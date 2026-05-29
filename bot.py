@@ -1,6 +1,6 @@
 """
 HoTroToanBot - Khung Cấu Trúc AI Automation & MMO VIP
-Bản Hoàn Chỉnh Tổng Thể - Tích hợp AI Chat (Gemini) & AI Tạo Giọng Đọc (Edge-TTS)
+Bản Hoàn Chỉnh Tổng Thể - Tích hợp AI Chat (Gemini) & Giọng Đọc Nam (Nam Minh)
 """
 
 import os
@@ -128,8 +128,8 @@ async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     status_msg = await update.message.reply_text("⏳ <i>Hệ thống AI đang xử lý chuyển đổi giọng nói...</i>", parse_mode="HTML")
     
     try:
-        # Gọi thư viện tạo giọng đọc (Giọng nữ Hoài An chuẩn VN)
-        communicate = edge_tts.Communicate(text, "vi-VN-HoaiAnNeural")
+        # Đã cập nhật: Gọi thư viện tạo giọng đọc (Giọng Nam - Nam Minh chuẩn VN)
+        communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
         await communicate.save(output_file)
         
         # Gửi file âm thanh thành phẩm lên Telegram
