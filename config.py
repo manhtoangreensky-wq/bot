@@ -1,25 +1,20 @@
 """
 Cấu hình bot - Chỉnh sửa thông tin tại đây
 """
+import os
 
 # ─── BẮT BUỘC PHẢI ĐIỀN ────────────────────────────────────────
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # Token từ @BotFather
+BOT_TOKEN = os.environ.get("8323884388:AAHjlvtCW8fF-x9jT7YgJYn6UQawlomsSo4", "")  # Lấy từ Railway Variables
 
 # ─── TÙY CHỌN ──────────────────────────────────────────────────
-# ID của admin (lấy từ @userinfobot)
-ADMIN_IDS = [123456789]  # Thay bằng Telegram ID của bạn
+ADMIN_IDS = [7xxxxxxxx]  # Thay bằng Telegram ID của bạn (lấy từ @userinfobot)
 
-# Tên bot hiển thị
 BOT_NAME = "HoTroToanBot"
 BOT_USERNAME = "hotrotoanbot"
 
-# Link group/channel của bạn (nếu có)
 GROUP_LINK = "https://t.me/your_group"
 CHANNEL_LINK = "https://t.me/your_channel"
 
-# Database (SQLite mặc định, có thể đổi sang PostgreSQL)
 DATABASE_URL = "sqlite:///hotrotoanbot.db"
-
-# Webhook (để trống nếu dùng polling)
 WEBHOOK_URL = ""
 PORT = 8443
