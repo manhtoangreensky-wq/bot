@@ -1,6 +1,6 @@
 """
 HoTroToanBot - Trạm Điều Khiển AI Đa Tác Vụ (Multi-Agent System)
-Phiên bản V7.2 - MỞ KHÓA HOÀN TOÀN (Tạm thời tắt Private Mode để test hệ thống)
+Phiên bản V7.3 - Sửa lỗi kết nối Model 404 sang định dạng Model chuẩn 2026
 """
 
 import os
@@ -30,9 +30,9 @@ if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
 # ─── KHỞI TẠO ĐỘNG CƠ CORE AI GEMINI SDK ─────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ─── CƠ CHẾ BẢO MẬT: ĐÃ MỞ KHÓA (TẠM TẮT ĐỂ TEST) ───────────────────────────────────
+# ─── CƠ CHẾ BẢO MẬT: TẠM TẮT ĐỂ TEST CÔNG KHAI ───────────────────────────────────
 async def restrict_access(update: Update) -> bool:
-    """Đã tạm tắt chế độ khóa để bồ test luồng lệnh thuận tiện nhất. Luôn trả về False."""
+    """Đã tạm tắt chế độ khóa để bồ test luồng lệnh thuận tiện nhất."""
     return False
 
 # ─── HỆ THỐNG PROMPT ĐỊNH HƯỚNG TƯ DUY CHO CÁC PHÒNG BAN AI ─────────────────────────
@@ -53,17 +53,17 @@ GENERAL_PROMPT = "Bạn là Trợ lý AI hệ thống điều khiển. Hãy hư�
 # ─── HÀM LIÊN KẾT GIAO TIẾP VỚI LÕI AI GEMINI CORE ──────────────────────────────────
 def call_gemini(prompt_system: str, user_text: str) -> str:
     try:
-        # Sử dụng mô hình gemini-1.5-flash để đảm bảo tương thích tuyệt đối 100%
+        # Cấu hình chuẩn hóa tên model cho thư viện mới để kích hoạt luồng truyền tải
         response = gemini_client.models.generate_content(
-            model="gemini-1.5-flash", 
+            model="gemini-2.5-flash", 
             config=types.GenerateContentConfig(system_instruction=prompt_system),
             contents=user_text,
         )
         return response.text
     except Exception as e:
         logger.error(f"Gemini Error: {e}")
-        # Kết xuất trực tiếp mã lỗi kỹ thuật lên màn hình Telegram để dễ dàng bắt bệnh
-        return f"❌ <b>Lỗi kết nối lõi Gemini API:</b>\n<code>{str(e)}</code>"
+        error_str = str(e).replace("<", "&lt;").replace(">", "&gt;")
+        return f"❌ <b>Lỗi kết nối lõi Gemini API:</b>\n<code>{error_str}</code>"
 
 # ─── PHÂN HỆ 1: KỸ SƯ LẬP TRÌNH CHUYÊN SÂU (/code) ───────────────────────────────────
 async def cmd_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -154,7 +154,7 @@ def get_open_button() -> InlineKeyboardMarkup:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await restrict_access(update): return
     text = (
-        "UFO <b>TRẠM ĐIỀU KHIỂN ĐA TÁC VỤ AI HOÀN CHỈNH</b>\n\n"
+        "🛸 <b>TRẠM ĐIỀU KHIỂN ĐA TÁC VỤ AI HOÀN CHỈNH</b>\n\n"
         "Chào mừng sếp đã quay trở lại phòng làm việc trung tâm. Hãy sử dụng các phân hệ lệnh sau để giao việc cho các trưởng phòng AI:\n\n"
         "👨‍💻 <code>/code [Nội dung]</code> : Gọi kỹ sư phần mềm (Web/App/Automation/Tester)\n"
         "💰 <code>/mmo [Nội dung]</code> : Gọi chuyên gia tư vấn kiếm tiền & Kịch bản Marketing\n"
