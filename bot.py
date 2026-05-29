@@ -1,6 +1,6 @@
 """
 HoTroToanBot - Trạm Điều Khiển AI Đa Tác Vụ (Multi-Agent System)
-Phiên bản V7 - Nâng cấp Gemini 1.5 Pro & Chế Độ Kín (Private Mode)
+Phiên bản V7.1 - Bản Tổng Thể Hoàn Chỉnh (Đã sửa tên Model thành gemini-1.5-flash)
 """
 
 import os
@@ -13,41 +13,43 @@ from google.genai import types
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-# ─── CẤU HÌNH HỆ THỐNG ──────────────────────────────────────────────────
+# ─── CẤU HÌNH HỆ THỐNG LOGGING ──────────────────────────────────────────────────
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ─── ĐƯỜNG LINK GIAO DIỆN WEB APP CỦA HỆ THỐNG ──────────────────────────────────
 WEB_APP_URL = "https://hoangthai223388-maker.github.io/xx88/redirect.html"
+
+# ─── BẢO MẬT BIẾN MÔI TRƯỜNG LẤY TỪ KHÔNG GIAN RAILWAY ─────────────────────────────
 TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-ADMIN_ID = os.environ.get("ADMIN_ID") # Lấy ID của Admin từ Railway
+ADMIN_ID = os.environ.get("ADMIN_ID") # Mã ID chặn người lạ truy cập hệ thống
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
-    logger.error("❌ THIẾU BIẾN MÔI TRƯỜNG!")
+    logger.error("❌ THIẾU BIẾN MÔI TRƯỜNG! Vui lòng kiểm tra lại cấu hình trên Railway.")
 
+# ─── KHỞI TẠO ĐỘNG CƠ CORE AI GEMINI SDK ─────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ─── CHẶN NGƯỜI LẠ (PRIVATE MODE) ───────────────────────────────────────
+# ─── CƠ CHẾ BẢO MẬT: CHẾ ĐỘ RIÊNG TƯ (PRIVATE MODE) ───────────────────────────────
 async def restrict_access(update: Update) -> bool:
-    """Hàm kiểm tra quyền Admin. Trả về True nếu bị chặn, False nếu được phép."""
+    """Kiểm tra ID người dùng. Trả về True nếu bị chặn, False nếu hợp lệ."""
     user_id = update.effective_user.id
     if not ADMIN_ID:
-        # Nếu chưa cấu hình ADMIN_ID trên Railway, bot sẽ báo ID để bồ copy
         await update.message.reply_text(
             f"🔒 <b>HỆ THỐNG ĐANG BỊ KHÓA</b>\n\n"
-            f"Bot này được thiết lập chế độ Private. Để cấp quyền cho chính mình, bồ hãy copy dãy số ID dưới đây:\n\n"
+            f"Bot đang chạy ở chế độ Private bảo mật. Để cấp quyền admin cho chính mình, bồ hãy copy dãy số ID này:\n\n"
             f"<code>{user_id}</code>\n\n"
-            f"<i>👉 Lên Railway -> tab Variables -> Thêm biến mới tên là <b>ADMIN_ID</b> và dán dãy số này vào -> Bấm Redeploy.</i>",
+            f"<i>👉 Lên Railway -> tab Variables -> Tạo biến mới tên là <b>ADMIN_ID</b> và dán dãy số này vào -> Bấm Redeploy/Restart.</i>",
             parse_mode="HTML"
         )
         return True
     elif str(user_id) != str(ADMIN_ID):
-        # Nếu người lạ chat vào, bot đuổi thẳng cổ
         await update.message.reply_text("⛔ <b>TRUY CẬP TỪ CHỐI:</b> Bạn không phải là Chủ Nhân của hệ thống này.")
         return True
     return False
 
-# ─── BỘ PROMPT ĐIỀU KHIỂN CÁC "TRƯỞNG PHÒNG AI" ─────────────────────────
+# ─── HỆ THỐNG PROMPT ĐỊNH HƯỚNG TƯ DUY CHO CÁC PHÒNG BAN AI ─────────────────────────
 CODER_PROMPT = """
 Bạn là một Senior Software Engineer. 
 Nhiệm vụ: Cung cấp giải pháp lập trình Web, App, Automation, và Tester chuyên sâu.
@@ -62,127 +64,133 @@ Quy tắc: Tư duy thực tế, ưu tiên tự động hóa (zero-cost). Đưa r
 
 GENERAL_PROMPT = "Bạn là Trợ lý AI hệ thống điều khiển. Hãy hướng dẫn Admin sử dụng các lệnh /code, /mmo, /trend, /voice."
 
-# ─── HÀM GIAO TIẾP VỚI LÕI AI GEMINI PRO ────────────────────────────────
+# ─── HÀM LIÊN KẾT GIAO TIẾP VỚI LÕI AI GEMINI CORE ──────────────────────────────────
 def call_gemini(prompt_system: str, user_text: str) -> str:
     try:
-        # Nâng cấp lên gemini-1.5-pro: Chuyên xử lý dữ liệu khủng, code mượt
+        # Sử dụng mô hình gemini-1.5-flash để đảm bảo tương thích tuyệt đối 100%
         response = gemini_client.models.generate_content(
-            model="gemini-1.5-pro", 
+            model="gemini-1.5-flash", 
             config=types.GenerateContentConfig(system_instruction=prompt_system),
             contents=user_text,
         )
         return response.text
     except Exception as e:
         logger.error(f"Gemini Error: {e}")
-        # In thẳng lỗi kỹ thuật ra Telegram để dễ dàng bắt bệnh
-        return f"❌ <b>Lỗi kết nối Gemini API:</b>\n<code>{str(e)}</code>"
+        # Kết xuất trực tiếp mã lỗi kỹ thuật lên màn hình Telegram để dễ dàng bắt bệnh
+        return f"❌ <b>Lỗi kết nối lõi Gemini API:</b>\n<code>{str(e)}</code>"
 
-# ─── MODULE 1: CHUYÊN GIA LẬP TRÌNH (/code) ─────────────────────────────
+# ─── PHÂN HỆ 1: KỸ SƯ LẬP TRÌNH CHUYÊN SÂU (/code) ───────────────────────────────────
 async def cmd_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if await restrict_access(update): return # Kiểm tra Admin
+    if await restrict_access(update): return
     if not context.args:
-        await update.message.reply_text("💻 <b>Nhập lệnh:</b> <code>/code [Câu hỏi lập trình]</code>", parse_mode="HTML")
+        await update.message.reply_text("💻 <b>Cú pháp lệnh:</b> <code>/code [Câu hỏi lập trình / Sửa Bug]</code>", parse_mode="HTML")
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     user_query = " ".join(context.args)
     reply = call_gemini(CODER_PROMPT, user_query)
-    await send_long_text(update, f"👨‍💻 <b>CHUYÊN GIA LẬP TRÌNH:</b>\n\n{reply}")
+    await send_long_text(update, f"👨‍💻 <b>CHUYÊN GIA LẬP TRÌNH VÀ TESTER:</b>\n\n{reply}")
 
-# ─── MODULE 2: CHUYÊN GIA MMO (/mmo) ────────────────────────────────────
+# ─── PHÂN HỆ 2: CHIẾN LƯỢC GIA MMO & MARKETING (/mmo) ───────────────────────────────
 async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if await restrict_access(update): return # Kiểm tra Admin
+    if await restrict_access(update): return
     if not context.args:
-        await update.message.reply_text("💰 <b>Nhập lệnh:</b> <code>/mmo [Câu hỏi kiếm tiền/Kịch bản]</code>", parse_mode="HTML")
+        await update.message.reply_text("💰 <b>Cú pháp lệnh:</b> <code>/mmo [Câu hỏi MMO / Viết kịch bản]</code>", parse_mode="HTML")
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     user_query = " ".join(context.args)
     reply = call_gemini(MMO_PROMPT, user_query)
-    await send_long_text(update, f"💡 <b>CHIẾN LƯỢC GIA MMO:</b>\n\n{reply}")
+    await send_long_text(update, f"💡 <b>CHIẾN LƯỢC GIA HỆ THỐNG MMO:</b>\n\n{reply}")
 
-# ─── MODULE 3: TÌM KIẾM TREND THỜI GIAN THỰC (/trend) ───────────────────
+# ─── PHÂN HỆ 3: CÀO TIN TỨC & PHÂN TÍCH XU HƯỚNG MẠNG (/trend) ─────────────────────────
 async def cmd_trend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if await restrict_access(update): return # Kiểm tra Admin
+    if await restrict_access(update): return
     if not context.args:
-        await update.message.reply_text("📈 <b>Nhập lệnh:</b> <code>/trend [Từ khóa cần tìm]</code>", parse_mode="HTML")
+        await update.message.reply_text("📈 <b>Cú pháp lệnh:</b> <code>/trend [Từ khóa quét mạng]</code>", parse_mode="HTML")
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     keyword = " ".join(context.args)
     try:
         results = DDGS().text(keyword, max_results=5)
         if not results:
-            await update.message.reply_text("❌ Không tìm thấy thông tin mới nào.")
+            await update.message.reply_text("❌ Hệ thống mạng không tìm thấy tin tức mới nào liên quan.")
             return
         
-        response_text = f"🌍 <b>KẾT QUẢ QUÉT TREND: '{keyword}'</b>\n\n"
+        response_text = f"🌍 <b>KẾT QUẢ DỮ LIỆU QUÉT XU HƯỚNG: '{keyword}'</b>\n\n"
         for idx, res in enumerate(results):
-            response_text += f"{idx+1}. <b>{res['title']}</b>\n- <i>{res['body']}</i>\n🔗 <a href='{res['href']}'>Link</a>\n\n"
+            response_text += f"{idx+1}. <b>{res['title']}</b>\n- <i>{res['body']}</i>\n🔗 <a href='{res['href']}'>Link đọc nguồn bài viết</a>\n\n"
         
         await update.message.reply_text(response_text, parse_mode="HTML", disable_web_page_preview=True)
     except Exception as e:
-        await update.message.reply_text(f"❌ Lỗi cào dữ liệu: {e}")
+        await update.message.reply_text(f"❌ Quá trình cào mạng dữ liệu thất bại: {e}")
 
-# ─── MODULE 4: TẠO GIỌNG ĐỌC (/voice) ───────────────────────────────────
+# ─── PHÂN HỆ 4: KÍCH HOẠT GENERATE GIỌNG ĐỌC NAM MIỄN PHÍ (/voice) ────────────────────
 async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if await restrict_access(update): return # Kiểm tra Admin
+    if await restrict_access(update): return
     if not context.args:
-        await update.message.reply_text("🎙️ <b>Nhập lệnh:</b> <code>/voice [Nội dung cần đọc]</code>", parse_mode="HTML")
+        await update.message.reply_text("🎙️ <b>Cú pháp lệnh:</b> <code>/voice [Đoạn văn bản cần đọc]</code>", parse_mode="HTML")
         return
     
     text = " ".join(context.args)
     user_id = update.effective_user.id
     output_file = f"voice_{user_id}.mp3"
-    status_msg = await update.message.reply_text("⏳ <i>Đang render âm thanh...</i>", parse_mode="HTML")
+    status_msg = await update.message.reply_text("⏳ <i>Đang kết nối máy chủ Microsoft render âm thanh...</i>", parse_mode="HTML")
     
     try:
+        # Sử dụng chính xác cấu trúc Giọng Nam Việt Nam ổn định nhất
         communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
         await communicate.save(output_file)
         with open(output_file, 'rb') as audio_file:
-            await update.message.reply_audio(audio=audio_file, caption="✅ Render thành công!")
+            await update.message.reply_audio(audio=audio_file, caption="✅ Hệ thống Render file âm thanh thành công!")
         await status_msg.delete()
     except Exception as e:
-        await status_msg.edit_text(f"❌ Lỗi Voice: {e}")
+        await status_msg.edit_text(f"❌ Luồng tạo audio thất bại. Lỗi tham số: {e}")
     finally:
         if os.path.exists(output_file): os.remove(output_file)
 
-# ─── HÀM HỖ TRỢ CHIA NHỎ TIN NHẮN DÀI ───────────────────────────────────
+# ─── THUẬT TOÁN BỔ TRỢ: TỰ ĐỘNG CHIA NHỎ TIN NHẮN TRÁNH TRÀN KHUNG TELEGRAM ─────────
 async def send_long_text(update: Update, text: str):
     chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
     for chunk in chunks:
         try:
             await update.message.reply_text(chunk, parse_mode="HTML")
         except:
-            await update.message.reply_text(chunk) 
+            await update.message.reply_text(chunk)
 
-# ─── GIAO DIỆN MENU & LỆNH /START ───────────────────────────────────────
+# ─── THIẾT LẬP PHÍM CHỨC NĂNG VÀ LỆNH KHỞI ĐỘNG CƠ /START ─────────────────────────────
 def get_bottom_menu() -> ReplyKeyboardMarkup:
     keyboard = [[KeyboardButton("🛠 BẢNG ĐIỀU KHIỂN HỆ THỐNG")]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
+def get_open_button() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(text="⚙️ Mở Kho Công Cụ MMO", web_app=WebAppInfo(url=WEB_APP_URL))
+    ]])
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if await restrict_access(update): return # Kiểm tra Admin
+    if await restrict_access(update): return
     text = (
-        "🛸 <b>TRẠM ĐIỀU KHIỂN ĐA TÁC VỤ AI KÍCH HOẠT</b>\n\n"
-        "Hệ thống đã phân luồng các chuyên gia. Vui lòng sử dụng các lệnh sau để ra việc:\n\n"
-        "👨‍💻 <code>/code [Câu hỏi]</code> : Gọi kỹ sư lập trình (Web/App/Auto)\n"
-        "💰 <code>/mmo [Câu hỏi]</code> : Gọi chuyên gia kiếm tiền, kịch bản\n"
-        "📈 <code>/trend [Từ khóa]</code> : Cào dữ liệu tìm kiếm thời gian thực\n"
-        "🎙️ <code>/voice [Văn bản]</code> : Render file âm thanh MP3\n\n"
-        "<i>Bảo mật: Hệ thống đang chạy ở Private Mode (Chỉ Chủ Nhân được quyền điều khiển).</i>"
+        "🛸 <b>TRẠM ĐIỀU KHIỂN ĐA TÁC VỤ AI HOÀN CHỈNH</b>\n\n"
+        "Chào mừng sếp đã quay trở lại phòng làm việc trung tâm. Hãy sử dụng các phân hệ lệnh sau để giao việc cho các trưởng phòng AI:\n\n"
+        "👨‍💻 <code>/code [Nội dung]</code> : Gọi kỹ sư phần mềm (Web/App/Automation/Tester)\n"
+        "💰 <code>/mmo [Nội dung]</code> : Gọi chuyên gia tư vấn kiếm tiền & Kịch bản Marketing\n"
+        "📈 <code>/trend [Từ khóa]</code> : Cào dữ liệu mạng phân tích xu hướng thời gian thực\n"
+        "🎙️ <code>/voice [Văn bản]</code> : Render file giọng đọc AI Nam Minh MP3\n\n"
+        "🛡️ <i>Trạng thái bảo mật: Chế độ Private đang bật. Hệ thống chỉ tuân theo lệnh duy nhất của sếp!</i>"
     )
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=get_bottom_menu())
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if await restrict_access(update): return # Kiểm tra Admin
+    if await restrict_access(update): return
     text = update.message.text.strip()
     if text == "🛠 BẢNG ĐIỀU KHIỂN HỆ THỐNG":
         await cmd_start(update, context)
         return
-    # Trò chuyện bình thường
+    
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     reply = call_gemini(GENERAL_PROMPT, text)
-    await update.message.reply_text(reply)
+    await update.message.reply_text(reply, reply_markup=get_open_button())
 
-# ─── KHỞI CHẠY BOT ──────────────────────────────────────────────────────
+# ─── KHỞI CHẠY KHUNG ĐIỀU HÀNH LUỒNG POLLING HỆ THỐNG ────────────────────────────────
 def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
