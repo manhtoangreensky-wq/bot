@@ -1,6 +1,6 @@
 """
 HoTroToanBot - Trợ lý AI Tối ưu Hóa MMO & Tự động hóa Video
-Phiên bản VIP V3 - Chạy chữ thuần túy loại trừ lỗi crash ảnh hệ thống
+Phiên bản VIP V5 - Đổi tên phân hệ thành KÍCH HOẠT AI TỰ ĐỘNG HÓA
 """
 
 import os
@@ -32,8 +32,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ─── CẤU HÌNH LIÊN KẾT HỆ THỐNG ─────────────────────────────────────────
-LINK_BEACON = "https://beacons.ai/toantong199"
+# ─── URL NÚT OPEN ──────────────────────────────────────────────────────
 WEB_APP_URL = "https://hoangthai223388-maker.github.io/xx88/redirect.html"
 
 # ─── BẢO MẬT BIẾN MÔI TRƯỜNG LẤY TỪ RAILWAY ─────────────────────────────
@@ -56,15 +55,14 @@ Khi khách hàng hỏi về cách làm hoặc xin code, bạn phải cung cấp 
 2. Sử dụng thư viện MoviePy để tự động chèn sub, ghép âm thanh lồng vào video nền hàng loạt.
 3. Sử dụng Playwright/Selenium phối hợp giải pháp giả lập trình duyệt sạch chống quét nuôi tài khoản Facebook Reels/TikTok đăng bài hàng loạt.
 
-Các link hệ thống:
-1. Link khóa học/Tool AI: <b><a href="https://t.me/toantong199">Truy Cập Kho Tool AI Tự Động</a></b>
-2. Link quản lý thương hiệu số: <b><a href="{LINK_BEACON}">Hệ Sinh Thế Kỹ Thuật Số</a></b>
+Đường link kết nối hệ thống duy nhất:
+Link khóa học/Tool AI/Hỗ trợ: <b><a href="https://t.me/hethongtoan">Kết Nối Hệ Thống Toàn</a></b>
 
 Tuyệt đối không dùng dấu sao (*) hoặc gạch dưới (_) của Markdown. Chỉ sử dụng các thẻ HTML được hỗ trợ: <b>, <i>, <a>, <code>.
 """
 
 # ─── NỘI DUNG BÀI VIẾT TƯ VẤN ──────────────────────────────────────────
-TEXT_AI_VIDEO = """🤖 <b>HỆ THỐNG AI TỰ ĐỘNG LÀM VIDEO FB/TIKTOK (BẢN FREE)</b> 🤖
+TEXT_AI_VIDEO = """🤖 <b>HỆ THỐNG KÍCH HOẠT AI TỰ ĐỘNG HÓA (BẢN FREE)</b> 🤖
 
 <i>Tự động hóa 100% quy trình từ kịch bản đến render video nuôi hệ thống tài khoản mạng xã hội lớn mà không tốn chi phí.</i>
 
@@ -81,14 +79,14 @@ TEXT_AI_VIDEO = """🤖 <b>HỆ THỐNG AI TỰ ĐỘNG LÀM VIDEO FB/TIKTOK (B�
 ⚙️ <b>IV. ĐOẠN CODE CODE MẪU BỘ LỌC AUDIO (PYTHON + EDGE-TTS)</b>
 <code>import edge_tts\nasync def make_voice(text, output_file):\n    communicate = edge_tts.Communicate(text, "vi-VN-HoaiAnNeural")\n    await communicate.save(output_file)</code>
 
-📲 Liên hệ Admin để lấy toàn bộ mã nguồn framework dựng video tự động: <b><a href="https://t.me/toantong199">Nhận Framework Automation</a></b>"""
+📲 Liên hệ Hệ Thống Toàn để lấy toàn bộ mã nguồn framework dựng video tự động: <b><a href="https://t.me/hethongtoan">Nhận Framework Automation</a></b>"""
 
 TEXT_FREELANCE = """💼 <b>GIẢI PHÁP FREELANCER & TOÀN DIỆN THƯƠNG HIỆU SỐ</b> 💼
 
 <i>Vận hành hệ thống Freelance tối ưu để chuyển đổi lưu lượng truy cập (Traffic) thành dòng tiền mỗi ngày.</i>
 
 • <b>Khai Thác Bulk Video Faceless:</b> Sản xuất hàng loạt video ngắn cho thị trường ngách (Tài chính, Câu chuyện, Thần thoại, Động lực) chỉ mất 5 phút cài đặt luồng chạy cho hệ thống để phân phối hàng loạt lên các nick vệ tinh Facebook/TikTok.
-• <b>Tiếp Thị Liên Kết (Affiliate Matrix):</b> Tự động đăng video hàng loạt phủ kín nền tảng mạng xã hội, bọc toàn bộ link sản phẩm qua bio hoặc hệ thống Beacon để tối ưu hóa tỷ lệ chuyển đổi đơn hàng mà không cần tốn tiền chạy quảng cáo.
+• <b>Tiếp Thị Liên Kết (Affiliate Matrix):</b> Tự động đăng video hàng loạt phủ kín nền tảng mạng xã hội để tối ưu hóa tỷ lệ chuyển đổi đơn hàng mà không cần tốn tiền chạy quảng cáo.
 • <b>Hệ Thống Đăng Bài Tự Động (Auto Upload):</b> Kết hợp Python <code>Playwright</code> với các trình duyệt Antidetect để tự động lên lịch post bài, phân bổ giờ vàng thông minh cho hàng chục kênh TikTok và Facebook cùng lúc."""
 
 # ─── HỆ THỐNG ĐÁP ÁN TỪ KHÓA NHANH ─────────────────────────────────────
@@ -98,11 +96,15 @@ KEYWORD_REPLIES = {
     "tiktok": TEXT_AI_VIDEO,
     "facebook": TEXT_AI_VIDEO,
     "reels": TEXT_AI_VIDEO,
+    "tự động hóa": TEXT_AI_VIDEO,
+    "tu dong hoa": TEXT_AI_VIDEO,
+    "kich hoat": TEXT_AI_VIDEO,
+    "kích hoạt": TEXT_AI_VIDEO,
     "freelance": TEXT_FREELANCE,
     "kiếm tiền": TEXT_FREELANCE,
     "công cụ": "🛠️ <b>KHO CÔNG CỤ AI MIỄN PHÍ DÀNH CHO HỆ THỐNG MMO:</b>\n\n- Kịch bản: Gemini API (Free tier), Claude.\n- Giọng đọc: Python Edge-TTS (Free 100%).\n- Xử lý Video: MoviePy Core, Pexels API.\n- Trình duyệt nuôi tài khoản: Playwright Automation.\n\nBấm vào nút bên dưới để xem kho công cụ chi tiết.",
     "tool": "🛠️ <b>KHO CÔNG CỤ AI MIỄN PHÍ DÀNH CHO HỆ THỐNG MMO:</b>\n\n- Kịch bản: Gemini API (Free tier), Claude.\n- Giọng đọc: Python Edge-TTS (Free 100%).\n- Xử lý Video: MoviePy Core, Pexels API.\n- Trình duyệt nuôi tài khoản: Playwright Automation.\n\nBấm vào nút bên dưới để xem kho công cụ chi tiết.",
-    "admin": "Dạ, để được tư vấn nâng cao về kiến trúc mã nguồn Python Automation hoặc phân tích tài nguyên hệ thống, Quý khách vui lòng kết nối trực tiếp: <b><a href=\"https://t.me/toantong199\">ADMIN HỆ THỐNG</a></b>."
+    "admin": "Dạ, để được tư vấn nâng cao về kiến trúc mã nguồn Python Automation hoặc phân tích tài nguyên hệ thống, Quý khách vui lòng kết nối trực tiếp: <b><a href=\"https://t.me/hethongtoan\">HỆ THỐNG TOÀN</a></b>."
 }
 
 # ─── KHO FILE ID ẢNH BANNER TRÊN TELEGRAM ──────────────────────────────
@@ -112,7 +114,7 @@ IMG_FREELANCE  = "AgACAgUAAxkBAAPvahbsSqrvQCcd71o-U12xYzv2hMwAAvYPaxtEaLlUC-iRAA
 # ─── GIAO DIỆN NÚT BẤM MENU ĐÁY MÀN HÌNH ───────────────────────────────
 def get_bottom_menu() -> ReplyKeyboardMarkup:
     keyboard = [
-        [KeyboardButton("🚀 HỆ THỐNG LÀM VIDEO AI")],
+        [KeyboardButton("🚀 KÍCH HOẠT AI TỰ ĐỘNG HÓA")],
         [KeyboardButton("🛠 CÔNG CỤ FREE"), KeyboardButton("💼 FREELANCER MMO")],
         [KeyboardButton("📲 QUẢN LÝ TIKTOK/FB"), KeyboardButton("👩🏻‍💻 LIÊN HỆ ADMIN")]
     ]
@@ -175,7 +177,7 @@ def match_keyword(text: str) -> str | None:
             return KEYWORD_REPLIES[kw]
     return None
 
-# ─── LỆNH /START (ĐÃ SỬA CHỮ THUẦN LOẠI TRỪ LỖI ẢNH CRASH) ───────────────────────
+# ─── LỆNH /START ──────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         text = (
@@ -186,10 +188,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "• Phân bổ kiến trúc hệ thống Freelance & Digital Branding tối ưu hóa chi phí.\n"
             "• Đề xuất giải pháp và mã nguồn kết nối API các công cụ AI hoàn toàn miễn phí.\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🌐 <b>Hệ Sinh Thái Kỹ Thuật Số:</b> <b><a href=\"{LINK_BEACON}\">Mở Hệ Thống Cổng Tổng</a></b>\n"
-            "📲 <b>Mã Nguồn Framework Automation:</b> <b><a href=\"https://t.me/toantong199\">Kết Nối Trực Tiếp Admin</a></b>\n"
+            "📲 <b>Mã Nguồn Framework Automation:</b> <b><a href=\"https://t.me/hethongtoan\">Kết Nối Hệ Thống Toàn</a></b>\n"
         )
-        # Thay thế bằng reply_text thuần chữ để đảm bảo không bị lỗi mã ID ảnh
         await update.message.reply_text(text=text, parse_mode="HTML", reply_markup=get_bottom_menu())
         await update.message.reply_text("👇 Bấm <b>Open</b> để mở giao diện quản lý ngay!", parse_mode="HTML", reply_markup=get_open_button())
     except Exception as e:
@@ -214,7 +214,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
-        if text == "🚀 HỆ THỐNG LÀM VIDEO AI":
+        if text == "🚀 KÍCH HOẠT AI TỰ ĐỘNG HÓA":
             await send_photo_with_long_text(update, photo=IMG_VIDEO, text=TEXT_AI_VIDEO, parse_mode="HTML")
             return
         elif text == "💼 FREELANCER MMO":
@@ -226,7 +226,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         elif text == "📲 QUẢN LÝ TIKTOK/FB" or text == "👩🏻‍💻 LIÊN HỆ ADMIN":
             caption = "Để được hướng dẫn cấu hình chi tiết framework tự động nuôi nhiều tài khoản mạng xã hội bằng Python Playwright, vui lòng liên hệ:"
-            inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("👩🏻‍💻 Trò Chuyện Cùng Chuyên Gia AI Automation ↗️", url="https://t.me/toantong199")]])
+            inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("👩🏻‍💻 Trò Chuyện Cùng Hệ Thống Toàn ↗️", url="https://t.me/hethongtoan")]])
             await update.message.reply_text(text=caption, reply_markup=inline_kb)
             return
 
@@ -250,7 +250,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
 
-# ─── KHỞI CHẠY KHUNG BOT TELEGRAM ───────────────────────────────────────────
+# ─── KHỔI CHẠY KHUNG BOT TELEGRAM ───────────────────────────────────────────
 def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
