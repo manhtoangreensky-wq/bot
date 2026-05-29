@@ -1,6 +1,6 @@
 """
 HoTroToanBot - Trợ lý AI Tối ưu Hóa MMO & Tự động hóa Video
-Phiên bản VIP - Tích hợp AI Gemini + Menu Đáy + Nút Open
+Phiên bản VIP V3 - Chạy chữ thuần túy loại trừ lỗi crash ảnh hệ thống
 """
 
 import os
@@ -58,7 +58,7 @@ Khi khách hàng hỏi về cách làm hoặc xin code, bạn phải cung cấp 
 
 Các link hệ thống:
 1. Link khóa học/Tool AI: <b><a href="https://t.me/toantong199">Truy Cập Kho Tool AI Tự Động</a></b>
-2. Link quản lý thương hiệu số: <b><a href="{LINK_BEACON}">Hệ Sinh Thái Kỹ Thuật Số</a></b>
+2. Link quản lý thương hiệu số: <b><a href="{LINK_BEACON}">Hệ Sinh Thế Kỹ Thuật Số</a></b>
 
 Tuyệt đối không dùng dấu sao (*) hoặc gạch dưới (_) của Markdown. Chỉ sử dụng các thẻ HTML được hỗ trợ: <b>, <i>, <a>, <code>.
 """
@@ -106,7 +106,6 @@ KEYWORD_REPLIES = {
 }
 
 # ─── KHO FILE ID ẢNH BANNER TRÊN TELEGRAM ──────────────────────────────
-IMG_START      = "AgACAgUAAxkBAAP1ahbu9wl2UOIkh5HyVFiFPbgQwIkAAvkPaxtEaLlUNwymVRbVQTsBAAMCAAN5AAM7BA"
 IMG_VIDEO      = "AgACAgUAAxkBAAPzahbudVw6wBpMyIwah_9XoBKTGRcAAvgPaxtEaLlUr4O-Ebqn30EBAAMCAAN5AAM7BA"
 IMG_FREELANCE  = "AgACAgUAAxkBAAPvahbsSqrvQCcd71o-U12xYzv2hMwAAvYPaxtEaLlUC-iRAAHC9wfoAQADAgADeQADOwQ"
 
@@ -176,7 +175,7 @@ def match_keyword(text: str) -> str | None:
             return KEYWORD_REPLIES[kw]
     return None
 
-# ─── LỆNH /START ──────────────────────────────────────────────────────
+# ─── LỆNH /START (ĐÃ SỬA CHỮ THUẦN LOẠI TRỪ LỖI ẢNH CRASH) ───────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         text = (
@@ -190,7 +189,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"🌐 <b>Hệ Sinh Thái Kỹ Thuật Số:</b> <b><a href=\"{LINK_BEACON}\">Mở Hệ Thống Cổng Tổng</a></b>\n"
             "📲 <b>Mã Nguồn Framework Automation:</b> <b><a href=\"https://t.me/toantong199\">Kết Nối Trực Tiếp Admin</a></b>\n"
         )
-        await update.message.reply_photo(photo=IMG_START, caption=text, parse_mode="HTML", reply_markup=get_bottom_menu())
+        # Thay thế bằng reply_text thuần chữ để đảm bảo không bị lỗi mã ID ảnh
+        await update.message.reply_text(text=text, parse_mode="HTML", reply_markup=get_bottom_menu())
         await update.message.reply_text("👇 Bấm <b>Open</b> để mở giao diện quản lý ngay!", parse_mode="HTML", reply_markup=get_open_button())
     except Exception as e:
         logger.error("Lỗi cmd_start: %s", e)
@@ -227,7 +227,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         elif text == "📲 QUẢN LÝ TIKTOK/FB" or text == "👩🏻‍💻 LIÊN HỆ ADMIN":
             caption = "Để được hướng dẫn cấu hình chi tiết framework tự động nuôi nhiều tài khoản mạng xã hội bằng Python Playwright, vui lòng liên hệ:"
             inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("👩🏻‍💻 Trò Chuyện Cùng Chuyên Gia AI Automation ↗️", url="https://t.me/toantong199")]])
-            await update.message.reply_photo(photo=IMG_START, caption=caption, reply_markup=inline_kb)
+            await update.message.reply_text(text=caption, reply_markup=inline_kb)
             return
 
         # Xử lý Từ khóa & Trí tuệ nhân tạo AI phản hồi sâu
