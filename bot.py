@@ -358,7 +358,7 @@ def main():
 
     # Callbacks
     app.add_handler(CallbackQueryHandler(button_callback))
-F
+
     # Messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
