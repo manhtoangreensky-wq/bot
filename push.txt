@@ -1,5 +1,5 @@
 D:
-cd D:\X\bot
+cd D:\mybot\hotrotoanbot
 git add .
-git commit -m "update bot va file moi"
+git commit -m "cap nhat code AI vip cho bot 1"
 git push
