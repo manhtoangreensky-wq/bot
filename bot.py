@@ -5,6 +5,7 @@ Phiên bản VIP - Tích hợp AI Gemini + Menu Đáy + Nút Open
 
 import os
 import logging
+import asyncio
 from google import genai
 from google.genai import types
 from telegram import (
@@ -33,10 +34,10 @@ logger = logging.getLogger(__name__)
 
 # ─── CẤU HÌNH LIÊN KẾT HỆ THỐNG ─────────────────────────────────────────
 LINK_BEACON = "https://beacons.ai/toantong199"
-WEB_APP_URL = "https://hoangthai223388-maker.github.io/xx88/redirect.html" # Đổi thành link web tool của bồ sau
+WEB_APP_URL = "https://hoangthai223388-maker.github.io/xx88/redirect.html"
 
 # ─── BẢO MẬT BIẾN MÔI TRƯỜNG LẤY TỪ RAILWAY ─────────────────────────────
-TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN") # Đã sửa cho khớp với biến trên Railway của bồ
+TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
@@ -47,10 +48,13 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ─── PROMPT TƯ DUY AI DÀNH CHO MMO & TỰ ĐỘNG HÓA ────────────────────────
 SYSTEM_PROMPT = f"""
-Bạn là Trợ lý Ảo AI Cấp Cao của hệ thống HoTroToanBot - Chuyên gia về MMO (Kiếm tiền online), Freelance, và Tự động hóa quy trình bằng AI.
-Văn phong chuyên nghiệp, thực tế, tối ưu hóa lợi nhuận và tư duy hệ thống. 
-Khách hàng là những người muốn dùng AI (Gemini, Claude) để điều khiển các AI khác làm video, code, tạo sản phẩm đăng lên TikTok/Facebook Reels.
-Mục tiêu là cung cấp các giải pháp miễn phí (Free tier) trước khi họ đầu tư mua VIP.
+Bạn là Trợ lý Ảo AI Cấp Cao của hệ thống HoTroToanBot - Chuyên gia về MMO, Freelance, và Tự động hóa quy trình hệ thống bằng AI.
+Văn phong chuyên nghiệp, thực tế, tập trung tối ưu hóa lợi nhuận tối đa với chi phí bằng 0 (Zero Cost Automation). 
+
+Khi khách hàng hỏi về cách làm hoặc xin code, bạn phải cung cấp các giải pháp và đoạn code Python thực tế để:
+1. Điều khiển các mô hình AI (Sử dụng google-genai bản free hoặc edge-tts miễn phí) để tự sinh nội dung.
+2. Sử dụng thư viện MoviePy để tự động chèn sub, ghép âm thanh lồng vào video nền hàng loạt.
+3. Sử dụng Playwright/Selenium phối hợp giải pháp giả lập trình duyệt sạch chống quét nuôi tài khoản Facebook Reels/TikTok đăng bài hàng loạt.
 
 Các link hệ thống:
 1. Link khóa học/Tool AI: <b><a href="https://t.me/toantong199">Truy Cập Kho Tool AI Tự Động</a></b>
@@ -62,32 +66,30 @@ Tuyệt đối không dùng dấu sao (*) hoặc gạch dưới (_) của Markdo
 # ─── NỘI DUNG BÀI VIẾT TƯ VẤN ──────────────────────────────────────────
 TEXT_AI_VIDEO = """🤖 <b>HỆ THỐNG AI TỰ ĐỘNG LÀM VIDEO FB/TIKTOK (BẢN FREE)</b> 🤖
 
-<i>Tự động hóa 100% quy trình từ kịch bản đến render video để nuôi hàng loạt tài khoản mạng xã hội.</i>
+<i>Tự động hóa 100% quy trình từ kịch bản đến render video nuôi hệ thống tài khoản mạng xã hội lớn mà không tốn chi phí.</i>
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🧠 <b>I. TẠO KỊCH BẢN & LOGIC (Não bộ)</b>
-• Dùng <b>Claude 3.5 Sonnet (Free)</b> hoặc <b>Gemini 1.5 (Free)</b>: Viết script TikTok 15-30s, chia cột rõ ràng: Hình ảnh - Lời đọc - Text trên màn hình.
+🧠 <b>I. BỘ NÃO ĐIỀU KHIỂN SCRIPT (MIỄN PHÍ)</b>
+• Tận dụng hệ thống <b>Gemini 2.0 Flash API Free Tier</b> kết hợp với Python để tự sinh hàng loạt 100 kịch bản ngắn mỗi ngày theo cấu trúc JSON.
 
-🎙️ <b>II. TẠO GIỌNG ĐỌC (Voiceover)</b>
-• <b>ElevenLabs (Free tier)</b>: 10,000 ký tự/tháng, giọng cực chuẩn.
-• <b>CapCut Text-to-Speech (Free)</b>: Có thể tự động hóa thao tác bằng Python (PyAutoGUI).
+🎙️ <b>II. CÔNG NGHỆ CHUYỂN TEXT-TO-SPEECH KHÔNG GIỚI HẠN</b>
+• Thay vì mua ElevenLabs đắt đỏ, hệ thống khuyên dùng <code>edge-tts</code> của Microsoft. Thư viện này chạy trực tiếp bằng Python, hoàn toàn miễn phí và không giới hạn ký tự, giọng đọc AI tự nhiên cực chuẩn.
 
-🎨 <b>III. TẠO HÌNH ẢNH & VIDEO AI</b>
-• <b>Leonardo.AI / SeaArt (Free daily credits)</b>: Tạo ảnh minh họa sắc nét.
-• <b>Luma Dream Machine / Kling AI (Free daily)</b>: Biến ảnh tĩnh thành video chuyển động (B-roll).
+🎬 <b>III. LẮP RÁP & ĐÓNG GÓI VIDEO TỰ ĐỘNG HÀNG LOẠT</b>
+• Viết một đoạn script Python kết hợp thư viện <code>MoviePy</code> để tự đóng gói Video nền (B-roll) + file âm thanh âm đọc + Chèn phụ đề tự động (Subtitles) thành sản phẩm MP4 hoàn chỉnh mà không cần chạm tay vào phần mềm edit.
 
-🎬 <b>IV. LẮP RÁP & RENDER HÀNG LOẠT</b>
-• Viết một đoạn script Python dùng thư viện <code>MoviePy</code> để tự động ghép Audio + Video + Text lại với nhau thành hàng trăm video một ngày mà không cần mở app sửa tay.
+⚙️ <b>IV. ĐOẠN CODE CODE MẪU BỘ LỌC AUDIO (PYTHON + EDGE-TTS)</b>
+<code>import edge_tts\nasync def make_voice(text, output_file):\n    communicate = edge_tts.Communicate(text, "vi-VN-HoaiAnNeural")\n    await communicate.save(output_file)</code>
 
-📲 Liên hệ Admin để nhận code mẫu Python ghép video tự động: <b><a href="https://t.me/toantong199">Nhận Code Automation</a></b>"""
+📲 Liên hệ Admin để lấy toàn bộ mã nguồn framework dựng video tự động: <b><a href="https://t.me/toantong199">Nhận Framework Automation</a></b>"""
 
-TEXT_FREELANCE = """💼 <b>GIẢI PHÁP FREELANCER & KIẾM TIỀN TỐI ƯU</b> 💼
+TEXT_FREELANCE = """💼 <b>GIẢI PHÁP FREELANCER & TOÀN DIỆN THƯƠNG HIỆU SỐ</b> 💼
 
-<i>Dùng hệ thống AI tự động để tạo ra sản phẩm bán lấy tiền.</i>
+<i>Vận hành hệ thống Freelance tối ưu để chuyển đổi lưu lượng truy cập (Traffic) thành dòng tiền mỗi ngày.</i>
 
-• <b>Bán Video Hàng Loạt:</b> Nhận làm video faceless cho các kênh YouTube, TikTok của người khác. Bạn dùng hệ thống AI phía trên để làm mất 5 phút/video nhưng charge giá 5-10$/video.
-• <b>Xây Kênh Nhận Booking/Affiliate:</b> Đẩy mạnh thương hiệu cá nhân hoặc xây kênh chủ đề (Tâm lý, Tài chính, Kể chuyện). Khi kênh có view trên TikTok/FB Reels, gắn link Shopee Affiliate hoặc nhận booking.
-• <b>Quản lý Social Media:</b> Nhận quản lý page Facebook/TikTok cho doanh nghiệp. Dùng AI lên lịch bài viết và tạo nội dung cả tháng trong 1 ngày."""
+• <b>Khai Thác Bulk Video Faceless:</b> Sản xuất hàng loạt video ngắn cho thị trường ngách (Tài chính, Câu chuyện, Thần thoại, Động lực) chỉ mất 5 phút cài đặt luồng chạy cho hệ thống để phân phối hàng loạt lên các nick vệ tinh Facebook/TikTok.
+• <b>Tiếp Thị Liên Kết (Affiliate Matrix):</b> Tự động đăng video hàng loạt phủ kín nền tảng mạng xã hội, bọc toàn bộ link sản phẩm qua bio hoặc hệ thống Beacon để tối ưu hóa tỷ lệ chuyển đổi đơn hàng mà không cần tốn tiền chạy quảng cáo.
+• <b>Hệ Thống Đăng Bài Tự Động (Auto Upload):</b> Kết hợp Python <code>Playwright</code> với các trình duyệt Antidetect để tự động lên lịch post bài, phân bổ giờ vàng thông minh cho hàng chục kênh TikTok và Facebook cùng lúc."""
 
 # ─── HỆ THỐNG ĐÁP ÁN TỪ KHÓA NHANH ─────────────────────────────────────
 KEYWORD_REPLIES = {
@@ -98,13 +100,12 @@ KEYWORD_REPLIES = {
     "reels": TEXT_AI_VIDEO,
     "freelance": TEXT_FREELANCE,
     "kiếm tiền": TEXT_FREELANCE,
-    "công cụ": "🛠️ <b>KHO CÔNG CỤ AI MIỄN PHÍ DÀNH CHO MMO:</b>\n\n- Kịch bản: ChatGPT, Claude, Gemini.\n- Hình ảnh: Leonardo.AI, Bing Image Creator.\n- Video: Luma AI, Kling AI, CapCut.\n- Code Automation: Cursor AI, GitHub Copilot (Trial).\n\nBấm vào nút bên dưới để mở kho công cụ chi tiết.",
-    "tool": "🛠️ <b>KHO CÔNG CỤ AI MIỄN PHÍ DÀNH CHO MMO:</b>\n\n- Kịch bản: ChatGPT, Claude, Gemini.\n- Hình ảnh: Leonardo.AI, Bing Image Creator.\n- Video: Luma AI, Kling AI, CapCut.\n- Code Automation: Cursor AI, GitHub Copilot (Trial).\n\nBấm vào nút bên dưới để mở kho công cụ chi tiết.",
-    "admin": "Dạ, để được tư vấn thiết lập hệ thống tự động hóa làm video hoặc hướng dẫn chạy script Python, Quý khách vui lòng liên hệ trực tiếp: <b><a href=\"https://t.me/toantong199\">ADMIN HỆ THỐNG</a></b>."
+    "công cụ": "🛠️ <b>KHO CÔNG CỤ AI MIỄN PHÍ DÀNH CHO HỆ THỐNG MMO:</b>\n\n- Kịch bản: Gemini API (Free tier), Claude.\n- Giọng đọc: Python Edge-TTS (Free 100%).\n- Xử lý Video: MoviePy Core, Pexels API.\n- Trình duyệt nuôi tài khoản: Playwright Automation.\n\nBấm vào nút bên dưới để xem kho công cụ chi tiết.",
+    "tool": "🛠️ <b>KHO CÔNG CỤ AI MIỄN PHÍ DÀNH CHO HỆ THỐNG MMO:</b>\n\n- Kịch bản: Gemini API (Free tier), Claude.\n- Giọng đọc: Python Edge-TTS (Free 100%).\n- Xử lý Video: MoviePy Core, Pexels API.\n- Trình duyệt nuôi tài khoản: Playwright Automation.\n\nBấm vào nút bên dưới để xem kho công cụ chi tiết.",
+    "admin": "Dạ, để được tư vấn nâng cao về kiến trúc mã nguồn Python Automation hoặc phân tích tài nguyên hệ thống, Quý khách vui lòng kết nối trực tiếp: <b><a href=\"https://t.me/toantong199\">ADMIN HỆ THỐNG</a></b>."
 }
 
 # ─── KHO FILE ID ẢNH BANNER TRÊN TELEGRAM ──────────────────────────────
-# Tạm thời dùng ảnh cũ, bồ hãy gửi ảnh mới cho bot, lấy File ID từ bot trả về và thay vào đây nhé!
 IMG_START      = "AgACAgUAAxkBAAP1ahbu9wl2UOIkh5HyVFiFPbgQwIkAAvkPaxtEaLlUNwymVRbVQTsBAAMCAAN5AAM7BA"
 IMG_VIDEO      = "AgACAgUAAxkBAAPzahbudVw6wBpMyIwah_9XoBKTGRcAAvgPaxtEaLlUr4O-Ebqn30EBAAMCAAN5AAM7BA"
 IMG_FREELANCE  = "AgACAgUAAxkBAAPvahbsSqrvQCcd71o-U12xYzv2hMwAAvYPaxtEaLlUC-iRAAHC9wfoAQADAgADeQADOwQ"
@@ -127,7 +128,7 @@ def get_open_button() -> InlineKeyboardMarkup:
         )
     ]])
 
-# ─── HÀM GỬI AN TOÀN - TỰ ĐỘNG FALLBACK ────────────────────────────────
+# ─── HÀM GỬI AN TOÀN - TỰ ĐỘNG FALLBACK NẾU TEXT QUÁ DÀI ─────────────────────
 async def send_photo_with_long_text(update: Update, photo: str, text: str, reply_markup=None, parse_mode: str = "HTML") -> None:
     CAPTION_LIMIT = 1024
     try:
@@ -166,7 +167,7 @@ def ask_ai(user_id: int, message: str) -> str:
         return reply
     except Exception as e:
         logger.error("Lỗi AI: %s", e)
-        return "Dạ hệ thống AI đang quá tải, Quý khách vui lòng lựa chọn các phím chức năng tiện ích bên dưới màn hình ạ!"
+        return "Dạ hệ thống phân tích dữ liệu đang bận xử lý dữ liệu, Quý khách vui lòng lựa chọn các phím chức năng tiện ích bên dưới màn hình ạ!"
 
 def match_keyword(text: str) -> str | None:
     lower = text.lower().strip()
@@ -179,30 +180,30 @@ def match_keyword(text: str) -> str | None:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         text = (
-            "🚀 <b>CHÀO MỪNG ĐẾN VỚI HỆ THỐNG HOTROTOANBOT</b>\n\n"
-            "🔥 Giải pháp tự động hóa Video & Kiếm tiền MMO bằng AI hàng đầu.\n\n"
-            "💻 <b>Các tính năng chính:</b>\n"
-            "• Tự động tạo video TikTok/Facebook Reels hàng loạt.\n"
-            "• Quản lý quy trình Freelance & Digital Branding tối ưu.\n"
-            "• Đề xuất tool AI miễn phí giúp giảm chi phí xuống mức 0.\n\n"
+            "🚀 <b>CHÀO MỪNG ĐẾN VỚI HỆ THỐNG HOTROTOANBOT VIP</b>\n\n"
+            "🔥 Giải pháp tự động hóa quy trình sản xuất Video ngắn và khai thác MMO bằng hệ thống AI hàng đầu.\n\n"
+            "💻 <b>Các phân hệ tính năng lõi:</b>\n"
+            "• Quản lý luồng sinh Video ngắn (TikTok/Facebook Reels) tự động hàng loạt.\n"
+            "• Phân bổ kiến trúc hệ thống Freelance & Digital Branding tối ưu hóa chi phí.\n"
+            "• Đề xuất giải pháp và mã nguồn kết nối API các công cụ AI hoàn toàn miễn phí.\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🌐 <b>Hệ Sinh Thái:</b> <b><a href=\"{LINK_BEACON}\">Mở Hệ Thống Cổng Tổng</a></b>\n"
-            "📲 <b>Kỹ Thuật/Code Script:</b> <b><a href=\"https://t.me/toantong199\">Kết Nối Trực Tiếp Admin</a></b>\n"
+            f"🌐 <b>Hệ Sinh Thái Kỹ Thuật Số:</b> <b><a href=\"{LINK_BEACON}\">Mở Hệ Thống Cổng Tổng</a></b>\n"
+            "📲 <b>Mã Nguồn Framework Automation:</b> <b><a href=\"https://t.me/toantong199\">Kết Nối Trực Tiếp Admin</a></b>\n"
         )
         await update.message.reply_photo(photo=IMG_START, caption=text, parse_mode="HTML", reply_markup=get_bottom_menu())
         await update.message.reply_text("👇 Bấm <b>Open</b> để mở giao diện quản lý ngay!", parse_mode="HTML", reply_markup=get_open_button())
     except Exception as e:
         logger.error("Lỗi cmd_start: %s", e)
 
-# ─── FILE ID HANDLER LẤY ẢNH ──────────────────────────────────────────
+# ─── FILE ID HANDLER LẤY MÃ ẢNH TỰ ĐỘNG ─────────────────────────────────────
 async def reply_file_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         file_id = update.message.photo[-1].file_id
-        await update.message.reply_text(f"📸 <b>MÃ FILE ID CỦA ẢNH NÀY LÀ:</b>\n\n<code>{file_id}</code>\n\n<i>Hãy copy mã này và dán vào file bot.py</i>", parse_mode="HTML")
+        await update.message.reply_text(f"📸 <b>MÃ FILE ID CỦA ẢNH NÀY LÀ:</b>\n\n<code>{file_id}</code>\n\n<i>Hãy copy mã này và dán định cấu hình vào file bot.py</i>", parse_mode="HTML")
     except Exception as e:
         logger.error("Lỗi reply_file_id: %s", e)
 
-# ─── XỬ LÝ TIN NHẮN TEXT & PHÍM BẤM MENU ĐÁY ───────────────────────────
+# ─── XỬ LÝ TIN NHẮN TEXT & PHÍM BẤM MENU ĐÁY MÀN HÌNH ─────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
@@ -224,12 +225,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text(reply_text, parse_mode="HTML", reply_markup=get_open_button())
             return
         elif text == "📲 QUẢN LÝ TIKTOK/FB" or text == "👩🏻‍💻 LIÊN HỆ ADMIN":
-            caption = "Để được hướng dẫn set up luồng tự động hóa nuôi nhiều tài khoản TikTok/Facebook bằng Python, vui lòng liên hệ:"
-            inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("👩🏻‍💻 Trò Chuyện Cùng Chuyên Gia AI ↗️", url="https://t.me/toantong199")]])
+            caption = "Để được hướng dẫn cấu hình chi tiết framework tự động nuôi nhiều tài khoản mạng xã hội bằng Python Playwright, vui lòng liên hệ:"
+            inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("👩🏻‍💻 Trò Chuyện Cùng Chuyên Gia AI Automation ↗️", url="https://t.me/toantong199")]])
             await update.message.reply_photo(photo=IMG_START, caption=caption, reply_markup=inline_kb)
             return
 
-        # Xử lý Từ khóa & AI phản hồi
+        # Xử lý Từ khóa & Trí tuệ nhân tạo AI phản hồi sâu
         reply = match_keyword(text)
         if reply is None:
             reply = ask_ai(user_id, text)
@@ -249,13 +250,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
 
-# ─── KHỞI CHẠY BOT TELEGRAM ───────────────────────────────────────────
+# ─── KHỞI CHẠY KHUNG BOT TELEGRAM ───────────────────────────────────────────
 def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # Đăng ký các phân hệ Handler cốt lõi
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.PHOTO, reply_file_id))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    logger.info("🤖 HoTroToanBot đang khởi chạy luồng Polling...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
