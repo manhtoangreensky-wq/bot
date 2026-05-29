@@ -1,261 +1,175 @@
 """
-HoTroToanBot - Khung Cấu Trúc AI Automation & MMO VIP
-Bản Hoàn Chỉnh Tổng Thể - Tích hợp AI Chat (Gemini) & Giọng Đọc Nam (Nam Minh)
+HoTroToanBot - Trạm Điều Khiển AI Đa Tác Vụ (Multi-Agent System)
+Phiên bản V6 - Tích hợp Chuyên gia Code, Chuyên gia MMO, Cào Trend và Media
 """
 
 import os
 import logging
 import asyncio
 import edge_tts
+from duckduckgo_search import DDGS
 from google import genai
 from google.genai import types
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    WebAppInfo,
-)
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters,
-    ContextTypes,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-# ─── CẤU HÌNH LOGGING ──────────────────────────────────────────────────
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+# ─── CẤU HÌNH HỆ THỐNG ──────────────────────────────────────────────────
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ─── URL NÚT OPEN ──────────────────────────────────────────────────────
 WEB_APP_URL = "https://hoangthai223388-maker.github.io/xx88/redirect.html"
-
-# ─── BẢO MẬT BIẾN MÔI TRƯỜNG LẤY TỪ RAILWAY ─────────────────────────────
 TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
-    logger.error("❌ THIẾU BIẾN MÔI TRƯỜNG! Hãy kiểm tra lại mục Variables trên Railway.")
+    logger.error("❌ THIẾU BIẾN MÔI TRƯỜNG!")
 
-# ─── KHỞI TẠO AI GEMINI ────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ─── PROMPT TƯ DUY AI ──────────────────────────────────────────────────
-SYSTEM_PROMPT = """
-Bạn là Trợ lý Ảo AI Cấp Cao thuộc hệ thống HoTroToanBot.
-Nhiệm vụ của bạn là hỗ trợ tư vấn về MMO (Kiếm tiền online), Freelancer và Tự động hóa quy trình (Automation) bằng Python.
-Văn phong chuyên nghiệp, tập trung vào giải pháp tối ưu hệ thống, lập trình tự động bằng code.
+# ─── BỘ PROMPT ĐIỀU KHIỂN CÁC "TRƯỞNG PHÒNG AI" ─────────────────────────
 
-Khi người dùng yêu cầu kịch bản hoặc mã nguồn, hãy cung cấp các đoạn code Python thực tế sử dụng các thư viện miễn phí như:
-- edge-tts (Tạo giọng đọc AI miễn phí)
-- MoviePy (Tự động dựng và ghép video hàng loạt)
-- Playwright / Selenium (Tự động hóa trình duyệt nuôi và đăng bài mạng xã hội)
-
-Đường link hỗ trợ kỹ thuật duy nhất:
-<b><a href="https://t.me/hethongtoan">Kết Nối Hệ Thống Toàn</a></b>
-
-Tuyệt đối không dùng dấu sao (*) hoặc gạch dưới (_) của Markdown. Chỉ sử dụng các thẻ HTML được hỗ trợ: <b>, <i>, <a>, <code>.
+# 1. Trưởng phòng Lập trình (Dev/Tester)
+CODER_PROMPT = """
+Bạn là một Senior Software Engineer 10 năm kinh nghiệm. 
+Nhiệm vụ: Cung cấp giải pháp lập trình Web, App, Automation, và Tester chuyên sâu.
+Quy tắc: Luôn cung cấp code sạch (clean code), tối ưu hiệu suất, có comment giải thích rõ ràng. Phân tích lỗi logic chính xác. Trả lời thẳng vào vấn đề kỹ thuật, không dài dòng.
 """
 
-# ─── NỘI DUNG TƯ VẤN CỐT LÕI ───────────────────────────────────────────
-TEXT_KICH_HOAT_AI = """🤖 <b>HỆ THỐNG KÍCH HOẠT AI TỰ ĐỘNG HÓA</b> 🤖
+# 2. Trưởng phòng MMO (Chiến lược gia)
+MMO_PROMPT = """
+Bạn là một Chuyên gia MMO & Digital Marketing thực chiến.
+Nhiệm vụ: Lập kế hoạch kiếm tiền, kịch bản chuyển đổi cao, chiến lược traffic không đồng.
+Quy tắc: Tư duy thực tế, ưu tiên tự động hóa (zero-cost). Đưa ra các bước hành động cụ thể (Actionable steps) để tạo ra dòng tiền.
+"""
 
-<i>Nơi cấu hình và vận hành các kịch bản tự động hóa sản xuất nội dung số.</i>
+# 3. Lễ tân (Trả lời chung chung khi không dùng lệnh)
+GENERAL_PROMPT = "Bạn là Trợ lý AI hệ thống điều khiển. Hãy hướng dẫn người dùng sử dụng các lệnh /code, /mmo, /trend, /voice."
 
-━━━━━━━━━━━━━━━━━━━━━━
-🧠 <b>1. Lên Kịch Bản Tự Động:</b> Sử dụng Gemini API bản Free kết hợp Python để sinh nội dung hàng loạt.
-🎙️ <b>2. Tạo Giọng Đọc Không Giới Hạn:</b> Tích hợp thư viện <code>edge-tts</code> chạy trực tiếp bằng code, hoàn toàn miễn phí.
-🎬 <b>3. Render Video Hàng Loạt:</b> Sử dụng thư viện <code>MoviePy</code> để tự động ghép video nền, lồng âm thanh và chèn phụ đề tự động.
-
-📲 Liên hệ Admin để nhận bộ khung mã nguồn: <b><a href="https://t.me/hethongtoan">Nhận Framework Kỹ Thuật</a></b>"""
-
-TEXT_FREELANCER_MMO = """💼 <b>GIẢI PHÁP FREELANCER MMO</b> 💼
-
-<i>Chiến lược tối ưu hóa hệ thống tài khoản mạng xã hội để tạo nguồn thu nhập thụ động.</i>
-
-━━━━━━━━━━━━━━━━━━━━━━
-• <b>Hệ Thống Video Ngắn:</b> Sản xuất hàng loạt video ngắn cho thị trường ngách để phủ sóng lưu lượng truy cập sạch trên các nền tảng.
-• <b>Tự Động Hóa Vận Hành (Auto Upload):</b> Viết mã Python kết hợp trình duyệt Antidetect để tự động lên lịch và đăng bài trên hàng loạt nick vệ tinh.
-• <b>Tiếp Thị Liên Kết:</b> Điều hướng traffic về các link sản phẩm để tối ưu hóa tỷ lệ chuyển đổi.
-
-📲 Nhận tư vấn thiết lập kiến trúc luồng chạy: <b><a href="https://t.me/hethongtoan">Kết Nối Với Kỹ Thuật</a></b>"""
-
-KEYWORD_REPLIES = {
-    "kich hoat": TEXT_KICH_HOAT_AI,
-    "kích hoạt": TEXT_KICH_HOAT_AI,
-    "automation": TEXT_KICH_HOAT_AI,
-    "freelance": TEXT_FREELANCER_MMO,
-    "kiếm tiền": TEXT_FREELANCER_MMO,
-    "công cụ": "🛠️ <b>DANH SÁCH CÔNG CỤ AUTOMATION CORE:</b>\n\n- Kịch bản: Gemini API\n- Giọng đọc: Edge-TTS Python\n- Dựng Video: MoviePy Core\n- Nuôi nick: Playwright Automation",
-    "tool": "🛠️ <b>DANH SÁCH CÔNG CỤ AUTOMATION CORE:</b>\n\n- Kịch bản: Gemini API\n- Giọng đọc: Edge-TTS Python\n- Dựng Video: MoviePy Core\n- Nuôi nick: Playwright Automation"
-}
-
-# ─── GIAO DIỆN NÚT BẤM MENU ĐÁY MÀN HÌNH ───────────────────────────────
-def get_bottom_menu() -> ReplyKeyboardMarkup:
-    keyboard = [
-        [KeyboardButton("🚀 KÍCH HOẠT AI TỰ ĐỘNG HÓA")],
-        [KeyboardButton("🛠 CÔNG CỤ FREE"), KeyboardButton("💼 FREELANCER MMO")],
-        [KeyboardButton("📲 QUẢN LÝ TIKTOK/FB"), KeyboardButton("👩🏻‍💻 LIÊN HỆ ADMIN")]
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
-
-def get_open_button() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(
-            text="⚙️ Mở Kho Công Cụ MMO",
-            web_app=WebAppInfo(url=WEB_APP_URL)
+# ─── HÀM GIAO TIẾP VỚI LÕI AI GEMINI ────────────────────────────────────
+def call_gemini(prompt_system: str, user_text: str) -> str:
+    try:
+        response = gemini_client.models.generate_content(
+            model="gemini-2.0-flash",
+            config=types.GenerateContentConfig(system_instruction=prompt_system),
+            contents=user_text,
         )
-    ]])
+        return response.text
+    except Exception as e:
+        logger.error(f"Gemini Error: {e}")
+        return "❌ Hệ thống AI đang quá tải hoặc lỗi kết nối API."
 
-# ─── MODULE ĐIỀU KHIỂN: TẠO GIỌNG ĐỌC TỰ ĐỘNG (EDGE-TTS) ───────────────
-async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Lệnh /voice <nội dung> để hệ thống tự động tạo file MP3 gửi lại Telegram"""
+# ─── MODULE 1: CHUYÊN GIA LẬP TRÌNH (/code) ─────────────────────────────
+async def cmd_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
-        await update.message.reply_text("⚠️ <b>Thiếu nội dung!</b>\n\nQuý khách vui lòng nhập theo cú pháp:\n<code>/voice [Nội dung cần đọc]</code>", parse_mode="HTML")
+        await update.message.reply_text("💻 <b>Nhập lệnh:</b> <code>/code [Câu hỏi lập trình]</code>", parse_mode="HTML")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    user_query = " ".join(context.args)
+    reply = call_gemini(CODER_PROMPT, user_query)
+    await send_long_text(update, f"👨‍💻 <b>CHUYÊN GIA LẬP TRÌNH:</b>\n\n{reply}")
+
+# ─── MODULE 2: CHUYÊN GIA MMO (/mmo) ────────────────────────────────────
+async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("💰 <b>Nhập lệnh:</b> <code>/mmo [Câu hỏi kiếm tiền/Kịch bản]</code>", parse_mode="HTML")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    user_query = " ".join(context.args)
+    reply = call_gemini(MMO_PROMPT, user_query)
+    await send_long_text(update, f"💡 <b>CHIẾN LƯỢC GIA MMO:</b>\n\n{reply}")
+
+# ─── MODULE 3: TÌM KIẾM TREND THỜI GIAN THỰC (/trend) ───────────────────
+async def cmd_trend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("📈 <b>Nhập lệnh:</b> <code>/trend [Từ khóa cần tìm]</code>", parse_mode="HTML")
+        return
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    keyword = " ".join(context.args)
+    try:
+        results = DDGS().text(keyword, max_results=5)
+        if not results:
+            await update.message.reply_text("❌ Không tìm thấy thông tin mới nào.")
+            return
+        
+        response_text = f"🌍 <b>KẾT QUẢ QUÉT TREND: '{keyword}'</b>\n\n"
+        for idx, res in enumerate(results):
+            response_text += f"{idx+1}. <b>{res['title']}</b>\n- <i>{res['body']}</i>\n🔗 <a href='{res['href']}'>Link</a>\n\n"
+        
+        await update.message.reply_text(response_text, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi cào dữ liệu: {e}")
+
+# ─── MODULE 4: TẠO GIỌNG ĐỌC (/voice) ───────────────────────────────────
+async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("🎙️ <b>Nhập lệnh:</b> <code>/voice [Nội dung cần đọc]</code>", parse_mode="HTML")
         return
     
     text = " ".join(context.args)
     user_id = update.effective_user.id
-    output_file = f"voice_temp_{user_id}.mp3"
-    
-    # Gửi tin nhắn thông báo trạng thái
-    status_msg = await update.message.reply_text("⏳ <i>Hệ thống AI đang xử lý chuyển đổi giọng nói...</i>", parse_mode="HTML")
+    output_file = f"voice_{user_id}.mp3"
+    status_msg = await update.message.reply_text("⏳ <i>Đang render âm thanh...</i>", parse_mode="HTML")
     
     try:
-        # Đã cập nhật: Gọi thư viện tạo giọng đọc (Giọng Nam - Nam Minh chuẩn VN)
         communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
         await communicate.save(output_file)
-        
-        # Gửi file âm thanh thành phẩm lên Telegram
         with open(output_file, 'rb') as audio_file:
-            await update.message.reply_audio(
-                audio=audio_file, 
-                title="Giọng Đọc AI - Hệ Thống Toàn",
-                caption="✅ Kích hoạt Render âm thanh thành công!"
-            )
-        # Xóa tin nhắn trạng thái "đang xử lý"
+            await update.message.reply_audio(audio=audio_file, caption="✅ Render thành công!")
         await status_msg.delete()
     except Exception as e:
-        logger.error("Lỗi tạo voice: %s", e)
-        await status_msg.edit_text(f"❌ Quá trình tạo giọng đọc thất bại. Lỗi: {e}")
+        await status_msg.edit_text(f"❌ Lỗi Voice: {e}")
     finally:
-        # Xóa file tạm trên server để giải phóng bộ nhớ
-        if os.path.exists(output_file):
-            os.remove(output_file)
+        if os.path.exists(output_file): os.remove(output_file)
 
-# ─── XỬ LÝ AI GEMINI PHẢN HỒI LƯU LỊCH SỬ ──────────────────────────────
-conversation_history: dict[int, list] = {}
-MAX_HISTORY = 16
+# ─── HÀM HỖ TRỢ CHIA NHỎ TIN NHẮN DÀI ───────────────────────────────────
+async def send_long_text(update: Update, text: str):
+    chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
+    for chunk in chunks:
+        try:
+            await update.message.reply_text(chunk, parse_mode="HTML")
+        except:
+            await update.message.reply_text(chunk) # Fallback nếu HTML lỗi syntax
 
-def ask_ai(user_id: int, message: str) -> str:
-    if user_id not in conversation_history:
-        conversation_history[user_id] = []
-    conversation_history[user_id].append(types.Content(role="user", parts=[types.Part(text=message)]))
-    if len(conversation_history[user_id]) > MAX_HISTORY:
-        conversation_history[user_id] = conversation_history[user_id][-MAX_HISTORY:]
-    try:
-        response = gemini_client.models.generate_content(
-            model="gemini-2.0-flash",
-            config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
-            contents=conversation_history[user_id],
-        )
-        reply = response.text
-        conversation_history[user_id].append(types.Content(role="model", parts=[types.Part(text=reply)]))
-        return reply
-    except Exception as e:
-        logger.error("Lỗi AI: %s", e)
-        return "Dạ hệ thống AI đang bận xử lý, Quý khách vui lòng thử lại hoặc sử dụng menu phím bấm bên dưới!"
+# ─── GIAO DIỆN MENU & LỆNH /START ───────────────────────────────────────
+def get_bottom_menu() -> ReplyKeyboardMarkup:
+    keyboard = [[KeyboardButton("🛠 BẢNG ĐIỀU KHIỂN HỆ THỐNG")]]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
-def match_keyword(text: str) -> str | None:
-    lower = text.lower().strip()
-    for kw in sorted(KEYWORD_REPLIES.keys(), key=len, reverse=True):
-        if kw in lower:
-            return KEYWORD_REPLIES[kw]
-    return None
-
-# ─── LỆNH /START ──────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try:
-        text = (
-            "🚀 <b>CHÀO MỪNG ĐẾN VỚI HỆ THỐNG HOTROTOANBOT VIP</b>\n\n"
-            "🔥 Giải pháp tự động hóa quy trình sản xuất nội dung số và tối ưu hóa Freelancer MMO hàng đầu.\n\n"
-            "💻 <b>Các phân hệ quản trị lõi:</b>\n"
-            "• Quản lý luồng kích hoạt AI tự động hóa sản xuất kịch bản và giọng đọc.\n"
-            "• Định cấu hình hệ thống dựng video tự động hàng loạt bằng Python.\n"
-            "• Đề xuất giải pháp và cung cấp mã nguồn kết nối các công cụ miễn phí.\n\n"
-            "💡 <b>Tính năng Ẩn (Test Automation):</b> Gõ lệnh <code>/voice [Nội dung]</code> để dùng thử công nghệ tạo giọng đọc tự động.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📲 <b>Hỗ Trợ & Nhận Mã Nguồn Kỹ Thuật:</b> <b><a href=\"https://t.me/hethongtoan\">Kết Nối Hệ Thống Toàn</a></b>"
-        )
-        await update.message.reply_text(text=text, parse_mode="HTML", reply_markup=get_bottom_menu())
-        await update.message.reply_text("👇 Bấm <b>Open</b> để mở giao diện quản lý ngay!", parse_mode="HTML", reply_markup=get_open_button())
-    except Exception as e:
-        logger.error("Lỗi cmd_start: %s", e)
+    text = (
+        "🛸 <b>TRẠM ĐIỀU KHIỂN ĐA TÁC VỤ AI KÍCH HOẠT</b>\n\n"
+        "Hệ thống đã phân luồng các chuyên gia. Vui lòng sử dụng các lệnh sau để ra việc:\n\n"
+        "👨‍💻 <code>/code [Câu hỏi]</code> : Gọi kỹ sư lập trình (Web/App/Auto)\n"
+        "💰 <code>/mmo [Câu hỏi]</code> : Gọi chuyên gia kiếm tiền, kịch bản\n"
+        "📈 <code>/trend [Từ khóa]</code> : Cào dữ liệu tìm kiếm thời gian thực\n"
+        "🎙️ <code>/voice [Văn bản]</code> : Render file âm thanh MP3\n\n"
+        "<i>Ví dụ: /trend xu hướng tiktok tháng này</i>"
+    )
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=get_bottom_menu())
 
-# ─── XỬ LÝ TIN NHẮN VĂN BẢN & PHÍM BẤM ─────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.text:
-        return
-
     text = update.message.text.strip()
-    user_id = update.effective_user.id
+    if text == "🛠 BẢNG ĐIỀU KHIỂN HỆ THỐNG":
+        await cmd_start(update, context)
+        return
+    # Trò chuyện bình thường
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    reply = call_gemini(GENERAL_PROMPT, text)
+    await update.message.reply_text(reply)
 
-    try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-
-        if text == "🚀 KÍCH HOẠT AI TỰ ĐỘNG HÓA":
-            await update.message.reply_text(text=TEXT_KICH_HOAT_AI, parse_mode="HTML")
-            return
-        elif text == "💼 FREELANCER MMO":
-            await update.message.reply_text(text=TEXT_FREELANCER_MMO, parse_mode="HTML")
-            return
-        elif text == "🛠 CÔNG CỤ FREE":
-            reply_text = KEYWORD_REPLIES["công cụ"]
-            await update.message.reply_text(text=reply_text, parse_mode="HTML", reply_markup=get_open_button())
-            return
-        elif text == "📲 QUẢN LÝ TIKTOK/FB" or text == "👩🏻‍💻 LIÊN HỆ ADMIN":
-            caption = "Để được hướng dẫn chi tiết framework tự động đăng bài nuôi nhiều tài khoản mạng xã hội bằng Python Playwright, vui lòng liên hệ:"
-            inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("👩🏻‍💻 Kết Nối Hệ Thống Toàn ↗️", url="https://t.me/hethongtoan")]])
-            await update.message.reply_text(text=caption, reply_markup=inline_kb)
-            return
-
-        # Xử lý Từ khóa & Trí tuệ nhân tạo AI
-        reply = match_keyword(text)
-        if reply is None:
-            reply = ask_ai(user_id, text)
-
-        chunks = [reply[i:i + 4096] for i in range(0, len(reply), 4096)]
-        for idx, chunk in enumerate(chunks):
-            kb = get_open_button() if idx == len(chunks) - 1 else None
-            try:
-                await update.message.reply_text(chunk, reply_markup=kb, parse_mode="HTML")
-            except Exception:
-                await update.message.reply_text(chunk, reply_markup=kb)
-
-    except Exception as main_err:
-        logger.error("Lỗi tại handle_message: %s", main_err)
-
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-
-# ─── KHỞI CHẠY KHUNG BOT TELEGRAM ─────────────────────────────────────
+# ─── KHỞI CHẠY BOT ──────────────────────────────────────────────────────
 def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # Đăng ký các phân hệ Handler cốt lõi
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("voice", cmd_voice)) # Module test giọng đọc
-    app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_handler(CommandHandler("code", cmd_code))
+    app.add_handler(CommandHandler("mmo", cmd_mmo))
+    app.add_handler(CommandHandler("trend", cmd_trend))
+    app.add_handler(CommandHandler("voice", cmd_voice))
+    
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    logger.info("🤖 HoTroToanBot đang khởi chạy luồng Polling...")
+    logger.info("🤖 Trạm Điều Khiển Multi-Agent đang chạy...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
