@@ -1,7 +1,7 @@
 """
 HoTroToanBot - Trạm Điều Khiển AI Đa Tác Vụ (Multi-Agent System)
-Phiên bản V8.0 - TÍCH HỢP BỘ NÃO ĐIỀU PHỐI TỰ ĐỘNG (ROUTING INTENT ENGINE)
-Gemini tự đọc hiểu chat thường và tự kích hoạt các module Voice / Quét Trend ngầm.
+Phiên bản V8.1 - TÍCH HỢP CƠ CHẾ DỰ PHÒNG CHỐNG NGHẼN QUOTA 429 (FALLBACK ENGINE)
+Tự động đổi mô hình nếu một trong hai model của Google bị khóa giới hạn.
 """
 
 import os
@@ -50,7 +50,6 @@ Nhiệm vụ: Lập kế hoạch kiếm tiền, kịch bản chuyển đổi cao
 Quy tắc: Tư duy thực tế, ưu tiên tự động hóa (zero-cost). Đưa ra các bước hành động cụ thể để tạo ra dòng tiền.
 """
 
-# BỘ NÃO PHÂN LOẠI Ý ĐỊNH: Đọc tin nhắn thường và quyết định xem cần gọi module con nào
 ORCHESTRATOR_PROMPT = """
 Bạn là Bộ Não Điều Phối Trung Tâm của hệ thống HoTroToanBot.
 Nhiệm vụ của bạn là đọc tin nhắn thường của chủ nhân, phân tích ý định (Intent Tracking) và phân loại nó vào một trong các hành động kỹ thuật.
@@ -68,7 +67,7 @@ Các hành động bạn cần phân loại:
 
 2. Nếu chủ nhân muốn tìm kiếm tin tức, quét xu hướng thị trường, tìm trend mới trên mạng xã hội:
    -> action: "trend"
-   -> data: Từ khóa cốt lõi cần mang đi tìm kiếm (Ví dụ: "cách kiếm tiền tiktok 2026").
+   -> data: Từ khóa cốt lõi cần mang đi tìm kiếm.
 
 3. Nếu chủ nhân muốn hỏi về lập trình, viết code, sửa lỗi phần mềm, tester, xây dựng app web:
    -> action: "code"
@@ -78,28 +77,42 @@ Các hành động bạn cần phân loại:
    -> action: "mmo"
    -> data: Nội dung câu hỏi MMO của chủ nhân.
 
-5. Nếu chỉ là lời chào hỏi bình thường (ví dụ: hello, hi, bạn là ai) hoặc không thuộc các nhóm trên:
+5. Nếu chỉ là lời chào hỏi bình thường hoặc không thuộc các nhóm trên:
    -> action: "general"
    -> data: Câu trả lời ngắn gọn, lịch sự, hướng dẫn chủ nhân sử dụng hệ thống.
 """
 
-# ─── HÀM LIÊN KẾT GIAO TIẾP VỚI LÕI AI GEMINI CORE ──────────────────────────────────
+GENERAL_PROMPT = "Bạn là Trợ lý AI hệ thống điều khiển. Hãy hướng dẫn người dùng sử dụng các lệnh /code, /mmo, /trend, /voice."
+
+# ─── HÀM LIÊN KẾT GIAO TIẾP VỚI LÕI AI GEMINI (CƠ CHẾ DỰ PHÒNG CHỐNG NGHẼN VIP) ──────
 def call_gemini(prompt_system: str, user_text: str, is_json: bool = False) -> str:
+    config_args = {"system_instruction": prompt_system}
+    if is_json:
+        config_args["response_mime_type"] = "application/json"
+        
+    # Tuyến phòng thủ số 1: Sử dụng mô hình đời mới nhất 2.0
     try:
-        config_args = {"system_instruction": prompt_system}
-        if is_json:
-            config_args["response_mime_type"] = "application/json"
-            
         response = gemini_client.models.generate_content(
             model="gemini-2.0-flash", 
             config=types.GenerateContentConfig(**config_args),
             contents=user_text,
         )
         return response.text
-    except Exception as e:
-        logger.error(f"Gemini Error: {e}")
-        error_str = str(e).replace("<", "&lt;").replace(">", "&gt;")
-        return f"❌ <b>Lỗi kết nối lõi Gemini API:</b>\n<code>{error_str}</code>"
+    except Exception as e_2_0:
+        logger.warning(f"Model 2.0-flash kẹt hoặc nghẽn quota: {e_2_0}. Tự động chuyển sang tuyến dự phòng...")
+        
+        # Tuyến phòng thủ số 2 (Fallback): Tự kích hoạt model 1.5-flash cực kỳ ổn định
+        try:
+            response = gemini_client.models.generate_content(
+                model="gemini-1.5-flash", 
+                config=types.GenerateContentConfig(**config_args),
+                contents=user_text,
+            )
+            return response.text
+        except Exception as e_1_5:
+            logger.error(f"Tuyến dự phòng 1.5-flash cũng thất bại: {e_1_5}")
+            error_str = str(e_1_5).replace("<", "&lt;").replace(">", "&gt;")
+            return f"❌ <b>Cả hai máy chủ AI dự phòng đều đang quá tải hoặc hết hạn mức (Quota 429).</b>\n\nSếp vui lòng đợi khoảng 20 giây rồi thử lại ạ!"
 
 # ─── HÀM THI HÀNH LỆNH QUÉT TREND NGẦM ──────────────────────────────────────────
 def execute_trend_search(keyword: str) -> str:
@@ -129,7 +142,7 @@ async def execute_voice_render(text: str, user_id: int, context: ContextTypes.DE
     finally:
         if os.path.exists(output_file): os.remove(output_file)
 
-# ─── PHÂN HỆ 1: KỸ SƯ LẬP TRÌNH CHUYÊN SÂU (/code) ───────────────────────────────────
+# ─── PHÂN HỆ KHỞI CHẠY CÁC CÂU LỆNH ĐỘC LẬP ──────────────────────────────────────────
 async def cmd_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await restrict_access(update): return
     query = " ".join(context.args) if context.args else "Hãy hướng dẫn tôi cách viết code tối ưu bằng Python."
@@ -137,7 +150,6 @@ async def cmd_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     reply = call_gemini(CODER_PROMPT, query)
     await send_long_text(update, f"👨‍💻 <b>CHUYÊN GIA LẬP TRÌNH VÀ TESTER:</b>\n\n{reply}")
 
-# ─── PHÂN HỆ 2: CHIẾN LƯỢC GIA MMO & MARKETING (/mmo) ───────────────────────────────
 async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await restrict_access(update): return
     query = " ".join(context.args) if context.args else "Đề xuất cho tôi mô hình MMO zero-cost ổn định nhất."
@@ -145,18 +157,16 @@ async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     reply = call_gemini(MMO_PROMPT, query)
     await send_long_text(update, f"💡 <b>CHIẾN LƯỢC GIA HỆ THỐNG MMO:</b>\n\n{reply}")
 
-# ─── PHÂN HỆ 3: CÀO TIN TỨC & PHÂN TÍCH XU HƯỚNG MẠNG (/trend) ─────────────────────────
 async def cmd_trend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await restrict_access(update): return
     if not context.args:
-        await update.message.reply_text("txt <b>Cú pháp:</b> <code>/trend [Từ khóa]</code>", parse_mode="HTML")
+        await update.message.reply_text("📈 <b>Cú pháp:</b> <code>/trend [Từ khóa]</code>", parse_mode="HTML")
         return
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     keyword = " ".join(context.args)
     reply = execute_trend_search(keyword)
     await update.message.reply_text(reply, parse_mode="HTML", disable_web_page_preview=True)
 
-# ─── PHÂN HỆ 4: GENERATE GIỌNG ĐỌC NAM MIỄN PHÍ (/voice) ────────────────────
 async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await restrict_access(update): return
     if not context.args:
@@ -174,13 +184,12 @@ async def send_long_text(update: Update, text: str):
         except:
             await update.message.reply_text(chunk)
 
-# ─── THIẾT LẬP PHÍM CHỨC NĂNG INLINE VIP & LỆNH /START ─────────────────────────────────
+# ─── THIẾT LẬP GIAO DIỆN PHÍM BẤM HỆ THỐNG ──────────────────────────────────────────
 def get_bottom_menu() -> ReplyKeyboardMarkup:
     keyboard = [[KeyboardButton("🛸 MỞ TRẠM ĐIỀU KHIỂN AI CENTRAL")]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
 def get_inline_dashboard() -> InlineKeyboardMarkup:
-    # Thiết kế bảng nút bấm Inline hiện đại như phần mềm quản trị chuyên nghiệp
     keyboard = [
         [
             InlineKeyboardButton("👨‍💻 Kỹ Sư Lập Trình", callback_data="btn_code"),
@@ -190,38 +199,35 @@ def get_inline_dashboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📈 Quét Xu Hướng Mạng", callback_data="btn_trend"),
             InlineKeyboardButton("🎙️ Tạo Giọng Đọc AI", callback_data="btn_voice")
         ],
-        [
-            InlineKeyboardButton("⚙️ Mở Kho Công Cụ MMO (Full Screen)", web_app=WebAppInfo(url=WEB_APP_URL))
-        ]
+        [InlineKeyboardButton("⚙️ Mở Kho Công Cụ MMO (Full Screen)", web_app=WebAppInfo(url=WEB_APP_URL))]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await restrict_access(update): return
     text = (
-        "🛸 <b>TRẠM ĐIỀU KHIỂN HỆ THỐNG AI ĐA TÁC VỤ VIP V8.0</b>\n\n"
-        "Chào mừng sếp đã quay trở lại phòng làm việc trung tâm. Hệ thống điều phối ngầm đã được kích hoạt thành công.\n\n"
-        "🧠 <b>Cơ chế Sếp Tổng hoạt động:</b> Sếp không cần gõ câu lệnh phức tạp nữa. Cứ chat trực tiếp tiếng Việt bình thường (Ví dụ: <i>'Tạo file nói xin chào hệ thống'</i> hoặc <i>'Kiểm tra lỗi đoạn code này...'</i>), bộ não Gemini sẽ tự phân tích và điều khiển các module con chạy ngầm lập tức!\n\n"
-        "👇 Hoặc sếp có thể bấm trực tiếp vào bảng phân hệ chức năng dưới đây:"
+        "🛸 <b>TRẠM ĐIỀU KHIỂN HỆ THỐNG AI ĐA TÁC VỤ VIP V8.1</b>\n\n"
+        "Chào mừng sếp đã quay trở lại phòng làm việc trung tâm. Hệ thống bảo vệ kép (Fallback Engine) chống kẹt mạch API đã kích hoạt.\n\n"
+        "🧠 <b>Cơ chế điều phối tự động:</b> Sếp có thể nhắn tin thường trực tiếp (Ví dụ: <i>'Tạo file nói xin chào hệ thống'</i> hoặc <i>'Tìm kiếm xu hướng làm video ngắn'</i>). Bot sẽ tự động phân giải cấu trúc chạy lập tức!\n\n"
+        "👇 Bấm trực tiếp vào các phân hệ dưới đây để nhận hướng dẫn:"
     )
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=get_bottom_menu())
     await update.message.reply_text("🎛️ <b>BẢNG ĐIỀU KHIỂN PHÒNG BAN:</b>", parse_mode="HTML", reply_markup=get_inline_dashboard())
 
-# ─── XỬ LÝ SỰ KIỆN KHI ẤN NÚT BẤM INLINE ──────────────────────────────────────────
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     
     if query.data == "btn_code":
-        await query.message.reply_text("💻 <b>[Phân Hệ Lập Trình]</b>: Sếp hãy nhập theo cú pháp: <code>/code [Câu hỏi hoặc đoạn code cần sửa]</code>", parse_mode="HTML")
+        await query.message.reply_text("💻 <b>[Phân Hệ Lập Trình]</b>: Nhập theo cú pháp: <code>/code [Câu hỏi lập trình]</code>", parse_mode="HTML")
     elif query.data == "btn_mmo":
-        await query.message.reply_text("💰 <b>[Phân Hệ Chiến Lược MMO]</b>: Sếp hãy nhập theo cú pháp: <code>/mmo [Ý tưởng kiếm tiền hoặc yêu cầu kịch bản]</code>", parse_mode="HTML")
+        await query.message.reply_text("💰 <b>[Phân Hệ Chiến Lược MMO]</b>: Nhập theo cú pháp: <code>/mmo [Câu hỏi mmo / Kịch bản]</code>", parse_mode="HTML")
     elif query.data == "btn_trend":
-        await query.message.reply_text("📈 <b>[Phân Hệ Quét Trend]</b>: Sếp hãy nhập theo cú pháp: <code>/trend [Từ khóa cần quét mạng]</code>", parse_mode="HTML")
+        await query.message.reply_text("📈 <b>[Phân Hệ Quét Trend]</b>: Nhập theo cú pháp: <code>/trend [Từ khóa]</code>", parse_mode="HTML")
     elif query.data == "btn_voice":
-        await query.message.reply_text("🎙️ <b>[Phân Hệ Render Giọng Nói]</b>: Sếp hãy nhập theo cú pháp: <code>/voice [Đoạn văn bản cần bot đọc thành tiếng]</code>", parse_mode="HTML")
+        await query.message.reply_text("🎙️ <b>[Phân Hệ Giọng Nói]</b>: Nhập theo cú pháp: <code>/voice [Văn bản]</code>", parse_mode="HTML")
 
-# ─── BỘ NÃO ĐIỀU PHỐI (CHAT THƯỜNG TỰ ĐIỀU KHIỂN TẤT CẢ AI KHÁC) ───────────────────────
+# ─── BỘ NÀO ĐIỀU PHỐI MULTI-AGENT PHÒNG THỦ KÉP ─────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await restrict_access(update): return
     text = update.message.text.strip()
@@ -232,46 +238,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
-    # Bước 1: Đẩy tin nhắn thường qua Gemini để phân tích ý định (Intent Routing) dưới dạng JSON
+    # Phân giải ý định qua hàm call_gemini có bảo vệ chống lỗi 429
     intent_json_str = call_gemini(ORCHESTRATOR_PROMPT, text, is_json=True)
     
+    # Nếu nghẽn mạch hoàn toàn cả 2 model, trả về thẳng thông báo lỗi thân thiện cho sếp
+    if "Máy chủ AI dự phòng đều đang quá tải" in intent_json_str or "❌" in intent_json_str:
+        await update.message.reply_text(intent_json_str, parse_mode="HTML")
+        return
+        
     try:
         intent_data = json.loads(intent_json_str)
         action = intent_data.get("action")
         extracted_data = intent_data.get("data", "")
         
-        # Bước 2: Dựa vào hành động được Sếp Tổng phân loại, kích hoạt ngầm module tương ứng
         if action == "voice":
             await execute_voice_render(extracted_data, update.effective_user.id, context, update.effective_chat.id)
             return
-            
         elif action == "trend":
-            await update.message.reply_text(f"⏳ <i>Sếp tổng ra lệnh ngầm: Đang tự cào mạng quét dữ liệu cho từ khóa '{extracted_data}'...</i>", parse_mode="HTML")
+            await update.message.reply_text(f"⏳ <i>Sếp tổng ra lệnh: Đang cào mạng quét dữ liệu cho từ khóa '{extracted_data}'...</i>", parse_mode="HTML")
             reply = execute_trend_search(extracted_data)
             await update.message.reply_text(reply, parse_mode="HTML", disable_web_page_preview=True)
             return
-            
         elif action == "code":
             reply = call_gemini(CODER_PROMPT, extracted_data)
             await send_long_text(update, f"👨‍💻 <b>HỆ THỐNG TỰ ĐỘNG KÍCH HOẠT PHÒNG CODE:</b>\n\n{reply}")
             return
-            
         elif action == "mmo":
             reply = call_gemini(MMO_PROMPT, extracted_data)
             await send_long_text(update, f"💡 <b>HỆ THỐNG TỰ ĐỘNG KÍCH HOẠT CHIẾN LƯỢC MMO:</b>\n\n{reply}")
             return
-            
         else:
-            # Lời chào hoặc trò chuyện chung
             await update.message.reply_text(extracted_data, reply_markup=get_inline_dashboard())
             
     except Exception as err:
         logger.error(f"Routing Error: {err}")
-        # Nếu lỗi JSON, quay về chế độ chat thông thường bảo vệ luồng chạy
-        reply = call_gemini("Bạn là trợ lý AI thân thiện.", text)
+        reply = call_gemini(GENERAL_PROMPT, text)
         await update.message.reply_text(reply)
 
-# ─── KHỔI CHẠY KHUNG ĐIỀU HÀNH LUỒNG POLLING HỆ THỐNG ────────────────────────────────
 def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
@@ -284,7 +287,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    logger.info("🤖 Trạm Điều Khiển Multi-Agent V8.0 đang chạy...")
+    logger.info("🤖 Trạm Điều Khiển Multi-Agent V8.1 đang chạy...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
