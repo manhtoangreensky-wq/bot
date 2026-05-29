@@ -245,26 +245,45 @@ async def send_long_text(update: Update, text: str):
         try: await update.message.reply_text(chunk, parse_mode="HTML")
         except: await update.message.reply_text(chunk)
 
+# ─── GIAO DIỆN NÚT BẤM TƯƠNG TÁC CHUYÊN NGHIỆP ──────────────────────────────────
 def get_bottom_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup([[KeyboardButton("🛸 MỞ TRẠM ĐIỀU KHIỂN AI CENTRAL")]], resize_keyboard=True, is_persistent=True)
 
 def get_inline_dashboard() -> InlineKeyboardMarkup:
+    # Đã gỡ bỏ hoàn toàn link WebApp cũ, chuyển thành callback_data có chức năng
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👨‍💻 Kỹ sư Code", callback_data="none"), InlineKeyboardButton("🎙️ Tạo Audio", callback_data="none")],
-        [InlineKeyboardButton("📈 Quét Trend", callback_data="none"), InlineKeyboardButton("🌐 Mở Cấu Hình", web_app=WebAppInfo(url=WEB_APP_URL))]
+        [InlineKeyboardButton("👨‍💻 Kỹ sư Code", callback_data="btn_code"), InlineKeyboardButton("🎙️ Tạo Audio", callback_data="btn_voice")],
+        [InlineKeyboardButton("📈 Quét Trend", callback_data="btn_trend"), InlineKeyboardButton("🌐 Mở Cấu Hình", callback_data="btn_config")]
     ])
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("Chat trực tiếp lệnh bằng văn bản để AI tự điều phối nhé sếp!")
+    query = update.callback_query
+    await query.answer() # Tắt vòng loading khi bấm nút
+    
+    # Bắt sự kiện khi sếp bấm vào từng nút và trả về câu hướng dẫn
+    if query.data == "btn_code":
+        await query.message.reply_text("💻 <b>[Phân Hệ Lập Trình]</b>: Sếp hãy chat trực tiếp yêu cầu (VD: <i>'Viết mã Python...'</i>) hoặc dùng lệnh <code>/code [Câu hỏi]</code>", parse_mode="HTML")
+    elif query.data == "btn_voice":
+        await query.message.reply_text("🎙️ <b>[Phân Hệ Giọng Nói]</b>: Sếp hãy chat yêu cầu (VD: <i>'Tạo file nói...'</i>) hoặc dùng lệnh <code>/voice [Văn bản]</code>", parse_mode="HTML")
+    elif query.data == "btn_trend":
+        await query.message.reply_text("📈 <b>[Phân Hệ Quét Trend]</b>: Sếp hãy chat yêu cầu (VD: <i>'Tìm trend...'</i>) hoặc dùng lệnh <code>/trend [Từ khóa]</code>", parse_mode="HTML")
+    elif query.data == "btn_config":
+        await query.message.reply_text("🚧 <b>Hệ thống Website quản trị đang được xây dựng. Chức năng sẽ sớm ra mắt!</b>", parse_mode="HTML")
 
+# ─── KHỞI CHẠY KHUNG ĐIỀU HÀNH LUỒNG POLLING ─────────────────────────────────────
 def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("clear", cmd_clear))
+    
+    # Bắt sự kiện bấm nút Inline
     app.add_handler(CallbackQueryHandler(handle_callback))
+    
+    # Bắt sự kiện chat thường
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logger.info("🚀 Enterprise Architecture VIP V10.1 Online...")
+    
+    logger.info("🚀 Enterprise Architecture VIP V10.2 Online...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
