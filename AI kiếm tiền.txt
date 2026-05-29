@@ -1,0 +1,33 @@
+🎬 Quy trình làm video bằng AI Complete
+Bước 1 - Ý tưởng & Kịch bản: Claude / ChatGPT viết kịch bản
+Bước 2 - Giọng đọc: ElevenLabs (giọng Việt rất tự nhiên)
+Bước 3 - Hình ảnh/Video: Runway ML, Pika Labs tạo video từ văn bản
+Bước 4 - Edit auto: CapCut AI auto cut, thêm phụ đề, hiệu ứng
+Bước 5 - Đăng tự động: Buffer, Metricool lên lịch đăng nhiều kênh
+
+💰 Công cụ tìm kiếm mô tả
+Faceless YouTube - Không cần lộ mặt, dùng AI 100%
+
+Niche: top 10, lịch sử, tài chính, động lực
+1 video/video → 3-6 lần với AdSense
+
+TikTok + Reels hàng loạt - Tạo 5-10 video/ngày bằng AI
+
+1 mẫu → remix thành nhiều video
+Affiliate TikTok Shop kèm theo
+
+Bán dịch vụ làm video AI cho doanh nghiệp
+
+Sạc 500k-2M/video
+Họ không biết bạn sử dụng AI 😄
+
+
+🤖 Nên nâng cấp cái nào?
+Ở đây bạn xem video thì thứ tự đầu tiên:
+
+ElevenLabs $5/tháng → giọng đọc Việt cực tự nhiên, quan trọng nhất
+CapCut Pro → chỉnh sửa nhanh, có AI auto-cut
+Claude Pro $20/tháng → viết script treo hàng loạt, không giới hạn
+Runway ML $12/tháng → tạo video AI đẹp
+
+Tổng chi phí ~$37/tháng, làm túc túc về vài triệu/tháng là được.
