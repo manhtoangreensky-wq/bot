@@ -341,7 +341,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 # ─── MAIN ──────────────────────────────────────────────────────
 def main():
-    app = Application.builder().token(8323884388:AAGtcyKZ3bzkK-Bdxc6-61l4gdD9Y6FE23g).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
     # Commands
     app.add_handler(CommandHandler("start", start))
