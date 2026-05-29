@@ -3,7 +3,8 @@ Cấu hình bot - Chỉnh sửa thông tin tại đây
 """
 import os
 
-BOT_TOKEN = os.environ.get("8323884388:AAGtcyKZ3bzkK-Bdxc6-61l4gdD9Y6FE23g", "")
+# Hệ thống sẽ tự động lấy Token này để chạy
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8323884388:AAGtcyKZ3bzkK-Bdxc6-61l4gdD9Y6FE23g")
 
 ADMIN_IDS = [123456789]
 
