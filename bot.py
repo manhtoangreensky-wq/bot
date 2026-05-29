@@ -1,11 +1,12 @@
 """
 HoTroToanBot - Khung Cấu Trúc AI Automation & MMO VIP
-Bản thô sạch 100% - Đã xóa toàn bộ nội dung Boss Toàn cũ và loại bỏ hoàn toàn Beacon
+Bản Hoàn Chỉnh Tổng Thể - Tích hợp AI Chat (Gemini) & AI Tạo Giọng Đọc (Edge-TTS)
 """
 
 import os
 import logging
 import asyncio
+import edge_tts
 from google import genai
 from google.genai import types
 from telegram import (
@@ -25,28 +26,27 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# ─── CẤU HÌNH LOGGING HỆ THỐNG ──────────────────────────────────────────────────
+# ─── CẤU HÌNH LOGGING ──────────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# ─── URL NÚT OPEN (MỞ WEB APP TOÀN MÀN HÌNH) ────────────────────────────────────
-# Bồ có thể thay link Web App của bồ vào đây sau
+# ─── URL NÚT OPEN ──────────────────────────────────────────────────────
 WEB_APP_URL = "https://hoangthai223388-maker.github.io/xx88/redirect.html"
 
-# ─── BẢO MẬT BIẾN MÔI TRƯỜNG LẤY TỪ RAILWAY ─────────────────────────────────────
+# ─── BẢO MẬT BIẾN MÔI TRƯỜNG LẤY TỪ RAILWAY ─────────────────────────────
 TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     logger.error("❌ THIẾU BIẾN MÔI TRƯỜNG! Hãy kiểm tra lại mục Variables trên Railway.")
 
-# ─── KHỞI TẠO AI GEMINI ──────────────────────────────────────────────────
+# ─── KHỞI TẠO AI GEMINI ────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ─── PROMPT VIP TƯ DUY AI (ĐÃ LÀM SẠCH NỘI DUNG) ────────────────────────────────
+# ─── PROMPT TƯ DUY AI ──────────────────────────────────────────────────
 SYSTEM_PROMPT = """
 Bạn là Trợ lý Ảo AI Cấp Cao thuộc hệ thống HoTroToanBot.
 Nhiệm vụ của bạn là hỗ trợ tư vấn về MMO (Kiếm tiền online), Freelancer và Tự động hóa quy trình (Automation) bằng Python.
@@ -63,14 +63,14 @@ Khi người dùng yêu cầu kịch bản hoặc mã nguồn, hãy cung cấp c
 Tuyệt đối không dùng dấu sao (*) hoặc gạch dưới (_) của Markdown. Chỉ sử dụng các thẻ HTML được hỗ trợ: <b>, <i>, <a>, <code>.
 """
 
-# ─── NỘI DUNG THÔ CHO CÁC PHÍM CHỨC NĂNG (BỒ TỰ THAY LINK SAU) ───────────────────
+# ─── NỘI DUNG TƯ VẤN CỐT LÕI ───────────────────────────────────────────
 TEXT_KICH_HOAT_AI = """🤖 <b>HỆ THỐNG KÍCH HOẠT AI TỰ ĐỘNG HÓA</b> 🤖
 
 <i>Nơi cấu hình và vận hành các kịch bản tự động hóa sản xuất nội dung số.</i>
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🧠 <b>1. Lên Kịch Bản Tự Động:</b> Sử dụng Gemini API bản Free kết hợp Python để sinh nội dung hàng loạt.
-🎙️ <b>2. Tạo Giọng Đọc Không Giới Hạn:</b> Tích hợp thư viện <code>edge-tts</code> của Microsoft chạy trực tiếp bằng code, hoàn toàn miễn phí.
+🎙️ <b>2. Tạo Giọng Đọc Không Giới Hạn:</b> Tích hợp thư viện <code>edge-tts</code> chạy trực tiếp bằng code, hoàn toàn miễn phí.
 🎬 <b>3. Render Video Hàng Loạt:</b> Sử dụng thư viện <code>MoviePy</code> để tự động ghép video nền, lồng âm thanh và chèn phụ đề tự động.
 
 📲 Liên hệ Admin để nhận bộ khung mã nguồn: <b><a href="https://t.me/hethongtoan">Nhận Framework Kỹ Thuật</a></b>"""
@@ -86,7 +86,6 @@ TEXT_FREELANCER_MMO = """💼 <b>GIẢI PHÁP FREELANCER MMO</b> 💼
 
 📲 Nhận tư vấn thiết lập kiến trúc luồng chạy: <b><a href="https://t.me/hethongtoan">Kết Nối Với Kỹ Thuật</a></b>"""
 
-# ─── HỆ THỐNG ĐÁP ÁN TỪ KHÓA NHANH (MẪU) ────────────────────────────────────────
 KEYWORD_REPLIES = {
     "kich hoat": TEXT_KICH_HOAT_AI,
     "kích hoạt": TEXT_KICH_HOAT_AI,
@@ -97,7 +96,7 @@ KEYWORD_REPLIES = {
     "tool": "🛠️ <b>DANH SÁCH CÔNG CỤ AUTOMATION CORE:</b>\n\n- Kịch bản: Gemini API\n- Giọng đọc: Edge-TTS Python\n- Dựng Video: MoviePy Core\n- Nuôi nick: Playwright Automation"
 }
 
-# ─── GIAO DIỆN NÚT BẤM MENU ĐÁY MÀN HÌNH ───────────────────────────────────────
+# ─── GIAO DIỆN NÚT BẤM MENU ĐÁY MÀN HÌNH ───────────────────────────────
 def get_bottom_menu() -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton("🚀 KÍCH HOẠT AI TỰ ĐỘNG HÓA")],
@@ -106,7 +105,6 @@ def get_bottom_menu() -> ReplyKeyboardMarkup:
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
-# ─── NÚT "OPEN" HIỆN Ở CHAT LIST (WEB APP) ──────────────────────────────────────
 def get_open_button() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(
@@ -115,7 +113,43 @@ def get_open_button() -> InlineKeyboardMarkup:
         )
     ]])
 
-# ─── XỬ LÝ AI GEMINI PHẢN HỒI LƯU LỊCH SỬ ───────────────────────────────────────
+# ─── MODULE ĐIỀU KHIỂN: TẠO GIỌNG ĐỌC TỰ ĐỘNG (EDGE-TTS) ───────────────
+async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lệnh /voice <nội dung> để hệ thống tự động tạo file MP3 gửi lại Telegram"""
+    if not context.args:
+        await update.message.reply_text("⚠️ <b>Thiếu nội dung!</b>\n\nQuý khách vui lòng nhập theo cú pháp:\n<code>/voice [Nội dung cần đọc]</code>", parse_mode="HTML")
+        return
+    
+    text = " ".join(context.args)
+    user_id = update.effective_user.id
+    output_file = f"voice_temp_{user_id}.mp3"
+    
+    # Gửi tin nhắn thông báo trạng thái
+    status_msg = await update.message.reply_text("⏳ <i>Hệ thống AI đang xử lý chuyển đổi giọng nói...</i>", parse_mode="HTML")
+    
+    try:
+        # Gọi thư viện tạo giọng đọc (Giọng nữ Hoài An chuẩn VN)
+        communicate = edge_tts.Communicate(text, "vi-VN-HoaiAnNeural")
+        await communicate.save(output_file)
+        
+        # Gửi file âm thanh thành phẩm lên Telegram
+        with open(output_file, 'rb') as audio_file:
+            await update.message.reply_audio(
+                audio=audio_file, 
+                title="Giọng Đọc AI - Hệ Thống Toàn",
+                caption="✅ Kích hoạt Render âm thanh thành công!"
+            )
+        # Xóa tin nhắn trạng thái "đang xử lý"
+        await status_msg.delete()
+    except Exception as e:
+        logger.error("Lỗi tạo voice: %s", e)
+        await status_msg.edit_text(f"❌ Quá trình tạo giọng đọc thất bại. Lỗi: {e}")
+    finally:
+        # Xóa file tạm trên server để giải phóng bộ nhớ
+        if os.path.exists(output_file):
+            os.remove(output_file)
+
+# ─── XỬ LÝ AI GEMINI PHẢN HỒI LƯU LỊCH SỬ ──────────────────────────────
 conversation_history: dict[int, list] = {}
 MAX_HISTORY = 16
 
@@ -145,7 +179,7 @@ def match_keyword(text: str) -> str | None:
             return KEYWORD_REPLIES[kw]
     return None
 
-# ─── LỆNH /START (TIN NHẮN CHỮ VIP SẠCH 100%) ────────────────────────────────────
+# ─── LỆNH /START ──────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         text = (
@@ -155,6 +189,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "• Quản lý luồng kích hoạt AI tự động hóa sản xuất kịch bản và giọng đọc.\n"
             "• Định cấu hình hệ thống dựng video tự động hàng loạt bằng Python.\n"
             "• Đề xuất giải pháp và cung cấp mã nguồn kết nối các công cụ miễn phí.\n\n"
+            "💡 <b>Tính năng Ẩn (Test Automation):</b> Gõ lệnh <code>/voice [Nội dung]</code> để dùng thử công nghệ tạo giọng đọc tự động.\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             "📲 <b>Hỗ Trợ & Nhận Mã Nguồn Kỹ Thuật:</b> <b><a href=\"https://t.me/hethongtoan\">Kết Nối Hệ Thống Toàn</a></b>"
         )
@@ -163,7 +198,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error("Lỗi cmd_start: %s", e)
 
-# ─── XỬ LÝ TIN NHẮN VĂN BẢN & PHÍM BẤM MENU ĐÁY MÀN HÌNH ─────────────────────────
+# ─── XỬ LÝ TIN NHẮN VĂN BẢN & PHÍM BẤM ─────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
@@ -190,7 +225,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text(text=caption, reply_markup=inline_kb)
             return
 
-        # Xử lý Từ khóa & Trí tuệ nhân tạo AI phản hồi
+        # Xử lý Từ khóa & Trí tuệ nhân tạo AI
         reply = match_keyword(text)
         if reply is None:
             reply = ask_ai(user_id, text)
@@ -210,12 +245,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
 
-# ─── KHỞI CHẠY KHUNG BOT TELEGRAM ───────────────────────────────────────────
+# ─── KHỞI CHẠY KHUNG BOT TELEGRAM ─────────────────────────────────────
 def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
     # Đăng ký các phân hệ Handler cốt lõi
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("voice", cmd_voice)) # Module test giọng đọc
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
