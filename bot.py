@@ -1,6 +1,6 @@
 """
 HoTroToanBot - Trạm Điều Khiển AI Đa Tác Vụ (Multi-Agent System)
-Phiên bản V6 - Tích hợp Chuyên gia Code, Chuyên gia MMO, Cào Trend và Media
+Phiên bản V7 - Nâng cấp Gemini 1.5 Pro & Chế Độ Kín (Private Mode)
 """
 
 import os
@@ -20,46 +20,66 @@ logger = logging.getLogger(__name__)
 WEB_APP_URL = "https://hoangthai223388-maker.github.io/xx88/redirect.html"
 TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+ADMIN_ID = os.environ.get("ADMIN_ID") # Lấy ID của Admin từ Railway
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     logger.error("❌ THIẾU BIẾN MÔI TRƯỜNG!")
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ─── BỘ PROMPT ĐIỀU KHIỂN CÁC "TRƯỞNG PHÒNG AI" ─────────────────────────
+# ─── CHẶN NGƯỜI LẠ (PRIVATE MODE) ───────────────────────────────────────
+async def restrict_access(update: Update) -> bool:
+    """Hàm kiểm tra quyền Admin. Trả về True nếu bị chặn, False nếu được phép."""
+    user_id = update.effective_user.id
+    if not ADMIN_ID:
+        # Nếu chưa cấu hình ADMIN_ID trên Railway, bot sẽ báo ID để bồ copy
+        await update.message.reply_text(
+            f"🔒 <b>HỆ THỐNG ĐANG BỊ KHÓA</b>\n\n"
+            f"Bot này được thiết lập chế độ Private. Để cấp quyền cho chính mình, bồ hãy copy dãy số ID dưới đây:\n\n"
+            f"<code>{user_id}</code>\n\n"
+            f"<i>👉 Lên Railway -> tab Variables -> Thêm biến mới tên là <b>ADMIN_ID</b> và dán dãy số này vào -> Bấm Redeploy.</i>",
+            parse_mode="HTML"
+        )
+        return True
+    elif str(user_id) != str(ADMIN_ID):
+        # Nếu người lạ chat vào, bot đuổi thẳng cổ
+        await update.message.reply_text("⛔ <b>TRUY CẬP TỪ CHỐI:</b> Bạn không phải là Chủ Nhân của hệ thống này.")
+        return True
+    return False
 
-# 1. Trưởng phòng Lập trình (Dev/Tester)
+# ─── BỘ PROMPT ĐIỀU KHIỂN CÁC "TRƯỞNG PHÒNG AI" ─────────────────────────
 CODER_PROMPT = """
-Bạn là một Senior Software Engineer 10 năm kinh nghiệm. 
+Bạn là một Senior Software Engineer. 
 Nhiệm vụ: Cung cấp giải pháp lập trình Web, App, Automation, và Tester chuyên sâu.
 Quy tắc: Luôn cung cấp code sạch (clean code), tối ưu hiệu suất, có comment giải thích rõ ràng. Phân tích lỗi logic chính xác. Trả lời thẳng vào vấn đề kỹ thuật, không dài dòng.
 """
 
-# 2. Trưởng phòng MMO (Chiến lược gia)
 MMO_PROMPT = """
 Bạn là một Chuyên gia MMO & Digital Marketing thực chiến.
 Nhiệm vụ: Lập kế hoạch kiếm tiền, kịch bản chuyển đổi cao, chiến lược traffic không đồng.
-Quy tắc: Tư duy thực tế, ưu tiên tự động hóa (zero-cost). Đưa ra các bước hành động cụ thể (Actionable steps) để tạo ra dòng tiền.
+Quy tắc: Tư duy thực tế, ưu tiên tự động hóa (zero-cost). Đưa ra các bước hành động cụ thể để tạo ra dòng tiền.
 """
 
-# 3. Lễ tân (Trả lời chung chung khi không dùng lệnh)
-GENERAL_PROMPT = "Bạn là Trợ lý AI hệ thống điều khiển. Hãy hướng dẫn người dùng sử dụng các lệnh /code, /mmo, /trend, /voice."
+GENERAL_PROMPT = "Bạn là Trợ lý AI hệ thống điều khiển. Hãy hướng dẫn Admin sử dụng các lệnh /code, /mmo, /trend, /voice."
 
-# ─── HÀM GIAO TIẾP VỚI LÕI AI GEMINI ────────────────────────────────────
+# ─── HÀM GIAO TIẾP VỚI LÕI AI GEMINI PRO ────────────────────────────────
 def call_gemini(prompt_system: str, user_text: str) -> str:
     try:
+        # Nâng cấp lên gemini-1.5-pro: Chuyên xử lý dữ liệu khủng, code mượt
         response = gemini_client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-pro", 
             config=types.GenerateContentConfig(system_instruction=prompt_system),
             contents=user_text,
         )
         return response.text
     except Exception as e:
         logger.error(f"Gemini Error: {e}")
-        return "❌ Hệ thống AI đang quá tải hoặc lỗi kết nối API."
+        # In thẳng lỗi kỹ thuật ra Telegram để dễ dàng bắt bệnh
+        return f"❌ <b>Lỗi kết nối Gemini API:</b>\n<code>{str(e)}</code>"
 
 # ─── MODULE 1: CHUYÊN GIA LẬP TRÌNH (/code) ─────────────────────────────
 async def cmd_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await restrict_access(update): return # Kiểm tra Admin
     if not context.args:
         await update.message.reply_text("💻 <b>Nhập lệnh:</b> <code>/code [Câu hỏi lập trình]</code>", parse_mode="HTML")
         return
@@ -70,6 +90,7 @@ async def cmd_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ─── MODULE 2: CHUYÊN GIA MMO (/mmo) ────────────────────────────────────
 async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await restrict_access(update): return # Kiểm tra Admin
     if not context.args:
         await update.message.reply_text("💰 <b>Nhập lệnh:</b> <code>/mmo [Câu hỏi kiếm tiền/Kịch bản]</code>", parse_mode="HTML")
         return
@@ -80,6 +101,7 @@ async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ─── MODULE 3: TÌM KIẾM TREND THỜI GIAN THỰC (/trend) ───────────────────
 async def cmd_trend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await restrict_access(update): return # Kiểm tra Admin
     if not context.args:
         await update.message.reply_text("📈 <b>Nhập lệnh:</b> <code>/trend [Từ khóa cần tìm]</code>", parse_mode="HTML")
         return
@@ -101,6 +123,7 @@ async def cmd_trend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ─── MODULE 4: TẠO GIỌNG ĐỌC (/voice) ───────────────────────────────────
 async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await restrict_access(update): return # Kiểm tra Admin
     if not context.args:
         await update.message.reply_text("🎙️ <b>Nhập lệnh:</b> <code>/voice [Nội dung cần đọc]</code>", parse_mode="HTML")
         return
@@ -128,7 +151,7 @@ async def send_long_text(update: Update, text: str):
         try:
             await update.message.reply_text(chunk, parse_mode="HTML")
         except:
-            await update.message.reply_text(chunk) # Fallback nếu HTML lỗi syntax
+            await update.message.reply_text(chunk) 
 
 # ─── GIAO DIỆN MENU & LỆNH /START ───────────────────────────────────────
 def get_bottom_menu() -> ReplyKeyboardMarkup:
@@ -136,6 +159,7 @@ def get_bottom_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await restrict_access(update): return # Kiểm tra Admin
     text = (
         "🛸 <b>TRẠM ĐIỀU KHIỂN ĐA TÁC VỤ AI KÍCH HOẠT</b>\n\n"
         "Hệ thống đã phân luồng các chuyên gia. Vui lòng sử dụng các lệnh sau để ra việc:\n\n"
@@ -143,11 +167,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "💰 <code>/mmo [Câu hỏi]</code> : Gọi chuyên gia kiếm tiền, kịch bản\n"
         "📈 <code>/trend [Từ khóa]</code> : Cào dữ liệu tìm kiếm thời gian thực\n"
         "🎙️ <code>/voice [Văn bản]</code> : Render file âm thanh MP3\n\n"
-        "<i>Ví dụ: /trend xu hướng tiktok tháng này</i>"
+        "<i>Bảo mật: Hệ thống đang chạy ở Private Mode (Chỉ Chủ Nhân được quyền điều khiển).</i>"
     )
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=get_bottom_menu())
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await restrict_access(update): return # Kiểm tra Admin
     text = update.message.text.strip()
     if text == "🛠 BẢNG ĐIỀU KHIỂN HỆ THỐNG":
         await cmd_start(update, context)
