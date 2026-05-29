@@ -1,0 +1,5 @@
+D:
+cd D:\X\bot
+git add .
+git commit -m "update bot va file moi"
+git push
