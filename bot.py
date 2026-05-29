@@ -25,7 +25,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(name)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger("HoTroToanBot")
 
-WEB_APP_URL = "https://link-web-cua-sep.github.io/index.html"
+WEB_APP_URL = "https://manhtoangreensky-wq.github.io/web-admin-bot/"
 TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY")
@@ -253,7 +253,7 @@ def get_inline_dashboard() -> InlineKeyboardMarkup:
     # Đã gỡ bỏ hoàn toàn link WebApp cũ, chuyển thành callback_data có chức năng
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👨‍💻 Kỹ sư Code", callback_data="btn_code"), InlineKeyboardButton("🎙️ Tạo Audio", callback_data="btn_voice")],
-        [InlineKeyboardButton("📈 Quét Trend", callback_data="btn_trend"), InlineKeyboardButton("🌐 Mở Cấu Hình", callback_data="btn_config")]
+        [InlineKeyboardButton("📈 Quét Trend", callback_data="btn_trend"), InlineKeyboardButton("🌐 Mở Cấu Hình", web_app=WebAppInfo(url=WEB_APP_URL))]
     ])
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,7 +267,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("🎙️ <b>[Phân Hệ Giọng Nói]</b>: Sếp hãy chat yêu cầu (VD: <i>'Tạo file nói...'</i>) hoặc dùng lệnh <code>/voice [Văn bản]</code>", parse_mode="HTML")
     elif query.data == "btn_trend":
         await query.message.reply_text("📈 <b>[Phân Hệ Quét Trend]</b>: Sếp hãy chat yêu cầu (VD: <i>'Tìm trend...'</i>) hoặc dùng lệnh <code>/trend [Từ khóa]</code>", parse_mode="HTML")
-    elif query.data == "btn_config":
         await query.message.reply_text("🚧 <b>Hệ thống Website quản trị đang được xây dựng. Chức năng sẽ sớm ra mắt!</b>", parse_mode="HTML")
 
 # ─── KHỞI CHẠY KHUNG ĐIỀU HÀNH LUỒNG POLLING ─────────────────────────────────────
