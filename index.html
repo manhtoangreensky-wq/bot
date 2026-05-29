@@ -7,25 +7,24 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
 <style>
 :root {
-  /* Main Luxurious Backgrounds */
-  --bg-primary: #FDFDFD;   /* Off-white, soft luxurious cream-white */
-  --bg-secondary: #F7F8F9; /* Subtly warm light gray for sections */
-  --bg-card: #FFFFFF;     /* Pure white for cards to pop */
+  /* Ép xung màu Trắng tinh khiết và sáng nhất */
+  --bg-primary: #FFFFFF;   
+  --bg-secondary: #F8F9FA; 
+  --bg-card: #FFFFFF;     
   
-  /* Primary Accents */
-  --gold: #D4AF37;       /* Metallic Gold (Luxury) */
-  --gold-hover: #E9C46A; /* Lighter gold for hover */
-  --blue: #007BFF;       /* Trust Blue for main CTA */
-  --blue-hover: #0056B3; /* Darker blue for hover */
+  /* Màu nhấn Sang trọng */
+  --gold: #D4AF37;       
+  --gold-hover: #E9C46A; 
+  --blue: #007BFF;       
+  --blue-hover: #0056B3; 
 
-  /* Text Colors */
-  --text-main: #262626;  /* Deep charcoal for main text (readable, pro) */
-  --text-sub: #525252;   /* Slate gray for subtext */
-  --text-muted: #9CA3AF; /* Light gray for subtle notes */
+  /* Chữ màu đen siêu nét để dễ đọc */
+  --text-main: #111111;  
+  --text-sub: #444444;   
+  --text-muted: #666666; 
 
-  /* Special Elements */
-  --border: rgba(0, 0, 0, 0.05); /* Very subtle, transparent border */
-  --glass-effect: rgba(255, 255, 255, 0.7); /* Luxurious glassmorphism base */
+  --border: rgba(0, 0, 0, 0.08); 
+  --glass-effect: rgba(255, 255, 255, 0.95); 
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -40,22 +39,20 @@ body {
   cursor: default;
 }
 
-/* NOISE TEXTURE REMOVED - Fixed black screen rendering issue */
-
-/* CURSOR GLOW - Kept the effect but made it white-based */
+/* CURSOR GLOW */
 .cursor-glow {
   position: fixed;
   width: 400px;
   height: 400px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(212, 175, 55, 0.05) 0%, transparent 70%);
   pointer-events: none;
   z-index: 1;
   transform: translate(-50%, -50%);
   transition: opacity 0.3s;
 }
 
-/* NAV - Clean glass effect */
+/* NAV */
 nav {
   position: fixed;
   top: 0; left: 0; right: 0;
@@ -90,7 +87,7 @@ nav {
 
 .nav-links a {
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-sub);
   text-decoration: none;
@@ -98,7 +95,7 @@ nav {
   text-transform: uppercase;
 }
 
-.nav-links a:hover { color: var(--text-main); }
+.nav-links a:hover { color: var(--blue); }
 
 .nav-cta {
   background: transparent;
@@ -120,7 +117,7 @@ nav {
   color: var(--bg-card);
 }
 
-/* HERO - Golden orb animation kept, blue glow removed */
+/* HERO */
 .hero {
   position: relative;
   min-height: 100vh;
@@ -136,8 +133,8 @@ nav {
   position: absolute;
   inset: 0;
   background-image: 
-    linear-gradient(rgba(212,175,55,0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(212,175,55,0.02) 1px, transparent 1px);
+    linear-gradient(rgba(0,123,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,123,255,0.03) 1px, transparent 1px);
   background-size: 60px 60px;
   mask-image: radial-gradient(ellipse 80% 60% at 50% 50%, black 0%, transparent 100%);
 }
@@ -146,7 +143,7 @@ nav {
   position: absolute;
   width: 500px; height: 500px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(212,175,55,0.08) 0%, transparent 60%);
+  background: radial-gradient(circle, rgba(212,175,55,0.06) 0%, transparent 60%);
   bottom: -100px; right: -150px;
   animation: float2 10s ease-in-out infinite;
 }
@@ -160,11 +157,11 @@ nav {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(0,123,255,0.2);
+  border: 1px solid rgba(0,123,255,0.3);
   background: rgba(0,123,255,0.05);
   padding: 8px 20px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.15em;
   text-transform: uppercase;
   color: var(--blue);
@@ -273,13 +270,14 @@ nav {
 }
 .stat-label {
   font-size: 12px;
-  color: var(--text-sub);
+  font-weight: 600;
+  color: var(--text-muted);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   margin-top: 4px;
 }
 
-/* SECTIONS - Text colors updated */
+/* SECTIONS */
 section {
   position: relative;
   z-index: 2;
@@ -292,7 +290,7 @@ section {
 
 .section-tag {
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--blue);
@@ -320,7 +318,7 @@ section {
   line-height: 1.7;
 }
 
-/* SERVICES - Cards popped on top of secondary bg */
+/* SERVICES */
 #services {
   padding: 100px 60px;
   background: var(--bg-secondary);
@@ -329,33 +327,34 @@ section {
 .services-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 2px;
+  gap: 20px;
   max-width: 1200px;
   margin: 0 auto;
-  background: var(--border);
 }
 
 .service-card {
   background: var(--bg-card);
+  border: 1px solid var(--border);
   padding: 40px 36px;
   transition: all 0.3s;
   position: relative;
   overflow: hidden;
   cursor: default;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.02);
 }
 
 .service-card::before {
   content: '';
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 2px;
+  height: 3px;
   background: linear-gradient(90deg, transparent, var(--gold), transparent);
   transform: scaleX(0);
   transition: transform 0.4s;
 }
 
 .service-card:hover::before { transform: scaleX(1); }
-.service-card:hover { background: var(--bg-secondary); }
+.service-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
 
 .service-icon {
   width: 48px; height: 48px;
@@ -367,12 +366,12 @@ section {
   font-size: 22px;
   color: var(--gold);
   transition: all 0.3s;
+  border-radius: 8px;
 }
 
 .service-card:hover .service-icon {
   background: var(--gold);
   color: var(--bg-card);
-  border-color: var(--gold);
 }
 
 .service-card h3 {
@@ -393,12 +392,12 @@ section {
   margin-top: 24px;
   font-family: 'Syne', sans-serif;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--blue);
   letter-spacing: 0.05em;
 }
 
-/* HOW IT WORKS - Process line and step numbers adjusted */
+/* HOW IT WORKS */
 #process {
   padding: 100px 60px;
   background: var(--bg-primary);
@@ -419,7 +418,7 @@ section {
   left: 30px;
   top: 30px;
   bottom: 30px;
-  width: 1px;
+  width: 2px;
   background: linear-gradient(to bottom, var(--gold), var(--blue-hover), transparent);
 }
 
@@ -435,7 +434,7 @@ section {
 
 .step-num {
   width: 60px; height: 60px;
-  border: 1px solid var(--gold);
+  border: 2px solid var(--gold);
   background: var(--bg-card);
   display: flex;
   align-items: center;
@@ -447,6 +446,7 @@ section {
   flex-shrink: 0;
   position: relative;
   z-index: 2;
+  border-radius: 50%;
 }
 
 .step-content h3 {
@@ -468,6 +468,8 @@ section {
   padding: 80px 60px;
   background: var(--bg-secondary);
   overflow: hidden;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .tech-track-wrapper {
@@ -495,15 +497,16 @@ section {
   border: 1px solid var(--border);
   background: var(--bg-card);
   font-size: 13px;
-  font-weight: 500;
-  color: var(--text-sub);
+  font-weight: 600;
+  color: var(--text-main);
   white-space: nowrap;
-  transition: all 0.3s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+  border-radius: 30px;
 }
 
 .tech-pill span { font-size: 18px; }
 
-/* TESTIMONIALS - Cards clean white */
+/* TESTIMONIALS */
 #testimonials {
   padding: 100px 60px;
   background: var(--bg-primary);
@@ -522,6 +525,8 @@ section {
   border: 1px solid var(--border);
   padding: 36px;
   position: relative;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+  border-radius: 12px;
 }
 
 .testimonial-card::before {
@@ -558,28 +563,28 @@ section {
 }
 
 .author-avatar {
-  width: 40px; height: 40px;
+  width: 48px; height: 48px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--gold-hover), var(--gold));
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: 'Syne', sans-serif;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--bg-card);
 }
 
 .author-name {
   font-family: 'Syne', sans-serif;
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 700;
+  font-size: 15px;
   color: var(--text-main);
 }
 
-.author-role { font-size: 12px; color: var(--text-muted); }
+.author-role { font-size: 12px; font-weight: 500; color: var(--text-muted); }
 
-/* ORDER FORM - Forms popped on white bg */
+/* ORDER FORM */
 #order {
   padding: 100px 60px;
   background: var(--bg-secondary);
@@ -596,7 +601,7 @@ section {
 
 .order-info h3 {
   font-family: 'Syne', sans-serif;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 22px;
   margin-bottom: 16px;
   color: var(--gold);
@@ -617,7 +622,7 @@ section {
 }
 
 .order-feature-dot {
-  width: 6px; height: 6px;
+  width: 8px; height: 8px;
   border-radius: 50%;
   background: var(--blue);
   margin-top: 6px;
@@ -625,8 +630,9 @@ section {
 }
 
 .order-feature span {
-  font-size: 13px;
-  color: var(--text-sub);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-main);
   line-height: 1.6;
 }
 
@@ -634,6 +640,8 @@ section {
   background: var(--bg-card);
   border: 1px solid var(--border);
   padding: 40px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+  border-radius: 12px;
 }
 
 .form-row {
@@ -649,10 +657,10 @@ section {
 .form-group label {
   display: block;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-sub);
   margin-bottom: 8px;
 }
 
@@ -660,21 +668,23 @@ section {
 .form-group select,
 .form-group textarea {
   width: 100%;
-  background: var(--bg-card);
+  background: var(--bg-secondary);
   border: 1px solid var(--border);
   color: var(--text-main);
-  padding: 12px 16px;
+  padding: 14px 16px;
   font-family: 'DM Sans', sans-serif;
   font-size: 14px;
   outline: none;
-  transition: border-color 0.2s;
-  appearance: none;
+  transition: all 0.2s;
+  border-radius: 6px;
 }
 
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {
   border-color: var(--gold);
+  background: var(--bg-card);
+  box-shadow: 0 0 0 3px rgba(212,175,55,0.1);
 }
 
 .form-group textarea { resize: vertical; min-height: 100px; }
@@ -688,13 +698,14 @@ section {
 
 .service-opt {
   border: 1px solid var(--border);
-  background: var(--bg-card);
+  background: var(--bg-secondary);
   padding: 12px 16px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
   align-items: center;
   gap: 8px;
+  border-radius: 6px;
 }
 
 .service-opt.selected {
@@ -703,18 +714,20 @@ section {
 }
 
 .service-opt input[type="checkbox"] {
-  width: 14px; height: 14px;
+  width: 16px; height: 16px;
   accent-color: var(--gold);
   cursor: pointer;
 }
 
 .service-opt-label {
   font-size: 13px;
+  font-weight: 500;
   color: var(--text-sub);
 }
 
 .service-opt.selected .service-opt-label {
   color: var(--gold);
+  font-weight: 700;
 }
 
 .budget-options {
@@ -725,14 +738,16 @@ section {
 }
 
 .budget-btn {
-  padding: 8px 20px;
+  padding: 10px 20px;
   border: 1px solid var(--border);
-  background: transparent;
+  background: var(--bg-secondary);
   color: var(--text-sub);
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
   font-family: 'DM Sans', sans-serif;
+  border-radius: 30px;
 }
 
 .budget-btn.active {
@@ -746,29 +761,32 @@ section {
   background: var(--gold);
   color: var(--bg-card);
   border: none;
-  padding: 16px;
+  padding: 18px;
   font-family: 'Syne', sans-serif;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
   transition: all 0.3s;
+  border-radius: 6px;
 }
 
 .submit-btn:hover {
   background: var(--gold-hover);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(212,175,55,0.3);
 }
 
 .form-note {
   text-align: center;
   font-size: 12px;
+  font-weight: 500;
   color: var(--text-muted);
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
-/* SUCCESS STATE - Lightened */
+/* SUCCESS STATE */
 .order-success {
   display: none;
   text-align: center;
@@ -776,13 +794,13 @@ section {
 }
 
 .success-icon {
-  width: 64px; height: 64px;
-  border: 2px solid var(--blue);
+  width: 72px; height: 72px;
+  border: 3px solid var(--blue);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: 32px;
   color: var(--blue);
   margin: 0 auto 24px;
   animation: success-pop 0.4s ease-out;
@@ -795,32 +813,33 @@ section {
 
 .order-success h3 {
   font-family: 'Syne', sans-serif;
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 800;
   margin-bottom: 12px;
   color: var(--blue);
 }
 
 .order-success p {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-sub);
   line-height: 1.7;
 }
 
-/* ORDER ID - Lightened */
+/* ORDER ID */
 .order-id-display {
-  margin-top: 20px;
-  padding: 16px;
+  margin-top: 24px;
+  padding: 20px;
   background: var(--bg-secondary);
-  border: 1px solid rgba(0,123,255,0.2);
+  border: 1px dashed var(--blue);
   text-align: center;
+  border-radius: 8px;
 }
 
-.order-id-label { font-size: 11px; color: var(--text-muted); letter-spacing: 0.1em; margin-bottom: 4px; }
+.order-id-label { font-size: 12px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.1em; margin-bottom: 6px; text-transform: uppercase; }
 .order-id-value {
   font-family: 'Syne', sans-serif;
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 800;
   color: var(--blue);
   letter-spacing: 0.1em;
 }
@@ -848,28 +867,30 @@ footer {
 }
 
 .footer-tagline {
-  font-size: 13px;
-  color: var(--text-muted);
-  max-width: 260px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-sub);
+  max-width: 280px;
   line-height: 1.6;
 }
 
 .footer-links-col h4 {
   font-family: 'Syne', sans-serif;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  color: var(--text-sub);
+  color: var(--text-main);
   margin-bottom: 16px;
 }
 
 .footer-links-col a {
   display: block;
   font-size: 14px;
-  color: var(--text-muted);
+  font-weight: 500;
+  color: var(--text-sub);
   text-decoration: none;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   transition: color 0.2s;
 }
 
@@ -881,13 +902,14 @@ footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-muted);
 }
 
 .footer-neon-line {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--blue-hover), transparent);
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
   margin-bottom: 32px;
   opacity: 0.3;
 }
@@ -914,27 +936,30 @@ footer {
   .hero-stats { gap: 32px; flex-wrap: wrap; }
   footer { padding: 48px 24px 32px; }
   .footer-top { flex-direction: column; gap: 32px; }
+  .footer-bottom { flex-direction: column; gap: 16px; text-align: center; }
 }
 
-/* NOTIFICATION - Lightened */
+/* NOTIFICATION */
 .notification {
   position: fixed;
   bottom: 32px;
   right: 32px;
   background: var(--bg-card);
   border: 1px solid rgba(0,123,255,0.2);
-  border-left: 3px solid var(--blue);
+  border-left: 4px solid var(--blue);
   padding: 16px 24px;
   max-width: 320px;
   z-index: 999;
   transform: translateX(120%);
   transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text-sub);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.1);
 }
 
 .notification.show { transform: translateX(0); }
-.notification strong { color: var(--blue); display: block; margin-bottom: 4px; font-family: 'Syne', sans-serif; }
+.notification strong { color: var(--blue); display: block; margin-bottom: 4px; font-family: 'Syne', sans-serif; font-size: 16px; }
 
 </style>
 </head>
@@ -1032,7 +1057,7 @@ footer {
       <div class="service-price">Từ 1,500,000 đ</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.4s">
-      <div class="service-icon">⚙&amp;#65039;</div>
+      <div class="service-icon">⚙️</div>
       <h3>Tự Động Hóa Quy Trình</h3>
       <p>Loại bỏ công việc thủ công bằng script Python, Make, Zapier, n8n. Tiết kiệm hàng chục giờ mỗi tuần.</p>
       <div class="service-price">Từ 1,000,000 đ</div>
@@ -1098,11 +1123,11 @@ footer {
       <div class="tech-pill"><span>🎬</span> Edge TTS</div>
       <div class="tech-pill"><span>🌐</span> DuckDuckGo API</div>
       <div class="tech-pill"><span>🚀</span> Railway</div>
-      <div class="tech-pill"><span>⚡&amp;#65039;</span> FastAPI</div>
+      <div class="tech-pill"><span>⚡</span> FastAPI</div>
       <div class="tech-pill"><span>🎯</span> TikTok Ads</div>
       <div class="tech-pill"><span>📊</span> Google Analytics</div>
       <div class="tech-pill"><span>🔗</span> Make / Zapier</div>
-      <div class="tech-pill"><span>🗄&amp;#65039;</span> PostgreSQL</div>
+      <div class="tech-pill"><span>🗄️</span> PostgreSQL</div>
       <div class="tech-pill"><span>🤖</span> Claude AI</div>
       <div class="tech-pill"><span>✨</span> Gemini 2.0</div>
       <div class="tech-pill"><span>🐍</span> Python</div>
@@ -1110,11 +1135,11 @@ footer {
       <div class="tech-pill"><span>🎬</span> Edge TTS</div>
       <div class="tech-pill"><span>🌐</span> DuckDuckGo API</div>
       <div class="tech-pill"><span>🚀</span> Railway</div>
-      <div class="tech-pill"><span>⚡&amp;#65039;</span> FastAPI</div>
+      <div class="tech-pill"><span>⚡</span> FastAPI</div>
       <div class="tech-pill"><span>🎯</span> TikTok Ads</div>
       <div class="tech-pill"><span>📊</span> Google Analytics</div>
       <div class="tech-pill"><span>🔗</span> Make / Zapier</div>
-      <div class="tech-pill"><span>🗄&amp;#65039;</span> PostgreSQL</div>
+      <div class="tech-pill"><span>🗄️</span> PostgreSQL</div>
     </div>
   </div>
 </section>
@@ -1196,9 +1221,9 @@ footer {
         <div class="order-feature-dot"></div>
         <span>Cam kết đúng deadline hoặc hoàn tiền</span>
       </div>
-      <div style="margin-top:32px; padding:20px; border:1px solid rgba(0,123,255,0.1); background:var(--bg-card);">
-        <div style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--blue);margin-bottom:8px;">Liên hệ trực tiếp</div>
-        <div style="font-size:14px;color:var(--text-sub);">Telegram: <a href="https://t.me/Httdhtoan" style="color:var(--gold); text-decoration:none;">@Httdhtoan</a></div>
+      <div style="margin-top:32px; padding:20px; border:1px solid rgba(0,123,255,0.15); background:var(--bg-primary); border-radius:8px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--blue);margin-bottom:8px;">Liên hệ trực tiếp</div>
+        <div style="font-size:15px;font-weight:600;color:var(--text-sub);">Telegram: <a href="https://t.me/Httdhtoan" style="color:var(--gold); text-decoration:none;">@Httdhtoan</a></div>
       </div>
     </div>
 
@@ -1246,10 +1271,10 @@ footer {
         <div class="form-group">
           <label>Ngân sách dự kiến</label>
           <div class="budget-options">
-            <button class="budget-btn" onclick="selectBudget(this, '&lt; 2 triệu')">Dưới 2tr</button>
+            <button class="budget-btn" onclick="selectBudget(this, '< 2 triệu')">Dưới 2tr</button>
             <button class="budget-btn" onclick="selectBudget(this, '2–5 triệu')">2–5 triệu</button>
             <button class="budget-btn" onclick="selectBudget(this, '5–15 triệu')">5–15 triệu</button>
-            <button class="budget-btn" onclick="selectBudget(this, '&gt; 15 triệu')">Trên 15tr</button>
+            <button class="budget-btn" onclick="selectBudget(this, '> 15 triệu')">Trên 15tr</button>
           </div>
         </div>
 
@@ -1277,7 +1302,7 @@ footer {
           <div class="order-id-label">Mã đơn hàng của bạn</div>
           <div class="order-id-value" id="orderId">---</div>
         </div>
-        <p style="margin-top:20px;font-size:12px;color:var(--text-muted);">Lưu mã này để theo dõi tiến độ dự án qua Telegram bot.</p>
+        <p style="margin-top:20px;font-size:13px;color:var(--text-muted);">Lưu mã này để theo dõi tiến độ dự án qua Telegram bot.</p>
       </div>
     </div>
   </div>
@@ -1305,13 +1330,13 @@ footer {
     </div>
   </div>
   <div class="footer-bottom">
-    <span>© 2025 Hệ Thống AI Tự Động Hóa. All rights reserved.</span>
-    <span style="color:var(--text-muted)">Powered by Claude + Gemini AI | Toàn Nguyễn</span>
+    <span>© 2026 Hệ Thống AI Tự Động Hóa. All rights reserved.</span>
+    <span style="color:var(--text-muted); font-weight:700;">Hệ thống quản trị bởi Toàn Nguyễn</span>
   </div>
 </footer>
 
 <script>
-// CURSOR GLOW - Updated color
+// CURSOR GLOW
 const glow = document.getElementById('cursorGlow');
 document.addEventListener('mousemove', e => {
   glow.style.left = e.clientX + 'px';
