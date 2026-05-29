@@ -1,6 +1,6 @@
 """
 HoTroToanBot - Trạm Điều Khiển AI Đa Tác Vụ (Multi-Agent System)
-Phiên bản V7.3 - Sửa lỗi kết nối Model 404 sang định dạng Model chuẩn 2026
+Phiên bản V7.4 - Đổi sang model gemini-2.0-flash để khắc phục lỗi nghẽn mạch 503
 """
 
 import os
@@ -53,9 +53,9 @@ GENERAL_PROMPT = "Bạn là Trợ lý AI hệ thống điều khiển. Hãy hư�
 # ─── HÀM LIÊN KẾT GIAO TIẾP VỚI LÕI AI GEMINI CORE ──────────────────────────────────
 def call_gemini(prompt_system: str, user_text: str) -> str:
     try:
-        # Cấu hình chuẩn hóa tên model cho thư viện mới để kích hoạt luồng truyền tải
+        # Chuyển sang model thế hệ mới gemini-2.0-flash để giảm tải nghẽn 503 tối đa
         response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash", 
+            model="gemini-2.0-flash", 
             config=types.GenerateContentConfig(system_instruction=prompt_system),
             contents=user_text,
         )
