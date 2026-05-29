@@ -1,6 +1,6 @@
 """
 HoTroToanBot - Trạm Điều Khiển AI Đa Tác Vụ (Multi-Agent System)
-Phiên bản V7.1 - Bản Tổng Thể Hoàn Chỉnh (Đã sửa tên Model thành gemini-1.5-flash)
+Phiên bản V7.2 - MỞ KHÓA HOÀN TOÀN (Tạm thời tắt Private Mode để test hệ thống)
 """
 
 import os
@@ -23,7 +23,6 @@ WEB_APP_URL = "https://hoangthai223388-maker.github.io/xx88/redirect.html"
 # ─── BẢO MẬT BIẾN MÔI TRƯỜNG LẤY TỪ KHÔNG GIAN RAILWAY ─────────────────────────────
 TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-ADMIN_ID = os.environ.get("ADMIN_ID") # Mã ID chặn người lạ truy cập hệ thống
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     logger.error("❌ THIẾU BIẾN MÔI TRƯỜNG! Vui lòng kiểm tra lại cấu hình trên Railway.")
@@ -31,22 +30,9 @@ if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
 # ─── KHỞI TẠO ĐỘNG CƠ CORE AI GEMINI SDK ─────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# ─── CƠ CHẾ BẢO MẬT: CHẾ ĐỘ RIÊNG TƯ (PRIVATE MODE) ───────────────────────────────
+# ─── CƠ CHẾ BẢO MẬT: ĐÃ MỞ KHÓA (TẠM TẮT ĐỂ TEST) ───────────────────────────────────
 async def restrict_access(update: Update) -> bool:
-    """Kiểm tra ID người dùng. Trả về True nếu bị chặn, False nếu hợp lệ."""
-    user_id = update.effective_user.id
-    if not ADMIN_ID:
-        await update.message.reply_text(
-            f"🔒 <b>HỆ THỐNG ĐANG BỊ KHÓA</b>\n\n"
-            f"Bot đang chạy ở chế độ Private bảo mật. Để cấp quyền admin cho chính mình, bồ hãy copy dãy số ID này:\n\n"
-            f"<code>{user_id}</code>\n\n"
-            f"<i>👉 Lên Railway -> tab Variables -> Tạo biến mới tên là <b>ADMIN_ID</b> và dán dãy số này vào -> Bấm Redeploy/Restart.</i>",
-            parse_mode="HTML"
-        )
-        return True
-    elif str(user_id) != str(ADMIN_ID):
-        await update.message.reply_text("⛔ <b>TRUY CẬP TỪ CHỐI:</b> Bạn không phải là Chủ Nhân của hệ thống này.")
-        return True
+    """Đã tạm tắt chế độ khóa để bồ test luồng lệnh thuận tiện nhất. Luôn trả về False."""
     return False
 
 # ─── HỆ THỐNG PROMPT ĐỊNH HƯỚNG TƯ DUY CHO CÁC PHÒNG BAN AI ─────────────────────────
@@ -62,7 +48,7 @@ Nhiệm vụ: Lập kế hoạch kiếm tiền, kịch bản chuyển đổi cao
 Quy tắc: Tư duy thực tế, ưu tiên tự động hóa (zero-cost). Đưa ra các bước hành động cụ thể để tạo ra dòng tiền.
 """
 
-GENERAL_PROMPT = "Bạn là Trợ lý AI hệ thống điều khiển. Hãy hướng dẫn Admin sử dụng các lệnh /code, /mmo, /trend, /voice."
+GENERAL_PROMPT = "Bạn là Trợ lý AI hệ thống điều khiển. Hãy hướng dẫn người dùng sử dụng các lệnh /code, /mmo, /trend, /voice."
 
 # ─── HÀM LIÊN KẾT GIAO TIẾP VỚI LÕI AI GEMINI CORE ──────────────────────────────────
 def call_gemini(prompt_system: str, user_text: str) -> str:
@@ -136,7 +122,6 @@ async def cmd_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     status_msg = await update.message.reply_text("⏳ <i>Đang kết nối máy chủ Microsoft render âm thanh...</i>", parse_mode="HTML")
     
     try:
-        # Sử dụng chính xác cấu trúc Giọng Nam Việt Nam ổn định nhất
         communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
         await communicate.save(output_file)
         with open(output_file, 'rb') as audio_file:
@@ -169,13 +154,13 @@ def get_open_button() -> InlineKeyboardMarkup:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await restrict_access(update): return
     text = (
-        "🛸 <b>TRẠM ĐIỀU KHIỂN ĐA TÁC VỤ AI HOÀN CHỈNH</b>\n\n"
+        "UFO <b>TRẠM ĐIỀU KHIỂN ĐA TÁC VỤ AI HOÀN CHỈNH</b>\n\n"
         "Chào mừng sếp đã quay trở lại phòng làm việc trung tâm. Hãy sử dụng các phân hệ lệnh sau để giao việc cho các trưởng phòng AI:\n\n"
         "👨‍💻 <code>/code [Nội dung]</code> : Gọi kỹ sư phần mềm (Web/App/Automation/Tester)\n"
         "💰 <code>/mmo [Nội dung]</code> : Gọi chuyên gia tư vấn kiếm tiền & Kịch bản Marketing\n"
         "📈 <code>/trend [Từ khóa]</code> : Cào dữ liệu mạng phân tích xu hướng thời gian thực\n"
         "🎙️ <code>/voice [Văn bản]</code> : Render file giọng đọc AI Nam Minh MP3\n\n"
-        "🛡️ <i>Trạng thái bảo mật: Chế độ Private đang bật. Hệ thống chỉ tuân theo lệnh duy nhất của sếp!</i>"
+        "🔓 <i>Trạng thái bảo mật: Chế độ Private đang TẠM TẮT để phục vụ quá trình test luồng tính năng công khai.</i>"
     )
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=get_bottom_menu())
 
