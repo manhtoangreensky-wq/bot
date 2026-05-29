@@ -1,0 +1,1420 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HỆ THỐNG AI TỰ ĐỘNG HÓA</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+:root {
+  --gold: #C9A84C;
+  --gold-light: #E8C97A;
+  --gold-dim: #7A6230;
+  --neon: #00F5C3;
+  --neon-dim: #00A882;
+  --dark: #050508;
+  --dark-2: #0C0C12;
+  --dark-3: #13131C;
+  --dark-4: #1A1A26;
+  --dark-5: #22222F;
+  --glass: rgba(255,255,255,0.04);
+  --glass-border: rgba(255,255,255,0.08);
+  --text: #F0EEE8;
+  --text-muted: #8A8A9A;
+  --text-dim: #555565;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--dark);
+  color: var(--text);
+  overflow-x: hidden;
+  cursor: default;
+}
+
+/* NOISE TEXTURE */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.6;
+}
+
+/* CURSOR GLOW */
+.cursor-glow {
+  position: fixed;
+  width: 400px;
+  height: 400px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,245,195,0.04) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 1;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.3s;
+}
+
+/* NAV */
+nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: 20px 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(5,5,8,0.95), transparent);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(201,168,76,0.1);
+}
+
+.nav-logo {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.15em;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+
+.nav-logo span {
+  color: var(--neon);
+}
+
+.nav-links {
+  display: flex;
+  gap: 36px;
+  list-style: none;
+}
+
+.nav-links a {
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+  text-transform: uppercase;
+}
+
+.nav-links a:hover { color: var(--text); }
+
+.nav-cta {
+  background: transparent;
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+  padding: 10px 24px;
+  font-family: 'Syne', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.3s;
+  text-decoration: none;
+}
+
+.nav-cta:hover {
+  background: var(--gold);
+  color: var(--dark);
+  border-color: var(--gold);
+}
+
+/* HERO */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 120px 40px 80px;
+  overflow: hidden;
+}
+
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(201,168,76,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(201,168,76,0.04) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 50%, black 0%, transparent 100%);
+}
+
+.hero-orb-1 {
+  position: absolute;
+  width: 600px; height: 600px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,245,195,0.06) 0%, transparent 60%);
+  top: -100px; left: -200px;
+  animation: float1 8s ease-in-out infinite;
+}
+
+.hero-orb-2 {
+  position: absolute;
+  width: 500px; height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(201,168,76,0.08) 0%, transparent 60%);
+  bottom: -100px; right: -150px;
+  animation: float2 10s ease-in-out infinite;
+}
+
+@keyframes float1 {
+  0%, 100% { transform: translate(0,0); }
+  50% { transform: translate(40px, 30px); }
+}
+@keyframes float2 {
+  0%, 100% { transform: translate(0,0); }
+  50% { transform: translate(-30px, -40px); }
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(0,245,195,0.3);
+  background: rgba(0,245,195,0.05);
+  padding: 8px 20px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--neon);
+  margin-bottom: 32px;
+}
+
+.hero-badge-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--neon);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.hero h1 {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: clamp(42px, 7vw, 88px);
+  line-height: 1.0;
+  letter-spacing: -0.02em;
+  margin-bottom: 28px;
+  position: relative;
+}
+
+.hero h1 .line-gold { color: var(--gold); }
+.hero h1 .line-neon { color: var(--neon); }
+
+.hero-sub {
+  font-size: 17px;
+  font-weight: 300;
+  color: var(--text-muted);
+  line-height: 1.7;
+  max-width: 560px;
+  margin: 0 auto 48px;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.btn-primary {
+  background: var(--gold);
+  color: var(--dark);
+  border: none;
+  padding: 16px 40px;
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.3s;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-primary:hover {
+  background: var(--gold-light);
+  transform: translateY(-2px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--glass-border);
+  padding: 16px 40px;
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.3s;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-ghost:hover {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+
+.hero-stats {
+  display: flex;
+  gap: 60px;
+  justify-content: center;
+  margin-top: 72px;
+  padding-top: 48px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.stat-item { text-align: center; }
+.stat-num {
+  font-family: 'Syne', sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--gold);
+}
+.stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+/* SECTIONS */
+section {
+  position: relative;
+  z-index: 2;
+}
+
+.section-header {
+  text-align: center;
+  margin-bottom: 64px;
+}
+
+.section-tag {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--neon);
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: clamp(28px, 4vw, 48px);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.section-title .gold { color: var(--gold); }
+
+.section-desc {
+  margin-top: 16px;
+  font-size: 16px;
+  color: var(--text-muted);
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.7;
+}
+
+/* SERVICES */
+#services {
+  padding: 100px 60px;
+  background: var(--dark-2);
+}
+
+.services-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2px;
+  max-width: 1200px;
+  margin: 0 auto;
+  background: var(--dark-5);
+}
+
+.service-card {
+  background: var(--dark-3);
+  padding: 40px 36px;
+  transition: all 0.3s;
+  position: relative;
+  overflow: hidden;
+  cursor: default;
+}
+
+.service-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  transform: scaleX(0);
+  transition: transform 0.4s;
+}
+
+.service-card:hover::before { transform: scaleX(1); }
+.service-card:hover { background: var(--dark-4); }
+
+.service-icon {
+  width: 48px; height: 48px;
+  border: 1px solid var(--gold-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+  font-size: 22px;
+  color: var(--gold);
+  transition: all 0.3s;
+}
+
+.service-card:hover .service-icon {
+  background: var(--gold);
+  color: var(--dark);
+  border-color: var(--gold);
+}
+
+.service-card h3 {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+.service-card p {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.service-price {
+  margin-top: 24px;
+  font-family: 'Syne', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--neon);
+  letter-spacing: 0.05em;
+}
+
+/* HOW IT WORKS */
+#process {
+  padding: 100px 60px;
+  background: var(--dark);
+}
+
+.process-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 800px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.process-steps::before {
+  content: '';
+  position: absolute;
+  left: 30px;
+  top: 30px;
+  bottom: 30px;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--gold-dim), var(--neon-dim), transparent);
+}
+
+.process-step {
+  display: flex;
+  gap: 40px;
+  align-items: flex-start;
+  padding: 32px 0;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.process-step:last-child { border-bottom: none; }
+
+.step-num {
+  width: 60px; height: 60px;
+  border: 1px solid var(--gold-dim);
+  background: var(--dark-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Syne', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--gold);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+
+.step-content h3 {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.step-content p {
+  font-size: 15px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+/* TECHNOLOGIES */
+#tech {
+  padding: 80px 60px;
+  background: var(--dark-2);
+  overflow: hidden;
+}
+
+.tech-track-wrapper {
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, black 15%, black 85%, transparent);
+}
+
+.tech-track {
+  display: flex;
+  gap: 16px;
+  animation: scroll-tech 20s linear infinite;
+  width: max-content;
+}
+
+@keyframes scroll-tech {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.tech-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  border: 1px solid var(--glass-border);
+  background: var(--dark-3);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: all 0.3s;
+}
+
+.tech-pill span { font-size: 18px; }
+
+/* TESTIMONIALS */
+#testimonials {
+  padding: 100px 60px;
+  background: var(--dark);
+}
+
+.testimonial-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.testimonial-card {
+  background: var(--dark-3);
+  border: 1px solid var(--glass-border);
+  padding: 36px;
+  position: relative;
+}
+
+.testimonial-card::before {
+  content: '"';
+  position: absolute;
+  top: 20px; right: 28px;
+  font-family: 'Syne', sans-serif;
+  font-size: 80px;
+  color: var(--gold);
+  opacity: 0.15;
+  line-height: 1;
+}
+
+.stars {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  color: var(--gold);
+  font-size: 14px;
+}
+
+.testimonial-card p {
+  font-size: 15px;
+  color: var(--text-muted);
+  line-height: 1.75;
+  font-style: italic;
+  margin-bottom: 24px;
+}
+
+.testimonial-author {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.author-avatar {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--gold-dim), var(--neon-dim));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Syne', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dark);
+}
+
+.author-name {
+  font-family: 'Syne', sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.author-role { font-size: 12px; color: var(--text-dim); }
+
+/* ORDER FORM */
+#order {
+  padding: 100px 60px;
+  background: var(--dark-2);
+}
+
+.order-wrapper {
+  max-width: 900px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 40px;
+  align-items: start;
+}
+
+.order-info h3 {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  margin-bottom: 16px;
+  color: var(--gold);
+}
+
+.order-info p {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.8;
+  margin-bottom: 32px;
+}
+
+.order-feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.order-feature-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--neon);
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.order-feature span {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.order-form-card {
+  background: var(--dark-3);
+  border: 1px solid var(--glass-border);
+  padding: 40px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  background: var(--dark-5);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  padding: 12px 16px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+  appearance: none;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--gold-dim);
+}
+
+.form-group textarea { resize: vertical; min-height: 100px; }
+
+.service-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.service-opt {
+  border: 1px solid var(--glass-border);
+  background: var(--dark-5);
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.service-opt.selected {
+  border-color: var(--gold-dim);
+  background: rgba(201,168,76,0.08);
+}
+
+.service-opt input[type="checkbox"] {
+  width: 14px; height: 14px;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+.service-opt-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.service-opt.selected .service-opt-label {
+  color: var(--gold);
+}
+
+.budget-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.budget-btn {
+  padding: 8px 20px;
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.budget-btn.active {
+  border-color: var(--gold-dim);
+  background: rgba(201,168,76,0.1);
+  color: var(--gold);
+}
+
+.submit-btn {
+  width: 100%;
+  background: var(--gold);
+  color: var(--dark);
+  border: none;
+  padding: 16px;
+  font-family: 'Syne', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.submit-btn:hover {
+  background: var(--gold-light);
+  transform: translateY(-1px);
+}
+
+.form-note {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 12px;
+}
+
+/* SUCCESS STATE */
+.order-success {
+  display: none;
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.success-icon {
+  width: 64px; height: 64px;
+  border: 2px solid var(--neon);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  color: var(--neon);
+  margin: 0 auto 24px;
+  animation: success-pop 0.4s ease-out;
+}
+
+@keyframes success-pop {
+  from { transform: scale(0.5); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.order-success h3 {
+  font-family: 'Syne', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--neon);
+}
+
+.order-success p {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+/* ORDER ID */
+.order-id-display {
+  margin-top: 20px;
+  padding: 16px;
+  background: var(--dark-5);
+  border: 1px solid var(--neon-dim);
+  text-align: center;
+}
+
+.order-id-label { font-size: 11px; color: var(--text-dim); letter-spacing: 0.1em; margin-bottom: 4px; }
+.order-id-value {
+  font-family: 'Syne', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--neon);
+  letter-spacing: 0.1em;
+}
+
+/* FOOTER */
+footer {
+  padding: 60px 60px 40px;
+  background: var(--dark);
+  border-top: 1px solid var(--glass-border);
+}
+
+.footer-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 48px;
+}
+
+.footer-brand {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--gold);
+  margin-bottom: 12px;
+}
+
+.footer-tagline {
+  font-size: 13px;
+  color: var(--text-dim);
+  max-width: 260px;
+  line-height: 1.6;
+}
+
+.footer-links-col h4 {
+  font-family: 'Syne', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.footer-links-col a {
+  display: block;
+  font-size: 14px;
+  color: var(--text-dim);
+  text-decoration: none;
+  margin-bottom: 10px;
+  transition: color 0.2s;
+}
+
+.footer-links-col a:hover { color: var(--gold); }
+
+.footer-bottom {
+  border-top: 1px solid var(--glass-border);
+  padding-top: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.footer-neon-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--neon-dim), transparent);
+  margin-bottom: 32px;
+  opacity: 0.3;
+}
+
+/* SCROLL ANIMATIONS */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* MOBILE */
+@media (max-width: 768px) {
+  nav { padding: 16px 24px; }
+  .nav-links { display: none; }
+  #services, #process, #tech, #testimonials, #order { padding: 72px 24px; }
+  .order-wrapper { grid-template-columns: 1fr; }
+  .form-row { grid-template-columns: 1fr; }
+  .hero-stats { gap: 32px; flex-wrap: wrap; }
+  footer { padding: 48px 24px 32px; }
+  .footer-top { flex-direction: column; gap: 32px; }
+}
+
+/* NOTIFICATION */
+.notification {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  background: var(--dark-3);
+  border: 1px solid var(--neon-dim);
+  border-left: 3px solid var(--neon);
+  padding: 16px 24px;
+  max-width: 320px;
+  z-index: 999;
+  transform: translateX(120%);
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.notification.show { transform: translateX(0); }
+.notification strong { color: var(--neon); display: block; margin-bottom: 4px; font-family: 'Syne', sans-serif; }
+
+</style>
+</head>
+<body>
+
+<div class="cursor-glow" id="cursorGlow"></div>
+
+<!-- NOTIFICATION -->
+<div class="notification" id="notification">
+  <strong>✓ Đơn hàng đã gửi!</strong>
+  Chúng tôi sẽ liên hệ bạn trong vòng 2–4 giờ.
+</div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">AI<span>AUTO</span> SYSTEM</div>
+  <ul class="nav-links">
+    <li><a href="#services">Dịch vụ</a></li>
+    <li><a href="#process">Quy trình</a></li>
+    <li><a href="#testimonials">Phản hồi</a></li>
+    <li><a href="#order">Đặt hàng</a></li>
+  </ul>
+  <a href="#order" class="nav-cta">Bắt đầu ngay</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-grid"></div>
+  <div class="hero-orb-1"></div>
+  <div class="hero-orb-2"></div>
+  <div style="position:relative;z-index:2;">
+    <div class="hero-badge">
+      <div class="hero-badge-dot"></div>
+      Hệ thống AI vận hành 24/7
+    </div>
+    <h1>
+      Tự Động Hóa<br>
+      <span class="line-gold">Toàn Bộ</span> Hoạt Động<br>
+      <span class="line-neon">Kinh Doanh</span>
+    </h1>
+    <p class="hero-sub">
+      Từ lập trình hệ thống, tạo video đến quảng cáo — 
+      chúng tôi xây dựng cỗ máy tự động tạo ra doanh thu cho bạn.
+    </p>
+    <div class="hero-actions">
+      <a href="#order" class="btn-primary">Đặt Hàng Ngay</a>
+      <a href="#services" class="btn-ghost">Xem Dịch Vụ</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat-item">
+        <div class="stat-num">50+</div>
+        <div class="stat-label">Dự án hoàn thành</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">24/7</div>
+        <div class="stat-label">Hỗ trợ liên tục</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">3x</div>
+        <div class="stat-label">Tăng hiệu suất</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">AI</div>
+        <div class="stat-label">Đa nền tảng</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SERVICES -->
+<section id="services">
+  <div class="section-header reveal">
+    <div class="section-tag">— Dịch Vụ —</div>
+    <h2 class="section-title">Chúng Tôi Làm <span class="gold">Được Gì</span></h2>
+    <p class="section-desc">Giải pháp toàn diện từ AI, automation đến nội dung số và quảng cáo hiệu suất cao</p>
+  </div>
+  <div class="services-grid">
+    <div class="service-card reveal">
+      <div class="service-icon">🤖</div>
+      <h3>Bot & Hệ Thống AI</h3>
+      <p>Xây dựng bot Telegram, chatbot tự động, hệ thống điều phối đa AI. Tích hợp Gemini, Claude, GPT vào workflow kinh doanh.</p>
+      <div class="service-price">Từ 2,000,000 đ</div>
+    </div>
+    <div class="service-card reveal" style="transition-delay:0.1s">
+      <div class="service-icon">🌐</div>
+      <h3>Website & Hệ Thống</h3>
+      <p>Landing page chuyển đổi cao, dashboard quản lý, hệ thống CRM tùy chỉnh. Tích hợp thanh toán, form, automation.</p>
+      <div class="service-price">Từ 3,000,000 đ</div>
+    </div>
+    <div class="service-card reveal" style="transition-delay:0.2s">
+      <div class="service-icon">🎬</div>
+      <h3>Video & Nội Dung AI</h3>
+      <p>Kịch bản video viral, auto-generate content, tạo video bằng AI. Tối ưu cho TikTok, YouTube Shorts, Reels.</p>
+      <div class="service-price">Từ 500,000 đ/video</div>
+    </div>
+    <div class="service-card reveal" style="transition-delay:0.3s">
+      <div class="service-icon">📢</div>
+      <h3>Quảng Cáo & MMO</h3>
+      <p>Chiến lược quảng cáo Facebook/TikTok/Google, automation affiliate, hệ thống MMO tự động sinh lợi.</p>
+      <div class="service-price">Từ 1,500,000 đ</div>
+    </div>
+    <div class="service-card reveal" style="transition-delay:0.4s">
+      <div class="service-icon">⚙️</div>
+      <h3>Tự Động Hóa Quy Trình</h3>
+      <p>Loại bỏ công việc thủ công bằng script Python, Make, Zapier, n8n. Tiết kiệm hàng chục giờ mỗi tuần.</p>
+      <div class="service-price">Từ 1,000,000 đ</div>
+    </div>
+    <div class="service-card reveal" style="transition-delay:0.5s">
+      <div class="service-icon">📊</div>
+      <h3>Phân Tích & Tư Vấn</h3>
+      <p>Phân tích dữ liệu kinh doanh, tư vấn chiến lược AI, audit hệ thống hiện có. Đưa ra roadmap triển khai rõ ràng.</p>
+      <div class="service-price">Từ 800,000 đ/buổi</div>
+    </div>
+  </div>
+</section>
+
+<!-- PROCESS -->
+<section id="process">
+  <div class="section-header reveal">
+    <div class="section-tag">— Quy Trình —</div>
+    <h2 class="section-title">Làm Việc <span class="gold">Như Thế Nào</span></h2>
+    <p class="section-desc">Từ yêu cầu đến sản phẩm hoàn chỉnh — quy trình rõ ràng, minh bạch</p>
+  </div>
+  <div class="process-steps">
+    <div class="process-step reveal">
+      <div class="step-num">01</div>
+      <div class="step-content">
+        <h3>Đặt hàng & Briefing</h3>
+        <p>Điền form đặt hàng với mô tả yêu cầu. Chúng tôi phân tích và phản hồi trong vòng 2–4 giờ với báo giá chi tiết và timeline cụ thể.</p>
+      </div>
+    </div>
+    <div class="process-step reveal" style="transition-delay:0.1s">
+      <div class="step-num">02</div>
+      <div class="step-content">
+        <h3>Xác nhận & Lên kế hoạch</h3>
+        <p>Sau khi đồng ý báo giá, chúng tôi gửi bản kế hoạch chi tiết gồm timeline, deliverables và cách thức bàn giao sản phẩm.</p>
+      </div>
+    </div>
+    <div class="process-step reveal" style="transition-delay:0.2s">
+      <div class="step-num">03</div>
+      <div class="step-content">
+        <h3>Triển khai & Báo cáo</h3>
+        <p>Thực hiện dự án với cập nhật tiến độ hàng ngày qua Telegram. Bạn xem được trực tiếp quá trình xây dựng hệ thống.</p>
+      </div>
+    </div>
+    <div class="process-step reveal" style="transition-delay:0.3s">
+      <div class="step-num">04</div>
+      <div class="step-content">
+        <h3>Bàn giao & Hỗ trợ</h3>
+        <p>Bàn giao toàn bộ code/tài sản kèm tài liệu hướng dẫn. Hỗ trợ kỹ thuật 30 ngày sau bàn giao hoàn toàn miễn phí.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TECH STACK -->
+<section id="tech">
+  <div class="section-header reveal" style="margin-bottom:40px">
+    <div class="section-tag">— Công Nghệ —</div>
+    <h2 class="section-title">Nền Tảng <span class="gold">Sử Dụng</span></h2>
+  </div>
+  <div class="tech-track-wrapper">
+    <div class="tech-track" id="techTrack">
+      <div class="tech-pill"><span>🤖</span> Claude AI</div>
+      <div class="tech-pill"><span>✨</span> Gemini 2.0</div>
+      <div class="tech-pill"><span>🐍</span> Python</div>
+      <div class="tech-pill"><span>📱</span> Telegram Bot</div>
+      <div class="tech-pill"><span>🎬</span> Edge TTS</div>
+      <div class="tech-pill"><span>🌐</span> DuckDuckGo API</div>
+      <div class="tech-pill"><span>🚀</span> Railway</div>
+      <div class="tech-pill"><span>⚡</span> FastAPI</div>
+      <div class="tech-pill"><span>🎯</span> TikTok Ads</div>
+      <div class="tech-pill"><span>📊</span> Google Analytics</div>
+      <div class="tech-pill"><span>🔗</span> Make / Zapier</div>
+      <div class="tech-pill"><span>🗄️</span> PostgreSQL</div>
+      <!-- duplicate for seamless loop -->
+      <div class="tech-pill"><span>🤖</span> Claude AI</div>
+      <div class="tech-pill"><span>✨</span> Gemini 2.0</div>
+      <div class="tech-pill"><span>🐍</span> Python</div>
+      <div class="tech-pill"><span>📱</span> Telegram Bot</div>
+      <div class="tech-pill"><span>🎬</span> Edge TTS</div>
+      <div class="tech-pill"><span>🌐</span> DuckDuckGo API</div>
+      <div class="tech-pill"><span>🚀</span> Railway</div>
+      <div class="tech-pill"><span>⚡</span> FastAPI</div>
+      <div class="tech-pill"><span>🎯</span> TikTok Ads</div>
+      <div class="tech-pill"><span>📊</span> Google Analytics</div>
+      <div class="tech-pill"><span>🔗</span> Make / Zapier</div>
+      <div class="tech-pill"><span>🗄️</span> PostgreSQL</div>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section id="testimonials">
+  <div class="section-header reveal">
+    <div class="section-tag">— Phản Hồi —</div>
+    <h2 class="section-title">Khách Hàng <span class="gold">Nói Gì</span></h2>
+  </div>
+  <div class="testimonial-grid">
+    <div class="testimonial-card reveal">
+      <div class="stars">★★★★★</div>
+      <p>Bot Telegram chạy mượt mà, tích hợp AI cực kỳ thông minh. Giờ tôi không cần ngồi trả lời từng tin nhắn nữa — hệ thống tự xử lý hết.</p>
+      <div class="testimonial-author">
+        <div class="author-avatar">MH</div>
+        <div>
+          <div class="author-name">Minh Hoàng</div>
+          <div class="author-role">Chủ shop online, Hà Nội</div>
+        </div>
+      </div>
+    </div>
+    <div class="testimonial-card reveal" style="transition-delay:0.1s">
+      <div class="stars">★★★★★</div>
+      <p>Landing page ra đời trong 3 ngày, tỉ lệ chuyển đổi tăng gần gấp đôi so với trang cũ. Đội ngũ làm việc rất chuyên nghiệp và hiểu insight.</p>
+      <div class="testimonial-author">
+        <div class="author-avatar">TL</div>
+        <div>
+          <div class="author-name">Thu Lan</div>
+          <div class="author-role">Founder startup EdTech</div>
+        </div>
+      </div>
+    </div>
+    <div class="testimonial-card reveal" style="transition-delay:0.2s">
+      <div class="stars">★★★★★</div>
+      <p>Hệ thống automation giúp tôi tiết kiệm 20+ giờ/tuần. Script chạy 24/7, thu thập data, tổng hợp báo cáo — tất cả tự động hoàn toàn.</p>
+      <div class="testimonial-author">
+        <div class="author-avatar">QA</div>
+        <div>
+          <div class="author-name">Quang An</div>
+          <div class="author-role">Digital marketer, HCM</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ORDER FORM -->
+<section id="order">
+  <div class="section-header reveal">
+    <div class="section-tag">— Đặt Hàng —</div>
+    <h2 class="section-title">Bắt Đầu <span class="gold">Dự Án</span> Của Bạn</h2>
+    <p class="section-desc">Điền thông tin bên dưới — chúng tôi sẽ phân tích và phản hồi trong vòng 2–4 giờ</p>
+  </div>
+
+  <div class="order-wrapper">
+    <div class="order-info reveal">
+      <h3>Tại sao chọn chúng tôi?</h3>
+      <p>Không chỉ là nhà thầu — chúng tôi là đối tác chiến lược giúp bạn xây dựng hệ thống tạo ra doanh thu bền vững.</p>
+      <div class="order-feature">
+        <div class="order-feature-dot"></div>
+        <span>Phản hồi trong 2–4 giờ, không để khách chờ lâu</span>
+      </div>
+      <div class="order-feature">
+        <div class="order-feature-dot"></div>
+        <span>Báo giá minh bạch, không phát sinh chi phí ẩn</span>
+      </div>
+      <div class="order-feature">
+        <div class="order-feature-dot"></div>
+        <span>Hỗ trợ kỹ thuật 30 ngày sau bàn giao miễn phí</span>
+      </div>
+      <div class="order-feature">
+        <div class="order-feature-dot"></div>
+        <span>Toàn quyền sở hữu code và tài sản bàn giao</span>
+      </div>
+      <div class="order-feature">
+        <div class="order-feature-dot"></div>
+        <span>Cập nhật tiến độ hàng ngày qua Telegram</span>
+      </div>
+      <div class="order-feature">
+        <div class="order-feature-dot"></div>
+        <span>Cam kết đúng deadline hoặc hoàn tiền</span>
+      </div>
+      <div style="margin-top:32px; padding:20px; border:1px solid rgba(0,245,195,0.2); background:rgba(0,245,195,0.04);">
+        <div style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--neon);margin-bottom:8px;">Liên hệ trực tiếp</div>
+        <div style="font-size:14px;color:var(--text-muted);">Telegram: <span style="color:var(--gold)">@HoTroToan</span></div>
+      </div>
+    </div>
+
+    <div class="order-form-card reveal" style="transition-delay:0.15s">
+      <div id="orderForm">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Họ tên *</label>
+            <input type="text" id="fname" placeholder="Nguyễn Văn A">
+          </div>
+          <div class="form-group">
+            <label>Số điện thoại *</label>
+            <input type="text" id="fphone" placeholder="0901 234 567">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="femail" placeholder="email@example.com">
+        </div>
+
+        <div class="form-group">
+          <label>Dịch vụ cần (chọn tất cả phù hợp) *</label>
+          <div class="service-options">
+            <div class="service-opt" onclick="toggleService(this)">
+              <input type="checkbox" value="bot-ai"> <span class="service-opt-label">Bot & AI System</span>
+            </div>
+            <div class="service-opt" onclick="toggleService(this)">
+              <input type="checkbox" value="website"> <span class="service-opt-label">Website</span>
+            </div>
+            <div class="service-opt" onclick="toggleService(this)">
+              <input type="checkbox" value="video"> <span class="service-opt-label">Video & Nội dung</span>
+            </div>
+            <div class="service-opt" onclick="toggleService(this)">
+              <input type="checkbox" value="ads"> <span class="service-opt-label">Quảng cáo</span>
+            </div>
+            <div class="service-opt" onclick="toggleService(this)">
+              <input type="checkbox" value="automation"> <span class="service-opt-label">Automation</span>
+            </div>
+            <div class="service-opt" onclick="toggleService(this)">
+              <input type="checkbox" value="consult"> <span class="service-opt-label">Tư vấn chiến lược</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Ngân sách dự kiến</label>
+          <div class="budget-options">
+            <button class="budget-btn" onclick="selectBudget(this, '< 2 triệu')">Dưới 2tr</button>
+            <button class="budget-btn" onclick="selectBudget(this, '2–5 triệu')">2–5 triệu</button>
+            <button class="budget-btn" onclick="selectBudget(this, '5–15 triệu')">5–15 triệu</button>
+            <button class="budget-btn" onclick="selectBudget(this, '> 15 triệu')">Trên 15tr</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Mô tả yêu cầu *</label>
+          <textarea id="fdesc" placeholder="Mô tả càng chi tiết càng tốt: bạn muốn làm gì, hiện tại có gì, mục tiêu cuối cùng là gì..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Deadline mong muốn</label>
+          <input type="date" id="fdeadline">
+        </div>
+
+        <button class="submit-btn" onclick="submitOrder()">
+          GỬI YÊU CẦU ĐẶT HÀNG →
+        </button>
+        <p class="form-note">Phản hồi trong 2–4 giờ · Miễn phí tư vấn · Không ràng buộc</p>
+      </div>
+
+      <div class="order-success" id="orderSuccess">
+        <div class="success-icon">✓</div>
+        <h3>Đặt hàng thành công!</h3>
+        <p>Chúng tôi đã nhận được yêu cầu của bạn và sẽ liên hệ qua số điện thoại / Telegram trong vòng <strong style="color:var(--neon)">2–4 giờ</strong>.</p>
+        <div class="order-id-display">
+          <div class="order-id-label">Mã đơn hàng của bạn</div>
+          <div class="order-id-value" id="orderId">---</div>
+        </div>
+        <p style="margin-top:20px;font-size:12px;color:var(--text-dim);">Lưu mã này để theo dõi tiến độ dự án qua Telegram bot.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-neon-line"></div>
+  <div class="footer-top">
+    <div>
+      <div class="footer-brand">HỆ THỐNG AI TỰ ĐỘNG HÓA</div>
+      <p class="footer-tagline">Xây dựng cỗ máy kinh doanh tự động — tạo ra doanh thu ngay cả khi bạn ngủ.</p>
+    </div>
+    <div class="footer-links-col">
+      <h4>Dịch vụ</h4>
+      <a href="#services">Bot & AI System</a>
+      <a href="#services">Website</a>
+      <a href="#services">Video & Nội dung</a>
+      <a href="#services">Quảng cáo</a>
+    </div>
+    <div class="footer-links-col">
+      <h4>Liên hệ</h4>
+      <a href="#">Telegram: @HoTroToan</a>
+      <a href="#order">Đặt hàng ngay</a>
+      <a href="#process">Quy trình làm việc</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2025 Hệ Thống AI Tự Động Hóa. All rights reserved.</span>
+    <span style="color:var(--neon-dim)">Powered by Claude + Gemini AI</span>
+  </div>
+</footer>
+
+<script>
+// CURSOR GLOW
+const glow = document.getElementById('cursorGlow');
+document.addEventListener('mousemove', e => {
+  glow.style.left = e.clientX + 'px';
+  glow.style.top = e.clientY + 'px';
+});
+
+// SCROLL REVEAL
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// SERVICES TOGGLE
+function toggleService(el) {
+  el.classList.toggle('selected');
+  el.querySelector('input').checked = el.classList.contains('selected');
+}
+
+// BUDGET SELECT
+let selectedBudget = '';
+function selectBudget(btn, val) {
+  document.querySelectorAll('.budget-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  selectedBudget = val;
+}
+
+// GENERATE ORDER ID
+function genOrderId() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let id = 'ORD-';
+  for (let i = 0; i < 8; i++) id += chars[Math.floor(Math.random() * chars.length)];
+  return id;
+}
+
+// SUBMIT ORDER
+function submitOrder() {
+  const name = document.getElementById('fname').value.trim();
+  const phone = document.getElementById('fphone').value.trim();
+  const desc = document.getElementById('fdesc').value.trim();
+  const services = [...document.querySelectorAll('.service-opt.selected')].map(el => el.querySelector('input').value);
+
+  if (!name || !phone || !desc || services.length === 0) {
+    alert('Vui lòng điền đầy đủ: Họ tên, Số điện thoại, chọn ít nhất 1 dịch vụ và mô tả yêu cầu.');
+    return;
+  }
+
+  const orderId = genOrderId();
+  document.getElementById('orderId').textContent = orderId;
+  document.getElementById('orderForm').style.display = 'none';
+  document.getElementById('orderSuccess').style.display = 'block';
+
+  // Show notification
+  const notif = document.getElementById('notification');
+  notif.classList.add('show');
+  setTimeout(() => notif.classList.remove('show'), 5000);
+
+  // Log order data (sẽ gửi về bot sau)
+  const order = {
+    id: orderId,
+    name, phone,
+    email: document.getElementById('femail').value,
+    services,
+    budget: selectedBudget,
+    description: desc,
+    deadline: document.getElementById('fdeadline').value,
+    timestamp: new Date().toISOString()
+  };
+  console.log('ORDER:', JSON.stringify(order, null, 2));
+}
+
+// Smooth scroll for nav links
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth' }); }
+  });
+});
+</script>
+</body>
+</html>
