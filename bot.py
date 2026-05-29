@@ -25,7 +25,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(name)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger("HoTroToanBot")
 
-WEB_APP_URL = "https://manhtoangreensky-wq.github.io/web-admin-bot/"
+WEB_APP_URL = "https://manhtoangreensky-wq.github.io/web-admin-bot/index.html?v=1"
 TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY")
