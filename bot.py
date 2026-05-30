@@ -23,7 +23,6 @@ logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=lo
 logger = logging.getLogger("TOAN_DAAS")
 
 TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN")
-# CHÚ Ý: Đảm bảo biến ADMIN_ID trên Railway đã được đặt thành 7126457028
 ADMIN_ID = str(os.environ.get("ADMIN_ID", "7126457028")) 
 
 DEEPL_API_KEY = os.environ.get("DEEPL_API_KEY")
@@ -45,7 +44,7 @@ COSTS = {
     'voice': 30,      # 3.000đ
     'image': 50       # 5.000đ
 }
-TRIAL_CREDITS = 30    # Tặng 30 Xu trải nghiệm
+TRIAL_CREDITS = 200    # Tặng 200 Xu trải nghiệm
 
 # ─── 2. HỆ THỐNG DATABASE (TÀI KHOẢN & HÒM THƯ) ───────────────────────────────
 def init_db():
@@ -211,7 +210,7 @@ class AgentVoice:
     @staticmethod
     async def render(text: str, user_id: int, context: ContextTypes.DEFAULT_TYPE, chat_id: int):
         out = f"voice_{user_id}.mp3"
-        msg = await context.bot.send_message(chat_id=chat_id, text="⏳ <i>[Nhân Bản Giọng Nói] Đang tổng hợp audio...</i>", parse_mode="HTML")
+        msg = await context.bot.send_message(chat_id=chat_id, text="⏳ <i>[Nhân Bản Giọng Nói Tiếng Việt] Đang tổng hợp audio...</i>", parse_mode="HTML")
         try:
             try:
                 async with httpx.AsyncClient() as client:
@@ -245,7 +244,7 @@ class AgentWhisper:
 class AgentRemoveBg:
     @staticmethod
     async def remove(img_bytes: bytes, context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-        msg = await context.bot.send_message(chat_id=chat_id, text="⏳ <i>[Studio Đồ Họa] Đang bóc tách nền...</i>", parse_mode="HTML")
+        msg = await context.bot.send_message(chat_id=chat_id, text="⏳ <i>[Studio Đồ Họa] Đang xử lý bóc nền...</i>", parse_mode="HTML")
         try:
             async with httpx.AsyncClient() as client:
                 res = await client.post("https://api.remove.bg/v1.0/removebg", headers={"X-Api-Key": REMOVEBG_API_KEY}, files={"image_file": img_bytes}, data={"size": "auto"}, timeout=30.0)
@@ -278,7 +277,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if text == "🛸 MENU DỊCH VỤ TOAN DAAS": return await cmd_start(update, context)
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
-    routing_instruction = "Phân loại: 'voice', 'code', 'content', 'download', 'general'. Nếu user gửi link URL -> 'download'. Nếu user yêu cầu đọc voice/tạo giọng nói -> 'voice'."
+    routing_instruction = "Phân loại: 'voice', 'code', 'content', 'download', 'general'. URL -> 'download'. Người dùng muốn tạo giọng nói/đọc văn bản -> 'voice'."
     route = json.loads(AgentGemini.chat(routing_instruction, text, uid, is_json=True))
     act, data = route.get("action", "general"), route.get("data", text)
     
@@ -319,20 +318,20 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Chào mừng bạn! Dưới đây là Sổ tay hướng dẫn sử dụng cỗ máy tự động hóa:\n\n"
         f"🎁 <b>Tài khoản mới:</b> Bạn có <b>{TRIAL_CREDITS} Xu</b> trải nghiệm.\n\n"
         "🛠️ <b>CÁCH RA LỆNH CHO HỆ THỐNG:</b>\n"
-        f"<b>1. Trợ Lý Ảo TOAN DAAS</b> (-{COSTS['chat']} Xu):\n"
+        f"<b>1. Trợ Lý AI TOAN DAAS</b> (-{COSTS['chat']} Xu):\n"
         "👉 <i>Cách dùng:</i> Gõ tin nhắn bình thường (VD: 'Viết kịch bản Tiktok về loa bluetooth').\n\n"
         f"<b>2. Trợ Lý Bóc Băng AI</b> (-{COSTS['whisper']} Xu):\n"
-        "👉 <i>Cách dùng:</i> Bấm giữ nút Micro 🎤, gửi 1 đoạn ghi âm, AI sẽ chuyển thành văn bản và tự hiểu lệnh.\n\n"
+        "👉 <i>Cách dùng:</i> Bấm giữ nút Micro 🎤, gửi 1 đoạn ghi âm, AI sẽ chuyển thành văn bản.\n\n"
         f"<b>3. Máy Hút Media Sạch</b> (-{COSTS['download']} Xu):\n"
-        "👉 <i>Cách dùng:</i> Copy link video (TikTok/Youtube/FB) và dán thẳng vào khung chat.\n\n"
-        f"<b>4. Studio Đồ Họa Tự Động</b> (-{COSTS['image']} Xu):\n"
-        "👉 <i>Cách dùng:</i> Bấm nút Gửi Ảnh 🖼️, tải 1 bức ảnh lên để AI tách nền xuyên thấu.\n\n"
-        f"<b>5. Nhân Bản Giọng Nói Tiếng Việt</b> (-{COSTS['voice']} Xu):\n"
-        "👉 <i>Cách dùng:</i> Nhắn tin với cú pháp 'Đọc voice: [nội dung của bạn]'.\n\n"
+        "👉 <i>Cách dùng:</i> Copy link video (TikTok/Youtube/FB) dán thẳng vào chat.\n\n"
+        f"<b>4. Studio Đồ Họa</b> (-{COSTS['image']} Xu):\n"
+        "👉 <i>Cách dùng:</i> Bấm gửi Ảnh 🖼️, tải 1 bức ảnh lên để AI tách nền.\n\n"
+        f"<b>5. Nhân Bản Giọng Nói</b> (-{COSTS['voice']} Xu):\n"
+        "👉 <i>Cách dùng:</i> Nhắn tin cú pháp 'Đọc voice: (nội dung của bạn)'.\n\n"
         "💡 <b>Lệnh hệ thống:</b>\n"
         "• /profile - Xem ID và Số dư Xu\n"
         "• /naptien - Nạp thêm hạn mức\n"
-        "• /gopy <nội dung> - Gửi phản hồi báo lỗi"
+        "• /gopy (nội dung) - Báo lỗi/phản hồi"
     )
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🛸 MENU DỊCH VỤ TOAN DAAS")]], resize_keyboard=True))
 
