@@ -1,0 +1,270 @@
+🎤 Văn bản → Giọng nói (Text To Speech)
+ElevenLabs
+NaturalReader
+FreeTTS
+TTSMaker
+Speechify
+Microsoft Azure Speech Studio
+Google Cloud Text-to-Speech
+Murf AI
+PlayHT
+Fish Audio
+
+Các công cụ như ElevenLabs, NaturalReader và TTSMaker hiện vẫn là lựa chọn phổ biến cho giọng đọc AI tự nhiên.
+
+🎙️ Giọng nói → Văn bản (Speech To Text)
+OpenAI Whisper
+Otter.ai
+Notta
+Google Recorder
+TurboScribe
+AssemblyAI Playground
+SpeechTexter
+Voice Notes
+
+Whisper vẫn là một trong những công nghệ nhận diện giọng nói miễn phí chính xác nhất hiện nay.
+
+🎬 Tải video không logo / không watermark
+TikTok Downloader
+SnapTik
+SSSTik
+SaveTT
+Facebook Downloader
+FDown
+Getfvid
+YouTube Downloader
+Cobalt Tools
+Y2Mate
+SaveFrom
+🖼️ Làm nét ảnh (Image Upscaler)
+Upscale.media
+Clipdrop Upscaler
+Pixelcut Upscaler
+Icons8 Smart Upscaler
+ImgUpscaler
+BigJPG
+Waifu2x
+📐 Thay đổi kích thước / pixel ảnh
+ILoveIMG Resize
+ResizePixel
+Simple Image Resizer
+Canva Resize
+Adobe Express Resize
+✂️ Xóa nền ảnh
+Remove.bg
+Clipdrop Remove Background
+Adobe Express Remove Background
+Pixelcut Background Remover
+🎨 AI tạo ảnh
+Microsoft Designer
+Ideogram
+Leonardo AI
+Playground AI
+Mage Space
+🎥 AI tạo video
+Pika
+Luma Dream Machine
+Hailuo AI
+PixVerse
+Runway
+🎞️ Chỉnh sửa video online
+CapCut Web
+Canva Video Editor
+VEED.IO
+FlexClip
+🔊 Tách nhạc - giọng hát
+Moises AI
+LALAL.AI
+VocalRemover
+Splitter AI
+📝 PDF và OCR
+ILovePDF
+SmallPDF
+PDF24 Tools
+OCR.Space
+OnlineOCR
+🌐 Dịch thuật
+Google Translate
+DeepL Translator
+Microsoft Translator
+🤖 AI Chat miễn phí
+ChatGPT
+Google Gemini
+Claude
+Perplexity AI
+Grok
+💻 Công cụ lập trình AI
+GitHub Copilot
+Codeium
+Cursor
+Windsurf
+🎵 AI tạo nhạc
+Suno AI
+Udio
+Boomy
+🎤 Clone giọng nói
+ElevenLabs Voice Clone
+Fish Audio
+Voice.ai
+MiniMax Audio
+
+Một số công cụ clone giọng nói miễn phí và mã nguồn mở đang được cộng đồng sử dụng khá nhiều hiện nay.
+
+🔥 Kho công cụ AI tổng hợp lớn
+Futurepedia
+There's An AI For That
+Toolify AI
+AI Top Tools
+FutureTools
+🤖 AI Chat & Trợ lý AI
+ChatGPT
+Google Gemini
+Claude
+Perplexity
+Grok
+Microsoft Copilot
+Poe
+You.com
+Phind
+OpenRouter
+🎨 AI Tạo Ảnh
+Ideogram
+Leonardo AI
+Playground AI
+Microsoft Designer
+Mage Space
+Tensor Art
+SeaArt AI
+PixAI
+Krea AI
+Recraft
+🖼️ Xóa nền & Chỉnh ảnh
+Remove.bg
+Clipdrop
+Pixelcut
+Photopea
+Canva
+Adobe Express
+Fotor
+Pixlr
+Lunapic
+BeFunky
+🔍 Nâng cấp chất lượng ảnh
+Upscale.media
+BigJPG
+Waifu2x
+ImgUpscaler
+Icons8 Upscaler
+🎬 AI Video
+Runway
+Pika
+Luma Dream Machine
+PixVerse
+Hailuo AI
+Vidu AI
+Kling AI
+Haiper AI
+✂️ Chỉnh sửa Video
+CapCut
+VEED.IO
+FlexClip
+Canva Video
+Clipchamp
+DaVinci Resolve
+🎤 Text To Speech
+ElevenLabs
+PlayHT
+NaturalReader
+TTSMaker
+Murf AI
+Speechify
+🎙️ Speech To Text
+Whisper
+Otter AI
+TurboScribe
+Notta
+AssemblyAI Playground
+🎵 AI Tạo Nhạc
+Suno
+Udio
+Boomy
+Beatoven AI
+Soundraw
+🎚️ Tách nhạc - Vocal Remover
+Moises
+LALAL.AI
+Vocal Remover
+Splitter AI
+📄 PDF
+ILovePDF
+SmallPDF
+PDF24
+Sejda PDF
+PDF Candy
+🔍 OCR
+OCR Space
+Online OCR
+NewOCR
+Convertio OCR
+💻 AI Lập Trình
+Cursor
+Windsurf
+Codeium
+GitHub Copilot
+Tabby
+Continue.dev
+🌐 Dịch Thuật
+DeepL
+Google Translate
+Microsoft Translator
+Reverso
+📈 SEO & Marketing
+Ahrefs Free Tools
+Ubersuggest
+Keyword Tool
+AnswerThePublic
+Google Trends
+📊 Thiết kế & UI/UX
+Figma
+Penpot
+Excalidraw
+Miro
+Whimsical
+☁️ Lưu trữ
+Google Drive
+Dropbox
+OneDrive
+MEGA
+📥 Tải Video
+Cobalt Tools
+SnapTik
+SSSTik
+FDown
+SaveTT
+📚 Kho Tổng Hợp AI
+Futurepedia
+There's An AI For That
+Toolify
+Future Tools
+AI Top Tools
+Top 20 công cụ miễn phí nên có năm 2026
+ChatGPT
+Gemini
+Claude
+Perplexity
+Cursor
+CapCut
+Canva
+Photopea
+Ideogram
+Leonardo AI
+ElevenLabs
+Whisper
+Suno
+Udio
+Cobalt Tools
+PDF24
+DeepL
+Figma
+Google Drive
+DaVinci Resolve
