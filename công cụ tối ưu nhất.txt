@@ -1,0 +1,73 @@
+🗣️ NHÓM XỬ LÝ ÂM THANH & NGÔN NGỮ
+🎤 Văn bản → Giọng nói (TTS): ElevenLabs
+
+Lý do: Vua của giọng đọc biểu cảm. API của nó hỗ trợ tinh chỉnh cảm xúc, ngắt nghỉ y như người thật. Gói Free cho 10.000 ký tự/tháng.
+
+🎙️ Giọng nói → Văn bản (STT): Whisper (của OpenAI)
+
+Lý do: Độ chính xác khi nghe tiếng Việt là vô đối. Sếp có thể gọi API với giá cực rẻ, hoặc tải mã nguồn mở về chạy nội bộ (offline) trên máy chủ miễn phí 100%.
+
+🎤 Clone giọng nói: Fish Audio
+
+Lý do: Rẻ hơn ElevenLabs rất nhiều, API cực kỳ thân thiện với dân code. Giao diện và tài liệu hướng dẫn nhúng vào Bot Telegram rất trực quan.
+
+🎥 NHÓM XỬ LÝ & SÁNG TẠO VIDEO
+🎬 Tải video không logo: Cobalt Tools
+
+Lý do: Nguồn mở 100%, không dính quảng cáo rác, không bị chặn API. Bốc được mọi loại link (TikTok, YouTube, FB) cực nhanh. (Đã tích hợp trong code V10.4).
+
+🎥 AI tạo video: Luma Dream Machine
+
+Lý do: Luma đã mở cổng API chính thức (Luma API). Tốc độ render nhỉnh hơn các bên khác, chất lượng B-roll siêu thực, dễ gọi lệnh từ Python.
+
+🎞️ Chỉnh sửa video online: VEED.IO
+
+Lý do: Trong danh sách sếp đưa, VEED có hạ tầng API dựng sẵn khá tốt để chèn chữ, tự động tạo phụ đề. (Tuy nhiên, tối ưu nhất cho Bot vẫn là tự code bằng thư viện MoviePy / FFmpeg của Python).
+
+🖼️ NHÓM XỬ LÝ & SÁNG TẠO HÌNH ẢNH
+🎨 AI tạo ảnh: Leonardo AI
+
+Lý do: Hệ thống API của Leonardo cực đỉnh, cho tới 150 credit miễn phí mỗi ngày. Vẽ thiết bị thông minh, concept nhà xưởng nét căng và chuẩn điện ảnh.
+
+✂️ Xóa nền ảnh: Remove.bg
+
+Lý do: API quá nổi tiếng và dễ dùng, cho 50 lần gọi miễn phí/tháng. Khớp nền chuẩn xác đến từng sợi tóc/viền thiết bị.
+
+🖼️ Làm nét ảnh (Upscaler): Waifu2x
+
+Lý do: Mã nguồn mở đỉnh cao. Không bị giới hạn số lần gọi như các web thương mại. Cài thẳng vào server để up-scale ảnh lên 2K, 4K mượt mà.
+
+📐 Thay đổi kích thước: ILoveIMG
+
+Lý do: Có iLoveAPI chuyên biệt cho nhà phát triển, xử lý hàng loạt ảnh (resize, crop, nén dung lượng) với gói Free khá thoải mái.
+
+🛠️ NHÓM TIỆN ÍCH & TÀI LIỆU
+🌐 Dịch thuật: DeepL
+
+Lý do: Dịch ngữ cảnh kỹ thuật, hệ thống camera, AI chuẩn xác hơn Google Translate. API gói Free cho dịch 500.000 ký tự/tháng.
+
+📝 PDF: ILovePDF
+
+Lý do: Cùng hệ sinh thái API với ILoveIMG. Gộp, cắt, nén, chuyển đổi PDF cực kỳ ổn định.
+
+🔍 OCR (Quét chữ từ ảnh): OCR Space
+
+Lý do: Cung cấp API miễn phí hào phóng nhất hiện nay. Đọc được cả tiếng Việt trên hóa đơn, tài liệu kỹ thuật gửi vào Telegram.
+
+🧠 NHÓM TƯ DUY & LẬP TRÌNH
+🤖 AI Chat tổng hợp: OpenRouter
+
+Lý do: Đây là một "Hub" API. Sếp chỉ cần nạp 1 key của OpenRouter là có thể gọi được mọi mô hình từ Gemini, Claude, ChatGPT đến Grok. Cực kỳ tiện để test AI nào thông minh nhất.
+
+💻 AI Lập Trình: Cursor
+
+Lý do: Codeium có bản Free ngon, nhưng Cursor mới là "chân ái" của dân kỹ thuật. Tích hợp thẳng Claude 3.5 Sonnet vào trình duyệt code, hiểu toàn bộ cấu trúc dự án.
+
+🎵 AI Tạo Nhạc: Suno AI
+
+Lý do: Đỉnh nhất thế giới về text-to-music hiện tại. Mặc dù chưa có API public chính thức, nhưng cộng đồng đã có rất nhiều bản "Unofficial API" trên GitHub để sếp kéo về nhúng vào Bot.
+
+🔥 KHO TÀI NGUYÊN
+📚 Kho Tổng Hợp AI: There's An AI For That
+
+Lý do: Bộ lọc sâu nhất, cập nhật nhanh nhất mỗi khi có một công cụ AI mới ra đời. Sếp tra cứu tool mới trên này là chuẩn bài nhất.
