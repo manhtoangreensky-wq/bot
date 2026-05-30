@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HỆ THỐNG AI TỰ ĐỘNG HÓA - TOÀN NGUYỄN</title>
+<title>TOAN DAAS - ENTERPRISE AI SYSTEM</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
 <style>
 :root {
-  /* Tông nền mới: Xám ngọc bích nhạt dịu mắt */
+  /* Tông nền mới: Xám ngọc bích nhạt dịu mắt (Tech Green Light) */
   --bg-primary: #F0F5F4;   
   --bg-secondary: #FFFFFF; 
   --bg-card: #FFFFFF;     
@@ -15,7 +15,7 @@
   /* Màu nhấn Sang trọng */
   --gold: #D4AF37;       
   --gold-hover: #E9C46A; 
-  /* Xanh Teal Công Nghệ (Tech Green) */
+  /* Xanh Teal Công Nghệ (Tech Green) - Tuyệt đối không còn màu xanh dương */
   --blue: #0A6D63;       
   --blue-hover: #0D9488; 
 
@@ -50,7 +50,7 @@ body {
   transition: opacity 0.3s;
 }
 
-/* NAV */
+/* NAV & LOGO TOAN DAAS */
 nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
   padding: 20px 60px;
@@ -59,14 +59,26 @@ nav {
   backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border);
 }
-.nav-logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 15px; letter-spacing: 0.15em; color: var(--gold); text-transform: uppercase; }
+.nav-logo { 
+  display: flex; align-items: center; gap: 10px;
+  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 16px; letter-spacing: 0.15em; color: var(--text-main); text-transform: uppercase; 
+}
+.nav-logo svg {
+  width: 28px; height: 28px;
+  animation: float-logo 3s ease-in-out infinite;
+}
+@keyframes float-logo {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
 .nav-logo span { color: var(--blue); }
+
 .nav-links { display: flex; gap: 36px; list-style: none; }
 .nav-links a { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-sub); text-decoration: none; transition: color 0.2s; text-transform: uppercase; }
 .nav-links a:hover { color: var(--blue); }
 .nav-cta {
   background: transparent; border: 1px solid var(--gold); color: var(--gold);
-  padding: 10px 24px; font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: all 0.3s; text-decoration: none;
+  padding: 10px 24px; font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: all 0.3s; text-decoration: none; border-radius: 4px;
 }
 .nav-cta:hover { background: var(--gold); color: var(--bg-card); }
 
@@ -134,20 +146,20 @@ section { position: relative; z-index: 2; }
 #services { padding: 100px 60px; background: var(--bg-secondary); }
 .services-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr); /* ÉP CỨNG 3 CỘT ĐỀU NHAU */
+  grid-template-columns: repeat(3, 1fr); 
   gap: 24px;
   max-width: 1200px;
   margin: 0 auto;
 }
 
 .service-card {
-  background: var(--bg-card); border: 1px solid var(--border); padding: 40px 36px; transition: all 0.3s; position: relative; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.02); border-radius: 8px;
+  background: var(--bg-card); border: 1px solid var(--border); padding: 40px 36px; transition: all 0.3s; position: relative; overflow: hidden; box-shadow: 0 4px 15px rgba(10, 109, 99, 0.03); border-radius: 8px;
 }
 .service-card::before {
   content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--gold), transparent); transform: scaleX(0); transition: transform 0.4s;
 }
 .service-card:hover::before { transform: scaleX(1); }
-.service-card:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(10, 109, 99, 0.08); }
+.service-card:hover { transform: translateY(-5px); box-shadow: 0 10px 30px rgba(10, 109, 99, 0.08); }
 .service-icon {
   width: 48px; height: 48px; border: 1px solid var(--gold); display: flex; align-items: center; justify-content: center; margin-bottom: 24px; font-size: 22px; color: var(--gold); transition: all 0.3s; border-radius: 8px; background: rgba(212,175,55,0.05);
 }
@@ -174,25 +186,9 @@ section { position: relative; z-index: 2; }
 .tech-track { display: flex; gap: 16px; animation: scroll-tech 25s linear infinite; width: max-content; }
 @keyframes scroll-tech { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .tech-pill {
-  display: flex; align-items: center; gap: 10px; padding: 12px 24px; border: 1px solid var(--border); background: var(--bg-card); font-size: 13px; font-weight: 700; color: var(--text-main); white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.02); border-radius: 30px;
+  display: flex; align-items: center; gap: 10px; padding: 12px 24px; border: 1px solid var(--border); background: var(--bg-card); font-size: 13px; font-weight: 700; color: var(--text-main); white-space: nowrap; box-shadow: 0 2px 8px rgba(10, 109, 99, 0.05); border-radius: 30px;
 }
 .tech-pill span { font-size: 18px; }
-
-/* TESTIMONIALS */
-#testimonials { padding: 100px 60px; background: var(--bg-primary); }
-.testimonial-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; max-width: 1100px; margin: 0 auto; }
-.testimonial-card {
-  background: var(--bg-card); border: 1px solid var(--border); padding: 36px; position: relative; box-shadow: 0 4px 15px rgba(10, 109, 99, 0.05); border-radius: 12px;
-}
-.testimonial-card::before { content: '"'; position: absolute; top: 20px; right: 28px; font-family: 'Syne', sans-serif; font-size: 80px; color: var(--gold); opacity: 0.15; line-height: 1; }
-.stars { display: flex; gap: 4px; margin-bottom: 16px; color: var(--gold); font-size: 14px; }
-.testimonial-card p { font-size: 15px; color: var(--text-sub); line-height: 1.75; font-style: italic; margin-bottom: 24px; }
-.testimonial-author { display: flex; align-items: center; gap: 12px; }
-.author-avatar {
-  width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, var(--gold-hover), var(--gold)); display: flex; align-items: center; justify-content: center; font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; color: var(--bg-card);
-}
-.author-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 15px; color: var(--text-main); }
-.author-role { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 
 /* ORDER FORM */
 #order { padding: 100px 60px; background: var(--bg-secondary); }
@@ -219,33 +215,18 @@ section { position: relative; z-index: 2; }
 .service-opt input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer; }
 .service-opt-label { font-size: 13px; font-weight: 600; color: var(--text-sub); }
 .service-opt.selected .service-opt-label { color: var(--gold); font-weight: 700; }
-.budget-options { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
-.budget-btn {
-  padding: 10px 20px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-sub); font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; font-family: 'DM Sans', sans-serif; border-radius: 30px;
-}
-.budget-btn.active { border-color: var(--gold); background: rgba(212,175,55,0.1); color: var(--gold); }
 .submit-btn {
   width: 100%; background: var(--gold); color: var(--bg-card); border: none; padding: 18px; font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: all 0.3s; border-radius: 6px;
 }
 .submit-btn:hover { background: var(--gold-hover); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(212,175,55,0.3); }
-.form-note { text-align: center; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-top: 16px; }
-
-/* SUCCESS STATE & ORDER ID */
-.order-success { display: none; text-align: center; padding: 48px 24px; }
-.success-icon {
-  width: 72px; height: 72px; border: 3px solid var(--blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: var(--blue); margin: 0 auto 24px; animation: success-pop 0.4s ease-out;
-}
-@keyframes success-pop { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-.order-success h3 { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; margin-bottom: 12px; color: var(--blue); }
-.order-success p { font-size: 15px; color: var(--text-sub); line-height: 1.7; }
-.order-id-display { margin-top: 24px; padding: 20px; background: var(--bg-primary); border: 1px dashed var(--blue); text-align: center; border-radius: 8px; }
-.order-id-label { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.1em; margin-bottom: 6px; text-transform: uppercase; }
-.order-id-value { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; color: var(--blue); letter-spacing: 0.1em; }
 
 /* FOOTER */
 footer { padding: 60px 60px 40px; background: var(--bg-primary); border-top: 1px solid var(--border); }
 .footer-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 48px; }
-.footer-brand { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px; color: var(--gold); margin-bottom: 12px; }
+.footer-brand { 
+  display: flex; align-items: center; gap: 10px;
+  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px; color: var(--gold); margin-bottom: 12px; 
+}
 .footer-tagline { font-size: 14px; font-weight: 500; color: var(--text-sub); max-width: 280px; line-height: 1.6; }
 .footer-links-col h4 { font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-main); margin-bottom: 16px; }
 .footer-links-col a { display: block; font-size: 14px; font-weight: 500; color: var(--text-sub); text-decoration: none; margin-bottom: 12px; transition: color 0.2s; }
@@ -254,41 +235,36 @@ footer { padding: 60px 60px 40px; background: var(--bg-primary); border-top: 1px
 .footer-neon-line { height: 2px; background: linear-gradient(90deg, transparent, var(--gold), transparent); margin-bottom: 32px; opacity: 0.3; }
 
 /* RESPONSIVE */
-@media (max-width: 1024px) {
-  .services-grid { grid-template-columns: repeat(2, 1fr); }
-}
+@media (max-width: 1024px) { .services-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 768px) {
   nav { padding: 16px 24px; } .nav-links { display: none; }
-  #services, #process, #tech, #testimonials, #order { padding: 72px 24px; }
+  #services, #process, #tech, #order { padding: 72px 24px; }
   .services-grid { grid-template-columns: 1fr; }
   .order-wrapper { grid-template-columns: 1fr; } .form-row { grid-template-columns: 1fr; }
   .hero-stats { gap: 32px; flex-wrap: wrap; }
   footer { padding: 48px 24px 32px; }
   .footer-top { flex-direction: column; gap: 32px; } .footer-bottom { flex-direction: column; gap: 16px; text-align: center; }
 }
-
-/* NOTIFICATION */
-.notification {
-  position: fixed; bottom: 32px; right: 32px; background: var(--bg-card); border: 1px solid rgba(10, 109, 99, 0.2); border-left: 4px solid var(--blue); padding: 16px 24px; max-width: 320px; z-index: 999; transform: translateX(120%); transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); font-size: 14px; font-weight: 500; color: var(--text-sub); box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-}
-.notification.show { transform: translateX(0); }
-.notification strong { color: var(--blue); display: block; margin-bottom: 4px; font-family: 'Syne', sans-serif; font-size: 16px; }
 </style>
 </head>
 <body>
 
 <div class="cursor-glow" id="cursorGlow"></div>
-<div class="notification" id="notification">
-  <strong>✓ Đơn hàng đã gửi!</strong> Toàn Nguyễn sẽ liên hệ bạn trong vòng 2–4 giờ.
-</div>
 
 <nav>
-  <div class="nav-logo">AI<span>AUTO</span> SYSTEM</div>
+  <div class="nav-logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+      <path d="M2 17l10 5 10-5"></path>
+      <path d="M2 12l10 5 10-5"></path>
+    </svg>
+    TOAN <span>DAAS</span>
+  </div>
   <ul class="nav-links">
     <li><a href="#services">Dịch vụ API</a></li>
     <li><a href="#process">Quy trình</a></li>
     <li><a href="#tech">Công nghệ</a></li>
-    <li><a href="#order">Đặt hàng</a></li>
+    <li><a href="#order">Liên Hệ</a></li>
   </ul>
   <a href="#order" class="nav-cta">Trải Nghiệm Ngay</a>
 </nav>
@@ -415,16 +391,10 @@ footer { padding: 60px 60px 40px; background: var(--bg-primary); border-top: 1px
       <div class="tech-pill"><span>📥</span> Cobalt Downloader</div>
       <div class="tech-pill"><span>📋</span> OCR Space</div>
       <div class="tech-pill"><span>🐍</span> Python Core</div>
-      <div class="tech-pill"><span>📱</span> Telegram Bot API</div>
-      <div class="tech-pill"><span>🚀</span> Railway Hosting</div>
       <div class="tech-pill"><span>🤖</span> Gemini 2.0 Flash</div>
       <div class="tech-pill"><span>🧠</span> Claude 3.5 Sonnet</div>
       <div class="tech-pill"><span>🗣️</span> OpenAI Whisper</div>
       <div class="tech-pill"><span>🐟</span> Fish Audio Clone</div>
-      <div class="tech-pill"><span>🌐</span> DeepL Translator</div>
-      <div class="tech-pill"><span>✂️</span> Remove.bg API</div>
-      <div class="tech-pill"><span>📥</span> Cobalt Downloader</div>
-      <div class="tech-pill"><span>📋</span> OCR Space</div>
     </div>
   </div>
 </section>
@@ -435,18 +405,15 @@ footer { padding: 60px 60px 40px; background: var(--bg-primary); border-top: 1px
     <h2 class="section-title">Triển Khai <span class="gold">Hệ Thống</span></h2>
     <p class="section-desc">Gửi yêu cầu để tích hợp kiến trúc Multi-Agent này vào doanh nghiệp của bạn</p>
   </div>
-
   <div class="order-wrapper">
     <div class="order-info reveal">
       <h3>Sức mạnh của Bot V11.0</h3>
       <p>Thay vì thuê 5 nhân sự (Content, Design, Video Editor, Dịch thuật, Code), hệ thống tự động hóa này xử lý toàn bộ khối lượng công việc ngay trên điện thoại của bạn.</p>
-      
       <div style="margin-top:32px; padding:20px; border:1px solid rgba(10, 109, 99, 0.15); background:var(--bg-primary); border-radius:8px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--blue);margin-bottom:8px;">Liên hệ Kỹ sư hệ thống</div>
         <div style="font-size:15px;font-weight:600;color:var(--text-sub);">Telegram: <a href="https://t.me/Httdhtoan" style="color:var(--gold); text-decoration:none;">@Httdhtoan</a></div>
       </div>
     </div>
-
     <div class="order-form-card reveal" style="transition-delay:0.15s">
       <div id="orderForm">
         <div class="form-row">
@@ -459,7 +426,6 @@ footer { padding: 60px 60px 40px; background: var(--bg-primary); border-top: 1px
             <input type="text" id="fphone" placeholder="077...">
           </div>
         </div>
-
         <div class="form-group">
           <label>Module muốn tích hợp *</label>
           <div class="service-options">
@@ -477,25 +443,9 @@ footer { padding: 60px 60px 40px; background: var(--bg-primary); border-top: 1px
             </div>
           </div>
         </div>
-
-        <div class="form-group">
-          <label>Yêu cầu tùy chỉnh thêm *</label>
-          <textarea id="fdesc" placeholder="Bạn muốn con Bot làm thêm tác vụ tự động nào nữa?"></textarea>
-        </div>
-
-        <button class="submit-btn" onclick="submitOrder()">
+        <button class="submit-btn" onclick="alert('Đã gửi thông tin! Kỹ sư Toàn Nguyễn sẽ liên hệ lại.')">
           GỬI YÊU CẦU CẤU HÌNH →
         </button>
-      </div>
-
-      <div class="order-success" id="orderSuccess">
-        <div class="success-icon">✓</div>
-        <h3>Gửi yêu cầu thành công!</h3>
-        <p>Hệ thống đã ghi nhận. Kỹ sư sẽ liên hệ lại qua Telegram trong thời gian sớm nhất.</p>
-        <div class="order-id-display">
-          <div class="order-id-label">Mã Tracking ID</div>
-          <div class="order-id-value" id="orderId">---</div>
-        </div>
       </div>
     </div>
   </div>
@@ -505,7 +455,14 @@ footer { padding: 60px 60px 40px; background: var(--bg-primary); border-top: 1px
   <div class="footer-neon-line"></div>
   <div class="footer-top">
     <div>
-      <div class="footer-brand">AI AUTO SYSTEM V11</div>
+      <div class="footer-brand">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+          <path d="M2 17l10 5 10-5"></path>
+          <path d="M2 12l10 5 10-5"></path>
+        </svg>
+        TOAN DAAS V11
+      </div>
       <p class="footer-tagline">Kiến trúc hệ thống điều phối đa AI (Multi-Agent) chuyên nghiệp dành cho Affiliate & Automation.</p>
     </div>
     <div class="footer-links-col">
@@ -522,7 +479,7 @@ footer { padding: 60px 60px 40px; background: var(--bg-primary); border-top: 1px
     </div>
   </div>
   <div class="footer-bottom">
-    <span>© 2026 AI Auto System. All rights reserved.</span>
+    <span>© 2026 TOAN DAAS System. All rights reserved.</span>
     <span style="color:var(--text-muted); font-weight:700;">Hệ thống quản trị bởi Toàn Nguyễn</span>
   </div>
 </footer>
@@ -532,48 +489,14 @@ const glow = document.getElementById('cursorGlow');
 document.addEventListener('mousemove', e => {
   glow.style.left = e.clientX + 'px'; glow.style.top = e.clientY + 'px';
 });
-
 const observer = new IntersectionObserver(entries => {
   entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
 }, { threshold: 0.1 });
 document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
-
 function toggleService(el) {
   el.classList.toggle('selected');
   el.querySelector('input').checked = el.classList.contains('selected');
 }
-
-function genOrderId() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; let id = 'SYS-';
-  for (let i = 0; i < 8; i++) id += chars[Math.floor(Math.random() * chars.length)];
-  return id;
-}
-
-function submitOrder() {
-  const name = document.getElementById('fname').value.trim();
-  const phone = document.getElementById('fphone').value.trim();
-  const desc = document.getElementById('fdesc').value.trim();
-  const services = [...document.querySelectorAll('.service-opt.selected')].map(el => el.querySelector('input').value);
-
-  if (!name || !phone || !desc || services.length === 0) {
-    alert('Vui lòng điền đầy đủ Tên, SĐT, Chọn Module và Mô tả yêu cầu.'); return;
-  }
-
-  const orderId = genOrderId();
-  document.getElementById('orderId').textContent = orderId;
-  document.getElementById('orderForm').style.display = 'none';
-  document.getElementById('orderSuccess').style.display = 'block';
-
-  const notif = document.getElementById('notification');
-  notif.classList.add('show'); setTimeout(() => notif.classList.remove('show'), 5000);
-}
-
-document.querySelectorAll('a[href^="#"]').forEach(a => {
-  a.addEventListener('click', e => {
-    const target = document.querySelector(a.getAttribute('href'));
-    if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth' }); }
-  });
-});
 </script>
 </body>
 </html>
