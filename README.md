@@ -66,6 +66,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/handoff job=<ID> tool=claude|gemini|runway|kling|capcut|ffmpeg|fish|edge stage=...`: xuất prompt giao việc cho AI/tool khác và chuyển job sang `waiting`.
 - `/publish_pack job=<ID>`: tạo gói caption, hashtag, CTA, link affiliate và checklist trước khi đăng.
 - `/review_gate job=<ID>`: AI kiểm duyệt quyền hình ảnh/âm thanh, affiliate claim, CTA và rủi ro nền tảng trước khi đăng.
+- `/mark_published job=<ID> url=https://... views=0 clicks=0 note=...`: ghi nhận bài đã đăng thủ công, lưu URL và chuyển job sang `published`.
 - `/performance_add job=<ID> type=view|click|order|revenue|lead value=... amount=... note=...`: ghi hiệu quả bài đăng/affiliate.
 - `/performance`: báo cáo hiệu quả theo loại sự kiện, kênh và job gần nhất.
 - `/produce slot=<calendar_id>`: tạo production job từ lịch nội dung, kèm brief AI nếu đã cấu hình provider.

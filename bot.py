@@ -2094,6 +2094,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /handoff — Prompt giao việc cho AI/tool khác",
             "• /publish_pack — Gói caption/link để đăng",
             "• /review_gate — Kiểm duyệt trước khi đăng",
+            "• /mark_published — Ghi nhận đã đăng bài",
             "• /performance_add — Ghi hiệu quả bài đăng",
             "• /performance — Báo cáo hiệu quả kiếm tiền",
             "• /produce — Tạo job sản xuất từ lịch",
@@ -2950,6 +2951,52 @@ async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"• Value: <b>{value}</b>\n"
         f"• Amount: <b>{amount:,}đ</b>\n"
         f"• Note: {html.escape(note or '-')}",
+        parse_mode="HTML"
+    )
+
+async def cmd_mark_published(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("id") or data.get("job") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/mark_published job=1 url=https://... views=0 clicks=0 note=...</code>",
+            parse_mode="HTML"
+        )
+    publish_url = data.get("url") or data.get("publish") or ""
+    note = data.get("note") or "manual_publish"
+    try:
+        views = int(data.get("views") or data.get("view") or 0)
+    except ValueError:
+        views = 0
+    try:
+        clicks = int(data.get("clicks") or data.get("click") or 0)
+    except ValueError:
+        clicks = 0
+    if not get_production_job(job_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    update_production_job(
+        job_id,
+        update.effective_user.id,
+        stage="done",
+        status="published",
+        note=note,
+        publish_url=publish_url
+    )
+    add_performance_event(update.effective_user.id, job_id, "publish", 1, 0, note)
+    if views > 0:
+        add_performance_event(update.effective_user.id, job_id, "view", views, 0, "initial_views")
+    if clicks > 0:
+        add_performance_event(update.effective_user.id, job_id, "click", clicks, 0, "initial_clicks")
+    await update.message.reply_text(
+        f"✅ <b>Đã ghi nhận job #{job_id} đã đăng</b>\n"
+        f"• Publish URL: <code>{html.escape(publish_url or 'chưa nhập')}</code>\n"
+        f"• Views ban đầu: <b>{views}</b>\n"
+        f"• Clicks ban đầu: <b>{clicks}</b>\n"
+        f"• Note: {html.escape(note)}\n\n"
+        f"Cập nhật doanh thu sau: <code>/performance_add job={job_id} type=revenue value=1 amount=...</code>",
         parse_mode="HTML"
     )
 
@@ -3862,6 +3909,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
     tg_app.add_handler(CommandHandler("publish_pack", cmd_publish_pack))
     tg_app.add_handler(CommandHandler("review_gate", cmd_review_gate))
+    tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
