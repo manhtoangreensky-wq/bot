@@ -4738,6 +4738,54 @@ def update_production_task(owner_id, task_id, status=None, output_url=None, note
         add_production_asset(owner_id, row[0], asset_type, output_url, "", f"task:{task_id} {note or ''}")
     return changed > 0, row
 
+def operator_task_contract(task_id, task_type: str = "", job_id: int = 0):
+    task_ref = str(task_id or "<TASK_ID>")
+    try:
+        task_num = int(task_id)
+    except (TypeError, ValueError):
+        task_num = 0
+    default_asset_type = {
+        "visual_scene": "raw_video",
+        "voice": "voice",
+        "edit": "final_video",
+        "publish": "source",
+        "review": "source",
+    }.get((task_type or "").lower(), "source")
+    return {
+        "complete_url": f"/api/operator/tasks/{task_ref}/complete",
+        "upload_url": f"/api/operator/tasks/{task_ref}/upload",
+        "complete_payload": {
+            "status": "ready",
+            "output_url": "https://.../asset.mp4",
+            "output_urls": ["https://.../asset-1.mp4", "https://.../asset-2.mp4"],
+            "asset_type": default_asset_type,
+            "note": "tool output or error detail",
+        },
+        "upload_form": {
+            "file": "binary",
+            "status": "ready",
+            "asset_type": default_asset_type,
+            "note": "uploaded by worker",
+        },
+        "telegram": {
+            "handoff": f"/task_handoff id={task_ref}",
+            "set_ready": f"/task_set id={task_ref} status=ready url=https://...",
+            "send_latest_asset": f"/asset_send job={int(job_id)} type={default_asset_type}" if job_id else "",
+            "job_ready": f"/job_ready job={int(job_id)}" if job_id else "",
+        },
+        "after_success": [
+            "Nếu tạo file local: upload multipart qua upload_url.",
+            "Nếu tool trả URL public: POST complete_url với output_url/output_urls.",
+            "Bot tự lưu asset, báo admin và cập nhật readiness.",
+            "Khi final_video đã có: admin dùng /asset_send để kiểm duyệt trong Telegram rồi /approve_publish.",
+        ],
+        "after_failure": [
+            "Nếu lỗi/quota: POST complete_url status=blocked kèm note rõ lý do.",
+            "Nếu có fallback rẻ/miễn phí: báo /api/operator/tool-events rồi chạy fallback.",
+        ],
+        "is_example": task_num == 0,
+    }
+
 def serialize_operator_task(row):
     if not row:
         return None
@@ -4776,6 +4824,7 @@ def serialize_operator_task(row):
         "output_url": output_url,
         "note": note,
         "updated_at": updated_at,
+        "contract": operator_task_contract(task_id, task_type, job_id),
         "job": job_payload,
     }
 
@@ -4846,7 +4895,15 @@ def operator_job_context_data(owner_id, job_id):
             ],
         },
         "assets": [
-            {"id": aid, "type": asset_type, "url": url, "file_id": file_id, "note": asset_note, "created_at": created_at}
+            {
+                "id": aid,
+                "type": asset_type,
+                "url": url,
+                "file_id": file_id,
+                "note": asset_note,
+                "created_at": created_at,
+                "telegram_send_command": f"/asset_send id={aid}",
+            }
             for aid, asset_type, url, file_id, asset_note, created_at in assets
         ],
         "creative_variants": [
@@ -4877,16 +4934,26 @@ def operator_job_context_data(owner_id, job_id):
         "worker_runbook": {
             "sequence": [
                 "Nếu next_task có status queued/waiting: thực hiện đúng prompt/tool.",
-                "Trả output qua POST /api/operator/tasks/<TASK_ID>/complete.",
+                "Nếu tool có public URL: POST /api/operator/tasks/<TASK_ID>/complete với output_url/output_urls.",
+                "Nếu tool tạo file local: POST multipart /api/operator/tasks/<TASK_ID>/upload.",
+                "Sau khi upload/complete, admin có thể dùng /asset_send id=<ASSET_ID> để kiểm duyệt trong Telegram.",
                 "Khi readiness READY_TO_QUEUE: lấy publish_pack, admin review rồi approve publish.",
                 "Publisher chỉ đăng khi queue đã approved và publisher_run cho phép.",
                 "Sau đăng, ghi publish_url và performance.",
             ],
             "task_complete_url": "/api/operator/tasks/<TASK_ID>/complete",
+            "task_upload_url": "/api/operator/tasks/<TASK_ID>/upload",
+            "task_contract": operator_task_contract("<TASK_ID>"),
             "ready_url": f"/api/operator/jobs/{job_id}/ready",
             "publish_pack_url": f"/api/operator/jobs/{job_id}/publish-pack",
             "approve_url": f"/api/operator/jobs/{job_id}/approve",
             "performance_url": "/api/operator/performance",
+            "telegram_review": {
+                "assets": f"/assets {job_id}",
+                "send_final_video": f"/asset_send job={job_id} type=final_video",
+                "ready_check": f"/job_ready job={job_id}",
+                "approve_publish": f"/approve_publish job={job_id} queue=1 mode=manual",
+            },
         },
         "rule": "Không tự publish hoặc sửa claim affiliate nếu chưa qua review/approve. Không dùng tài sản thiếu quyền/consent.",
     }
