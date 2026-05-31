@@ -968,6 +968,285 @@ def create_affiliate_link(owner_id, network, product_name, niche="", url="", com
     conn.close()
     return affiliate_id
 
+DEFAULT_AFFILIATE_LINKS = [
+    {
+        "network": "GoEco",
+        "product_name": "VPBank",
+        "niche": "tai chinh ngan hang",
+        "url": "https://goecom.asia/Z31Vp7Ad",
+        "target_audience": "nguoi can tai khoan ngan hang, the, uu dai tai chinh ca nhan",
+        "product_score": 78,
+    },
+    {
+        "network": "GoEco",
+        "product_name": "Shopee",
+        "niche": "san thuong mai dien tu",
+        "url": "https://goeco.mobi/GJPRlrH3",
+        "target_audience": "nguoi mua online, san deal, do cong nghe va do gia dung",
+        "product_score": 82,
+    },
+    {
+        "network": "GoEco",
+        "product_name": "Lazada",
+        "niche": "san thuong mai dien tu",
+        "url": "https://goeco.mobi/Ao8zhi5N",
+        "target_audience": "nguoi mua online, san voucher, do cong nghe va tieu dung",
+        "product_score": 82,
+    },
+    {
+        "network": "GoEco",
+        "product_name": "Traveloka",
+        "niche": "du lich booking",
+        "url": "https://goeco.mobi/UbHEhUul",
+        "target_audience": "nguoi dat ve may bay, khach san, du lich tu tuc",
+        "product_score": 74,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "TikTok",
+        "niche": "social commerce tiktok affiliate",
+        "url": "https://trackfin.asia/J5X2hWfu",
+        "target_audience": "creator, nguoi ban hang, nguoi mua san pham tren tiktok",
+        "product_score": 84,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "MSB Bank",
+        "niche": "tai chinh ngan hang",
+        "url": "https://attracking.asia/TfNc2dfN",
+        "target_audience": "nguoi can tai khoan ngan hang, the, uu dai tai chinh ca nhan",
+        "product_score": 74,
+    },
+    {
+        "network": "TrackEC",
+        "product_name": "Mam Nam Ngu",
+        "niche": "hang tieu dung gia dinh",
+        "url": "https://trackec.asia/x6H5baXh",
+        "target_audience": "noi tro, gia dinh, nguoi mua hang tieu dung",
+        "product_score": 68,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "BIDV",
+        "niche": "tai chinh ngan hang",
+        "url": "https://attracking.asia/jaUg5JFT",
+        "target_audience": "nguoi can tai khoan ngan hang, the, uu dai tai chinh ca nhan",
+        "product_score": 76,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "MBBank",
+        "niche": "tai chinh ngan hang",
+        "url": "https://attracking.asia/eVBScXBZ",
+        "target_audience": "nguoi can tai khoan ngan hang, the, app ngan hang so",
+        "product_score": 78,
+    },
+    {
+        "network": "TrackEC",
+        "product_name": "VPBank Ho Kinh Doanh",
+        "niche": "tai chinh doanh nghiep nho",
+        "url": "https://trackec.asia/xMdFNmSa",
+        "target_audience": "chu shop, ho kinh doanh, nguoi ban hang online",
+        "product_score": 77,
+    },
+    {
+        "network": "TrackMobi",
+        "product_name": "Hong Leong Bank",
+        "niche": "tai chinh ngan hang",
+        "url": "https://trackmobi.asia/ss183PMu",
+        "target_audience": "nguoi can tai khoan ngan hang va uu dai tai chinh",
+        "product_score": 72,
+    },
+    {
+        "network": "ShortenAsia",
+        "product_name": "Zalo Ads",
+        "niche": "quang cao marketing",
+        "url": "https://shorten.asia/SBPDCn5x",
+        "target_audience": "chu shop, doanh nghiep nho, nguoi chay quang cao",
+        "product_score": 78,
+    },
+    {
+        "network": "ShortenAsia",
+        "product_name": "ShopDunk Web",
+        "niche": "dien thoai cong nghe",
+        "url": "https://shorten.asia/TFbjeqe8",
+        "target_audience": "nguoi mua iphone, ipad, phu kien apple",
+        "product_score": 80,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "Giay Shondo",
+        "niche": "thoi trang giay dep",
+        "url": "https://trackfin.asia/W7d7w4EX",
+        "target_audience": "nguoi mua giay dep, thoi trang hang ngay",
+        "product_score": 70,
+    },
+    {
+        "network": "TrackEC",
+        "product_name": "Savani",
+        "niche": "thoi trang",
+        "url": "https://trackec.asia/Udse3MbB",
+        "target_audience": "nguoi mua quan ao cong so, thoi trang gia dinh",
+        "product_score": 70,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "Lazada Referral",
+        "niche": "san thuong mai dien tu referral",
+        "url": "https://attracking.asia/YUVK7hBs",
+        "target_audience": "nguoi mua online, san voucher, nguoi moi dung lazada",
+        "product_score": 80,
+    },
+    {
+        "network": "ShortenAsia",
+        "product_name": "AEON eShop",
+        "niche": "san thuong mai dien tu hang tieu dung",
+        "url": "https://shorten.asia/1JdwRvYt",
+        "target_audience": "gia dinh, nguoi mua hang sieu thi online",
+        "product_score": 72,
+    },
+    {
+        "network": "GoEcom",
+        "product_name": "Hoang Ha Mobile",
+        "niche": "dien thoai cong nghe",
+        "url": "https://goecom.asia/wnMFwYsF",
+        "target_audience": "nguoi mua dien thoai, laptop, phu kien cong nghe",
+        "product_score": 82,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "TikTok For Business",
+        "niche": "quang cao marketing tiktok",
+        "url": "https://trackfin.asia/c413qgqe",
+        "target_audience": "chu shop, creator, doanh nghiep can chay quang cao tiktok",
+        "product_score": 83,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "Chickita Voucher",
+        "niche": "voucher hang tieu dung",
+        "url": "https://trackfin.asia/N9sa43Xv",
+        "target_audience": "nguoi san voucher, me va be, gia dinh",
+        "product_score": 66,
+    },
+    {
+        "network": "TrackEcom",
+        "product_name": "Samsung Student",
+        "niche": "dien thoai cong nghe sinh vien",
+        "url": "https://trackecom.asia/YbBhQ2pq",
+        "target_audience": "sinh vien, nguoi mua dien thoai laptop samsung",
+        "product_score": 82,
+    },
+    {
+        "network": "ShortenAsia",
+        "product_name": "CellphoneS",
+        "niche": "dien thoai cong nghe",
+        "url": "https://shorten.asia/1hyutcwN",
+        "target_audience": "nguoi mua dien thoai, laptop, phu kien cong nghe",
+        "product_score": 82,
+    },
+    {
+        "network": "ShortenAsia",
+        "product_name": "Dien Thoai Vui",
+        "niche": "sua chua dien thoai cong nghe",
+        "url": "https://shorten.asia/pPvvzj6X",
+        "target_audience": "nguoi can sua dien thoai, thay pin, phu kien",
+        "product_score": 76,
+    },
+    {
+        "network": "TrackEcom",
+        "product_name": "JOCKEY",
+        "niche": "thoi trang do lot",
+        "url": "https://trackecom.asia/VYp9XMEB",
+        "target_audience": "nguoi mua do lot, do mac nha, lifestyle",
+        "product_score": 70,
+    },
+    {
+        "network": "TrackMobi",
+        "product_name": "VERA",
+        "niche": "thoi trang do lot",
+        "url": "https://trackmobi.asia/fQRZdVyj",
+        "target_audience": "phu nu, nguoi mua do lot va do mac nha",
+        "product_score": 70,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "Vascara",
+        "niche": "thoi trang giay tui",
+        "url": "https://trackfin.asia/8uvHbKPp",
+        "target_audience": "phu nu mua giay, tui xach, phu kien thoi trang",
+        "product_score": 72,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "Adidas Viet Nam Online",
+        "niche": "thoi trang the thao",
+        "url": "https://attracking.asia/GsQmmkz7",
+        "target_audience": "nguoi tap luyen, mua giay va do the thao",
+        "product_score": 78,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "SUPERSPORTS",
+        "niche": "thoi trang the thao",
+        "url": "https://trackfin.asia/9ueaXQH5",
+        "target_audience": "nguoi tap luyen, mua do the thao va lifestyle",
+        "product_score": 76,
+    },
+    {
+        "network": "TrackMobi",
+        "product_name": "Lazada Viet Nam VIP",
+        "niche": "san thuong mai dien tu vip",
+        "url": "https://trackmobi.asia/pdfM4UWt",
+        "target_audience": "nguoi mua online, san voucher, khach hang lazada vip",
+        "product_score": 82,
+    },
+]
+
+DEFAULT_AFFILIATE_ALLOWED_CLAIMS = (
+    "Gioi thieu uu dai, so sanh tinh nang, neu trai nghiem va huong dan mua hang minh bach."
+)
+DEFAULT_AFFILIATE_BLOCKED_CLAIMS = (
+    "Khong cam ket duyet ho so, khong cam ket loi nhuan/thu nhap, khong mao danh thuong hieu, khong spam, khong noi sai chinh sach."
+)
+
+def get_affiliate_by_url(owner_id, url):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, network, product_name, url FROM affiliate_links WHERE owner_id=? AND url=? LIMIT 1",
+        (str(owner_id), url)
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def seed_default_affiliate_links(owner_id):
+    created = []
+    skipped = []
+    for item in DEFAULT_AFFILIATE_LINKS:
+        url = item["url"].strip()
+        existing = get_affiliate_by_url(owner_id, url)
+        if existing:
+            skipped.append(existing)
+            continue
+        affiliate_id = create_affiliate_link(
+            owner_id,
+            item["network"],
+            item["product_name"],
+            item["niche"],
+            url,
+            "Affiliate link moi dang ky tu admin.",
+            0,
+            0,
+            item["target_audience"],
+            DEFAULT_AFFILIATE_ALLOWED_CLAIMS,
+            DEFAULT_AFFILIATE_BLOCKED_CLAIMS,
+            item["product_score"],
+        )
+        created.append((affiliate_id, item["network"], item["product_name"], url))
+    return created, skipped
+
 def list_affiliate_links(owner_id, limit=30):
     conn = db_connect()
     c = conn.cursor()
@@ -3891,6 +4170,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /channel_add — Thêm kênh/tài khoản nội bộ",
             "• /channels — Danh sách kênh nội bộ",
             "• /affiliate_add — Lưu link affiliate",
+            "• /affiliate_seed — Import bộ link affiliate mặc định",
             "• /affiliates — Danh sách affiliate",
             "• /affiliate_profile — Cập nhật hồ sơ/claim affiliate",
             "• /affiliate_match — Chọn affiliate phù hợp trend",
@@ -4620,6 +4900,31 @@ async def cmd_affiliate_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Link: <code>{html.escape(url or 'chưa có')}</code>",
         parse_mode="HTML"
     )
+
+async def cmd_affiliate_seed(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    created, skipped = seed_default_affiliate_links(update.effective_user.id)
+    lines = [
+        "🔗 <b>IMPORT AFFILIATE CATALOG</b>",
+        f"• Tạo mới: <b>{len(created)}</b>",
+        f"• Bỏ qua do trùng URL: <b>{len(skipped)}</b>",
+        f"• Tổng catalog chuẩn: <b>{len(DEFAULT_AFFILIATE_LINKS)}</b>\n",
+    ]
+    if created:
+        lines.append("<b>Link vừa tạo:</b>")
+        for affiliate_id, network, product, url in created[:20]:
+            lines.append(f"• #{affiliate_id} | <code>{html.escape(network)}</code> | {html.escape(product)}")
+        if len(created) > 20:
+            lines.append(f"• ... và {len(created) - 20} link khác.")
+    if skipped:
+        lines.append("\n<b>Đã có sẵn, không tạo trùng:</b>")
+        for affiliate_id, network, product, url in skipped[:10]:
+            lines.append(f"• #{affiliate_id} | <code>{html.escape(network or '-')}</code> | {html.escape(product or '-')}")
+        if len(skipped) > 10:
+            lines.append(f"• ... và {len(skipped) - 10} link khác.")
+    lines.append("\nDùng <code>/affiliates</code> để xem ID, hoặc <code>/affiliate_match niche=...</code> để chọn link theo trend.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -5442,6 +5747,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🎯 Affiliate match", callback_data="opmenu|affmatch"),
             InlineKeyboardButton("🛒 Affiliate profile", callback_data="opmenu|affprofile")
         ],
+        [InlineKeyboardButton("🔗 Import affiliate catalog", callback_data="opmenu|affseed")],
         [
             InlineKeyboardButton("🎛 Pipeline", callback_data="opmenu|pipeline"),
             InlineKeyboardButton("📅 Calendar", callback_data="opmenu|calendar")
@@ -5538,6 +5844,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
         "rank": "/trend_rank\n/trend_rank 20",
+        "affseed": "/affiliate_seed\n/affiliates",
         "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
         "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
@@ -7584,6 +7891,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("channel_publish_set", cmd_channel_publish_set))
     tg_app.add_handler(CommandHandler("publish_readiness", cmd_publish_readiness))
     tg_app.add_handler(CommandHandler("affiliate_add", cmd_affiliate_add))
+    tg_app.add_handler(CommandHandler("affiliate_seed", cmd_affiliate_seed))
     tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
     tg_app.add_handler(CommandHandler("affiliate_profile", cmd_affiliate_profile))
     tg_app.add_handler(CommandHandler("affiliate_match", cmd_affiliate_match))
