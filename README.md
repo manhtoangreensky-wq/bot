@@ -81,6 +81,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/operator_dashboard`: tổng quan kênh, affiliate, lịch sắp tới và production job cần xử lý.
 - `/operator_loop limit=10 queue=1`: quét job đang mở, tự đưa job đủ điều kiện vào publish queue và báo task tiếp theo cho worker.
 - `/operator_api`: xem trạng thái `OPERATOR_API_TOKEN`, base URL và mẫu endpoint/payload cho n8n/Claude/tool worker.
+- `/operator_director days=30 platform=tiktok limit=10`: trả đúng một next action ưu tiên cho admin/Claude/n8n, kèm Telegram command hoặc API endpoint/payload cần gọi.
 - `/operator_status`: kiểm tra hệ thống đã sẵn sàng scale chưa, gồm channel, affiliate, campaign, API token, publish readiness, queue, task và job blocked.
 - `/operator_today`: kế hoạch ưu tiên trong ngày, tự gom việc setup còn thiếu, job blocked, task kế tiếp, publish queue và affiliate nên scale.
 - `/operator_playbook`: checklist vận hành từ kiểm tra hệ thống, chọn affiliate, tạo video theo trend, giao task cho AI/tool, review, publish và đo doanh thu.
@@ -126,6 +127,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /lead`: nhận lead từ landing page và gửi thông báo về admin Telegram.
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
 - `GET /api/operator/status`: worker ngoài kiểm tra readiness tổng thể trước khi tự động scale hoặc publish.
+- `GET /api/operator/director`: endpoint “đầu não” cho Claude/n8n, gom setup, blocker, task, publish queue và affiliate decisions thành một next action có method/url/payload rõ ràng.
 - `GET /api/operator/today`: worker ngoài lấy danh sách hành động ưu tiên trong ngày, gồm setup, task, publish queue và affiliate nên scale.
 - `POST /api/operator/tasks/{task_id}/complete`: worker ngoài trả `status`, `output_url`, `note`; bot tự lưu asset theo loại task và báo admin.
 - `GET /api/operator/jobs/{job_id}/ready`: worker ngoài kiểm tra job đã đủ điều kiện review/publish chưa.

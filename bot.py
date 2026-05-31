@@ -3288,6 +3288,125 @@ def affiliate_decision_data(owner_id, days=30, limit=20, min_views=200, platform
     ), reverse=True)
     return since, decisions, job_rows
 
+def operator_director_data(owner_id, days=30, platform="tiktok", limit=10):
+    status = operator_status_data(owner_id)
+    since, decisions, _ = affiliate_decision_data(owner_id, days=days, limit=limit, platform=platform)
+    advanced, ready_publish, next_tasks, blocked = operator_loop_data(owner_id, limit=limit, auto_queue=False)
+    actions = []
+
+    for key, ok, detail, next_cmd in status["checks"]:
+        if not ok:
+            actions.append({
+                "rank": len(actions) + 1,
+                "action": "SETUP",
+                "priority": "high",
+                "title": f"Hoàn thiện {key}",
+                "detail": detail,
+                "telegram_command": next_cmd,
+                "api": None,
+            })
+
+    if blocked:
+        jid, level, next_action, topic, action_platform, channel_name = blocked[0]
+        actions.append({
+            "rank": len(actions) + 1,
+            "action": "FIX_BLOCKED_JOB",
+            "priority": "high",
+            "title": f"Gỡ nghẽn job #{jid}",
+            "detail": f"{action_platform or '-'} | {channel_name or '-'} | {topic or '-'} | {level or '-'}",
+            "telegram_command": next_action or f"/job_ready job={jid}",
+            "api": {"method": "GET", "url": f"/api/operator/jobs/{jid}/ready"},
+        })
+
+    if next_tasks:
+        tid, job_id, task_type, tool, scene_no, title, task_status, topic, action_platform, channel_name = next_tasks[0]
+        url = f"/api/operator/tasks/next?job_id={job_id}"
+        if tool:
+            url += f"&tool={tool}"
+        actions.append({
+            "rank": len(actions) + 1,
+            "action": "WORK_TASK",
+            "priority": "high",
+            "title": f"Worker làm task #{tid}",
+            "detail": f"job #{job_id} | {task_type or '-'} / {tool or '-'} | scene={scene_no or '-'} | {title or topic or '-'}",
+            "telegram_command": f"/task_handoff id={tid}",
+            "api": {"method": "GET", "url": url, "submit_after": f"/api/operator/tasks/{tid}/complete"},
+        })
+
+    if ready_publish:
+        jid, topic, action_platform, channel_name = ready_publish[0]
+        actions.append({
+            "rank": len(actions) + 1,
+            "action": "PUBLISH_READY",
+            "priority": "medium",
+            "title": f"Đăng job #{jid}",
+            "detail": f"{action_platform or '-'} | {channel_name or '-'} | {topic or '-'}",
+            "telegram_command": f"/publish_pack job={jid}",
+            "api": {"method": "GET", "url": f"/api/operator/publish/next?platform={action_platform or ''}"},
+        })
+
+    for decision in decisions:
+        decision_action = decision.get("action")
+        if decision_action == "SCALE":
+            actions.append({
+                "rank": len(actions) + 1,
+                "action": "SCALE_AFFILIATE",
+                "priority": "medium",
+                "title": f"Scale affiliate #{decision['id']}: {decision.get('product') or '-'}",
+                "detail": f"score={decision['score']} views={decision['views']} clicks={decision['clicks']} revenue={decision['revenue']:,}đ",
+                "telegram_command": decision["command"],
+                "api": {
+                    "method": "POST",
+                    "url": "/api/operator/affiliate-scale",
+                    "payload": {
+                        "affiliate_id": int(decision["id"]),
+                        "platform": platform,
+                        "channel": "all",
+                        "limit": 3,
+                        "build": True,
+                        "duration": 45,
+                        "notify_admin": True,
+                    },
+                },
+                "related_links": decision.get("related_links", [])[:5],
+            })
+            break
+
+    if not any(item["action"] == "SCALE_AFFILIATE" for item in actions):
+        fix_decision = next((item for item in decisions if item.get("action") in {"PUBLISH", "FIX_CTA", "FIX_OFFER", "TEST", "TEST_MORE"}), None)
+        if fix_decision:
+            actions.append({
+                "rank": len(actions) + 1,
+                "action": f"AFFILIATE_{fix_decision['action']}",
+                "priority": "medium",
+                "title": f"{fix_decision['action']} affiliate #{fix_decision['id']}: {fix_decision.get('product') or '-'}",
+                "detail": fix_decision.get("reason") or "",
+                "telegram_command": fix_decision["command"],
+                "api": {"method": "GET", "url": f"/api/operator/affiliate-decisions?days={days}&platform={platform}&limit={limit}"},
+                "related_links": fix_decision.get("related_links", [])[:5],
+            })
+
+    if not actions:
+        actions.append({
+            "rank": 1,
+            "action": "START_TEST",
+            "priority": "medium",
+            "title": "Bắt đầu batch test affiliate",
+            "detail": "Không có task/publish/job nghẽn rõ ràng. Hãy chọn affiliate có base score tốt để test.",
+            "telegram_command": f"/affiliate_decisions days={days} platform={platform} limit={limit}",
+            "api": {"method": "GET", "url": f"/api/operator/affiliate-decisions?days={days}&platform={platform}&limit={limit}"},
+        })
+
+    return {
+        "status": status,
+        "since": since,
+        "platform": platform,
+        "decisions": decisions[:limit],
+        "actions": actions[:limit],
+        "next_action": actions[0] if actions else None,
+        "rule": "Director ưu tiên setup/blocker/task/publish trước, sau đó mới scale affiliate có tín hiệu tốt.",
+    }
+
 def operator_loop_data(owner_id, limit=10, auto_queue=True):
     jobs = list_production_jobs(owner_id, limit=limit)
     advanced = []
@@ -6688,6 +6807,7 @@ async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TY
         "📘 <b>OPERATOR PLAYBOOK — KIẾM TIỀN BẰNG VIDEO + AFFILIATE</b>\n\n"
         "<b>0. Kiểm tra hệ thống</b>\n"
         "• <code>/operator_status</code>\n"
+        "• <code>/operator_director</code> để lấy đúng một next action cho admin/Claude/n8n.\n"
         "• Nếu thiếu kênh: <code>/channel_add platform=tiktok name=... slots=2/day mode=manual</code>\n"
         "• Nếu thiếu link: <code>/affiliate_seed</code> hoặc <code>/affiliate_add ...</code>\n\n"
         "<b>1. Chọn link cần scale</b>\n"
@@ -6714,7 +6834,7 @@ async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TY
         "• <code>/affiliate_report days=30</code> và <code>/growth days=30</code> để quyết định scale tiếp.\n\n"
         "<b>7. Tự động hóa bằng API</b>\n"
         "• <code>/operator_api</code> để lấy endpoint/payload.\n"
-        "• Luồng API chuẩn: status → affiliate-decisions → affiliate-scale → tasks/next → publish/next → performance.\n"
+        "• Luồng API chuẩn: director → affiliate-scale → tasks/next → publish/next → performance.\n"
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -6778,6 +6898,7 @@ def operator_category_keyboard(category):
         "cat_control": [
             ("🧠 Brain command", "brain"), ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
+            ("🎛 Director", "director"),
             ("📌 Today plan", "today"), ("📘 Playbook", "playbook"),
             ("🧭 System status", "status"), ("📊 Daily digest", "daily"),
             ("🧭 Dashboard", "dashboard"),
@@ -6875,6 +6996,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Header bắt buộc: <code>Authorization: Bearer &lt;OPERATOR_API_TOKEN&gt;</code>",
         "",
         "<b>Endpoint cho n8n/worker:</b>",
+        f"• Director next action: <code>GET {html.escape(base_url)}/api/operator/director</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
@@ -6930,6 +7052,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "playbook": "/operator_playbook",
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
+        "director": "/operator_director days=30 platform=tiktok limit=10",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
         "autopilot": "/autopilot niche=công nghệ AI platform=tiktok channel=all aff=<AFF_ID> campaign=<ID> limit=3 duration=45",
         "build": "/operator_build job=<JOB_ID> n=5 duration=45",
@@ -8050,6 +8173,58 @@ async def cmd_affiliate_decisions(update: Update, context: ContextTypes.DEFAULT_
         "<code>/performance_add job=&lt;JOB_ID&gt; type=view value=1000</code>\n"
         "<code>/performance_add job=&lt;JOB_ID&gt; type=click value=20</code>\n"
         "<code>/performance_add job=&lt;JOB_ID&gt; type=revenue value=1 amount=150000</code>"
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_operator_director(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or (context.args[0] if context.args else 30)), 180))
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        limit = max(3, min(int(data.get("limit") or 10), 20))
+    except ValueError:
+        limit = 10
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    data_out = operator_director_data(update.effective_user.id, days=days, platform=platform, limit=limit)
+    next_action = data_out.get("next_action") or {}
+    counts = data_out["status"]["counts"]
+    lines = [
+        f"🧠 <b>AI OPERATOR DIRECTOR — {days} ngày</b>",
+        f"• Platform: <code>{html.escape(platform)}</code>",
+        f"• Ready scale: <b>{'có' if data_out['status']['ready_to_scale'] else 'chưa'}</b>",
+        f"• Channels={counts['active_channels']} | Affiliates={counts['active_affiliates']} | Campaigns={counts['active_campaigns']} | Jobs mở={counts['open_jobs']} | Tasks mở={counts['open_tasks']}",
+        "",
+        "<b>Việc nên làm ngay:</b>",
+    ]
+    if next_action:
+        api = next_action.get("api") or {}
+        lines.append(
+            f"• <b>{html.escape(next_action.get('action') or '-')}</b> | {html.escape(next_action.get('title') or '-')}\n"
+            f"  {html.escape(next_action.get('detail') or '-')}\n"
+            f"  Telegram: <code>{html.escape(next_action.get('telegram_command') or '-')}</code>"
+        )
+        if api:
+            payload = api.get("payload")
+            api_line = f"{api.get('method', 'GET')} {api.get('url', '-')}"
+            lines.append(f"  API: <code>{html.escape(api_line)}</code>")
+            if payload:
+                lines.append(f"  Payload: <pre>{html_pre(json.dumps(payload, ensure_ascii=False), 700)}</pre>")
+    else:
+        lines.append("• Chưa có hành động rõ ràng.")
+
+    lines.append("\n<b>Hàng đợi director:</b>")
+    for item in data_out.get("actions", [])[1:limit]:
+        lines.append(
+            f"• {html.escape(item.get('action') or '-')} | {html.escape(item.get('title') or '-')}\n"
+            f"  <code>{html.escape(item.get('telegram_command') or '-')}</code>"
+        )
+    lines.append(
+        "\nAPI cho Claude/n8n: "
+        "<code>GET /api/operator/director?days=30&amp;platform=tiktok</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -9260,6 +9435,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
     tg_app.add_handler(CommandHandler("operator_playbook", cmd_operator_playbook))
+    tg_app.add_handler(CommandHandler("operator_director", cmd_operator_director))
     tg_app.add_handler(CommandHandler("operator_today", cmd_operator_today))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
@@ -9450,10 +9626,36 @@ async def api_operator_status(request: Request):
         ],
         "next": {
             "telegram": "/operator_status",
+            "director": "/api/operator/director",
             "affiliate_report": "/api/operator/affiliate-report",
             "affiliate_decisions": "/api/operator/affiliate-decisions",
             "affiliate_scale": "/api/operator/affiliate-scale",
             "loop": "/api/operator/loop",
+        },
+    }
+
+@fastapi_app.get("/api/operator/director")
+async def api_operator_director(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 10):
+    verify_operator_api_token(request)
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 10), 20))
+    platform = (platform or "tiktok").lower()
+    data = operator_director_data(ADMIN_ID, days=days, platform=platform, limit=limit)
+    return {
+        "ok": True,
+        "days": days,
+        "platform": platform,
+        "ready_to_scale": data["status"]["ready_to_scale"],
+        "counts": data["status"]["counts"],
+        "next_action": data["next_action"],
+        "actions": data["actions"],
+        "rule": data["rule"],
+        "next": {
+            "director_url": "/api/operator/director",
+            "scale_url": "/api/operator/affiliate-scale",
+            "tasks_url": "/api/operator/tasks/next",
+            "publish_url": "/api/operator/publish/next",
+            "performance_url": "/api/operator/performance",
         },
     }
 
@@ -9488,6 +9690,7 @@ async def api_operator_today(request: Request):
         "actions": data["actions"],
         "best_affiliate": best,
         "next": {
+            "director_url": "/api/operator/director",
             "status_url": "/api/operator/status",
             "affiliate_report_url": "/api/operator/affiliate-report",
             "affiliate_decisions_url": "/api/operator/affiliate-decisions",
