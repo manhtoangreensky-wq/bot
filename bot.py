@@ -313,6 +313,10 @@ def init_db():
         channel_id INTEGER DEFAULT 0,
         campaign_id INTEGER DEFAULT 0,
         affiliate_id INTEGER DEFAULT 0,
+        trend_score INTEGER DEFAULT 0,
+        affiliate_fit_score INTEGER DEFAULT 0,
+        competition_score INTEGER DEFAULT 0,
+        score_reason TEXT,
         status TEXT DEFAULT 'new',
         created_at DATETIME
     )""")
@@ -399,6 +403,10 @@ def init_db():
             ("channel_id", "INTEGER DEFAULT 0"),
             ("campaign_id", "INTEGER DEFAULT 0"),
             ("affiliate_id", "INTEGER DEFAULT 0"),
+            ("trend_score", "INTEGER DEFAULT 0"),
+            ("affiliate_fit_score", "INTEGER DEFAULT 0"),
+            ("competition_score", "INTEGER DEFAULT 0"),
+            ("score_reason", "TEXT"),
             ("status", "TEXT DEFAULT 'new'"),
         ],
         "publish_queue": [
@@ -1316,16 +1324,83 @@ def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None,
     conn.close()
     return changed > 0, row[0] if row else None
 
-def save_trend_candidate(owner_id, niche, platform, title, source_url, source_name="", summary="", channel_id=0, campaign_id=0, affiliate_id=0):
+def clamp_score(value, low=0, high=100):
+    return max(low, min(high, int(value)))
+
+def tokenize_text(text):
+    return [part.strip().lower() for part in (text or "").replace("|", " ").replace("/", " ").replace(",", " ").split() if len(part.strip()) >= 3]
+
+def score_trend_candidate(niche, platform, title, summary="", channel=None, affiliate=None):
+    text = f"{title} {summary}".lower()
+    niche_tokens = tokenize_text(niche)
+    platform_l = (platform or "").lower()
+    reasons = []
+
+    trend_score = 45
+    if any(token in text for token in niche_tokens[:8]):
+        trend_score += 15
+        reasons.append("khớp niche")
+    if platform_l and platform_l in text:
+        trend_score += 8
+        reasons.append("có tín hiệu nền tảng")
+    fresh_words = ["mới", "ra mắt", "2026", "trend", "viral", "tăng", "bùng nổ", "latest", "new"]
+    fresh_hits = sum(1 for word in fresh_words if word in text)
+    trend_score += min(18, fresh_hits * 6)
+    if fresh_hits:
+        reasons.append("có tín hiệu mới/viral")
+    if channel:
+        _, _, _, _, topic_focus, audience, *_ = channel
+        focus_tokens = tokenize_text(topic_focus) + tokenize_text(audience)
+        focus_hits = sum(1 for token in focus_tokens[:12] if token in text)
+        trend_score += min(14, focus_hits * 4)
+        if focus_hits:
+            reasons.append("khớp kênh")
+
+    affiliate_fit = 0
+    if affiliate:
+        _, network, product_name, aff_niche, _, commission_note, *_ = affiliate
+        aff_tokens = tokenize_text(product_name) + tokenize_text(aff_niche) + tokenize_text(network)
+        aff_hits = sum(1 for token in aff_tokens[:16] if token in text)
+        affiliate_fit = clamp_score(25 + aff_hits * 15 + (10 if aff_niche and aff_niche.lower() in text else 0))
+        if aff_hits:
+            reasons.append("khớp affiliate")
+        if commission_note:
+            affiliate_fit = clamp_score(affiliate_fit + 5)
+    elif any(word in text for word in ["review", "mua", "shop", "giá", "deal", "sản phẩm", "product"]):
+        affiliate_fit = 45
+        reasons.append("có góc bán hàng")
+
+    broad_words = ["ai", "tiktok", "facebook", "youtube", "iphone", "chatgpt", "gemini", "trend"]
+    broad_hits = sum(1 for word in broad_words if word in text)
+    competition = clamp_score(35 + broad_hits * 10 - len(niche_tokens) * 2)
+    if competition >= 70:
+        reasons.append("cạnh tranh cao")
+    elif competition <= 45:
+        reasons.append("ngách hẹp")
+
+    opportunity = clamp_score(int((trend_score * 0.55) + (affiliate_fit * 0.35) + ((100 - competition) * 0.10)))
+    if not reasons:
+        reasons.append("trend mới từ RSS")
+    return {
+        "trend_score": opportunity,
+        "affiliate_fit_score": affiliate_fit,
+        "competition_score": competition,
+        "score_reason": "; ".join(reasons[:5]),
+    }
+
+def save_trend_candidate(owner_id, niche, platform, title, source_url, source_name="", summary="", channel_id=0, campaign_id=0, affiliate_id=0, trend_score=0, affiliate_fit_score=0, competition_score=0, score_reason=""):
     conn = db_connect()
     c = conn.cursor()
     c.execute(
         """INSERT INTO trend_candidates
-        (owner_id, niche, platform, title, source_url, source_name, summary, channel_id, campaign_id, affiliate_id, status, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (owner_id, niche, platform, title, source_url, source_name, summary, channel_id, campaign_id, affiliate_id,
+         trend_score, affiliate_fit_score, competition_score, score_reason, status, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             str(owner_id), niche, platform, title, source_url, source_name, summary,
-            int(channel_id or 0), int(campaign_id or 0), int(affiliate_id or 0), "new", now_text()
+            int(channel_id or 0), int(campaign_id or 0), int(affiliate_id or 0),
+            int(trend_score or 0), int(affiliate_fit_score or 0), int(competition_score or 0), score_reason,
+            "new", now_text()
         )
     )
     trend_id = c.lastrowid
@@ -1337,13 +1412,29 @@ def get_trend_candidate(trend_id, owner_id):
     conn = db_connect()
     c = conn.cursor()
     c.execute(
-        """SELECT id, niche, platform, title, source_url, source_name, summary, channel_id, campaign_id, affiliate_id, status
+        """SELECT id, niche, platform, title, source_url, source_name, summary, channel_id, campaign_id, affiliate_id,
+                  status, trend_score, affiliate_fit_score, competition_score, score_reason
         FROM trend_candidates WHERE id=? AND owner_id=?""",
         (trend_id, str(owner_id))
     )
     row = c.fetchone()
     conn.close()
     return row
+
+def list_trend_candidates(owner_id, limit=10):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, niche, platform, title, source_name, status, trend_score, affiliate_fit_score, competition_score, score_reason, created_at
+        FROM trend_candidates
+        WHERE owner_id=?
+        ORDER BY trend_score DESC, id DESC
+        LIMIT ?""",
+        (str(owner_id), limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
 
 def update_trend_status(trend_id, owner_id, status):
     conn = db_connect()
@@ -2380,6 +2471,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /publish_readiness — Kiểm tra sẵn sàng auto-post",
             "• /channel_publish_set — Cấu hình mode/token kênh",
             "• /trend_search — Tìm trend mới để làm video",
+            "• /trend_rank — Xếp hạng trend theo điểm affiliate",
             "• /handoff — Prompt giao việc cho AI/tool khác",
             "• /publish_pack — Gói caption/link để đăng",
             "• /review_gate — Kiểm duyệt trước khi đăng",
@@ -3073,12 +3165,21 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not trends:
         return await msg.edit_text("📭 Không tìm thấy trend để tạo job.")
 
-    created = []
+    affiliate = get_affiliate_link(affiliate_id, update.effective_user.id) if affiliate_id else None
+    primary_channel = channels[0] if channels else None
+    scored_trends = []
     for item in trends:
+        scores = score_trend_candidate(niche, search_platform, item["title"], item.get("summary", ""), primary_channel, affiliate)
+        scored_trends.append((scores["trend_score"], item, scores))
+    scored_trends.sort(key=lambda row: row[0], reverse=True)
+
+    created = []
+    for _, item, base_scores in scored_trends:
         for channel in channels:
             if len(created) >= limit:
                 break
             cid, channel_platform, channel_name, account_label, focus, audience, slots, status = channel
+            scores = score_trend_candidate(niche, channel_platform or search_platform, item["title"], item.get("summary", ""), channel, affiliate) or base_scores
             trend_id = save_trend_candidate(
                 update.effective_user.id,
                 niche,
@@ -3089,10 +3190,18 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 item.get("summary", ""),
                 cid,
                 campaign_id,
-                affiliate_id
+                affiliate_id,
+                scores["trend_score"],
+                scores["affiliate_fit_score"],
+                scores["competition_score"],
+                scores["score_reason"]
             )
             topic = f"{item['title']} | {niche} | affiliate product placement"
-            note = f"operator_auto trend #{trend_id} | source={item.get('source','')} | {item['url']}"
+            note = (
+                f"operator_auto trend #{trend_id} | score={scores['trend_score']} "
+                f"aff_fit={scores['affiliate_fit_score']} competition={scores['competition_score']} | "
+                f"source={item.get('source','')} | {item['url']}"
+            )
             slot_id = create_calendar_slot(
                 update.effective_user.id,
                 cid,
@@ -3125,7 +3234,7 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 note
             )
             update_trend_status(trend_id, update.effective_user.id, f"job:{job_id}")
-            created.append((job_id, slot_id, trend_id, channel_platform or search_platform, channel_name, item["title"]))
+            created.append((job_id, slot_id, trend_id, channel_platform or search_platform, channel_name, item["title"], scores["trend_score"], scores["score_reason"]))
     lines = [
         f"✅ <b>Operator Auto đã tạo {len(created)} production job</b>",
         f"• Niche: <b>{html.escape(niche)}</b>",
@@ -3134,8 +3243,13 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Job mới:</b>",
     ]
-    for job_id, slot_id, trend_id, platform, channel_name, title in created[:12]:
-        lines.append(f"• job #{job_id} | slot #{slot_id} | trend #{trend_id} | <code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n  {html.escape(title)}")
+    for job_id, slot_id, trend_id, platform, channel_name, title, score, reason in created[:12]:
+        lines.append(
+            f"• job #{job_id} | slot #{slot_id} | trend #{trend_id} | score=<b>{score}</b> | "
+            f"<code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n"
+            f"  {html.escape(title)}\n"
+            f"  lý do: {html.escape(reason or '-')}"
+        )
     lines.append("\nBước tiếp: /operator_dashboard hoặc /operator_next id=<JOB_ID> stage=script")
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
@@ -3441,6 +3555,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🧭 Dashboard", callback_data="opmenu|dashboard"),
             InlineKeyboardButton("🔥 Tìm trend", callback_data="opmenu|trend")
         ],
+        [InlineKeyboardButton("🏆 Trend ranking", callback_data="opmenu|rank")],
         [
             InlineKeyboardButton("🤖 Auto batch", callback_data="opmenu|auto"),
             InlineKeyboardButton("🧪 Auto-post ready", callback_data="opmenu|readiness")
@@ -3490,6 +3605,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "dashboard": "/operator_dashboard",
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
+        "rank": "/trend_rank\n/trend_rank 20",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
@@ -3966,6 +4082,14 @@ async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not items:
         return await msg.edit_text("📭 Chưa tìm thấy trend phù hợp. Thử niche khác.")
 
+    channel = get_social_channel(channel_id, update.effective_user.id) if channel_id else None
+    affiliate = get_affiliate_link(affiliate_id, update.effective_user.id) if affiliate_id else None
+    scored_items = []
+    for item in items:
+        scores = score_trend_candidate(niche, platform, item["title"], item.get("summary", ""), channel, affiliate)
+        scored_items.append((scores["trend_score"], item, scores))
+    scored_items.sort(key=lambda row: row[0], reverse=True)
+
     lines = [
         "🔥 <b>TREND MỚI GỢI Ý LÀM VIDEO</b>",
         f"• Niche: <b>{html.escape(niche)}</b>",
@@ -3973,7 +4097,7 @@ async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
     ]
     buttons = []
-    for item in items:
+    for _, item, scores in scored_items:
         trend_id = save_trend_candidate(
             update.effective_user.id,
             niche,
@@ -3984,12 +4108,44 @@ async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
             item.get("summary", ""),
             channel_id,
             campaign_id,
-            affiliate_id
+            affiliate_id,
+            scores["trend_score"],
+            scores["affiliate_fit_score"],
+            scores["competition_score"],
+            scores["score_reason"]
         )
-        lines.append(f"• #{trend_id} | <b>{html.escape(item['title'])}</b>\n  Nguồn: {html.escape(item.get('source') or '-')}")
-        buttons.append([InlineKeyboardButton(f"🎬 Tạo video trend #{trend_id}", callback_data=f"trend|video|{trend_id}")])
+        lines.append(
+            f"• #{trend_id} | score=<b>{scores['trend_score']}</b> | aff=<b>{scores['affiliate_fit_score']}</b> | "
+            f"comp=<b>{scores['competition_score']}</b>\n"
+            f"  <b>{html.escape(item['title'])}</b>\n"
+            f"  Nguồn: {html.escape(item.get('source') or '-')} | Lý do: {html.escape(scores['score_reason'])}"
+        )
+        buttons.append([InlineKeyboardButton(f"🎬 Tạo video trend #{trend_id} ({scores['trend_score']})", callback_data=f"trend|video|{trend_id}")])
     lines.append("\nChọn nút bên dưới để đưa trend vào pipeline affiliate.")
     await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def cmd_trend_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    try:
+        limit = max(1, min(int(context.args[0]), 20)) if context.args else 10
+    except ValueError:
+        limit = 10
+    rows = list_trend_candidates(update.effective_user.id, limit)
+    if not rows:
+        return await update.message.reply_text("📭 Chưa có trend đã lưu. Dùng /trend_search trước.")
+    lines = ["🏆 <b>TREND RANKING</b>", "Điểm càng cao càng nên ưu tiên sản xuất video affiliate.\n"]
+    for tid, niche, platform, title, source_name, status, trend_score, affiliate_fit, competition, reason, created_at in rows:
+        lines.append(
+            f"• #{tid} | score=<b>{trend_score or 0}</b> | aff=<b>{affiliate_fit or 0}</b> | "
+            f"comp=<b>{competition or 0}</b> | {html.escape(status or '-')}\n"
+            f"  <code>{html.escape(platform or '-')}</code> | {html.escape(niche or '-')}\n"
+            f"  {html.escape(title or '-')}\n"
+            f"  nguồn={html.escape(source_name or '-')} | lý do={html.escape(reason or '-')}\n"
+            f"  {created_at or '-'}"
+        )
+    lines.append("\nTạo video: bấm nút trong /trend_search hoặc tìm lại kèm channel/aff.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -4006,7 +4162,10 @@ async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TY
     trend = get_trend_candidate(trend_id, query.from_user.id)
     if not trend:
         return await query.edit_message_text("❌ Không tìm thấy trend.")
-    _, niche, platform, title, source_url, source_name, summary, channel_id, campaign_id, affiliate_id, status = trend
+    (
+        _, niche, platform, title, source_url, source_name, summary, channel_id, campaign_id,
+        affiliate_id, status, trend_score, affiliate_fit, competition, score_reason
+    ) = trend
     if not channel_id:
         return await query.edit_message_text(
             "⚠️ Trend này chưa gắn channel. Tìm lại bằng:\n"
@@ -4018,7 +4177,10 @@ async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TY
         return await query.edit_message_text("❌ Channel của trend không còn tồn tại.")
     _, channel_platform, channel_name, account_label, focus, audience, slots, channel_status = channel
     topic = f"{title} | góc nhìn {niche} | chèn sản phẩm affiliate phù hợp"
-    note = f"trend #{trend_id} | source={source_name} | {source_url}"
+    note = (
+        f"trend #{trend_id} | score={trend_score or 0} aff_fit={affiliate_fit or 0} "
+        f"competition={competition or 0} | source={source_name} | {source_url}"
+    )
     slot_id = create_calendar_slot(
         query.from_user.id,
         channel_id,
@@ -4063,6 +4225,8 @@ async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TY
         f"• Production job: <code>#{job_id}</code>\n"
         f"• Slot: <code>#{slot_id}</code>\n"
         f"• Kênh: <b>{html.escape(channel_name or '-')}</b> / <code>{html.escape(account_label or 'main')}</code>\n"
+        f"• Score: <b>{trend_score or 0}</b> | Aff fit: <b>{affiliate_fit or 0}</b> | Competition: <b>{competition or 0}</b>\n"
+        f"• Lý do: {html.escape(score_reason or '-')}\n"
         f"• Trend: {html.escape(title)}\n\n"
         f"<pre>{html_pre(brief)}</pre>",
         parse_mode="HTML",
@@ -4694,6 +4858,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
+    tg_app.add_handler(CommandHandler("trend_rank", cmd_trend_rank))
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
     tg_app.add_handler(CommandHandler("publish_pack", cmd_publish_pack))
     tg_app.add_handler(CommandHandler("review_gate", cmd_review_gate))

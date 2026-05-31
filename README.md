@@ -63,11 +63,12 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=...`: tạo lịch nội dung theo kênh.
 - `/calendar`: xem lịch nội dung đã lên.
 - `/operator topic=... channel=<ID> aff=<ID> campaign=<ID> date=YYYY-MM-DD`: ra lệnh một bước để tạo lịch nội dung + production job + brief AI.
-- `/operator_auto niche=... platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5`: tự tìm trend và tạo batch production job cho nhiều kênh active.
+- `/operator_auto niche=... platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5`: tự tìm trend, chấm điểm ưu tiên affiliate và tạo batch production job cho nhiều kênh active.
 - `/operator_next id=<JOB_ID> stage=script|voice|visuals|edit|review|publish`: AI điều phối stage tiếp theo, kèm tool chính/fallback và output cần lưu.
 - `/operator_dashboard`: tổng quan kênh, affiliate, lịch sắp tới và production job cần xử lý.
 - `/operator_daily days=1`: báo cáo vận hành theo ngày gồm job mới, publish queue, performance và việc cần xử lý.
-- `/trend_search niche=... platform=tiktok channel=<ID> aff=<ID> campaign=<ID>`: tìm trend mới từ nguồn RSS/news công khai, hiện nút tạo video trend vào pipeline.
+- `/trend_search niche=... platform=tiktok channel=<ID> aff=<ID> campaign=<ID>`: tìm trend mới từ nguồn RSS/news công khai, chấm điểm trend/affiliate/cạnh tranh và hiện nút tạo video trend vào pipeline.
+- `/trend_rank 10`: xem bảng xếp hạng trend đã lưu theo điểm ưu tiên sản xuất video affiliate.
 - `/handoff job=<ID> tool=claude|gemini|runway|kling|capcut|ffmpeg|fish|edge stage=...`: xuất prompt giao việc cho AI/tool khác và chuyển job sang `waiting`.
 - `/publish_pack job=<ID>`: tạo gói caption, hashtag, CTA, link affiliate và checklist trước khi đăng.
 - `/review_gate job=<ID>`: AI kiểm duyệt quyền hình ảnh/âm thanh, affiliate claim, CTA và rủi ro nền tảng trước khi đăng.
