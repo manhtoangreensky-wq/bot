@@ -71,6 +71,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/channels`: liệt kê kênh/tài khoản nội bộ.
 - `/channel_publish_set id=<CHANNEL_ID> mode=manual|api token_env=... page_id=...`: cấu hình khả năng đăng thủ công/API cho kênh, chỉ lưu tên biến môi trường token.
 - `/publish_readiness`: kiểm tra kênh nào sẵn sàng đăng thủ công hoặc đã đủ cấu hình API cơ bản.
+- `/publisher_status`: kiểm tra riêng lớp publisher, gồm kênh manual/API-ready, queue đang mở, blocker token/env/page_id và endpoint tiếp theo cho worker.
 - `/affiliate_add network=... product=... niche=... url=... price=... rate=... audience=... allowed=... blocked=...`: lưu link affiliate Shopee/Lazada/TikTok hoặc sàn khác kèm hồ sơ sản phẩm.
 - `/affiliate_seed`: import bộ link affiliate mặc định của admin vào database, tự bỏ qua URL đã tồn tại để không tạo trùng.
 - `/affiliates`: liệt kê link affiliate nội bộ.
@@ -150,6 +151,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /lead`: nhận lead từ landing page và gửi thông báo về admin Telegram.
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
 - `GET /api/operator/status`: worker ngoài kiểm tra readiness tổng thể trước khi tự động scale hoặc publish.
+- `GET /api/operator/publisher/status`: worker ngoài kiểm tra readiness riêng cho publisher: kênh nào manual/API-ready, queue nào chờ đăng, blocker token/env/page_id.
 - `GET /api/operator/audit`: worker ngoài kiểm tra mức sẵn sàng end-to-end và blocker còn thiếu trước khi bật automation.
 - `GET /api/operator/worker-spec`: worker ngoài đọc runbook máy đọc được cho Director, Creative, Tool Worker, Publisher và Growth Analyst.
 - `GET /api/operator/toolchain`: worker ngoài đọc chính sách paid-first/fallback theo từng stage, gồm Claude/Gemini/OpenAI, Fish/Edge, RemoveBG/Cutout, Kling/Runway, CapCut/FFmpeg, publisher và payment.
@@ -200,6 +202,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Review gate là admin-only, dùng làm chốt kiểm duyệt trước khi đăng; job đạt có thể chuyển sang `ready`, job rủi ro chuyển `blocked`.
 - Publish queue là admin-only, dùng để gom job đã duyệt vào hàng đợi đăng thủ công hoặc chuẩn bị sẵn điểm nối API/OAuth chính thức.
 - Publisher handoff là lớp nối giữa bot và publisher worker: bot không lưu secret nền tảng, chỉ trả tên biến môi trường/token cần có, nội dung cần đăng và endpoint để worker báo kết quả.
+- Publisher status là chốt vận hành cho auto-post: cron/n8n nên gọi trước khi claim queue để biết có kênh API-ready hay chỉ nên trả handoff cho admin đăng thủ công.
 - Job ready check là admin-only, dùng như chốt cuối trước khi đưa video vào hàng đợi đăng; nếu thiếu asset/review/creative/manifest/task, bot trả về lệnh cần chạy tiếp.
 - Production assets là admin-only, dùng để lưu script, voice, raw video, subtitle, thumbnail, final video hoặc source link theo từng job trước khi review/publish.
 - Auto-post readiness là admin-only, dùng để kiểm tra channel nào có thể đăng thủ công, channel nào đã có `token_env` trỏ tới biến môi trường trên server, và channel nào còn thiếu cấu hình. Secret không lưu trong SQLite.

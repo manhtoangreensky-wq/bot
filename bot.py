@@ -2113,6 +2113,115 @@ def operator_status_data(owner_id):
         "blocked_jobs": blocked_jobs,
     }
 
+def publisher_status_data(owner_id):
+    channel_rows = list_social_publish_readiness(owner_id)
+    channels = []
+    counts = {
+        "manual_ready": 0,
+        "api_ready": 0,
+        "manual_required": 0,
+        "missing_token_env": 0,
+        "missing_secret": 0,
+        "missing_page_id": 0,
+        "blocked": 0,
+    }
+    for row in channel_rows:
+        cid, platform, channel_name, account_label, status, publish_mode, token_env, page_id = row
+        readiness, reason = channel_publish_readiness(row)
+        counts[readiness] = counts.get(readiness, 0) + 1
+        channels.append({
+            "id": cid,
+            "platform": platform,
+            "channel_name": channel_name,
+            "account_label": account_label,
+            "status": status,
+            "publish_mode": publish_mode or "manual",
+            "token_env": token_env,
+            "page_id": page_id,
+            "readiness": readiness,
+            "reason": reason,
+            "can_manual_publish": readiness in {"manual_ready", "api_ready", "manual_required"},
+            "can_api_publish": readiness == "api_ready",
+        })
+
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT pq.status, COALESCE(pq.platform,''), COALESCE(pq.mode,''), COUNT(*)
+        FROM publish_queue pq
+        WHERE pq.owner_id=?
+        GROUP BY pq.status, pq.platform, pq.mode
+        ORDER BY pq.status, pq.platform, pq.mode""",
+        (str(owner_id),)
+    )
+    queue_counts = [
+        {"status": status, "platform": platform, "mode": mode, "count": count}
+        for status, platform, mode, count in c.fetchall()
+    ]
+    c.execute(
+        """SELECT pq.id, pq.job_id, pq.platform, pq.mode, pq.status, pq.scheduled_at,
+                  sc.channel_name, sc.account_label, pj.topic, pj.asset_url
+        FROM publish_queue pq
+        LEFT JOIN social_channels sc ON sc.id=pq.channel_id
+        LEFT JOIN production_jobs pj ON pj.id=pq.job_id
+        WHERE pq.owner_id=? AND pq.status IN ('queued','scheduled','publishing','blocked')
+        ORDER BY
+            CASE pq.status WHEN 'queued' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'publishing' THEN 2 WHEN 'blocked' THEN 3 ELSE 4 END,
+            pq.id ASC
+        LIMIT 20""",
+        (str(owner_id),)
+    )
+    open_queue = [
+        {
+            "queue_id": qid,
+            "job_id": job_id,
+            "platform": platform,
+            "mode": mode,
+            "status": status,
+            "scheduled_at": scheduled_at,
+            "channel_name": channel_name,
+            "account_label": account_label,
+            "topic": topic,
+            "has_asset": bool(asset_url),
+            "handoff_url": f"/api/operator/publish/{qid}/handoff",
+            "complete_url": f"/api/operator/publish/{qid}/complete",
+        }
+        for qid, job_id, platform, mode, status, scheduled_at, channel_name, account_label, topic, asset_url in c.fetchall()
+    ]
+    conn.close()
+
+    blockers = []
+    if not channel_rows:
+        blockers.append({"key": "no_channels", "detail": "Chưa có kênh đăng.", "next": "/channel_add platform=tiktok name=... mode=manual"})
+    for channel in channels:
+        if channel["readiness"] in {"missing_token_env", "missing_secret", "missing_page_id", "blocked"}:
+            blockers.append({
+                "key": f"channel_{channel['id']}",
+                "detail": f"{channel['platform']} / {channel['channel_name']}: {channel['reason']}",
+                "next": f"/channel_publish_set id={channel['id']} mode=manual hoặc mode=api token_env=...",
+            })
+    can_publish_any = any(ch["can_manual_publish"] for ch in channels)
+    can_api_publish = any(ch["can_api_publish"] for ch in channels)
+    queued_count = sum(row["count"] for row in queue_counts if row["status"] in {"queued", "scheduled"})
+    return {
+        "ready": can_publish_any,
+        "api_ready": can_api_publish,
+        "counts": counts,
+        "queue_counts": queue_counts,
+        "open_queue": open_queue,
+        "channels": channels,
+        "blockers": blockers,
+        "next": {
+            "telegram_queue": "/publish_queue",
+            "telegram_handoff": "/publisher_handoff queue=<QUEUE_ID>",
+            "api_next": "/api/operator/publish/next",
+            "api_handoff": "/api/operator/publish/<QUEUE_ID>/handoff",
+            "api_complete": "/api/operator/publish/<QUEUE_ID>/complete",
+        },
+        "rule": "Manual-ready được phép đăng thủ công. API-ready mới cho publisher worker tự đăng qua API chính thức; OnlyFans giữ manual trừ khi có công cụ được phép theo ToS.",
+        "queued_count": queued_count,
+    }
+
 def operator_audit_data(owner_id):
     status = operator_status_data(owner_id)
     conn = db_connect()
@@ -7652,6 +7761,45 @@ async def cmd_publish_readiness(update: Update, context: ContextTypes.DEFAULT_TY
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_publisher_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = publisher_status_data(update.effective_user.id)
+    lines = [
+        "📡 <b>PUBLISHER STATUS</b>",
+        f"• Ready manual/API: <b>{'có' if data['ready'] else 'chưa'}</b>",
+        f"• API-ready: <b>{'có' if data['api_ready'] else 'chưa'}</b>",
+        f"• Queue chờ đăng: <b>{data['queued_count']}</b>",
+        "",
+        "<b>Kênh đăng:</b>",
+    ]
+    if data["channels"]:
+        for ch in data["channels"][:12]:
+            lines.append(
+                f"• #{ch['id']} | <code>{html.escape(ch['platform'] or '-')}</code> | "
+                f"{html.escape(ch['channel_name'] or '-')} / {html.escape(ch['account_label'] or 'main')}\n"
+                f"  mode=<code>{html.escape(ch['publish_mode'] or '-')}</code> "
+                f"readiness=<b>{html.escape(ch['readiness'])}</b> | {html.escape(ch['reason'])}"
+            )
+    else:
+        lines.append("• Chưa có kênh. Tạo bằng /channel_add.")
+    if data["open_queue"]:
+        lines.append("\n<b>Queue đang mở:</b>")
+        for item in data["open_queue"][:8]:
+            lines.append(
+                f"• queue #{item['queue_id']} | job #{item['job_id']} | "
+                f"<code>{html.escape(item['platform'] or '-')}</code>/{html.escape(item['mode'] or '-')}"
+                f" | {html.escape(item['status'] or '-')}\n"
+                f"  {html.escape(item['topic'] or '-')}\n"
+                f"  next: <code>/publisher_handoff queue={item['queue_id']}</code>"
+            )
+    if data["blockers"]:
+        lines.append("\n<b>Blocker cần xử lý:</b>")
+        for blocker in data["blockers"][:8]:
+            lines.append(f"• {html.escape(blocker['detail'])}\n  <code>{html.escape(blocker['next'])}</code>")
+    lines.append("\nAPI: <code>GET /api/operator/publisher/status</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_affiliate_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -8971,7 +9119,7 @@ def operator_category_keyboard(category):
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
             ("🤖 Publisher handoff", "publisherhandoff"), ("✅ Approve publish", "approvepublish"),
-            ("🧪 Publish readiness", "readiness"),
+            ("📡 Publisher status", "publisherstatus"), ("🧪 Publish readiness", "readiness"),
             ("✅ Mark published", "markpublished"),
         ],
         "cat_money": [
@@ -9053,6 +9201,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• n8n template: <code>GET {html.escape(base_url)}/api/operator/n8n-template</code>",
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
+        f"• Trạng thái publisher: <code>GET {html.escape(base_url)}/api/operator/publisher/status</code>",
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
         f"• Make video pipeline: <code>POST {html.escape(base_url)}/api/operator/make-video</code>",
@@ -9290,6 +9439,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
         "publishqueue": "/publish_queue\n/publisher_handoff queue=<QUEUE_ID>\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
         "publisherhandoff": "/publisher_handoff queue=<QUEUE_ID>\nGET /api/operator/publish/<QUEUE_ID>/handoff",
+        "publisherstatus": "/publisher_status\nGET /api/operator/publisher/status",
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
@@ -11921,6 +12071,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("channels",    cmd_channels))
     tg_app.add_handler(CommandHandler("channel_publish_set", cmd_channel_publish_set))
     tg_app.add_handler(CommandHandler("publish_readiness", cmd_publish_readiness))
+    tg_app.add_handler(CommandHandler("publisher_status", cmd_publisher_status))
     tg_app.add_handler(CommandHandler("affiliate_add", cmd_affiliate_add))
     tg_app.add_handler(CommandHandler("affiliate_seed", cmd_affiliate_seed))
     tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
@@ -12224,6 +12375,12 @@ async def api_operator_status(request: Request):
             "loop": "/api/operator/loop",
         },
     }
+
+@fastapi_app.get("/api/operator/publisher/status")
+async def api_operator_publisher_status(request: Request):
+    verify_operator_api_token(request)
+    data = publisher_status_data(ADMIN_ID)
+    return {"ok": True, **data}
 
 @fastapi_app.get("/api/operator/audit")
 async def api_operator_audit(request: Request):
