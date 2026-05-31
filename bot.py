@@ -4248,6 +4248,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /operator_menu — Menu nút theo thư mục: Trend, Affiliate, Sản xuất, Đăng bài, Doanh thu, API",
             "• /brain &lt;lệnh&gt; — Ra lệnh tự nhiên cho AI Operator",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
+            "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
             "• /dashboard — Dashboard quản trị hệ thống",
             "• /checkpayos &lt;mã_đơn&gt; — Kiểm tra lại đơn PayOS",
             "• /tools và /mmo — Kho công cụ/quy trình nội bộ Admin",
@@ -5873,7 +5874,8 @@ def operator_category_keyboard(category):
         "cat_affiliate": [
             ("🔗 Import catalog", "affseed"), ("🛒 Danh sách link", "affiliates"),
             ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
-            ("💰 Báo cáo affiliate", "affreport"), ("✏️ Cập nhật hồ sơ", "affprofile"),
+            ("🚀 Scale thành video", "affscale"), ("💰 Báo cáo affiliate", "affreport"),
+            ("✏️ Cập nhật hồ sơ", "affprofile"),
         ],
         "cat_schedule": [
             ("📡 Kênh", "channels"), ("➕ Thêm kênh", "channeladd"),
@@ -6009,6 +6011,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "affseed": "/affiliate_seed\n/affiliates",
         "affiliates": "/affiliates",
         "affreport": "/affiliate_report days=30\n/affiliate_report days=90 limit=20",
+        "affscale": "/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID>",
         "affideas": "/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=trend đang nóng",
         "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
         "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
@@ -7061,6 +7064,90 @@ async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYP
         "<code>/performance_add job=&lt;JOB_ID&gt; type=click|order|revenue value=1 amount=...</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        affiliate_id = int(data.get("id") or data.get("aff") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/affiliate_scale aff=&lt;AFF_ID&gt; platform=tiktok channel=all limit=5 campaign=&lt;ID&gt;</code>",
+            parse_mode="HTML"
+        )
+    affiliate = get_affiliate_link(affiliate_id, update.effective_user.id)
+    if not affiliate:
+        return await update.message.reply_text("❌ Không tìm thấy affiliate hoặc không có quyền.")
+    (
+        aid, network, product, niche, url, note, status,
+        price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
+    ) = affiliate
+    platform_filter = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    channel_filter = (data.get("channel") or data.get("kenh") or "all").lower()
+    scale_niche = data.get("niche") or data.get("ngach") or niche or product or "affiliate"
+    try:
+        limit = max(1, min(int(data.get("limit") or data.get("max") or 5), 12))
+    except ValueError:
+        limit = 5
+    try:
+        campaign_id = int(data.get("campaign") or data.get("camp") or 0)
+    except ValueError:
+        campaign_id = 0
+    if campaign_id and not get_campaign(campaign_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy campaign hoặc không có quyền.")
+    msg = await update.message.reply_text(
+        f"🚀 Đang scale affiliate #{aid}: {html.escape(product or '-')}\n"
+        "Bot sẽ tìm trend phù hợp và tạo production job..."
+    )
+    try:
+        created_jobs, error = await create_operator_auto_jobs(
+            update.effective_user.id,
+            scale_niche,
+            platform_filter,
+            channel_filter,
+            campaign_id,
+            affiliate_id,
+            limit,
+        )
+    except Exception as e:
+        await alert_admin(context, "Affiliate Scale", f"{str(e)} | aff={affiliate_id} niche={scale_niche}")
+        return await msg.edit_text("❌ Affiliate Scale lỗi khi tìm trend/tạo job. Đã báo admin.")
+    if error:
+        return await msg.edit_text(f"❌ {html.escape(error)}", parse_mode="HTML")
+    if not created_jobs:
+        return await msg.edit_text("📭 Chưa tạo được job nào. Kiểm tra lại channel active hoặc niche.")
+    lines = [
+        f"✅ <b>ĐÃ SCALE AFFILIATE #{aid}</b>",
+        f"• Sản phẩm: <b>{html.escape(product or '-')}</b>",
+        f"• Network: <code>{html.escape(network or '-')}</code>",
+        f"• Niche: <b>{html.escape(scale_niche)}</b>",
+        f"• Platform: <code>{html.escape(platform_filter or 'auto')}</code>",
+        f"• Channel: <code>{html.escape(channel_filter)}</code>",
+        f"• Job tạo mới: <b>{len(created_jobs)}</b>",
+        "",
+        "<b>Job mới:</b>",
+    ]
+    for item in created_jobs[:10]:
+        lines.append(
+            f"• job #{item['job_id']} | trend #{item['trend_id']} | score=<b>{item['score']}</b> | "
+            f"<code>{html.escape(item['platform'] or '-')}</code> | {html.escape(item['channel_name'] or '-')}\n"
+            f"  {html.escape(item['title'])}\n"
+            f"  lý do: {html.escape(item.get('reason') or '-')}"
+        )
+    lines.append(
+        "\nBước tiếp:\n"
+        "<code>/operator_build job=&lt;JOB_ID&gt; n=5 duration=45</code>\n"
+        "<code>/autopilot niche=%s platform=%s channel=%s aff=%s campaign=%s limit=3 duration=45</code>"
+        % (
+            html.escape(scale_niche),
+            html.escape(platform_filter or "tiktok"),
+            html.escape(channel_filter),
+            aid,
+            campaign_id or "&lt;ID&gt;",
+        )
+    )
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -8164,6 +8251,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("affiliate_report", cmd_affiliate_report))
+    tg_app.add_handler(CommandHandler("affiliate_scale", cmd_affiliate_scale))
     tg_app.add_handler(CommandHandler("growth", cmd_growth))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
     tg_app.add_handler(CommandHandler("pipeline",    cmd_pipeline))
