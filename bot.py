@@ -222,6 +222,43 @@ def init_db():
         approved_at DATETIME,
         published_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS social_channels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        platform TEXT,
+        channel_name TEXT,
+        account_label TEXT,
+        topic_focus TEXT,
+        audience TEXT,
+        posting_slots TEXT,
+        status TEXT DEFAULT 'active',
+        notes TEXT,
+        created_at DATETIME
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS affiliate_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        network TEXT,
+        product_name TEXT,
+        niche TEXT,
+        url TEXT,
+        commission_note TEXT,
+        status TEXT DEFAULT 'active',
+        created_at DATETIME
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS content_calendar (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        channel_id INTEGER,
+        campaign_id INTEGER,
+        affiliate_id INTEGER,
+        post_date TEXT,
+        platform TEXT,
+        topic TEXT,
+        status TEXT DEFAULT 'planned',
+        notes TEXT,
+        created_at DATETIME
+    )""")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -255,6 +292,18 @@ def init_db():
         "video_jobs": [
             ("approved_at", "DATETIME"),
             ("published_at", "DATETIME"),
+        ],
+        "social_channels": [
+            ("notes", "TEXT"),
+            ("status", "TEXT DEFAULT 'active'"),
+        ],
+        "affiliate_links": [
+            ("commission_note", "TEXT"),
+            ("status", "TEXT DEFAULT 'active'"),
+        ],
+        "content_calendar": [
+            ("notes", "TEXT"),
+            ("status", "TEXT DEFAULT 'planned'"),
         ],
     }.items():
         for col, col_type in columns:
@@ -608,6 +657,131 @@ def campaign_stats(owner_id):
     recent_jobs = c.fetchall()
     conn.close()
     return total_campaigns, job_counts, recent_jobs
+
+def create_social_channel(owner_id, platform, channel_name, account_label="", topic_focus="", audience="", posting_slots="", notes="") -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO social_channels
+        (owner_id, platform, channel_name, account_label, topic_focus, audience, posting_slots, status, notes, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (str(owner_id), platform, channel_name, account_label, topic_focus, audience, posting_slots, "active", notes, now_text())
+    )
+    channel_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return channel_id
+
+def list_social_channels(owner_id, limit=30):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, platform, channel_name, account_label, topic_focus, audience, posting_slots, status
+        FROM social_channels WHERE owner_id=? ORDER BY id DESC LIMIT ?""",
+        (str(owner_id), limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_social_channel(channel_id, owner_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, platform, channel_name, account_label, topic_focus, audience, posting_slots, status
+        FROM social_channels WHERE id=? AND owner_id=?""",
+        (channel_id, str(owner_id))
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def create_affiliate_link(owner_id, network, product_name, niche="", url="", commission_note="") -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO affiliate_links
+        (owner_id, network, product_name, niche, url, commission_note, status, created_at)
+        VALUES (?,?,?,?,?,?,?,?)""",
+        (str(owner_id), network, product_name, niche, url, commission_note, "active", now_text())
+    )
+    affiliate_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return affiliate_id
+
+def list_affiliate_links(owner_id, limit=30):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, network, product_name, niche, url, commission_note, status
+        FROM affiliate_links WHERE owner_id=? ORDER BY id DESC LIMIT ?""",
+        (str(owner_id), limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_affiliate_link(affiliate_id, owner_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, network, product_name, niche, url, commission_note, status
+        FROM affiliate_links WHERE id=? AND owner_id=?""",
+        (affiliate_id, str(owner_id))
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def create_calendar_slot(owner_id, channel_id, campaign_id, affiliate_id, post_date, platform, topic, notes="") -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO content_calendar
+        (owner_id, channel_id, campaign_id, affiliate_id, post_date, platform, topic, status, notes, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (str(owner_id), channel_id, campaign_id, affiliate_id, post_date, platform, topic, "planned", notes, now_text())
+    )
+    slot_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return slot_id
+
+def list_calendar_slots(owner_id, limit=30):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT cc.id, cc.post_date, cc.platform, sc.channel_name, cc.topic, cc.status, cc.campaign_id, cc.affiliate_id
+        FROM content_calendar cc
+        LEFT JOIN social_channels sc ON sc.id = cc.channel_id
+        WHERE cc.owner_id=?
+        ORDER BY cc.post_date ASC, cc.id DESC
+        LIMIT ?""",
+        (str(owner_id), limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def slots_per_day(posting_slots: str) -> int:
+    digits = "".join(ch for ch in (posting_slots or "") if ch.isdigit())
+    if not digits:
+        return 2
+    return max(1, min(int(digits), 5))
+
+def content_topic_for_slot(niche, channel_focus, platform, day_index, slot_index):
+    focus = channel_focus or niche or "công nghệ"
+    templates = [
+        "Review nhanh {focus}: vấn đề thật và cách TOAN DAAS xử lý",
+        "Top công cụ {focus} đáng dùng trong ngày",
+        "Case study kiếm tiền với {focus} và link affiliate phù hợp",
+        "So sánh sản phẩm {focus}: nên mua loại nào",
+        "Checklist tạo nội dung {focus} để bán hàng bền vững",
+        "Lỗi thường gặp khi làm {focus} và cách sửa",
+    ]
+    template = templates[(day_index + slot_index) % len(templates)]
+    return f"{template.format(focus=focus)} ({platform})"
 
 def calculate_dynamic_cost(action_type, size_or_length):
     if action_type == "chat":
@@ -1382,6 +1556,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /video_plan — AI lập kế hoạch video",
             "• /video_job &lt;id&gt; — Xem job video",
             "• /campaign_stats — Thống kê AI Operator",
+            "• /channel_add — Thêm kênh/tài khoản nội bộ",
+            "• /channels — Danh sách kênh nội bộ",
+            "• /affiliate_add — Lưu link affiliate",
+            "• /affiliates — Danh sách affiliate",
+            "• /calendar_plan — Lên lịch nội dung",
+            "• /calendar — Xem lịch nội dung",
             "• /dashboard — Dashboard quản trị",
             "• /checkpayos &lt;mã_đơn&gt; — Kiểm tra lại đơn PayOS",
         ])
@@ -1613,6 +1793,24 @@ async def cmd_video_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ Không tìm thấy campaign hoặc không có quyền.")
     platforms = data.get("platforms") or data.get("nen") or ""
     affiliate_url = data.get("affiliate") or data.get("link") or ""
+    channel_id = data.get("channel") or data.get("kenh")
+    if channel_id:
+        try:
+            channel = get_social_channel(int(channel_id), update.effective_user.id)
+        except ValueError:
+            channel = None
+        if not channel:
+            return await update.message.reply_text("❌ Không tìm thấy channel hoặc không có quyền.")
+        platforms = platforms or channel[1]
+    affiliate_id = data.get("affiliate_id") or data.get("aff")
+    if affiliate_id:
+        try:
+            affiliate = get_affiliate_link(int(affiliate_id), update.effective_user.id)
+        except ValueError:
+            affiliate = None
+        if not affiliate:
+            return await update.message.reply_text("❌ Không tìm thấy affiliate hoặc không có quyền.")
+        affiliate_url = affiliate_url or affiliate[4]
     prompt = build_video_brief_prompt(campaign, topic, platforms, affiliate_url)
     msg = await update.message.reply_text("⏳ AI Operator đang lập kế hoạch video...")
     brief = AgentGemini.chat(
@@ -1674,6 +1872,169 @@ async def cmd_campaign_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     for jid, topic, platforms, status, created_at in recent_jobs:
         lines.append(f"• #{jid} | {status} | <code>{platforms}</code> | {topic}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_channel_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    platform = data.get("platform") or data.get("nen")
+    name = data.get("name") or data.get("kenh")
+    account = data.get("account") or data.get("tk") or ""
+    focus = data.get("focus") or data.get("niche") or data.get("ngach") or ""
+    audience = data.get("audience") or data.get("khach") or ""
+    slots = data.get("slots") or data.get("lich") or "2/day"
+    notes = data.get("notes") or data.get("note") or ""
+    if not platform or not name:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/channel_add platform=tiktok name=TechVN account=tk1 focus=AI tools audience=creator slots=2/day</code>",
+            parse_mode="HTML"
+        )
+    channel_id = create_social_channel(update.effective_user.id, platform, name, account, focus, audience, slots, notes)
+    await update.message.reply_text(
+        f"✅ <b>Đã thêm channel #{channel_id}</b>\n"
+        f"• Nền tảng: <code>{html.escape(platform)}</code>\n"
+        f"• Kênh: <b>{html.escape(name)}</b>\n"
+        f"• Tài khoản: <code>{html.escape(account or 'chưa ghi')}</code>\n"
+        f"• Chủ đề: {html.escape(focus or 'chưa ghi')}\n"
+        f"• Lịch: <code>{html.escape(slots)}</code>",
+        parse_mode="HTML"
+    )
+
+async def cmd_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    rows = list_social_channels(update.effective_user.id)
+    if not rows:
+        return await update.message.reply_text("📭 Chưa có channel. Tạo bằng /channel_add.")
+    lines = ["📡 <b>KÊNH NỘI BỘ</b>\n"]
+    for cid, platform, name, account, focus, audience, slots, status in rows:
+        lines.append(
+            f"• #{cid} | <code>{html.escape(platform)}</code> | <b>{html.escape(name)}</b> | "
+            f"{html.escape(account or '-') } | {html.escape(focus or '-') } | {html.escape(slots or '-') } | {status}"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_affiliate_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    network = data.get("network") or data.get("san") or data.get("shop")
+    product = data.get("product") or data.get("sp") or data.get("name")
+    niche = data.get("niche") or data.get("ngach") or ""
+    url = data.get("url") or data.get("link") or ""
+    note = data.get("note") or data.get("commission") or data.get("hh") or ""
+    if not network or not product:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/affiliate_add network=shopee product=mic thu am niche=cong nghe url=https://... note=hoa hong 8%</code>",
+            parse_mode="HTML"
+        )
+    affiliate_id = create_affiliate_link(update.effective_user.id, network, product, niche, url, note)
+    await update.message.reply_text(
+        f"✅ <b>Đã lưu affiliate #{affiliate_id}</b>\n"
+        f"• Sàn: <code>{html.escape(network)}</code>\n"
+        f"• Sản phẩm: <b>{html.escape(product)}</b>\n"
+        f"• Niche: {html.escape(niche or 'chưa ghi')}\n"
+        f"• Link: <code>{html.escape(url or 'chưa có')}</code>",
+        parse_mode="HTML"
+    )
+
+async def cmd_affiliates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    rows = list_affiliate_links(update.effective_user.id)
+    if not rows:
+        return await update.message.reply_text("📭 Chưa có affiliate. Tạo bằng /affiliate_add.")
+    lines = ["🛒 <b>LINK AFFILIATE NỘI BỘ</b>\n"]
+    for aid, network, product, niche, url, note, status in rows:
+        url_display = url if len(url or "") <= 70 else url[:67] + "..."
+        lines.append(
+            f"• #{aid} | <code>{html.escape(network)}</code> | <b>{html.escape(product)}</b> | "
+            f"{html.escape(niche or '-') } | {html.escape(note or '-') } | {status}\n"
+            f"  <code>{html.escape(url_display or 'chưa có link')}</code>"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_calendar_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or 7), 30))
+    except ValueError:
+        days = 7
+    channel_filter = (data.get("channel") or data.get("kenh") or "all").lower()
+    try:
+        campaign_id = int(data.get("campaign") or data.get("camp") or 0)
+    except ValueError:
+        campaign_id = 0
+    try:
+        affiliate_id = int(data.get("affiliate_id") or data.get("aff") or 0)
+    except ValueError:
+        affiliate_id = 0
+    niche = data.get("niche") or data.get("ngach") or "công nghệ"
+
+    if campaign_id and not get_campaign(campaign_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy campaign.")
+    if affiliate_id and not get_affiliate_link(affiliate_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy affiliate.")
+    if channel_filter == "all":
+        channels = list_social_channels(update.effective_user.id, limit=50)
+    else:
+        try:
+            one = get_social_channel(int(channel_filter), update.effective_user.id)
+        except ValueError:
+            one = None
+        channels = [one] if one else []
+    if not channels:
+        return await update.message.reply_text("📭 Chưa có channel phù hợp. Tạo bằng /channel_add.")
+
+    created = []
+    base_date = datetime.now().date()
+    for day_index in range(days):
+        for channel in channels:
+            cid, platform, name, account, focus, audience, slots, status = channel
+            if status != "active":
+                continue
+            for slot_index in range(slots_per_day(slots)):
+                if len(created) >= 80:
+                    break
+                post_date = (base_date + timedelta(days=day_index)).isoformat()
+                topic = content_topic_for_slot(niche, focus, platform, day_index, slot_index)
+                note = f"{name} | {account or 'main'} | audience={audience or 'general'}"
+                slot_id = create_calendar_slot(
+                    update.effective_user.id, cid, campaign_id, affiliate_id, post_date, platform, topic, note
+                )
+                created.append((slot_id, post_date, platform, name, topic))
+    preview = created[:10]
+    lines = [
+        f"✅ <b>Đã tạo {len(created)} lịch nội dung</b>",
+        f"• Số ngày: <b>{days}</b>",
+        f"• Channel: <code>{html.escape(channel_filter)}</code>",
+        f"• Campaign: <code>{campaign_id or 'chưa gắn'}</code>",
+        f"• Affiliate: <code>{affiliate_id or 'chưa gắn'}</code>",
+        "",
+        "<b>10 lịch đầu:</b>",
+    ]
+    for slot_id, post_date, platform, name, topic in preview:
+        lines.append(f"• #{slot_id} | {post_date} | <code>{html.escape(platform)}</code> | {html.escape(name)} | {html.escape(topic)}")
+    lines.append("\nXem tiếp: /calendar")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    rows = list_calendar_slots(update.effective_user.id)
+    if not rows:
+        return await update.message.reply_text("📭 Chưa có lịch. Tạo bằng /calendar_plan.")
+    lines = ["🗓️ <b>LỊCH NỘI DUNG NỘI BỘ</b>\n"]
+    for slot_id, post_date, platform, channel_name, topic, status, campaign_id, affiliate_id in rows:
+        lines.append(
+            f"• #{slot_id} | {post_date} | <code>{html.escape(platform or '-')}</code> | "
+            f"{html.escape(channel_name or '-') } | {status}\n"
+            f"  {html.escape(topic or '-')}\n"
+            f"  camp=<code>{campaign_id or '-'}</code> aff=<code>{affiliate_id or '-'}</code>"
+        )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def handle_video_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2255,6 +2616,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_plan",  cmd_video_plan))
     tg_app.add_handler(CommandHandler("video_job",   cmd_video_job))
     tg_app.add_handler(CommandHandler("campaign_stats", cmd_campaign_stats))
+    tg_app.add_handler(CommandHandler("channel_add", cmd_channel_add))
+    tg_app.add_handler(CommandHandler("channels",    cmd_channels))
+    tg_app.add_handler(CommandHandler("affiliate_add", cmd_affiliate_add))
+    tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
+    tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
+    tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("ref",         cmd_ref))
     tg_app.add_handler(CommandHandler("gopy",        cmd_gopy))
     tg_app.add_handler(CommandHandler("add",         cmd_admin_add))
