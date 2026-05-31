@@ -4202,67 +4202,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     if is_admin:
         command_lines.extend([
-            "• /tools — Kho 30 công cụ AI/MMO (Admin)",
-            "• /mmo — Quy trình kiếm tiền bằng AI (Admin)",
-            "• /brain — Ra lệnh tự nhiên cho AI Operator",
+            "• /operator_menu — Menu nút theo thư mục: Trend, Affiliate, Sản xuất, Đăng bài, Doanh thu, API",
+            "• /brain &lt;lệnh&gt; — Ra lệnh tự nhiên cho AI Operator",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
-            "• /operator_menu — Menu vận hành AI Operator",
-            "• /operator_api — Xem endpoint/token status cho n8n/worker",
-            "• /campaign_new — Tạo chiến dịch affiliate/video",
-            "• /campaigns — Danh sách chiến dịch",
-            "• /video_plan — AI lập kế hoạch video",
-            "• /video_job &lt;id&gt; — Xem job video",
-            "• /campaign_stats — Thống kê AI Operator",
-            "• /channel_add — Thêm kênh/tài khoản nội bộ",
-            "• /channels — Danh sách kênh nội bộ",
-            "• /affiliate_add — Lưu link affiliate",
-            "• /affiliate_seed — Import bộ link affiliate mặc định",
-            "• /affiliates — Danh sách affiliate",
-            "• /affiliate_profile — Cập nhật hồ sơ/claim affiliate",
-            "• /affiliate_match — Chọn affiliate phù hợp trend",
-            "• /affiliate_ideas — Tạo ý tưởng video từ link affiliate",
-            "• /calendar_plan — Lên lịch nội dung",
-            "• /calendar — Xem lịch nội dung",
-            "• /operator — Ra lệnh tạo video một bước",
-            "• /operator_build — Tạo creative + manifest + task một lần",
-            "• /operator_auto — Tự tạo batch job từ trend",
-            "• /operator_next — Điều phối stage tiếp theo",
-            "• /operator_dashboard — Tổng quan vận hành",
-            "• /operator_loop — Quét job, tự queue job ready và báo task tiếp theo",
-            "• /publish_readiness — Kiểm tra sẵn sàng auto-post",
-            "• /channel_publish_set — Cấu hình mode/token kênh",
-            "• /trend_search — Tìm trend mới để làm video",
-            "• /trend_rank — Xếp hạng trend theo điểm affiliate",
-            "• /handoff — Prompt giao việc cho AI/tool khác",
-            "• /publish_pack — Gói caption/link để đăng",
-            "• /review_gate — Kiểm duyệt trước khi đăng",
-            "• /creative_test — Tạo biến thể hook/caption/CTA",
-            "• /creative_variants — Xem biến thể creative",
-            "• /creative_select — Chọn biến thể để sản xuất",
-            "• /creative_report — Báo cáo biến thể thắng",
-            "• /manifest — Tạo production manifest cho AI/tool",
-            "• /manifests — Xem manifest của job",
-            "• /manifest_handoff — Giao manifest cho từng AI/tool",
-            "• /task_plan — Tách manifest thành task",
-            "• /tasks — Xem production task",
-            "• /next_task — Lấy task ưu tiên tiếp theo",
-            "• /task_handoff — Giao từng task cho AI/tool",
-            "• /task_set — Cập nhật output task",
-            "• /queue_publish — Đưa job vào hàng đợi đăng",
-            "• /publish_queue — Xem hàng đợi đăng",
-            "• /asset_add — Lưu asset vào job",
-            "• /assets — Xem asset của job",
-            "• /job_report — Báo cáo đầy đủ một job",
-            "• /job_ready — Kiểm tra job đủ điều kiện đăng chưa",
-            "• /mark_published — Ghi nhận đã đăng bài",
-            "• /performance_add — Ghi hiệu quả bài đăng",
-            "• /performance — Báo cáo hiệu quả kiếm tiền",
-            "• /growth — Tối ưu nội dung/kênh/affiliate theo performance",
-            "• /produce — Tạo job sản xuất từ lịch",
-            "• /pipeline — Theo dõi pipeline video",
-            "• /pipeline_set — Cập nhật stage/trạng thái",
-            "• /dashboard — Dashboard quản trị",
+            "• /dashboard — Dashboard quản trị hệ thống",
             "• /checkpayos &lt;mã_đơn&gt; — Kiểm tra lại đơn PayOS",
+            "• /tools và /mmo — Kho công cụ/quy trình nội bộ Admin",
         ])
     text = (
         "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.2</b>\n\n"
@@ -5849,59 +5794,95 @@ async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🧠 Brain command", callback_data="opmenu|brain")],
-        [InlineKeyboardButton("🔌 Operator API", callback_data="opmenu|api")],
-        [InlineKeyboardButton("🚀 Autopilot batch", callback_data="opmenu|autopilot")],
-        [InlineKeyboardButton("⚡ Operator build", callback_data="opmenu|build")],
         [
-            InlineKeyboardButton("🧭 Dashboard", callback_data="opmenu|dashboard"),
-            InlineKeyboardButton("🔥 Tìm trend", callback_data="opmenu|trend")
-        ],
-        [InlineKeyboardButton("🏆 Trend ranking", callback_data="opmenu|rank")],
-        [
-            InlineKeyboardButton("🤖 Auto batch", callback_data="opmenu|auto"),
-            InlineKeyboardButton("🧪 Auto-post ready", callback_data="opmenu|readiness")
+            InlineKeyboardButton("🧠 Điều hành", callback_data="opmenu|cat_control"),
+            InlineKeyboardButton("🔥 Trend", callback_data="opmenu|cat_trend")
         ],
         [
-            InlineKeyboardButton("🎯 Affiliate match", callback_data="opmenu|affmatch"),
-            InlineKeyboardButton("🛒 Affiliate profile", callback_data="opmenu|affprofile")
+            InlineKeyboardButton("🔗 Affiliate", callback_data="opmenu|cat_affiliate"),
+            InlineKeyboardButton("📅 Kênh & lịch", callback_data="opmenu|cat_schedule")
         ],
         [
-            InlineKeyboardButton("💡 Affiliate ideas", callback_data="opmenu|affideas"),
-            InlineKeyboardButton("🔗 Import catalog", callback_data="opmenu|affseed")
+            InlineKeyboardButton("🎬 Sản xuất", callback_data="opmenu|cat_production"),
+            InlineKeyboardButton("📮 Đăng bài", callback_data="opmenu|cat_publish")
         ],
         [
-            InlineKeyboardButton("🎛 Pipeline", callback_data="opmenu|pipeline"),
-            InlineKeyboardButton("📅 Calendar", callback_data="opmenu|calendar")
+            InlineKeyboardButton("💰 Doanh thu", callback_data="opmenu|cat_money"),
+            InlineKeyboardButton("🔌 API/Auto", callback_data="opmenu|cat_api")
         ],
         [
-            InlineKeyboardButton("📦 Publish pack", callback_data="opmenu|publish"),
-            InlineKeyboardButton("🛡 Review gate", callback_data="opmenu|review")
+            InlineKeyboardButton("🛠 Nội bộ", callback_data="opmenu|cat_internal"),
+            InlineKeyboardButton("📊 Dashboard", callback_data="opmenu|dashboard")
         ],
-        [
-            InlineKeyboardButton("🧪 Creative test", callback_data="opmenu|creative"),
-            InlineKeyboardButton("🏁 Creative report", callback_data="opmenu|creativereport")
-        ],
-        [
-            InlineKeyboardButton("🗂 Assets", callback_data="opmenu|assets"),
-            InlineKeyboardButton("📋 Job report", callback_data="opmenu|report")
-        ],
-        [InlineKeyboardButton("🚦 Job ready check", callback_data="opmenu|jobready")],
-        [
-            InlineKeyboardButton("🎬 Production manifest", callback_data="opmenu|manifest"),
-            InlineKeyboardButton("🤝 Manifest handoff", callback_data="opmenu|manifesthandoff")
-        ],
-        [InlineKeyboardButton("✅ Production tasks", callback_data="opmenu|tasks")],
-        [InlineKeyboardButton("➡️ Next task", callback_data="opmenu|nexttask")],
-        [InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")],
-        [
-            InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
-            InlineKeyboardButton("💰 Performance", callback_data="opmenu|performance")
-        ],
-        [InlineKeyboardButton("📈 Growth optimizer", callback_data="opmenu|growth")],
-        [InlineKeyboardButton("🔁 Operator loop", callback_data="opmenu|loop")],
-        [InlineKeyboardButton("📊 Daily digest", callback_data="opmenu|daily")],
     ])
+
+def operator_category_keyboard(category):
+    categories = {
+        "cat_control": [
+            ("🧠 Brain command", "brain"), ("🚀 Autopilot batch", "autopilot"),
+            ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
+            ("📊 Daily digest", "daily"), ("🧭 Dashboard", "dashboard"),
+        ],
+        "cat_trend": [
+            ("🔥 Tìm trend", "trend"), ("🏆 Trend ranking", "rank"),
+            ("🤖 Auto từ trend", "auto"), ("📈 Growth optimizer", "growth"),
+        ],
+        "cat_affiliate": [
+            ("🔗 Import catalog", "affseed"), ("🛒 Danh sách link", "affiliates"),
+            ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
+            ("✏️ Cập nhật hồ sơ", "affprofile"),
+        ],
+        "cat_schedule": [
+            ("📡 Kênh", "channels"), ("➕ Thêm kênh", "channeladd"),
+            ("📅 Calendar", "calendar"), ("🗓 Lên lịch", "calendarplan"),
+            ("🧪 Auto-post ready", "readiness"),
+        ],
+        "cat_production": [
+            ("⚡ Build bundle", "build"), ("🎛 Pipeline", "pipeline"),
+            ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
+            ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
+            ("🗂 Assets", "assets"), ("📋 Job report", "report"),
+            ("🚦 Job ready", "jobready"), ("🛡 Review gate", "review"),
+            ("🧪 Creative test", "creative"), ("🏁 Creative report", "creativereport"),
+        ],
+        "cat_publish": [
+            ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
+            ("🧪 Publish readiness", "readiness"), ("✅ Mark published", "markpublished"),
+        ],
+        "cat_money": [
+            ("💰 Performance", "performance"), ("📈 Growth optimizer", "growth"),
+            ("📊 Daily digest", "daily"), ("🏦 Dashboard quản trị", "admin_dashboard"),
+            ("💳 Check PayOS", "checkpayos"),
+        ],
+        "cat_api": [
+            ("🔌 Operator API", "api"), ("🔁 Operator loop", "loop"),
+            ("🧪 Auto-post ready", "readiness"), ("📮 Publish API queue", "publishqueue"),
+        ],
+        "cat_internal": [
+            ("🛠 Tools", "tools"), ("💼 MMO workflow", "mmo"),
+            ("🤝 Handoff AI", "handoff"), ("📊 Campaign stats", "campaignstats"),
+        ],
+    }
+    rows = []
+    items = categories.get(category, [])
+    for i in range(0, len(items), 2):
+        rows.append([InlineKeyboardButton(text, callback_data=f"opmenu|{action}") for text, action in items[i:i + 2]])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại thư mục", callback_data="opmenu|root")])
+    return InlineKeyboardMarkup(rows)
+
+def operator_category_title(category):
+    titles = {
+        "cat_control": "🧠 ĐIỀU HÀNH",
+        "cat_trend": "🔥 TREND",
+        "cat_affiliate": "🔗 AFFILIATE",
+        "cat_schedule": "📅 KÊNH & LỊCH",
+        "cat_production": "🎬 SẢN XUẤT",
+        "cat_publish": "📮 ĐĂNG BÀI",
+        "cat_money": "💰 DOANH THU",
+        "cat_api": "🔌 API/AUTO",
+        "cat_internal": "🛠 NỘI BỘ",
+    }
+    return titles.get(category, "AI OPERATOR")
 
 async def cmd_operator_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -5914,7 +5895,7 @@ async def cmd_operator_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "3. Review gate trước khi đăng.\n"
         "4. Publish pack, đăng thủ công/API chính thức.\n"
         "5. Mark published và ghi performance.\n\n"
-        "Chọn nút bên dưới để lấy lệnh nhanh."
+        "Chọn một thư mục bên dưới để mở các lệnh liên quan."
     )
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=operator_menu_keyboard())
 
@@ -5957,22 +5938,40 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     if str(query.from_user.id) != ADMIN_ID:
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
     action = query.data.split("|", 1)[1]
+    if action == "root":
+        return await query.edit_message_text(
+            "🧠 <b>AI OPERATOR MENU</b>\n\nChọn một thư mục để mở các lệnh liên quan.",
+            parse_mode="HTML",
+            reply_markup=operator_menu_keyboard()
+        )
+    if action.startswith("cat_"):
+        return await query.edit_message_text(
+            f"{operator_category_title(action)}\n\nChọn mục cần thao tác:",
+            parse_mode="HTML",
+            reply_markup=operator_category_keyboard(action)
+        )
     snippets = {
         "dashboard": "/operator_dashboard",
+        "admin_dashboard": "/dashboard",
         "api": "/operator_api",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
         "autopilot": "/autopilot niche=công nghệ AI platform=tiktok channel=all aff=<AFF_ID> campaign=<ID> limit=3 duration=45",
         "build": "/operator_build job=<JOB_ID> n=5 duration=45",
+        "channels": "/channels",
+        "channeladd": "/channel_add platform=tiktok name=TechVN account=tk1 focus=AI tools audience=creator slots=2/day mode=manual",
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
         "rank": "/trend_rank\n/trend_rank 20",
         "affseed": "/affiliate_seed\n/affiliates",
+        "affiliates": "/affiliates",
         "affideas": "/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=trend đang nóng",
         "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
         "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
+        "calendarplan": "/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
+        "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
         "publishqueue": "/publish_queue\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
@@ -5990,12 +5989,16 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "growth": "/growth\n/growth days=30",
         "loop": "/operator_loop\n/operator_loop limit=10 queue=1",
         "daily": "/operator_daily\n/operator_daily days=7",
+        "tools": "/tools",
+        "mmo": "/mmo",
+        "campaignstats": "/campaign_stats",
+        "checkpayos": "/checkpayos <ORDER_CODE>",
     }
     await query.edit_message_text(
         f"🧠 <b>AI OPERATOR MENU</b>\n\n"
         f"Lệnh nhanh:\n<pre>{html.escape(snippets.get(action, '/operator_dashboard'))}</pre>",
         parse_mode="HTML",
-        reply_markup=operator_menu_keyboard()
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại thư mục", callback_data="opmenu|root")]])
     )
 
 async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):

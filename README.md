@@ -51,7 +51,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/mmo`: workflow kiếm tiền bằng AI hợp pháp nội bộ.
 - `/brain <lệnh tự nhiên>`: đầu não admin-only, hiểu lệnh tiếng Việt và tự định tuyến sang Operator Auto, tạo job, build job, job ready check hoặc báo cáo vận hành.
 - `/autopilot niche=... platform=tiktok channel=all aff=<ID> campaign=<ID> limit=3 duration=45`: tìm trend, tạo production job và tự build creative/manifest/task cho batch video.
-- `/operator_menu`: menu nút bấm cho toàn bộ quy trình AI Operator.
+- `/operator_menu`: menu nút bấm dạng thư mục, gom lệnh theo Điều hành, Trend, Affiliate, Kênh/Lịch, Sản xuất, Đăng bài, Doanh thu và API.
 - `/campaign_new name=... niche=... platforms=... affiliate=...`: tạo chiến dịch AI Operator.
 - `/campaigns`: liệt kê chiến dịch.
 - `/video_plan campaign=<ID> topic=... platforms=... channel=<ID> aff=<ID>`: AI tạo brief video, caption, hashtag, CTA và compliance checklist.
