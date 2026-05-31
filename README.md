@@ -72,6 +72,10 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/handoff job=<ID> tool=claude|gemini|runway|kling|capcut|ffmpeg|fish|edge stage=...`: xuất prompt giao việc cho AI/tool khác và chuyển job sang `waiting`.
 - `/publish_pack job=<ID>`: tạo gói caption, hashtag, CTA, link affiliate và checklist trước khi đăng.
 - `/review_gate job=<ID>`: AI kiểm duyệt quyền hình ảnh/âm thanh, affiliate claim, CTA và rủi ro nền tảng trước khi đăng.
+- `/creative_test job=<ID> n=5`: sinh nhiều biến thể hook/caption/CTA để A/B test video affiliate.
+- `/creative_variants <JOB_ID>`: xem các biến thể creative của job.
+- `/creative_select id=<VARIANT_ID>`: chọn biến thể creative để đưa vào stage script/sản xuất.
+- `/creative_report job=<ID>`: so sánh performance theo biến thể creative đã gắn khi ghi dữ liệu.
 - `/queue_publish job=<ID> mode=manual|api schedule=... note=...`: đưa job đã duyệt vào hàng đợi đăng.
 - `/publish_queue`: xem hàng đợi đăng.
 - `/publish_queue_set id=<QUEUE_ID> status=published|blocked|scheduled url=https://... note=...`: cập nhật trạng thái hàng đợi đăng.
@@ -79,7 +83,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/assets <JOB_ID>`: xem toàn bộ asset đã lưu của job.
 - `/job_report <JOB_ID>`: báo cáo tổng hợp brief, asset, publish queue, publish URL, affiliate và performance của một job.
 - `/mark_published job=<ID> url=https://... views=0 clicks=0 note=...`: ghi nhận bài đã đăng thủ công, lưu URL và chuyển job sang `published`.
-- `/performance_add job=<ID> type=view|click|order|revenue|lead value=... amount=... note=...`: ghi hiệu quả bài đăng/affiliate.
+- `/performance_add job=<ID> variant=<VARIANT_ID> type=view|click|order|revenue|lead value=... amount=... note=...`: ghi hiệu quả bài đăng/affiliate, có thể gắn vào biến thể creative.
 - `/performance`: báo cáo hiệu quả theo loại sự kiện, kênh và job gần nhất.
 - `/produce slot=<calendar_id>`: tạo production job từ lịch nội dung, kèm brief AI nếu đã cấu hình provider.
 - `/pipeline`: xem hàng đợi sản xuất video.

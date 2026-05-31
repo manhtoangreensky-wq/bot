@@ -288,10 +288,27 @@ def init_db():
         note TEXT,
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS creative_variants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        job_id INTEGER,
+        variant_label TEXT,
+        hook TEXT,
+        script_angle TEXT,
+        caption TEXT,
+        cta TEXT,
+        hashtags TEXT,
+        creative_score INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'draft',
+        note TEXT,
+        created_at DATETIME,
+        selected_at DATETIME
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS performance_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
         job_id INTEGER,
+        variant_id INTEGER DEFAULT 0,
         channel_id INTEGER,
         affiliate_id INTEGER,
         platform TEXT,
@@ -394,7 +411,20 @@ def init_db():
             ("file_id", "TEXT"),
             ("note", "TEXT"),
         ],
+        "creative_variants": [
+            ("variant_label", "TEXT"),
+            ("hook", "TEXT"),
+            ("script_angle", "TEXT"),
+            ("caption", "TEXT"),
+            ("cta", "TEXT"),
+            ("hashtags", "TEXT"),
+            ("creative_score", "INTEGER DEFAULT 0"),
+            ("status", "TEXT DEFAULT 'draft'"),
+            ("note", "TEXT"),
+            ("selected_at", "DATETIME"),
+        ],
         "performance_events": [
+            ("variant_id", "INTEGER DEFAULT 0"),
             ("value", "INTEGER DEFAULT 0"),
             ("amount", "INTEGER DEFAULT 0"),
             ("note", "TEXT"),
@@ -1205,18 +1235,100 @@ def job_report_data(owner_id, job_id):
     conn.close()
     return job, assets, queue_items, performance
 
-def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note=""):
+def create_creative_variant(owner_id, job_id, variant_label, hook="", script_angle="", caption="", cta="", hashtags="", creative_score=0, note=""):
     job = get_production_job(job_id, owner_id)
     if not job:
         return False, None
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO creative_variants
+        (owner_id, job_id, variant_label, hook, script_angle, caption, cta, hashtags, creative_score, status, note, created_at, selected_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(owner_id), job_id, variant_label, hook, script_angle, caption, cta, hashtags,
+            int(creative_score or 0), "draft", note, now_text(), None
+        )
+    )
+    variant_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return True, variant_id
+
+def list_creative_variants(owner_id, job_id, limit=20):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, variant_label, hook, script_angle, caption, cta, hashtags, creative_score, status, note, created_at, selected_at
+        FROM creative_variants
+        WHERE owner_id=? AND job_id=?
+        ORDER BY creative_score DESC, id ASC
+        LIMIT ?""",
+        (str(owner_id), job_id, limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_creative_variant(owner_id, variant_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, job_id, variant_label, hook, script_angle, caption, cta, hashtags, creative_score, status, note
+        FROM creative_variants WHERE owner_id=? AND id=?""",
+        (str(owner_id), variant_id)
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def select_creative_variant(owner_id, variant_id):
+    variant = get_creative_variant(owner_id, variant_id)
+    if not variant:
+        return False, None
+    _, job_id, variant_label, hook, script_angle, caption, cta, hashtags, creative_score, status, note = variant
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("UPDATE creative_variants SET status='draft', selected_at=NULL WHERE owner_id=? AND job_id=?", (str(owner_id), job_id))
+    c.execute("UPDATE creative_variants SET status='selected', selected_at=? WHERE owner_id=? AND id=?", (now_text(), str(owner_id), variant_id))
+    conn.commit()
+    conn.close()
+    job_note = f"creative_variant:{variant_id} {variant_label or ''} | hook={truncate_text(hook, 180)} | cta={truncate_text(cta, 120)}"
+    update_production_job(job_id, owner_id, stage="script", status="working", note=job_note)
+    return True, variant
+
+def creative_report_data(owner_id, job_id):
+    variants = list_creative_variants(owner_id, job_id, limit=50)
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT variant_id, event_type, COALESCE(SUM(value),0), COALESCE(SUM(amount),0), COUNT(*)
+        FROM performance_events
+        WHERE owner_id=? AND job_id=? AND COALESCE(variant_id,0)>0
+        GROUP BY variant_id, event_type
+        ORDER BY variant_id, event_type""",
+        (str(owner_id), job_id)
+    )
+    events = c.fetchall()
+    conn.close()
+    return variants, events
+
+def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return False, None
+    if variant_id:
+        variant = get_creative_variant(owner_id, variant_id)
+        if not variant or int(variant[1]) != int(job_id):
+            return False, None
     _, _, _, channel_id, affiliate_id, platform, *_ = job
     conn = db_connect()
     c = conn.cursor()
     c.execute(
         """INSERT INTO performance_events
-        (owner_id, job_id, channel_id, affiliate_id, platform, event_type, value, amount, note, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (str(owner_id), job_id, channel_id, affiliate_id, platform, event_type, int(value), int(amount), note, now_text())
+        (owner_id, job_id, variant_id, channel_id, affiliate_id, platform, event_type, value, amount, note, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (str(owner_id), job_id, int(variant_id or 0), channel_id, affiliate_id, platform, event_type, int(value), int(amount), note, now_text())
     )
     conn.commit()
     conn.close()
@@ -1550,6 +1662,86 @@ def build_publish_pack_prompt(job):
         "5. Checklist trước khi đăng.\n"
         "6. Sau khi đăng cần ghi lại: publish_url, view, click, order, revenue bằng /pipeline_set và /performance_add."
     )
+
+def build_creative_test_prompt(job, count=5):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    return (
+        "Bạn là creative strategist cho video affiliate ngắn. Tạo nhiều biến thể hook/caption/CTA để A/B test, "
+        "không spam, không cam kết thu nhập phi thực tế, không mạo danh, không dùng nội dung nhạy cảm trái phép. "
+        "Nếu có AI influencer/OnlyFans thì chỉ dùng nhân vật tự tạo hoặc người thật có consent rõ ràng, đủ 18 tuổi.\n\n"
+        f"Số biến thể cần tạo: {count}\n"
+        f"Job ID: #{jid}\n"
+        f"Nền tảng: {platform or '-'}\n"
+        f"Kênh: {channel_name or channel_id or '-'} / account={account_label or 'main'}\n"
+        f"Topic: {topic or '-'}\n"
+        f"Affiliate: {network or '-'} - {product_name or '-'}\n"
+        f"Affiliate URL: {affiliate_url or 'chưa có'}\n"
+        f"Brief:\n{brief or 'Chưa có brief'}\n\n"
+        "Trả về JSON thuần là một mảng. Mỗi phần tử có key: "
+        "variant_label, hook, script_angle, caption, cta, hashtags, creative_score, note. "
+        "creative_score là 0-100 dựa trên khả năng giữ chân 3 giây đầu, độ khớp affiliate và độ an toàn nền tảng."
+    )
+
+def fallback_creative_variants(job, count=5):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    base_topic = topic or "sản phẩm affiliate"
+    product = product_name or "sản phẩm đề xuất"
+    templates = [
+        ("A", f"Bạn đang bỏ lỡ mẹo này về {base_topic}", "pain-point -> demo nhanh -> giải pháp", f"Một mẹo nhỏ giúp xử lý {base_topic}. Xem kỹ phần cuối để lấy link.", f"Xem link {product} trong mô tả/bio.", "#AI #congnghe #review #affiliate"),
+        ("B", f"Trước khi mua {product}, xem 3 điểm này", "checklist review -> ưu/nhược -> ai nên mua", f"3 điểm cần biết trước khi chọn {product}.", "Lưu lại và mở link khi cần so sánh.", "#review #muasamthongminh #deal"),
+        ("C", f"Tôi thử biến {base_topic} thành quy trình 60 giây", "case study -> kết quả -> công cụ", f"Quy trình 60 giây để áp dụng {base_topic} vào công việc thật.", "Muốn làm theo thì bắt đầu từ link trong bio.", "#workflow #creator #AItools"),
+        ("D", f"Sai lầm phổ biến khi dùng {base_topic}", "mistake -> correction -> product placement", f"Nhiều người dùng sai bước này khi bắt đầu với {base_topic}.", "Kiểm tra checklist và link gợi ý trước khi mua.", "#meohay #tiktokshop #congnghe"),
+        ("E", f"Setup tối giản cho người mới bắt đầu {base_topic}", "starter kit -> budget -> next step", f"Setup tối giản, dễ làm, không cần quá nhiều công cụ.", "Chọn món phù hợp trong link affiliate, không cần mua quá tay.", "#setup #creatorlife #shopee"),
+    ]
+    variants = []
+    for label, hook, angle, caption, cta, hashtags in templates[:max(1, min(count, len(templates)))]:
+        variants.append({
+            "variant_label": label,
+            "hook": hook,
+            "script_angle": angle,
+            "caption": caption,
+            "cta": cta,
+            "hashtags": hashtags,
+            "creative_score": 70 - len(variants) * 3,
+            "note": "fallback_template",
+        })
+    return variants
+
+def parse_creative_variants(raw_text, job, count=5):
+    try:
+        parsed = json.loads(raw_text)
+        if isinstance(parsed, dict):
+            parsed = parsed.get("variants") or parsed.get("items") or []
+        if isinstance(parsed, list):
+            clean = []
+            for idx, item in enumerate(parsed[:count], start=1):
+                if not isinstance(item, dict):
+                    continue
+                clean.append({
+                    "variant_label": str(item.get("variant_label") or item.get("label") or chr(64 + idx)),
+                    "hook": str(item.get("hook") or ""),
+                    "script_angle": str(item.get("script_angle") or item.get("angle") or ""),
+                    "caption": str(item.get("caption") or ""),
+                    "cta": str(item.get("cta") or ""),
+                    "hashtags": str(item.get("hashtags") or ""),
+                    "creative_score": clamp_score(item.get("creative_score") or item.get("score") or 0),
+                    "note": str(item.get("note") or "ai_generated"),
+                })
+            if clean:
+                return clean
+    except Exception:
+        pass
+    variants = fallback_creative_variants(job, count=count)
+    if raw_text:
+        variants[0]["note"] = "ai_raw_unparsed"
+        variants[0]["script_angle"] = truncate_text(raw_text, 800)
+    return variants
 
 def build_handoff_prompt(job, target_tool, target_stage):
     (
@@ -2475,6 +2667,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /handoff — Prompt giao việc cho AI/tool khác",
             "• /publish_pack — Gói caption/link để đăng",
             "• /review_gate — Kiểm duyệt trước khi đăng",
+            "• /creative_test — Tạo biến thể hook/caption/CTA",
+            "• /creative_variants — Xem biến thể creative",
+            "• /creative_select — Chọn biến thể để sản xuất",
+            "• /creative_report — Báo cáo biến thể thắng",
             "• /queue_publish — Đưa job vào hàng đợi đăng",
             "• /publish_queue — Xem hàng đợi đăng",
             "• /asset_add — Lưu asset vào job",
@@ -3569,6 +3765,10 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🛡 Review gate", callback_data="opmenu|review")
         ],
         [
+            InlineKeyboardButton("🧪 Creative test", callback_data="opmenu|creative"),
+            InlineKeyboardButton("🏁 Creative report", callback_data="opmenu|creativereport")
+        ],
+        [
             InlineKeyboardButton("🗂 Assets", callback_data="opmenu|assets"),
             InlineKeyboardButton("📋 Job report", callback_data="opmenu|report")
         ],
@@ -3611,6 +3811,8 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
         "publishqueue": "/publish_queue\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
+        "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
+        "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
         "report": "/job_report <JOB_ID>",
         "review": "/review_gate job=<JOB_ID>",
@@ -3625,6 +3827,174 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         reply_markup=operator_menu_keyboard()
     )
 
+async def cmd_creative_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/creative_test job=1 n=5</code>",
+            parse_mode="HTML"
+        )
+    try:
+        count = max(2, min(int(data.get("n") or data.get("count") or 5), 8))
+    except ValueError:
+        count = 5
+    job = get_production_job(job_id, update.effective_user.id)
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    if gemini_client or openai_client:
+        raw = AgentGemini.chat(
+            "Bạn là creative strategist tạo biến thể A/B test video affiliate.",
+            build_creative_test_prompt(job, count),
+            update.effective_user.id,
+            is_json=False
+        )
+        variants = parse_creative_variants(raw, job, count)
+    else:
+        variants = fallback_creative_variants(job, count)
+    created = []
+    for item in variants[:count]:
+        ok, variant_id = create_creative_variant(
+            update.effective_user.id,
+            job_id,
+            item["variant_label"],
+            item["hook"],
+            item["script_angle"],
+            item["caption"],
+            item["cta"],
+            item["hashtags"],
+            item["creative_score"],
+            item["note"],
+        )
+        if ok:
+            created.append((variant_id, item))
+    if not created:
+        return await update.message.reply_text("❌ Không tạo được creative variant.")
+    update_production_job(job_id, update.effective_user.id, stage="script", status="working", note=f"creative_test created={len(created)}")
+    lines = [f"🧪 <b>CREATIVE TEST — JOB #{job_id}</b>", f"Đã tạo <b>{len(created)}</b> biến thể hook/caption/CTA.\n"]
+    buttons = []
+    for variant_id, item in created:
+        lines.append(
+            f"• variant #{variant_id} | <b>{html.escape(item['variant_label'])}</b> | score=<b>{item['creative_score']}</b>\n"
+            f"  Hook: {html.escape(item['hook'])}\n"
+            f"  CTA: {html.escape(item['cta'])}"
+        )
+        buttons.append([InlineKeyboardButton(f"✅ Chọn variant #{variant_id}", callback_data=f"creative|select|{variant_id}")])
+    lines.append("\nSau khi đăng/test: <code>/performance_add job=%s variant=&lt;ID&gt; type=click value=...</code>" % job_id)
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def cmd_creative_variants(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    try:
+        job_id = int(context.args[0])
+    except (IndexError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/creative_variants &lt;JOB_ID&gt;</code>", parse_mode="HTML")
+    rows = list_creative_variants(update.effective_user.id, job_id)
+    if not rows:
+        return await update.message.reply_text(f"📭 Job #{job_id} chưa có creative variant. Dùng /creative_test job={job_id}.")
+    lines = [f"🧪 <b>CREATIVE VARIANTS — JOB #{job_id}</b>\n"]
+    buttons = []
+    for vid, label, hook, angle, caption, cta, hashtags, score, status, note, created_at, selected_at in rows:
+        lines.append(
+            f"• #{vid} | <b>{html.escape(label or '-')}</b> | score=<b>{score or 0}</b> | {html.escape(status or '-')}\n"
+            f"  Hook: {html.escape(hook or '-')}\n"
+            f"  Angle: {html.escape(angle or '-')}\n"
+            f"  Caption: {html.escape(caption or '-')}\n"
+            f"  CTA: {html.escape(cta or '-')}\n"
+            f"  Hashtags: <code>{html.escape(hashtags or '-')}</code>"
+        )
+        buttons.append([InlineKeyboardButton(f"✅ Chọn variant #{vid}", callback_data=f"creative|select|{vid}")])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def cmd_creative_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        variant_id = int(data.get("id") or data.get("variant") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/creative_select id=&lt;VARIANT_ID&gt;</code>", parse_mode="HTML")
+    ok, variant = select_creative_variant(update.effective_user.id, variant_id)
+    if not ok:
+        return await update.message.reply_text("❌ Không tìm thấy creative variant.")
+    _, job_id, label, hook, angle, caption, cta, hashtags, score, status, note = variant
+    await update.message.reply_text(
+        f"✅ <b>Đã chọn creative variant #{variant_id} cho job #{job_id}</b>\n"
+        f"• Label: <b>{html.escape(label or '-')}</b> | Score: <b>{score or 0}</b>\n"
+        f"• Hook: {html.escape(hook or '-')}\n"
+        f"• Caption: {html.escape(caption or '-')}\n"
+        f"• CTA: {html.escape(cta or '-')}\n\n"
+        f"Bước tiếp: <code>/handoff job={job_id} tool=claude stage=script</code> hoặc <code>/publish_pack job={job_id}</code>",
+        parse_mode="HTML"
+    )
+
+async def cmd_creative_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/creative_report job=&lt;JOB_ID&gt;</code>", parse_mode="HTML")
+    if not get_production_job(job_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    variants, events = creative_report_data(update.effective_user.id, job_id)
+    if not variants:
+        return await update.message.reply_text(f"📭 Job #{job_id} chưa có creative variant.")
+    by_variant = {}
+    for variant_id, event_type, value_sum, amount_sum, count in events:
+        bucket = by_variant.setdefault(variant_id, {"value": 0, "amount": 0, "events": 0, "types": []})
+        bucket["value"] += int(value_sum or 0)
+        bucket["amount"] += int(amount_sum or 0)
+        bucket["events"] += int(count or 0)
+        bucket["types"].append(f"{event_type}:v{value_sum}/đ{amount_sum:,}")
+    ranked = []
+    for row in variants:
+        vid, label, hook, angle, caption, cta, hashtags, score, status, note, created_at, selected_at = row
+        perf = by_variant.get(vid, {"value": 0, "amount": 0, "events": 0, "types": []})
+        rank_score = int(perf["amount"] or 0) + int(perf["value"] or 0) * 10 + int(score or 0)
+        ranked.append((rank_score, row, perf))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    lines = [f"🏁 <b>CREATIVE REPORT — JOB #{job_id}</b>", "Biến thể thắng dựa trên revenue/order/click/view đã ghi.\n"]
+    for rank_score, row, perf in ranked:
+        vid, label, hook, angle, caption, cta, hashtags, score, status, note, created_at, selected_at = row
+        lines.append(
+            f"• #{vid} | <b>{html.escape(label or '-')}</b> | rank=<b>{rank_score}</b> | creative=<b>{score or 0}</b> | {html.escape(status or '-')}\n"
+            f"  perf: value={perf['value']} amount={perf['amount']:,}đ events={perf['events']}\n"
+            f"  {html.escape(', '.join(perf['types']) or 'chưa có performance')}\n"
+            f"  Hook: {html.escape(hook or '-')}"
+        )
+    lines.append("\nGhi dữ liệu: <code>/performance_add job=%s variant=&lt;ID&gt; type=click value=...</code>" % job_id)
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if str(query.from_user.id) != ADMIN_ID:
+        return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    parts = query.data.split("|")
+    if len(parts) != 3 or parts[1] != "select":
+        return
+    try:
+        variant_id = int(parts[2])
+    except ValueError:
+        return
+    ok, variant = select_creative_variant(query.from_user.id, variant_id)
+    if not ok:
+        return await query.edit_message_text("❌ Không tìm thấy creative variant.")
+    _, job_id, label, hook, angle, caption, cta, hashtags, score, status, note = variant
+    await query.edit_message_text(
+        f"✅ Đã chọn creative variant #{variant_id} cho job #{job_id}\n"
+        f"Hook: {html.escape(hook or '-')}\n"
+        f"CTA: {html.escape(cta or '-')}\n\n"
+        f"Tiếp theo: /handoff job={job_id} tool=claude stage=script",
+        parse_mode="HTML"
+    )
+
 async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -3633,7 +4003,7 @@ async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE
         job_id = int(data.get("id") or data.get("job") or context.args[0])
     except (IndexError, TypeError, ValueError):
         return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/performance_add job=1 type=view value=1000 amount=0 note=tiktok ngay 1</code>\n"
+            "⚠️ Cú pháp: <code>/performance_add job=1 variant=2 type=view value=1000 amount=0 note=tiktok ngay 1</code>\n"
             "Type: <code>view, click, order, revenue, lead</code>",
             parse_mode="HTML"
         )
@@ -3649,15 +4019,20 @@ async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE
         amount = int(data.get("amount") or data.get("money") or data.get("vnd") or 0)
     except ValueError:
         amount = 0
+    try:
+        variant_id = int(data.get("variant") or data.get("variant_id") or 0)
+    except ValueError:
+        variant_id = 0
     note = data.get("note") or ""
-    ok, job = add_performance_event(update.effective_user.id, job_id, event_type, value, amount, note)
+    ok, job = add_performance_event(update.effective_user.id, job_id, event_type, value, amount, note, variant_id)
     if not ok:
-        return await update.message.reply_text("❌ Không tìm thấy production job.")
+        return await update.message.reply_text("❌ Không tìm thấy production job hoặc creative variant.")
     if event_type in {"revenue", "order", "lead"} and amount > 0:
         update_production_job(job_id, update.effective_user.id, status="published")
     await update.message.reply_text(
         f"✅ <b>Đã ghi hiệu quả job #{job_id}</b>\n"
         f"• Type: <code>{html.escape(event_type)}</code>\n"
+        f"• Variant: <code>{variant_id or 'không gắn'}</code>\n"
         f"• Value: <b>{value}</b>\n"
         f"• Amount: <b>{amount:,}đ</b>\n"
         f"• Note: {html.escape(note or '-')}",
@@ -3847,7 +4222,17 @@ async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"• {event_type}: value={value_sum} amount={amount_sum:,}đ events={count}")
     else:
         lines.append("• Chưa có dữ liệu.")
-    lines.append("\nLệnh tiếp theo: /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
+    variants = list_creative_variants(update.effective_user.id, job_id, limit=5)
+    lines.append("\n<b>Creative variants:</b>")
+    if variants:
+        for vid, label, hook, angle, caption, cta, hashtags, score, v_status, v_note, created_at, selected_at in variants[:5]:
+            lines.append(
+                f"• #{vid} | {html.escape(label or '-')} | score={score or 0} | {html.escape(v_status or '-')}\n"
+                f"  Hook: {html.escape(hook or '-')}"
+            )
+    else:
+        lines.append("• Chưa có. Dùng /creative_test job=%s." % job_id)
+    lines.append("\nLệnh tiếp theo: /creative_test, /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4862,6 +5247,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
     tg_app.add_handler(CommandHandler("publish_pack", cmd_publish_pack))
     tg_app.add_handler(CommandHandler("review_gate", cmd_review_gate))
+    tg_app.add_handler(CommandHandler("creative_test", cmd_creative_test))
+    tg_app.add_handler(CommandHandler("creative_variants", cmd_creative_variants))
+    tg_app.add_handler(CommandHandler("creative_select", cmd_creative_select))
+    tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
@@ -4893,6 +5282,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_video_job_callback, pattern=r"^job\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_pipeline_callback, pattern=r"^pipe\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_callback, pattern=r"^trend\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_creative_callback, pattern=r"^creative\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
 
     await tg_app.initialize()
