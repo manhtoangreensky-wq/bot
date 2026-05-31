@@ -320,6 +320,22 @@ def init_db():
         created_at DATETIME,
         updated_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS production_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        job_id INTEGER,
+        manifest_id INTEGER DEFAULT 0,
+        task_type TEXT,
+        tool TEXT,
+        scene_no INTEGER DEFAULT 0,
+        title TEXT,
+        prompt TEXT,
+        status TEXT DEFAULT 'queued',
+        output_url TEXT,
+        note TEXT,
+        created_at DATETIME,
+        updated_at DATETIME
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS performance_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -449,6 +465,18 @@ def init_db():
             ("variant_id", "INTEGER DEFAULT 0"),
             ("manifest_json", "TEXT"),
             ("status", "TEXT DEFAULT 'draft'"),
+            ("updated_at", "DATETIME"),
+        ],
+        "production_tasks": [
+            ("manifest_id", "INTEGER DEFAULT 0"),
+            ("task_type", "TEXT"),
+            ("tool", "TEXT"),
+            ("scene_no", "INTEGER DEFAULT 0"),
+            ("title", "TEXT"),
+            ("prompt", "TEXT"),
+            ("status", "TEXT DEFAULT 'queued'"),
+            ("output_url", "TEXT"),
+            ("note", "TEXT"),
             ("updated_at", "DATETIME"),
         ],
         "performance_events": [
@@ -1700,6 +1728,155 @@ def build_manifest_handoff_prompt(job, manifest_row, target_tool):
         f"<MANIFEST_JSON>\n{manifest_json}\n</MANIFEST_JSON>\n\n"
         "OUTPUT: danh sách việc theo thứ tự, lệnh Telegram cần chạy tiếp, và điểm rủi ro cần xử lý."
     )
+
+def create_production_task(owner_id, job_id, manifest_id, task_type, tool, scene_no=0, title="", prompt="", status="queued", output_url="", note=""):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO production_tasks
+        (owner_id, job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(owner_id), job_id, int(manifest_id or 0), task_type, tool, int(scene_no or 0),
+            title, prompt, status, output_url, note, now_text(), now_text()
+        )
+    )
+    task_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return task_id
+
+def create_tasks_from_manifest(owner_id, manifest_row):
+    manifest_id, job_id, variant_id, manifest_status, manifest_json, created_at, updated_at = manifest_row
+    try:
+        manifest = json.loads(manifest_json or "{}")
+    except Exception:
+        manifest = {}
+    scenes = manifest.get("scenes") or []
+    voice = manifest.get("voice") or {}
+    edit = manifest.get("edit_instructions") or {}
+    publish = manifest.get("publish") or {}
+    created = []
+    for scene in scenes:
+        scene_no = int(scene.get("scene") or 0)
+        tool = str(scene.get("video_tool") or "kling").split("|")[0].strip() or "kling"
+        prompt = (
+            f"Scene {scene_no} ({scene.get('start','?')}-{scene.get('end','?')}s, {scene.get('goal','-')})\n"
+            f"Visual prompt: {scene.get('visual_prompt','')}\n"
+            f"On-screen text: {scene.get('on_screen_text','')}\n"
+            f"Voice line: {scene.get('voice_line','')}\n"
+            f"Asset needed: {scene.get('asset_needed','')}"
+        )
+        created.append(create_production_task(
+            owner_id, job_id, manifest_id, "visual_scene", tool, scene_no,
+            f"Scene {scene_no}: {scene.get('goal','visual')}", prompt, "queued", "", f"asset_needed={scene.get('asset_needed','')}"
+        ))
+    voice_script = voice.get("script") or " ".join(str(scene.get("voice_line", "")) for scene in scenes)
+    if voice_script:
+        created.append(create_production_task(
+            owner_id, job_id, manifest_id, "voice", "fish", 0,
+            "Voice over", f"Style: {voice.get('style','giọng Việt rõ')}\nScript:\n{voice_script}", "queued", "",
+            f"fallback={voice.get('provider_fallback','Edge TTS')}"
+        ))
+    created.append(create_production_task(
+        owner_id, job_id, manifest_id, "edit", "capcut", 0,
+        "Edit final video",
+        "Dựng 9:16 từ raw scene + voice.\n"
+        f"Music: {edit.get('music','nhạc hợp lệ')}\nSubtitle: {edit.get('subtitle','burn subtitle')}\n"
+        f"Transitions: {edit.get('transitions','cut nhanh')}\nCTA overlay: {edit.get('cta_overlay') or publish.get('cta','')}",
+        "queued", "", "fallback=ffmpeg"
+    ))
+    created.append(create_production_task(
+        owner_id, job_id, manifest_id, "review", "review_gate", 0,
+        "Compliance review", "\n".join(str(item) for item in (manifest.get("compliance_checklist") or [])), "queued", "", ""
+    ))
+    created.append(create_production_task(
+        owner_id, job_id, manifest_id, "publish", "manual", 0,
+        "Publish/queue",
+        f"Caption: {publish.get('caption','')}\nHashtags: {publish.get('hashtags','')}\nCTA: {publish.get('cta','')}\nAffiliate: {publish.get('affiliate_placement','')}",
+        "queued", "", "mode=manual_or_api"
+    ))
+    update_production_job(job_id, owner_id, stage="visuals", status="working", note=f"task_plan manifest:{manifest_id} tasks={len(created)}")
+    return created
+
+def list_production_tasks(owner_id, job_id=None, manifest_id=None, limit=30):
+    where = ["owner_id=?"]
+    params = [str(owner_id)]
+    if job_id:
+        where.append("job_id=?")
+        params.append(int(job_id))
+    if manifest_id:
+        where.append("manifest_id=?")
+        params.append(int(manifest_id))
+    params.append(limit)
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        f"""SELECT id, job_id, manifest_id, task_type, tool, scene_no, title, status, output_url, note, updated_at
+        FROM production_tasks
+        WHERE {' AND '.join(where)}
+        ORDER BY
+            CASE status
+                WHEN 'blocked' THEN 0
+                WHEN 'working' THEN 1
+                WHEN 'queued' THEN 2
+                WHEN 'ready' THEN 3
+                ELSE 4
+            END,
+            id ASC
+        LIMIT ?""",
+        params
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_production_task(owner_id, task_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at
+        FROM production_tasks WHERE owner_id=? AND id=?""",
+        (str(owner_id), task_id)
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_production_task(owner_id, task_id, status=None, output_url=None, note=None):
+    updates = []
+    params = []
+    if status:
+        updates.append("status=?")
+        params.append(status)
+    if output_url is not None:
+        updates.append("output_url=?")
+        params.append(output_url)
+    if note is not None:
+        updates.append("note=?")
+        params.append(note)
+    if not updates:
+        return False, None
+    updates.append("updated_at=?")
+    params.append(now_text())
+    params.extend([str(owner_id), task_id])
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(f"UPDATE production_tasks SET {', '.join(updates)} WHERE owner_id=? AND id=?", params)
+    changed = c.rowcount
+    c.execute("SELECT job_id, task_type FROM production_tasks WHERE owner_id=? AND id=?", (str(owner_id), task_id))
+    row = c.fetchone()
+    conn.commit()
+    conn.close()
+    if changed and output_url and row:
+        asset_type = {
+            "visual_scene": "raw_video",
+            "voice": "voice",
+            "edit": "final_video",
+            "publish": "source",
+        }.get(row[1], "source")
+        add_production_asset(owner_id, row[0], asset_type, output_url, "", f"task:{task_id} {note or ''}")
+    return changed > 0, row
 
 def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0):
     job = get_production_job(job_id, owner_id)
@@ -3077,6 +3254,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /manifest — Tạo production manifest cho AI/tool",
             "• /manifests — Xem manifest của job",
             "• /manifest_handoff — Giao manifest cho từng AI/tool",
+            "• /task_plan — Tách manifest thành task",
+            "• /tasks — Xem production task",
+            "• /task_handoff — Giao từng task cho AI/tool",
+            "• /task_set — Cập nhật output task",
             "• /queue_publish — Đưa job vào hàng đợi đăng",
             "• /publish_queue — Xem hàng đợi đăng",
             "• /asset_add — Lưu asset vào job",
@@ -4296,6 +4477,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🎬 Production manifest", callback_data="opmenu|manifest"),
             InlineKeyboardButton("🤝 Manifest handoff", callback_data="opmenu|manifesthandoff")
         ],
+        [InlineKeyboardButton("✅ Production tasks", callback_data="opmenu|tasks")],
         [InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")],
         [
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
@@ -4341,6 +4523,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
+        "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
         "report": "/job_report <JOB_ID>",
         "review": "/review_gate job=<JOB_ID>",
@@ -4844,6 +5027,132 @@ async def cmd_manifest_handoff(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode="HTML"
     )
 
+async def cmd_task_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    manifest_row = None
+    try:
+        manifest_id = int(data.get("manifest") or data.get("mid") or 0)
+    except ValueError:
+        manifest_id = 0
+    if manifest_id:
+        manifest_row = get_production_manifest(update.effective_user.id, manifest_id)
+        if not manifest_row:
+            return await update.message.reply_text("❌ Không tìm thấy manifest.")
+    else:
+        try:
+            job_id = int(data.get("job") or data.get("id") or context.args[0])
+        except (IndexError, TypeError, ValueError):
+            return await update.message.reply_text(
+                "⚠️ Cú pháp: <code>/task_plan job=1</code> hoặc <code>/task_plan manifest=2</code>",
+                parse_mode="HTML"
+            )
+        manifest_row = latest_production_manifest(update.effective_user.id, job_id)
+        if not manifest_row:
+            return await update.message.reply_text(
+                f"📭 Job #{job_id} chưa có manifest. Tạo trước bằng <code>/manifest job={job_id}</code>.",
+                parse_mode="HTML"
+            )
+    created = create_tasks_from_manifest(update.effective_user.id, manifest_row)
+    job_id = manifest_row[1]
+    rows = list_production_tasks(update.effective_user.id, job_id=job_id, manifest_id=manifest_row[0], limit=50)
+    lines = [
+        f"✅ <b>ĐÃ TẠO TASK PLAN</b>",
+        f"• Manifest: <code>#{manifest_row[0]}</code>",
+        f"• Job: <code>#{job_id}</code>",
+        f"• Task mới: <b>{len(created)}</b>\n",
+    ]
+    for tid, _job_id, mid, task_type, tool, scene_no, title, status, output_url, note, updated_at in rows[:20]:
+        lines.append(
+            f"• task #{tid} | {html.escape(task_type or '-')} | tool=<code>{html.escape(tool or '-')}</code> | "
+            f"scene={scene_no or '-'} | {html.escape(status or '-')}\n"
+            f"  {html.escape(title or '-')}"
+        )
+    lines.append("\nGiao việc: <code>/task_handoff id=&lt;TASK_ID&gt;</code> | Cập nhật: <code>/task_set id=&lt;TASK_ID&gt; status=ready url=https://...</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or (context.args[0] if context.args else 0))
+    except ValueError:
+        job_id = 0
+    try:
+        manifest_id = int(data.get("manifest") or data.get("mid") or 0)
+    except ValueError:
+        manifest_id = 0
+    rows = list_production_tasks(update.effective_user.id, job_id=job_id or None, manifest_id=manifest_id or None)
+    if not rows:
+        return await update.message.reply_text("📭 Chưa có production task. Dùng /task_plan job=<ID>.")
+    lines = ["✅ <b>PRODUCTION TASKS</b>\n"]
+    for tid, row_job_id, mid, task_type, tool, scene_no, title, status, output_url, note, updated_at in rows:
+        lines.append(
+            f"• #{tid} | job #{row_job_id} | manifest #{mid or '-'} | <code>{html.escape(task_type or '-')}</code> | "
+            f"{html.escape(status or '-')}\n"
+            f"  tool={html.escape(tool or '-')} | scene={scene_no or '-'} | {html.escape(title or '-')}\n"
+            f"  output={html.escape(output_url or '-')}"
+        )
+    lines.append("\nChi tiết/giao việc: <code>/task_handoff id=&lt;TASK_ID&gt;</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        task_id = int(data.get("id") or data.get("task") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/task_handoff id=&lt;TASK_ID&gt;</code>", parse_mode="HTML")
+    task = get_production_task(update.effective_user.id, task_id)
+    if not task:
+        return await update.message.reply_text("❌ Không tìm thấy production task.")
+    tid, job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
+    update_production_task(update.effective_user.id, task_id, status="working", note=note or "handoff_started")
+    await update.message.reply_text(
+        f"🤝 <b>TASK HANDOFF #{tid}</b>\n"
+        f"Job: <code>#{job_id}</code> | Manifest: <code>#{manifest_id or '-'}</code>\n"
+        f"Type: <code>{html.escape(task_type or '-')}</code> | Tool: <b>{html.escape(tool or '-')}</b> | Scene: <b>{scene_no or '-'}</b>\n"
+        f"Title: {html.escape(title or '-')}\n\n"
+        f"<pre>{html_pre(prompt or '-')}</pre>\n\n"
+        f"Khi có output: <code>/task_set id={tid} status=ready url=https://...</code>",
+        parse_mode="HTML"
+    )
+
+async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        task_id = int(data.get("id") or data.get("task") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/task_set id=1 status=ready url=https://... note=...</code>",
+            parse_mode="HTML"
+        )
+    status = (data.get("status") or data.get("state") or "").lower()
+    allowed = {"queued", "working", "waiting", "ready", "blocked", "done", "cancelled"}
+    if status and status not in allowed:
+        return await update.message.reply_text(f"⚠️ status hợp lệ: <code>{', '.join(sorted(allowed))}</code>", parse_mode="HTML")
+    output_url = data.get("url") or data.get("output")
+    note = data.get("note")
+    changed, row = update_production_task(update.effective_user.id, task_id, status or None, output_url, note)
+    if not changed:
+        return await update.message.reply_text("❌ Không tìm thấy task hoặc không có gì để cập nhật.")
+    job_id, task_type = row
+    if status in {"ready", "done"}:
+        update_production_job(job_id, update.effective_user.id, status="working", note=f"task:{task_id} {task_type} {status}")
+    await update.message.reply_text(
+        f"✅ <b>Đã cập nhật task #{task_id}</b>\n"
+        f"• Job: <code>#{job_id}</code>\n"
+        f"• Type: <code>{html.escape(task_type or '-')}</code>\n"
+        f"• Status: <b>{html.escape(status or 'giữ nguyên')}</b>\n"
+        f"• Output: <code>{html.escape(output_url or 'giữ nguyên')}</code>",
+        parse_mode="HTML"
+    )
+
 async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -4925,7 +5234,17 @@ async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     else:
         lines.append("• Chưa có. Dùng /manifest job=%s." % job_id)
-    lines.append("\nLệnh tiếp theo: /creative_test, /manifest, /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
+    tasks = list_production_tasks(update.effective_user.id, job_id=job_id, limit=8)
+    lines.append("\n<b>Production tasks:</b>")
+    if tasks:
+        for tid, row_job_id, mid, task_type, tool, scene_no, title, t_status, output_url, task_note, updated_at in tasks[:8]:
+            lines.append(
+                f"• task #{tid} | {html.escape(task_type or '-')} | {html.escape(t_status or '-')}\n"
+                f"  tool={html.escape(tool or '-')} | scene={scene_no or '-'} | output={html.escape(output_url or '-')}"
+            )
+    else:
+        lines.append("• Chưa có. Dùng /task_plan job=%s." % job_id)
+    lines.append("\nLệnh tiếp theo: /creative_test, /manifest, /task_plan, /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5949,6 +6268,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
     tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
     tg_app.add_handler(CommandHandler("manifest_handoff", cmd_manifest_handoff))
+    tg_app.add_handler(CommandHandler("task_plan", cmd_task_plan))
+    tg_app.add_handler(CommandHandler("tasks", cmd_tasks))
+    tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
+    tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
