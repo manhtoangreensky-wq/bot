@@ -2325,8 +2325,9 @@ def operator_worker_spec_data():
             {
                 "role": "director",
                 "owner": "Claude/n8n hoặc admin Telegram",
-                "input": "GET /api/operator/audit, GET /api/operator/director",
+                "input": "GET /api/operator/audit, GET /api/operator/director, POST /api/operator/make-video",
                 "allowed_actions": [
+                    "POST /api/operator/make-video khi admin/Claude có topic và muốn tạo pipeline video kiếm tiền nhanh",
                     "POST /api/operator/director/run để scale/build hoặc queue publish manual an toàn",
                     "POST /api/operator/affiliate-scale khi đã chọn affiliate rõ ràng",
                     "Không tự đăng ra mạng xã hội nếu chưa qua publish pack/review gate",
@@ -2356,9 +2357,11 @@ def operator_worker_spec_data():
             {
                 "role": "publisher",
                 "owner": "Admin/manual publisher hoặc API chính thức",
-                "input": "GET /api/operator/publish/next và GET /api/operator/jobs/<JOB_ID>/publish-pack",
+                "input": "GET /api/operator/publisher/status, POST /api/operator/publisher/run, GET /api/operator/publish/<QUEUE_ID>/handoff",
                 "submit": "POST /api/operator/publish/<QUEUE_ID>/complete",
                 "allowed_actions": [
+                    "Chỉ auto-post khi publisher_run.decision=api_ready và có API chính thức/token hợp lệ",
+                    "Nếu decision=manual_required thì gửi handoff cho admin hoặc worker manual, không bypass ToS",
                     "Đăng theo publish_pack, gắn disclosure, link chính và link liên quan phù hợp",
                     "Nếu nền tảng/API chặn thì trả status=blocked và note",
                     "OnlyFans giữ manual/official tool, chỉ dùng nhân vật tự tạo hoặc consent 18+",
@@ -2378,17 +2381,28 @@ def operator_worker_spec_data():
         ],
         "standard_loop": [
             {"step": 1, "name": "audit", "method": "GET", "url": "/api/operator/audit"},
-            {"step": 2, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
-            {"step": 3, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
-            {"step": 4, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/next"},
-            {"step": 5, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
-            {"step": 6, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
-            {"step": 7, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
-            {"step": 8, "name": "claim_publish", "method": "GET", "url": "/api/operator/publish/next"},
-            {"step": 9, "name": "submit_publish", "method": "POST", "url": "/api/operator/publish/<QUEUE_ID>/complete"},
-            {"step": 10, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
+            {"step": 2, "name": "make_video_optional", "method": "POST", "url": "/api/operator/make-video"},
+            {"step": 3, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
+            {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
+            {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/next"},
+            {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
+            {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
+            {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
+            {"step": 9, "name": "publisher_status", "method": "GET", "url": "/api/operator/publisher/status"},
+            {"step": 10, "name": "publisher_run", "method": "POST", "url": "/api/operator/publisher/run"},
+            {"step": 11, "name": "submit_publish", "method": "POST", "url": "/api/operator/publish/<QUEUE_ID>/complete"},
+            {"step": 12, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
         ],
         "payloads": {
+            "make_video": {
+                "topic": "đồ công nghệ văn phòng",
+                "platform": "tiktok",
+                "channel": "all",
+                "limit": 3,
+                "build": True,
+                "duration": 45,
+                "notify_admin": True,
+            },
             "director_run": {
                 "days": 30,
                 "platform": "tiktok",
@@ -2396,6 +2410,12 @@ def operator_worker_spec_data():
                 "execute": True,
                 "build": True,
                 "duration": 45,
+                "notify_admin": True,
+            },
+            "publisher_run": {
+                "platform": "tiktok",
+                "mode": "api",
+                "auto_claim": True,
                 "notify_admin": True,
             },
             "task_complete": {
@@ -2425,6 +2445,7 @@ def operator_worker_spec_data():
             "Không hứa thu nhập, lợi nhuận, phê duyệt vay/thẻ, hoặc kết quả tài chính.",
             "Không spam link; gắn disclosure affiliate rõ ràng.",
             "Không tự publish nếu readiness/review bị blocked.",
+            "Không tự publish khi publisher_run.decision khác api_ready; hãy dùng handoff manual.",
             "Không ghi secret/token/API key vào database, caption, note công khai hoặc repo.",
         ],
     }
@@ -2698,6 +2719,22 @@ def operator_n8n_template_data():
                 "note": "Cho worker biết tool chính/fallback, env còn thiếu và failure protocol.",
             },
             {
+                "node": "Make Video Pipeline",
+                "type": "http_request",
+                "method": "POST",
+                "url": f"{base_url}/api/operator/make-video",
+                "body": {
+                    "topic": "đồ công nghệ văn phòng",
+                    "platform": "tiktok",
+                    "channel": "all",
+                    "limit": 3,
+                    "build": True,
+                    "duration": 45,
+                    "notify_admin": True,
+                },
+                "note": "Node tùy chọn: dùng khi muốn n8n/Claude tạo pipeline video từ topic thay vì chờ director chọn action.",
+            },
+            {
                 "node": "Director Run",
                 "type": "http_request",
                 "method": "POST",
@@ -2773,15 +2810,24 @@ def operator_n8n_template_data():
                 "note": "Chỉ gọi sau khi admin/worker đã kiểm duyệt final video, caption, affiliate claim và quyền nội dung.",
             },
             {
-                "node": "Claim Publish Queue",
+                "node": "Publisher Status",
                 "type": "http_request",
                 "method": "GET",
-                "url": f"{base_url}/api/operator/publish/next?platform=tiktok&mode=manual",
+                "url": f"{base_url}/api/operator/publisher/status",
+                "note": "Kiểm tra kênh manual/API-ready, queue đang chờ và blocker token/env/page_id trước khi claim.",
+            },
+            {
+                "node": "Publisher Run",
+                "type": "http_request",
+                "method": "POST",
+                "url": f"{base_url}/api/operator/publisher/run",
+                "body": {"platform": "tiktok", "mode": "api", "auto_claim": True, "notify_admin": True},
+                "note": "Claim queue kế tiếp an toàn. Nếu decision=manual_required thì gửi handoff cho admin, không auto đăng.",
             },
             {
                 "node": "Publisher",
                 "type": "manual_or_official_api",
-                "rule": "Đăng thủ công/API chính thức sau review. OnlyFans giữ manual/official tool và consent 18+.",
+                "rule": "Chỉ auto đăng khi Publisher Run trả decision=api_ready. Manual-required thì đăng tay/official tool theo handoff.",
                 "output": {"status": "published|blocked", "publish_url": "https://...", "views": 0, "clicks": 0},
             },
             {
@@ -2803,7 +2849,7 @@ def operator_n8n_template_data():
             "Nếu audit.level=SETUP_REQUIRED: dừng workflow và báo admin bằng next_command.",
             "Nếu director_run.executed=false: báo admin kèm next_action, không cố chạy node tool.",
             "Nếu task không có output_url: complete task status=blocked/failed để không kẹt pipeline.",
-            "Nếu publish readiness không đạt: queue manual hoặc blocked, không tự đăng.",
+            "Nếu publisher_run.decision khác api_ready: không tự đăng, chuyển handoff cho admin/manual publisher.",
             "Nếu affiliate_decisions có SCALE/PUBLISH: ưu tiên link đó và chèn các related_links phù hợp trong caption/comment/status.",
         ],
         "tracking_events": [
@@ -2820,6 +2866,16 @@ def operator_n8n_template_data():
                 f"curl -X POST -H \"Authorization: {bearer}\" -H \"Content-Type: application/json\" "
                 f"-d '{{\"days\":30,\"platform\":\"tiktok\",\"limit\":10,\"execute\":true,\"build\":true,\"duration\":45}}' "
                 f"{base_url}/api/operator/director/run"
+            ),
+            "make_video": (
+                f"curl -X POST -H \"Authorization: {bearer}\" -H \"Content-Type: application/json\" "
+                f"-d '{{\"topic\":\"đồ công nghệ văn phòng\",\"platform\":\"tiktok\",\"channel\":\"all\",\"limit\":3,\"build\":true}}' "
+                f"{base_url}/api/operator/make-video"
+            ),
+            "publisher_run": (
+                f"curl -X POST -H \"Authorization: {bearer}\" -H \"Content-Type: application/json\" "
+                f"-d '{{\"platform\":\"tiktok\",\"mode\":\"api\",\"auto_claim\":true}}' "
+                f"{base_url}/api/operator/publisher/run"
             ),
         },
         "guardrails": [
@@ -2919,6 +2975,27 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "make-video-optional",
+                "name": "Make Video Optional Sample",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, -520],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/make-video",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"topic\":\"đồ công nghệ văn phòng\","
+                        "\"platform\":\"tiktok\",\"channel\":\"all\","
+                        "\"limit\":3,\"build\":true,\"duration\":45,\"notify_admin\":true}"
+                    ),
+                    "options": {"timeout": 120000},
+                },
+            },
+            {
                 "id": "director-run",
                 "name": "Director Run Safe Action",
                 "type": "n8n-nodes-base.httpRequest",
@@ -3011,14 +3088,14 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
-                "id": "claim-publish",
-                "name": "Claim Publish Queue",
+                "id": "publisher-status",
+                "name": "Publisher Status",
                 "type": "n8n-nodes-base.httpRequest",
                 "typeVersion": 4.2,
                 "position": [540, -120],
                 "parameters": {
                     "method": "GET",
-                    "url": f"{base_url_expr}/api/operator/publish/next?platform=tiktok&mode=manual",
+                    "url": f"{base_url_expr}/api/operator/publisher/status",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -3052,9 +3129,29 @@ def operator_n8n_workflow_json_data():
                 "position": [820, -120],
                 "parameters": {
                     "method": "GET",
-                    "url": f"{base_url_expr}/api/operator/jobs/{{{{$json.item.job_id}}}}/publish-pack",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{{{$json.queue.job_id}}}}/publish-pack",
                     "sendHeaders": True,
                     "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "publisher-run",
+                "name": "Publisher Run Safe Claim",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [820, 80],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/publisher/run",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"platform\":\"tiktok\",\"mode\":\"api\","
+                        "\"auto_claim\":true,\"notify_admin\":true}"
+                    ),
                     "options": {"timeout": 60000},
                 },
             },
@@ -3066,7 +3163,8 @@ def operator_n8n_workflow_json_data():
                 "position": [1080, -300],
                 "parameters": {
                     "content": (
-                        "Đăng bằng tay hoặc API chính thức sau khi kiểm duyệt.\n"
+                        "Đăng bằng tay hoặc API chính thức sau khi Publisher Run trả handoff.\n"
+                        "Chỉ auto đăng nếu decision=api_ready.\n"
                         "TikTok/Facebook: gắn disclosure affiliate.\n"
                         "OnlyFans: chỉ dùng nhân vật tự tạo hoặc người thật có consent, đủ 18+, không auto bằng tool trái điều khoản."
                     ),
@@ -3082,7 +3180,7 @@ def operator_n8n_workflow_json_data():
                 "position": [1120, -120],
                 "parameters": {
                     "method": "POST",
-                    "url": f"{base_url_expr}/api/operator/publish/{{{{$json.item.queue_id}}}}/complete",
+                    "url": f"{base_url_expr}/api/operator/publish/{{{{$node[\"Publisher Run Safe Claim\"].json.queue.id}}}}/complete",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "sendBody": True,
@@ -3163,8 +3261,9 @@ def operator_n8n_workflow_json_data():
             "Read Toolchain": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
             "Director Run Safe Action": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
             "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
-            "Complete Task": {"main": [[{"node": "Claim Publish Queue", "type": "main", "index": 0}]]},
-            "Claim Publish Queue": {"main": [[{"node": "Get Publish Pack", "type": "main", "index": 0}]]},
+            "Complete Task": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
+            "Publisher Status": {"main": [[{"node": "Publisher Run Safe Claim", "type": "main", "index": 0}]]},
+            "Publisher Run Safe Claim": {"main": [[{"node": "Get Publish Pack", "type": "main", "index": 0}]]},
             "Get Publish Pack": {"main": [[{"node": "Complete Publish", "type": "main", "index": 0}]]},
             "Complete Publish": {"main": [[{"node": "Record Performance Sample", "type": "main", "index": 0}]]},
         },
