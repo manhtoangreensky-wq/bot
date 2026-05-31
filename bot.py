@@ -3198,6 +3198,96 @@ def growth_score(views=0, clicks=0, conversions=0, revenue=0, cost=0):
     score = min(100, int((ctr * 3) + (cvr * 5) + min(revenue / 10000, 40) + max(min(roi / 10, 20), 0)))
     return score, ctr, cvr, roi
 
+def affiliate_decision_label(score, views, clicks, conversions, revenue, cost, jobs, publishes, min_views=200):
+    views = int(views or 0)
+    clicks = int(clicks or 0)
+    conversions = int(conversions or 0)
+    revenue = int(revenue or 0)
+    cost = int(cost or 0)
+    jobs = int(jobs or 0)
+    publishes = int(publishes or 0)
+    if jobs == 0:
+        return "TEST", "Chưa có job, cần tạo batch test nhỏ trước khi đánh giá."
+    if publishes == 0:
+        return "PUBLISH", "Đã có job nhưng chưa ghi nhận bài đăng, cần đưa vào publish queue hoặc đăng thủ công."
+    if cost > 0 and revenue < cost and views >= min_views:
+        return "PAUSE_CHECK", "Có chi phí nhưng doanh thu chưa bù chi phí, cần dừng scale và kiểm tra offer/targeting."
+    if revenue > 0 or conversions > 0 or score >= 35:
+        return "SCALE", "Đã có tín hiệu chuyển đổi/doanh thu hoặc điểm tăng trưởng đủ tốt."
+    if views >= min_views and clicks == 0:
+        return "FIX_CTA", "Có view nhưng chưa có click, cần sửa hook/caption/CTA/link placement."
+    if clicks >= 20 and conversions == 0:
+        return "FIX_OFFER", "Có click nhưng chưa có lead/order, cần đổi angle, sản phẩm kèm hoặc landing/offer."
+    return "TEST_MORE", "Dữ liệu còn mỏng, tiếp tục test thêm creative và kênh."
+
+def affiliate_decision_command(action, aid, niche, platform="tiktok", limit=3):
+    safe_niche = niche or "affiliate"
+    if action == "SCALE":
+        return f"/affiliate_scale aff={aid} platform={platform} channel=all limit={limit} build=1 duration=45"
+    if action == "PUBLISH":
+        return "/publish_queue hoặc /mark_published job=<JOB_ID> url=https://... views=0 clicks=0"
+    if action == "FIX_CTA":
+        return f"/affiliate_ideas aff={aid} platform={platform} n=5 topic=sửa CTA cho {safe_niche}"
+    if action == "FIX_OFFER":
+        return f"/affiliate_related aff={aid} limit=12"
+    if action == "PAUSE_CHECK":
+        return f"/affiliate_report days=30 limit=20 và kiểm tra cost/revenue cho aff={aid}"
+    return f"/affiliate_scale aff={aid} platform={platform} channel=all limit=2 build=1 duration=45"
+
+def affiliate_decision_data(owner_id, days=30, limit=20, min_views=200, platform="tiktok"):
+    since, affiliate_rows, job_rows = affiliate_performance_report_data(owner_id, days=days, limit=max(limit, 30))
+    decisions = []
+    for (
+        aid, network, product, niche, url, product_score, jobs, publishes, views,
+        clicks, conversions, revenue, cost, events
+    ) in affiliate_rows[:limit]:
+        score, ctr, cvr, roi = growth_score(views, clicks, conversions, revenue, cost)
+        action, reason = affiliate_decision_label(score, views, clicks, conversions, revenue, cost, jobs, publishes, min_views)
+        related = list_related_affiliate_links(owner_id, affiliate_id=aid, niche=niche or product, limit=6)
+        related_links = [
+            {
+                "id": row[0],
+                "network": row[1],
+                "product": row[2],
+                "niche": row[3],
+                "url": row[4],
+                "match_score": int(rel_score or 0),
+                "reasons": reasons[:3],
+            }
+            for rel_score, reasons, row in related
+        ]
+        decisions.append({
+            "id": aid,
+            "network": network,
+            "product": product,
+            "niche": niche,
+            "url": url,
+            "action": action,
+            "reason": reason,
+            "score": score,
+            "base_score": int(product_score or 0),
+            "jobs": int(jobs or 0),
+            "publishes": int(publishes or 0),
+            "views": int(views or 0),
+            "clicks": int(clicks or 0),
+            "conversions": int(conversions or 0),
+            "revenue": int(revenue or 0),
+            "cost": int(cost or 0),
+            "events": int(events or 0),
+            "ctr": round(ctr, 2),
+            "cvr": round(cvr, 2),
+            "roi": round(roi, 1),
+            "command": affiliate_decision_command(action, aid, niche or product, platform=platform),
+            "related_links": related_links,
+        })
+    decisions.sort(key=lambda item: (
+        {"SCALE": 5, "PUBLISH": 4, "FIX_CTA": 3, "FIX_OFFER": 3, "TEST_MORE": 2, "TEST": 1, "PAUSE_CHECK": 0}.get(item["action"], 0),
+        item["score"],
+        item["revenue"],
+        item["clicks"],
+    ), reverse=True)
+    return since, decisions, job_rows
+
 def operator_loop_data(owner_id, limit=10, auto_queue=True):
     jobs = list_production_jobs(owner_id, limit=limit)
     advanced = []
@@ -6624,7 +6714,7 @@ async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TY
         "• <code>/affiliate_report days=30</code> và <code>/growth days=30</code> để quyết định scale tiếp.\n\n"
         "<b>7. Tự động hóa bằng API</b>\n"
         "• <code>/operator_api</code> để lấy endpoint/payload.\n"
-        "• Luồng API chuẩn: status → affiliate-report → affiliate-scale → tasks/next → publish/next → performance.\n"
+        "• Luồng API chuẩn: status → affiliate-decisions → affiliate-scale → tasks/next → publish/next → performance.\n"
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -6700,7 +6790,8 @@ def operator_category_keyboard(category):
             ("🔗 Import catalog", "affseed"), ("🛒 Danh sách link", "affiliates"),
             ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
             ("🚀 Scale thành video", "affscale"), ("💰 Báo cáo affiliate", "affreport"),
-            ("🔎 Link liên quan", "affrelated"), ("✏️ Cập nhật hồ sơ", "affprofile"),
+            ("🧠 Quyết định scale", "affdecisions"), ("🔎 Link liên quan", "affrelated"),
+            ("✏️ Cập nhật hồ sơ", "affprofile"),
         ],
         "cat_schedule": [
             ("📡 Kênh", "channels"), ("➕ Thêm kênh", "channeladd"),
@@ -6791,6 +6882,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Danh sách campaign: <code>GET {html.escape(base_url)}/api/operator/campaigns</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
+        f"• Quyết định scale affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-decisions</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
@@ -6849,6 +6941,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "affseed": "/affiliate_seed\n/affiliates",
         "affiliates": "/affiliates",
         "affreport": "/affiliate_report days=30\n/affiliate_report days=90 limit=20",
+        "affdecisions": "/affiliate_decisions days=30 platform=tiktok limit=12\n/affiliate_decisions days=7 min_views=200",
         "affscale": "/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID>\n/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=3 build=1 duration=45",
         "affideas": "/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=trend đang nóng",
         "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
@@ -7901,6 +7994,62 @@ async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYP
         "<code>/affiliate_ideas aff=&lt;ID&gt; platform=tiktok n=5 topic=...</code>\n"
         "<code>/operator_auto niche=... platform=tiktok channel=all aff=&lt;ID&gt; campaign=&lt;ID&gt; limit=5</code>\n"
         "<code>/performance_add job=&lt;JOB_ID&gt; type=click|order|revenue value=1 amount=...</code>"
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_affiliate_decisions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or (context.args[0] if context.args else 30)), 180))
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        limit = max(3, min(int(data.get("limit") or 12), 30))
+    except ValueError:
+        limit = 12
+    try:
+        min_views = max(50, min(int(data.get("min_views") or data.get("views") or 200), 10000))
+    except ValueError:
+        min_views = 200
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    since, decisions, job_rows = affiliate_decision_data(
+        update.effective_user.id,
+        days=days,
+        limit=limit,
+        min_views=min_views,
+        platform=platform,
+    )
+    lines = [
+        f"🧠 <b>AFFILIATE SCALE DECISIONS — {days} ngày</b>",
+        f"• Từ: <code>{html.escape(since)}</code>",
+        f"• Rule: SCALE khi có revenue/conversion/score tốt; FIX khi có view/click nhưng chưa ra đơn; TEST khi thiếu dữ liệu.",
+        "",
+    ]
+    if not decisions:
+        lines.append("📭 Chưa có affiliate active. Chạy <code>/affiliate_seed</code> hoặc thêm bằng <code>/affiliate_add</code>.")
+    else:
+        for item in decisions[:limit]:
+            related = item.get("related_links") or []
+            related_hint = ""
+            if related:
+                related_hint = "\n  Link kèm: " + " | ".join(
+                    f"#{row['id']} {row['product']}" for row in related[:3]
+                )
+            lines.append(
+                f"• <b>{html.escape(item['action'])}</b> | aff #{item['id']} | "
+                f"<code>{html.escape(item['network'] or '-')}</code> / <b>{html.escape(item['product'] or '-')}</b> | score=<b>{item['score']}</b>\n"
+                f"  views={item['views']} click={item['clicks']} conv={item['conversions']} "
+                f"rev={item['revenue']:,}đ cost={item['cost']:,}đ | CTR={item['ctr']:.2f}% CVR={item['cvr']:.2f}% ROI={item['roi']:.1f}%\n"
+                f"  lý do: {html.escape(item['reason'])}{html.escape(related_hint)}\n"
+                f"  next: <code>{html.escape(item['command'])}</code>"
+            )
+    lines.append(
+        "\nGhi dữ liệu để quyết định chuẩn hơn:\n"
+        "<code>/performance_add job=&lt;JOB_ID&gt; type=view value=1000</code>\n"
+        "<code>/performance_add job=&lt;JOB_ID&gt; type=click value=20</code>\n"
+        "<code>/performance_add job=&lt;JOB_ID&gt; type=revenue value=1 amount=150000</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -9145,6 +9294,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("affiliate_report", cmd_affiliate_report))
+    tg_app.add_handler(CommandHandler("affiliate_decisions", cmd_affiliate_decisions))
     tg_app.add_handler(CommandHandler("affiliate_scale", cmd_affiliate_scale))
     tg_app.add_handler(CommandHandler("growth", cmd_growth))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
@@ -9301,6 +9451,7 @@ async def api_operator_status(request: Request):
         "next": {
             "telegram": "/operator_status",
             "affiliate_report": "/api/operator/affiliate-report",
+            "affiliate_decisions": "/api/operator/affiliate-decisions",
             "affiliate_scale": "/api/operator/affiliate-scale",
             "loop": "/api/operator/loop",
         },
@@ -9339,6 +9490,7 @@ async def api_operator_today(request: Request):
         "next": {
             "status_url": "/api/operator/status",
             "affiliate_report_url": "/api/operator/affiliate-report",
+            "affiliate_decisions_url": "/api/operator/affiliate-decisions",
             "affiliate_scale_url": "/api/operator/affiliate-scale",
             "tasks_url": "/api/operator/tasks/next",
             "telegram": "/operator_today",
@@ -9705,6 +9857,41 @@ async def api_operator_affiliate_report(request: Request, days: int = 30, limit:
             "list_url": "/api/operator/affiliates",
             "scale_url": "/api/operator/affiliate-scale",
             "performance_url": "/api/operator/performance",
+        },
+    }
+
+@fastapi_app.get("/api/operator/affiliate-decisions")
+async def api_operator_affiliate_decisions(
+    request: Request,
+    days: int = 30,
+    limit: int = 12,
+    min_views: int = 200,
+    platform: str = "tiktok",
+):
+    verify_operator_api_token(request)
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 12), 30))
+    min_views = max(50, min(int(min_views or 200), 10000))
+    platform = (platform or "tiktok").lower()
+    since, decisions, job_rows = affiliate_decision_data(
+        ADMIN_ID,
+        days=days,
+        limit=limit,
+        min_views=min_views,
+        platform=platform,
+    )
+    return {
+        "ok": True,
+        "days": days,
+        "since": since,
+        "platform": platform,
+        "min_views": min_views,
+        "decisions": decisions,
+        "rule": "Use SCALE to create more videos, FIX_CTA/FIX_OFFER before spending more, PUBLISH when jobs exist but no publish event, TEST/TEST_MORE for low data.",
+        "next": {
+            "scale_url": "/api/operator/affiliate-scale",
+            "performance_url": "/api/operator/performance",
+            "affiliate_report_url": "/api/operator/affiliate-report",
         },
     }
 
