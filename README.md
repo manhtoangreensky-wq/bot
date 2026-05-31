@@ -22,6 +22,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `DEEPGRAM_API_KEY`, `FISH_AUDIO_KEY`: bóc băng và voice cao cấp.
 - `REMOVEBG_API_KEY`, `CUTOUT_API_KEY`: tách nền ảnh.
 - `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`: PayOS QR động.
+- `COBALT_API_URL`, `COBALT_API_KEY`: API tải video sạch. Public `api.cobalt.tools` có bot protection, nên self-host Cobalt trên Railway để bot tải ổn định.
 - `BOT_USERNAME`: username bot, ví dụ `Httdhtoan`.
 - `PUBLIC_BASE_URL`: domain public nếu cần dùng cho link ngoài.
 - `MANUAL_BANK_NAME`, `MANUAL_BANK_CODE`, `MANUAL_BANK_ACCOUNT`, `MANUAL_BANK_OWNER`: tài khoản và mã VietQR nạp thủ công khi PayOS lỗi.

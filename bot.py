@@ -76,6 +76,8 @@ PAYOS_CHECKSUM_KEY  = _env("PAYOS_CHECKSUM_KEY")
 # Misc
 RAPIDAPI_KEY        = _env("RAPIDAPI_KEY")
 RAPIDAPI_HOST       = _env("RAPIDAPI_HOST")
+COBALT_API_URL      = _env("COBALT_API_URL", "https://api.cobalt.tools")
+COBALT_API_KEY      = _env("COBALT_API_KEY")
 PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "Httdhtoan")
 PUBLIC_BASE_URL     = _env("PUBLIC_BASE_URL")
@@ -2699,6 +2701,14 @@ def operator_toolchain_data():
             "primary": _tool_node("RemoveBG HD", "image", ["REMOVEBG_API_KEY"], "paid", "api", "Chất lượng cao; nếu lỗi/quota/hết tiền thì fallback Cutout và hoàn chênh lệch."),
             "fallbacks": [
                 _tool_node("Cutout.pro", "image", ["CUTOUT_API_KEY"], "paid_or_free_quota", "api", "Gói tiết kiệm/fallback."),
+            ],
+        },
+        {
+            "stage": "video_download",
+            "purpose": "Tải video public từ TikTok/Facebook/YouTube/Instagram để phân tích hoặc tái dựng hợp pháp.",
+            "primary": _tool_node("Self-hosted Cobalt API", "downloader", ["COBALT_API_URL"], "self_host", "api", "Ổn định nhất khi self-host; public api.cobalt.tools có bot protection."),
+            "fallbacks": [
+                _tool_node("Manual upload", "downloader", [], "manual", "telegram", "Nếu link private/cần đăng nhập, admin tải video lên Telegram để bot xử lý tiếp."),
             ],
         },
         {
@@ -5396,6 +5406,8 @@ def serialize_publish_queue_item(row):
             "affiliate_placement": affiliate_url,
             "pinned_comment": static_pack.get("pinned_comment", ""),
             "related_links": static_pack.get("related_links", []),
+            "affiliate_bundle": static_pack.get("affiliate_bundle", {}),
+            "placement_plan": static_pack.get("placement_plan", {}),
             "disclosure": static_pack.get("disclosure", ""),
             "checklist": static_pack.get("checklist", []),
             "performance_plan": static_pack.get("performance_plan", {}),
@@ -5419,6 +5431,8 @@ def build_publisher_handoff(queue_payload):
     caption = "\n\n".join([part for part in caption_parts if part]).strip()
     pinned_comment = pack.get("pinned_comment") or ""
     related_links = pack.get("related_links") or []
+    affiliate_bundle = pack.get("affiliate_bundle") or {}
+    placement_plan = pack.get("placement_plan") or affiliate_bundle.get("placement_plan") or {}
     if platform in {"tiktok", "tiktokshop"}:
         api_plan = [
             "Dùng TikTok Content Posting API chính thức nếu channel api_ready.",
@@ -5462,6 +5476,8 @@ def build_publisher_handoff(queue_payload):
             "caption": caption,
             "pinned_comment": pinned_comment,
             "related_links": related_links,
+            "affiliate_bundle": affiliate_bundle,
+            "placement_plan": placement_plan,
             "disclosure": pack.get("disclosure", ""),
         },
         "api_plan": api_plan,
@@ -5971,6 +5987,8 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
                         "caption": pack.get("caption", ""),
                         "tracking_url": (pack.get("primary_affiliate") or {}).get("tracking_url", ""),
                         "related_links": pack.get("related_links", [])[:6],
+                        "affiliate_bundle": pack.get("affiliate_bundle", {}),
+                        "placement_plan": pack.get("placement_plan", {}),
                         "disclosure": pack.get("disclosure", ""),
                     })
             else:
@@ -6132,21 +6150,19 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
         note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
     ) = job
-    related = list_related_affiliate_links(owner_id, affiliate_id=affiliate_id, niche=topic or product_name or "", limit=8) if affiliate_id else []
-    related_links = [
-        {
-            "id": row[0],
-            "network": row[1],
-            "product": row[2],
-            "niche": row[3],
-            "url": row[4],
-            "tracking_url": affiliate_tracking_url(row[0], jid, f"{platform or 'social'}_related"),
-            "match_score": int(score or 0),
-            "reasons": reasons[:3],
-        }
-        for score, reasons, row in related
-    ]
+    _bundle_ok, _bundle_reason, affiliate_bundle = build_affiliate_link_bundle(
+        owner_id,
+        affiliate_id=affiliate_id or 0,
+        job_id=jid,
+        brand=product_name or "",
+        niche=topic or product_name or "",
+        platform=platform or "social",
+        limit=8,
+    )
+    related_links = affiliate_bundle.get("related_links", []) if affiliate_bundle else []
     primary_tracking_url = affiliate_tracking_url(affiliate_id, jid, f"{platform or 'social'}_primary") if affiliate_id else ""
+    if affiliate_bundle and affiliate_bundle.get("primary"):
+        primary_tracking_url = (affiliate_bundle["primary"].get("tracking") or {}).get("caption") or primary_tracking_url
     primary_display_url = primary_tracking_url or affiliate_url
     disclosure = "Có thể nhận hoa hồng affiliate nếu người xem mua/đăng ký qua link."
     caption = (
@@ -6154,11 +6170,9 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
         f"Link chính: {primary_display_url or 'chưa có'}\n"
         f"{disclosure}"
     )
-    pinned_comment_parts = []
-    if primary_display_url:
-        pinned_comment_parts.append(f"Link chính: {primary_display_url}")
-    for item in related_links[:5]:
-        pinned_comment_parts.append(f"{item['product']}: {item.get('tracking_url') or item['url']}")
+    pinned_comment = ((affiliate_bundle or {}).get("placement_plan") or {}).get("pinned_comment") or ""
+    if not pinned_comment and primary_display_url:
+        pinned_comment = f"Link chính: {primary_display_url}"
     checklist = [
         "Đã kiểm tra quyền hình ảnh/voice/nhạc.",
         "Đã ghi disclosure affiliate rõ ràng.",
@@ -6181,8 +6195,10 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
             "tracking_url": primary_tracking_url,
         },
         "related_links": related_links,
+        "affiliate_bundle": affiliate_bundle,
+        "placement_plan": (affiliate_bundle or {}).get("placement_plan", {}),
         "caption": caption,
-        "pinned_comment": "\n".join(pinned_comment_parts),
+        "pinned_comment": pinned_comment,
         "hashtags": "#review #affiliate #muasamthongminh #AI",
         "cta": "Xem link chính và các lựa chọn liên quan trong mô tả/comment ghim.",
         "disclosure": disclosure,
@@ -6806,36 +6822,70 @@ class AgentDownloader:
             parse_mode="HTML"
         )
         try:
+            api_base = (COBALT_API_URL or "https://api.cobalt.tools").rstrip("/")
+            headers = {"Accept": "application/json", "Content-Type": "application/json"}
+            if COBALT_API_KEY:
+                headers["Authorization"] = f"Api-Key {COBALT_API_KEY}"
+            payload = {
+                "url": url,
+                "downloadMode": "auto",
+                "videoQuality": "1080",
+                "filenameStyle": "basic",
+                "localProcessing": "disabled",
+            }
             async with httpx.AsyncClient() as client:
                 res = await client.post(
-                    "https://api.cobalt.tools/api/json",
-                    headers={"Accept": "application/json", "Content-Type": "application/json"},
-                    json={"url": url},
+                    api_base + "/",
+                    headers=headers,
+                    json=payload,
                     timeout=30.0
                 )
-            data = res.json()
-            if res.status_code == 200 and data.get("status") in ["stream", "redirect", "success"]:
+            try:
+                data = res.json()
+            except Exception:
+                data = {"status": "error", "error": {"code": f"http_{res.status_code}", "context": {"body": res.text[:300]}}}
+
+            status = data.get("status")
+            media_url = data.get("url", "")
+            filename = data.get("filename", "")
+            if status == "picker":
+                picker = data.get("picker") or []
+                video_item = next((item for item in picker if item.get("type") == "video" and item.get("url")), None)
+                media_url = (video_item or (picker[0] if picker else {})).get("url", "")
+                filename = (video_item or (picker[0] if picker else {})).get("filename", filename)
+            if res.status_code == 200 and status in {"tunnel", "redirect", "stream", "success", "picker"} and media_url:
                 await context.bot.send_video(
                     chat_id=chat_id,
-                    video=data.get("url"),
-                    caption=f"🎬 Đã làm sạch! (-{cost} Xu)"
+                    video=media_url,
+                    caption=f"🎬 Đã làm sạch! (-{cost} Xu)" + (f"\n<code>{html.escape(filename)}</code>" if filename else ""),
+                    parse_mode="HTML"
                 )
                 await msg.delete()
             else:
                 if user_id and cost > 0:
-                    add_credit(user_id, cost)
+                    add_credit(user_id, cost, "download_refund", "", "Cobalt không trả media_url")
+                err = data.get("error") if isinstance(data, dict) else {}
+                err_code = err.get("code") if isinstance(err, dict) else ""
+                admin_hint = (
+                    "\n\n⚠️ Admin: public <code>api.cobalt.tools</code> có bot protection. "
+                    "Nên self-host Cobalt trên Railway rồi set <code>COBALT_API_URL</code>"
+                    + (" và <code>COBALT_API_KEY</code>." if not COBALT_API_KEY else ".")
+                )
+                if err_code:
+                    admin_hint += f"\nMã lỗi: <code>{html.escape(err_code)}</code>"
                 await msg.edit_text(
                     "❌ Link không hỗ trợ, video riêng tư/cần đăng nhập, hoặc dịch vụ tải đang bảo trì.\n"
-                    f"✅ Đã hoàn lại <b>{cost}</b> Xu.",
+                    f"✅ Đã hoàn lại <b>{cost}</b> Xu." + admin_hint,
                     parse_mode="HTML"
                 )
         except Exception as e:
             logger.error(f"Downloader error: {e}")
             if user_id and cost > 0:
-                add_credit(user_id, cost)
+                add_credit(user_id, cost, "download_refund", "", "Exception trong downloader")
             await msg.edit_text(
                 "❌ Lỗi luồng tải video.\n"
-                f"✅ Đã hoàn lại <b>{cost}</b> Xu.",
+                f"✅ Đã hoàn lại <b>{cost}</b> Xu.\n\n"
+                "⚠️ Admin: kiểm tra <code>COBALT_API_URL</code>, <code>COBALT_API_KEY</code> hoặc self-host Cobalt.",
                 parse_mode="HTML"
             )
 
