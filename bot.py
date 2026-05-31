@@ -6260,6 +6260,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
+        f"• Danh sách kênh: <code>GET {html.escape(base_url)}/api/operator/channels</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
@@ -9001,6 +9002,51 @@ async def api_operator_affiliates(request: Request, limit: int = 50):
             ) in rows
         ],
         "rule": "Pick an active affiliate id, then call POST /api/operator/affiliate-scale. Keep affiliate claims compliant.",
+    }
+
+@fastapi_app.get("/api/operator/channels")
+async def api_operator_channels(request: Request, limit: int = 50):
+    verify_operator_api_token(request)
+    limit = max(1, min(int(limit or 50), 100))
+    rows = list_social_channels(ADMIN_ID, limit=limit)
+    readiness_rows = {row[0]: row for row in list_social_publish_readiness(ADMIN_ID)}
+    channels = []
+    for cid, platform, name, account, focus, audience, slots, status in rows:
+        readiness_row = readiness_rows.get(cid)
+        readiness = "unknown"
+        reason = "Chưa có dữ liệu readiness."
+        publish_mode = "manual"
+        token_env = ""
+        page_id = ""
+        if readiness_row:
+            _, _, _, _, _, publish_mode, token_env, page_id = readiness_row
+            readiness, reason = channel_publish_readiness(readiness_row)
+        channels.append({
+            "id": cid,
+            "platform": platform,
+            "channel_name": name,
+            "account_label": account,
+            "topic_focus": focus,
+            "audience": audience,
+            "posting_slots": slots,
+            "status": status,
+            "publish_mode": publish_mode or "manual",
+            "token_env": token_env,
+            "page_id": page_id,
+            "readiness": readiness,
+            "reason": reason,
+            "can_manual_publish": readiness in {"manual_ready", "api_ready", "manual_required"},
+            "can_api_publish": readiness == "api_ready",
+        })
+    return {
+        "ok": True,
+        "channels": channels,
+        "rule": "Use active channels for affiliate-scale. Use api_ready only for automated publisher workers; manual_ready still requires admin/manual posting.",
+        "next": {
+            "scale_url": "/api/operator/affiliate-scale",
+            "publish_next_url": "/api/operator/publish/next",
+            "status_url": "/api/operator/status",
+        },
     }
 
 @fastapi_app.get("/api/operator/affiliate-report")
