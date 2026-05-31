@@ -1079,12 +1079,24 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(update.effective_user.id, update.effective_user.first_name)
+    is_admin = str(update.effective_user.id) == ADMIN_ID
     if context.args and context.args[0].startswith("ref_"):
         referrer = context.args[0].replace("ref_", "", 1)
         if register_referral(update.effective_user.id, referrer):
             await update.message.reply_text(
                 f"🎁 Đã ghi nhận mã giới thiệu. Người giới thiệu sẽ nhận {REFERRAL_BONUS_XU} Xu khi bạn nạp lần đầu."
             )
+    command_lines = [
+        "• /profile — Xem Hạng VIP & Số dư",
+        "• /naptien — Nạp thêm hạn mức",
+        "• /gopy &lt;nội dung&gt; — Góp ý / báo lỗi",
+    ]
+    if is_admin:
+        command_lines.extend([
+            "• /tools — Kho 30 công cụ AI/MMO (Admin)",
+            "• /mmo — Quy trình kiếm tiền bằng AI (Admin)",
+            "• /dashboard — Dashboard quản trị",
+        ])
     text = (
         "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.2</b>\n\n"
         "Chào mừng! Hệ thống tính phí thông minh theo dung lượng thực tế.\n\n"
@@ -1095,11 +1107,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>4. Tách Nền Ảnh:</b> Gửi ảnh bất kỳ (tính theo MB).\n"
         "<b>5. Đọc Voice:</b> Nhập 'Đọc voice: (nội dung)' (tính theo ký tự).\n\n"
         "💡 <b>Lệnh hệ thống:</b>\n"
-        "• /profile — Xem Hạng VIP & Số dư\n"
-        "• /naptien — Nạp thêm hạn mức\n"
-        "• /tools — Kho 30 công cụ AI/MMO\n"
-        "• /mmo — Quy trình kiếm tiền bằng AI\n"
-        "• /gopy &lt;nội dung&gt; — Góp ý / báo lỗi"
+        + "\n".join(command_lines)
     )
     await update.message.reply_text(
         text, parse_mode="HTML",
@@ -1162,6 +1170,10 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def cmd_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return await update.message.reply_text(
+            "🔒 Lệnh này chỉ dành cho Admin.", parse_mode="HTML"
+        )
     text = (
         "🧰 <b>KHO 30 CÔNG CỤ CHUẨN</b>\n\n"
         "<b>Viết & nghiên cứu:</b> ChatGPT, Perplexity, DeepL, Notion\n"
@@ -1176,6 +1188,10 @@ async def cmd_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return await update.message.reply_text(
+            "🔒 Lệnh này chỉ dành cho Admin.", parse_mode="HTML"
+        )
     text = (
         "💰 <b>WORKFLOW AI KIẾM TIỀN HỢP PHÁP</b>\n\n"
         "<b>1. Faceless video:</b> ChatGPT/Claude viết kịch bản → ElevenLabs/Edge TTS đọc → Kling/CapCut dựng → đăng TikTok/Reels/YouTube Shorts.\n"
