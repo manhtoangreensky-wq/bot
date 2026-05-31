@@ -4271,6 +4271,118 @@ def growth_score(views=0, clicks=0, conversions=0, revenue=0, cost=0):
     score = min(100, int((ctr * 3) + (cvr * 5) + min(revenue / 10000, 40) + max(min(roi / 10, 20), 0)))
     return score, ctr, cvr, roi
 
+def performance_source_from_note(note):
+    note = str(note or "").strip()
+    if not note:
+        return "unknown"
+    match = re.search(r"(?:^|\|\s*)src:([^|]+)", note, re.IGNORECASE)
+    if match:
+        return match.group(1).strip()[:80] or "unknown"
+    first = note.split("|", 1)[0].strip()
+    if ":" in first:
+        key, value = first.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key in {"api", "affiliate_postback", "redirect_affiliate", "tiktok_affiliate", "manual", "n8n"}:
+            return key if key != "api" or not value else value[:80]
+    return first[:80] or "unknown"
+
+def tracking_report_data(owner_id, days=30, limit=15):
+    since = (datetime.now() - timedelta(days=max(1, int(days or 30)))).strftime("%Y-%m-%d %H:%M:%S")
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT pe.affiliate_id, al.network, al.product_name, al.url,
+                  pe.job_id, pj.topic, pe.platform, pe.event_type,
+                  COALESCE(pe.value,0), COALESCE(pe.amount,0), COALESCE(pe.note,''), pe.created_at
+        FROM performance_events pe
+        LEFT JOIN affiliate_links al ON al.id=pe.affiliate_id
+        LEFT JOIN production_jobs pj ON pj.id=pe.job_id
+        WHERE pe.owner_id=? AND pe.created_at>=?
+        ORDER BY pe.id DESC""",
+        (str(owner_id), since)
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    by_affiliate = {}
+    by_source = {}
+    by_job = {}
+
+    def blank():
+        return {"views": 0, "clicks": 0, "conversions": 0, "revenue": 0, "cost": 0, "events": 0}
+
+    for aid, network, product, url, job_id, topic, platform, event_type, value, amount, note, created_at in rows:
+        value = int(value or 0)
+        amount = int(amount or 0)
+        event_type = (event_type or "").lower()
+        source = performance_source_from_note(note)
+        aff_key = int(aid or 0)
+        if aff_key not in by_affiliate:
+            by_affiliate[aff_key] = {
+                **blank(),
+                "affiliate_id": aff_key,
+                "network": network or "",
+                "product": product or "",
+                "url": url or "",
+                "sources": set(),
+            }
+        source_key = (aff_key, source)
+        if source_key not in by_source:
+            by_source[source_key] = {
+                **blank(),
+                "affiliate_id": aff_key,
+                "network": network or "",
+                "product": product or "",
+                "source": source,
+            }
+        job_key = int(job_id or 0)
+        if job_key not in by_job:
+            by_job[job_key] = {
+                **blank(),
+                "job_id": job_key,
+                "affiliate_id": aff_key,
+                "product": product or "",
+                "topic": topic or "",
+                "platform": platform or "",
+            }
+        for bucket in (by_affiliate[aff_key], by_source[source_key], by_job[job_key]):
+            bucket["events"] += 1
+            if event_type == "view":
+                bucket["views"] += value
+            elif event_type == "click":
+                bucket["clicks"] += value
+            elif event_type in {"order", "lead", "revenue"}:
+                bucket["conversions"] += value
+                bucket["revenue"] += amount
+            elif event_type == "cost":
+                bucket["cost"] += amount
+        by_affiliate[aff_key]["sources"].add(source)
+
+    def finalize(items):
+        output = []
+        for item in items:
+            views = item["views"]
+            clicks = item["clicks"]
+            conversions = item["conversions"]
+            revenue = item["revenue"]
+            cost = item["cost"]
+            score, ctr, cvr, roi = growth_score(views, clicks, conversions, revenue, cost)
+            row = {**item, "score": score, "ctr": round(ctr, 2), "cvr": round(cvr, 2), "roi": round(roi, 1)}
+            if isinstance(row.get("sources"), set):
+                row["sources"] = sorted(row["sources"])
+            output.append(row)
+        output.sort(key=lambda x: (x["revenue"], x["conversions"], x["clicks"], x["views"], x["score"]), reverse=True)
+        return output[:limit]
+
+    return {
+        "since": since,
+        "days": days,
+        "affiliates": finalize(by_affiliate.values()),
+        "sources": finalize(by_source.values()),
+        "jobs": finalize(by_job.values()),
+    }
+
 def affiliate_decision_label(score, views, clicks, conversions, revenue, cost, jobs, publishes, min_views=200):
     views = int(views or 0)
     clicks = int(clicks or 0)
@@ -8329,7 +8441,7 @@ def operator_category_keyboard(category):
         ],
         "cat_money": [
             ("💰 Performance", "performance"), ("📈 Growth optimizer", "growth"),
-            ("🔗 Báo cáo affiliate", "affreport"),
+            ("🔗 Báo cáo affiliate", "affreport"), ("📊 Tracking funnel", "trackingreport"),
             ("📊 Daily digest", "daily"), ("🏦 Dashboard quản trị", "admin_dashboard"),
             ("💳 Check PayOS", "checkpayos"),
         ],
@@ -8410,6 +8522,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Danh sách campaign: <code>GET {html.escape(base_url)}/api/operator/campaigns</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
+        f"• Tracking funnel: <code>GET {html.escape(base_url)}/api/operator/tracking-report</code>",
         f"• Quyết định scale affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-decisions</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
@@ -8644,6 +8757,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "review": "/review_gate job=<JOB_ID>",
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
+        "trackingreport": "/tracking_report days=30 limit=10\nGET /api/operator/tracking-report?days=30",
         "growth": "/growth\n/growth days=30",
         "loop": "/operator_loop\n/operator_loop limit=10 queue=1",
         "daily": "/operator_daily\n/operator_daily days=7",
@@ -9654,6 +9768,60 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     else:
         lines.append("• Chưa có sự kiện.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_tracking_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or (context.args[0] if context.args else 30)), 180))
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        limit = max(3, min(int(data.get("limit") or 10), 30))
+    except ValueError:
+        limit = 10
+    report = tracking_report_data(update.effective_user.id, days=days, limit=limit)
+    lines = [
+        f"📊 <b>AFFILIATE TRACKING FUNNEL — {days} ngày</b>",
+        f"• Từ: <code>{html.escape(report['since'])}</code>",
+        "",
+        "<b>1. Link/affiliate tạo tiền:</b>",
+    ]
+    if report["affiliates"]:
+        for item in report["affiliates"]:
+            if not item["affiliate_id"]:
+                continue
+            lines.append(
+                f"• aff #{item['affiliate_id']} | <b>{html.escape(item['product'] or '-')}</b> | score=<b>{item['score']}</b>\n"
+                f"  views={item['views']} click={item['clicks']} conv={item['conversions']} rev={item['revenue']:,}đ cost={item['cost']:,}đ\n"
+                f"  CTR={item['ctr']:.2f}% CVR={item['cvr']:.2f}% ROI={item['roi']:.1f}% | src={html.escape(', '.join(item.get('sources') or []) or '-')}"
+            )
+    else:
+        lines.append("• Chưa có dữ liệu. Dùng tracking URL /r/<AFF_ID>?job=<JOB_ID>&src=tiktok_primary hoặc postback.")
+    lines.append("\n<b>2. Source/caption/comment hiệu quả:</b>")
+    if report["sources"]:
+        for item in report["sources"][:limit]:
+            lines.append(
+                f"• <code>{html.escape(item['source'])}</code> | aff #{item['affiliate_id'] or '-'} {html.escape(item['product'] or '-')}\n"
+                f"  click={item['clicks']} conv={item['conversions']} rev={item['revenue']:,}đ | CTR={item['ctr']:.2f}% CVR={item['cvr']:.2f}% ROI={item['roi']:.1f}%"
+            )
+    else:
+        lines.append("• Chưa có source.")
+    lines.append("\n<b>3. Job nên scale/remix:</b>")
+    if report["jobs"]:
+        for item in report["jobs"][:limit]:
+            if not item["job_id"]:
+                continue
+            lines.append(
+                f"• job #{item['job_id']} | <code>{html.escape(item['platform'] or '-')}</code> | score=<b>{item['score']}</b>\n"
+                f"  click={item['clicks']} conv={item['conversions']} rev={item['revenue']:,}đ | {html.escape(item['topic'] or '-')}\n"
+                f"  next: <code>/affiliate_scale aff={item['affiliate_id']} platform={item['platform'] or 'tiktok'} channel=all limit=3 build=1</code>"
+            )
+    else:
+        lines.append("• Chưa có job performance.")
+    lines.append("\nAPI: <code>GET /api/operator/tracking-report?days=30</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -11118,6 +11286,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
+    tg_app.add_handler(CommandHandler("tracking_report", cmd_tracking_report))
     tg_app.add_handler(CommandHandler("affiliate_report", cmd_affiliate_report))
     tg_app.add_handler(CommandHandler("affiliate_decisions", cmd_affiliate_decisions))
     tg_app.add_handler(CommandHandler("affiliate_scale", cmd_affiliate_scale))
@@ -11339,6 +11508,7 @@ async def api_operator_status(request: Request):
             "n8n_workflow": "/api/operator/n8n-workflow.json",
             "director": "/api/operator/director",
             "affiliate_report": "/api/operator/affiliate-report",
+            "tracking_report": "/api/operator/tracking-report",
             "affiliate_decisions": "/api/operator/affiliate-decisions",
             "affiliate_scale": "/api/operator/affiliate-scale",
             "approve_publish": "/api/operator/jobs/<JOB_ID>/approve",
@@ -11961,6 +12131,22 @@ async def api_operator_affiliate_report(request: Request, days: int = 30, limit:
             "scale_url": "/api/operator/affiliate-scale",
             "performance_url": "/api/operator/performance",
         },
+    }
+
+@fastapi_app.get("/api/operator/tracking-report")
+async def api_operator_tracking_report(request: Request, days: int = 30, limit: int = 15):
+    verify_operator_api_token(request)
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 15), 50))
+    report = tracking_report_data(ADMIN_ID, days=days, limit=limit)
+    return {
+        "ok": True,
+        "days": days,
+        "since": report["since"],
+        "affiliates": report["affiliates"],
+        "sources": report["sources"],
+        "jobs": report["jobs"],
+        "rule": "Scale sources/jobs with revenue or high conversion rate; fix CTA when views/clicks exist without conversions; pause when cost exceeds revenue.",
     }
 
 @fastapi_app.get("/api/operator/affiliate-decisions")

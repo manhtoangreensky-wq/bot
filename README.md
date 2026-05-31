@@ -122,6 +122,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/mark_published job=<ID> url=https://... views=0 clicks=0 note=...`: ghi nhận bài đã đăng thủ công, lưu URL và chuyển job sang `published`.
 - `/performance_add job=<ID> variant=<VARIANT_ID> type=view|click|order|revenue|lead value=... amount=... note=...`: ghi hiệu quả bài đăng/affiliate, có thể gắn vào biến thể creative.
 - `/performance`: báo cáo hiệu quả theo loại sự kiện, kênh và job gần nhất.
+- `/tracking_report days=30 limit=10`: báo cáo funnel theo affiliate, source tracking URL/postback và job để biết link nào nên scale.
 - `/growth days=14`: xếp hạng job/kênh/creative theo view, click, order, revenue, cost và đề xuất lệnh sản xuất/remix tiếp theo.
 - `/produce slot=<calendar_id>`: tạo production job từ lịch nội dung, kèm brief AI nếu đã cấu hình provider.
 - `/pipeline`: xem hàng đợi sản xuất video.
@@ -156,6 +157,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/campaigns`: worker ngoài đọc campaign active, niche, platform, affiliate/pay URL để chọn `campaign_id` khi scale.
 - `GET /api/operator/affiliates`: worker ngoài đọc catalog affiliate active, gồm ID, niche, audience, claim được phép/cấm và link để chọn sản phẩm.
 - `GET /api/operator/affiliate-report`: worker ngoài đọc hiệu quả theo affiliate gồm job, publish, view, click, conversion, revenue, cost, ROI để chọn link nên scale.
+- `GET /api/operator/tracking-report`: worker ngoài đọc funnel theo affiliate/source/job, gồm CTR, CVR, ROI, revenue và gợi ý scale/fix/pause.
 - `GET /api/operator/affiliate-decisions`: worker ngoài lấy quyết định scale/fix/test/pause cho từng affiliate, gồm lệnh Telegram/API gợi ý và danh sách link liên quan để chèn thêm.
 - `POST /api/operator/affiliate-scale`: n8n/Claude worker gửi `affiliate_id`, `platform`, `channel`, `limit`, `build`, `duration`; nếu không gửi `campaign_id`, bot tự chọn campaign active phù hợp rồi tìm trend, tạo batch job và có thể build luôn creative/manifest/task cho link affiliate.
 - `GET /api/operator/publish/next`: publisher worker lấy bài trong publish queue, hỗ trợ query `platform` và `mode`, rồi chuyển queue sang `publishing`.
