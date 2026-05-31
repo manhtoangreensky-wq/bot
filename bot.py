@@ -1220,6 +1220,38 @@ def build_handoff_prompt(job, target_tool, target_stage):
         "5. Dòng cập nhật đề xuất cho Telegram: /pipeline_set id=... stage=... status=... asset=... publish=... note=..."
     )
 
+def build_review_gate_prompt(job):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    return (
+        "Bạn là AI compliance reviewer cho TOAN DAAS. Hãy kiểm duyệt production job trước khi đăng. "
+        "Không cần trích dẫn luật; hãy kiểm tra thực dụng theo rủi ro nền tảng và rủi ro kinh doanh.\n\n"
+        f"Job ID: #{jid}\n"
+        f"Platform: {platform or '-'}\n"
+        f"Channel/account: {channel_name or channel_id or '-'} / {account_label or 'main'}\n"
+        f"Topic: {topic or '-'}\n"
+        f"Stage/status: {stage or '-'} / {status or '-'}\n"
+        f"Affiliate: {network or '-'} - {product_name or '-'} - {affiliate_url or '-'}\n"
+        f"Asset URL: {asset_url or 'chưa có'}\n"
+        f"Publish URL: {publish_url or 'chưa có'}\n"
+        f"Operator note: {note or '-'}\n\n"
+        f"Brief/publish context:\n{brief or 'Chưa có brief'}\n\n"
+        "Trả về tiếng Việt theo format:\n"
+        "DECISION: APPROVE hoặc FIX hoặc BLOCK\n"
+        "RISK_LEVEL: LOW/MEDIUM/HIGH\n"
+        "CHECKLIST:\n"
+        "- Quyền hình ảnh/nhân vật/consent 18+ nếu có người mẫu hoặc OnlyFans\n"
+        "- Quyền âm thanh/voice/music\n"
+        "- Affiliate claim có minh bạch, không cam kết thu nhập phi thực tế\n"
+        "- Không spam, không mạo danh, không né kiểm duyệt\n"
+        "- Caption/CTA không gây hiểu nhầm\n"
+        "- Có link affiliate và tracking cần thiết\n"
+        "FIX_REQUIRED: các điểm phải sửa trước khi đăng\n"
+        "APPROVAL_NOTE: câu ngắn để lưu vào pipeline"
+    )
+
 def slots_per_day(posting_slots: str) -> int:
     digits = "".join(ch for ch in (posting_slots or "") if ch.isdigit())
     if not digits:
@@ -2061,6 +2093,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /trend_search — Tìm trend mới để làm video",
             "• /handoff — Prompt giao việc cho AI/tool khác",
             "• /publish_pack — Gói caption/link để đăng",
+            "• /review_gate — Kiểm duyệt trước khi đăng",
             "• /performance_add — Ghi hiệu quả bài đăng",
             "• /performance — Báo cáo hiệu quả kiếm tiền",
             "• /produce — Tạo job sản xuất từ lịch",
@@ -3023,6 +3056,52 @@ async def cmd_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+async def cmd_review_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("id") or data.get("job") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/review_gate job=1</code>\n"
+            "Nếu đạt, dùng nút <b>Approve Publish</b> để chuyển job sang ready.",
+            parse_mode="HTML"
+        )
+    job = get_production_job(job_id, update.effective_user.id)
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    if gemini_client or openai_client:
+        review = AgentGemini.chat(
+            "Bạn là AI compliance reviewer cho video affiliate/social publishing.",
+            build_review_gate_prompt(job),
+            update.effective_user.id,
+            is_json=False
+        )
+    else:
+        review = (
+            "Chưa cấu hình AI Provider. Review thủ công:\n"
+            "- Kiểm tra quyền hình ảnh/âm thanh/consent.\n"
+            "- Kiểm tra affiliate claim và CTA.\n"
+            "- Kiểm tra nội dung không spam/không mạo danh.\n"
+            "- Nếu đạt, approve publish."
+        )
+    update_production_job(job_id, update.effective_user.id, stage="review", status="waiting", note=f"review_gate | {truncate_text(review, 700)}")
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Approve Publish", callback_data=f"pipe|status|ready|{job_id}"),
+            InlineKeyboardButton("⛔ Blocked", callback_data=f"pipe|status|blocked|{job_id}")
+        ],
+        [InlineKeyboardButton("📦 Publish pack", callback_data=f"pipe|stage|publish|{job_id}")]
+    ])
+    await update.message.reply_text(
+        f"🛡️ <b>REVIEW GATE — JOB #{job_id}</b>\n"
+        f"Stage: <b>review</b> | Status: <b>waiting</b>\n\n"
+        f"<pre>{html_pre(review)}</pre>",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
 async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -3782,6 +3861,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
     tg_app.add_handler(CommandHandler("publish_pack", cmd_publish_pack))
+    tg_app.add_handler(CommandHandler("review_gate", cmd_review_gate))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
