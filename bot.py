@@ -810,6 +810,32 @@ def get_campaign(campaign_id, owner_id=None):
     conn.close()
     return row
 
+def find_matching_campaign(owner_id, niche="", platform=""):
+    rows = list_campaigns(owner_id, limit=50)
+    active_rows = [row for row in rows if (row[5] or "active") == "active"]
+    if not active_rows:
+        return None, 0
+    query = f"{niche or ''} {platform or ''}".lower()
+    best = None
+    best_score = -1
+    for row in active_rows:
+        cid, name, campaign_niche, platforms, affiliate_url, status = row
+        text = f"{name or ''} {campaign_niche or ''} {platforms or ''}".lower()
+        score = 0
+        for token in tokenize_text(query)[:30]:
+            if token and token in text:
+                score += 8
+        if platform and platform.lower() in (platforms or "").lower():
+            score += 25
+        if niche and (niche or "").lower() in text:
+            score += 25
+        if affiliate_url:
+            score += 3
+        if score > best_score:
+            best = row
+            best_score = score
+    return best, max(best_score, 0)
+
 def create_video_job(campaign_id, owner_id, topic, platforms, affiliate_url, brief_json) -> int:
     conn = db_connect()
     c = conn.cursor()
@@ -7416,6 +7442,12 @@ async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE
         campaign_id = 0
     if campaign_id and not get_campaign(campaign_id, update.effective_user.id):
         return await update.message.reply_text("❌ Không tìm thấy campaign hoặc không có quyền.")
+    matched_campaign = None
+    campaign_match_score = 0
+    if not campaign_id:
+        matched_campaign, campaign_match_score = find_matching_campaign(update.effective_user.id, scale_niche, platform_filter)
+        if matched_campaign:
+            campaign_id = matched_campaign[0]
     msg = await update.message.reply_text(
         f"🚀 Đang scale affiliate #{aid}: {html.escape(product or '-')}\n"
         "Bot sẽ tìm trend phù hợp và tạo production job..."
@@ -7460,6 +7492,8 @@ async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"• Niche: <b>{html.escape(scale_niche)}</b>",
         f"• Platform: <code>{html.escape(platform_filter or 'auto')}</code>",
         f"• Channel: <code>{html.escape(channel_filter)}</code>",
+        f"• Campaign: <code>{campaign_id or 'chưa gắn'}</code>"
+        + (f" | auto match score={campaign_match_score}" if matched_campaign else ""),
         f"• Job tạo mới: <b>{len(created_jobs)}</b>",
         f"• Auto build: <b>{'bật' if auto_build else 'tắt'}</b>",
         "",
@@ -8909,12 +8943,19 @@ async def api_operator_affiliate_scale(payload: OperatorAffiliateScaleRequest, r
         price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
     ) = affiliate
     scale_niche = payload.niche or affiliate_niche or product or "affiliate"
+    campaign_id = payload.campaign_id
+    matched_campaign = None
+    campaign_match_score = 0
+    if not campaign_id:
+        matched_campaign, campaign_match_score = find_matching_campaign(ADMIN_ID, scale_niche, payload.platform or "tiktok")
+        if matched_campaign:
+            campaign_id = matched_campaign[0]
     created_jobs, error = await create_operator_auto_jobs(
         ADMIN_ID,
         scale_niche,
         (payload.platform or "tiktok").lower(),
         payload.channel or "all",
-        payload.campaign_id,
+        campaign_id,
         payload.affiliate_id,
         payload.limit,
     )
@@ -8944,6 +8985,9 @@ async def api_operator_affiliate_scale(payload: OperatorAffiliateScaleRequest, r
                     f"🚀 <b>OPERATOR API AFFILIATE SCALE</b>\n\n"
                     f"• Affiliate: <code>#{aid}</code> {html.escape(product or '-')}\n"
                     f"• Niche: <b>{html.escape(scale_niche)}</b>\n"
+                    f"• Campaign: <code>{campaign_id or 'chưa gắn'}</code>"
+                    + (f" | auto score={campaign_match_score}" if matched_campaign else "")
+                    + "\n"
                     f"• Platform/channel: <code>{html.escape(payload.platform or 'tiktok')}</code> / <code>{html.escape(payload.channel or 'all')}</code>\n"
                     f"• Jobs: <b>{len(created_jobs)}</b> | Built: <b>{len(built)}</b> | Failed: <b>{len(failed)}</b>\n"
                     f"• Xem: <code>/affiliate_report days=30</code> hoặc <code>/operator_dashboard</code>"
@@ -8962,6 +9006,14 @@ async def api_operator_affiliate_scale(payload: OperatorAffiliateScaleRequest, r
             "url": url,
         },
         "scale_niche": scale_niche,
+        "campaign": {
+            "id": campaign_id,
+            "auto_matched": bool(matched_campaign and not payload.campaign_id),
+            "match_score": campaign_match_score,
+            "name": matched_campaign[1] if matched_campaign else "",
+            "niche": matched_campaign[2] if matched_campaign else "",
+            "platforms": matched_campaign[3] if matched_campaign else "",
+        },
         "created_jobs": created_jobs,
         "built_jobs": built,
         "failed_builds": failed,

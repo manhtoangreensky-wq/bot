@@ -69,7 +69,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/affiliate_match niche=... platform=tiktok trend=...`: xếp hạng affiliate phù hợp với trend/niche để chọn link trước khi tạo video.
 - `/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=...`: tạo hook, angle, outline, CTA và rủi ro kiểm duyệt cho video ngắn từ một link affiliate đã lưu.
 - `/affiliate_report days=30 limit=15`: báo cáo link affiliate nào có job, bài đăng, view, click, conversion, doanh thu, chi phí và ROI để quyết định scale.
-- `/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID> build=1 duration=45`: lấy niche của affiliate, tìm trend phù hợp, tạo batch production job gắn sẵn link đó; thêm `build=1` để tự tạo creative variants, manifest và production tasks.
+- `/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID> build=1 duration=45`: lấy niche của affiliate, tự chọn campaign active phù hợp nếu chưa truyền `campaign`, tìm trend phù hợp, tạo batch production job gắn sẵn link đó; thêm `build=1` để tự tạo creative variants, manifest và production tasks.
 - `/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=...`: tạo lịch nội dung theo kênh.
 - `/calendar`: xem lịch nội dung đã lên.
 - `/operator topic=... channel=<ID> aff=<ID> campaign=<ID> date=YYYY-MM-DD`: ra lệnh một bước để tạo lịch nội dung + production job + brief AI.
@@ -132,7 +132,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/campaigns`: worker ngoài đọc campaign active, niche, platform, affiliate/pay URL để chọn `campaign_id` khi scale.
 - `GET /api/operator/affiliates`: worker ngoài đọc catalog affiliate active, gồm ID, niche, audience, claim được phép/cấm và link để chọn sản phẩm.
 - `GET /api/operator/affiliate-report`: worker ngoài đọc hiệu quả theo affiliate gồm job, publish, view, click, conversion, revenue, cost, ROI để chọn link nên scale.
-- `POST /api/operator/affiliate-scale`: n8n/Claude worker gửi `affiliate_id`, `platform`, `channel`, `limit`, `build`, `duration` để tìm trend, tạo batch job và có thể build luôn creative/manifest/task cho link affiliate.
+- `POST /api/operator/affiliate-scale`: n8n/Claude worker gửi `affiliate_id`, `platform`, `channel`, `limit`, `build`, `duration`; nếu không gửi `campaign_id`, bot tự chọn campaign active phù hợp rồi tìm trend, tạo batch job và có thể build luôn creative/manifest/task cho link affiliate.
 - `GET /api/operator/publish/next`: publisher worker lấy bài trong publish queue, hỗ trợ query `platform` và `mode`, rồi chuyển queue sang `publishing`.
 - `POST /api/operator/publish/{queue_id}/complete`: publisher worker trả `status`, `publish_url`, `views`, `clicks`, `note`; bot cập nhật job và performance.
 - `POST /api/operator/performance`: worker ngoài gửi `job_id`, `event_type=view|click|order|revenue|lead|cost`, `value`, `amount`, `variant_id`, `source`, `note` để bot tự ghi hiệu quả affiliate.
