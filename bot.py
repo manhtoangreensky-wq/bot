@@ -352,6 +352,19 @@ def init_db():
         note TEXT,
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS tool_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        stage TEXT,
+        tool_name TEXT,
+        event_type TEXT,
+        severity TEXT,
+        job_id INTEGER DEFAULT 0,
+        task_id INTEGER DEFAULT 0,
+        fallback_tool TEXT,
+        message TEXT,
+        created_at DATETIME
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS trend_candidates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -486,6 +499,16 @@ def init_db():
             ("value", "INTEGER DEFAULT 0"),
             ("amount", "INTEGER DEFAULT 0"),
             ("note", "TEXT"),
+        ],
+        "tool_events": [
+            ("stage", "TEXT"),
+            ("tool_name", "TEXT"),
+            ("event_type", "TEXT"),
+            ("severity", "TEXT"),
+            ("job_id", "INTEGER DEFAULT 0"),
+            ("task_id", "INTEGER DEFAULT 0"),
+            ("fallback_tool", "TEXT"),
+            ("message", "TEXT"),
         ],
         "trend_candidates": [
             ("channel_id", "INTEGER DEFAULT 0"),
@@ -2407,9 +2430,91 @@ def operator_toolchain_data():
             "Nếu cả primary và fallback đều không có output: đánh dấu task blocked/failed, không tự giả lập kết quả.",
             "Không xóa tool cũ khi nâng cấp; chỉ thay đổi khi tool sai hoặc vi phạm chính sách.",
         ],
+        "event_api": {
+            "report_url": "/api/operator/tool-events",
+            "list_url": "/api/operator/tool-events",
+            "telegram": "/operator_tool_events",
+            "payload": {
+                "stage": "voice",
+                "tool_name": "Fish Audio HD",
+                "event_type": "quota",
+                "severity": "warning",
+                "job_id": 0,
+                "task_id": 0,
+                "fallback_tool": "Edge TTS",
+                "message": "quota hết, đã fallback",
+                "notify_admin": True,
+            },
+        },
         "counts": {"ready": ready, "total": len(chains), "blocked": len(blocked)},
         "blocked": blocked,
         "chains": chains,
+    }
+
+def record_tool_event(owner_id, stage, tool_name, event_type, severity="warning", job_id=0, task_id=0, fallback_tool="", message=""):
+    event_type = (event_type or "error").strip().lower()
+    severity = (severity or "warning").strip().lower()
+    allowed_events = {"error", "quota", "out_of_credit", "fallback", "blocked", "recovered", "info"}
+    allowed_severity = {"info", "warning", "critical"}
+    if event_type not in allowed_events:
+        event_type = "error"
+    if severity not in allowed_severity:
+        severity = "warning"
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO tool_events
+           (owner_id, stage, tool_name, event_type, severity, job_id, task_id, fallback_tool, message, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(owner_id), stage or "", tool_name or "", event_type, severity,
+            int(job_id or 0), int(task_id or 0), fallback_tool or "", message or "", now_text()
+        )
+    )
+    event_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return event_id
+
+def list_tool_events(owner_id, limit=20, stage="", severity=""):
+    limit = max(1, min(int(limit or 20), 50))
+    params = [str(owner_id)]
+    where = ["owner_id=?"]
+    if stage:
+        where.append("LOWER(stage)=?")
+        params.append(stage.lower())
+    if severity:
+        where.append("LOWER(severity)=?")
+        params.append(severity.lower())
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        f"""SELECT id, stage, tool_name, event_type, severity, job_id, task_id, fallback_tool, message, created_at
+            FROM tool_events
+            WHERE {' AND '.join(where)}
+            ORDER BY id DESC
+            LIMIT ?""",
+        [*params, limit]
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def serialize_tool_event(row):
+    if not row:
+        return {}
+    event_id, stage, tool_name, event_type, severity, job_id, task_id, fallback_tool, message, created_at = row
+    return {
+        "id": event_id,
+        "stage": stage,
+        "tool_name": tool_name,
+        "event_type": event_type,
+        "severity": severity,
+        "job_id": job_id,
+        "task_id": task_id,
+        "fallback_tool": fallback_tool,
+        "message": message,
+        "created_at": created_at,
     }
 
 def operator_n8n_template_data():
@@ -2494,8 +2599,24 @@ def operator_n8n_template_data():
                 "node": "AI/Tool Worker",
                 "type": "external_tool",
                 "tools": ["Claude/Gemini", "Kling/Runway", "Fish Audio/Edge TTS", "CapCut/FFmpeg"],
-                "rule": "Dùng công cụ trả phí/chất lượng cao trước; nếu lỗi/quota hết thì fallback công cụ rẻ/miễn phí và báo admin.",
+                "rule": "Dùng công cụ trả phí/chất lượng cao trước; nếu lỗi/quota hết thì POST /api/operator/tool-events, fallback công cụ rẻ/miễn phí và báo admin.",
                 "output": {"status": "ready|blocked|failed", "output_url": "https://...", "note": "tool log"},
+            },
+            {
+                "node": "Report Tool Event",
+                "type": "http_request",
+                "method": "POST",
+                "url": f"{base_url}/api/operator/tool-events",
+                "body": {
+                    "stage": "voice",
+                    "tool_name": "Fish Audio HD",
+                    "event_type": "quota",
+                    "severity": "warning",
+                    "fallback_tool": "Edge TTS",
+                    "message": "quota hết, đã fallback",
+                    "notify_admin": True,
+                },
+                "note": "Gọi node này khi tool chính lỗi/quota/hết tiền hoặc worker phải fallback.",
             },
             {
                 "node": "Complete Task",
@@ -2712,6 +2833,28 @@ def operator_n8n_workflow_json_data():
                     ),
                     "height": 260,
                     "width": 360,
+                },
+            },
+            {
+                "id": "report-tool-event",
+                "name": "Report Tool Event Sample",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [180, 120],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/tool-events",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"stage\":\"voice\",\"tool_name\":\"Fish Audio HD\","
+                        "\"event_type\":\"quota\",\"severity\":\"warning\","
+                        "\"fallback_tool\":\"Edge TTS\",\"message\":\"sample fallback event\","
+                        "\"notify_admin\":true}"
+                    ),
+                    "options": {"timeout": 60000},
                 },
             },
             {
@@ -5366,6 +5509,17 @@ class OperatorPerformanceRequest(BaseModel):
     note: str = Field(default="", max_length=1200)
     source: str = Field(default="api", max_length=120)
 
+class OperatorToolEventRequest(BaseModel):
+    stage: str = Field(default="", max_length=80)
+    tool_name: str = Field(default="", max_length=120)
+    event_type: str = Field(default="error", max_length=40)
+    severity: str = Field(default="warning", max_length=40)
+    job_id: int = Field(default=0, ge=0)
+    task_id: int = Field(default=0, ge=0)
+    fallback_tool: str = Field(default="", max_length=120)
+    message: str = Field(default="", max_length=1500)
+    notify_admin: bool = True
+
 class OperatorLoopRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=30)
     auto_queue: bool = True
@@ -6212,6 +6366,12 @@ def int_from_text(text, keys, default=0):
         if match:
             return int(match.group(1))
     return default
+
+def safe_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 def first_number_near(text, words, default=0):
     for word in words:
@@ -8021,7 +8181,7 @@ def operator_category_keyboard(category):
         "cat_api": [
             ("🔌 Operator API", "api"), ("🔁 Operator loop", "loop"),
             ("📜 Worker spec", "workerspec"), ("🧰 Toolchain", "toolchain"),
-            ("🧪 Auto-post ready", "readiness"),
+            ("🧯 Tool events", "toolevents"), ("🧪 Auto-post ready", "readiness"),
             ("🧩 n8n template", "n8ntemplate"), ("📥 n8n import", "n8nworkflow"),
             ("📮 Publish API queue", "publishqueue"),
         ],
@@ -8085,6 +8245,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• Toolchain paid/fallback: <code>GET {html.escape(base_url)}/api/operator/toolchain</code>",
+        f"• Báo lỗi/quota tool: <code>POST {html.escape(base_url)}/api/operator/tool-events</code>",
         f"• n8n template: <code>GET {html.escape(base_url)}/api/operator/n8n-template</code>",
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
@@ -8168,6 +8329,57 @@ async def cmd_operator_toolchain(update: Update, context: ContextTypes.DEFAULT_T
     lines.append("\nAPI: <code>GET /api/operator/toolchain</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_tool_events(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    if data.get("tool") or data.get("stage") or data.get("type") or data.get("message"):
+        event_id = record_tool_event(
+            update.effective_user.id,
+            data.get("stage", ""),
+            data.get("tool") or data.get("tool_name", ""),
+            data.get("type") or data.get("event") or data.get("event_type") or "error",
+            data.get("severity", "warning"),
+            safe_int(data.get("job") or data.get("job_id"), 0),
+            safe_int(data.get("task") or data.get("task_id"), 0),
+            data.get("fallback", "") or data.get("fallback_tool", ""),
+            data.get("message", "") or data.get("note", ""),
+        )
+        return await update.message.reply_text(
+            f"✅ Đã ghi tool event <code>#{event_id}</code>.\nXem lại: <code>/operator_tool_events limit=10</code>",
+            parse_mode="HTML"
+        )
+    try:
+        limit = int(data.get("limit") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        limit = 12
+    rows = list_tool_events(
+        update.effective_user.id,
+        limit=limit,
+        stage=(data.get("stage") or "").lower(),
+        severity=(data.get("severity") or "").lower(),
+    )
+    lines = [
+        "🧯 <b>TOOL EVENTS / QUOTA LOG</b>",
+        "",
+        "Ghi mới: <code>/operator_tool_events stage=voice tool=Fish type=quota fallback=Edge message=het_quota</code>",
+        "API: <code>POST /api/operator/tool-events</code>",
+        "",
+    ]
+    if not rows:
+        lines.append("Chưa có sự cố tool nào.")
+    for row in rows:
+        event_id, stage, tool_name, event_type, severity, job_id, task_id, fallback_tool, message, created_at = row
+        icon = "🚨" if severity == "critical" else ("⚠️" if severity == "warning" else "ℹ️")
+        lines.append(
+            f"{icon} <code>#{event_id}</code> | {html.escape(created_at or '-')}\n"
+            f"• <b>{html.escape(stage or '-')}</b> / <code>{html.escape(tool_name or '-')}</code> | "
+            f"type=<code>{html.escape(event_type or '-')}</code> | severity=<code>{html.escape(severity or '-')}</code>\n"
+            f"• job=<code>{job_id or '-'}</code> task=<code>{task_id or '-'}</code> fallback=<code>{html.escape(fallback_tool or '-')}</code>\n"
+            f"• {html.escape(message or '-')}"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_operator_n8n_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -8234,6 +8446,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "api": "/operator_api",
         "workerspec": "/operator_worker_spec\nGET /api/operator/worker-spec",
         "toolchain": "/operator_toolchain\nGET /api/operator/toolchain",
+        "toolevents": "/operator_tool_events\n/operator_tool_events stage=voice tool=Fish type=quota fallback=Edge message=het_quota\nPOST /api/operator/tool-events",
         "n8ntemplate": "/operator_n8n_template\nGET /api/operator/n8n-template",
         "n8nworkflow": "/operator_n8n_workflow\nGET /api/operator/n8n-workflow.json",
         "director": "/operator_director days=30 platform=tiktok limit=10",
@@ -10679,6 +10892,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_worker_spec", cmd_operator_worker_spec))
     tg_app.add_handler(CommandHandler("operator_toolchain", cmd_operator_toolchain))
+    tg_app.add_handler(CommandHandler("operator_tool_events", cmd_operator_tool_events))
     tg_app.add_handler(CommandHandler("operator_n8n_template", cmd_operator_n8n_template))
     tg_app.add_handler(CommandHandler("operator_n8n_workflow", cmd_operator_n8n_workflow))
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
@@ -10871,6 +11085,7 @@ async def api_operator_status(request: Request):
             "audit": "/api/operator/audit",
             "worker_spec": "/api/operator/worker-spec",
             "toolchain": "/api/operator/toolchain",
+            "tool_events": "/api/operator/tool-events",
             "n8n_template": "/api/operator/n8n-template",
             "n8n_workflow": "/api/operator/n8n-workflow.json",
             "director": "/api/operator/director",
@@ -10909,6 +11124,54 @@ async def api_operator_worker_spec(request: Request):
 async def api_operator_toolchain(request: Request):
     verify_operator_api_token(request)
     return {"ok": True, "toolchain": operator_toolchain_data()}
+
+@fastapi_app.get("/api/operator/tool-events")
+async def api_operator_tool_events(request: Request, limit: int = 20, stage: str = "", severity: str = ""):
+    verify_operator_api_token(request)
+    rows = list_tool_events(ADMIN_ID, limit=limit, stage=(stage or "").lower(), severity=(severity or "").lower())
+    return {"ok": True, "events": [serialize_tool_event(row) for row in rows]}
+
+@fastapi_app.post("/api/operator/tool-events")
+async def api_operator_tool_event(payload: OperatorToolEventRequest, request: Request):
+    verify_operator_api_token(request)
+    event_id = record_tool_event(
+        ADMIN_ID,
+        payload.stage,
+        payload.tool_name,
+        payload.event_type,
+        payload.severity,
+        payload.job_id,
+        payload.task_id,
+        payload.fallback_tool,
+        payload.message,
+    )
+    if tg_app and ADMIN_ID and payload.notify_admin and payload.severity.lower() in {"warning", "critical"}:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🧯 <b>TOOL EVENT / FALLBACK ALERT</b>\n\n"
+                    f"• Event: <code>#{event_id}</code> | Severity: <b>{html.escape(payload.severity)}</b>\n"
+                    f"• Stage: <code>{html.escape(payload.stage or '-')}</code>\n"
+                    f"• Tool: <code>{html.escape(payload.tool_name or '-')}</code>\n"
+                    f"• Type: <code>{html.escape(payload.event_type or '-')}</code>\n"
+                    f"• Fallback: <code>{html.escape(payload.fallback_tool or '-')}</code>\n"
+                    f"• Job/task: <code>{payload.job_id or '-'}</code>/<code>{payload.task_id or '-'}</code>\n"
+                    f"• Message: {html.escape(payload.message or '-')}"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Tool event notify error: {e}")
+    return {
+        "ok": True,
+        "event_id": event_id,
+        "next": {
+            "toolchain": "/api/operator/toolchain",
+            "events": "/api/operator/tool-events",
+            "telegram": "/operator_tool_events",
+        },
+    }
 
 @fastapi_app.get("/api/operator/n8n-template")
 async def api_operator_n8n_template(request: Request):
