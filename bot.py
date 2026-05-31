@@ -5291,6 +5291,95 @@ async def create_operator_auto_jobs(owner_id, niche, platform_filter="", channel
             })
     return created, ""
 
+async def execute_scale_plan_actions(owner_id, days=30, platform="tiktok", limit=5, per_affiliate_limit=3, build=True, duration=45, notify_admin=False):
+    plan = scale_plan_data(owner_id, days=days, limit=max(limit * 3, 10), platform=platform)
+    executed = []
+    skipped = []
+    seen_affiliates = set()
+    for item in plan["plans"]:
+        if len(executed) >= limit:
+            break
+        aid = int(item.get("affiliate_id") or 0)
+        if item.get("action") != "SCALE":
+            skipped.append({**item, "skip_reason": "not_scale_action"})
+            continue
+        if not aid:
+            skipped.append({**item, "skip_reason": "missing_affiliate_id"})
+            continue
+        if aid in seen_affiliates:
+            skipped.append({**item, "skip_reason": "duplicate_affiliate_in_batch"})
+            continue
+        affiliate = get_affiliate_link(aid, owner_id)
+        if not affiliate:
+            skipped.append({**item, "skip_reason": "affiliate_not_found"})
+            continue
+        (
+            _aid, network, product, affiliate_niche, url, note, status,
+            price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
+        ) = affiliate
+        if (status or "active").lower() != "active":
+            skipped.append({**item, "skip_reason": "affiliate_inactive"})
+            continue
+        scale_niche = affiliate_niche or product or item.get("topic") or "affiliate"
+        matched_campaign, campaign_score = find_matching_campaign(owner_id, scale_niche, platform)
+        campaign_id = matched_campaign[0] if matched_campaign else 0
+        created_jobs, error = await create_operator_auto_jobs(
+            owner_id,
+            scale_niche,
+            platform,
+            "all",
+            campaign_id,
+            aid,
+            per_affiliate_limit,
+        )
+        if error:
+            skipped.append({**item, "skip_reason": error})
+            continue
+        built = []
+        failed = []
+        if build:
+            for created in created_jobs:
+                ok, bundle = build_operator_job_bundle(owner_id, created["job_id"], count=5, duration=duration)
+                if ok:
+                    built.append({
+                        "job_id": created["job_id"],
+                        "manifest_id": bundle.get("manifest_id"),
+                        "task_count": len(bundle.get("task_ids") or []),
+                        "variant_id": bundle.get("best_variant_id"),
+                        "readiness": (bundle.get("readiness") or {}).get("level", "UNKNOWN"),
+                    })
+                else:
+                    failed.append({"job_id": created["job_id"], "error": bundle.get("error", "build lỗi") if isinstance(bundle, dict) else "build lỗi"})
+        seen_affiliates.add(aid)
+        executed.append({
+            **item,
+            "affiliate": {"id": aid, "network": network, "product": product, "niche": affiliate_niche},
+            "campaign": {
+                "id": campaign_id,
+                "name": matched_campaign[1] if matched_campaign else "",
+                "match_score": campaign_score,
+            },
+            "created_jobs": created_jobs,
+            "built_jobs": built,
+            "failed_builds": failed,
+        })
+    if notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🎯 <b>SCALE PLAN EXECUTED</b>\n\n"
+                    f"• Executed: <b>{len(executed)}</b>\n"
+                    f"• Skipped: <b>{len(skipped)}</b>\n"
+                    f"• Platform: <code>{html.escape(platform)}</code>\n"
+                    f"• Next: <code>/tasks</code> hoặc <code>/operator_loop</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Scale plan execute notify error: {e}")
+    return {"plan": plan, "executed": executed, "skipped": skipped}
+
 def build_production_prompt(slot):
     (
         slot_id, _, channel_id, campaign_id, affiliate_id, post_date, platform, topic, _, notes,
@@ -5895,6 +5984,15 @@ class OperatorDirectorRunRequest(BaseModel):
     platform: str = Field(default="tiktok", max_length=40)
     limit: int = Field(default=10, ge=3, le=20)
     execute: bool = True
+    build: bool = True
+    duration: int = Field(default=45, ge=15, le=120)
+    notify_admin: bool = True
+
+class OperatorScalePlanRunRequest(BaseModel):
+    days: int = Field(default=30, ge=1, le=180)
+    platform: str = Field(default="tiktok", max_length=40)
+    limit: int = Field(default=3, ge=1, le=10)
+    per_affiliate_limit: int = Field(default=3, ge=1, le=8)
     build: bool = True
     duration: int = Field(default=45, ge=15, le=120)
     notify_admin: bool = True
@@ -8529,7 +8627,8 @@ def operator_category_keyboard(category):
         "cat_money": [
             ("💰 Performance", "performance"), ("📈 Growth optimizer", "growth"),
             ("🔗 Báo cáo affiliate", "affreport"), ("📊 Tracking funnel", "trackingreport"),
-            ("🎯 Scale plan", "scaleplan"), ("📊 Daily digest", "daily"),
+            ("🎯 Scale plan", "scaleplan"), ("🚀 Execute scale", "scaleexecute"),
+            ("📊 Daily digest", "daily"),
             ("🏦 Dashboard quản trị", "admin_dashboard"),
             ("💳 Check PayOS", "checkpayos"),
         ],
@@ -8612,6 +8711,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
         f"• Tracking funnel: <code>GET {html.escape(base_url)}/api/operator/tracking-report</code>",
         f"• Scale plan: <code>GET {html.escape(base_url)}/api/operator/scale-plan</code>",
+        f"• Execute scale plan: <code>POST {html.escape(base_url)}/api/operator/scale-plan/run</code>",
         f"• Quyết định scale affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-decisions</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
@@ -8848,6 +8948,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
         "trackingreport": "/tracking_report days=30 limit=10\nGET /api/operator/tracking-report?days=30",
         "scaleplan": "/scale_plan days=30 platform=tiktok limit=10\nGET /api/operator/scale-plan?days=30",
+        "scaleexecute": "/scale_execute days=30 platform=tiktok limit=3 per=3 build=1\nPOST /api/operator/scale-plan/run",
         "growth": "/growth\n/growth days=30",
         "loop": "/operator_loop\n/operator_loop limit=10 queue=1",
         "daily": "/operator_daily\n/operator_daily days=7",
@@ -9954,6 +10055,67 @@ async def cmd_scale_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     lines.append("\nAPI: <code>GET /api/operator/scale-plan?days=30</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_scale_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or 30), 180))
+    except ValueError:
+        days = 30
+    platform = (data.get("platform") or "tiktok").lower()
+    try:
+        limit = max(1, min(int(data.get("limit") or 3), 10))
+    except ValueError:
+        limit = 3
+    try:
+        per_affiliate_limit = max(1, min(int(data.get("per") or data.get("per_affiliate") or 3), 8))
+    except ValueError:
+        per_affiliate_limit = 3
+    build = str(data.get("build") or "1").lower() not in {"0", "false", "no", "khong"}
+    try:
+        duration = max(15, min(int(data.get("duration") or 45), 120))
+    except ValueError:
+        duration = 45
+    msg = await update.message.reply_text("🎯 Đang chạy scale plan an toàn từ funnel...")
+    result = await execute_scale_plan_actions(
+        update.effective_user.id,
+        days=days,
+        platform=platform,
+        limit=limit,
+        per_affiliate_limit=per_affiliate_limit,
+        build=build,
+        duration=duration,
+        notify_admin=False,
+    )
+    lines = [
+        "🎯 <b>SCALE PLAN EXECUTE</b>",
+        f"• Executed: <b>{len(result['executed'])}</b>",
+        f"• Skipped: <b>{len(result['skipped'])}</b>",
+        f"• Platform: <code>{html.escape(platform)}</code>",
+        "",
+    ]
+    if result["executed"]:
+        lines.append("<b>Đã tạo job:</b>")
+        for item in result["executed"][:8]:
+            jobs = item.get("created_jobs") or []
+            built = item.get("built_jobs") or []
+            next_line = f"  next: <code>/tasks job={jobs[0]['job_id']}</code>" if jobs else "  next: <code>/tasks</code>"
+            lines.append(
+                f"🚀 aff #{item['affiliate_id']} | {html.escape(item.get('product') or item.get('affiliate', {}).get('product') or '-')}\n"
+                f"  jobs={len(jobs)} built={len(built)} | reason={html.escape(item.get('reason') or '-')}\n"
+                f"{next_line}"
+            )
+    if result["skipped"]:
+        lines.append("\n<b>Bỏ qua/chờ xử lý:</b>")
+        for item in result["skipped"][:8]:
+            lines.append(
+                f"• {html.escape(item.get('action') or '-')} | aff #{item.get('affiliate_id') or '-'} | "
+                f"{html.escape(item.get('skip_reason') or item.get('reason') or '-')}"
+            )
+    lines.append("\nTiếp theo: <code>/operator_loop</code> hoặc <code>/tasks</code>")
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -11419,6 +11581,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("tracking_report", cmd_tracking_report))
     tg_app.add_handler(CommandHandler("scale_plan", cmd_scale_plan))
+    tg_app.add_handler(CommandHandler("scale_execute", cmd_scale_execute))
     tg_app.add_handler(CommandHandler("affiliate_report", cmd_affiliate_report))
     tg_app.add_handler(CommandHandler("affiliate_decisions", cmd_affiliate_decisions))
     tg_app.add_handler(CommandHandler("affiliate_scale", cmd_affiliate_scale))
@@ -11642,6 +11805,7 @@ async def api_operator_status(request: Request):
             "affiliate_report": "/api/operator/affiliate-report",
             "tracking_report": "/api/operator/tracking-report",
             "scale_plan": "/api/operator/scale-plan",
+            "scale_plan_run": "/api/operator/scale-plan/run",
             "affiliate_decisions": "/api/operator/affiliate-decisions",
             "affiliate_scale": "/api/operator/affiliate-scale",
             "approve_publish": "/api/operator/jobs/<JOB_ID>/approve",
@@ -12301,6 +12465,38 @@ async def api_operator_scale_plan(request: Request, days: int = 30, limit: int =
             "tracking_report_url": "/api/operator/tracking-report",
             "affiliate_scale_url": "/api/operator/affiliate-scale",
             "performance_url": "/api/operator/performance",
+        },
+    }
+
+@fastapi_app.post("/api/operator/scale-plan/run")
+async def api_operator_scale_plan_run(payload: OperatorScalePlanRunRequest, request: Request):
+    verify_operator_api_token(request)
+    platform = (payload.platform or "tiktok").lower()
+    result = await execute_scale_plan_actions(
+        ADMIN_ID,
+        days=payload.days,
+        platform=platform,
+        limit=payload.limit,
+        per_affiliate_limit=payload.per_affiliate_limit,
+        build=payload.build,
+        duration=payload.duration,
+        notify_admin=payload.notify_admin,
+    )
+    return {
+        "ok": True,
+        "days": payload.days,
+        "platform": platform,
+        "executed": result["executed"],
+        "skipped": result["skipped"],
+        "summary": {
+            "executed": len(result["executed"]),
+            "skipped": len(result["skipped"]),
+            "scale_candidates": result["plan"]["summary"]["scale"],
+        },
+        "next": {
+            "tasks_url": "/api/operator/tasks/next",
+            "loop_url": "/api/operator/loop",
+            "publish_queue_url": "/api/operator/publish/next",
         },
     }
 
