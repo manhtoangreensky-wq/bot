@@ -129,6 +129,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/publish_queue`: xem hàng đợi đăng.
 - `/publisher_handoff queue=<QUEUE_ID>`: xuất runbook đăng bài theo nền tảng cho publisher worker hoặc đăng thủ công, gồm final video, caption, comment ghim, env token cần có và payload trả kết quả.
 - `/publisher_run platform=tiktok mode=api`: claim queue kế tiếp và trả quyết định `api_ready`, `manual_required` hoặc `blocked_missing_final_video` cho publisher worker/admin.
+- `/publisher_auto_check queue=<QUEUE_ID>`: kiểm tra dry-run trước khi auto publish, gồm queue status, mode API, job readiness, nền tảng hỗ trợ, token env, page_id và final video; không gọi API mạng xã hội và không đổi trạng thái job/queue.
 - `/publisher_auto queue=<QUEUE_ID>`: thử auto publish bằng API chính thức, hiện giới hạn Facebook Page `api_ready` có `token_env` và `page_id`; chỉ chạy khi job `READY_TO_PUBLISH`, queue `mode=api`, có final video; nền tảng khác trả handoff/manual.
 - `/publish_queue_set id=<QUEUE_ID> status=published|blocked|scheduled url=https://... note=...`: cập nhật trạng thái hàng đợi đăng.
 - `/asset_add job=<ID> type=script|voice|raw_video|subtitle|thumbnail|final_video url=... note=...`: lưu asset/link/file vào production job.
@@ -196,6 +197,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /api/operator/affiliate-scale`: n8n/Claude worker gửi `affiliate_id`, `platform`, `channel`, `limit`, `build`, `duration`; nếu không gửi `campaign_id`, bot tự chọn campaign active phù hợp rồi tìm trend, tạo batch job và có thể build luôn creative/manifest/task cho link affiliate.
 - `GET /api/operator/publish/next`: publisher worker lấy bài trong publish queue, hỗ trợ query `platform` và `mode`, rồi chuyển queue sang `publishing`.
 - `GET /api/operator/publish/{queue_id}/handoff`: lấy runbook đăng bài cho queue đã duyệt, phân biệt TikTok, Facebook/Reels, OnlyFans/manual và trả sẵn copy/pinned comment/complete payload.
+- `GET /api/operator/publish/{queue_id}/auto-check`: dry-run kiểm tra auto publish chính thức trước khi đăng thật; trả checklist và lệnh/API tiếp theo, không gọi mạng xã hội và không mutate dữ liệu.
 - `POST /api/operator/publish/{queue_id}/auto`: thử auto publish chính thức, hiện hỗ trợ Facebook Page video bằng Meta Graph API khi queue/channel `api_ready`, job `READY_TO_PUBLISH`, queue `mode=api`, có final video; nếu không đạt thì trả lý do/manual handoff.
 - `POST /api/operator/publish/{queue_id}/complete`: publisher worker trả `status`, `publish_url`, `views`, `clicks`, `note`; bot cập nhật job và performance.
 - `POST /api/operator/performance`: worker ngoài gửi `job_id`, `event_type=view|click|order|revenue|lead|cost`, `value`, `amount`, `variant_id`, `source`, `note` để bot tự ghi hiệu quả affiliate.

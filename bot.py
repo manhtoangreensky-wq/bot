@@ -6040,6 +6040,7 @@ def publisher_run_payload(owner_id, platform="", mode="", auto_claim=True):
         },
         "rule": "API-ready mới tự đăng bằng API chính thức. Manual-required thì chỉ gửi handoff, không bypass ToS/nền tảng.",
         "auto_publish_rule": "Auto chỉ chạy khi queue mode=api, job READY_TO_PUBLISH, final video tồn tại, token/page_id hợp lệ và nền tảng được hỗ trợ.",
+        "auto_check_url": f"/api/operator/publish/{queue_id}/auto-check",
     }
 
 def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None, note=None):
@@ -6154,6 +6155,56 @@ async def official_auto_publish_queue_item(owner_id, queue_id):
     if not item:
         return False, "queue_not_found", {}
     queue_payload = serialize_publish_queue_item(item)
+    ok, reason, info = official_auto_publish_preflight(owner_id, queue_payload)
+    if not ok:
+        return False, reason, info
+    platform = (queue_payload.get("platform") or "").lower()
+    if platform in {"facebook", "fb", "meta", "reels"}:
+        ok, reason, info = await publish_facebook_page_video(queue_payload)
+    else:
+        return False, "official_auto_not_supported", {
+            "platform": platform,
+            "manual_handoff": build_publisher_handoff(queue_payload),
+        }
+    if not ok:
+        if reason not in {"job_not_ready_to_publish", "queue_not_api_mode"} and not str(reason).startswith("queue_already_"):
+            update_publish_queue_item(owner_id, queue_id, status="blocked", note=f"official_auto_publish_failed:{reason}")
+        return False, reason, info
+    publish_url = info.get("publish_url") or ""
+    update_publish_queue_item(owner_id, queue_id, status="published", publish_url=publish_url, note=f"official_auto_publish:{platform}")
+    job_id = queue_payload.get("job_id") or 0
+    if job_id:
+        update_production_job(job_id, owner_id, stage="done", status="published", note=f"official_auto_publish queue:{queue_id}", publish_url=publish_url)
+        add_performance_event(owner_id, job_id, "publish", 1, 0, f"official_auto_publish:{platform}")
+    return True, "published", {**info, "queue": serialize_publish_queue_item(get_publish_queue_item(owner_id, queue_id))}
+
+
+def official_auto_publish_check(owner_id, queue_id):
+    item = get_publish_queue_item(owner_id, queue_id)
+    if not item:
+        return False, "queue_not_found", {
+            "queue_id": queue_id,
+            "checks": [{"name": "queue", "ok": False, "detail": "Không tìm thấy publish queue."}],
+        }
+    queue_payload = serialize_publish_queue_item(item)
+    ok, reason, info = official_auto_publish_preflight(owner_id, queue_payload)
+    checks = build_official_auto_publish_checks(queue_payload, info, reason)
+    return ok, reason, {
+        **(info or {}),
+        "queue": queue_payload,
+        "checks": checks,
+        "next": {
+            "publish_command": f"/publisher_auto queue={queue_id}" if ok else "",
+            "manual_command": f"/publisher_handoff queue={queue_id}",
+            "auto_publish_url": f"/api/operator/publish/{queue_id}/auto",
+        },
+        "rule": "Dry-run only: no network publish is called and no queue/job state is changed.",
+    }
+
+
+def official_auto_publish_preflight(owner_id, queue_payload):
+    if not queue_payload:
+        return False, "queue_not_found", {}
     queue_status = (queue_payload.get("status") or "").lower()
     if queue_status in {"published", "cancelled"}:
         return False, f"queue_already_{queue_status}", {"queue": queue_payload}
@@ -6174,24 +6225,101 @@ async def official_auto_publish_queue_item(owner_id, queue_id):
             ],
         }
     platform = (queue_payload.get("platform") or "").lower()
-    if platform in {"facebook", "fb", "meta", "reels"}:
-        ok, reason, info = await publish_facebook_page_video(queue_payload)
-    else:
+    if platform not in {"facebook", "fb", "meta", "reels"}:
         return False, "official_auto_not_supported", {
             "platform": platform,
             "manual_handoff": build_publisher_handoff(queue_payload),
         }
-    if not ok:
-        if reason not in {"job_not_ready_to_publish", "queue_not_api_mode"} and not str(reason).startswith("queue_already_"):
-            update_publish_queue_item(owner_id, queue_id, status="blocked", note=f"official_auto_publish_failed:{reason}")
-        return False, reason, info
-    publish_url = info.get("publish_url") or ""
-    update_publish_queue_item(owner_id, queue_id, status="published", publish_url=publish_url, note=f"official_auto_publish:{platform}")
-    job_id = queue_payload.get("job_id") or 0
-    if job_id:
-        update_production_job(job_id, owner_id, stage="done", status="published", note=f"official_auto_publish queue:{queue_id}", publish_url=publish_url)
-        add_performance_event(owner_id, job_id, "publish", 1, 0, f"official_auto_publish:{platform}")
-    return True, "published", {**info, "queue": serialize_publish_queue_item(get_publish_queue_item(owner_id, queue_id))}
+    token_env = queue_payload.get("token_env") or ""
+    page_id = str(queue_payload.get("page_id") or "").strip()
+    token = _env(token_env) if token_env else ""
+    final_video = queue_payload.get("final_video") or {}
+    handoff = build_publisher_handoff(queue_payload)
+    media = handoff.get("media") or {}
+    if not token_env or not token:
+        return False, "missing_token", {"token_env": token_env}
+    if not page_id:
+        return False, "missing_page_id", {}
+    if not (media.get("final_video_url") or media.get("telegram_file_id") or final_video.get("id")):
+        return False, "missing_final_video", {"media": media}
+    if final_video.get("id"):
+        asset = get_production_asset(ADMIN_ID, final_video.get("id"))
+        if asset:
+            _aid, _owner_id, _job_id, _asset_type, _url, _file_id, _note, local_path, _content_type, _filename, _created_at = asset
+            if local_path:
+                upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+                abs_path = os.path.abspath(local_path)
+                if not abs_path.startswith(upload_root) or not os.path.exists(abs_path):
+                    return False, "local_asset_missing", {"asset_id": final_video.get("id"), "path": local_path}
+        elif not media.get("final_video_url") and not media.get("telegram_file_id"):
+            return False, "missing_final_video_asset", {"asset_id": final_video.get("id")}
+    return True, "ready", {
+        "platform": platform,
+        "queue": queue_payload,
+        "page_id": page_id,
+        "token_env": token_env,
+        "media": media,
+        "handoff": handoff,
+        "will_call": f"https://graph.facebook.com/{META_GRAPH_VERSION.strip('/')}/{page_id}/videos",
+        "rule": "Dry-run only: no network publish is called.",
+    }
+
+
+def build_official_auto_publish_checks(queue_payload, info=None, reason=""):
+    info = info or {}
+    handoff = info.get("handoff") or build_publisher_handoff(queue_payload)
+    media = info.get("media") or handoff.get("media") or {}
+    platform = (queue_payload.get("platform") or "").lower()
+    queue_status = (queue_payload.get("status") or "").lower()
+    mode = (queue_payload.get("mode") or "").lower()
+    readiness = production_readiness_data(queue_payload.get("owner_id") or ADMIN_ID, queue_payload.get("job_id") or 0) or {}
+    token_env = queue_payload.get("token_env") or ""
+    token_present = bool(_env(token_env)) if token_env else False
+    page_id = str(queue_payload.get("page_id") or "").strip()
+    final_video = queue_payload.get("final_video") or {}
+    checks = [
+        {
+            "name": "queue_status",
+            "ok": queue_status in {"queued", "scheduled", "publishing"},
+            "detail": queue_status or "unknown",
+        },
+        {
+            "name": "queue_mode",
+            "ok": mode == "api",
+            "detail": mode or "missing",
+        },
+        {
+            "name": "job_readiness",
+            "ok": readiness.get("level") == "READY_TO_PUBLISH",
+            "detail": readiness.get("level") or "unknown",
+        },
+        {
+            "name": "platform_supported",
+            "ok": platform in {"facebook", "fb", "meta", "reels"},
+            "detail": platform or "missing",
+        },
+        {
+            "name": "token_env",
+            "ok": bool(token_env and token_present),
+            "detail": token_env or "missing",
+        },
+        {
+            "name": "page_id",
+            "ok": bool(page_id),
+            "detail": page_id or "missing",
+        },
+        {
+            "name": "final_video",
+            "ok": bool(media.get("final_video_url") or media.get("telegram_file_id") or final_video.get("id")),
+            "detail": str(media.get("asset_id") or media.get("final_video_url") or media.get("telegram_file_id") or "missing"),
+        },
+    ]
+    if reason in {"local_asset_missing", "missing_final_video_asset"}:
+        checks.append({"name": "local_asset_file", "ok": False, "detail": json.dumps(info, ensure_ascii=False)[:300]})
+    elif final_video.get("id"):
+        checks.append({"name": "local_asset_file", "ok": True, "detail": f"asset_id={final_video.get('id')}"})
+    return checks
+
 
 def clamp_score(value, low=0, high=100):
     return max(low, min(high, int(value)))
@@ -10690,8 +10818,8 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "approvepublish": "/approve_publish job=<JOB_ID> queue=1 mode=manual note=duyet_ok\nPOST /api/operator/jobs/<JOB_ID>/approve",
         "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
-        "publishqueue": "/publish_queue\n/publisher_handoff queue=<QUEUE_ID>\n/publisher_auto queue=<QUEUE_ID>\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
-        "publisherhandoff": "/publisher_handoff queue=<QUEUE_ID>\n/publisher_auto queue=<QUEUE_ID>\nGET /api/operator/publish/<QUEUE_ID>/handoff",
+        "publishqueue": "/publish_queue\n/publisher_handoff queue=<QUEUE_ID>\n/publisher_auto_check queue=<QUEUE_ID>\n/publisher_auto queue=<QUEUE_ID>\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
+        "publisherhandoff": "/publisher_handoff queue=<QUEUE_ID>\n/publisher_auto_check queue=<QUEUE_ID>\n/publisher_auto queue=<QUEUE_ID>\nGET /api/operator/publish/<QUEUE_ID>/handoff",
         "publisherrun": "/publisher_run platform=tiktok mode=api\nPOST /api/operator/publisher/run",
         "publisherstatus": "/publisher_status\nGET /api/operator/publisher/status",
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
@@ -11768,6 +11896,7 @@ async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(
         "\nLệnh tiếp:\n"
         "<code>/publisher_handoff queue=&lt;QUEUE_ID&gt;</code>\n"
+        "<code>/publisher_auto_check queue=&lt;QUEUE_ID&gt;</code> — kiểm tra đủ điều kiện API trước\n"
         "<code>/publisher_auto queue=&lt;QUEUE_ID&gt;</code> — chỉ Facebook Page api_ready\n"
         "<code>/publish_queue_set id=&lt;QUEUE_ID&gt; status=published url=https://...</code>"
     )
@@ -11814,7 +11943,8 @@ async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TY
         f"<code>/publish_queue_set id={queue_id} status=published url=https://...</code>"
     )
     if handoff.get("can_auto_publish") and (handoff.get("platform") or "") in {"facebook", "fb", "meta", "reels"}:
-        lines.append(f"\nAuto chính thức: <code>/publisher_auto queue={queue_id}</code>")
+        lines.append(f"\nKiểm tra auto: <code>/publisher_auto_check queue={queue_id}</code>")
+        lines.append(f"Auto chính thức: <code>/publisher_auto queue={queue_id}</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -11847,8 +11977,41 @@ async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<code>/publish_queue_set id={queue.get('id')} status=published url=https://...</code>",
     ]
     if result.get("decision") == "api_ready" and (queue.get("platform") or "").lower() in {"facebook", "fb", "meta", "reels"}:
+        lines.append(f"Kiểm tra auto: <code>/publisher_auto_check queue={queue.get('id')}</code>")
         lines.append(f"Auto chính thức: <code>/publisher_auto queue={queue.get('id')}</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_publisher_auto_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        queue_id = int(data.get("id") or data.get("queue") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/publisher_auto_check queue=&lt;QUEUE_ID&gt;</code>\n"
+            "Lệnh này chỉ kiểm tra, không đăng thật.",
+            parse_mode="HTML"
+        )
+    ok, reason, info = official_auto_publish_check(update.effective_user.id, queue_id)
+    checks = info.get("checks") or []
+    lines = [
+        f"🧪 <b>AUTO PUBLISH CHECK — QUEUE #{queue_id}</b>",
+        f"• Kết quả: <b>{'READY' if ok else 'BLOCKED'}</b>",
+        f"• Lý do: <code>{html.escape(reason)}</code>",
+        "",
+        "<b>Checklist:</b>",
+    ]
+    for check in checks:
+        icon = "✅" if check.get("ok") else "❌"
+        lines.append(f"{icon} <code>{html.escape(check.get('name') or '-')}</code>: {html.escape(str(check.get('detail') or '-'))}")
+    if ok:
+        lines.append(f"\nCó thể đăng thật bằng: <code>/publisher_auto queue={queue_id}</code>")
+    else:
+        lines.append(f"\nChuyển manual: <code>/publisher_handoff queue={queue_id}</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 
 async def cmd_publisher_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -13567,6 +13730,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publisher_handoff", cmd_publisher_handoff))
     tg_app.add_handler(CommandHandler("publisher_run", cmd_publisher_run))
+    tg_app.add_handler(CommandHandler("publisher_auto_check", cmd_publisher_auto_check))
     tg_app.add_handler(CommandHandler("publisher_auto", cmd_publisher_auto))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
@@ -14900,6 +15064,7 @@ async def api_operator_publish_next(request: Request, platform: str = "", mode: 
         "queue": queue_payload,
         "publisher_handoff": build_publisher_handoff(queue_payload),
         "submit_url": f"/api/operator/publish/{queue_id}/complete",
+        "auto_check_url": f"/api/operator/publish/{queue_id}/auto-check",
         "auto_publish_url": f"/api/operator/publish/{queue_id}/auto",
         "rule": "Return publish_url after posting. If blocked by platform/compliance, submit status=blocked and note.",
     }
@@ -14916,9 +15081,23 @@ async def api_operator_publish_handoff(queue_id: int, request: Request):
         "queue": queue_payload,
         "publisher_handoff": build_publisher_handoff(queue_payload),
         "submit_url": f"/api/operator/publish/{queue_id}/complete",
+        "auto_check_url": f"/api/operator/publish/{queue_id}/auto-check",
         "auto_publish_url": f"/api/operator/publish/{queue_id}/auto",
         "rule": "Use official platform API or manual publishing. Never bypass platform rules, consent, or review gate.",
     }
+
+
+@fastapi_app.get("/api/operator/publish/{queue_id}/auto-check")
+async def api_operator_publish_auto_check(queue_id: int, request: Request):
+    verify_operator_api_token(request)
+    ok, reason, info = official_auto_publish_check(ADMIN_ID, queue_id)
+    return {
+        "ok": ok,
+        "reason": reason,
+        "result": info,
+        "rule": "Dry-run only: this endpoint does not call social network APIs and does not mutate queue/job state.",
+    }
+
 
 @fastapi_app.post("/api/operator/publish/{queue_id}/auto")
 async def api_operator_publish_auto(queue_id: int, request: Request):
