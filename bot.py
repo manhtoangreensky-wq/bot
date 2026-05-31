@@ -5435,6 +5435,26 @@ def operator_brain_fallback(raw_text):
     limit = first_number_near(lower, ["video", "job", "trend"], 0) or int_from_text(lower, ["limit", "max"], 0) or 5
     duration = int_from_text(lower, ["duration", "dai", "dài"], 45) or 45
     build_requested = any(word in lower for word in ["build", "dựng", "dung", "xây", "xay", "tạo bundle", "tao bundle", "build luôn", "build luon"])
+    days = int_from_text(lower, ["days", "ngày", "ngay"], 30) or 30
+
+    if any(word in lower for word in ["execute", "thực thi", "thuc thi", "chạy bước tiếp", "chay buoc tiep", "tự xử lý", "tu xu ly", "đầu não chạy", "dau nao chay"]):
+        return {
+            "intent": "operator_execute",
+            "platform": platform,
+            "limit": max(3, min(limit, 20)),
+            "duration": duration,
+            "build": 1 if build_requested or "build" in lower else 1,
+            "days": max(1, min(days, 180)),
+            "confidence": 82,
+        }
+    if any(word in lower for word in ["director", "đầu não", "dau nao", "việc tiếp theo", "viec tiep theo", "next action", "nên làm gì", "nen lam gi"]):
+        return {
+            "intent": "operator_director",
+            "platform": platform,
+            "limit": max(3, min(limit, 20)),
+            "days": max(1, min(days, 180)),
+            "confidence": 80,
+        }
 
     if any(word in lower for word in ["ready", "sẵn sàng", "san sang", "đủ điều kiện", "du dieu kien"]):
         return {"intent": "job_ready", "job": job_id, "confidence": 70}
@@ -5504,8 +5524,10 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
+        "Chỉ chọn một intent trong: operator_director, operator_execute, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
         "Quy tắc:\n"
+        "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
+        "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
         "- affiliate_scale: khi admin muốn scale/đẩy một link affiliate cụ thể thành nhiều video theo trend; cần affiliate/aff ID.\n"
         "- operator_auto: khi admin muốn tìm trend/tạo nhiều video theo niche/platform.\n"
         "- autopilot: khi admin muốn tìm trend, tạo job và build luôn creative/manifest/task trong một lệnh.\n"
@@ -5515,7 +5537,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":3,"duration":45,"build":1,"days":1,"topic":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -5529,6 +5551,17 @@ def parse_operator_brain(raw_text, owner_id):
 
 def brain_command_preview(plan):
     intent = (plan.get("intent") or "help").lower()
+    if intent == "operator_director":
+        return (
+            f"/operator_director days={max(1, min(int(plan.get('days') or 30), 180))} "
+            f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 10), 20))}"
+        )
+    if intent == "operator_execute":
+        return (
+            f"/operator_execute days={max(1, min(int(plan.get('days') or 30), 180))} "
+            f"platform={plan.get('platform') or 'tiktok'} build={int(plan.get('build') or 1)} "
+            f"duration={int(plan.get('duration') or 45)}"
+        )
     if intent == "affiliate_scale":
         return (
             f"/affiliate_scale aff={int(plan.get('affiliate') or 0)} "
@@ -5579,6 +5612,22 @@ async def run_brain_plan(update, context, plan):
     intent = (plan.get("intent") or "help").lower()
     old_args = list(getattr(context, "args", []) or [])
     try:
+        if intent == "operator_director":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 10), 20))}",
+            ]
+            return await cmd_operator_director(update, context)
+        if intent == "operator_execute":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"build={int(plan.get('build') or 1)}",
+                f"duration={int(plan.get('duration') or 45)}",
+                f"limit={max(3, min(int(plan.get('limit') or 10), 20))}",
+            ]
+            return await cmd_operator_execute(update, context)
         if intent == "affiliate_scale":
             if not int(plan.get("affiliate") or 0):
                 return await update.message.reply_text(
@@ -7303,6 +7352,8 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🧠 <b>AI BRAIN</b>\n\n"
             "Gõ lệnh tự nhiên để bot tự định tuyến vào AI Operator.\n\n"
             "Ví dụ:\n"
+            "• <code>/brain đầu não nên làm gì tiếp theo</code>\n"
+            "• <code>/brain đầu não chạy bước tiếp theo an toàn</code>\n"
             "• <code>/brain autopilot 3 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain build job 12 duration 45</code>\n"
