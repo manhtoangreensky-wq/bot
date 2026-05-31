@@ -2796,6 +2796,103 @@ def operator_toolchain_data():
         "chains": chains,
     }
 
+def operator_tool_readiness_data():
+    checks = []
+
+    def add_check(key, ok, level, detail, next_action, stage=""):
+        checks.append({
+            "key": key,
+            "stage": stage or key,
+            "ok": bool(ok),
+            "level": level,
+            "detail": detail,
+            "next": next_action,
+        })
+
+    cobalt_url = (COBALT_API_URL or "").rstrip("/")
+    cobalt_public = cobalt_url == "https://api.cobalt.tools"
+    add_check(
+        "cobalt_downloader",
+        bool(cobalt_url) and not cobalt_public,
+        "warning" if cobalt_public else ("ok" if cobalt_url else "blocked"),
+        (
+            "Đang dùng public api.cobalt.tools; có bot protection, có thể không tải được video."
+            if cobalt_public else
+            ("Đã cấu hình Cobalt API riêng." if cobalt_url else "Chưa cấu hình COBALT_API_URL.")
+        ),
+        "Self-host Cobalt trên Railway và set COBALT_API_URL=https://<cobalt-domain>",
+        "video_download",
+    )
+    add_check(
+        "ai_provider",
+        bool(gemini_client or openai_client),
+        "ok" if (gemini_client or openai_client) else "warning",
+        "Có Gemini/OpenAI để phân tích lệnh, trend, script." if (gemini_client or openai_client) else "Thiếu GEMINI_API_KEY/OPENAI_API_KEY; một số luồng dùng template fallback.",
+        "Set GEMINI_API_KEY hoặc OPENAI_API_KEY trên Railway.",
+        "brain_and_script",
+    )
+    add_check(
+        "voice_primary",
+        bool(FISH_AUDIO_KEY),
+        "ok" if FISH_AUDIO_KEY else "warning",
+        "Fish Audio HD sẵn sàng." if FISH_AUDIO_KEY else "Thiếu FISH_AUDIO_KEY; bot fallback Edge TTS.",
+        "Nạp/cấu hình FISH_AUDIO_KEY nếu muốn giọng HD.",
+        "voice",
+    )
+    add_check(
+        "transcription_primary",
+        bool(DEEPGRAM_API_KEY),
+        "ok" if DEEPGRAM_API_KEY else "warning",
+        "Deepgram sẵn sàng." if DEEPGRAM_API_KEY else "Thiếu DEEPGRAM_API_KEY; bóc băng audio/video sẽ không chạy được.",
+        "Set DEEPGRAM_API_KEY.",
+        "transcription",
+    )
+    add_check(
+        "image_background",
+        bool(REMOVEBG_API_KEY or CUTOUT_API_KEY),
+        "ok" if (REMOVEBG_API_KEY or CUTOUT_API_KEY) else "blocked",
+        "Có ít nhất một dịch vụ tách nền." if (REMOVEBG_API_KEY or CUTOUT_API_KEY) else "Thiếu cả REMOVEBG_API_KEY và CUTOUT_API_KEY.",
+        "Set REMOVEBG_API_KEY hoặc CUTOUT_API_KEY.",
+        "background_removal",
+    )
+    add_check(
+        "payos",
+        bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY),
+        "ok" if (PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY) else "warning",
+        "PayOS đủ 3 khóa." if (PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY) else "PayOS thiếu khóa; dùng nạp thủ công nếu QR động lỗi.",
+        "Kiểm tra PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY.",
+        "payment",
+    )
+    add_check(
+        "operator_api",
+        bool(OPERATOR_API_TOKEN and PUBLIC_BASE_URL),
+        "ok" if (OPERATOR_API_TOKEN and PUBLIC_BASE_URL) else "warning",
+        "Operator API bridge sẵn sàng cho n8n/Claude worker." if (OPERATOR_API_TOKEN and PUBLIC_BASE_URL) else "Thiếu OPERATOR_API_TOKEN hoặc PUBLIC_BASE_URL.",
+        "Set OPERATOR_API_TOKEN và PUBLIC_BASE_URL.",
+        "operator_bridge",
+    )
+    add_check(
+        "video_generation",
+        bool(_env("KLING_API_KEY") or _env("RUNWAY_API_KEY")),
+        "ok" if (_env("KLING_API_KEY") or _env("RUNWAY_API_KEY")) else "manual",
+        "Có API video generation." if (_env("KLING_API_KEY") or _env("RUNWAY_API_KEY")) else "Chưa có API Kling/Runway; dùng handoff/manual tool worker.",
+        "Set KLING_API_KEY/RUNWAY_API_KEY nếu muốn tự động hóa sâu hơn.",
+        "video_generation",
+    )
+
+    blocking = [item for item in checks if item["level"] == "blocked"]
+    warnings = [item for item in checks if item["level"] in {"warning", "manual"}]
+    ok_count = sum(1 for item in checks if item["ok"])
+    return {
+        "ready_for_full_auto": not blocking and not any(item["key"] == "cobalt_downloader" and item["level"] == "warning" for item in checks),
+        "score": int(ok_count / len(checks) * 100),
+        "checks": checks,
+        "blocking": blocking,
+        "warnings": warnings,
+        "next": blocking[0]["next"] if blocking else (warnings[0]["next"] if warnings else "/operator_director"),
+        "rule": "Full auto chỉ bật khi các tool bắt buộc có endpoint/key thật. Nếu warning/manual, bot vẫn chạy kiểu handoff có kiểm soát.",
+    }
+
 def record_tool_event(owner_id, stage, tool_name, event_type, severity="warning", job_id=0, task_id=0, fallback_tool="", message=""):
     event_type = (event_type or "error").strip().lower()
     severity = (severity or "warning").strip().lower()
@@ -9705,6 +9802,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• Toolchain paid/fallback: <code>GET {html.escape(base_url)}/api/operator/toolchain</code>",
+        f"• Tool runtime readiness: <code>GET {html.escape(base_url)}/api/operator/tool-readiness</code>",
         f"• Báo lỗi/quota tool: <code>POST {html.escape(base_url)}/api/operator/tool-events</code>",
         f"• n8n template: <code>GET {html.escape(base_url)}/api/operator/n8n-template</code>",
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
@@ -9798,6 +9896,33 @@ async def cmd_operator_toolchain(update: Update, context: ContextTypes.DEFAULT_T
     for rule in data["failure_protocol"][:4]:
         lines.append(f"• {html.escape(rule)}")
     lines.append("\nAPI: <code>GET /api/operator/toolchain</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_operator_tool_readiness(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = operator_tool_readiness_data()
+    lines = [
+        "🧪 <b>TOOL RUNTIME READINESS</b>",
+        f"• Full auto: <b>{'YES' if data['ready_for_full_auto'] else 'NO'}</b>",
+        f"• Score: <b>{data['score']}</b>",
+        "",
+    ]
+    for item in data["checks"]:
+        if item["level"] == "ok":
+            icon = "✅"
+        elif item["level"] == "blocked":
+            icon = "⛔"
+        elif item["level"] == "manual":
+            icon = "🛠"
+        else:
+            icon = "⚠️"
+        lines.append(
+            f"{icon} <code>{html.escape(item['key'])}</code> / {html.escape(item['stage'])}\n"
+            f"  {html.escape(item['detail'])}\n"
+            f"  next: <code>{html.escape(item['next'])}</code>"
+        )
+    lines.append("\nAPI: <code>GET /api/operator/tool-readiness</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_tool_events(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -9917,7 +10042,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
         "workerspec": "/operator_worker_spec\nGET /api/operator/worker-spec",
-        "toolchain": "/operator_toolchain\nGET /api/operator/toolchain",
+        "toolchain": "/operator_toolchain\n/operator_tool_readiness\nGET /api/operator/toolchain\nGET /api/operator/tool-readiness",
         "toolevents": "/operator_tool_events\n/operator_tool_events stage=voice tool=Fish type=quota fallback=Edge message=het_quota\nPOST /api/operator/tool-events",
         "n8ntemplate": "/operator_n8n_template\nGET /api/operator/n8n-template",
         "n8nworkflow": "/operator_n8n_workflow\nGET /api/operator/n8n-workflow.json",
@@ -12645,6 +12770,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_worker_spec", cmd_operator_worker_spec))
     tg_app.add_handler(CommandHandler("operator_toolchain", cmd_operator_toolchain))
+    tg_app.add_handler(CommandHandler("operator_tool_readiness", cmd_operator_tool_readiness))
     tg_app.add_handler(CommandHandler("operator_tool_events", cmd_operator_tool_events))
     tg_app.add_handler(CommandHandler("operator_n8n_template", cmd_operator_n8n_template))
     tg_app.add_handler(CommandHandler("operator_n8n_workflow", cmd_operator_n8n_workflow))
@@ -12994,6 +13120,11 @@ async def api_operator_worker_spec(request: Request):
 async def api_operator_toolchain(request: Request):
     verify_operator_api_token(request)
     return {"ok": True, "toolchain": operator_toolchain_data()}
+
+@fastapi_app.get("/api/operator/tool-readiness")
+async def api_operator_tool_readiness(request: Request):
+    verify_operator_api_token(request)
+    return {"ok": True, **operator_tool_readiness_data()}
 
 @fastapi_app.get("/api/operator/tool-events")
 async def api_operator_tool_events(request: Request, limit: int = 20, stage: str = "", severity: str = ""):

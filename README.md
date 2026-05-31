@@ -95,6 +95,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/operator_api`: xem trạng thái `OPERATOR_API_TOKEN`, base URL và mẫu endpoint/payload cho n8n/Claude/tool worker.
 - `/operator_worker_spec`: xuất runbook JSON cho Claude/n8n/tool worker, gồm role, endpoint, payload mẫu và safety rules.
 - `/operator_toolchain`: xem registry công cụ theo stage, tool chính có phí/chất lượng cao, fallback ít phí/miễn phí, env còn thiếu và protocol khi lỗi/quota.
+- `/operator_tool_readiness`: kiểm tra runtime thật của các tool quan trọng; cảnh báo public Cobalt, thiếu key AI/voice/image/payment/operator trước khi bật full auto.
 - `/operator_tool_events`: xem hoặc ghi sự cố tool/quota/fallback; ví dụ `stage=voice tool=Fish type=quota fallback=Edge message=het_quota`.
 - `/operator_n8n_template`: xuất template workflow n8n an toàn: Cron, audit, make-video/director-run, task worker, publisher status/run/handoff và performance tracker.
 - `/operator_n8n_workflow`: lấy URL JSON workflow có thể import vào n8n, mặc định inactive và giữ publisher-run/review gate trước khi đăng thật.
@@ -161,6 +162,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/audit`: worker ngoài kiểm tra mức sẵn sàng end-to-end và blocker còn thiếu trước khi bật automation.
 - `GET /api/operator/worker-spec`: worker ngoài đọc runbook máy đọc được cho Director, Creative, Tool Worker, Publisher và Growth Analyst.
 - `GET /api/operator/toolchain`: worker ngoài đọc chính sách paid-first/fallback theo từng stage, gồm Claude/Gemini/OpenAI, Fish/Edge, RemoveBG/Cutout, Kling/Runway, CapCut/FFmpeg, publisher và payment.
+- `GET /api/operator/tool-readiness`: worker ngoài kiểm tra tool nào thật sự đủ runtime/env để bật automation, đặc biệt Cobalt self-host, AI provider, voice, image, PayOS và Operator API.
 - `GET/POST /api/operator/tool-events`: worker ngoài báo tool lỗi/quota/hết tiền/fallback/recovered; bot lưu log và nhắn admin khi severity `warning|critical`.
 - `GET /api/operator/n8n-template`: worker ngoài đọc template workflow n8n có sẵn cho cron, audit, director-run, task worker, publish pack, publisher và performance tracking.
 - `GET /api/operator/n8n-workflow.json`: trả JSON workflow import được vào n8n, dùng env `OPERATOR_BASE_URL` và `OPERATOR_API_TOKEN`, có gate thủ công trước khi publish.
