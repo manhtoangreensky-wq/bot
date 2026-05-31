@@ -3061,6 +3061,15 @@ class OperatorPublishCompleteRequest(BaseModel):
     views: int = Field(default=0, ge=0)
     clicks: int = Field(default=0, ge=0)
 
+class OperatorPerformanceRequest(BaseModel):
+    job_id: int = Field(gt=0)
+    event_type: str = Field(default="click", max_length=40)
+    value: int = Field(default=1, ge=0)
+    amount: int = Field(default=0, ge=0)
+    variant_id: int = Field(default=0, ge=0)
+    note: str = Field(default="", max_length=1200)
+    source: str = Field(default="api", max_length=120)
+
 class AgentGemini:
     @staticmethod
     def chat(prompt: str, text: str, uid, is_json: bool = False) -> str:
@@ -7517,6 +7526,53 @@ async def api_operator_publish_complete(queue_id: int, payload: OperatorPublishC
         "ok": True,
         "queue": serialize_publish_queue_item(updated),
         "job_id": job_id,
+    }
+
+@fastapi_app.post("/api/operator/performance")
+async def api_operator_performance(payload: OperatorPerformanceRequest, request: Request):
+    verify_operator_api_token(request)
+    event_type = (payload.event_type or "click").lower()
+    allowed = {"view", "click", "order", "revenue", "lead", "publish", "cost"}
+    if event_type not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid event_type. Allowed: {', '.join(sorted(allowed))}")
+    note = f"{payload.source}: {payload.note}".strip(": ")
+    ok, job = add_performance_event(
+        ADMIN_ID,
+        payload.job_id,
+        event_type,
+        payload.value,
+        payload.amount,
+        note,
+        payload.variant_id,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Job or variant not found")
+    if event_type in {"revenue", "order", "lead"} and payload.amount > 0:
+        update_production_job(payload.job_id, ADMIN_ID, status="published", note=f"api_performance:{event_type} amount={payload.amount}")
+
+    if tg_app and ADMIN_ID and (event_type in {"order", "revenue", "lead"} or payload.amount > 0):
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"💰 <b>OPERATOR PERFORMANCE API</b>\n\n"
+                    f"• Job: <code>#{payload.job_id}</code> | Variant: <code>{payload.variant_id or '-'}</code>\n"
+                    f"• Type: <code>{html.escape(event_type)}</code> | Value: <b>{payload.value}</b>\n"
+                    f"• Amount: <b>{payload.amount:,}đ</b>\n"
+                    f"• Source: <code>{html.escape(payload.source or 'api')}</code>\n"
+                    f"• Note: {html.escape(payload.note or '-')}"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Operator performance notify error: {e}")
+    return {
+        "ok": True,
+        "job_id": payload.job_id,
+        "event_type": event_type,
+        "value": payload.value,
+        "amount": payload.amount,
+        "variant_id": payload.variant_id,
     }
 
 # ─── WEBHOOK PAYOS (DYNAMIC UPDATED) ─────────────────────────────────────────
