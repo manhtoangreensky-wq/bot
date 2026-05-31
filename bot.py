@@ -6261,6 +6261,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
         f"• Danh sách kênh: <code>GET {html.escape(base_url)}/api/operator/channels</code>",
+        f"• Danh sách campaign: <code>GET {html.escape(base_url)}/api/operator/campaigns</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
@@ -9046,6 +9047,36 @@ async def api_operator_channels(request: Request, limit: int = 50):
             "scale_url": "/api/operator/affiliate-scale",
             "publish_next_url": "/api/operator/publish/next",
             "status_url": "/api/operator/status",
+        },
+    }
+
+@fastapi_app.get("/api/operator/campaigns")
+async def api_operator_campaigns(request: Request, limit: int = 30):
+    verify_operator_api_token(request)
+    limit = max(1, min(int(limit or 30), 100))
+    rows = list_campaigns(ADMIN_ID, limit=limit)
+    campaigns = []
+    for cid, name, niche, platforms, affiliate_url, status in rows:
+        detail = get_campaign(cid, ADMIN_ID)
+        pay_url = detail[6] if detail else ""
+        campaigns.append({
+            "id": cid,
+            "name": name,
+            "niche": niche,
+            "platforms": platforms,
+            "affiliate_url": affiliate_url,
+            "pay_url": pay_url,
+            "status": status,
+            "use_in_affiliate_scale": f"campaign_id={cid}",
+        })
+    return {
+        "ok": True,
+        "campaigns": campaigns,
+        "rule": "Pick an active campaign whose niche/platform matches the affiliate and channel. Pass campaign_id to POST /api/operator/affiliate-scale.",
+        "next": {
+            "channels_url": "/api/operator/channels",
+            "affiliates_url": "/api/operator/affiliates",
+            "scale_url": "/api/operator/affiliate-scale",
         },
     }
 

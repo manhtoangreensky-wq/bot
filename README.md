@@ -129,6 +129,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/jobs/{job_id}/ready`: worker ngoài kiểm tra job đã đủ điều kiện review/publish chưa.
 - `POST /api/operator/loop`: cron/n8n gọi vòng điều phối an toàn với `limit`, `auto_queue`, `notify_admin`; bot tự queue job ready và trả task tiếp theo.
 - `GET /api/operator/channels`: worker ngoài đọc danh sách kênh, topic focus, posting slots, publish mode và readiness manual/API để chọn nơi đăng.
+- `GET /api/operator/campaigns`: worker ngoài đọc campaign active, niche, platform, affiliate/pay URL để chọn `campaign_id` khi scale.
 - `GET /api/operator/affiliates`: worker ngoài đọc catalog affiliate active, gồm ID, niche, audience, claim được phép/cấm và link để chọn sản phẩm.
 - `GET /api/operator/affiliate-report`: worker ngoài đọc hiệu quả theo affiliate gồm job, publish, view, click, conversion, revenue, cost, ROI để chọn link nên scale.
 - `POST /api/operator/affiliate-scale`: n8n/Claude worker gửi `affiliate_id`, `platform`, `channel`, `limit`, `build`, `duration` để tìm trend, tạo batch job và có thể build luôn creative/manifest/task cho link affiliate.
