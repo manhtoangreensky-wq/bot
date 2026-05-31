@@ -79,7 +79,7 @@ user_memory: dict = {}
 
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
 DB_FILE       = "toandaas_system.db"
-TRIAL_CREDITS = 200
+TRIAL_CREDITS = 150
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -110,7 +110,7 @@ def init_db():
         order_code TEXT PRIMARY KEY,
         processed_at DATETIME
     )""")
-    for col, defval in [("total_spent","0"), ("is_vip","0")]:
+    for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0")]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT {defval}")
         except Exception:
@@ -423,11 +423,26 @@ USER_PENDING: dict = {}
 VOICE_FREE_COST  = 5   # xu cho gói tiết kiệm giọng nói
 IMAGE_FREE_COST  = 5   # xu cho gói tiết kiệm tách nền
 
+def is_trial_account(user_id) -> bool:
+    """Tài khoản thử nghiệm = chưa từng nạp tiền (total_spent chỉ từ xu tặng, không có giao dịch nạp).
+    Dùng cờ has_deposited trong DB để phân biệt."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT has_deposited FROM users WHERE user_id=?", (str(user_id),))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return True
+    return row[0] != 1  # 0 = chưa nạp (trial), 1 = đã nạp
+
 def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup:
     """
     Tạo inline keyboard cho khách chọn provider.
+    - Tài khoản trial (chưa nạp tiền): chỉ thấy Gói Tiết Kiệm
+    - Tài khoản đã nạp: thấy đủ 2 gói
     service: 'voice' | 'image'
     """
+    trial = is_trial_account(uid)
     if service == "voice":
         buttons = [
             [
@@ -436,13 +451,14 @@ def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup
                     callback_data=f"prov|voice|free|{uid}"
                 )
             ],
-            [
+        ]
+        if not trial:
+            buttons.append([
                 InlineKeyboardButton(
                     f"🎙️ Gói Cao Cấp — -{cost} Xu",
                     callback_data=f"prov|voice|paid|{uid}"
                 )
-            ],
-        ]
+            ])
     else:  # image
         buttons = [
             [
@@ -451,13 +467,14 @@ def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup
                     callback_data=f"prov|image|free|{uid}"
                 )
             ],
-            [
+        ]
+        if not trial:
+            buttons.append([
                 InlineKeyboardButton(
                     f"🖼️ Gói Cao Cấp — -{cost} Xu",
                     callback_data=f"prov|image|paid|{uid}"
                 )
-            ],
-        ]
+            ])
     buttons.append([InlineKeyboardButton("❌ Huỷ", callback_data=f"prov|cancel|cancel|{uid}")])
     return InlineKeyboardMarkup(buttons)
 
@@ -793,6 +810,11 @@ async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_id, amount = context.args[0], int(context.args[1])
         add_credit(target_id, amount)
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
+        conn.commit()
+        conn.close()
         credits, _, _ = get_user(target_id)
         await update.message.reply_text(f"✅ Đã bơm {amount} Xu cho ID {target_id}. Số dư mới: {credits} Xu")
     except Exception:
@@ -832,6 +854,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "UPDATE pending_deposits SET status='approved' WHERE user_id=? AND status='pending'",
             (str(target_id),)
         )
+        c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
         conn.commit()
         conn.close()
         credits, _, _ = get_user(target_id)
@@ -1011,13 +1034,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "chat_id": update.effective_chat.id,
     }
     kb = provider_keyboard("image", uid, final_cost)
-    await update.message.reply_text(
-        f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
-        f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{IMAGE_FREE_COST} Xu</b>\n"
-        f"🖼️ <b>Gói Cao Cấp</b> — Chất lượng HD, trừ <b>{final_cost} Xu</b>\n\n"
-        f"<i>Nếu gói cao cấp gặp sự cố → tự chuyển gói tiết kiệm và hoàn phần dư.</i>",
-        parse_mode="HTML", reply_markup=kb
-    )
+    if is_trial_account(uid):
+        img_desc = (
+            f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
+            f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{IMAGE_FREE_COST} Xu</b>\n\n"
+            f"<i>💡 Nạp tiền để mở khoá Gói Cao Cấp — chất lượng HD!</i>"
+        )
+    else:
+        img_desc = (
+            f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
+            f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{IMAGE_FREE_COST} Xu</b>\n"
+            f"🖼️ <b>Gói Cao Cấp</b> — Chất lượng HD, trừ <b>{final_cost} Xu</b>\n\n"
+            f"<i>Nếu gói cao cấp gặp sự cố → tự chuyển gói tiết kiệm và hoàn phần dư.</i>"
+        )
+    await update.message.reply_text(img_desc, parse_mode="HTML", reply_markup=kb)
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_obj = update.message.voice or update.message.audio
@@ -1095,13 +1125,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "file_bytes": None,
         }
         kb = provider_keyboard("voice", uid, fish_cost)
-        await update.message.reply_text(
-            f"🎙️ <b>Chọn gói đọc giọng nói:</b>\n\n"
-            f"🔊 <b>Gói Tiết Kiệm</b> — Giọng chuẩn, trừ <b>{VOICE_FREE_COST} Xu</b>\n"
-            f"🎙️ <b>Gói Cao Cấp</b> — Giọng nhân bản siêu thực, trừ <b>{fish_cost} Xu</b>\n\n"
-            f"<i>Nếu gói cao cấp gặp sự cố → tự chuyển gói tiết kiệm và hoàn phần dư.</i>",
-            parse_mode="HTML", reply_markup=kb
-        )
+        if is_trial_account(uid):
+            voice_desc = (
+                f"🎙️ <b>Chọn gói đọc giọng nói:</b>\n\n"
+                f"🔊 <b>Gói Tiết Kiệm</b> — Giọng chuẩn, trừ <b>{VOICE_FREE_COST} Xu</b>\n\n"
+                f"<i>💡 Nạp tiền để mở khoá Gói Cao Cấp — giọng nhân bản siêu thực!</i>"
+            )
+        else:
+            voice_desc = (
+                f"🎙️ <b>Chọn gói đọc giọng nói:</b>\n\n"
+                f"🔊 <b>Gói Tiết Kiệm</b> — Giọng chuẩn, trừ <b>{VOICE_FREE_COST} Xu</b>\n"
+                f"🎙️ <b>Gói Cao Cấp</b> — Giọng nhân bản siêu thực, trừ <b>{fish_cost} Xu</b>\n\n"
+                f"<i>Nếu gói cao cấp gặp sự cố → tự chuyển gói tiết kiệm và hoàn phần dư.</i>"
+            )
+        await update.message.reply_text(voice_desc, parse_mode="HTML", reply_markup=kb)
     elif act == "download":
         await AgentDownloader.download(data, context, update.effective_chat.id, cost)
     else:
@@ -1187,21 +1224,16 @@ async def webhook_payos(request: Request):
     """
     try:
         body = await request.json()
-        logger.info(f"PayOS webhook received: {body}")
     except Exception:
-        logger.warning("PayOS webhook: body không phải JSON hợp lệ")
-        return JSONResponse({"code": "00", "desc": "ok"})
+        raise HTTPException(status_code=400, detail="Invalid JSON")
 
     sig  = body.get("signature", "")
     data = body.get("data", {})
 
-    # Xác thực chữ ký — chỉ bật khi đã cấu hình PAYOS_CHECKSUM_KEY
-    if PAYOS_CHECKSUM_KEY:
-        if not sig:
-            logger.warning("PayOS webhook: không có signature, bỏ qua xác thực.")
-        elif not verify_payos_signature(data, sig):
-            logger.warning("PayOS webhook: chữ ký không hợp lệ!")
-            return JSONResponse({"code": "01", "desc": "invalid_signature"}, status_code=200)
+    # Xác thực chữ ký (bỏ qua nếu chưa cấu hình PAYOS_CHECKSUM_KEY)
+    if PAYOS_CHECKSUM_KEY and not verify_payos_signature(data, sig):
+        logger.warning("PayOS webhook: chữ ký không hợp lệ!")
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
     # Chỉ xử lý khi giao dịch thành công
     if not (body.get("success") or data.get("status") == "PAID"):
@@ -1242,6 +1274,12 @@ async def webhook_payos(request: Request):
         return JSONResponse({"code": "00", "desc": "amount_too_low"})
 
     add_credit(target_id, xu)
+    # Đánh dấu tài khoản đã nạp tiền → mở khoá gói cao cấp
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
+    conn.commit()
+    conn.close()
     if order_code:
         mark_payos_order_processed(order_code)
 
