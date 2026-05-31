@@ -1620,6 +1620,31 @@ def parse_manifest_json(raw_text, job, variant=None, duration=45):
         manifest["ai_raw_unparsed"] = truncate_text(raw_text, 1200)
     return manifest
 
+def create_manifest_for_job(owner_id, job, variant=None, duration=45):
+    job_id = job[0]
+    if gemini_client or openai_client:
+        raw = AgentGemini.chat(
+            "Bạn là AI production director tạo production manifest JSON cho video affiliate.",
+            build_manifest_prompt(job, variant, duration),
+            owner_id,
+            is_json=False
+        )
+        manifest = parse_manifest_json(raw, job, variant, duration)
+    else:
+        manifest = fallback_production_manifest(job, variant, duration)
+    manifest["job_id"] = job_id
+    manifest["generated_at"] = now_text()
+    manifest["tool_policy"] = "premium_first_then_fallback"
+    manifest_json = json.dumps(manifest, ensure_ascii=False, indent=2)
+    ok, manifest_id = save_production_manifest(
+        owner_id,
+        job_id,
+        variant[0] if variant else 0,
+        manifest_json,
+        "draft"
+    )
+    return ok, manifest_id, manifest
+
 def build_manifest_handoff_prompt(job, manifest_row, target_tool):
     (
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
@@ -2320,6 +2345,36 @@ def parse_creative_variants(raw_text, job, count=5):
         variants[0]["note"] = "ai_raw_unparsed"
         variants[0]["script_angle"] = truncate_text(raw_text, 800)
     return variants
+
+def create_creative_variants_for_job(owner_id, job, count=5):
+    job_id = job[0]
+    if gemini_client or openai_client:
+        raw = AgentGemini.chat(
+            "Bạn là creative strategist tạo biến thể A/B test video affiliate.",
+            build_creative_test_prompt(job, count),
+            owner_id,
+            is_json=False
+        )
+        variants = parse_creative_variants(raw, job, count)
+    else:
+        variants = fallback_creative_variants(job, count)
+    created = []
+    for item in variants[:count]:
+        ok, variant_id = create_creative_variant(
+            owner_id,
+            job_id,
+            item["variant_label"],
+            item["hook"],
+            item["script_angle"],
+            item["caption"],
+            item["cta"],
+            item["hashtags"],
+            item["creative_score"],
+            item["note"],
+        )
+        if ok:
+            created.append((variant_id, item))
+    return created
 
 def build_handoff_prompt(job, target_tool, target_stage):
     (
@@ -3237,6 +3292,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /calendar_plan — Lên lịch nội dung",
             "• /calendar — Xem lịch nội dung",
             "• /operator — Ra lệnh tạo video một bước",
+            "• /operator_build — Tạo creative + manifest + task một lần",
             "• /operator_auto — Tự tạo batch job từ trend",
             "• /operator_next — Điều phối stage tiếp theo",
             "• /operator_dashboard — Tổng quan vận hành",
@@ -4444,6 +4500,7 @@ async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ Operator build", callback_data="opmenu|build")],
         [
             InlineKeyboardButton("🧭 Dashboard", callback_data="opmenu|dashboard"),
             InlineKeyboardButton("🔥 Tìm trend", callback_data="opmenu|trend")
@@ -4509,6 +4566,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     action = query.data.split("|", 1)[1]
     snippets = {
         "dashboard": "/operator_dashboard",
+        "build": "/operator_build job=<JOB_ID> n=5 duration=45",
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
         "rank": "/trend_rank\n/trend_rank 20",
@@ -4538,6 +4596,71 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         reply_markup=operator_menu_keyboard()
     )
 
+async def cmd_operator_build(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/operator_build job=1 n=5 duration=45</code>",
+            parse_mode="HTML"
+        )
+    try:
+        count = max(2, min(int(data.get("n") or data.get("count") or 5), 8))
+    except ValueError:
+        count = 5
+    try:
+        duration = max(15, min(int(data.get("duration") or data.get("sec") or 45), 120))
+    except ValueError:
+        duration = 45
+    job = get_production_job(job_id, update.effective_user.id)
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+
+    msg = await update.message.reply_text("🧠 Operator Build đang tạo creative, manifest và task plan...")
+    created_variants = create_creative_variants_for_job(update.effective_user.id, job, count)
+    if not created_variants:
+        return await msg.edit_text("❌ Không tạo được creative variants.")
+    best_variant_id, best_variant = sorted(
+        created_variants,
+        key=lambda item: int(item[1].get("creative_score") or 0),
+        reverse=True
+    )[0]
+    ok, selected_variant = select_creative_variant(update.effective_user.id, best_variant_id)
+    if not ok:
+        return await msg.edit_text("❌ Không chọn được creative variant tốt nhất.")
+    ok, manifest_id, manifest = create_manifest_for_job(update.effective_user.id, job, selected_variant, duration)
+    if not ok:
+        return await msg.edit_text("❌ Không tạo được production manifest.")
+    manifest_row = get_production_manifest(update.effective_user.id, manifest_id)
+    task_ids = create_tasks_from_manifest(update.effective_user.id, manifest_row)
+    scenes = manifest.get("scenes") or []
+    lines = [
+        "✅ <b>OPERATOR BUILD COMPLETE</b>",
+        f"• Job: <code>#{job_id}</code>",
+        f"• Creative variants: <b>{len(created_variants)}</b>",
+        f"• Selected variant: <code>#{best_variant_id}</code> | score=<b>{best_variant.get('creative_score', 0)}</b>",
+        f"• Manifest: <code>#{manifest_id}</code>",
+        f"• Scenes: <b>{len(scenes)}</b>",
+        f"• Production tasks: <b>{len(task_ids)}</b>",
+        "",
+        "<b>Task preview:</b>",
+    ]
+    rows = list_production_tasks(update.effective_user.id, job_id=job_id, manifest_id=manifest_id, limit=12)
+    for tid, _job_id, mid, task_type, tool, scene_no, title, status, output_url, note, updated_at in rows:
+        lines.append(
+            f"• task #{tid} | {html.escape(task_type or '-')} | tool=<code>{html.escape(tool or '-')}</code> | "
+            f"scene={scene_no or '-'} | {html.escape(status or '-')}\n"
+            f"  {html.escape(title or '-')}"
+        )
+    lines.append(
+        "\nBước tiếp: <code>/task_handoff id=&lt;TASK_ID&gt;</code> để giao từng việc, "
+        "hoặc <code>/manifest_handoff manifest=%s tool=kling</code> để giao theo tool." % manifest_id
+    )
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_creative_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -4556,32 +4679,7 @@ async def cmd_creative_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     job = get_production_job(job_id, update.effective_user.id)
     if not job:
         return await update.message.reply_text("❌ Không tìm thấy production job.")
-    if gemini_client or openai_client:
-        raw = AgentGemini.chat(
-            "Bạn là creative strategist tạo biến thể A/B test video affiliate.",
-            build_creative_test_prompt(job, count),
-            update.effective_user.id,
-            is_json=False
-        )
-        variants = parse_creative_variants(raw, job, count)
-    else:
-        variants = fallback_creative_variants(job, count)
-    created = []
-    for item in variants[:count]:
-        ok, variant_id = create_creative_variant(
-            update.effective_user.id,
-            job_id,
-            item["variant_label"],
-            item["hook"],
-            item["script_angle"],
-            item["caption"],
-            item["cta"],
-            item["hashtags"],
-            item["creative_score"],
-            item["note"],
-        )
-        if ok:
-            created.append((variant_id, item))
+    created = create_creative_variants_for_job(update.effective_user.id, job, count)
     if not created:
         return await update.message.reply_text("❌ Không tạo được creative variant.")
     update_production_job(job_id, update.effective_user.id, stage="script", status="working", note=f"creative_test created={len(created)}")
@@ -4901,27 +4999,7 @@ async def cmd_manifest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     variant = get_creative_variant(update.effective_user.id, variant_id) if variant_id else selected_creative_variant(update.effective_user.id, job_id)
     if variant and int(variant[1]) != int(job_id):
         return await update.message.reply_text("❌ Creative variant không thuộc job này.")
-    if gemini_client or openai_client:
-        raw = AgentGemini.chat(
-            "Bạn là AI production director tạo production manifest JSON cho video affiliate.",
-            build_manifest_prompt(job, variant, duration),
-            update.effective_user.id,
-            is_json=False
-        )
-        manifest = parse_manifest_json(raw, job, variant, duration)
-    else:
-        manifest = fallback_production_manifest(job, variant, duration)
-    manifest["job_id"] = job_id
-    manifest["generated_at"] = now_text()
-    manifest["tool_policy"] = "premium_first_then_fallback"
-    manifest_json = json.dumps(manifest, ensure_ascii=False, indent=2)
-    ok, manifest_id = save_production_manifest(
-        update.effective_user.id,
-        job_id,
-        variant[0] if variant else 0,
-        manifest_json,
-        "draft"
-    )
+    ok, manifest_id, manifest = create_manifest_for_job(update.effective_user.id, job, variant, duration)
     if not ok:
         return await update.message.reply_text("❌ Không lưu được manifest.")
     scenes = manifest.get("scenes") or []
@@ -6251,6 +6329,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
+    tg_app.add_handler(CommandHandler("operator_build", cmd_operator_build))
     tg_app.add_handler(CommandHandler("operator_auto", cmd_operator_auto))
     tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))

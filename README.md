@@ -65,6 +65,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=...`: tạo lịch nội dung theo kênh.
 - `/calendar`: xem lịch nội dung đã lên.
 - `/operator topic=... channel=<ID> aff=<ID> campaign=<ID> date=YYYY-MM-DD`: ra lệnh một bước để tạo lịch nội dung + production job + brief AI.
+- `/operator_build job=<ID> n=5 duration=45`: tự tạo creative variants, chọn biến thể tốt nhất, tạo manifest và tách task sản xuất cho một job.
 - `/operator_auto niche=... platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5`: tự tìm trend, chấm điểm ưu tiên affiliate và tạo batch production job cho nhiều kênh active.
 - `/operator_next id=<JOB_ID> stage=script|voice|visuals|edit|review|publish`: AI điều phối stage tiếp theo, kèm tool chính/fallback và output cần lưu.
 - `/operator_dashboard`: tổng quan kênh, affiliate, lịch sắp tới và production job cần xử lý.
