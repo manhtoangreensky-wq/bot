@@ -73,6 +73,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/operator_next id=<JOB_ID> stage=script|voice|visuals|edit|review|publish`: AI điều phối stage tiếp theo, kèm tool chính/fallback và output cần lưu.
 - `/operator_dashboard`: tổng quan kênh, affiliate, lịch sắp tới và production job cần xử lý.
 - `/operator_loop limit=10 queue=1`: quét job đang mở, tự đưa job đủ điều kiện vào publish queue và báo task tiếp theo cho worker.
+- `/operator_api`: xem trạng thái `OPERATOR_API_TOKEN`, base URL và mẫu endpoint/payload cho n8n/Claude/tool worker.
 - `/operator_daily days=1`: báo cáo vận hành theo ngày gồm job mới, publish queue, performance và việc cần xử lý.
 - `/trend_search niche=... platform=tiktok channel=<ID> aff=<ID> campaign=<ID>`: tìm trend mới từ nguồn RSS/news công khai, chấm điểm trend/affiliate/cạnh tranh và hiện nút tạo video trend vào pipeline.
 - `/trend_rank 10`: xem bảng xếp hạng trend đã lưu theo điểm ưu tiên sản xuất video affiliate.
@@ -130,6 +131,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - AI Brain là lớp điều khiển admin-only phía trên AI Operator: admin có thể gõ lệnh tự nhiên trong Telegram, bot sẽ phân tích intent và gọi đúng luồng nội bộ thay vì phải nhớ toàn bộ cú pháp.
 - Autopilot là lớp batch admin-only: một lệnh sẽ tìm trend, tạo job và chuẩn bị production bundle gồm creative variant, manifest và task. Video vẫn phải qua task output, review gate và publish queue trước khi đăng thật.
 - Operator API Bridge là cổng bảo mật cho n8n/Claude/tool worker: tool ngoài có thể lấy task, chạy Kling/Fish/CapCut/FFmpeg hoặc quy trình khác, rồi trả output URL về bot. Publisher worker cũng có thể lấy publish queue, đăng qua API chính thức/thủ công có kiểm soát và trả publish URL về bot. Bridge chỉ bật khi có `OPERATOR_API_TOKEN`.
+- `/operator_api` là lệnh admin-only để lấy checklist cấu hình n8n/worker mà không lộ token thật.
 - Channel/affiliate/calendar registry là khu vực admin-only để quản lý kênh Facebook/TikTok/OnlyFans, tài khoản phụ, link affiliate và lịch đăng nội dung. Không hiển thị cho khách hàng.
 - Production pipeline là admin-only, dùng để theo dõi từng video qua các stage: `brief`, `script`, `voice`, `visuals`, `edit`, `review`, `publish`, `done`.
 - Performance tracking là admin-only, dùng để ghi view/click/order/revenue/lead/cost sau khi đăng bài và theo dõi kênh hoặc affiliate nào đang tạo tiền. Dữ liệu có thể nhập bằng Telegram hoặc đẩy tự động qua Operator API Bridge.

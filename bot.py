@@ -3882,6 +3882,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /brain — Ra lệnh tự nhiên cho AI Operator",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /operator_menu — Menu vận hành AI Operator",
+            "• /operator_api — Xem endpoint/token status cho n8n/worker",
             "• /campaign_new — Tạo chiến dịch affiliate/video",
             "• /campaigns — Danh sách chiến dịch",
             "• /video_plan — AI lập kế hoạch video",
@@ -5425,6 +5426,7 @@ async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE)
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🧠 Brain command", callback_data="opmenu|brain")],
+        [InlineKeyboardButton("🔌 Operator API", callback_data="opmenu|api")],
         [InlineKeyboardButton("🚀 Autopilot batch", callback_data="opmenu|autopilot")],
         [InlineKeyboardButton("⚡ Operator build", callback_data="opmenu|build")],
         [
@@ -5488,6 +5490,39 @@ async def cmd_operator_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=operator_menu_keyboard())
 
+async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    base_url = (PUBLIC_BASE_URL or "").rstrip("/") or "https://<RAILWAY_DOMAIN>"
+    token_status = "đã bật" if OPERATOR_API_TOKEN else "chưa bật"
+    lines = [
+        "🔌 <b>OPERATOR API BRIDGE</b>",
+        "",
+        f"• Base URL: <code>{html.escape(base_url)}</code>",
+        f"• OPERATOR_API_TOKEN: <b>{token_status}</b>",
+        "• Header bắt buộc: <code>Authorization: Bearer &lt;OPERATOR_API_TOKEN&gt;</code>",
+        "",
+        "<b>Endpoint cho n8n/worker:</b>",
+        f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
+        f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
+        f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
+        f"• Lấy hàng đợi đăng: <code>GET {html.escape(base_url)}/api/operator/publish/next</code>",
+        f"• Trả URL đã đăng: <code>POST {html.escape(base_url)}/api/operator/publish/&lt;QUEUE_ID&gt;/complete</code>",
+        f"• Ghi view/click/doanh thu: <code>POST {html.escape(base_url)}/api/operator/performance</code>",
+        "",
+        "<b>Payload loop mẫu:</b>",
+        '<pre>{"limit":10,"auto_queue":true,"notify_admin":true}</pre>',
+        "<b>Payload task complete mẫu:</b>",
+        '<pre>{"status":"ready","output_url":"https://.../final.mp4","note":"kling/capcut output"}</pre>',
+        "<b>Payload performance mẫu:</b>",
+        '<pre>{"job_id":12,"event_type":"revenue","value":1,"amount":150000,"source":"tiktok_affiliate","note":"order"}</pre>',
+    ]
+    if not OPERATOR_API_TOKEN:
+        lines.append("\n⚠️ Chưa set <code>OPERATOR_API_TOKEN</code> trên server nên API bridge đang đóng.")
+    if not PUBLIC_BASE_URL:
+        lines.append("⚠️ Chưa set <code>PUBLIC_BASE_URL</code>, hãy dùng domain Railway thật trong n8n.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def handle_operator_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -5496,6 +5531,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     action = query.data.split("|", 1)[1]
     snippets = {
         "dashboard": "/operator_dashboard",
+        "api": "/operator_api",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
         "autopilot": "/autopilot niche=công nghệ AI platform=tiktok channel=all aff=<AFF_ID> campaign=<ID> limit=3 duration=45",
         "build": "/operator_build job=<JOB_ID> n=5 duration=45",
@@ -7560,6 +7596,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
+    tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
     tg_app.add_handler(CommandHandler("brain", cmd_brain))
     tg_app.add_handler(CommandHandler("autopilot", cmd_autopilot))
