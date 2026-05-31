@@ -78,6 +78,8 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/creative_variants <JOB_ID>`: xem các biến thể creative của job.
 - `/creative_select id=<VARIANT_ID>`: chọn biến thể creative để đưa vào stage script/sản xuất.
 - `/creative_report job=<ID>`: so sánh performance theo biến thể creative đã gắn khi ghi dữ liệu.
+- `/manifest job=<ID> duration=45 variant=<VARIANT_ID>`: tạo production manifest JSON gồm scene, prompt video, voice, edit, publish và compliance cho AI/tool thực thi.
+- `/manifests <JOB_ID>`: xem các production manifest đã tạo cho job.
 - `/queue_publish job=<ID> mode=manual|api schedule=... note=...`: đưa job đã duyệt vào hàng đợi đăng.
 - `/publish_queue`: xem hàng đợi đăng.
 - `/publish_queue_set id=<QUEUE_ID> status=published|blocked|scheduled url=https://... note=...`: cập nhật trạng thái hàng đợi đăng.

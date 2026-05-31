@@ -310,6 +310,16 @@ def init_db():
         created_at DATETIME,
         selected_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS production_manifests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        job_id INTEGER,
+        variant_id INTEGER DEFAULT 0,
+        manifest_json TEXT,
+        status TEXT DEFAULT 'draft',
+        created_at DATETIME,
+        updated_at DATETIME
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS performance_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -434,6 +444,12 @@ def init_db():
             ("status", "TEXT DEFAULT 'draft'"),
             ("note", "TEXT"),
             ("selected_at", "DATETIME"),
+        ],
+        "production_manifests": [
+            ("variant_id", "INTEGER DEFAULT 0"),
+            ("manifest_json", "TEXT"),
+            ("status", "TEXT DEFAULT 'draft'"),
+            ("updated_at", "DATETIME"),
         ],
         "performance_events": [
             ("variant_id", "INTEGER DEFAULT 0"),
@@ -1387,6 +1403,187 @@ def creative_report_data(owner_id, job_id):
     events = c.fetchall()
     conn.close()
     return variants, events
+
+def selected_creative_variant(owner_id, job_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, job_id, variant_label, hook, script_angle, caption, cta, hashtags, creative_score, status, note
+        FROM creative_variants
+        WHERE owner_id=? AND job_id=? AND status='selected'
+        ORDER BY selected_at DESC, id DESC LIMIT 1""",
+        (str(owner_id), job_id)
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def save_production_manifest(owner_id, job_id, variant_id, manifest_json, status="draft"):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return False, None
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO production_manifests
+        (owner_id, job_id, variant_id, manifest_json, status, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?)""",
+        (str(owner_id), job_id, int(variant_id or 0), manifest_json, status, now_text(), now_text())
+    )
+    manifest_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    update_production_job(job_id, owner_id, stage="visuals", status="working", note=f"production_manifest:{manifest_id}")
+    return True, manifest_id
+
+def list_production_manifests(owner_id, job_id, limit=5):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, variant_id, status, manifest_json, created_at, updated_at
+        FROM production_manifests
+        WHERE owner_id=? AND job_id=?
+        ORDER BY id DESC LIMIT ?""",
+        (str(owner_id), job_id, limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_production_manifest(owner_id, manifest_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, job_id, variant_id, status, manifest_json, created_at, updated_at
+        FROM production_manifests WHERE owner_id=? AND id=?""",
+        (str(owner_id), manifest_id)
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def build_manifest_prompt(job, variant=None, duration=45):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    variant_text = "Chưa chọn creative variant."
+    if variant:
+        _, _, label, hook, angle, caption, cta, hashtags, score, v_status, v_note = variant
+        variant_text = (
+            f"Variant #{variant[0]} / {label or '-'} / score={score or 0}\n"
+            f"Hook: {hook or '-'}\n"
+            f"Angle: {angle or '-'}\n"
+            f"Caption: {caption or '-'}\n"
+            f"CTA: {cta or '-'}\n"
+            f"Hashtags: {hashtags or '-'}"
+        )
+    return (
+        "Bạn là AI production director cho video ngắn affiliate. Hãy tạo PRODUCTION MANIFEST dạng JSON thuần, "
+        "để Claude/Gemini/Runway/Kling/Fish/CapCut/FFmpeg có thể thực thi từng bước. "
+        "Không spam, không mạo danh, không cam kết thu nhập phi thực tế. Với AI influencer/OnlyFans/người mẫu, "
+        "chỉ dùng nhân vật tự tạo hoặc người thật có consent rõ ràng, đủ 18 tuổi.\n\n"
+        f"Job ID: #{jid}\n"
+        f"Nền tảng: {platform or '-'} | Tỷ lệ: 9:16 | Độ dài mục tiêu: {duration}s\n"
+        f"Kênh/account: {channel_name or channel_id or '-'} / {account_label or 'main'}\n"
+        f"Topic: {topic or '-'}\n"
+        f"Affiliate: {network or '-'} - {product_name or '-'} - {affiliate_url or '-'}\n"
+        f"Asset hiện có: {asset_url or 'chưa có'}\n"
+        f"Operator note: {note or '-'}\n\n"
+        f"Creative variant:\n{variant_text}\n\n"
+        f"Brief:\n{brief or 'Chưa có brief'}\n\n"
+        "JSON schema bắt buộc:\n"
+        "{\n"
+        '  "title": "...",\n'
+        '  "duration_sec": 45,\n'
+        '  "format": "9:16",\n'
+        '  "selected_variant_id": 0,\n'
+        '  "voice": {"provider_primary":"Fish Audio HD","provider_fallback":"Edge TTS","style":"...","script":"..."},\n'
+        '  "scenes": [\n'
+        '    {"scene":1,"start":0,"end":5,"goal":"hook","visual_prompt":"...","video_tool":"kling|runway","on_screen_text":"...","voice_line":"...","asset_needed":"..."}\n'
+        "  ],\n"
+        '  "edit_instructions": {"tool":"capcut|ffmpeg","music":"...","subtitle":"...","transitions":"...","cta_overlay":"..."},\n'
+        '  "publish": {"caption":"...","hashtags":"...","affiliate_placement":"...","cta":"..."},\n'
+        '  "compliance_checklist": ["..."],\n'
+        '  "handoff_order": ["claude","kling","fish","capcut","review_gate"]\n'
+        "}"
+    )
+
+def fallback_production_manifest(job, variant=None, duration=45):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    hook = topic or "video affiliate"
+    caption = f"{topic or 'Nội dung mới'} - xem link gợi ý trong bio/mô tả."
+    cta = "Xem link affiliate trong bio/mô tả nếu phù hợp nhu cầu."
+    hashtags = "#AI #review #affiliate"
+    selected_variant_id = 0
+    if variant:
+        selected_variant_id = variant[0]
+        hook = variant[3] or hook
+        caption = variant[5] or caption
+        cta = variant[6] or cta
+        hashtags = variant[7] or hashtags
+    scenes = []
+    scene_ranges = [(1, 0, 4, "hook"), (2, 4, 12, "problem"), (3, 12, 25, "demo"), (4, 25, 38, "benefit"), (5, 38, duration, "cta")]
+    for scene, start, end, goal in scene_ranges:
+        scenes.append({
+            "scene": scene,
+            "start": start,
+            "end": end,
+            "goal": goal,
+            "visual_prompt": f"Vertical 9:16 short video scene about {topic or product_name or 'AI affiliate product'}, clean realistic tech creator style, no impersonation, no copyrighted likeness.",
+            "video_tool": "kling",
+            "on_screen_text": hook if scene == 1 else (product_name or topic or "TOAN DAAS"),
+            "voice_line": hook if scene == 1 else f"Giải thích ngắn về {topic or product_name or 'sản phẩm'} theo góc {goal}.",
+            "asset_needed": f"scene_{scene}_video.mp4",
+        })
+    return {
+        "title": topic or "Affiliate short video",
+        "duration_sec": duration,
+        "format": "9:16",
+        "selected_variant_id": selected_variant_id,
+        "voice": {
+            "provider_primary": "Fish Audio HD",
+            "provider_fallback": "Edge TTS",
+            "style": "giọng Việt rõ, nhanh vừa, đáng tin",
+            "script": " ".join(scene["voice_line"] for scene in scenes),
+        },
+        "scenes": scenes,
+        "edit_instructions": {
+            "tool": "capcut|ffmpeg",
+            "music": "nhạc nền hợp lệ, âm lượng thấp",
+            "subtitle": "burn subtitle tiếng Việt, chữ rõ trên mobile",
+            "transitions": "cut nhanh, không rối",
+            "cta_overlay": cta,
+        },
+        "publish": {
+            "caption": caption,
+            "hashtags": hashtags,
+            "affiliate_placement": affiliate_url or "bio/mô tả",
+            "cta": cta,
+        },
+        "compliance_checklist": [
+            "Không mạo danh người thật/brand.",
+            "Không cam kết thu nhập/kết quả phi thực tế.",
+            "Affiliate CTA minh bạch.",
+            "Asset hình/voice/nhạc có quyền dùng.",
+        ],
+        "handoff_order": ["claude", "kling", "fish", "capcut", "review_gate"],
+    }
+
+def parse_manifest_json(raw_text, job, variant=None, duration=45):
+    try:
+        parsed = json.loads(raw_text)
+        if isinstance(parsed, dict) and parsed.get("scenes"):
+            return parsed
+    except Exception:
+        pass
+    manifest = fallback_production_manifest(job, variant, duration)
+    if raw_text:
+        manifest["ai_raw_unparsed"] = truncate_text(raw_text, 1200)
+    return manifest
 
 def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0):
     job = get_production_job(job_id, owner_id)
@@ -2761,6 +2958,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /creative_variants — Xem biến thể creative",
             "• /creative_select — Chọn biến thể để sản xuất",
             "• /creative_report — Báo cáo biến thể thắng",
+            "• /manifest — Tạo production manifest cho AI/tool",
+            "• /manifests — Xem manifest của job",
             "• /queue_publish — Đưa job vào hàng đợi đăng",
             "• /publish_queue — Xem hàng đợi đăng",
             "• /asset_add — Lưu asset vào job",
@@ -3976,6 +4175,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🗂 Assets", callback_data="opmenu|assets"),
             InlineKeyboardButton("📋 Job report", callback_data="opmenu|report")
         ],
+        [InlineKeyboardButton("🎬 Production manifest", callback_data="opmenu|manifest")],
         [InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")],
         [
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
@@ -4019,6 +4219,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "publishqueue": "/publish_queue\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
+        "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
         "report": "/job_report <JOB_ID>",
         "review": "/review_gate job=<JOB_ID>",
@@ -4371,6 +4572,107 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_manifest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/manifest job=1 duration=45 variant=&lt;ID&gt;</code>",
+            parse_mode="HTML"
+        )
+    try:
+        duration = max(15, min(int(data.get("duration") or data.get("sec") or 45), 120))
+    except ValueError:
+        duration = 45
+    job = get_production_job(job_id, update.effective_user.id)
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    try:
+        variant_id = int(data.get("variant") or data.get("variant_id") or 0)
+    except ValueError:
+        variant_id = 0
+    variant = get_creative_variant(update.effective_user.id, variant_id) if variant_id else selected_creative_variant(update.effective_user.id, job_id)
+    if variant and int(variant[1]) != int(job_id):
+        return await update.message.reply_text("❌ Creative variant không thuộc job này.")
+    if gemini_client or openai_client:
+        raw = AgentGemini.chat(
+            "Bạn là AI production director tạo production manifest JSON cho video affiliate.",
+            build_manifest_prompt(job, variant, duration),
+            update.effective_user.id,
+            is_json=False
+        )
+        manifest = parse_manifest_json(raw, job, variant, duration)
+    else:
+        manifest = fallback_production_manifest(job, variant, duration)
+    manifest["job_id"] = job_id
+    manifest["generated_at"] = now_text()
+    manifest["tool_policy"] = "premium_first_then_fallback"
+    manifest_json = json.dumps(manifest, ensure_ascii=False, indent=2)
+    ok, manifest_id = save_production_manifest(
+        update.effective_user.id,
+        job_id,
+        variant[0] if variant else 0,
+        manifest_json,
+        "draft"
+    )
+    if not ok:
+        return await update.message.reply_text("❌ Không lưu được manifest.")
+    scenes = manifest.get("scenes") or []
+    title = manifest.get("title") or job[6] or "-"
+    lines = [
+        f"🎬 <b>PRODUCTION MANIFEST #{manifest_id}</b>",
+        f"• Job: <code>#{job_id}</code>",
+        f"• Variant: <code>{variant[0] if variant else 'chưa chọn'}</code>",
+        f"• Title: {html.escape(str(title))}",
+        f"• Duration: <b>{manifest.get('duration_sec', duration)}s</b> | Format: <b>{html.escape(str(manifest.get('format', '9:16')))}</b>",
+        f"• Scenes: <b>{len(scenes)}</b>",
+        "",
+        "<b>Scene preview:</b>",
+    ]
+    for scene in scenes[:5]:
+        lines.append(
+            f"• {scene.get('scene','?')} | {scene.get('start','?')}-{scene.get('end','?')}s | {html.escape(str(scene.get('goal','-')))}\n"
+            f"  {html.escape(str(scene.get('on_screen_text') or scene.get('voice_line') or '-'))}"
+        )
+    lines.append("\nXem JSON đầy đủ: <code>/manifests %s</code>" % job_id)
+    lines.append("Handoff tiếp: <code>/handoff job=%s tool=kling stage=visuals</code> hoặc <code>/handoff job=%s tool=capcut stage=edit</code>" % (job_id, job_id))
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_manifests(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    try:
+        job_id = int(context.args[0])
+    except (IndexError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/manifests &lt;JOB_ID&gt;</code>", parse_mode="HTML")
+    rows = list_production_manifests(update.effective_user.id, job_id)
+    if not rows:
+        return await update.message.reply_text(f"📭 Job #{job_id} chưa có manifest. Dùng /manifest job={job_id}.")
+    lines = [f"🎬 <b>MANIFESTS — JOB #{job_id}</b>\n"]
+    for mid, variant_id, status, manifest_json, created_at, updated_at in rows:
+        try:
+            manifest = json.loads(manifest_json or "{}")
+        except Exception:
+            manifest = {}
+        scenes = manifest.get("scenes") or []
+        voice = manifest.get("voice") or {}
+        publish = manifest.get("publish") or {}
+        lines.append(
+            f"• manifest #{mid} | variant={variant_id or '-'} | {html.escape(status or '-')}\n"
+            f"  title={html.escape(str(manifest.get('title') or '-'))}\n"
+            f"  scenes={len(scenes)} | voice={html.escape(str(voice.get('provider_primary') or '-'))}\n"
+            f"  cta={html.escape(str(publish.get('cta') or '-'))}\n"
+            f"  updated={updated_at or created_at or '-'}"
+        )
+        if scenes:
+            first = scenes[0]
+            lines.append(f"  first_scene={html.escape(str(first.get('visual_prompt') or first.get('voice_line') or '-'))[:400]}")
+    lines.append("\nTạo lại manifest: <code>/manifest job=%s duration=45</code>" % job_id)
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -4438,7 +4740,21 @@ async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     else:
         lines.append("• Chưa có. Dùng /creative_test job=%s." % job_id)
-    lines.append("\nLệnh tiếp theo: /creative_test, /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
+    manifests = list_production_manifests(update.effective_user.id, job_id, limit=3)
+    lines.append("\n<b>Production manifests:</b>")
+    if manifests:
+        for mid, variant_id, m_status, manifest_json, created_at, updated_at in manifests:
+            try:
+                manifest = json.loads(manifest_json or "{}")
+            except Exception:
+                manifest = {}
+            lines.append(
+                f"• manifest #{mid} | variant={variant_id or '-'} | {html.escape(m_status or '-')}\n"
+                f"  scenes={len(manifest.get('scenes') or [])} | title={html.escape(str(manifest.get('title') or '-'))}"
+            )
+    else:
+        lines.append("• Chưa có. Dùng /manifest job=%s." % job_id)
+    lines.append("\nLệnh tiếp theo: /creative_test, /manifest, /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5459,6 +5775,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("creative_variants", cmd_creative_variants))
     tg_app.add_handler(CommandHandler("creative_select", cmd_creative_select))
     tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
+    tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
+    tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
