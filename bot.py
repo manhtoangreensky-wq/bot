@@ -1628,6 +1628,81 @@ def operator_status_data(owner_id):
         "blocked_jobs": blocked_jobs,
     }
 
+def operator_today_data(owner_id):
+    status = operator_status_data(owner_id)
+    since, affiliate_rows, job_rows = affiliate_performance_report_data(owner_id, days=30, limit=8)
+    next_task = next_production_task(owner_id)
+    publish_rows = list_publish_queue(owner_id, limit=5)
+    actions = []
+    for key, ok, detail, next_cmd in status["checks"]:
+        if not ok:
+            actions.append({
+                "priority": "setup",
+                "title": f"Hoàn thiện {key}",
+                "detail": detail,
+                "command": next_cmd,
+            })
+    if status["blocked_jobs"]:
+        jid, stage, job_status, platform, topic, channel_name, product_name, updated_at = status["blocked_jobs"][0]
+        actions.append({
+            "priority": "fix",
+            "title": f"Gỡ nghẽn job #{jid}",
+            "detail": f"{platform or '-'} | {topic or '-'}",
+            "command": f"/job_ready job={jid}",
+        })
+    if next_task:
+        tid, job_id, manifest_id, task_type, tool, scene_no, title, task_status, output_url, note, updated_at = next_task
+        actions.append({
+            "priority": "produce",
+            "title": f"Làm task #{tid} cho job #{job_id}",
+            "detail": f"{task_type or '-'} / {tool or '-'} | {title or '-'}",
+            "command": f"/task_handoff id={tid}",
+        })
+    open_publish = [row for row in publish_rows if (row[5] or "") in {"queued", "scheduled", "publishing", "blocked"}]
+    if open_publish:
+        qid, job_id, platform, channel_name, mode, queue_status, scheduled_at, publish_url, topic, updated_at = open_publish[0]
+        actions.append({
+            "priority": "publish",
+            "title": f"Xử lý publish queue #{qid}",
+            "detail": f"job #{job_id} | {platform or '-'} | {topic or '-'}",
+            "command": "/publish_queue",
+        })
+    best_affiliate = None
+    if affiliate_rows:
+        ranked = []
+        for row in affiliate_rows:
+            (
+                aid, network, product, niche, url, product_score, jobs, publishes, views,
+                clicks, conversions, revenue, cost, events
+            ) = row
+            score, ctr, cvr, roi = growth_score(views, clicks, conversions, revenue, cost)
+            ranked.append((score, row, ctr, cvr, roi))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        best_affiliate = ranked[0]
+        score, row, ctr, cvr, roi = best_affiliate
+        aid, network, product, niche, url, product_score, jobs, publishes, views, clicks, conversions, revenue, cost, events = row
+        actions.append({
+            "priority": "scale",
+            "title": f"Scale affiliate #{aid}: {product or network or 'affiliate'}",
+            "detail": f"score={score} views={views or 0} clicks={clicks or 0} revenue={int(revenue or 0):,}đ",
+            "command": f"/affiliate_scale aff={aid} platform=tiktok channel=all limit=3 build=1 duration=45",
+        })
+    if not actions:
+        actions.append({
+            "priority": "start",
+            "title": "Bắt đầu vòng scale mới",
+            "detail": "Hệ thống không có việc nghẽn rõ ràng.",
+            "command": "/affiliate_report days=30",
+        })
+    return {
+        "status": status,
+        "affiliate_since": since,
+        "best_affiliate": best_affiliate,
+        "next_task": next_task,
+        "publish_rows": publish_rows,
+        "actions": actions[:8],
+    }
+
 def get_production_job(job_id, owner_id):
     conn = db_connect()
     c = conn.cursor()
@@ -6026,6 +6101,37 @@ async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TY
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
+async def cmd_operator_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = operator_today_data(update.effective_user.id)
+    counts = data["status"]["counts"]
+    lines = [
+        "📌 <b>OPERATOR TODAY</b>",
+        f"• Ready to scale: <b>{'YES' if data['status']['ready_to_scale'] else 'NO'}</b>",
+        f"• Channels/Affiliates/Campaigns: <b>{counts['active_channels']}</b>/<b>{counts['active_affiliates']}</b>/<b>{counts['active_campaigns']}</b>",
+        f"• Open jobs/tasks/publish: <b>{counts['open_jobs']}</b>/<b>{counts['open_tasks']}</b>/<b>{counts['open_publish']}</b>",
+        "",
+        "<b>Việc ưu tiên hôm nay:</b>",
+    ]
+    for idx, action in enumerate(data["actions"], 1):
+        lines.append(
+            f"{idx}. <b>{html.escape(action['title'])}</b> "
+            f"(<code>{html.escape(action['priority'])}</code>)\n"
+            f"   {html.escape(action['detail'])}\n"
+            f"   <code>{html.escape(action['command'])}</code>"
+        )
+    if data["best_affiliate"]:
+        score, row, ctr, cvr, roi = data["best_affiliate"]
+        aid, network, product, niche, url, product_score, jobs, publishes, views, clicks, conversions, revenue, cost, events = row
+        lines.append(
+            "\n<b>Affiliate nổi bật:</b>\n"
+            f"• #{aid} | <code>{html.escape(network or '-')}</code> | {html.escape(product or '-')}\n"
+            f"• score={score} | CTR={ctr:.2f}% | CVR={cvr:.2f}% | ROI={roi:.1f}% | revenue={int(revenue or 0):,}đ"
+        )
+    lines.append("\nMở checklist đầy đủ: <code>/operator_playbook</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -6055,7 +6161,7 @@ def operator_category_keyboard(category):
         "cat_control": [
             ("🧠 Brain command", "brain"), ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
-            ("📘 Playbook", "playbook"),
+            ("📌 Today plan", "today"), ("📘 Playbook", "playbook"),
             ("🧭 System status", "status"), ("📊 Daily digest", "daily"),
             ("🧭 Dashboard", "dashboard"),
         ],
@@ -6152,6 +6258,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Endpoint cho n8n/worker:</b>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
+        f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
@@ -6198,6 +6305,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     snippets = {
         "dashboard": "/operator_dashboard",
         "status": "/operator_status",
+        "today": "/operator_today",
         "playbook": "/operator_playbook",
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
@@ -8456,6 +8564,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
     tg_app.add_handler(CommandHandler("operator_playbook", cmd_operator_playbook))
+    tg_app.add_handler(CommandHandler("operator_today", cmd_operator_today))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
@@ -8647,6 +8756,45 @@ async def api_operator_status(request: Request):
             "affiliate_report": "/api/operator/affiliate-report",
             "affiliate_scale": "/api/operator/affiliate-scale",
             "loop": "/api/operator/loop",
+        },
+    }
+
+@fastapi_app.get("/api/operator/today")
+async def api_operator_today(request: Request):
+    verify_operator_api_token(request)
+    data = operator_today_data(ADMIN_ID)
+    best = None
+    if data["best_affiliate"]:
+        score, row, ctr, cvr, roi = data["best_affiliate"]
+        aid, network, product, niche, url, product_score, jobs, publishes, views, clicks, conversions, revenue, cost, events = row
+        best = {
+            "id": aid,
+            "network": network,
+            "product": product,
+            "niche": niche,
+            "url": url,
+            "score": score,
+            "views": int(views or 0),
+            "clicks": int(clicks or 0),
+            "conversions": int(conversions or 0),
+            "revenue": int(revenue or 0),
+            "cost": int(cost or 0),
+            "ctr": round(ctr, 2),
+            "cvr": round(cvr, 2),
+            "roi": round(roi, 1),
+        }
+    return {
+        "ok": True,
+        "ready_to_scale": data["status"]["ready_to_scale"],
+        "counts": data["status"]["counts"],
+        "actions": data["actions"],
+        "best_affiliate": best,
+        "next": {
+            "status_url": "/api/operator/status",
+            "affiliate_report_url": "/api/operator/affiliate-report",
+            "affiliate_scale_url": "/api/operator/affiliate-scale",
+            "tasks_url": "/api/operator/tasks/next",
+            "telegram": "/operator_today",
         },
     }
 
