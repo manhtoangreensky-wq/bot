@@ -116,6 +116,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
 - `POST /api/operator/tasks/{task_id}/complete`: worker ngoài trả `status`, `output_url`, `note`; bot tự lưu asset theo loại task và báo admin.
 - `GET /api/operator/jobs/{job_id}/ready`: worker ngoài kiểm tra job đã đủ điều kiện review/publish chưa.
+- `POST /api/operator/loop`: cron/n8n gọi vòng điều phối an toàn với `limit`, `auto_queue`, `notify_admin`; bot tự queue job ready và trả task tiếp theo.
 - `GET /api/operator/publish/next`: publisher worker lấy bài trong publish queue, hỗ trợ query `platform` và `mode`, rồi chuyển queue sang `publishing`.
 - `POST /api/operator/publish/{queue_id}/complete`: publisher worker trả `status`, `publish_url`, `views`, `clicks`, `note`; bot cập nhật job và performance.
 - `POST /api/operator/performance`: worker ngoài gửi `job_id`, `event_type=view|click|order|revenue|lead|cost`, `value`, `amount`, `variant_id`, `source`, `note` để bot tự ghi hiệu quả affiliate.
@@ -135,7 +136,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Growth optimizer là admin-only, dùng dữ liệu performance để chọn job/creative/kênh thắng, gợi ý remix hoặc chạy autopilot tiếp theo thay vì sản xuất mù.
 - Trend search là admin-only, dùng để tìm trend mới trước khi tạo video; bot lưu trend candidate, tạo lịch/job từ trend và vẫn yêu cầu admin kiểm duyệt trước khi đăng.
 - Operator auto là admin-only, dùng để tạo hàng loạt production job từ trend mới cho các channel active; vẫn đi qua review gate/publish queue trước khi đăng.
-- Operator loop là admin-only, dùng để chạy một vòng điều phối an toàn: tự queue publish cho job đã ready, liệt kê task kế tiếp cho worker ngoài và chỉ ra job nào còn nghẽn.
+- Operator loop là admin-only, dùng để chạy một vòng điều phối an toàn: tự queue publish cho job đã ready, liệt kê task kế tiếp cho worker ngoài và chỉ ra job nào còn nghẽn. Có thể chạy bằng Telegram hoặc cron/n8n qua `POST /api/operator/loop`.
 - Review gate là admin-only, dùng làm chốt kiểm duyệt trước khi đăng; job đạt có thể chuyển sang `ready`, job rủi ro chuyển `blocked`.
 - Publish queue là admin-only, dùng để gom job đã duyệt vào hàng đợi đăng thủ công hoặc chuẩn bị sẵn điểm nối API/OAuth chính thức.
 - Job ready check là admin-only, dùng như chốt cuối trước khi đưa video vào hàng đợi đăng; nếu thiếu asset/review/creative/manifest/task, bot trả về lệnh cần chạy tiếp.

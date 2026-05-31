@@ -2278,6 +2278,56 @@ def operator_loop_data(owner_id, limit=10, auto_queue=True):
             blocked.append((jid, level, next_action, topic, platform, channel_name))
     return advanced, ready_publish, next_tasks, blocked
 
+def serialize_operator_loop_result(advanced, ready_publish, next_tasks, blocked):
+    return {
+        "advanced": [
+            {
+                "job_id": jid,
+                "action": action,
+                "queue_id": queue_id,
+                "topic": topic,
+                "platform": platform,
+                "channel_name": channel_name,
+            }
+            for jid, action, queue_id, topic, platform, channel_name in advanced
+        ],
+        "ready_publish": [
+            {
+                "job_id": jid,
+                "topic": topic,
+                "platform": platform,
+                "channel_name": channel_name,
+            }
+            for jid, topic, platform, channel_name in ready_publish
+        ],
+        "next_tasks": [
+            {
+                "task_id": tid,
+                "job_id": job_id,
+                "task_type": task_type,
+                "tool": tool,
+                "scene_no": scene_no,
+                "title": title,
+                "status": status,
+                "topic": topic,
+                "platform": platform,
+                "channel_name": channel_name,
+            }
+            for tid, job_id, task_type, tool, scene_no, title, status, topic, platform, channel_name in next_tasks
+        ],
+        "blocked": [
+            {
+                "job_id": jid,
+                "level": level,
+                "next_action": next_action,
+                "topic": topic,
+                "platform": platform,
+                "channel_name": channel_name,
+            }
+            for jid, level, next_action, topic, platform, channel_name in blocked
+        ],
+    }
+
 def create_publish_queue_item(owner_id, job_id, mode="manual", scheduled_at="", note=""):
     job = get_production_job(job_id, owner_id)
     if not job:
@@ -3166,6 +3216,11 @@ class OperatorPerformanceRequest(BaseModel):
     variant_id: int = Field(default=0, ge=0)
     note: str = Field(default="", max_length=1200)
     source: str = Field(default="api", max_length=120)
+
+class OperatorLoopRequest(BaseModel):
+    limit: int = Field(default=10, ge=1, le=30)
+    auto_queue: bool = True
+    notify_admin: bool = True
 
 class AgentGemini:
     @staticmethod
@@ -7707,6 +7762,38 @@ async def api_operator_job_ready(job_id: int, request: Request):
             {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
             for key, ok, detail, next_cmd in readiness["checks"]
         ],
+    }
+
+@fastapi_app.post("/api/operator/loop")
+async def api_operator_loop(payload: OperatorLoopRequest, request: Request):
+    verify_operator_api_token(request)
+    advanced, ready_publish, next_tasks, blocked = operator_loop_data(
+        ADMIN_ID,
+        limit=payload.limit,
+        auto_queue=payload.auto_queue,
+    )
+    result = serialize_operator_loop_result(advanced, ready_publish, next_tasks, blocked)
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🔁 <b>OPERATOR LOOP API</b>\n\n"
+                    f"• Advanced: <b>{len(advanced)}</b>\n"
+                    f"• Ready publish: <b>{len(ready_publish)}</b>\n"
+                    f"• Next tasks: <b>{len(next_tasks)}</b>\n"
+                    f"• Blocked/needs admin: <b>{len(blocked)}</b>\n\n"
+                    "Xem chi tiết: <code>/operator_loop</code> hoặc <code>/operator_dashboard</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Operator loop API notify error: {e}")
+    return {
+        "ok": True,
+        "limit": payload.limit,
+        "auto_queue": payload.auto_queue,
+        **result,
     }
 
 @fastapi_app.get("/api/operator/publish/next")
