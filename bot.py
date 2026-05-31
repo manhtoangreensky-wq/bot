@@ -3596,6 +3596,8 @@ def serialize_publish_queue_item(row):
     caption = selected_variant[5] if selected_variant else ""
     cta = selected_variant[6] if selected_variant else ""
     hashtags = selected_variant[7] if selected_variant else ""
+    job = get_production_job(job_id, ADMIN_ID)
+    static_pack = build_static_publish_pack(job, ADMIN_ID) if job else {}
     return {
         "id": qid,
         "job_id": job_id,
@@ -3621,10 +3623,15 @@ def serialize_publish_queue_item(row):
             "url": affiliate_url,
         },
         "publish_pack": {
-            "caption": caption,
-            "cta": cta,
-            "hashtags": hashtags,
+            "caption": caption or static_pack.get("caption", ""),
+            "cta": cta or static_pack.get("cta", ""),
+            "hashtags": hashtags or static_pack.get("hashtags", ""),
             "affiliate_placement": affiliate_url,
+            "pinned_comment": static_pack.get("pinned_comment", ""),
+            "related_links": static_pack.get("related_links", []),
+            "disclosure": static_pack.get("disclosure", ""),
+            "checklist": static_pack.get("checklist", []),
+            "performance_plan": static_pack.get("performance_plan", {}),
         },
         "rule": "Publish only approved/queued jobs. Keep affiliate disclosure and platform rules.",
     }
@@ -3980,6 +3987,25 @@ def build_publish_pack_prompt(job):
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
         note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
     ) = job
+    related = list_related_affiliate_links(ADMIN_ID, affiliate_id=affiliate_id, niche=topic or product_name or "", limit=8) if affiliate_id else []
+    related_note = format_related_affiliate_links(related, max_items=6)
+    platform_key = (platform or "").lower()
+    if platform_key in {"onlyfans", "of"}:
+        platform_rule = (
+            "OnlyFans: chỉ dùng người thật có consent rõ ràng hoặc nhân vật AI tự tạo; tất cả nhân vật phải đủ 18 tuổi; "
+            "không mạo danh người thật/creator khác; không dùng ảnh người khác để gợi dục hoặc lừa đảo."
+        )
+    elif platform_key in {"tiktok", "tik tok"}:
+        platform_rule = (
+            "TikTok: hook nhanh, caption gọn, affiliate disclosure rõ, tránh claim tài chính quá mức, tránh spam link trong mô tả; "
+            "nếu cần nhiều link thì đưa link chính ở bio/mô tả và link liên quan ở comment ghim/status."
+        )
+    elif platform_key in {"facebook", "fb", "reels"}:
+        platform_rule = (
+            "Facebook/Reels: caption có ngữ cảnh, disclosure affiliate, link chính trong post/comment ghim, không bait tương tác giả tạo."
+        )
+    else:
+        platform_rule = "Nền tảng bất kỳ: minh bạch affiliate, không spam, không mạo danh, không cam kết kết quả tài chính."
     return (
         "Bạn là AI Operator trưởng chuẩn bị gói đăng bài kiếm tiền cho TOAN DAAS. "
         "Tạo nội dung đăng hợp pháp, không spam, không mạo danh, không cam kết thu nhập phi thực tế, "
@@ -3991,18 +4017,87 @@ def build_publish_pack_prompt(job):
         f"Topic: {topic or '-'}\n"
         f"Affiliate: {network or '-'} - {product_name or '-'}\n"
         f"Affiliate URL: {affiliate_url or 'chưa có'}\n"
+        f"Link liên quan để chèn caption/comment/status:\n{related_note or '-'}\n"
         f"Asset URL: {asset_url or 'chưa có'}\n"
         f"Publish URL hiện tại: {publish_url or 'chưa có'}\n"
         f"Ghi chú: {note or '-'}\n\n"
+        f"Luật nền tảng:\n{platform_rule}\n\n"
         f"Brief/job context:\n{brief or 'Chưa có brief'}\n\n"
         "Trả về tiếng Việt theo format:\n"
         "1. Caption chính theo nền tảng.\n"
         "2. Caption ngắn A/B.\n"
         "3. Hashtag.\n"
-        "4. CTA và vị trí gắn link affiliate.\n"
-        "5. Checklist trước khi đăng.\n"
-        "6. Sau khi đăng cần ghi lại: publish_url, view, click, order, revenue bằng /pipeline_set và /performance_add."
+        "4. CTA và vị trí gắn link affiliate chính.\n"
+        "5. Link liên quan nên đưa vào comment ghim/status/mô tả, chỉ chọn link thật sự liên quan.\n"
+        "6. Checklist trước khi đăng.\n"
+        "7. Kế hoạch đo hiệu quả sau đăng: publish_url, view, click, order/lead, revenue, cost bằng /mark_published và /performance_add."
     )
+
+def build_static_publish_pack(job, owner_id=ADMIN_ID):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    related = list_related_affiliate_links(owner_id, affiliate_id=affiliate_id, niche=topic or product_name or "", limit=8) if affiliate_id else []
+    related_links = [
+        {
+            "id": row[0],
+            "network": row[1],
+            "product": row[2],
+            "niche": row[3],
+            "url": row[4],
+            "match_score": int(score or 0),
+            "reasons": reasons[:3],
+        }
+        for score, reasons, row in related
+    ]
+    disclosure = "Có thể nhận hoa hồng affiliate nếu người xem mua/đăng ký qua link."
+    caption = (
+        f"{topic or product_name or 'Gợi ý sản phẩm/dịch vụ'}\n\n"
+        f"Link chính: {affiliate_url or 'chưa có'}\n"
+        f"{disclosure}"
+    )
+    pinned_comment_parts = []
+    if affiliate_url:
+        pinned_comment_parts.append(f"Link chính: {affiliate_url}")
+    for item in related_links[:5]:
+        pinned_comment_parts.append(f"{item['product']}: {item['url']}")
+    checklist = [
+        "Đã kiểm tra quyền hình ảnh/voice/nhạc.",
+        "Đã ghi disclosure affiliate rõ ràng.",
+        "Không hứa thu nhập/lãi suất/kết quả phê duyệt.",
+        "Không mạo danh thương hiệu/người thật.",
+        "Nếu nội dung người mẫu/OnlyFans: nhân vật tự tạo hoặc có consent, đủ 18 tuổi.",
+        "Sau đăng ghi /mark_published và /performance_add.",
+    ]
+    return {
+        "job_id": jid,
+        "platform": platform,
+        "channel_name": channel_name,
+        "account_label": account_label,
+        "topic": topic,
+        "primary_affiliate": {
+            "id": affiliate_id,
+            "network": network,
+            "product": product_name,
+            "url": affiliate_url,
+        },
+        "related_links": related_links,
+        "caption": caption,
+        "pinned_comment": "\n".join(pinned_comment_parts),
+        "hashtags": "#review #affiliate #muasamthongminh #AI",
+        "cta": "Xem link chính và các lựa chọn liên quan trong mô tả/comment ghim.",
+        "disclosure": disclosure,
+        "checklist": checklist,
+        "performance_plan": {
+            "after_publish": f"/mark_published job={jid} url=https://... views=0 clicks=0 note=...",
+            "views": f"/performance_add job={jid} type=view value=<VIEWS>",
+            "clicks": f"/performance_add job={jid} type=click value=<CLICKS>",
+            "orders": f"/performance_add job={jid} type=order value=<ORDERS> amount=<REVENUE>",
+            "revenue": f"/performance_add job={jid} type=revenue value=1 amount=<REVENUE>",
+            "cost": f"/performance_add job={jid} type=cost value=1 amount=<COST>",
+        },
+    }
 
 def build_creative_test_prompt(job, count=5):
     (
@@ -7008,6 +7103,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
+        f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
         f"• Lấy hàng đợi đăng: <code>GET {html.escape(base_url)}/api/operator/publish/next</code>",
         f"• Trả URL đã đăng: <code>POST {html.escape(base_url)}/api/operator/publish/&lt;QUEUE_ID&gt;/complete</code>",
         f"• Ghi view/click/doanh thu: <code>POST {html.escape(base_url)}/api/operator/performance</code>",
@@ -8518,6 +8614,7 @@ async def cmd_publish_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     job = get_production_job(job_id, update.effective_user.id)
     if not job:
         return await update.message.reply_text("❌ Không tìm thấy production job.")
+    static_pack = build_static_publish_pack(job, update.effective_user.id)
     if gemini_client or openai_client:
         pack = AgentGemini.chat(
             "Bạn là AI Operator trưởng chuẩn bị publish pack cho video affiliate.",
@@ -8537,6 +8634,10 @@ async def cmd_publish_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"📦 <b>PUBLISH PACK — JOB #{job_id}</b>\n"
         f"Stage: <b>publish</b> | Status: <b>ready</b>\n\n"
+        f"<b>Link chính:</b> <code>{html.escape((static_pack.get('primary_affiliate') or {}).get('url') or '-')}</code>\n"
+        f"<b>Comment ghim/link kèm:</b>\n<pre>{html_pre(static_pack.get('pinned_comment') or '-', 900)}</pre>\n"
+        f"<b>Ghi performance sau đăng:</b>\n"
+        f"<code>{html.escape((static_pack.get('performance_plan') or {}).get('after_publish') or '')}</code>\n\n"
         f"<pre>{html_pre(pack)}</pre>",
         parse_mode="HTML"
     )
@@ -9762,6 +9863,29 @@ async def api_operator_job_ready(job_id: int, request: Request):
             {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
             for key, ok, detail, next_cmd in readiness["checks"]
         ],
+    }
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/publish-pack")
+async def api_operator_job_publish_pack(job_id: int, request: Request):
+    verify_operator_api_token(request)
+    job = get_production_job(job_id, ADMIN_ID)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    readiness = production_readiness_data(ADMIN_ID, job_id)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "readiness": {
+            "level": (readiness or {}).get("level", "UNKNOWN"),
+            "next_action": (readiness or {}).get("next_action", ""),
+        },
+        "publish_pack": build_static_publish_pack(job, ADMIN_ID),
+        "rule": "Use this pack for manual/API publishing. Do not publish if review/compliance is blocked.",
+        "next": {
+            "queue_url": "/api/operator/publish/next",
+            "complete_url": "/api/operator/publish/<QUEUE_ID>/complete",
+            "performance_url": "/api/operator/performance",
+        },
     }
 
 @fastapi_app.post("/api/operator/loop")

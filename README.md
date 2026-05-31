@@ -89,7 +89,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/trend_search niche=... platform=tiktok channel=<ID> aff=<ID> campaign=<ID>`: tìm trend mới từ nguồn RSS/news công khai, chấm điểm trend/affiliate/cạnh tranh và hiện nút tạo video trend vào pipeline.
 - `/trend_rank 10`: xem bảng xếp hạng trend đã lưu theo điểm ưu tiên sản xuất video affiliate.
 - `/handoff job=<ID> tool=claude|gemini|runway|kling|capcut|ffmpeg|fish|edge stage=...`: xuất prompt giao việc cho AI/tool khác và chuyển job sang `waiting`.
-- `/publish_pack job=<ID>`: tạo gói caption, hashtag, CTA, link affiliate và checklist trước khi đăng.
+- `/publish_pack job=<ID>`: tạo gói caption, hashtag, CTA, disclosure, link affiliate chính, link liên quan/comment ghim, checklist compliance và kế hoạch ghi performance trước khi đăng.
 - `/review_gate job=<ID>`: AI kiểm duyệt quyền hình ảnh/âm thanh, affiliate claim, CTA và rủi ro nền tảng trước khi đăng.
 - `/creative_test job=<ID> n=5`: sinh nhiều biến thể hook/caption/CTA để A/B test video affiliate.
 - `/creative_variants <JOB_ID>`: xem các biến thể creative của job.
@@ -131,6 +131,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/today`: worker ngoài lấy danh sách hành động ưu tiên trong ngày, gồm setup, task, publish queue và affiliate nên scale.
 - `POST /api/operator/tasks/{task_id}/complete`: worker ngoài trả `status`, `output_url`, `note`; bot tự lưu asset theo loại task và báo admin.
 - `GET /api/operator/jobs/{job_id}/ready`: worker ngoài kiểm tra job đã đủ điều kiện review/publish chưa.
+- `GET /api/operator/jobs/{job_id}/publish-pack`: worker ngoài lấy caption, CTA, disclosure, link affiliate chính, link liên quan, comment ghim, checklist compliance và kế hoạch ghi performance.
 - `POST /api/operator/loop`: cron/n8n gọi vòng điều phối an toàn với `limit`, `auto_queue`, `notify_admin`; bot tự queue job ready và trả task tiếp theo.
 - `GET /api/operator/channels`: worker ngoài đọc danh sách kênh, topic focus, posting slots, publish mode và readiness manual/API để chọn nơi đăng.
 - `GET /api/operator/campaigns`: worker ngoài đọc campaign active, niche, platform, affiliate/pay URL để chọn `campaign_id` khi scale.
