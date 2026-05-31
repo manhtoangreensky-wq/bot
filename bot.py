@@ -1106,6 +1106,39 @@ def list_production_assets(owner_id, job_id, limit=20):
     conn.close()
     return rows
 
+def job_report_data(owner_id, job_id):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return None
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, asset_type, url, file_id, note, created_at
+        FROM production_assets
+        WHERE owner_id=? AND job_id=?
+        ORDER BY id DESC LIMIT 8""",
+        (str(owner_id), job_id)
+    )
+    assets = c.fetchall()
+    c.execute(
+        """SELECT id, mode, status, scheduled_at, publish_url, note, updated_at
+        FROM publish_queue
+        WHERE owner_id=? AND job_id=?
+        ORDER BY id DESC LIMIT 5""",
+        (str(owner_id), job_id)
+    )
+    queue_items = c.fetchall()
+    c.execute(
+        """SELECT event_type, COALESCE(SUM(value),0), COALESCE(SUM(amount),0), COUNT(*)
+        FROM performance_events
+        WHERE owner_id=? AND job_id=?
+        GROUP BY event_type ORDER BY event_type""",
+        (str(owner_id), job_id)
+    )
+    performance = c.fetchall()
+    conn.close()
+    return job, assets, queue_items, performance
+
 def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note=""):
     job = get_production_job(job_id, owner_id)
     if not job:
@@ -2296,6 +2329,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /publish_queue — Xem hàng đợi đăng",
             "• /asset_add — Lưu asset vào job",
             "• /assets — Xem asset của job",
+            "• /job_report — Báo cáo đầy đủ một job",
             "• /mark_published — Ghi nhận đã đăng bài",
             "• /performance_add — Ghi hiệu quả bài đăng",
             "• /performance — Báo cáo hiệu quả kiếm tiền",
@@ -3306,7 +3340,10 @@ def operator_menu_keyboard():
             InlineKeyboardButton("📦 Publish pack", callback_data="opmenu|publish"),
             InlineKeyboardButton("🛡 Review gate", callback_data="opmenu|review")
         ],
-        [InlineKeyboardButton("🗂 Assets", callback_data="opmenu|assets")],
+        [
+            InlineKeyboardButton("🗂 Assets", callback_data="opmenu|assets"),
+            InlineKeyboardButton("📋 Job report", callback_data="opmenu|report")
+        ],
         [InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")],
         [
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
@@ -3345,6 +3382,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
         "publishqueue": "/publish_queue\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
+        "report": "/job_report <JOB_ID>",
         "review": "/review_gate job=<JOB_ID>",
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
@@ -3519,6 +3557,66 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  file_id=<code>{html.escape(file_id or '-')}</code>\n"
             f"  note={html.escape(note or '-')}"
         )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    try:
+        job_id = int(context.args[0])
+    except (IndexError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/job_report &lt;JOB_ID&gt;</code>", parse_mode="HTML")
+    data = job_report_data(update.effective_user.id, job_id)
+    if not data:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    job, assets, queue_items, performance = data
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    required = {
+        "brief": bool(brief),
+        "final_asset": any((asset_type or "") in {"final_video", "raw_video"} for _, asset_type, *_ in assets) or bool(asset_url),
+        "publish_pack_or_review": stage in {"review", "publish", "done"} or status in {"ready", "published"},
+        "affiliate": bool(affiliate_url),
+        "queued_or_published": bool(queue_items) or status == "published",
+    }
+    readiness = "READY" if all(required.values()) else "MISSING"
+    lines = [
+        f"📋 <b>JOB REPORT #{jid}</b>",
+        f"• Readiness: <b>{readiness}</b>",
+        f"• Stage/status: <b>{html.escape(stage or '-')}</b>/<b>{html.escape(status or '-')}</b>",
+        f"• Platform: <code>{html.escape(platform or '-')}</code>",
+        f"• Channel: {html.escape(channel_name or '-')} / <code>{html.escape(account_label or 'main')}</code>",
+        f"• Topic: {html.escape(topic or '-')}",
+        f"• Affiliate: <code>{html.escape(network or '-')} / {html.escape(product_name or '-')}</code>",
+        f"• Affiliate URL: <code>{html.escape(affiliate_url or 'chưa có')}</code>",
+        f"• Asset URL: <code>{html.escape(asset_url or 'chưa có')}</code>",
+        f"• Publish URL: <code>{html.escape(publish_url or 'chưa có')}</code>",
+        "",
+        "<b>Checklist:</b>",
+    ]
+    for key, ok in required.items():
+        lines.append(f"• {'✅' if ok else '⚠️'} {key}")
+    lines.append("\n<b>Assets gần nhất:</b>")
+    if assets:
+        for aid, asset_type, url, file_id, asset_note, created_at in assets[:5]:
+            lines.append(f"• #{aid} | <code>{html.escape(asset_type or '-')}</code> | {created_at}\n  {html.escape(url or file_id or '-')}")
+    else:
+        lines.append("• Chưa có asset.")
+    lines.append("\n<b>Publish queue:</b>")
+    if queue_items:
+        for qid, mode, q_status, scheduled_at, q_url, q_note, updated_at in queue_items:
+            lines.append(f"• queue #{qid} | {mode}/{q_status} | schedule={html.escape(scheduled_at or '-')}\n  url={html.escape(q_url or '-')}")
+    else:
+        lines.append("• Chưa vào hàng đợi đăng.")
+    lines.append("\n<b>Performance:</b>")
+    if performance:
+        for event_type, value_sum, amount_sum, count in performance:
+            lines.append(f"• {event_type}: value={value_sum} amount={amount_sum:,}đ events={count}")
+    else:
+        lines.append("• Chưa có dữ liệu.")
+    lines.append("\nLệnh tiếp theo: /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4488,6 +4586,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
     tg_app.add_handler(CommandHandler("assets", cmd_assets))
+    tg_app.add_handler(CommandHandler("job_report", cmd_job_report))
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
