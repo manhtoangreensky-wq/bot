@@ -1569,6 +1569,65 @@ def operator_daily_data(owner_id, days=1):
     conn.close()
     return since, job_status_counts, job_stage_counts, queue_status_counts, performance_counts, recent_jobs, open_queue
 
+def operator_status_data(owner_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM social_channels WHERE owner_id=? AND status='active'", (str(owner_id),))
+    active_channels = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM affiliate_links WHERE owner_id=? AND status='active'", (str(owner_id),))
+    active_affiliates = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM campaigns WHERE owner_id=? AND status='active'", (str(owner_id),))
+    active_campaigns = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM production_jobs WHERE owner_id=? AND status IN ('queued','working','waiting','blocked','ready')", (str(owner_id),))
+    open_jobs = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM production_tasks WHERE owner_id=? AND status IN ('queued','waiting','working','blocked')", (str(owner_id),))
+    open_tasks = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM publish_queue WHERE owner_id=? AND status IN ('queued','scheduled','publishing','blocked')", (str(owner_id),))
+    open_publish = c.fetchone()[0]
+    c.execute(
+        """SELECT id, platform, channel_name, account_label, status, publish_mode, token_env, page_id
+        FROM social_channels WHERE owner_id=? AND status='active' ORDER BY id DESC LIMIT 20""",
+        (str(owner_id),)
+    )
+    channel_rows = c.fetchall()
+    c.execute(
+        """SELECT pj.id, pj.stage, pj.status, pj.platform, pj.topic, sc.channel_name, al.product_name, pj.updated_at
+        FROM production_jobs pj
+        LEFT JOIN social_channels sc ON sc.id=pj.channel_id
+        LEFT JOIN affiliate_links al ON al.id=pj.affiliate_id
+        WHERE pj.owner_id=? AND pj.status='blocked'
+        ORDER BY pj.updated_at DESC LIMIT 8""",
+        (str(owner_id),)
+    )
+    blocked_jobs = c.fetchall()
+    conn.close()
+    channel_readiness = []
+    for row in channel_rows:
+        readiness, reason = channel_publish_readiness(row)
+        channel_readiness.append((row, readiness, reason))
+    checks = [
+        ("channels", active_channels > 0, f"{active_channels} kênh active", "/channel_add platform=tiktok name=..."),
+        ("affiliates", active_affiliates > 0, f"{active_affiliates} affiliate active", "/affiliate_seed hoặc /affiliate_add"),
+        ("campaigns", active_campaigns > 0, f"{active_campaigns} campaign active", "/campaign_new name=... niche=..."),
+        ("operator_api", bool(OPERATOR_API_TOKEN), "OPERATOR_API_TOKEN đã bật" if OPERATOR_API_TOKEN else "OPERATOR_API_TOKEN chưa set", "/operator_api"),
+        ("publish_ready", any(r in {"manual_ready", "api_ready"} for _, r, _ in channel_readiness), "Có kênh sẵn sàng đăng" if channel_readiness else "Chưa có kênh", "/publish_readiness"),
+    ]
+    ready_to_scale = all(ok for key, ok, _, _ in checks[:3])
+    return {
+        "counts": {
+            "active_channels": active_channels,
+            "active_affiliates": active_affiliates,
+            "active_campaigns": active_campaigns,
+            "open_jobs": open_jobs,
+            "open_tasks": open_tasks,
+            "open_publish": open_publish,
+        },
+        "checks": checks,
+        "ready_to_scale": ready_to_scale,
+        "channel_readiness": channel_readiness,
+        "blocked_jobs": blocked_jobs,
+    }
+
 def get_production_job(job_id, owner_id):
     conn = db_connect()
     c = conn.cursor()
@@ -5892,6 +5951,44 @@ async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lines.append("\nLệnh nhanh: /operator_dashboard | /publish_queue | /performance | /operator_auto")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = operator_status_data(update.effective_user.id)
+    counts = data["counts"]
+    lines = [
+        "🧭 <b>OPERATOR SYSTEM STATUS</b>",
+        f"• Ready to scale: <b>{'YES' if data['ready_to_scale'] else 'NO'}</b>",
+        f"• Channels: <b>{counts['active_channels']}</b> | Affiliates: <b>{counts['active_affiliates']}</b> | Campaigns: <b>{counts['active_campaigns']}</b>",
+        f"• Open jobs: <b>{counts['open_jobs']}</b> | Tasks: <b>{counts['open_tasks']}</b> | Publish queue: <b>{counts['open_publish']}</b>",
+        "",
+        "<b>Checklist:</b>",
+    ]
+    for key, ok, detail, next_cmd in data["checks"]:
+        lines.append(f"• {'✅' if ok else '⚠️'} <code>{html.escape(key)}</code> — {html.escape(detail)} | next: <code>{html.escape(next_cmd)}</code>")
+    lines.append("\n<b>Channel readiness:</b>")
+    if data["channel_readiness"]:
+        for row, readiness, reason in data["channel_readiness"][:10]:
+            cid, platform, channel_name, account_label, status, publish_mode, token_env, page_id = row
+            lines.append(
+                f"• #{cid} | <code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')} / {html.escape(account_label or 'main')}\n"
+                f"  mode={html.escape(publish_mode or 'manual')} | <b>{html.escape(readiness)}</b> — {html.escape(reason)}"
+            )
+    else:
+        lines.append("• Chưa có channel active.")
+    lines.append("\n<b>Blocked jobs:</b>")
+    if data["blocked_jobs"]:
+        for jid, stage, status, platform, topic, channel_name, product_name, updated_at in data["blocked_jobs"]:
+            lines.append(
+                f"• job #{jid} | <code>{html.escape(platform or '-')}</code> | {html.escape(stage or '-')}/{html.escape(status or '-')}\n"
+                f"  {html.escape(topic or '-')}\n"
+                f"  next: <code>/job_ready job={jid}</code>"
+            )
+    else:
+        lines.append("• Không có job blocked.")
+    lines.append("\nLệnh nhanh: <code>/operator_menu</code> | <code>/affiliate_scale aff=&lt;ID&gt; build=1</code> | <code>/operator_loop</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -5921,7 +6018,8 @@ def operator_category_keyboard(category):
         "cat_control": [
             ("🧠 Brain command", "brain"), ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
-            ("📊 Daily digest", "daily"), ("🧭 Dashboard", "dashboard"),
+            ("🧭 System status", "status"), ("📊 Daily digest", "daily"),
+            ("🧭 Dashboard", "dashboard"),
         ],
         "cat_trend": [
             ("🔥 Tìm trend", "trend"), ("🏆 Trend ranking", "rank"),
@@ -6014,6 +6112,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Header bắt buộc: <code>Authorization: Bearer &lt;OPERATOR_API_TOKEN&gt;</code>",
         "",
         "<b>Endpoint cho n8n/worker:</b>",
+        f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
@@ -6059,6 +6158,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         )
     snippets = {
         "dashboard": "/operator_dashboard",
+        "status": "/operator_status",
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
@@ -8314,6 +8414,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
+    tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
@@ -8456,6 +8557,56 @@ async def api_operator_next_task(request: Request, job_id: int = 0, tool: str = 
         "task": serialize_operator_task(task),
         "submit_url": f"/api/operator/tasks/{task[0]}/complete",
         "rule": "Submit output_url when the external AI/tool finishes. Do not publish without review gate.",
+    }
+
+@fastapi_app.get("/api/operator/status")
+async def api_operator_status(request: Request):
+    verify_operator_api_token(request)
+    data = operator_status_data(ADMIN_ID)
+    channel_readiness = []
+    for row, readiness, reason in data["channel_readiness"]:
+        cid, platform, channel_name, account_label, status, publish_mode, token_env, page_id = row
+        channel_readiness.append({
+            "id": cid,
+            "platform": platform,
+            "channel_name": channel_name,
+            "account_label": account_label,
+            "status": status,
+            "publish_mode": publish_mode,
+            "token_env": token_env,
+            "page_id": page_id,
+            "readiness": readiness,
+            "reason": reason,
+        })
+    return {
+        "ok": True,
+        "ready_to_scale": data["ready_to_scale"],
+        "counts": data["counts"],
+        "checks": [
+            {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
+            for key, ok, detail, next_cmd in data["checks"]
+        ],
+        "channel_readiness": channel_readiness,
+        "blocked_jobs": [
+            {
+                "job_id": jid,
+                "stage": stage,
+                "status": status,
+                "platform": platform,
+                "topic": topic,
+                "channel_name": channel_name,
+                "affiliate_product": product_name,
+                "updated_at": updated_at,
+                "ready_url": f"/api/operator/jobs/{jid}/ready",
+            }
+            for jid, stage, status, platform, topic, channel_name, product_name, updated_at in data["blocked_jobs"]
+        ],
+        "next": {
+            "telegram": "/operator_status",
+            "affiliate_report": "/api/operator/affiliate-report",
+            "affiliate_scale": "/api/operator/affiliate-scale",
+            "loop": "/api/operator/loop",
+        },
     }
 
 @fastapi_app.post("/api/operator/tasks/{task_id}/complete")
