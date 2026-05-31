@@ -4901,6 +4901,7 @@ def get_publish_queue_item(owner_id, queue_id):
     c.execute(
         """SELECT pq.id, pq.job_id, pq.channel_id, pq.platform, sc.channel_name, sc.account_label,
                   pq.mode, pq.status, pq.scheduled_at, pq.publish_url, pq.note, pq.updated_at,
+                  sc.publish_mode, sc.token_env, sc.page_id,
                   pj.topic, pj.asset_url, pj.brief_text, pj.stage, pj.status,
                   al.network, al.product_name, al.url
         FROM publish_queue pq
@@ -4945,7 +4946,7 @@ def serialize_publish_queue_item(row):
         return None
     (
         qid, job_id, channel_id, platform, channel_name, account_label, mode, status,
-        scheduled_at, publish_url, note, updated_at, topic, asset_url, brief_text,
+        scheduled_at, publish_url, note, updated_at, publish_mode, token_env, page_id, topic, asset_url, brief_text,
         stage, job_status, network, product_name, affiliate_url
     ) = row
     assets = list_production_assets(ADMIN_ID, job_id, limit=20)
@@ -4972,6 +4973,9 @@ def serialize_publish_queue_item(row):
         "channel_name": channel_name,
         "account_label": account_label,
         "mode": mode,
+        "channel_publish_mode": publish_mode,
+        "token_env": token_env,
+        "page_id": page_id,
         "status": status,
         "scheduled_at": scheduled_at,
         "publish_url": publish_url,
@@ -5000,6 +5004,86 @@ def serialize_publish_queue_item(row):
             "performance_plan": static_pack.get("performance_plan", {}),
         },
         "rule": "Publish only approved/queued jobs. Keep affiliate disclosure and platform rules.",
+    }
+
+def build_publisher_handoff(queue_payload):
+    if not queue_payload:
+        return {}
+    platform = (queue_payload.get("platform") or "").lower()
+    mode = (queue_payload.get("mode") or queue_payload.get("channel_publish_mode") or "manual").lower()
+    pack = queue_payload.get("publish_pack") or {}
+    final_video = queue_payload.get("final_video") or {}
+    media_url = final_video.get("url") or queue_payload.get("asset_url") or ""
+    caption_parts = [
+        pack.get("caption", ""),
+        pack.get("cta", ""),
+        pack.get("hashtags", ""),
+    ]
+    caption = "\n\n".join([part for part in caption_parts if part]).strip()
+    pinned_comment = pack.get("pinned_comment") or ""
+    related_links = pack.get("related_links") or []
+    if platform in {"tiktok", "tiktokshop"}:
+        api_plan = [
+            "Dùng TikTok Content Posting API chính thức nếu channel api_ready.",
+            "Upload video 9:16, caption ngắn, hashtag rõ ràng.",
+            "Nếu TikTok không cho link ngoài trong caption, đưa tracking URL vào bio/comment ghim/manual note.",
+        ]
+        required_env = [queue_payload.get("token_env") or "TIKTOK_ACCESS_TOKEN"]
+    elif platform in {"facebook", "fb", "reels", "instagram"}:
+        api_plan = [
+            "Dùng Meta Graph API chính thức cho Page/Reels nếu channel api_ready.",
+            "Đăng video/reel với caption, disclosure affiliate và CTA.",
+            "Link affiliate chính/related nên đưa vào caption hoặc comment đầu tùy chính sách page.",
+        ]
+        required_env = [queue_payload.get("token_env") or "META_PAGE_ACCESS_TOKEN", "page_id=" + str(queue_payload.get("page_id") or "<PAGE_ID>")]
+    elif platform in {"onlyfan", "onlyfans"}:
+        api_plan = [
+            "OnlyFans không có public API ổn định cho auto-post đại trà; ưu tiên manual hoặc automation có consent/ToS rõ ràng.",
+            "Không đăng nội dung người thật/AI influencer nếu thiếu consent, tuổi 18+ và quyền thương mại.",
+            "Dùng pack này làm checklist đăng thủ công, sau đó trả publish_url qua complete endpoint.",
+        ]
+        required_env = []
+    else:
+        api_plan = [
+            "Dùng kênh manual/API chính thức của nền tảng.",
+            "Giữ disclosure affiliate, không spam link và không mạo danh.",
+        ]
+        required_env = [queue_payload.get("token_env")] if queue_payload.get("token_env") else []
+    return {
+        "queue_id": queue_payload.get("id"),
+        "job_id": queue_payload.get("job_id"),
+        "platform": platform or "social",
+        "mode": mode,
+        "can_auto_publish": mode == "api" and bool(queue_payload.get("token_env")),
+        "required_env": [item for item in required_env if item],
+        "media": {
+            "final_video_url": media_url,
+            "telegram_file_id": final_video.get("file_id", ""),
+            "required": "final_video_url hoặc telegram_file_id",
+        },
+        "copy": {
+            "caption": caption,
+            "pinned_comment": pinned_comment,
+            "related_links": related_links,
+            "disclosure": pack.get("disclosure", ""),
+        },
+        "api_plan": api_plan,
+        "manual_steps": [
+            "Tải final video từ media.",
+            "Đăng lên đúng account/channel.",
+            "Dán caption, disclosure, CTA và link liên quan phù hợp.",
+            "Kiểm tra bài hiển thị công khai.",
+            f"Gọi POST /api/operator/publish/{queue_payload.get('id')}/complete với publish_url thật.",
+        ],
+        "complete_payload": {
+            "status": "published",
+            "publish_url": "https://...",
+            "views": 0,
+            "clicks": 0,
+            "note": f"published_by_{platform or 'worker'}",
+        },
+        "performance_next": (pack.get("performance_plan") or {}),
+        "rule": "Không publish nếu thiếu final video, thiếu consent/quyền nội dung, hoặc review gate/publish queue chưa duyệt.",
     }
 
 def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None, note=None):
@@ -8886,7 +8970,8 @@ def operator_category_keyboard(category):
         ],
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
-            ("✅ Approve publish", "approvepublish"), ("🧪 Publish readiness", "readiness"),
+            ("🤖 Publisher handoff", "publisherhandoff"), ("✅ Approve publish", "approvepublish"),
+            ("🧪 Publish readiness", "readiness"),
             ("✅ Mark published", "markpublished"),
         ],
         "cat_money": [
@@ -8985,6 +9070,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
         f"• Duyệt publish: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/approve</code>",
         f"• Lấy hàng đợi đăng: <code>GET {html.escape(base_url)}/api/operator/publish/next</code>",
+        f"• Publisher handoff: <code>GET {html.escape(base_url)}/api/operator/publish/&lt;QUEUE_ID&gt;/handoff</code>",
         f"• Trả URL đã đăng: <code>POST {html.escape(base_url)}/api/operator/publish/&lt;QUEUE_ID&gt;/complete</code>",
         f"• Ghi view/click/doanh thu: <code>POST {html.escape(base_url)}/api/operator/performance</code>",
         "",
@@ -9202,7 +9288,8 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "approvepublish": "/approve_publish job=<JOB_ID> queue=1 mode=manual note=duyet_ok\nPOST /api/operator/jobs/<JOB_ID>/approve",
         "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
-        "publishqueue": "/publish_queue\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
+        "publishqueue": "/publish_queue\n/publisher_handoff queue=<QUEUE_ID>\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
+        "publisherhandoff": "/publisher_handoff queue=<QUEUE_ID>\nGET /api/operator/publish/<QUEUE_ID>/handoff",
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
@@ -10162,7 +10249,52 @@ async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  {html.escape(topic or '-')}\n"
             f"  schedule={html.escape(scheduled_at or '-')} | url={html.escape(publish_url or '-')}"
         )
-    lines.append("\nCập nhật: <code>/publish_queue_set id=&lt;QUEUE_ID&gt; status=published url=https://...</code>")
+    lines.append(
+        "\nLệnh tiếp:\n"
+        "<code>/publisher_handoff queue=&lt;QUEUE_ID&gt;</code>\n"
+        "<code>/publish_queue_set id=&lt;QUEUE_ID&gt; status=published url=https://...</code>"
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        queue_id = int(data.get("id") or data.get("queue") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/publisher_handoff queue=&lt;QUEUE_ID&gt;</code>\n"
+            "Lấy queue ID bằng <code>/publish_queue</code>.",
+            parse_mode="HTML"
+        )
+    item = get_publish_queue_item(update.effective_user.id, queue_id)
+    if not item:
+        return await update.message.reply_text("❌ Không tìm thấy publish queue item.")
+    payload = serialize_publish_queue_item(item)
+    handoff = build_publisher_handoff(payload)
+    copy = handoff.get("copy") or {}
+    media = handoff.get("media") or {}
+    lines = [
+        f"📮 <b>PUBLISHER HANDOFF — QUEUE #{queue_id}</b>",
+        f"• Job: <code>#{handoff.get('job_id') or '-'}</code>",
+        f"• Platform/mode: <code>{html.escape(handoff.get('platform') or '-')}</code> / <code>{html.escape(handoff.get('mode') or '-')}</code>",
+        f"• Auto publish: <b>{'có thể' if handoff.get('can_auto_publish') else 'manual/API chưa đủ token'}</b>",
+        f"• Env cần có: <code>{html.escape(', '.join(handoff.get('required_env') or []) or '-')}</code>",
+        f"• Final video: <code>{html.escape(media.get('final_video_url') or media.get('telegram_file_id') or 'thiếu')}</code>",
+        "",
+        "<b>Caption:</b>",
+        f"<pre>{html_pre(copy.get('caption') or '-', 900)}</pre>",
+        "<b>Comment ghim/link kèm:</b>",
+        f"<pre>{html_pre(copy.get('pinned_comment') or '-', 900)}</pre>",
+        "<b>Plan đăng:</b>",
+    ]
+    for step in handoff.get("api_plan") or []:
+        lines.append(f"• {html.escape(step)}")
+    lines.append(
+        "\nSau khi đăng xong gọi:\n"
+        f"<code>/publish_queue_set id={queue_id} status=published url=https://...</code>"
+    )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_queue_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -11841,6 +11973,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
+    tg_app.add_handler(CommandHandler("publisher_handoff", cmd_publisher_handoff))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
     tg_app.add_handler(CommandHandler("assets", cmd_assets))
@@ -12870,11 +13003,28 @@ async def api_operator_publish_next(request: Request, platform: str = "", mode: 
     queue_id = item[0]
     update_publish_queue_item(ADMIN_ID, queue_id, status="publishing", note=f"api_publisher_claim platform={platform or item[3] or '-'}")
     item = get_publish_queue_item(ADMIN_ID, queue_id)
+    queue_payload = serialize_publish_queue_item(item)
     return {
         "ok": True,
-        "queue": serialize_publish_queue_item(item),
+        "queue": queue_payload,
+        "publisher_handoff": build_publisher_handoff(queue_payload),
         "submit_url": f"/api/operator/publish/{queue_id}/complete",
         "rule": "Return publish_url after posting. If blocked by platform/compliance, submit status=blocked and note.",
+    }
+
+@fastapi_app.get("/api/operator/publish/{queue_id}/handoff")
+async def api_operator_publish_handoff(queue_id: int, request: Request):
+    verify_operator_api_token(request)
+    item = get_publish_queue_item(ADMIN_ID, queue_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Publish queue item not found")
+    queue_payload = serialize_publish_queue_item(item)
+    return {
+        "ok": True,
+        "queue": queue_payload,
+        "publisher_handoff": build_publisher_handoff(queue_payload),
+        "submit_url": f"/api/operator/publish/{queue_id}/complete",
+        "rule": "Use official platform API or manual publishing. Never bypass platform rules, consent, or review gate.",
     }
 
 @fastapi_app.post("/api/operator/publish/{queue_id}/complete")
