@@ -59,6 +59,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/affiliates`: liệt kê link affiliate nội bộ.
 - `/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=...`: tạo lịch nội dung theo kênh.
 - `/calendar`: xem lịch nội dung đã lên.
+- `/operator topic=... channel=<ID> aff=<ID> campaign=<ID> date=YYYY-MM-DD`: ra lệnh một bước để tạo lịch nội dung + production job + brief AI.
 - `/produce slot=<calendar_id>`: tạo production job từ lịch nội dung, kèm brief AI nếu đã cấu hình provider.
 - `/pipeline`: xem hàng đợi sản xuất video.
 - `/pipeline <ID>`: xem chi tiết production job.

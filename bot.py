@@ -1748,6 +1748,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /affiliates — Danh sách affiliate",
             "• /calendar_plan — Lên lịch nội dung",
             "• /calendar — Xem lịch nội dung",
+            "• /operator — Ra lệnh tạo video một bước",
             "• /produce — Tạo job sản xuất từ lịch",
             "• /pipeline — Theo dõi pipeline video",
             "• /pipeline_set — Cập nhật stage/trạng thái",
@@ -2231,6 +2232,99 @@ async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  camp=<code>{campaign_id or '-'}</code> aff=<code>{affiliate_id or '-'}</code>"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    topic = data.get("topic") or data.get("chude")
+    if not topic:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/operator topic=review 5 món đồ công nghệ channel=1 aff=1 campaign=1 date=2026-06-01</code>\n"
+            "Dùng <code>/channels</code> và <code>/affiliates</code> để lấy ID.",
+            parse_mode="HTML"
+        )
+    try:
+        channel_id = int(data.get("channel") or data.get("kenh") or 0)
+    except ValueError:
+        channel_id = 0
+    try:
+        affiliate_id = int(data.get("affiliate_id") or data.get("aff") or 0)
+    except ValueError:
+        affiliate_id = 0
+    try:
+        campaign_id = int(data.get("campaign") or data.get("camp") or 0)
+    except ValueError:
+        campaign_id = 0
+
+    if not channel_id:
+        return await update.message.reply_text("⚠️ Thiếu <code>channel=&lt;ID&gt;</code>. Xem ID bằng /channels.", parse_mode="HTML")
+    channel = get_social_channel(channel_id, update.effective_user.id)
+    if not channel:
+        return await update.message.reply_text("❌ Không tìm thấy channel hoặc không có quyền.")
+    if affiliate_id and not get_affiliate_link(affiliate_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy affiliate hoặc không có quyền.")
+    if campaign_id and not get_campaign(campaign_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy campaign hoặc không có quyền.")
+
+    post_date = data.get("date") or data.get("ngay") or datetime.now().date().isoformat()
+    note = data.get("note") or "operator_direct"
+    _, platform, channel_name, account_label, focus, audience, slots, status = channel
+    slot_note = f"{channel_name} | {account_label or 'main'} | audience={audience or 'general'} | {note}"
+    slot_id = create_calendar_slot(
+        update.effective_user.id,
+        channel_id,
+        campaign_id,
+        affiliate_id,
+        post_date,
+        platform,
+        topic,
+        slot_note
+    )
+    slot = get_calendar_slot(slot_id, update.effective_user.id)
+    if gemini_client or openai_client:
+        brief = AgentGemini.chat(
+            "Bạn là AI Operator trưởng, biến lệnh Telegram của admin thành brief sản xuất video affiliate hợp pháp.",
+            build_production_prompt(slot),
+            update.effective_user.id,
+            is_json=False
+        )
+    else:
+        brief = "Chưa cấu hình AI Provider. Job đã được tạo, admin bổ sung brief thủ công."
+    job_id = create_production_job(
+        update.effective_user.id,
+        slot_id,
+        campaign_id,
+        channel_id,
+        affiliate_id,
+        platform or "",
+        topic or "",
+        brief,
+        note
+    )
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎙 Voice", callback_data=f"pipe|stage|voice|{job_id}"),
+            InlineKeyboardButton("🎞 Edit", callback_data=f"pipe|stage|edit|{job_id}"),
+            InlineKeyboardButton("✅ Review", callback_data=f"pipe|stage|review|{job_id}")
+        ],
+        [
+            InlineKeyboardButton("🚀 Published", callback_data=f"pipe|status|published|{job_id}"),
+            InlineKeyboardButton("⛔ Blocked", callback_data=f"pipe|status|blocked|{job_id}")
+        ]
+    ])
+    await update.message.reply_text(
+        f"🧠 <b>AI OPERATOR ĐÃ NHẬN LỆNH</b>\n\n"
+        f"• Calendar slot: <code>#{slot_id}</code>\n"
+        f"• Production job: <code>#{job_id}</code>\n"
+        f"• Kênh: <b>{html.escape(channel_name or '-')}</b> / <code>{html.escape(account_label or 'main')}</code>\n"
+        f"• Nền tảng: <code>{html.escape(platform or '-')}</code>\n"
+        f"• Topic: {html.escape(topic)}\n"
+        f"• Ngày: <code>{html.escape(post_date)}</code>\n\n"
+        f"<pre>{html_pre(brief)}</pre>",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
 
 async def cmd_produce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -2992,6 +3086,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
+    tg_app.add_handler(CommandHandler("operator",    cmd_operator))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
     tg_app.add_handler(CommandHandler("pipeline",    cmd_pipeline))
     tg_app.add_handler(CommandHandler("pipeline_set", cmd_pipeline_set))
