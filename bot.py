@@ -22,6 +22,7 @@ import uvicorn
 import time
 import random
 import re
+import tempfile
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode
 from contextlib import asynccontextmanager
@@ -2535,7 +2536,7 @@ def operator_worker_spec_data():
                 "submit": "POST /api/operator/tasks/<TASK_ID>/complete",
                 "allowed_actions": [
                     "Tạo voice, visual, edit, subtitle, final_video theo task",
-                    "Trả output_url hoặc note lỗi rõ ràng",
+                    "Trả output_url/output_urls hoặc note lỗi rõ ràng",
                     "Không tự thay đổi affiliate link hoặc claim chính sách",
                 ],
             },
@@ -2612,6 +2613,8 @@ def operator_worker_spec_data():
             "task_complete": {
                 "status": "ready",
                 "output_url": "https://.../asset.mp4",
+                "output_urls": ["https://.../scene-1.mp4", "https://.../scene-2.mp4"],
+                "asset_type": "raw_video|voice|final_video|source",
                 "note": "tool output or error detail",
             },
             "task_claim": {
@@ -3063,7 +3066,7 @@ def operator_n8n_template_data():
                 "type": "external_tool",
                 "tools": ["Claude/Gemini", "Kling/Runway", "Fish Audio/Edge TTS", "CapCut/FFmpeg"],
                 "rule": "Dùng công cụ trả phí/chất lượng cao trước; nếu lỗi/quota hết thì POST /api/operator/tool-events, fallback công cụ rẻ/miễn phí và báo admin.",
-                "output": {"status": "ready|blocked|failed", "output_url": "https://...", "note": "tool log"},
+                "output": {"status": "ready|blocked|done", "output_url": "https://...", "output_urls": ["https://..."], "asset_type": "raw_video|voice|final_video", "note": "tool log"},
             },
             {
                 "node": "Report Tool Event",
@@ -3086,7 +3089,7 @@ def operator_n8n_template_data():
                 "type": "http_request",
                 "method": "POST",
                 "url": f"{base_url}/api/operator/tasks/<TASK_ID>/complete",
-                "body": {"status": "ready", "output_url": "https://.../asset.mp4", "note": "tool output"},
+                "body": {"status": "ready", "output_url": "https://.../asset.mp4", "output_urls": ["https://.../scene-1.mp4"], "asset_type": "raw_video", "note": "tool output"},
             },
             {
                 "node": "Job Readiness",
@@ -3149,7 +3152,7 @@ def operator_n8n_template_data():
         "branching_rules": [
             "Nếu audit.level=SETUP_REQUIRED: dừng workflow và báo admin bằng next_command.",
             "Nếu director_run.executed=false: báo admin kèm next_action, không cố chạy node tool.",
-            "Nếu task không có output_url: complete task status=blocked/failed để không kẹt pipeline.",
+            "Nếu task không có output_url: complete task status=blocked để không kẹt pipeline.",
             "Nếu publisher_run.decision khác api_ready: không tự đăng, chuyển handoff cho admin/manual publisher.",
             "Nếu affiliate_decisions có SCALE/PUBLISH: ưu tiên link đó và chèn các related_links phù hợp trong caption/comment/status.",
         ],
@@ -3340,7 +3343,7 @@ def operator_n8n_workflow_json_data():
                     "content": (
                         "Gắn node Claude/Gemini/Kling/Runway/Fish/Edge/CapCut tại đây.\n"
                         "Luật vận hành: dùng tool trả phí/chất lượng cao trước; hết quota/lỗi thì fallback tool rẻ/miễn phí và báo admin.\n"
-                        "Output cần có: status, output_url, note. Không tự đổi affiliate link, không tự publish nếu chưa qua review."
+                        "Output cần có: status, output_url hoặc output_urls, note. Không tự đổi affiliate link, không tự publish nếu chưa qua review."
                     ),
                     "height": 260,
                     "width": 360,
@@ -6784,6 +6787,8 @@ class LeadRequest(BaseModel):
 class OperatorTaskCompleteRequest(BaseModel):
     status: str = Field(default="ready", max_length=30)
     output_url: str = Field(default="", max_length=2000)
+    output_urls: list[str] = Field(default_factory=list)
+    asset_type: str = Field(default="", max_length=80)
     note: str = Field(default="", max_length=1200)
 
 class OperatorPublishCompleteRequest(BaseModel):
@@ -7028,6 +7033,72 @@ class AgentVoice:
         return used_fish
 
 class AgentDownloader:
+    MAX_TELEGRAM_DOWNLOAD_BYTES = 48 * 1024 * 1024
+
+    @staticmethod
+    async def _send_media_url_or_file(context: ContextTypes.DEFAULT_TYPE, chat_id: int, media_url: str, caption: str, filename: str = ""):
+        try:
+            await context.bot.send_video(
+                chat_id=chat_id,
+                video=media_url,
+                caption=caption,
+                parse_mode="HTML"
+            )
+            return True, "sent_by_url"
+        except Exception as e:
+            logger.warning(f"Telegram send_video by URL failed, will download locally: {e}")
+
+        suffix = os.path.splitext((filename or "").split("?")[0])[1] or ".mp4"
+        tmp_path = ""
+        try:
+            total = 0
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp_path = tmp.name
+            async with httpx.AsyncClient(follow_redirects=True, timeout=120.0) as client:
+                async with client.stream("GET", media_url, headers={"User-Agent": "TOAN-DAAS-Bot/1.0"}) as res:
+                    if res.status_code >= 400:
+                        return False, f"media_http_{res.status_code}"
+                    content_length = int(res.headers.get("content-length") or 0)
+                    if content_length > AgentDownloader.MAX_TELEGRAM_DOWNLOAD_BYTES:
+                        return False, f"media_too_large_{content_length}"
+                    with open(tmp_path, "wb") as f:
+                        async for chunk in res.aiter_bytes(1024 * 256):
+                            if not chunk:
+                                continue
+                            total += len(chunk)
+                            if total > AgentDownloader.MAX_TELEGRAM_DOWNLOAD_BYTES:
+                                return False, f"media_too_large_{total}"
+                            f.write(chunk)
+            if not total:
+                return False, "media_empty"
+            with open(tmp_path, "rb") as f:
+                try:
+                    await context.bot.send_video(
+                        chat_id=chat_id,
+                        video=f,
+                        caption=caption,
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    f.seek(0)
+                    await context.bot.send_document(
+                        chat_id=chat_id,
+                        document=f,
+                        filename=filename or "toan-daas-video.mp4",
+                        caption=caption,
+                        parse_mode="HTML"
+                    )
+            return True, "sent_by_local_file"
+        except Exception as e:
+            logger.error(f"Downloader local media send failed: {e}")
+            return False, str(e)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
     @staticmethod
     async def download(url: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int, cost: int, user_id=None):
         msg = await context.bot.send_message(
@@ -7068,13 +7139,23 @@ class AgentDownloader:
                 media_url = (video_item or (picker[0] if picker else {})).get("url", "")
                 filename = (video_item or (picker[0] if picker else {})).get("filename", filename)
             if res.status_code == 200 and status in {"tunnel", "redirect", "stream", "success", "picker"} and media_url:
-                await context.bot.send_video(
-                    chat_id=chat_id,
-                    video=media_url,
-                    caption=f"🎬 Đã làm sạch! (-{cost} Xu)" + (f"\n<code>{html.escape(filename)}</code>" if filename else ""),
-                    parse_mode="HTML"
+                caption = f"🎬 Đã làm sạch! (-{cost} Xu)" + (f"\n<code>{html.escape(filename)}</code>" if filename else "")
+                sent, send_reason = await AgentDownloader._send_media_url_or_file(
+                    context, chat_id, media_url, caption, filename
                 )
-                await msg.delete()
+                if sent:
+                    await msg.delete()
+                else:
+                    if user_id and cost > 0:
+                        add_credit(user_id, cost, "download_refund", "", f"Không gửi được media: {send_reason}")
+                    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Mở link tải video", url=media_url)]])
+                    await msg.edit_text(
+                        "⚠️ Đã lấy được link video nhưng Telegram không nhận được file trực tiếp.\n"
+                        f"✅ Đã hoàn lại <b>{cost}</b> Xu.\n"
+                        "Bạn có thể mở link bên dưới để tải thủ công, hoặc admin cần self-host Cobalt ổn định hơn.",
+                        parse_mode="HTML",
+                        reply_markup=kb
+                    )
             else:
                 if user_id and cost > 0:
                     add_credit(user_id, cost, "download_refund", "", "Cobalt không trả media_url")
@@ -10976,15 +11057,40 @@ async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
     status = (data.get("status") or data.get("state") or "").lower()
+    if status == "failed":
+        status = "blocked"
     allowed = {"queued", "working", "waiting", "ready", "blocked", "done", "cancelled"}
     if status and status not in allowed:
         return await update.message.reply_text(f"⚠️ status hợp lệ: <code>{', '.join(sorted(allowed))}</code>", parse_mode="HTML")
     output_url = data.get("url") or data.get("output")
+    raw_urls = data.get("urls") or data.get("outputs") or ""
+    output_urls = [u.strip() for u in re.split(r"[\n,|]+", raw_urls) if u.strip()]
+    if not output_url and output_urls:
+        output_url = output_urls[0]
     note = data.get("note")
     changed, row = update_production_task(update.effective_user.id, task_id, status or None, output_url, note)
     if not changed:
         return await update.message.reply_text("❌ Không tìm thấy task hoặc không có gì để cập nhật.")
     job_id, task_type = row
+    asset_type = data.get("asset_type") or data.get("type") or {
+        "visual_scene": "raw_video",
+        "voice": "voice",
+        "edit": "final_video",
+        "publish": "source",
+    }.get(task_type, "source")
+    saved_extra = 0
+    for extra_url in output_urls:
+        if extra_url and extra_url != output_url:
+            ok, _asset_id = add_production_asset(
+                update.effective_user.id,
+                job_id,
+                asset_type,
+                extra_url,
+                "",
+                f"task:{task_id} extra_output {note or ''}"
+            )
+            if ok:
+                saved_extra += 1
     if status in {"ready", "done"}:
         update_production_job(job_id, update.effective_user.id, status="working", note=f"task:{task_id} {task_type} {status}")
     await update.message.reply_text(
@@ -10992,7 +11098,8 @@ async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Job: <code>#{job_id}</code>\n"
         f"• Type: <code>{html.escape(task_type or '-')}</code>\n"
         f"• Status: <b>{html.escape(status or 'giữ nguyên')}</b>\n"
-        f"• Output: <code>{html.escape(output_url or 'giữ nguyên')}</code>",
+        f"• Output: <code>{html.escape(output_url or 'giữ nguyên')}</code>\n"
+        f"• Extra assets: <b>{saved_extra}</b>",
         parse_mode="HTML"
     )
 
@@ -13474,16 +13581,39 @@ async def api_operator_today(request: Request):
 async def api_operator_complete_task(task_id: int, payload: OperatorTaskCompleteRequest, request: Request):
     verify_operator_api_token(request)
     status = (payload.status or "ready").lower()
+    if status == "failed":
+        status = "blocked"
     allowed = {"queued", "working", "waiting", "ready", "blocked", "done", "cancelled"}
     if status not in allowed:
         raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {', '.join(sorted(allowed))}")
     task = get_production_task(ADMIN_ID, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    changed, row = update_production_task(ADMIN_ID, task_id, status=status, output_url=payload.output_url, note=payload.note)
+    output_urls = [u.strip() for u in (payload.output_urls or []) if u and u.strip()]
+    primary_output = payload.output_url or (output_urls[0] if output_urls else "")
+    changed, row = update_production_task(ADMIN_ID, task_id, status=status, output_url=primary_output, note=payload.note)
     if not changed:
         raise HTTPException(status_code=400, detail="Task not updated")
     job_id, task_type = row
+    asset_type = (payload.asset_type or "").strip() or {
+        "visual_scene": "raw_video",
+        "voice": "voice",
+        "edit": "final_video",
+        "publish": "source",
+    }.get(task_type, "source")
+    saved_extra_assets = 0
+    for extra_url in output_urls:
+        if extra_url and extra_url != primary_output:
+            ok, _asset_id = add_production_asset(
+                ADMIN_ID,
+                job_id,
+                asset_type,
+                extra_url,
+                "",
+                f"api_task:{task_id} extra_output {payload.note or ''}"
+            )
+            if ok:
+                saved_extra_assets += 1
     if status in {"ready", "done"}:
         update_production_job(job_id, ADMIN_ID, status="working", note=f"api_task_complete:{task_id} {task_type} {status}")
     if status == "blocked":
@@ -13499,7 +13629,8 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
                     f"🤖 <b>OPERATOR API TASK UPDATE</b>\n\n"
                     f"• Task: <code>#{task_id}</code> | Job: <code>#{job_id}</code>\n"
                     f"• Type: <code>{html.escape(task_type or '-')}</code> | Status: <b>{html.escape(status)}</b>\n"
-                    f"• Output: <code>{html.escape(payload.output_url or 'không có')}</code>\n"
+                    f"• Output: <code>{html.escape(primary_output or 'không có')}</code>\n"
+                    f"• Extra assets: <b>{saved_extra_assets}</b>\n"
                     f"• Ready: <b>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</b>"
                 ),
                 parse_mode="HTML"
@@ -13511,6 +13642,7 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
         "ok": True,
         "task": serialize_operator_task(updated_task),
         "job_id": job_id,
+        "saved_extra_assets": saved_extra_assets,
         "readiness": {
             "level": (readiness or {}).get("level", "UNKNOWN"),
             "next_action": (readiness or {}).get("next_action", ""),

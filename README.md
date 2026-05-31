@@ -124,6 +124,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/next_task job=<ID>`: lấy task ưu tiên tiếp theo và tự chuyển sang `working` để giao cho AI/tool.
 - `/task_handoff id=<TASK_ID>`: xuất prompt giao riêng một task cho AI/tool.
 - `/task_set id=<TASK_ID> status=ready url=https://... note=...`: cập nhật task, tự lưu output thành asset nếu có URL.
+- `/task_set id=<TASK_ID> status=ready urls=https://a.mp4,https://b.mp4 type=raw_video`: lưu nhiều output scene/audio/video cho cùng task.
 - `/queue_publish job=<ID> mode=manual|api schedule=... note=...`: đưa job đã duyệt vào hàng đợi đăng.
 - `/publish_queue`: xem hàng đợi đăng.
 - `/publisher_handoff queue=<QUEUE_ID>`: xuất runbook đăng bài theo nền tảng cho publisher worker hoặc đăng thủ công, gồm final video, caption, comment ghim, env token cần có và payload trả kết quả.
@@ -171,7 +172,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/director`: endpoint “đầu não” cho Claude/n8n, gom setup, blocker, task, publish queue và affiliate decisions thành một next action có method/url/payload rõ ràng.
 - `POST /api/operator/director/run`: chạy action an toàn tiếp theo từ director; scale affiliate/build job hoặc queue publish manual, nhưng không tự publish ngoài mạng xã hội.
 - `GET /api/operator/today`: worker ngoài lấy danh sách hành động ưu tiên trong ngày, gồm setup, task, publish queue và affiliate nên scale.
-- `POST /api/operator/tasks/{task_id}/complete`: worker ngoài trả `status`, `output_url`, `note`; bot tự lưu asset theo loại task và báo admin.
+- `POST /api/operator/tasks/{task_id}/complete`: worker ngoài trả `status`, `output_url` hoặc `output_urls`, `asset_type`, `note`; bot tự lưu asset theo loại task và báo admin. `failed` được quy về `blocked` để pipeline không kẹt im lặng.
 - `GET /api/operator/jobs/{job_id}/ready`: worker ngoài kiểm tra job đã đủ điều kiện review/publish chưa.
 - `GET /api/operator/jobs/{job_id}/context`: worker ngoài lấy toàn bộ context và runbook của một job trong một lần gọi, thay vì phải tự ghép nhiều endpoint rời.
 - `POST /api/operator/jobs/{job_id}/approve`: duyệt cuối job đã đủ điều kiện và tùy chọn đưa vào publish queue; dùng làm gate trước khi n8n/publisher lấy bài đăng.
