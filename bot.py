@@ -2172,6 +2172,7 @@ def operator_worker_spec_data():
             "Điều phối sản xuất video affiliate hợp pháp: chọn affiliate, tìm trend, tạo job, giao task cho AI/tool, "
             "chuẩn bị publish pack, đăng có kiểm soát và ghi performance."
         ),
+        "toolchain_url": f"{base_url}/api/operator/toolchain",
         "roles": [
             {
                 "role": "director",
@@ -2280,6 +2281,137 @@ def operator_worker_spec_data():
         ],
     }
 
+def _tool_env_ready(env_keys):
+    if not env_keys:
+        return True
+    return all(bool(_env(key)) for key in env_keys)
+
+def _tool_node(name, kind, env_keys=None, cost="unknown", mode="api", note=""):
+    env_keys = env_keys or []
+    return {
+        "name": name,
+        "kind": kind,
+        "cost": cost,
+        "mode": mode,
+        "env_keys": env_keys,
+        "configured": _tool_env_ready(env_keys),
+        "note": note,
+    }
+
+def operator_toolchain_data():
+    chains = [
+        {
+            "stage": "brain_and_script",
+            "purpose": "Hiểu lệnh Telegram, tạo brief, script, hook, caption và prompt cho tool khác.",
+            "primary": _tool_node("Claude Opus / Claude Sonnet external", "llm", ["ANTHROPIC_API_KEY"], "paid", "external_api_or_manual", "Có thể chạy ngoài n8n/Claude app; bot không cần giữ key nếu bạn điều khiển thủ công."),
+            "fallbacks": [
+                _tool_node("Gemini", "llm", ["GEMINI_API_KEY"], "paid_or_free_quota", "api", "Đang được bot dùng cho brief/prompt khi có key."),
+                _tool_node("OpenAI", "llm", ["OPENAI_API_KEY"], "paid", "api", "Fallback khi Gemini lỗi hoặc cần model khác."),
+                _tool_node("Template nội bộ", "template", [], "free", "local", "Không gọi API, chất lượng thấp hơn nhưng không tốn phí."),
+            ],
+        },
+        {
+            "stage": "trend_research",
+            "purpose": "Tìm trend, news/RSS, ghép trend với affiliate và đề xuất góc video.",
+            "primary": _tool_node("Gemini/OpenAI trend analyst", "llm", ["GEMINI_API_KEY"], "paid_or_free_quota", "api", "Dùng AI để phân tích trend và sản phẩm phù hợp."),
+            "fallbacks": [
+                _tool_node("RSS/news public parser", "public_data", [], "free", "local", "Nguồn công khai trong /trend_search."),
+                _tool_node("Manual trend input", "manual", [], "free", "telegram", "Admin nhập trend trực tiếp qua bot."),
+            ],
+        },
+        {
+            "stage": "voice",
+            "purpose": "Tạo giọng đọc cho video.",
+            "primary": _tool_node("Fish Audio HD", "tts", ["FISH_AUDIO_KEY"], "paid", "api", "Giọng chất lượng cao; nếu lỗi/quota/hết tiền thì fallback Edge và báo admin."),
+            "fallbacks": [
+                _tool_node("Edge TTS", "tts", [], "free", "local", "Fallback miễn phí/ít phí, bot có sẵn."),
+            ],
+        },
+        {
+            "stage": "transcription",
+            "purpose": "Bóc băng audio/video thành text.",
+            "primary": _tool_node("Deepgram", "speech_to_text", ["DEEPGRAM_API_KEY"], "paid", "api", "Bóc băng nhanh, cần theo dõi quota."),
+            "fallbacks": [
+                _tool_node("Manual transcript", "manual", [], "free", "telegram", "Nếu Deepgram lỗi, yêu cầu admin/worker nhập transcript hoặc dùng tool ngoài."),
+            ],
+        },
+        {
+            "stage": "background_removal",
+            "purpose": "Tách nền ảnh sản phẩm/người mẫu AI.",
+            "primary": _tool_node("RemoveBG HD", "image", ["REMOVEBG_API_KEY"], "paid", "api", "Chất lượng cao; nếu lỗi/quota/hết tiền thì fallback Cutout và hoàn chênh lệch."),
+            "fallbacks": [
+                _tool_node("Cutout.pro", "image", ["CUTOUT_API_KEY"], "paid_or_free_quota", "api", "Gói tiết kiệm/fallback."),
+            ],
+        },
+        {
+            "stage": "video_generation",
+            "purpose": "Tạo cảnh video AI từ manifest/prompt.",
+            "primary": _tool_node("Kling", "video", ["KLING_API_KEY"], "paid", "external_api_or_manual", "Ưu tiên khi có tài khoản/API/tool chính thức."),
+            "fallbacks": [
+                _tool_node("Runway", "video", ["RUNWAY_API_KEY"], "paid", "external_api_or_manual", "Fallback/so sánh chất lượng."),
+                _tool_node("Pika/Luma/manual tool", "video", [], "manual", "manual", "Dùng khi chưa có API hoặc cần kiểm soát bằng tay."),
+            ],
+        },
+        {
+            "stage": "editing",
+            "purpose": "Ghép cảnh, voice, subtitle, CTA overlay và export final video.",
+            "primary": _tool_node("CapCut", "editor", ["CAPCUT_API_KEY"], "paid_or_manual", "external_api_or_manual", "Ưu tiên workflow dựng video nhanh nếu có API/tool hợp lệ."),
+            "fallbacks": [
+                _tool_node("FFmpeg", "editor", [], "free", "local_or_worker", "Fallback tự động cho ghép file cơ bản."),
+                _tool_node("Manual editor", "manual", [], "manual", "manual", "Dùng khi video cần review/chỉnh tay."),
+            ],
+        },
+        {
+            "stage": "publishing",
+            "purpose": "Đăng TikTok/Facebook/OnlyFans/Reels và gắn link affiliate đúng chỗ.",
+            "primary": _tool_node("Official platform API", "publisher", ["TIKTOK_ACCESS_TOKEN", "FACEBOOK_PAGE_TOKEN"], "paid_or_platform", "api", "Chỉ dùng API chính thức khi tài khoản được phép."),
+            "fallbacks": [
+                _tool_node("Manual publish gate", "publisher", [], "manual", "telegram", "Mặc định an toàn: admin tự đăng hoặc duyệt trước khi worker đăng."),
+            ],
+        },
+        {
+            "stage": "performance_tracking",
+            "purpose": "Ghi view/click/lead/order/revenue/cost để AI quyết định scale/fix/pause.",
+            "primary": _tool_node("Operator performance API", "analytics", ["OPERATOR_API_TOKEN"], "free", "api", "n8n/worker gửi số liệu vào /api/operator/performance."),
+            "fallbacks": [
+                _tool_node("Manual performance_add", "analytics", [], "free", "telegram", "Admin nhập số liệu bằng /performance_add."),
+            ],
+        },
+        {
+            "stage": "payment",
+            "purpose": "Thu tiền từ khách hoặc thanh toán thủ công khi PayOS lỗi.",
+            "primary": _tool_node("PayOS dynamic QR", "payment", ["PAYOS_CLIENT_ID", "PAYOS_API_KEY", "PAYOS_CHECKSUM_KEY"], "transaction_fee", "api", "Tạo QR động và webhook tự cộng xu khi chữ ký/số tiền đúng."),
+            "fallbacks": [
+                _tool_node("Manual bank QR", "payment", [], "manual", "telegram", "Khách gửi bill, admin duyệt và cộng xu khi PayOS lỗi."),
+            ],
+        },
+    ]
+    ready = 0
+    blocked = []
+    for chain in chains:
+        options = [chain["primary"], *chain["fallbacks"]]
+        active = next((item for item in options if item["configured"] or item["mode"] in {"manual", "telegram", "local", "local_or_worker"}), None)
+        chain["active_choice"] = active["name"] if active else ""
+        chain["primary_ready"] = chain["primary"]["configured"]
+        chain["fallback_ready"] = any(item["configured"] or item["mode"] in {"manual", "telegram", "local", "local_or_worker"} for item in chain["fallbacks"])
+        chain["ready"] = bool(active)
+        if chain["ready"]:
+            ready += 1
+        else:
+            blocked.append({"stage": chain["stage"], "missing": chain["primary"]["env_keys"]})
+    return {
+        "policy": "paid_best_tool_first_then_low_cost_or_free_fallback",
+        "failure_protocol": [
+            "Nếu tool chính lỗi/quota/hết tiền: ghi rõ lỗi, báo admin, dùng fallback được phép.",
+            "Nếu dịch vụ khách đã bị trừ phí cao cấp nhưng fallback rẻ hơn: hoàn chênh lệch bằng credit log.",
+            "Nếu cả primary và fallback đều không có output: đánh dấu task blocked/failed, không tự giả lập kết quả.",
+            "Không xóa tool cũ khi nâng cấp; chỉ thay đổi khi tool sai hoặc vi phạm chính sách.",
+        ],
+        "counts": {"ready": ready, "total": len(chains), "blocked": len(blocked)},
+        "blocked": blocked,
+        "chains": chains,
+    }
+
 def operator_n8n_template_data():
     base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
     bearer = "Bearer <OPERATOR_API_TOKEN>"
@@ -2327,6 +2459,13 @@ def operator_n8n_template_data():
                 "method": "GET",
                 "url": f"{base_url}/api/operator/worker-spec",
                 "note": "Cho Claude/tool worker biết vai trò, payload và safety rules.",
+            },
+            {
+                "node": "Read Toolchain",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/toolchain",
+                "note": "Cho worker biết tool chính/fallback, env còn thiếu và failure protocol.",
             },
             {
                 "node": "Director Run",
@@ -2512,6 +2651,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "read-toolchain",
+                "name": "Read Toolchain",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, -300],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/toolchain",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "director-run",
                 "name": "Director Run Safe Action",
                 "type": "n8n-nodes-base.httpRequest",
@@ -2569,7 +2722,7 @@ def operator_n8n_workflow_json_data():
                 "position": [240, -120],
                 "parameters": {
                     "method": "POST",
-                    "url": f"{base_url_expr}/api/operator/tasks/{{$json.task.id}}/complete",
+                    "url": f"{base_url_expr}/api/operator/tasks/{{{{$json.task.id}}}}/complete",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "sendBody": True,
@@ -2603,7 +2756,7 @@ def operator_n8n_workflow_json_data():
                 "position": [820, -120],
                 "parameters": {
                     "method": "GET",
-                    "url": f"{base_url_expr}/api/operator/jobs/{{$json.item.job_id}}/publish-pack",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{{{$json.item.job_id}}}}/publish-pack",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -2633,7 +2786,7 @@ def operator_n8n_workflow_json_data():
                 "position": [1120, -120],
                 "parameters": {
                     "method": "POST",
-                    "url": f"{base_url_expr}/api/operator/publish/{{$json.item.queue_id}}/complete",
+                    "url": f"{base_url_expr}/api/operator/publish/{{{{$json.item.queue_id}}}}/complete",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "sendBody": True,
@@ -2707,10 +2860,11 @@ def operator_n8n_workflow_json_data():
             "Audit Operator": {"main": [[{"node": "Audit Ready?", "type": "main", "index": 0}]]},
             "Audit Ready?": {
                 "main": [
-                    [{"node": "Director Run Safe Action", "type": "main", "index": 0}],
+                    [{"node": "Read Toolchain", "type": "main", "index": 0}],
                     [{"node": "Setup Required", "type": "main", "index": 0}],
                 ]
             },
+            "Read Toolchain": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
             "Director Run Safe Action": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
             "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
             "Complete Task": {"main": [[{"node": "Claim Publish Queue", "type": "main", "index": 0}]]},
@@ -7866,7 +8020,8 @@ def operator_category_keyboard(category):
         ],
         "cat_api": [
             ("🔌 Operator API", "api"), ("🔁 Operator loop", "loop"),
-            ("📜 Worker spec", "workerspec"), ("🧪 Auto-post ready", "readiness"),
+            ("📜 Worker spec", "workerspec"), ("🧰 Toolchain", "toolchain"),
+            ("🧪 Auto-post ready", "readiness"),
             ("🧩 n8n template", "n8ntemplate"), ("📥 n8n import", "n8nworkflow"),
             ("📮 Publish API queue", "publishqueue"),
         ],
@@ -7929,6 +8084,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Director execute an toàn: <code>POST {html.escape(base_url)}/api/operator/director/run</code>",
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
+        f"• Toolchain paid/fallback: <code>GET {html.escape(base_url)}/api/operator/toolchain</code>",
         f"• n8n template: <code>GET {html.escape(base_url)}/api/operator/n8n-template</code>",
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
@@ -7983,6 +8139,34 @@ async def cmd_operator_worker_spec(update: Update, context: ContextTypes.DEFAULT
         f"<pre>{html_pre(json.dumps(compact, ensure_ascii=False, indent=2), 3000)}</pre>"
     )
     await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_operator_toolchain(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = operator_toolchain_data()
+    lines = [
+        "🧰 <b>OPERATOR TOOLCHAIN</b>",
+        "",
+        f"• Policy: <code>{html.escape(data['policy'])}</code>",
+        f"• Ready: <b>{data['counts']['ready']}/{data['counts']['total']}</b> | Blocked: <b>{data['counts']['blocked']}</b>",
+        "",
+    ]
+    for chain in data["chains"]:
+        primary = chain["primary"]
+        status = "✅" if chain["ready"] else "⚠️"
+        p_status = "OK" if primary["configured"] else "thiếu env"
+        fallback_names = ", ".join(item["name"] for item in chain["fallbacks"][:3])
+        lines.append(
+            f"{status} <b>{html.escape(chain['stage'])}</b>\n"
+            f"  Primary: <code>{html.escape(primary['name'])}</code> ({html.escape(p_status)})\n"
+            f"  Active: <code>{html.escape(chain['active_choice'] or '-')}</code>\n"
+            f"  Fallback: {html.escape(fallback_names or '-')}"
+        )
+    lines.append("\nFailure protocol:")
+    for rule in data["failure_protocol"][:4]:
+        lines.append(f"• {html.escape(rule)}")
+    lines.append("\nAPI: <code>GET /api/operator/toolchain</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_n8n_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -8049,6 +8233,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
         "workerspec": "/operator_worker_spec\nGET /api/operator/worker-spec",
+        "toolchain": "/operator_toolchain\nGET /api/operator/toolchain",
         "n8ntemplate": "/operator_n8n_template\nGET /api/operator/n8n-template",
         "n8nworkflow": "/operator_n8n_workflow\nGET /api/operator/n8n-workflow.json",
         "director": "/operator_director days=30 platform=tiktok limit=10",
@@ -10493,6 +10678,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_worker_spec", cmd_operator_worker_spec))
+    tg_app.add_handler(CommandHandler("operator_toolchain", cmd_operator_toolchain))
     tg_app.add_handler(CommandHandler("operator_n8n_template", cmd_operator_n8n_template))
     tg_app.add_handler(CommandHandler("operator_n8n_workflow", cmd_operator_n8n_workflow))
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
@@ -10684,6 +10870,7 @@ async def api_operator_status(request: Request):
             "telegram": "/operator_status",
             "audit": "/api/operator/audit",
             "worker_spec": "/api/operator/worker-spec",
+            "toolchain": "/api/operator/toolchain",
             "n8n_template": "/api/operator/n8n-template",
             "n8n_workflow": "/api/operator/n8n-workflow.json",
             "director": "/api/operator/director",
@@ -10717,6 +10904,11 @@ async def api_operator_audit(request: Request):
 async def api_operator_worker_spec(request: Request):
     verify_operator_api_token(request)
     return {"ok": True, "spec": operator_worker_spec_data()}
+
+@fastapi_app.get("/api/operator/toolchain")
+async def api_operator_toolchain(request: Request):
+    verify_operator_api_token(request)
+    return {"ok": True, "toolchain": operator_toolchain_data()}
 
 @fastapi_app.get("/api/operator/n8n-template")
 async def api_operator_n8n_template(request: Request):
