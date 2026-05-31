@@ -1069,12 +1069,25 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             update_order_status(order_code, PAYOS_STATUS_CANCELLED)
             logger.error(f"PayOS error response: {res_data} | signed={raw_str}")
             desc = res_data.get("desc", "Lỗi không rõ")
-            hint = "\n\n⚠️ Nếu vẫn báo signature không hợp lệ, kiểm tra lại biến PAYOS_CHECKSUM_KEY trên server."
-            await query.edit_message_text(f"❌ PayOS từ chối tạo hóa đơn: {desc}{hint}")
+            await alert_admin(
+                context,
+                "PayOS tạo hóa đơn",
+                f"{desc} | order={order_code} | amount={amount} | signed={raw_str} | kiểm tra PAYOS_CHECKSUM_KEY"
+            )
+            await query.edit_message_text(
+                "⚠️ <b>Cổng thanh toán đang bận, chưa tạo được mã QR.</b>\n\n"
+                "Bạn vui lòng thử lại sau ít phút hoặc nhắn Admin để được hỗ trợ nạp Xu thủ công.",
+                parse_mode="HTML"
+            )
     except Exception as e:
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
         logger.error(f"PayOS Exception: {e}")
-        await query.edit_message_text(f"❌ Thất bại khi kết nối API cổng PayOS: {str(e)}")
+        await alert_admin(context, "PayOS API", f"Exception order={order_code}: {str(e)}")
+        await query.edit_message_text(
+            "⚠️ <b>Cổng thanh toán đang bận, chưa tạo được mã QR.</b>\n\n"
+            "Bạn vui lòng thử lại sau ít phút hoặc nhắn Admin để được hỗ trợ nạp Xu thủ công.",
+            parse_mode="HTML"
+        )
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
