@@ -1329,6 +1329,52 @@ def list_affiliate_matches(owner_id, niche="", trend_text="", platform="", limit
     ranked.sort(key=lambda item: item[0], reverse=True)
     return ranked[:limit]
 
+def fallback_affiliate_video_ideas(affiliate, platform="tiktok", limit=5):
+    (
+        aid, network, product_name, niche, url, commission_note, status,
+        price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
+    ) = affiliate
+    product = product_name or "sản phẩm affiliate"
+    audience = target_audience or "người mua online"
+    platform = platform or "tiktok"
+    templates = [
+        (
+            f"3 lỗi thường gặp khi chọn {product}",
+            f"mở bằng vấn đề thật của {audience}, demo cách tránh lỗi, CTA xem link nếu phù hợp",
+            "problem -> quick checklist -> soft CTA",
+        ),
+        (
+            f"So sánh nhanh {product} cho người mới",
+            "đặt 2-3 tiêu chí chọn mua, không phóng đại kết quả, chốt bằng tiêu chí tự kiểm tra",
+            "comparison -> buying criteria -> disclosure",
+        ),
+        (
+            f"Checklist trước khi dùng {product}",
+            "dùng dạng checklist lưu lại được, ưu tiên minh bạch điều kiện/chi phí/chính sách",
+            "checklist -> common traps -> CTA",
+        ),
+        (
+            f"Một tình huống đời thường cần {product}",
+            "kể tình huống ngắn, đưa sản phẩm như một lựa chọn, không ép mua",
+            "story -> use case -> link placement",
+        ),
+        (
+            f"Review thật lòng: {product} hợp với ai?",
+            "nêu ai nên dùng, ai không nên dùng, minh bạch đây là affiliate",
+            "fit/not-fit -> pros/limits -> affiliate disclosure",
+        ),
+    ]
+    ideas = []
+    for idx, (hook, angle, structure) in enumerate(templates[:limit], 1):
+        ideas.append(
+            f"{idx}. Hook: {hook}\n"
+            f"   Góc làm: {angle}\n"
+            f"   Format: {structure}\n"
+            f"   Nền tảng: {platform}\n"
+            f"   CTA: Xem link {product} trong bio/mô tả nếu phù hợp nhu cầu."
+        )
+    return "\n\n".join(ideas)
+
 def create_calendar_slot(owner_id, channel_id, campaign_id, affiliate_id, post_date, platform, topic, notes="") -> int:
     conn = db_connect()
     c = conn.cursor()
@@ -4174,6 +4220,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /affiliates — Danh sách affiliate",
             "• /affiliate_profile — Cập nhật hồ sơ/claim affiliate",
             "• /affiliate_match — Chọn affiliate phù hợp trend",
+            "• /affiliate_ideas — Tạo ý tưởng video từ link affiliate",
             "• /calendar_plan — Lên lịch nội dung",
             "• /calendar — Xem lịch nội dung",
             "• /operator — Ra lệnh tạo video một bước",
@@ -5035,6 +5082,78 @@ async def cmd_affiliate_match(update: Update, context: ContextTypes.DEFAULT_TYPE
     lines.append("\nDùng ID phù hợp trong /trend_search, /operator hoặc /operator_auto bằng <code>aff=&lt;ID&gt;</code>.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_affiliate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        affiliate_id = int(data.get("id") or data.get("aff") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/affiliate_ideas aff=&lt;AFF_ID&gt; platform=tiktok n=5 topic=...</code>",
+            parse_mode="HTML"
+        )
+    affiliate = get_affiliate_link(affiliate_id, update.effective_user.id)
+    if not affiliate:
+        return await update.message.reply_text("❌ Không tìm thấy affiliate hoặc không có quyền.")
+    platform = data.get("platform") or data.get("nen") or "tiktok"
+    topic = data.get("topic") or data.get("trend") or data.get("chude") or ""
+    try:
+        limit = max(1, min(int(data.get("n") or data.get("limit") or 5), 8))
+    except ValueError:
+        limit = 5
+    (
+        aid, network, product, niche, url, note, status,
+        price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
+    ) = affiliate
+    prompt = (
+        "Tạo danh sách ý tưởng video ngắn affiliate hợp pháp, có thể đưa vào pipeline sản xuất.\n"
+        f"Nền tảng: {platform}\n"
+        f"Sản phẩm: {product}\n"
+        f"Network: {network}\n"
+        f"Niche: {niche}\n"
+        f"Khách mục tiêu: {audience or '-'}\n"
+        f"Claim được phép: {allowed_claims or DEFAULT_AFFILIATE_ALLOWED_CLAIMS}\n"
+        f"Claim cấm: {blocked_claims or DEFAULT_AFFILIATE_BLOCKED_CLAIMS}\n"
+        f"Topic/trend gợi ý: {topic or '-'}\n\n"
+        f"Hãy trả về {limit} ý tưởng. Mỗi ý tưởng gồm: hook 3 giây đầu, angle, script outline 30-45s, "
+        "visual direction, CTA minh bạch affiliate, rủi ro cần kiểm duyệt. Không cam kết kết quả tài chính, "
+        "không mạo danh thương hiệu/người thật, không spam."
+    )
+    next_command = (
+        f"/operator_auto niche={html.escape(niche or product or 'affiliate')} "
+        f"platform={html.escape(platform)} channel=all aff={aid} campaign=&lt;ID&gt; limit=5"
+    )
+    if gemini_client or openai_client:
+        msg = await update.message.reply_text("⏳ Đang tạo ý tưởng video từ affiliate catalog...")
+        ideas = AgentGemini.chat(
+            "Bạn là creative strategist cho video short affiliate hợp pháp.",
+            prompt,
+            update.effective_user.id,
+            is_json=False
+        )
+        await msg.edit_text(
+            f"💡 <b>AFFILIATE VIDEO IDEAS #{aid}</b>\n"
+            f"• <code>{html.escape(network or '-')}</code> / <b>{html.escape(product or '-')}</b>\n"
+            f"• Platform: <code>{html.escape(platform)}</code>\n"
+            f"• Link: <code>{html.escape(url or '-')}</code>\n\n"
+            f"<pre>{html_pre(ideas)}</pre>\n\n"
+            f"Tạo batch từ trend: <code>{next_command}</code>",
+            parse_mode="HTML"
+        )
+        return
+    ideas = fallback_affiliate_video_ideas(affiliate, platform, limit)
+    await update.message.reply_text(
+        f"💡 <b>AFFILIATE VIDEO IDEAS #{aid}</b>\n"
+        f"• <code>{html.escape(network or '-')}</code> / <b>{html.escape(product or '-')}</b>\n"
+        f"• Platform: <code>{html.escape(platform)}</code>\n"
+        f"• Link: <code>{html.escape(url or '-')}</code>\n\n"
+        f"<pre>{html.escape(ideas)}</pre>\n\n"
+        f"⚠️ Chưa cấu hình AI provider nên bot dùng template fallback.\n"
+        f"Tạo batch từ trend: <code>{next_command}</code>",
+        parse_mode="HTML"
+    )
+
 async def cmd_calendar_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -5747,7 +5866,10 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🎯 Affiliate match", callback_data="opmenu|affmatch"),
             InlineKeyboardButton("🛒 Affiliate profile", callback_data="opmenu|affprofile")
         ],
-        [InlineKeyboardButton("🔗 Import affiliate catalog", callback_data="opmenu|affseed")],
+        [
+            InlineKeyboardButton("💡 Affiliate ideas", callback_data="opmenu|affideas"),
+            InlineKeyboardButton("🔗 Import catalog", callback_data="opmenu|affseed")
+        ],
         [
             InlineKeyboardButton("🎛 Pipeline", callback_data="opmenu|pipeline"),
             InlineKeyboardButton("📅 Calendar", callback_data="opmenu|calendar")
@@ -5845,6 +5967,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
         "rank": "/trend_rank\n/trend_rank 20",
         "affseed": "/affiliate_seed\n/affiliates",
+        "affideas": "/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=trend đang nóng",
         "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
         "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
@@ -7895,6 +8018,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
     tg_app.add_handler(CommandHandler("affiliate_profile", cmd_affiliate_profile))
     tg_app.add_handler(CommandHandler("affiliate_match", cmd_affiliate_match))
+    tg_app.add_handler(CommandHandler("affiliate_ideas", cmd_affiliate_ideas))
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))

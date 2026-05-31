@@ -66,6 +66,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/affiliates`: liệt kê link affiliate nội bộ.
 - `/affiliate_profile id=<AFF_ID> price=... rate=... audience=... allowed=... blocked=... score=...`: cập nhật hồ sơ, claim được phép và claim cấm cho sản phẩm affiliate.
 - `/affiliate_match niche=... platform=tiktok trend=...`: xếp hạng affiliate phù hợp với trend/niche để chọn link trước khi tạo video.
+- `/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=...`: tạo hook, angle, outline, CTA và rủi ro kiểm duyệt cho video ngắn từ một link affiliate đã lưu.
 - `/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=...`: tạo lịch nội dung theo kênh.
 - `/calendar`: xem lịch nội dung đã lên.
 - `/operator topic=... channel=<ID> aff=<ID> campaign=<ID> date=YYYY-MM-DD`: ra lệnh một bước để tạo lịch nội dung + production job + brief AI.
