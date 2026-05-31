@@ -1928,6 +1928,39 @@ def create_tasks_from_manifest(owner_id, manifest_row):
     update_production_job(job_id, owner_id, stage="visuals", status="working", note=f"task_plan manifest:{manifest_id} tasks={len(created)}")
     return created
 
+def build_operator_job_bundle(owner_id, job_id, count=5, duration=45):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return False, {"error": "Không tìm thấy production job."}
+    created_variants = create_creative_variants_for_job(owner_id, job, count)
+    if not created_variants:
+        return False, {"error": "Không tạo được creative variants."}
+    best_variant_id, best_variant = sorted(
+        created_variants,
+        key=lambda item: int(item[1].get("creative_score") or 0),
+        reverse=True
+    )[0]
+    ok, selected_variant = select_creative_variant(owner_id, best_variant_id)
+    if not ok:
+        return False, {"error": "Không chọn được creative variant tốt nhất."}
+    ok, manifest_id, manifest = create_manifest_for_job(owner_id, job, selected_variant, duration)
+    if not ok:
+        return False, {"error": "Không tạo được production manifest."}
+    manifest_row = get_production_manifest(owner_id, manifest_id)
+    task_ids = create_tasks_from_manifest(owner_id, manifest_row)
+    readiness = production_readiness_data(owner_id, job_id)
+    return True, {
+        "job": job,
+        "created_variants": created_variants,
+        "best_variant_id": best_variant_id,
+        "best_variant": best_variant,
+        "selected_variant": selected_variant,
+        "manifest_id": manifest_id,
+        "manifest": manifest,
+        "task_ids": task_ids,
+        "readiness": readiness,
+    }
+
 def list_production_tasks(owner_id, job_id=None, manifest_id=None, limit=30):
     where = ["owner_id=?"]
     params = [str(owner_id)]
@@ -2309,6 +2342,111 @@ async def fetch_google_news_trends(niche, platform="", limit=5):
         if title and link:
             items.append({"title": title, "url": link, "source": source_name, "summary": summary})
     return items
+
+async def create_operator_auto_jobs(owner_id, niche, platform_filter="", channel_filter="all", campaign_id=0, affiliate_id=0, limit=5):
+    if campaign_id and not get_campaign(campaign_id, owner_id):
+        return [], "Không tìm thấy campaign."
+    if affiliate_id and not get_affiliate_link(affiliate_id, owner_id):
+        return [], "Không tìm thấy affiliate."
+    if channel_filter == "all":
+        channels = list_social_channels(owner_id, limit=80)
+        if platform_filter:
+            channels = [ch for ch in channels if (ch[1] or "").lower() == platform_filter]
+    else:
+        try:
+            one = get_social_channel(int(channel_filter), owner_id)
+        except ValueError:
+            one = None
+        channels = [one] if one else []
+    channels = [ch for ch in channels if ch and ch[7] == "active"]
+    if not channels:
+        return [], "Chưa có channel active phù hợp. Tạo bằng /channel_add."
+
+    search_platform = platform_filter or (channels[0][1] if channels else "tiktok")
+    trends = await fetch_google_news_trends(niche, search_platform, limit=limit)
+    if not trends:
+        return [], "Không tìm thấy trend để tạo job."
+
+    affiliate = get_affiliate_link(affiliate_id, owner_id) if affiliate_id else None
+    primary_channel = channels[0] if channels else None
+    scored_trends = []
+    for item in trends:
+        scores = score_trend_candidate(niche, search_platform, item["title"], item.get("summary", ""), primary_channel, affiliate)
+        scored_trends.append((scores["trend_score"], item, scores))
+    scored_trends.sort(key=lambda row: row[0], reverse=True)
+
+    created = []
+    for _, item, base_scores in scored_trends:
+        for channel in channels:
+            if len(created) >= limit:
+                break
+            cid, channel_platform, channel_name, account_label, focus, audience, slots, status = channel
+            scores = score_trend_candidate(niche, channel_platform or search_platform, item["title"], item.get("summary", ""), channel, affiliate) or base_scores
+            trend_id = save_trend_candidate(
+                owner_id,
+                niche,
+                channel_platform or search_platform,
+                item["title"],
+                item["url"],
+                item.get("source", ""),
+                item.get("summary", ""),
+                cid,
+                campaign_id,
+                affiliate_id,
+                scores["trend_score"],
+                scores["affiliate_fit_score"],
+                scores["competition_score"],
+                scores["score_reason"]
+            )
+            topic = f"{item['title']} | {niche} | affiliate product placement"
+            note = (
+                f"operator_auto trend #{trend_id} | score={scores['trend_score']} "
+                f"aff_fit={scores['affiliate_fit_score']} competition={scores['competition_score']} | "
+                f"source={item.get('source','')} | {item['url']}"
+            )
+            slot_id = create_calendar_slot(
+                owner_id,
+                cid,
+                campaign_id,
+                affiliate_id,
+                datetime.now().date().isoformat(),
+                channel_platform or search_platform,
+                topic,
+                note
+            )
+            slot = get_calendar_slot(slot_id, owner_id)
+            if gemini_client or openai_client:
+                brief = AgentGemini.chat(
+                    "Bạn là AI Operator trưởng, tạo brief video affiliate từ trend cho pipeline batch.",
+                    build_production_prompt(slot) + f"\n\nNguồn trend: {item['url']}\nTóm tắt trend: {item.get('summary','')}",
+                    owner_id,
+                    is_json=False
+                )
+            else:
+                brief = f"Trend: {item['title']}\nNguồn: {item['url']}\nTạo video affiliate theo trend này và kiểm duyệt trước khi đăng."
+            job_id = create_production_job(
+                owner_id,
+                slot_id,
+                campaign_id,
+                cid,
+                affiliate_id,
+                channel_platform or search_platform,
+                topic,
+                brief,
+                note
+            )
+            update_trend_status(trend_id, owner_id, f"job:{job_id}")
+            created.append({
+                "job_id": job_id,
+                "slot_id": slot_id,
+                "trend_id": trend_id,
+                "platform": channel_platform or search_platform,
+                "channel_name": channel_name,
+                "title": item["title"],
+                "score": scores["trend_score"],
+                "reason": scores["score_reason"],
+            })
+    return created, ""
 
 def build_production_prompt(slot):
     (
@@ -3408,6 +3546,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /tools — Kho 30 công cụ AI/MMO (Admin)",
             "• /mmo — Quy trình kiếm tiền bằng AI (Admin)",
             "• /brain — Ra lệnh tự nhiên cho AI Operator",
+            "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /operator_menu — Menu vận hành AI Operator",
             "• /campaign_new — Tạo chiến dịch affiliate/video",
             "• /campaigns — Danh sách chiến dịch",
@@ -3658,6 +3797,21 @@ def operator_brain_fallback(raw_text):
         return {"intent": "operator_build", "job": job_id, "duration": duration, "limit": limit, "confidence": 70}
     if any(word in lower for word in ["daily", "báo cáo ngày", "bao cao ngay", "tổng quan", "tong quan", "dashboard"]):
         return {"intent": "operator_daily", "days": int_from_text(lower, ["days", "ngày", "ngay"], 1) or 1, "confidence": 65}
+    if any(word in lower for word in ["autopilot", "tự chạy", "tu chay", "tự động hết", "tu dong het", "build luôn", "build luon"]):
+        niche = re.sub(r"\b(autopilot|tự chạy|tu chay|tự động hết|tu dong het|build luôn|build luon|tạo|tao|làm|lam|video|trend|cho|trên|tren|gắn|gan|link|affiliate|aff|campaign|camp|limit|job)\b", " ", lower)
+        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
+        niche = re.sub(r"\s+", " ", niche).strip(" :=#") or "công nghệ AI"
+        return {
+            "intent": "autopilot",
+            "niche": niche,
+            "platform": platform,
+            "channel": channel_id or "all",
+            "affiliate": affiliate_id,
+            "campaign": campaign_id,
+            "limit": max(1, min(limit, 8)),
+            "duration": duration,
+            "confidence": 75,
+        }
     if any(word in lower for word in ["trend", "viral", "mới nhất", "moi nhat"]) or "tạo" in lower and "video" in lower and channel_id == 0:
         niche = re.sub(r"\b(tạo|tao|làm|lam|video|trend|viral|mới nhất|moi nhat|cho|trên|tren|kênh|kenh|gắn|gan|link|affiliate|aff|campaign|camp|limit|job)\b", " ", lower)
         niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
@@ -3689,16 +3843,17 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
+        "Chỉ chọn một intent trong: autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
         "Quy tắc:\n"
         "- operator_auto: khi admin muốn tìm trend/tạo nhiều video theo niche/platform.\n"
+        "- autopilot: khi admin muốn tìm trend, tạo job và build luôn creative/manifest/task trong một lệnh.\n"
         "- operator: khi admin nêu một topic cụ thể và có channel để tạo một job.\n"
         "- operator_build: khi admin muốn dựng tiếp một job đã có thành creative/manifest/task.\n"
         "- job_ready: khi admin muốn kiểm tra đủ điều kiện đăng.\n"
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"operator_auto","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":5,"duration":45,"days":1,"topic":"","confidence":0,"safety_note":""}'
+        '{"intent":"autopilot","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":3,"duration":45,"days":1,"topic":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -3718,6 +3873,13 @@ def brain_command_preview(plan):
             f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
             f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
             f"limit={max(1, min(int(plan.get('limit') or 5), 15))}"
+        )
+    if intent == "autopilot":
+        return (
+            f"/autopilot niche={plan.get('niche') or 'công nghệ AI'} "
+            f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
+            f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
+            f"limit={max(1, min(int(plan.get('limit') or 3), 8))} duration={int(plan.get('duration') or 45)}"
         )
     if intent == "operator":
         return (
@@ -3757,6 +3919,17 @@ async def run_brain_plan(update, context, plan):
                 f"limit={max(1, min(int(plan.get('limit') or 5), 15))}",
             ]
             return await cmd_operator_auto(update, context)
+        if intent == "autopilot":
+            context.args = [
+                f"niche={plan.get('niche') or 'công nghệ AI'}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"channel={plan.get('channel') or 'all'}",
+                f"aff={int(plan.get('affiliate') or 0)}",
+                f"campaign={int(plan.get('campaign') or 0)}",
+                f"limit={max(1, min(int(plan.get('limit') or 3), 8))}",
+                f"duration={int(plan.get('duration') or 45)}",
+            ]
+            return await cmd_autopilot(update, context)
         if intent == "operator":
             if not int(plan.get("channel") or 0):
                 return await update.message.reply_text(
@@ -4530,6 +4703,93 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append("\nBước tiếp: /operator_dashboard hoặc /operator_next id=<JOB_ID> stage=script")
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_autopilot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    niche = data.get("niche") or data.get("ngach") or data.get("topic") or data.get("chude") or "công nghệ AI"
+    platform_filter = (data.get("platform") or data.get("nen") or "").lower()
+    channel_filter = (data.get("channel") or data.get("kenh") or "all").lower()
+    try:
+        limit = max(1, min(int(data.get("limit") or data.get("max") or 3), 8))
+    except ValueError:
+        limit = 3
+    try:
+        duration = max(15, min(int(data.get("duration") or data.get("sec") or 45), 120))
+    except ValueError:
+        duration = 45
+    try:
+        campaign_id = int(data.get("campaign") or data.get("camp") or 0)
+    except ValueError:
+        campaign_id = 0
+    try:
+        affiliate_id = int(data.get("affiliate_id") or data.get("aff") or 0)
+    except ValueError:
+        affiliate_id = 0
+
+    msg = await update.message.reply_text("🧠 Autopilot đang tìm trend, tạo job và build production bundle...")
+    try:
+        created_jobs, error = await create_operator_auto_jobs(
+            update.effective_user.id,
+            niche,
+            platform_filter,
+            channel_filter,
+            campaign_id,
+            affiliate_id,
+            limit,
+        )
+    except Exception as e:
+        await alert_admin(context, "Autopilot", f"{str(e)} | niche={niche} platform={platform_filter or '-'}")
+        return await msg.edit_text("❌ Autopilot lỗi khi tìm trend/tạo job. Đã báo admin.")
+    if error:
+        return await msg.edit_text(f"❌ {error}")
+    if not created_jobs:
+        return await msg.edit_text("📭 Autopilot chưa tạo được job nào.")
+
+    built = []
+    failed = []
+    for item in created_jobs:
+        job_id = item["job_id"]
+        ok, bundle = build_operator_job_bundle(update.effective_user.id, job_id, count=5, duration=duration)
+        if ok:
+            readiness = bundle.get("readiness") or {}
+            built.append({
+                **item,
+                "manifest_id": bundle["manifest_id"],
+                "task_count": len(bundle["task_ids"]),
+                "variant_id": bundle["best_variant_id"],
+                "readiness": readiness.get("level", "UNKNOWN") if isinstance(readiness, dict) else "UNKNOWN",
+            })
+        else:
+            failed.append((job_id, bundle.get("error", "build lỗi")))
+
+    lines = [
+        "✅ <b>AUTOPILOT BATCH COMPLETE</b>",
+        f"• Niche: <b>{html.escape(niche)}</b>",
+        f"• Platform filter: <code>{html.escape(platform_filter or 'auto')}</code>",
+        f"• Jobs tạo: <b>{len(created_jobs)}</b>",
+        f"• Jobs build xong: <b>{len(built)}</b>",
+        f"• Jobs lỗi build: <b>{len(failed)}</b>",
+        "",
+        "<b>Job đã build:</b>",
+    ]
+    for item in built[:10]:
+        lines.append(
+            f"• job #{item['job_id']} | trend #{item['trend_id']} | score=<b>{item['score']}</b> | "
+            f"<code>{html.escape(item['platform'] or '-')}</code> | {html.escape(item['channel_name'] or '-')}\n"
+            f"  variant=#{item['variant_id']} | manifest=#{item['manifest_id']} | tasks={item['task_count']} | ready={html.escape(item['readiness'])}\n"
+            f"  {html.escape(item['title'])}"
+        )
+    if failed:
+        lines.append("\n<b>Build lỗi:</b>")
+        for job_id, reason in failed[:5]:
+            lines.append(f"• job #{job_id}: {html.escape(reason)}")
+    lines.append(
+        "\nBước tiếp: <code>/tasks job=&lt;JOB_ID&gt;</code>, "
+        "<code>/next_task job=&lt;JOB_ID&gt;</code>, hoặc <code>/job_ready job=&lt;JOB_ID&gt;</code>."
+    )
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_produce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -4829,6 +5089,7 @@ async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE)
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🧠 Brain command", callback_data="opmenu|brain")],
+        [InlineKeyboardButton("🚀 Autopilot batch", callback_data="opmenu|autopilot")],
         [InlineKeyboardButton("⚡ Operator build", callback_data="opmenu|build")],
         [
             InlineKeyboardButton("🧭 Dashboard", callback_data="opmenu|dashboard"),
@@ -4898,6 +5159,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     snippets = {
         "dashboard": "/operator_dashboard",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
+        "autopilot": "/autopilot niche=công nghệ AI platform=tiktok channel=all aff=<AFF_ID> campaign=<ID> limit=3 duration=45",
         "build": "/operator_build job=<JOB_ID> n=5 duration=45",
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
@@ -4939,6 +5201,7 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🧠 <b>AI BRAIN</b>\n\n"
             "Gõ lệnh tự nhiên để bot tự định tuyến vào AI Operator.\n\n"
             "Ví dụ:\n"
+            "• <code>/brain autopilot 3 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain build job 12 duration 45</code>\n"
             "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
@@ -4983,22 +5246,15 @@ async def cmd_operator_build(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await update.message.reply_text("❌ Không tìm thấy production job.")
 
     msg = await update.message.reply_text("🧠 Operator Build đang tạo creative, manifest và task plan...")
-    created_variants = create_creative_variants_for_job(update.effective_user.id, job, count)
-    if not created_variants:
-        return await msg.edit_text("❌ Không tạo được creative variants.")
-    best_variant_id, best_variant = sorted(
-        created_variants,
-        key=lambda item: int(item[1].get("creative_score") or 0),
-        reverse=True
-    )[0]
-    ok, selected_variant = select_creative_variant(update.effective_user.id, best_variant_id)
+    ok, bundle = build_operator_job_bundle(update.effective_user.id, job_id, count, duration)
     if not ok:
-        return await msg.edit_text("❌ Không chọn được creative variant tốt nhất.")
-    ok, manifest_id, manifest = create_manifest_for_job(update.effective_user.id, job, selected_variant, duration)
-    if not ok:
-        return await msg.edit_text("❌ Không tạo được production manifest.")
-    manifest_row = get_production_manifest(update.effective_user.id, manifest_id)
-    task_ids = create_tasks_from_manifest(update.effective_user.id, manifest_row)
+        return await msg.edit_text(f"❌ {bundle.get('error', 'Operator Build lỗi.')}")
+    created_variants = bundle["created_variants"]
+    best_variant_id = bundle["best_variant_id"]
+    best_variant = bundle["best_variant"]
+    manifest_id = bundle["manifest_id"]
+    manifest = bundle["manifest"]
+    task_ids = bundle["task_ids"]
     scenes = manifest.get("scenes") or []
     lines = [
         "✅ <b>OPERATOR BUILD COMPLETE</b>",
@@ -6825,6 +7081,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("brain", cmd_brain))
+    tg_app.add_handler(CommandHandler("autopilot", cmd_autopilot))
     tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
     tg_app.add_handler(CommandHandler("trend_rank", cmd_trend_rank))
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))

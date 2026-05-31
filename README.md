@@ -49,6 +49,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/tools`: kho 30 công cụ AI/MMO nội bộ.
 - `/mmo`: workflow kiếm tiền bằng AI hợp pháp nội bộ.
 - `/brain <lệnh tự nhiên>`: đầu não admin-only, hiểu lệnh tiếng Việt và tự định tuyến sang Operator Auto, tạo job, build job, job ready check hoặc báo cáo vận hành.
+- `/autopilot niche=... platform=tiktok channel=all aff=<ID> campaign=<ID> limit=3 duration=45`: tìm trend, tạo production job và tự build creative/manifest/task cho batch video.
 - `/operator_menu`: menu nút bấm cho toàn bộ quy trình AI Operator.
 - `/campaign_new name=... niche=... platforms=... affiliate=...`: tạo chiến dịch AI Operator.
 - `/campaigns`: liệt kê chiến dịch.
@@ -117,6 +118,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - SQLite phù hợp bản nhỏ. Khi public nhiều người dùng, nên chuyển sang PostgreSQL hoặc tách lớp repository để kiểm soát transaction tốt hơn.
 - AI Operator v1 mới tạo kế hoạch video/caption/affiliate, lịch nội dung và production pipeline để admin duyệt/điều phối. Auto-post lên TikTok/Facebook/YouTube/OnlyFans cần cấu hình API/OAuth chính thức ở giai đoạn sau.
 - AI Brain là lớp điều khiển admin-only phía trên AI Operator: admin có thể gõ lệnh tự nhiên trong Telegram, bot sẽ phân tích intent và gọi đúng luồng nội bộ thay vì phải nhớ toàn bộ cú pháp.
+- Autopilot là lớp batch admin-only: một lệnh sẽ tìm trend, tạo job và chuẩn bị production bundle gồm creative variant, manifest và task. Video vẫn phải qua task output, review gate và publish queue trước khi đăng thật.
 - Channel/affiliate/calendar registry là khu vực admin-only để quản lý kênh Facebook/TikTok/OnlyFans, tài khoản phụ, link affiliate và lịch đăng nội dung. Không hiển thị cho khách hàng.
 - Production pipeline là admin-only, dùng để theo dõi từng video qua các stage: `brief`, `script`, `voice`, `visuals`, `edit`, `review`, `publish`, `done`.
 - Performance tracking là admin-only, dùng để ghi view/click/order/revenue/lead sau khi đăng bài và theo dõi kênh hoặc affiliate nào đang tạo tiền.
