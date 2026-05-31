@@ -1354,6 +1354,109 @@ def job_report_data(owner_id, job_id):
     conn.close()
     return job, assets, queue_items, performance
 
+def list_publish_queue_for_job(owner_id, job_id, limit=5):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, mode, status, scheduled_at, publish_url, note, updated_at
+        FROM publish_queue
+        WHERE owner_id=? AND job_id=?
+        ORDER BY id DESC LIMIT ?""",
+        (str(owner_id), job_id, limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def production_readiness_data(owner_id, job_id):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return None
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    assets = list_production_assets(owner_id, job_id, limit=80)
+    variants = list_creative_variants(owner_id, job_id, limit=80)
+    manifests = list_production_manifests(owner_id, job_id, limit=5)
+    tasks = list_production_tasks(owner_id, job_id=job_id, limit=120)
+    queue_items = list_publish_queue_for_job(owner_id, job_id, limit=5)
+
+    selected_variant = next((row for row in variants if (row[8] or "").lower() == "selected"), None)
+    final_asset = next(
+        (
+            row for row in assets
+            if (row[1] or "").lower() == "final_video" and (row[2] or row[3] or asset_url)
+        ),
+        None
+    )
+    raw_assets = [row for row in assets if (row[1] or "").lower() in {"raw_video", "scene_video", "source"}]
+    voice_asset = next((row for row in assets if (row[1] or "").lower() in {"voice", "audio"} and (row[2] or row[3])), None)
+    queue_open = next((row for row in queue_items if (row[2] or "").lower() in {"queued", "scheduled", "publishing", "published"}), None)
+    blocked_tasks = [row for row in tasks if (row[7] or "").lower() == "blocked"]
+    active_tasks = [row for row in tasks if (row[7] or "").lower() not in {"cancelled"}]
+
+    def tasks_by_type(task_type):
+        return [row for row in active_tasks if (row[3] or "").lower() == task_type]
+
+    def tasks_done(task_rows):
+        return bool(task_rows) and all((row[7] or "").lower() in {"ready", "done"} for row in task_rows)
+
+    visual_tasks = tasks_by_type("visual_scene")
+    voice_tasks = tasks_by_type("voice")
+    edit_tasks = tasks_by_type("edit")
+    review_tasks = tasks_by_type("review")
+
+    review_ok = (
+        tasks_done(review_tasks)
+        or (stage or "").lower() in {"review", "publish", "done"}
+        and (status or "").lower() in {"ready", "queued", "published"}
+    )
+    final_ok = bool(final_asset or publish_url)
+    checks = [
+        ("brief", bool(brief), "Có brief sản xuất.", f"/video_job {job_id} hoặc /operator_next id={job_id} stage=script"),
+        ("channel", bool(channel_id), "Có kênh/account để đăng.", "/channel_add platform=tiktok name=... account=..."),
+        ("affiliate", bool(affiliate_url), "Có link affiliate gắn sản phẩm.", "/affiliate_add network=... product=... url=..."),
+        ("creative_selected", bool(selected_variant), "Đã chọn creative variant thắng.", f"/creative_test job={job_id} n=5 rồi /creative_select id=<VARIANT_ID>"),
+        ("manifest", bool(manifests), "Có production manifest.", f"/manifest job={job_id} duration=45"),
+        ("tasks", bool(active_tasks), "Đã tách task sản xuất.", f"/task_plan job={job_id}"),
+        ("visuals", tasks_done(visual_tasks) or bool(raw_assets) or final_ok, "Visual scene đã có output hoặc final video.", f"/next_task job={job_id}"),
+        ("voice", tasks_done(voice_tasks) or bool(voice_asset) or final_ok, "Voice/audio đã có output hoặc final video.", f"/next_task job={job_id}"),
+        ("edit_final", final_ok or tasks_done(edit_tasks), "Có final video hoặc edit task đã ready.", f"/next_task job={job_id}"),
+        ("review", review_ok, "Đã qua review gate.", f"/review_gate job={job_id}"),
+        ("queue_or_published", bool(queue_open or publish_url or (status or "").lower() == "published"), "Đã vào hàng đợi hoặc đã đăng.", f"/publish_pack job={job_id} rồi /queue_publish job={job_id} mode=manual"),
+    ]
+    if blocked_tasks:
+        checks.append(("blocked_tasks", False, f"Có {len(blocked_tasks)} task bị blocked.", f"/tasks job={job_id}"))
+
+    missing = [row for row in checks if not row[1]]
+    core_missing = [row for row in missing if row[0] != "queue_or_published"]
+    if not core_missing and not queue_open and not publish_url and (status or "").lower() != "published":
+        level = "READY_TO_QUEUE"
+        next_action = f"/publish_pack job={job_id} rồi /queue_publish job={job_id} mode=manual"
+    elif not missing:
+        level = "READY_TO_PUBLISH"
+        next_action = f"/publish_queue hoặc /mark_published job={job_id} url=https://..."
+    else:
+        level = "BLOCKED"
+        next_action = missing[0][3]
+
+    return {
+        "job": job,
+        "assets": assets,
+        "variants": variants,
+        "manifests": manifests,
+        "tasks": tasks,
+        "queue_items": queue_items,
+        "checks": checks,
+        "missing": missing,
+        "level": level,
+        "next_action": next_action,
+        "selected_variant": selected_variant,
+        "final_asset": final_asset,
+        "blocked_tasks": blocked_tasks,
+    }
+
 def create_creative_variant(owner_id, job_id, variant_label, hook="", script_angle="", caption="", cta="", hashtags="", creative_score=0, note=""):
     job = get_production_job(job_id, owner_id)
     if not job:
@@ -3346,6 +3449,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /asset_add — Lưu asset vào job",
             "• /assets — Xem asset của job",
             "• /job_report — Báo cáo đầy đủ một job",
+            "• /job_ready — Kiểm tra job đủ điều kiện đăng chưa",
             "• /mark_published — Ghi nhận đã đăng bài",
             "• /performance_add — Ghi hiệu quả bài đăng",
             "• /performance — Báo cáo hiệu quả kiếm tiền",
@@ -4557,6 +4661,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🗂 Assets", callback_data="opmenu|assets"),
             InlineKeyboardButton("📋 Job report", callback_data="opmenu|report")
         ],
+        [InlineKeyboardButton("🚦 Job ready check", callback_data="opmenu|jobready")],
         [
             InlineKeyboardButton("🎬 Production manifest", callback_data="opmenu|manifest"),
             InlineKeyboardButton("🤝 Manifest handoff", callback_data="opmenu|manifesthandoff")
@@ -4613,6 +4718,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "nexttask": "/next_task\n/next_task job=<JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
         "report": "/job_report <JOB_ID>",
+        "jobready": "/job_ready job=<JOB_ID>",
         "review": "/review_gate job=<JOB_ID>",
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
@@ -5425,6 +5531,60 @@ async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("• Chưa có. Dùng /task_plan job=%s." % job_id)
     lines.append("\nLệnh tiếp theo: /creative_test, /manifest, /task_plan, /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_job_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/job_ready job=&lt;JOB_ID&gt;</code>", parse_mode="HTML")
+    data = production_readiness_data(update.effective_user.id, job_id)
+    if not data:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    job = data["job"]
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    level_label = {
+        "READY_TO_PUBLISH": "✅ READY TO PUBLISH",
+        "READY_TO_QUEUE": "🟡 READY TO QUEUE",
+        "BLOCKED": "⛔ CHƯA ĐỦ ĐIỀU KIỆN",
+    }.get(data["level"], data["level"])
+    lines = [
+        f"🚦 <b>JOB READY CHECK #{jid}</b>",
+        f"• Kết luận: <b>{level_label}</b>",
+        f"• Stage/status: <b>{html.escape(stage or '-')}</b>/<b>{html.escape(status or '-')}</b>",
+        f"• Platform: <code>{html.escape(platform or '-')}</code> | Channel: {html.escape(channel_name or '-')}",
+        f"• Topic: {html.escape(topic or '-')}",
+        f"• Affiliate: {html.escape(product_name or affiliate_url or 'chưa có')}",
+        "",
+        "<b>Checklist trước khi đăng:</b>",
+    ]
+    for key, ok, detail, next_cmd in data["checks"]:
+        mark = "✅" if ok else "⚠️"
+        lines.append(f"• {mark} <code>{html.escape(key)}</code> — {html.escape(detail)}")
+
+    lines.append("\n<b>Tóm tắt production:</b>")
+    lines.append(f"• Creative variants: <b>{len(data['variants'])}</b> | selected: <b>{'có' if data['selected_variant'] else 'chưa'}</b>")
+    lines.append(f"• Manifest: <b>{len(data['manifests'])}</b> | Tasks: <b>{len(data['tasks'])}</b> | Blocked: <b>{len(data['blocked_tasks'])}</b>")
+    lines.append(f"• Assets: <b>{len(data['assets'])}</b> | final video: <b>{'có' if data['final_asset'] or publish_url else 'chưa'}</b>")
+    lines.append(f"• Publish queue: <b>{len(data['queue_items'])}</b> | publish URL: <code>{html.escape(publish_url or 'chưa có')}</code>")
+    lines.append(f"\n<b>Lệnh nên chạy tiếp:</b>\n<code>{html.escape(data['next_action'])}</code>")
+
+    kb_rows = []
+    if data["level"] == "READY_TO_QUEUE":
+        kb_rows.append([InlineKeyboardButton("📦 Publish pack", callback_data=f"pipe|stage|publish|{job_id}")])
+    if data["level"] == "READY_TO_PUBLISH":
+        kb_rows.append([InlineKeyboardButton("✅ Mark ready", callback_data=f"pipe|status|ready|{job_id}")])
+    kb_rows.append([InlineKeyboardButton("🛡 Review gate", callback_data=f"pipe|stage|review|{job_id}")])
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb_rows)
+    )
 
 async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -6459,6 +6619,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
     tg_app.add_handler(CommandHandler("assets", cmd_assets))
     tg_app.add_handler(CommandHandler("job_report", cmd_job_report))
+    tg_app.add_handler(CommandHandler("job_ready", cmd_job_ready))
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
