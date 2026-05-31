@@ -17,6 +17,7 @@ import httpx
 import math
 import hmac
 import hashlib
+import html
 import uvicorn
 import time
 import random
@@ -197,6 +198,30 @@ def init_db():
         bonus_paid INTEGER DEFAULT 0,
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS campaigns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        name TEXT,
+        niche TEXT,
+        platforms TEXT,
+        affiliate_url TEXT,
+        pay_url TEXT,
+        status TEXT DEFAULT 'active',
+        created_at DATETIME
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS video_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        campaign_id INTEGER,
+        owner_id TEXT,
+        topic TEXT,
+        platforms TEXT,
+        affiliate_url TEXT,
+        status TEXT DEFAULT 'draft',
+        brief_json TEXT,
+        created_at DATETIME,
+        approved_at DATETIME,
+        published_at DATETIME
+    )""")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -222,6 +247,21 @@ def init_db():
             c.execute(f"ALTER TABLE pending_deposits ADD COLUMN {col} {col_type}")
         except Exception:
             pass
+    for table, columns in {
+        "campaigns": [
+            ("pay_url", "TEXT"),
+            ("status", "TEXT DEFAULT 'active'"),
+        ],
+        "video_jobs": [
+            ("approved_at", "DATETIME"),
+            ("published_at", "DATETIME"),
+        ],
+    }.items():
+        for col, col_type in columns:
+            try:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
     conn.commit()
     conn.close()
 
@@ -483,6 +523,91 @@ def award_referral_bonus_if_needed(conn, referred_user_id) -> int:
     c.execute("UPDATE referrals SET bonus_paid=1 WHERE referred_user_id=?", (str(referred_user_id),))
     record_credit_event(conn, referrer_id, REFERRAL_BONUS_XU, "referral_bonus", referred_user_id, "Thưởng giới thiệu khách nạp lần đầu")
     return REFERRAL_BONUS_XU
+
+def create_campaign(owner_id, name, niche, platforms, affiliate_url="", pay_url="") -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO campaigns (owner_id, name, niche, platforms, affiliate_url, pay_url, status, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (str(owner_id), name, niche, platforms, affiliate_url, pay_url, "active", now_text())
+    )
+    campaign_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return campaign_id
+
+def list_campaigns(owner_id, limit=8):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, name, niche, platforms, affiliate_url, status FROM campaigns WHERE owner_id=? ORDER BY id DESC LIMIT ?",
+        (str(owner_id), limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_campaign(campaign_id, owner_id=None):
+    conn = db_connect()
+    c = conn.cursor()
+    if owner_id is None:
+        c.execute("SELECT id, owner_id, name, niche, platforms, affiliate_url, pay_url, status FROM campaigns WHERE id=?", (campaign_id,))
+    else:
+        c.execute(
+            "SELECT id, owner_id, name, niche, platforms, affiliate_url, pay_url, status FROM campaigns WHERE id=? AND owner_id=?",
+            (campaign_id, str(owner_id))
+        )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def create_video_job(campaign_id, owner_id, topic, platforms, affiliate_url, brief_json) -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO video_jobs (campaign_id, owner_id, topic, platforms, affiliate_url, status, brief_json, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (campaign_id, str(owner_id), topic, platforms, affiliate_url, "draft", brief_json, now_text())
+    )
+    job_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return job_id
+
+def get_video_job(job_id, owner_id=None):
+    conn = db_connect()
+    c = conn.cursor()
+    if owner_id is None:
+        c.execute("SELECT id, campaign_id, owner_id, topic, platforms, affiliate_url, status, brief_json FROM video_jobs WHERE id=?", (job_id,))
+    else:
+        c.execute(
+            "SELECT id, campaign_id, owner_id, topic, platforms, affiliate_url, status, brief_json FROM video_jobs WHERE id=? AND owner_id=?",
+            (job_id, str(owner_id))
+        )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_video_job_status(job_id, status, timestamp_col=None):
+    conn = db_connect()
+    c = conn.cursor()
+    if timestamp_col in ("approved_at", "published_at"):
+        c.execute(f"UPDATE video_jobs SET status=?, {timestamp_col}=? WHERE id=?", (status, now_text(), job_id))
+    else:
+        c.execute("UPDATE video_jobs SET status=? WHERE id=?", (status, job_id))
+    conn.commit()
+    conn.close()
+
+def campaign_stats(owner_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM campaigns WHERE owner_id=?", (str(owner_id),))
+    total_campaigns = c.fetchone()[0]
+    c.execute("SELECT status, COUNT(*) FROM video_jobs WHERE owner_id=? GROUP BY status", (str(owner_id),))
+    job_counts = dict(c.fetchall())
+    c.execute("SELECT id, topic, platforms, status, created_at FROM video_jobs WHERE owner_id=? ORDER BY id DESC LIMIT 8", (str(owner_id),))
+    recent_jobs = c.fetchall()
+    conn.close()
+    return total_campaigns, job_counts, recent_jobs
 
 def calculate_dynamic_cost(action_type, size_or_length):
     if action_type == "chat":
@@ -1252,6 +1377,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command_lines.extend([
             "• /tools — Kho 30 công cụ AI/MMO (Admin)",
             "• /mmo — Quy trình kiếm tiền bằng AI (Admin)",
+            "• /campaign_new — Tạo chiến dịch affiliate/video",
+            "• /campaigns — Danh sách chiến dịch",
+            "• /video_plan — AI lập kế hoạch video",
+            "• /video_job &lt;id&gt; — Xem job video",
+            "• /campaign_stats — Thống kê AI Operator",
             "• /dashboard — Dashboard quản trị",
             "• /checkpayos &lt;mã_đơn&gt; — Kiểm tra lại đơn PayOS",
         ])
@@ -1387,6 +1517,195 @@ async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ Bắt đầu nhỏ: 1 niche, 1 format, 30 video đầu tiên. Dùng /tools để lấy bộ công cụ."
     )
     await update.message.reply_text(text, parse_mode="HTML")
+
+def parse_key_value_args(raw: str) -> dict:
+    data = {}
+    current_key = None
+    for token in raw.split():
+        if "=" in token:
+            key, value = token.split("=", 1)
+            current_key = key.strip().lower()
+            data[current_key] = value.strip()
+        elif current_key:
+            data[current_key] += " " + token.strip()
+    return data
+
+def truncate_text(text: str, limit: int = 3500) -> str:
+    return text if len(text) <= limit else text[: limit - 20] + "\n...[đã rút gọn]"
+
+def html_pre(text: str, limit: int = 3500) -> str:
+    return html.escape(truncate_text(text, limit))
+
+def build_video_brief_prompt(campaign, topic, platforms, affiliate_url):
+    _, _, name, niche, campaign_platforms, campaign_affiliate, pay_url, _ = campaign
+    target_platforms = platforms or campaign_platforms
+    target_affiliate = affiliate_url or campaign_affiliate or pay_url
+    return (
+        "Bạn là AI Operator trưởng cho hệ thống TOAN DAAS. "
+        "Tạo kế hoạch video kiếm tiền hợp pháp, không spam, không giả mạo người thật, "
+        "không hướng dẫn né kiểm duyệt nền tảng. Nếu có người mẫu/AI influencer thì chỉ dùng nhân vật tự tạo hoặc có consent 18+.\n\n"
+        f"Chiến dịch: {name}\n"
+        f"Niche: {niche}\n"
+        f"Nền tảng: {target_platforms}\n"
+        f"Chủ đề video: {topic}\n"
+        f"Link affiliate/thu tiền: {target_affiliate or 'chưa có'}\n\n"
+        "Trả về bằng tiếng Việt, dạng JSON có các khóa: hook, script_45s, shot_list, voice_style, visual_prompts, "
+        "caption_by_platform, hashtags, cta, affiliate_placement, compliance_check, next_actions. "
+        "Mỗi caption phải có vị trí gắn link/CTA rõ ràng."
+    )
+
+async def cmd_campaign_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args)
+    data = parse_key_value_args(raw)
+    name = data.get("name") or data.get("ten")
+    niche = data.get("niche") or data.get("ngach")
+    platforms = data.get("platforms") or data.get("nen") or "tiktok,facebook,youtube"
+    affiliate_url = data.get("affiliate") or data.get("link") or ""
+    pay_url = data.get("pay") or data.get("payos") or ""
+    if not name or not niche:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/campaign_new name=AI Tools niche=affiliate platforms=tiktok,fb affiliate=https://...</code>",
+            parse_mode="HTML"
+        )
+    campaign_id = create_campaign(update.effective_user.id, name, niche, platforms, affiliate_url, pay_url)
+    await update.message.reply_text(
+        f"✅ <b>Đã tạo campaign #{campaign_id}</b>\n"
+        f"• Tên: <b>{name}</b>\n"
+        f"• Niche: <b>{niche}</b>\n"
+        f"• Nền tảng: <code>{platforms}</code>\n"
+        f"• Affiliate: <code>{affiliate_url or 'chưa có'}</code>\n\n"
+        f"Tạo video: <code>/video_plan campaign={campaign_id} topic=...</code>",
+        parse_mode="HTML"
+    )
+
+async def cmd_campaigns(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    rows = list_campaigns(update.effective_user.id)
+    if not rows:
+        return await update.message.reply_text("📭 Chưa có campaign. Tạo bằng /campaign_new.")
+    lines = ["📌 <b>CAMPAIGN ĐANG CÓ</b>\n"]
+    for cid, name, niche, platforms, affiliate_url, status in rows:
+        lines.append(f"• #{cid} | <b>{name}</b> | {niche} | <code>{platforms}</code> | {status}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_video_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    if not gemini_client and not openai_client:
+        return await update.message.reply_text("❌ Chưa cấu hình AI Provider.")
+    raw = " ".join(context.args)
+    data = parse_key_value_args(raw)
+    try:
+        campaign_id = int(data.get("campaign") or data.get("camp") or data.get("id"))
+    except (TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/video_plan campaign=1 topic=5 công cụ AI giúp kiếm tiền platforms=tiktok,fb</code>",
+            parse_mode="HTML"
+        )
+    topic = data.get("topic") or data.get("chude")
+    if not topic:
+        return await update.message.reply_text("⚠️ Thiếu <code>topic=...</code>", parse_mode="HTML")
+    campaign = get_campaign(campaign_id, update.effective_user.id)
+    if not campaign:
+        return await update.message.reply_text("❌ Không tìm thấy campaign hoặc không có quyền.")
+    platforms = data.get("platforms") or data.get("nen") or ""
+    affiliate_url = data.get("affiliate") or data.get("link") or ""
+    prompt = build_video_brief_prompt(campaign, topic, platforms, affiliate_url)
+    msg = await update.message.reply_text("⏳ AI Operator đang lập kế hoạch video...")
+    brief = AgentGemini.chat(
+        "Bạn là AI Operator chuyên lập kế hoạch video affiliate hợp pháp, có kiểm duyệt trước khi đăng.",
+        prompt,
+        update.effective_user.id,
+        is_json=False
+    )
+    job_id = create_video_job(campaign_id, update.effective_user.id, topic, platforms or campaign[4], affiliate_url or campaign[5] or campaign[6], brief)
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Duyệt job", callback_data=f"job|approve|{job_id}"),
+            InlineKeyboardButton("❌ Hủy", callback_data=f"job|cancel|{job_id}")
+        ],
+        [InlineKeyboardButton("📊 Stats", callback_data="job|stats|0")]
+    ])
+    await msg.edit_text(
+        f"🎬 <b>VIDEO JOB #{job_id}</b>\n"
+        f"Campaign: <b>#{campaign_id}</b>\n"
+        f"Topic: <b>{topic}</b>\n\n"
+        f"<pre>{html_pre(brief)}</pre>\n\n"
+        "Trạng thái: <b>DRAFT - chờ duyệt</b>",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+async def cmd_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    try:
+        job_id = int(context.args[0])
+    except (IndexError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: /video_job <ID>")
+    job = get_video_job(job_id, update.effective_user.id)
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy job.")
+    _, campaign_id, _, topic, platforms, affiliate_url, status, brief = job
+    await update.message.reply_text(
+        f"🎬 <b>VIDEO JOB #{job_id}</b>\n"
+        f"Campaign: <b>#{campaign_id}</b>\n"
+        f"Topic: <b>{topic}</b>\n"
+        f"Nền tảng: <code>{platforms}</code>\n"
+        f"Affiliate: <code>{affiliate_url or 'chưa có'}</code>\n"
+        f"Status: <b>{status}</b>\n\n"
+        f"<pre>{html_pre(brief)}</pre>",
+        parse_mode="HTML"
+    )
+
+async def cmd_campaign_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    total_campaigns, job_counts, recent_jobs = campaign_stats(update.effective_user.id)
+    lines = [
+        "📊 <b>AI OPERATOR STATS</b>",
+        f"Campaign: <b>{total_campaigns}</b>",
+        "Video jobs: " + ", ".join(f"{k}={v}" for k, v in job_counts.items()) if job_counts else "Video jobs: 0",
+        "",
+        "<b>Job gần nhất:</b>",
+    ]
+    for jid, topic, platforms, status, created_at in recent_jobs:
+        lines.append(f"• #{jid} | {status} | <code>{platforms}</code> | {topic}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def handle_video_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if str(query.from_user.id) != ADMIN_ID:
+        return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    parts = query.data.split("|")
+    if len(parts) != 3:
+        return
+    _, action, job_id_raw = parts
+    if action == "stats":
+        total_campaigns, job_counts, recent_jobs = campaign_stats(query.from_user.id)
+        lines = [f"📊 Campaign: {total_campaigns}", "Jobs: " + (", ".join(f"{k}={v}" for k, v in job_counts.items()) or "0")]
+        return await query.edit_message_text("\n".join(lines))
+    try:
+        job_id = int(job_id_raw)
+    except ValueError:
+        return
+    job = get_video_job(job_id, query.from_user.id)
+    if not job:
+        return await query.edit_message_text("❌ Không tìm thấy job.")
+    if action == "approve":
+        update_video_job_status(job_id, "approved", "approved_at")
+        return await query.edit_message_text(
+            f"✅ <b>Đã duyệt VIDEO JOB #{job_id}</b>\n\n"
+            "Bước tiếp theo v1: dùng brief này để tạo asset/video. V2 sẽ nối API Kling/Runway/CapCut/FFmpeg và auto-post qua API chính thức.",
+            parse_mode="HTML"
+        )
+    if action == "cancel":
+        update_video_job_status(job_id, "cancelled")
+        return await query.edit_message_text(f"❌ Đã hủy VIDEO JOB #{job_id}")
 
 async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -1931,6 +2250,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
     tg_app.add_handler(CommandHandler("tools",       cmd_tools))
     tg_app.add_handler(CommandHandler("mmo",         cmd_mmo))
+    tg_app.add_handler(CommandHandler("campaign_new", cmd_campaign_new))
+    tg_app.add_handler(CommandHandler("campaigns",   cmd_campaigns))
+    tg_app.add_handler(CommandHandler("video_plan",  cmd_video_plan))
+    tg_app.add_handler(CommandHandler("video_job",   cmd_video_job))
+    tg_app.add_handler(CommandHandler("campaign_stats", cmd_campaign_stats))
     tg_app.add_handler(CommandHandler("ref",         cmd_ref))
     tg_app.add_handler(CommandHandler("gopy",        cmd_gopy))
     tg_app.add_handler(CommandHandler("add",         cmd_admin_add))
@@ -1947,6 +2271,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_job_callback, pattern=r"^job\|"))
 
     await tg_app.initialize()
     await tg_app.start()

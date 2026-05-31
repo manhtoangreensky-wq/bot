@@ -48,6 +48,11 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/dashboard`: dashboard text gồm user, đơn PayOS, biến động xu.
 - `/setvip <ID> <1|0>`: bật/tắt VIP.
 - `/admin_gopy`: tóm tắt góp ý 7 ngày.
+- `/campaign_new name=... niche=... platforms=... affiliate=...`: tạo chiến dịch AI Operator.
+- `/campaigns`: liệt kê chiến dịch.
+- `/video_plan campaign=<ID> topic=... platforms=...`: AI tạo brief video, caption, hashtag, CTA và compliance checklist.
+- `/video_job <ID>`: xem lại video job.
+- `/campaign_stats`: thống kê campaign/video job.
 
 ## API FastAPI
 
@@ -61,4 +66,5 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `bot.py` hiện là file chạy chính.
 - Thư mục `handlers/` là mã legacy từ phiên bản cũ, chưa được import trong runtime hiện tại.
 - SQLite phù hợp bản nhỏ. Khi public nhiều người dùng, nên chuyển sang PostgreSQL hoặc tách lớp repository để kiểm soát transaction tốt hơn.
+- AI Operator v1 mới tạo kế hoạch video/caption/affiliate và yêu cầu admin duyệt. Auto-post lên TikTok/Facebook/YouTube/OnlyFans cần cấu hình API/OAuth chính thức ở giai đoạn sau.
 - Với AI influencer/người mẫu AI: chỉ dùng nhân vật tự tạo hoặc người thật có đồng ý rõ ràng, đủ 18 tuổi; không dùng để giả mạo, lừa đảo hoặc tạo nội dung vi phạm nền tảng/pháp luật.
