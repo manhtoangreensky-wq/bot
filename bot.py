@@ -1027,6 +1027,64 @@ def operator_dashboard_data(owner_id):
     conn.close()
     return active_channels, active_affiliates, calendar_counts, pipeline_counts, active_jobs, upcoming_slots
 
+def operator_daily_data(owner_id, days=1):
+    since = (datetime.now() - timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d %H:%M:%S")
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT status, COUNT(*) FROM production_jobs
+        WHERE owner_id=? AND created_at>=?
+        GROUP BY status ORDER BY status""",
+        (str(owner_id), since)
+    )
+    job_status_counts = c.fetchall()
+    c.execute(
+        """SELECT stage, COUNT(*) FROM production_jobs
+        WHERE owner_id=? AND updated_at>=?
+        GROUP BY stage ORDER BY stage""",
+        (str(owner_id), since)
+    )
+    job_stage_counts = c.fetchall()
+    c.execute(
+        """SELECT status, COUNT(*) FROM publish_queue
+        WHERE owner_id=? AND updated_at>=?
+        GROUP BY status ORDER BY status""",
+        (str(owner_id), since)
+    )
+    queue_status_counts = c.fetchall()
+    c.execute(
+        """SELECT event_type, COALESCE(SUM(value),0), COALESCE(SUM(amount),0), COUNT(*)
+        FROM performance_events
+        WHERE owner_id=? AND created_at>=?
+        GROUP BY event_type ORDER BY event_type""",
+        (str(owner_id), since)
+    )
+    performance_counts = c.fetchall()
+    c.execute(
+        """SELECT pj.id, pj.stage, pj.status, pj.platform, pj.topic, sc.channel_name, al.product_name, pj.updated_at
+        FROM production_jobs pj
+        LEFT JOIN social_channels sc ON sc.id = pj.channel_id
+        LEFT JOIN affiliate_links al ON al.id = pj.affiliate_id
+        WHERE pj.owner_id=? AND pj.updated_at>=?
+        ORDER BY pj.updated_at DESC, pj.id DESC
+        LIMIT 8""",
+        (str(owner_id), since)
+    )
+    recent_jobs = c.fetchall()
+    c.execute(
+        """SELECT pq.id, pq.job_id, pq.platform, sc.channel_name, pq.mode, pq.status, pq.scheduled_at, pj.topic
+        FROM publish_queue pq
+        LEFT JOIN social_channels sc ON sc.id = pq.channel_id
+        LEFT JOIN production_jobs pj ON pj.id = pq.job_id
+        WHERE pq.owner_id=? AND pq.status IN ('queued','scheduled','publishing','blocked')
+        ORDER BY pq.updated_at DESC, pq.id DESC
+        LIMIT 8""",
+        (str(owner_id),)
+    )
+    open_queue = c.fetchall()
+    conn.close()
+    return since, job_status_counts, job_stage_counts, queue_status_counts, performance_counts, recent_jobs, open_queue
+
 def get_production_job(job_id, owner_id):
     conn = db_connect()
     c = conn.cursor()
@@ -3322,6 +3380,61 @@ async def cmd_operator_dashboard(update: Update, context: ContextTypes.DEFAULT_T
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = int(data.get("days") or data.get("ngay") or (context.args[0] if context.args else 1))
+    except (TypeError, ValueError):
+        days = 1
+    days = max(1, min(days, 30))
+    (
+        since, job_status_counts, job_stage_counts, queue_status_counts,
+        performance_counts, recent_jobs, open_queue
+    ) = operator_daily_data(update.effective_user.id, days)
+    lines = [
+        f"📊 <b>AI OPERATOR DAILY — {days} ngày</b>",
+        f"• Từ: <code>{html.escape(since)}</code>",
+        "",
+        "<b>Job mới theo status:</b>",
+        "• " + (", ".join(f"{html.escape(status or '-')}={count}" for status, count in job_status_counts) or "0"),
+        "<b>Job cập nhật theo stage:</b>",
+        "• " + (", ".join(f"{html.escape(stage or '-')}={count}" for stage, count in job_stage_counts) or "0"),
+        "<b>Publish queue:</b>",
+        "• " + (", ".join(f"{html.escape(status or '-')}={count}" for status, count in queue_status_counts) or "0"),
+        "",
+        "<b>Performance:</b>",
+    ]
+    if performance_counts:
+        for event_type, value_sum, amount_sum, count in performance_counts:
+            lines.append(f"• {html.escape(event_type or '-')}: value=<b>{value_sum}</b> | amount=<b>{amount_sum:,}đ</b> | events={count}")
+    else:
+        lines.append("• Chưa có dữ liệu mới.")
+    lines.append("\n<b>Job vừa cập nhật:</b>")
+    if recent_jobs:
+        for jid, stage, status, platform, topic, channel_name, product_name, updated_at in recent_jobs:
+            lines.append(
+                f"• #{jid} | {html.escape(stage or '-')}/{html.escape(status or '-')} | "
+                f"<code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n"
+                f"  {html.escape(topic or '-')}\n"
+                f"  aff={html.escape(product_name or '-')} | {updated_at or '-'}"
+            )
+    else:
+        lines.append("• Không có job cập nhật.")
+    lines.append("\n<b>Queue cần xử lý:</b>")
+    if open_queue:
+        for qid, job_id, platform, channel_name, mode, status, scheduled_at, topic in open_queue:
+            lines.append(
+                f"• queue #{qid} | job #{job_id} | {html.escape(mode or '-')}/{html.escape(status or '-')} | "
+                f"<code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n"
+                f"  schedule={html.escape(scheduled_at or '-')} | {html.escape(topic or '-')}"
+            )
+    else:
+        lines.append("• Không có queue mở.")
+    lines.append("\nLệnh nhanh: /operator_dashboard | /publish_queue | /performance | /operator_auto")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -3349,6 +3462,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
             InlineKeyboardButton("💰 Performance", callback_data="opmenu|performance")
         ],
+        [InlineKeyboardButton("📊 Daily digest", callback_data="opmenu|daily")],
     ])
 
 async def cmd_operator_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3386,6 +3500,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "review": "/review_gate job=<JOB_ID>",
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
+        "daily": "/operator_daily\n/operator_daily days=7",
     }
     await query.edit_message_text(
         f"🧠 <b>AI OPERATOR MENU</b>\n\n"
@@ -4576,6 +4691,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_auto", cmd_operator_auto))
     tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
+    tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
