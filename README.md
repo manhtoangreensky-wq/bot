@@ -116,6 +116,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/creative_variants <JOB_ID>`: xem các biến thể creative của job.
 - `/creative_select id=<VARIANT_ID>`: chọn biến thể creative để đưa vào stage script/sản xuất.
 - `/creative_report job=<ID>`: so sánh performance theo biến thể creative đã gắn khi ghi dữ liệu.
+- `/video_patterns`: xem kho format video chính thức học từ video mẫu, gồm proof-first demo, screen tutorial, avatar explainer, caption bait short và webinar cutdown; bot tự gắn pattern vào creative/manifest/task/publish pack.
 - `/manifest job=<ID> duration=45 variant=<VARIANT_ID>`: tạo production manifest JSON gồm scene, prompt video, voice, edit, publish và compliance cho AI/tool thực thi.
 - `/manifests <JOB_ID>`: xem các production manifest đã tạo cho job.
 - `/manifest_handoff job=<ID> tool=kling|runway|fish|capcut|ffmpeg|publish|review`: xuất prompt riêng từ manifest cho từng AI/tool thực thi.
@@ -168,6 +169,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/audit`: worker ngoài kiểm tra mức sẵn sàng end-to-end và blocker còn thiếu trước khi bật automation.
 - `GET /api/operator/worker-spec`: worker ngoài đọc runbook máy đọc được cho Director, Creative, Tool Worker, Publisher và Growth Analyst.
 - `GET /api/operator/toolchain`: worker ngoài đọc chính sách paid-first/fallback theo từng stage, gồm Claude/Gemini/OpenAI, Fish/Edge, RemoveBG/Cutout, Kling/Runway, CapCut/FFmpeg, publisher và payment.
+- `GET /api/operator/video-patterns`: worker ngoài đọc kho format video, proof asset cần có, hook formula, scene goals và CTA style để dựng video theo pattern riêng của TOAN DAAS.
 - `GET /api/operator/tool-readiness`: worker ngoài kiểm tra tool nào thật sự đủ runtime/env để bật automation, đặc biệt Cobalt self-host, AI provider, voice, image, PayOS và Operator API.
 - `GET/POST /api/operator/tool-events`: worker ngoài báo tool lỗi/quota/hết tiền/fallback/recovered; bot lưu log và nhắn admin khi severity `warning|critical`.
 - `GET /api/operator/n8n-template`: worker ngoài đọc template workflow n8n có sẵn cho cron, audit, director-run, task worker, publish pack, publisher và performance tracking.

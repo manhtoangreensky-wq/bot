@@ -2396,12 +2396,13 @@ def operator_audit_data(owner_id):
 def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
-        "publisher_status", "publisher_run", "publisher_handoff", "affiliate_seed", "affiliate_scale",
+        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "affiliate_seed", "affiliate_scale",
         "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
         ("GET", "/api/operator/worker-spec"),
+        ("GET", "/api/operator/video-patterns"),
         ("GET", "/api/operator/n8n-workflow.json"),
         ("POST", "/api/operator/make-video"),
         ("GET", "/api/operator/publisher/status"),
@@ -4261,6 +4262,111 @@ def latest_production_manifest(owner_id, job_id):
     mid, variant_id, status, manifest_json, created_at, updated_at = rows[0]
     return (mid, job_id, variant_id, status, manifest_json, created_at, updated_at)
 
+VIDEO_PATTERN_BANK = {
+    "proof_first_demo": {
+        "name": "Proof-first demo",
+        "best_for": ["AI system", "automation", "dashboard", "bot", "business proof"],
+        "hook_formula": "Kết quả thật/visual proof -> 3 bước hệ thống -> CTA mềm",
+        "duration_range": "35-75s",
+        "scene_goals": ["proof", "problem", "workflow", "demo", "affiliate_bridge", "cta"],
+        "proof_assets_required": [
+            "Ảnh/quay màn hình dashboard hoặc workflow thật.",
+            "Ảnh bot Telegram/pipeline/task/publish queue nếu bán hệ thống.",
+            "Nếu dùng số liệu doanh thu thì phải là số thật hoặc ghi rõ mô phỏng.",
+        ],
+        "cta_style": "Xem checklist/link trong caption hoặc comment ghim.",
+    },
+    "screen_tutorial": {
+        "name": "Screen tutorial",
+        "best_for": ["app", "software", "tool", "banking", "tech setup", "how-to"],
+        "hook_formula": "Lỗi/sai lầm thường gặp -> thao tác màn hình -> kết quả sau cùng",
+        "duration_range": "45-120s",
+        "scene_goals": ["hook", "screen_step_1", "screen_step_2", "result", "affiliate_options", "cta"],
+        "proof_assets_required": [
+            "Screenshot/quay màn hình từng bước, che thông tin nhạy cảm.",
+            "Bảng checklist ngắn hoặc before-after.",
+        ],
+        "cta_style": "Lưu lại khi cần làm theo; link công cụ/sản phẩm ở comment ghim.",
+    },
+    "avatar_explainer": {
+        "name": "Avatar explainer",
+        "best_for": ["faceless", "AI host", "education", "finance", "comparison"],
+        "hook_formula": "Host AI nêu vấn đề -> ví dụ thực tế -> gợi ý 2-4 lựa chọn",
+        "duration_range": "30-90s",
+        "scene_goals": ["avatar_hook", "context", "comparison", "recommendation", "disclosure", "cta"],
+        "proof_assets_required": [
+            "Nhân vật AI tự tạo, không mạo danh người thật.",
+            "B-roll sản phẩm hoặc mockup có quyền dùng.",
+        ],
+        "cta_style": "Comment để nhận gợi ý; link liên quan đặt ở caption/comment/status.",
+    },
+    "caption_bait_short": {
+        "name": "Caption bait short",
+        "best_for": ["listicle", "checklist", "fast hook", "caption traffic"],
+        "hook_formula": "Một câu gây tò mò -> visual giữ mắt -> kéo xem caption",
+        "duration_range": "6-15s",
+        "scene_goals": ["curiosity_hook", "proof_visual", "caption_cta"],
+        "proof_assets_required": [
+            "Một visual mạnh, không cần giải thích dài.",
+            "Caption phải chứa checklist/link đầy đủ vì video rất ngắn.",
+        ],
+        "cta_style": "Xem tiếp ở caption/comment ghim.",
+    },
+    "webinar_cutdown": {
+        "name": "Webinar cutdown",
+        "best_for": ["course", "long demo", "consulting", "authority"],
+        "hook_formula": "Cắt 1 ý sắc nhất từ video dài -> proof -> lời mời xem bản đầy đủ",
+        "duration_range": "45-180s",
+        "scene_goals": ["authority_hook", "key_lesson", "proof", "implementation", "cta"],
+        "proof_assets_required": [
+            "Nguồn video dài có quyền dùng.",
+            "Timestamp đoạn đáng cắt và transcript tóm tắt.",
+        ],
+        "cta_style": "Lưu bài hoặc inbox để nhận checklist/bản đầy đủ.",
+    },
+}
+
+def select_video_pattern(job, duration=45):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    text = f"{platform} {topic} {brief} {note} {product_name} {network}".lower()
+    if duration <= 15:
+        key = "caption_bait_short"
+    elif any(word in text for word in ["webinar", "lớp học", "khoa hoc", "khóa học", "bai giang", "bài giảng"]):
+        key = "webinar_cutdown"
+    elif any(word in text for word in ["bot", "agent", "automation", "tự động", "tu dong", "dashboard", "workflow", "hệ thống", "he thong", "ai operator"]):
+        key = "proof_first_demo"
+    elif any(word in text for word in ["app", "setup", "cài", "cai", "hướng dẫn", "huong dan", "đăng ký", "dang ky", "mở thẻ", "mo the"]):
+        key = "screen_tutorial"
+    elif any(word in text for word in ["faceless", "avatar", "onlyfan", "onlyfans", "người mẫu", "nguoi mau", "ai influencer"]):
+        key = "avatar_explainer"
+    else:
+        key = "screen_tutorial" if (platform or "").lower() in {"facebook", "fb", "youtube"} else "proof_first_demo"
+    pattern = dict(VIDEO_PATTERN_BANK[key])
+    pattern["id"] = key
+    return pattern
+
+def format_video_pattern_for_prompt(pattern):
+    return (
+        f"Pattern: {pattern.get('id')} - {pattern.get('name')}\n"
+        f"Hook formula: {pattern.get('hook_formula')}\n"
+        f"Scene goals: {', '.join(pattern.get('scene_goals') or [])}\n"
+        f"Proof assets required:\n- " + "\n- ".join(pattern.get("proof_assets_required") or []) + "\n"
+        f"CTA style: {pattern.get('cta_style')}"
+    )
+
+def video_pattern_bank_data():
+    return {
+        key: {
+            "id": key,
+            **value,
+            "rule": "Học format/nhịp dựng, không copy nguyên video, giọng, mặt người hoặc tài liệu có bản quyền.",
+        }
+        for key, value in VIDEO_PATTERN_BANK.items()
+    }
+
 def build_manifest_prompt(job, variant=None, duration=45):
     (
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
@@ -4277,6 +4383,7 @@ def build_manifest_prompt(job, variant=None, duration=45):
             f"CTA: {cta or '-'}\n"
             f"Hashtags: {hashtags or '-'}"
         )
+    pattern = select_video_pattern(job, duration)
     return (
         "Bạn là AI production director cho video ngắn affiliate. Hãy tạo PRODUCTION MANIFEST dạng JSON thuần, "
         "để Claude/Gemini/Runway/Kling/Fish/CapCut/FFmpeg có thể thực thi từng bước. "
@@ -4290,12 +4397,15 @@ def build_manifest_prompt(job, variant=None, duration=45):
         f"Asset hiện có: {asset_url or 'chưa có'}\n"
         f"Operator note: {note or '-'}\n\n"
         f"Creative variant:\n{variant_text}\n\n"
+        f"Video pattern bắt buộc áp dụng:\n{format_video_pattern_for_prompt(pattern)}\n\n"
         f"Brief:\n{brief or 'Chưa có brief'}\n\n"
         "JSON schema bắt buộc:\n"
         "{\n"
         '  "title": "...",\n'
         '  "duration_sec": 45,\n'
         '  "format": "9:16",\n'
+        '  "video_pattern": {"id":"proof_first_demo","name":"...","hook_formula":"..."},\n'
+        '  "proof_assets_required": ["..."],\n'
         '  "selected_variant_id": 0,\n'
         '  "voice": {"provider_primary":"Fish Audio HD","provider_fallback":"Edge TTS","style":"...","script":"..."},\n'
         '  "scenes": [\n'
@@ -4324,24 +4434,36 @@ def fallback_production_manifest(job, variant=None, duration=45):
         caption = variant[5] or caption
         cta = variant[6] or cta
         hashtags = variant[7] or hashtags
+    pattern = select_video_pattern(job, duration)
+    goals = pattern.get("scene_goals") or ["hook", "problem", "demo", "benefit", "cta"]
+    scene_count = max(3, min(6, len(goals)))
     scenes = []
-    scene_ranges = [(1, 0, 4, "hook"), (2, 4, 12, "problem"), (3, 12, 25, "demo"), (4, 25, 38, "benefit"), (5, 38, duration, "cta")]
-    for scene, start, end, goal in scene_ranges:
+    segment = max(3, int(duration / scene_count))
+    for idx, goal in enumerate(goals[:scene_count], start=1):
+        start = 0 if idx == 1 else min(duration - 1, (idx - 1) * segment)
+        end = duration if idx == scene_count else min(duration, idx * segment)
         scenes.append({
-            "scene": scene,
+            "scene": idx,
             "start": start,
             "end": end,
             "goal": goal,
-            "visual_prompt": f"Vertical 9:16 short video scene about {topic or product_name or 'AI affiliate product'}, clean realistic tech creator style, no impersonation, no copyrighted likeness.",
+            "visual_prompt": f"Vertical 9:16 {pattern.get('name')} scene about {topic or product_name or 'AI affiliate product'}, clean realistic creator style, proof-oriented, no impersonation, no copyrighted likeness.",
             "video_tool": "kling",
-            "on_screen_text": hook if scene == 1 else (product_name or topic or "TOAN DAAS"),
-            "voice_line": hook if scene == 1 else f"Giải thích ngắn về {topic or product_name or 'sản phẩm'} theo góc {goal}.",
-            "asset_needed": f"scene_{scene}_video.mp4",
+            "on_screen_text": hook if idx == 1 else (product_name or topic or "TOAN DAAS"),
+            "voice_line": hook if idx == 1 else f"Giải thích ngắn về {topic or product_name or 'sản phẩm'} theo góc {goal}.",
+            "asset_needed": f"scene_{idx}_video.mp4",
         })
     return {
         "title": topic or "Affiliate short video",
         "duration_sec": duration,
         "format": "9:16",
+        "video_pattern": {
+            "id": pattern.get("id"),
+            "name": pattern.get("name"),
+            "hook_formula": pattern.get("hook_formula"),
+            "cta_style": pattern.get("cta_style"),
+        },
+        "proof_assets_required": pattern.get("proof_assets_required") or [],
         "selected_variant_id": selected_variant_id,
         "voice": {
             "provider_primary": "Fish Audio HD",
@@ -4373,9 +4495,17 @@ def fallback_production_manifest(job, variant=None, duration=45):
     }
 
 def parse_manifest_json(raw_text, job, variant=None, duration=45):
+    pattern = select_video_pattern(job, duration)
     try:
         parsed = json.loads(raw_text)
         if isinstance(parsed, dict) and parsed.get("scenes"):
+            parsed.setdefault("video_pattern", {
+                "id": pattern.get("id"),
+                "name": pattern.get("name"),
+                "hook_formula": pattern.get("hook_formula"),
+                "cta_style": pattern.get("cta_style"),
+            })
+            parsed.setdefault("proof_assets_required", pattern.get("proof_assets_required") or [])
             return parsed
     except Exception:
         pass
@@ -4425,12 +4555,17 @@ def build_manifest_handoff_prompt(job, manifest_row, target_tool):
     edit = manifest.get("edit_instructions") or {}
     publish = manifest.get("publish") or {}
     compliance = manifest.get("compliance_checklist") or []
+    video_pattern = manifest.get("video_pattern") or {}
+    proof_assets = manifest.get("proof_assets_required") or []
     title = manifest.get("title") or topic or f"job #{jid}"
     common = (
         f"VAI TRÒ: Bạn là {target_tool.upper()} trong AI Operator TOAN DAAS.\n"
         f"Manifest: #{manifest_id} | Job: #{jid} | Variant: {variant_id or '-'} | Platform: {platform or '-'} | Format: {manifest.get('format','9:16')}\n"
         f"Title: {title}\n"
         f"Affiliate: {network or '-'} / {product_name or '-'} / {affiliate_url or '-'}\n\n"
+        f"VIDEO PATTERN: {video_pattern.get('id','-')} - {video_pattern.get('name','-')}\n"
+        f"Hook formula: {video_pattern.get('hook_formula','-')}\n"
+        "Proof cần có:\n" + "\n".join(f"- {item}" for item in proof_assets[:6]) + "\n\n"
         "QUY TẮC:\n"
         "- Ưu tiên công cụ tốt/có phí trước, nếu lỗi/quota/hết tiền thì ghi fallback và báo admin.\n"
         "- Không spam, không mạo danh, không dùng likeness/người thật nếu chưa có consent rõ ràng, đủ 18 tuổi.\n"
@@ -4545,7 +4680,13 @@ def create_tasks_from_manifest(owner_id, manifest_row):
     voice = manifest.get("voice") or {}
     edit = manifest.get("edit_instructions") or {}
     publish = manifest.get("publish") or {}
+    proof_assets = manifest.get("proof_assets_required") or []
     created = []
+    for idx, proof in enumerate(proof_assets[:4], start=1):
+        created.append(create_production_task(
+            owner_id, job_id, manifest_id, "proof_asset", "claude", idx,
+            f"Proof asset {idx}", str(proof), "queued", "", "pattern_bank"
+        ))
     for scene in scenes:
         scene_no = int(scene.get("scene") or 0)
         tool = str(scene.get("video_tool") or "kling").split("|")[0].strip() or "kling"
@@ -6856,6 +6997,7 @@ def build_publish_pack_prompt(job):
     ) = job
     related = list_related_affiliate_links(ADMIN_ID, affiliate_id=affiliate_id, niche=topic or product_name or "", limit=8) if affiliate_id else []
     related_note = format_related_affiliate_links(related, max_items=6)
+    pattern = select_video_pattern(job, 45)
     platform_key = (platform or "").lower()
     if platform_key in {"onlyfans", "of"}:
         platform_rule = (
@@ -6888,6 +7030,7 @@ def build_publish_pack_prompt(job):
         f"Asset URL: {asset_url or 'chưa có'}\n"
         f"Publish URL hiện tại: {publish_url or 'chưa có'}\n"
         f"Ghi chú: {note or '-'}\n\n"
+        f"Video pattern:\n{format_video_pattern_for_prompt(pattern)}\n\n"
         f"Luật nền tảng:\n{platform_rule}\n\n"
         f"Brief/job context:\n{brief or 'Chưa có brief'}\n\n"
         "Trả về tiếng Việt theo format:\n"
@@ -6914,6 +7057,7 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
         platform=platform or "social",
         limit=8,
     )
+    pattern = select_video_pattern(job, 45)
     related_links = affiliate_bundle.get("related_links", []) if affiliate_bundle else []
     primary_tracking_url = affiliate_tracking_url(affiliate_id, jid, f"{platform or 'social'}_primary") if affiliate_id else ""
     if affiliate_bundle and affiliate_bundle.get("primary"):
@@ -6922,6 +7066,7 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
     disclosure = "Có thể nhận hoa hồng affiliate nếu người xem mua/đăng ký qua link."
     caption = (
         f"{topic or product_name or 'Gợi ý sản phẩm/dịch vụ'}\n\n"
+        f"Góc video: {pattern.get('name')} - {pattern.get('hook_formula')}\n"
         f"Link chính: {primary_display_url or 'chưa có'}\n"
         f"{disclosure}"
     )
@@ -6951,6 +7096,8 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
         },
         "related_links": related_links,
         "affiliate_bundle": affiliate_bundle,
+        "video_pattern": pattern,
+        "proof_assets_required": pattern.get("proof_assets_required") or [],
         "placement_plan": (affiliate_bundle or {}).get("placement_plan", {}),
         "caption": caption,
         "pinned_comment": pinned_comment,
@@ -6973,6 +7120,7 @@ def build_creative_test_prompt(job, count=5):
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
         note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
     ) = job
+    pattern = select_video_pattern(job, 45)
     return (
         "Bạn là creative strategist cho video affiliate ngắn. Tạo nhiều biến thể hook/caption/CTA để A/B test, "
         "không spam, không cam kết thu nhập phi thực tế, không mạo danh, không dùng nội dung nhạy cảm trái phép. "
@@ -6984,10 +7132,12 @@ def build_creative_test_prompt(job, count=5):
         f"Topic: {topic or '-'}\n"
         f"Affiliate: {network or '-'} - {product_name or '-'}\n"
         f"Affiliate URL: {affiliate_url or 'chưa có'}\n"
+        f"Video pattern ưu tiên:\n{format_video_pattern_for_prompt(pattern)}\n"
         f"Brief:\n{brief or 'Chưa có brief'}\n\n"
         "Trả về JSON thuần là một mảng. Mỗi phần tử có key: "
         "variant_label, hook, script_angle, caption, cta, hashtags, creative_score, note. "
-        "creative_score là 0-100 dựa trên khả năng giữ chân 3 giây đầu, độ khớp affiliate và độ an toàn nền tảng."
+        "creative_score là 0-100 dựa trên khả năng giữ chân 3 giây đầu, độ khớp affiliate, proof có thể tạo, "
+        "vị trí gắn link và độ an toàn nền tảng."
     )
 
 def fallback_creative_variants(job, count=5):
@@ -6997,10 +7147,11 @@ def fallback_creative_variants(job, count=5):
     ) = job
     base_topic = topic or "sản phẩm affiliate"
     product = product_name or "sản phẩm đề xuất"
+    pattern = select_video_pattern(job, 45)
     templates = [
-        ("A", f"Bạn đang bỏ lỡ mẹo này về {base_topic}", "pain-point -> demo nhanh -> giải pháp", f"Một mẹo nhỏ giúp xử lý {base_topic}. Xem kỹ phần cuối để lấy link.", f"Xem link {product} trong mô tả/bio.", "#AI #congnghe #review #affiliate"),
+        ("A", f"Đây là cách tôi kiểm tra {base_topic} trước khi gắn link", f"{pattern.get('id')} -> proof -> affiliate bundle", f"Một quy trình ngắn để chọn đúng {product}. Xem comment ghim để so sánh link.", f"Xem link {product} và lựa chọn liên quan trong comment ghim.", "#AI #congnghe #review #affiliate"),
         ("B", f"Trước khi mua {product}, xem 3 điểm này", "checklist review -> ưu/nhược -> ai nên mua", f"3 điểm cần biết trước khi chọn {product}.", "Lưu lại và mở link khi cần so sánh.", "#review #muasamthongminh #deal"),
-        ("C", f"Tôi thử biến {base_topic} thành quy trình 60 giây", "case study -> kết quả -> công cụ", f"Quy trình 60 giây để áp dụng {base_topic} vào công việc thật.", "Muốn làm theo thì bắt đầu từ link trong bio.", "#workflow #creator #AItools"),
+        ("C", f"Tôi biến {base_topic} thành một workflow dễ làm", "proof-first -> 3 bước -> công cụ", f"Workflow 60 giây để áp dụng {base_topic} vào việc thật.", "Muốn làm theo thì bắt đầu từ link trong caption/comment.", "#workflow #creator #AItools"),
         ("D", f"Sai lầm phổ biến khi dùng {base_topic}", "mistake -> correction -> product placement", f"Nhiều người dùng sai bước này khi bắt đầu với {base_topic}.", "Kiểm tra checklist và link gợi ý trước khi mua.", "#meohay #tiktokshop #congnghe"),
         ("E", f"Setup tối giản cho người mới bắt đầu {base_topic}", "starter kit -> budget -> next step", f"Setup tối giản, dễ làm, không cần quá nhiều công cụ.", "Chọn món phù hợp trong link affiliate, không cần mua quá tay.", "#setup #creatorlife #shopee"),
     ]
@@ -10455,6 +10606,7 @@ def operator_category_keyboard(category):
             ("🧠 Job context", "jobcontext"), ("🚦 Job ready", "jobready"),
             ("🛡 Review gate", "review"),
             ("🧪 Creative test", "creative"), ("🏁 Creative report", "creativereport"),
+            ("🎞 Video patterns", "videopatterns"),
         ],
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
@@ -10824,6 +10976,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "publisherstatus": "/publisher_status\nGET /api/operator/publisher/status",
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
+        "videopatterns": "/video_patterns\nGET /api/operator/video-patterns",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
@@ -11061,6 +11214,25 @@ async def cmd_creative_report(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     lines.append("\nGhi dữ liệu: <code>/performance_add job=%s variant=&lt;ID&gt; type=click value=...</code>" % job_id)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_video_patterns(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    patterns = video_pattern_bank_data()
+    lines = ["🎞 <b>VIDEO PATTERN BANK</b>\n"]
+    for key, item in patterns.items():
+        lines.append(
+            f"• <code>{html.escape(key)}</code> — <b>{html.escape(item.get('name') or '-')}</b>\n"
+            f"  Hook: {html.escape(item.get('hook_formula') or '-')}\n"
+            f"  Goals: <code>{html.escape(', '.join(item.get('scene_goals') or []))}</code>"
+        )
+    lines.append(
+        "\nCác pattern này tự được gắn vào <code>/creative_test</code>, <code>/manifest</code>, "
+        "<code>/task_plan</code>, <code>/publish_pack</code> và API make-video."
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 
 async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -13717,6 +13889,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("creative_variants", cmd_creative_variants))
     tg_app.add_handler(CommandHandler("creative_select", cmd_creative_select))
     tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
+    tg_app.add_handler(CommandHandler("video_patterns", cmd_video_patterns))
     tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
     tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
     tg_app.add_handler(CommandHandler("manifest_handoff", cmd_manifest_handoff))
@@ -14075,6 +14248,15 @@ async def api_operator_worker_spec(request: Request):
 async def api_operator_toolchain(request: Request):
     verify_operator_api_token(request)
     return {"ok": True, "toolchain": operator_toolchain_data()}
+
+@fastapi_app.get("/api/operator/video-patterns")
+async def api_operator_video_patterns(request: Request):
+    verify_operator_api_token(request)
+    return {
+        "ok": True,
+        "patterns": video_pattern_bank_data(),
+        "selection_rule": "Bot tự chọn theo topic/platform/duration; worker có thể đọc để dựng đúng format, proof và CTA.",
+    }
 
 @fastapi_app.get("/api/operator/tool-readiness")
 async def api_operator_tool_readiness(request: Request):
