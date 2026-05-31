@@ -56,6 +56,8 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/campaign_stats`: thống kê campaign/video job.
 - `/channel_add platform=... name=... account=... focus=... audience=... slots=2/day`: lưu kênh/tài khoản nội bộ.
 - `/channels`: liệt kê kênh/tài khoản nội bộ.
+- `/channel_publish_set id=<CHANNEL_ID> mode=manual|api token_env=... page_id=...`: cấu hình khả năng đăng thủ công/API cho kênh, chỉ lưu tên biến môi trường token.
+- `/publish_readiness`: kiểm tra kênh nào sẵn sàng đăng thủ công hoặc đã đủ cấu hình API cơ bản.
 - `/affiliate_add network=... product=... niche=... url=... note=...`: lưu link affiliate Shopee/Lazada/TikTok hoặc sàn khác.
 - `/affiliates`: liệt kê link affiliate nội bộ.
 - `/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=...`: tạo lịch nội dung theo kênh.
@@ -97,5 +99,6 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Trend search là admin-only, dùng để tìm trend mới trước khi tạo video; bot lưu trend candidate, tạo lịch/job từ trend và vẫn yêu cầu admin kiểm duyệt trước khi đăng.
 - Review gate là admin-only, dùng làm chốt kiểm duyệt trước khi đăng; job đạt có thể chuyển sang `ready`, job rủi ro chuyển `blocked`.
 - Publish queue là admin-only, dùng để gom job đã duyệt vào hàng đợi đăng thủ công hoặc chuẩn bị sẵn điểm nối API/OAuth chính thức.
+- Auto-post readiness là admin-only, dùng để kiểm tra channel nào có thể đăng thủ công, channel nào đã có `token_env` trỏ tới biến môi trường trên server, và channel nào còn thiếu cấu hình. Secret không lưu trong SQLite.
 - Tool routing giữ đúng ý tưởng gốc: ưu tiên công cụ tốt/có phí trước, sau đó mới fallback sang công cụ ít phí/miễn phí. Gemini → OpenAI cho chat, Fish Audio HD → Edge TTS cho voice, RemoveBG HD → Cutout.pro cho tách nền. Khi gói cao cấp lỗi/quota, bot hoàn phần chênh lệch, chuyển sang gói dự phòng và báo admin kiểm tra quota/số dư/API key.
 - Với AI influencer/người mẫu AI: chỉ dùng nhân vật tự tạo hoặc người thật có đồng ý rõ ràng, đủ 18 tuổi; không dùng để giả mạo, lừa đảo hoặc tạo nội dung vi phạm nền tảng/pháp luật.

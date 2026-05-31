@@ -357,6 +357,9 @@ def init_db():
         "social_channels": [
             ("notes", "TEXT"),
             ("status", "TEXT DEFAULT 'active'"),
+            ("publish_mode", "TEXT DEFAULT 'manual'"),
+            ("token_env", "TEXT"),
+            ("page_id", "TEXT"),
         ],
         "affiliate_links": [
             ("commission_note", "TEXT"),
@@ -745,14 +748,14 @@ def campaign_stats(owner_id):
     conn.close()
     return total_campaigns, job_counts, recent_jobs
 
-def create_social_channel(owner_id, platform, channel_name, account_label="", topic_focus="", audience="", posting_slots="", notes="") -> int:
+def create_social_channel(owner_id, platform, channel_name, account_label="", topic_focus="", audience="", posting_slots="", notes="", publish_mode="manual", token_env="", page_id="") -> int:
     conn = db_connect()
     c = conn.cursor()
     c.execute(
         """INSERT INTO social_channels
-        (owner_id, platform, channel_name, account_label, topic_focus, audience, posting_slots, status, notes, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (str(owner_id), platform, channel_name, account_label, topic_focus, audience, posting_slots, "active", notes, now_text())
+        (owner_id, platform, channel_name, account_label, topic_focus, audience, posting_slots, status, notes, publish_mode, token_env, page_id, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (str(owner_id), platform, channel_name, account_label, topic_focus, audience, posting_slots, "active", notes, publish_mode, token_env, page_id, now_text())
     )
     channel_id = c.lastrowid
     conn.commit()
@@ -782,6 +785,59 @@ def get_social_channel(channel_id, owner_id):
     row = c.fetchone()
     conn.close()
     return row
+
+def set_social_publish_config(owner_id, channel_id, publish_mode=None, token_env=None, page_id=None):
+    updates = []
+    params = []
+    if publish_mode:
+        updates.append("publish_mode=?")
+        params.append(publish_mode)
+    if token_env is not None:
+        updates.append("token_env=?")
+        params.append(token_env)
+    if page_id is not None:
+        updates.append("page_id=?")
+        params.append(page_id)
+    if not updates:
+        return False
+    params.extend([channel_id, str(owner_id)])
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(f"UPDATE social_channels SET {', '.join(updates)} WHERE id=? AND owner_id=?", params)
+    changed = c.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0
+
+def list_social_publish_readiness(owner_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, platform, channel_name, account_label, status, publish_mode, token_env, page_id
+        FROM social_channels WHERE owner_id=? ORDER BY id DESC""",
+        (str(owner_id),)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def channel_publish_readiness(row):
+    cid, platform, channel_name, account_label, status, publish_mode, token_env, page_id = row
+    publish_mode = publish_mode or "manual"
+    if publish_mode == "manual":
+        return "manual_ready", "Đăng thủ công, không cần token."
+    if publish_mode != "api":
+        return "blocked", f"publish_mode không hợp lệ: {publish_mode}"
+    if not token_env:
+        return "missing_token_env", "Chưa khai báo tên biến môi trường token."
+    if not _env(token_env):
+        return "missing_secret", f"Biến môi trường {token_env} chưa có giá trị trên server."
+    platform_l = (platform or "").lower()
+    if platform_l in {"facebook", "fb", "meta"} and not page_id:
+        return "missing_page_id", "Facebook/Meta API cần page_id hoặc account id."
+    if platform_l in {"onlyfans"}:
+        return "manual_required", "OnlyFans không có API public ổn định; giữ manual hoặc tool chính thức được phép."
+    return "api_ready", "Đã có cấu hình API cơ bản. Vẫn cần OAuth/quyền đăng chính thức của nền tảng."
 
 def create_affiliate_link(owner_id, network, product_name, niche="", url="", commission_note="") -> int:
     conn = db_connect()
@@ -2182,6 +2238,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /operator — Ra lệnh tạo video một bước",
             "• /operator_next — Điều phối stage tiếp theo",
             "• /operator_dashboard — Tổng quan vận hành",
+            "• /publish_readiness — Kiểm tra sẵn sàng auto-post",
+            "• /channel_publish_set — Cấu hình mode/token kênh",
             "• /trend_search — Tìm trend mới để làm video",
             "• /handoff — Prompt giao việc cho AI/tool khác",
             "• /publish_pack — Gói caption/link để đăng",
@@ -2523,19 +2581,25 @@ async def cmd_channel_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audience = data.get("audience") or data.get("khach") or ""
     slots = data.get("slots") or data.get("lich") or "2/day"
     notes = data.get("notes") or data.get("note") or ""
+    publish_mode = (data.get("mode") or data.get("publish_mode") or "manual").lower()
+    token_env = data.get("token_env") or data.get("token") or ""
+    page_id = data.get("page_id") or data.get("page") or ""
     if not platform or not name:
         return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/channel_add platform=tiktok name=TechVN account=tk1 focus=AI tools audience=creator slots=2/day</code>",
+            "⚠️ Cú pháp: <code>/channel_add platform=tiktok name=TechVN account=tk1 focus=AI tools audience=creator slots=2/day mode=manual</code>",
             parse_mode="HTML"
         )
-    channel_id = create_social_channel(update.effective_user.id, platform, name, account, focus, audience, slots, notes)
+    if publish_mode not in {"manual", "api"}:
+        return await update.message.reply_text("⚠️ mode hợp lệ: <code>manual</code> hoặc <code>api</code>", parse_mode="HTML")
+    channel_id = create_social_channel(update.effective_user.id, platform, name, account, focus, audience, slots, notes, publish_mode, token_env, page_id)
     await update.message.reply_text(
         f"✅ <b>Đã thêm channel #{channel_id}</b>\n"
         f"• Nền tảng: <code>{html.escape(platform)}</code>\n"
         f"• Kênh: <b>{html.escape(name)}</b>\n"
         f"• Tài khoản: <code>{html.escape(account or 'chưa ghi')}</code>\n"
         f"• Chủ đề: {html.escape(focus or 'chưa ghi')}\n"
-        f"• Lịch: <code>{html.escape(slots)}</code>",
+        f"• Lịch: <code>{html.escape(slots)}</code>\n"
+        f"• Publish mode: <code>{html.escape(publish_mode)}</code>",
         parse_mode="HTML"
     )
 
@@ -2551,6 +2615,58 @@ async def cmd_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• #{cid} | <code>{html.escape(platform)}</code> | <b>{html.escape(name)}</b> | "
             f"{html.escape(account or '-') } | {html.escape(focus or '-') } | {html.escape(slots or '-') } | {status}"
         )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_channel_publish_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        channel_id = int(data.get("id") or data.get("channel") or data.get("kenh") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/channel_publish_set id=1 mode=api token_env=TIKTOK_ACCESS_TOKEN page_id=...</code>",
+            parse_mode="HTML"
+        )
+    mode = (data.get("mode") or data.get("publish_mode") or "").lower()
+    if mode and mode not in {"manual", "api"}:
+        return await update.message.reply_text("⚠️ mode hợp lệ: <code>manual</code> hoặc <code>api</code>", parse_mode="HTML")
+    token_env = data.get("token_env") or data.get("token")
+    page_id = data.get("page_id") or data.get("page")
+    if not (mode or token_env is not None or page_id is not None):
+        return await update.message.reply_text("⚠️ Cần ít nhất một trường: mode, token_env hoặc page_id.", parse_mode="HTML")
+    changed = set_social_publish_config(update.effective_user.id, channel_id, mode or None, token_env, page_id)
+    if not changed:
+        return await update.message.reply_text("❌ Không tìm thấy channel hoặc không có quyền.")
+    await update.message.reply_text(
+        f"✅ Đã cập nhật publish config cho channel #{channel_id}\n"
+        f"• mode=<code>{html.escape(mode or 'giữ nguyên')}</code>\n"
+        f"• token_env=<code>{html.escape(token_env or 'giữ nguyên')}</code>\n"
+        f"• page_id=<code>{html.escape(page_id or 'giữ nguyên')}</code>",
+        parse_mode="HTML"
+    )
+
+async def cmd_publish_readiness(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    rows = list_social_publish_readiness(update.effective_user.id)
+    if not rows:
+        return await update.message.reply_text("📭 Chưa có channel. Tạo bằng /channel_add.")
+    lines = ["🧪 <b>AUTO-POST READINESS</b>\n"]
+    for row in rows:
+        cid, platform, channel_name, account_label, status, publish_mode, token_env, page_id = row
+        readiness, reason = channel_publish_readiness(row)
+        icon = "✅" if readiness in {"manual_ready", "api_ready"} else "⚠️"
+        lines.append(
+            f"{icon} #{cid} | <code>{html.escape(platform or '-')}</code> | "
+            f"{html.escape(channel_name or '-')} / {html.escape(account_label or 'main')}\n"
+            f"  mode=<code>{html.escape(publish_mode or 'manual')}</code> "
+            f"token_env=<code>{html.escape(token_env or '-')}</code> page=<code>{html.escape(page_id or '-')}</code>\n"
+            f"  readiness=<b>{html.escape(readiness)}</b> — {html.escape(reason)}"
+        )
+    lines.append(
+        "\nCấu hình: <code>/channel_publish_set id=&lt;ID&gt; mode=api token_env=TIKTOK_ACCESS_TOKEN page_id=...</code>"
+    )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3024,6 +3140,10 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🛡 Review gate", callback_data="opmenu|review")
         ],
         [
+            InlineKeyboardButton("🧪 Auto-post ready", callback_data="opmenu|readiness"),
+            InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")
+        ],
+        [
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
             InlineKeyboardButton("💰 Performance", callback_data="opmenu|performance")
         ],
@@ -3056,6 +3176,8 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
+        "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
+        "publishqueue": "/publish_queue\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
         "review": "/review_gate job=<JOB_ID>",
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
@@ -4127,6 +4249,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("campaign_stats", cmd_campaign_stats))
     tg_app.add_handler(CommandHandler("channel_add", cmd_channel_add))
     tg_app.add_handler(CommandHandler("channels",    cmd_channels))
+    tg_app.add_handler(CommandHandler("channel_publish_set", cmd_channel_publish_set))
+    tg_app.add_handler(CommandHandler("publish_readiness", cmd_publish_readiness))
     tg_app.add_handler(CommandHandler("affiliate_add", cmd_affiliate_add))
     tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
