@@ -78,6 +78,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/affiliate_profile id=<AFF_ID> price=... rate=... audience=... allowed=... blocked=... score=...`: cập nhật hồ sơ, claim được phép và claim cấm cho sản phẩm affiliate.
 - `/affiliate_match niche=... platform=tiktok trend=...`: xếp hạng affiliate phù hợp với trend/niche để chọn link trước khi tạo video.
 - `/affiliate_related aff=<AFF_ID>` hoặc `/affiliate_related brand=Samsung niche=điện thoại limit=12`: tìm link cùng brand/nhóm sản phẩm, gồm các cặp Android/iOS, để chèn thêm vào caption, comment ghim, status hoặc mô tả video.
+- `/affiliate_bundle aff=<AFF_ID> job=<JOB_ID> platform=tiktok`: xuất một gói link chính + link liên quan theo caption/comment ghim/bio/status/reply comment, mỗi vị trí có tracking `src` riêng để đo hiệu quả.
 - `/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=...`: tạo hook, angle, outline, CTA và rủi ro kiểm duyệt cho video ngắn từ một link affiliate đã lưu.
 - `/affiliate_report days=30 limit=15`: báo cáo link affiliate nào có job, bài đăng, view, click, conversion, doanh thu, chi phí và ROI để quyết định scale.
 - `/affiliate_decisions days=30 platform=tiktok limit=12`: AI Operator phân loại từng link thành `SCALE`, `PUBLISH`, `FIX_CTA`, `FIX_OFFER`, `TEST` hoặc `PAUSE_CHECK`, kèm lệnh tiếp theo và link liên quan nên chèn kèm.
@@ -174,6 +175,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/channels`: worker ngoài đọc danh sách kênh, topic focus, posting slots, publish mode và readiness manual/API để chọn nơi đăng.
 - `GET /api/operator/campaigns`: worker ngoài đọc campaign active, niche, platform, affiliate/pay URL để chọn `campaign_id` khi scale.
 - `GET /api/operator/affiliates`: worker ngoài đọc catalog affiliate active, gồm ID, niche, audience, claim được phép/cấm và link để chọn sản phẩm.
+- `GET /api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>`: worker ngoài lấy bundle link affiliate theo từng vị trí đăng, gồm tracking URL riêng cho caption/comment/status/bio để đo nguồn nào hiệu quả nhất.
 - `GET /api/operator/affiliate-report`: worker ngoài đọc hiệu quả theo affiliate gồm job, publish, view, click, conversion, revenue, cost, ROI để chọn link nên scale.
 - `GET /api/operator/tracking-report`: worker ngoài đọc funnel theo affiliate/source/job, gồm CTR, CVR, ROI, revenue và gợi ý scale/fix/pause.
 - `GET /api/operator/scale-plan`: worker ngoài lấy kế hoạch hành động từ funnel để tự gọi scale affiliate, sửa CTA/offer hoặc tạm dừng nguồn kém.

@@ -1806,6 +1806,85 @@ def list_related_affiliate_links(owner_id, affiliate_id=0, brand="", niche="", l
     ranked.sort(key=lambda item: item[0], reverse=True)
     return ranked[:limit]
 
+def build_affiliate_link_bundle(owner_id, affiliate_id=0, job_id=0, brand="", niche="", platform="tiktok", limit=12):
+    platform = (platform or "social").lower()
+    base = get_affiliate_link(affiliate_id, owner_id) if affiliate_id else None
+    auto_selected = False
+    if not base and (brand or niche):
+        matches = list_affiliate_matches(owner_id, niche=niche or brand, trend_text=f"{brand} {niche}", platform=platform, limit=1)
+        if matches:
+            _score, _hits, _blocked, base = matches[0]
+            affiliate_id = base[0]
+            auto_selected = True
+    if affiliate_id and not base:
+        return False, "affiliate_not_found", {}
+
+    related = list_related_affiliate_links(
+        owner_id,
+        affiliate_id=affiliate_id,
+        brand=brand,
+        niche=niche or (base[3] if base else ""),
+        limit=limit,
+    )
+    placements = ["caption", "pinned_comment", "bio", "status", "reply_comment"]
+
+    def link_payload(row, role, score=0, reasons=None):
+        aid, network, product, aff_niche, url, note, status, price_vnd, commission_rate, audience, allowed, blocked, product_score = row
+        tracking = {
+            placement: affiliate_tracking_url(aid, job_id, f"{platform}_{placement}_{role}") or url
+            for placement in placements
+        }
+        return {
+            "id": aid,
+            "role": role,
+            "network": network,
+            "product": product,
+            "niche": aff_niche,
+            "url": url,
+            "tracking": tracking,
+            "recommended_url": tracking["pinned_comment"] or url,
+            "score": int(score or product_score or 0),
+            "reasons": reasons or [],
+            "target_audience": audience,
+            "allowed_claims": allowed,
+            "blocked_claims": blocked,
+        }
+
+    primary = link_payload(base, "primary") if base else None
+    related_links = [
+        link_payload(row, "related", score, reasons[:3])
+        for score, reasons, row in related
+    ]
+    all_links = ([primary] if primary else []) + related_links
+    pinned_lines = []
+    if primary:
+        pinned_lines.append(f"Link chính - {primary['product']}: {primary['tracking']['pinned_comment']}")
+    for item in related_links[:6]:
+        pinned_lines.append(f"{item['product']}: {item['tracking']['pinned_comment']}")
+    caption_links = []
+    if primary:
+        caption_links.append(primary["tracking"]["caption"])
+    return True, "ok", {
+        "job_id": int(job_id or 0),
+        "platform": platform,
+        "auto_selected_primary": auto_selected,
+        "query": {"affiliate_id": affiliate_id, "brand": brand, "niche": niche},
+        "primary": primary,
+        "related_links": related_links,
+        "all_links": all_links,
+        "placement_plan": {
+            "caption": caption_links,
+            "pinned_comment": "\n".join(pinned_lines),
+            "bio": primary["tracking"]["bio"] if primary else "",
+            "status": "\n".join([item["tracking"]["status"] for item in all_links[:8]]),
+            "reply_comment": "\n".join([item["tracking"]["reply_comment"] for item in related_links[:5]]),
+        },
+        "performance_rule": (
+            "Mỗi placement có src riêng trong tracking URL. Sau khi đăng, dùng tracking_report/affiliate_report "
+            "để so sánh caption, pinned_comment, bio, status và reply_comment."
+        ),
+    }
+
 def format_related_affiliate_links(related, max_items=8):
     lines = []
     for score, reasons, row in related[:max_items]:
@@ -2492,12 +2571,18 @@ def operator_worker_spec_data():
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
-            {"step": 9, "name": "publisher_status", "method": "GET", "url": "/api/operator/publisher/status"},
-            {"step": 10, "name": "publisher_run", "method": "POST", "url": "/api/operator/publisher/run"},
-            {"step": 11, "name": "submit_publish", "method": "POST", "url": "/api/operator/publish/<QUEUE_ID>/complete"},
-            {"step": 12, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
+            {"step": 9, "name": "affiliate_bundle", "method": "GET", "url": "/api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>"},
+            {"step": 10, "name": "publisher_status", "method": "GET", "url": "/api/operator/publisher/status"},
+            {"step": 11, "name": "publisher_run", "method": "POST", "url": "/api/operator/publisher/run"},
+            {"step": 12, "name": "submit_publish", "method": "POST", "url": "/api/operator/publish/<QUEUE_ID>/complete"},
+            {"step": 13, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
         ],
         "payloads": {
+            "affiliate_bundle": {
+                "method": "GET",
+                "url": "/api/operator/affiliate-bundle?affiliate_id=3&job_id=12&platform=tiktok&limit=12",
+                "purpose": "Lấy link chính + link liên quan, mỗi placement có src tracking riêng cho caption/comment/status/bio.",
+            },
             "make_video": {
                 "topic": "đồ công nghệ văn phòng",
                 "platform": "tiktok",
@@ -5885,7 +5970,7 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
                         "job_id": item["job_id"],
                         "caption": pack.get("caption", ""),
                         "tracking_url": (pack.get("primary_affiliate") or {}).get("tracking_url", ""),
-                        "related_links": pack.get("related_affiliates", [])[:6],
+                        "related_links": pack.get("related_links", [])[:6],
                         "disclosure": pack.get("disclosure", ""),
                     })
             else:
@@ -8363,6 +8448,68 @@ async def cmd_affiliate_related(update: Update, context: ContextTypes.DEFAULT_TY
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_affiliate_bundle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        affiliate_id = int(data.get("id") or data.get("aff") or (context.args[0] if context.args and context.args[0].isdigit() else 0))
+    except (TypeError, ValueError):
+        affiliate_id = 0
+    try:
+        job_id = int(data.get("job") or data.get("job_id") or 0)
+    except (TypeError, ValueError):
+        job_id = 0
+    brand = data.get("brand") or data.get("thuonghieu") or ""
+    niche = data.get("niche") or data.get("ngach") or data.get("topic") or data.get("chude") or ""
+    platform = data.get("platform") or data.get("nen") or "tiktok"
+    try:
+        limit = max(3, min(int(data.get("limit") or 12), 30))
+    except ValueError:
+        limit = 12
+    if not affiliate_id and not brand and not niche:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/affiliate_bundle aff=&lt;AFF_ID&gt; job=&lt;JOB_ID&gt; platform=tiktok</code> hoặc "
+            "<code>/affiliate_bundle brand=Samsung niche=điện thoại platform=tiktok</code>",
+            parse_mode="HTML"
+        )
+    ok, reason, bundle = build_affiliate_link_bundle(
+        update.effective_user.id,
+        affiliate_id=affiliate_id,
+        job_id=job_id,
+        brand=brand,
+        niche=niche,
+        platform=platform,
+        limit=limit,
+    )
+    if not ok:
+        return await update.message.reply_text("❌ Không tìm thấy affiliate phù hợp để tạo bundle.")
+    primary = bundle.get("primary") or {}
+    lines = [
+        "🧺 <b>AFFILIATE LINK BUNDLE</b>",
+        f"• Platform: <code>{html.escape(bundle.get('platform') or '-')}</code> | Job: <code>{job_id or 'chưa gắn'}</code>",
+        f"• Link chính: #{primary.get('id') or '-'} | <b>{html.escape(primary.get('product') or '-')}</b>",
+        f"• Auto chọn link chính: <b>{'YES' if bundle.get('auto_selected_primary') else 'NO'}</b>",
+        "",
+        "<b>Caption link:</b>",
+        "<pre>" + html_pre("\n".join((bundle.get("placement_plan") or {}).get("caption") or []) or "-", 700) + "</pre>",
+        "<b>Comment ghim:</b>",
+        "<pre>" + html_pre((bundle.get("placement_plan") or {}).get("pinned_comment") or "-", 1400) + "</pre>",
+        "<b>Status/mô tả/bio:</b>",
+        "<pre>" + html_pre((bundle.get("placement_plan") or {}).get("status") or "-", 1200) + "</pre>",
+        "",
+        "<b>Link liên quan:</b>",
+    ]
+    for item in (bundle.get("related_links") or [])[:8]:
+        lines.append(
+            f"• #{item['id']} | score=<b>{item['score']}</b> | <code>{html.escape(item.get('network') or '-')}</code> / "
+            f"{html.escape(item.get('product') or '-')}\n"
+            f"  src: <code>{html.escape(item['tracking'].get('pinned_comment') or item.get('url') or '-')}</code>\n"
+            f"  lý do: {html.escape('; '.join(item.get('reasons') or []) or '-')}"
+        )
+    lines.append("\nBáo cáo hiệu quả: <code>/tracking_report days=30</code> hoặc <code>/affiliate_report days=30</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_calendar_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -9382,7 +9529,7 @@ def operator_category_keyboard(category):
             ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
             ("🚀 Scale thành video", "affscale"), ("💰 Báo cáo affiliate", "affreport"),
             ("🧠 Quyết định scale", "affdecisions"), ("🔎 Link liên quan", "affrelated"),
-            ("✏️ Cập nhật hồ sơ", "affprofile"),
+            ("🧺 Link bundle", "affbundle"), ("✏️ Cập nhật hồ sơ", "affprofile"),
         ],
         "cat_schedule": [
             ("📡 Kênh", "channels"), ("➕ Thêm kênh", "channeladd"),
@@ -9493,6 +9640,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Danh sách kênh: <code>GET {html.escape(base_url)}/api/operator/channels</code>",
         f"• Danh sách campaign: <code>GET {html.escape(base_url)}/api/operator/campaigns</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
+        f"• Bundle link affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-bundle?affiliate_id=1&amp;job_id=12</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
         f"• Tracking funnel: <code>GET {html.escape(base_url)}/api/operator/tracking-report</code>",
         f"• Scale plan: <code>GET {html.escape(base_url)}/api/operator/scale-plan</code>",
@@ -9715,6 +9863,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "affideas": "/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=trend đang nóng",
         "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
         "affrelated": "/affiliate_related aff=<AFF_ID>\n/affiliate_related brand=Samsung niche=điện thoại limit=12",
+        "affbundle": "/affiliate_bundle aff=<AFF_ID> job=<JOB_ID> platform=tiktok\nGET /api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>",
         "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
@@ -12396,6 +12545,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("affiliate_match", cmd_affiliate_match))
     tg_app.add_handler(CommandHandler("affiliate_ideas", cmd_affiliate_ideas))
     tg_app.add_handler(CommandHandler("affiliate_related", cmd_affiliate_related))
+    tg_app.add_handler(CommandHandler("affiliate_bundle", cmd_affiliate_bundle))
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
@@ -13258,6 +13408,35 @@ async def api_operator_affiliates(request: Request, limit: int = 50):
             ) in rows
         ],
         "rule": "Pick an active affiliate id, then call POST /api/operator/affiliate-scale. Keep affiliate claims compliant.",
+    }
+
+@fastapi_app.get("/api/operator/affiliate-bundle")
+async def api_operator_affiliate_bundle(
+    request: Request,
+    affiliate_id: int = 0,
+    job_id: int = 0,
+    brand: str = "",
+    niche: str = "",
+    platform: str = "tiktok",
+    limit: int = 12,
+):
+    verify_operator_api_token(request)
+    limit = max(3, min(int(limit or 12), 30))
+    ok, reason, bundle = build_affiliate_link_bundle(
+        ADMIN_ID,
+        affiliate_id=affiliate_id,
+        job_id=job_id,
+        brand=(brand or "")[:120],
+        niche=(niche or "")[:240],
+        platform=(platform or "tiktok")[:40],
+        limit=limit,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail=reason)
+    return {
+        "ok": True,
+        **bundle,
+        "rule": "Use this bundle in caption/comment/status/bio. Keep affiliate disclosure and compare performance by src.",
     }
 
 @fastapi_app.get("/api/operator/channels")
