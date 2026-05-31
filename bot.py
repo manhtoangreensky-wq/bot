@@ -259,6 +259,24 @@ def init_db():
         notes TEXT,
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS production_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        calendar_id INTEGER,
+        campaign_id INTEGER,
+        channel_id INTEGER,
+        affiliate_id INTEGER,
+        platform TEXT,
+        topic TEXT,
+        stage TEXT DEFAULT 'brief',
+        status TEXT DEFAULT 'queued',
+        operator_note TEXT,
+        brief_text TEXT,
+        asset_url TEXT,
+        publish_url TEXT,
+        created_at DATETIME,
+        updated_at DATETIME
+    )""")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -304,6 +322,13 @@ def init_db():
         "content_calendar": [
             ("notes", "TEXT"),
             ("status", "TEXT DEFAULT 'planned'"),
+        ],
+        "production_jobs": [
+            ("operator_note", "TEXT"),
+            ("brief_text", "TEXT"),
+            ("asset_url", "TEXT"),
+            ("publish_url", "TEXT"),
+            ("updated_at", "DATETIME"),
         ],
     }.items():
         for col, col_type in columns:
@@ -764,6 +789,130 @@ def list_calendar_slots(owner_id, limit=30):
     conn.close()
     return rows
 
+def get_calendar_slot(slot_id, owner_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT cc.id, cc.owner_id, cc.channel_id, cc.campaign_id, cc.affiliate_id, cc.post_date,
+                  cc.platform, cc.topic, cc.status, cc.notes,
+                  sc.channel_name, sc.account_label, sc.topic_focus, sc.audience,
+                  al.network, al.product_name, al.url, al.commission_note
+        FROM content_calendar cc
+        LEFT JOIN social_channels sc ON sc.id = cc.channel_id
+        LEFT JOIN affiliate_links al ON al.id = cc.affiliate_id
+        WHERE cc.id=? AND cc.owner_id=?""",
+        (slot_id, str(owner_id))
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def create_production_job(owner_id, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, brief_text="", note="") -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO production_jobs
+        (owner_id, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic,
+         stage, status, operator_note, brief_text, asset_url, publish_url, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(owner_id), calendar_id, campaign_id, channel_id, affiliate_id, platform, topic,
+            "brief", "queued", note, brief_text, "", "", now_text(), now_text()
+        )
+    )
+    job_id = c.lastrowid
+    if calendar_id:
+        c.execute("UPDATE content_calendar SET status=? WHERE id=? AND owner_id=?", ("in_production", calendar_id, str(owner_id)))
+    conn.commit()
+    conn.close()
+    return job_id
+
+def list_production_jobs(owner_id, limit=20):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT pj.id, pj.stage, pj.status, pj.platform, pj.topic, sc.channel_name, al.product_name, pj.updated_at
+        FROM production_jobs pj
+        LEFT JOIN social_channels sc ON sc.id = pj.channel_id
+        LEFT JOIN affiliate_links al ON al.id = pj.affiliate_id
+        WHERE pj.owner_id=?
+        ORDER BY pj.id DESC
+        LIMIT ?""",
+        (str(owner_id), limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_production_job(job_id, owner_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT pj.id, pj.calendar_id, pj.campaign_id, pj.channel_id, pj.affiliate_id, pj.platform, pj.topic,
+                  pj.stage, pj.status, pj.operator_note, pj.brief_text, pj.asset_url, pj.publish_url,
+                  sc.channel_name, sc.account_label, al.network, al.product_name, al.url
+        FROM production_jobs pj
+        LEFT JOIN social_channels sc ON sc.id = pj.channel_id
+        LEFT JOIN affiliate_links al ON al.id = pj.affiliate_id
+        WHERE pj.id=? AND pj.owner_id=?""",
+        (job_id, str(owner_id))
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_production_job(job_id, owner_id, stage=None, status=None, note=None, asset_url=None, publish_url=None):
+    updates = []
+    params = []
+    if stage:
+        updates.append("stage=?")
+        params.append(stage)
+    if status:
+        updates.append("status=?")
+        params.append(status)
+    if note is not None:
+        updates.append("operator_note=?")
+        params.append(note)
+    if asset_url is not None:
+        updates.append("asset_url=?")
+        params.append(asset_url)
+    if publish_url is not None:
+        updates.append("publish_url=?")
+        params.append(publish_url)
+    updates.append("updated_at=?")
+    params.append(now_text())
+    params.extend([job_id, str(owner_id)])
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(f"UPDATE production_jobs SET {', '.join(updates)} WHERE id=? AND owner_id=?", params)
+    changed = c.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0
+
+def build_production_prompt(slot):
+    (
+        slot_id, _, channel_id, campaign_id, affiliate_id, post_date, platform, topic, _, notes,
+        channel_name, account_label, topic_focus, audience, network, product_name, affiliate_url, commission_note
+    ) = slot
+    return (
+        "Bạn là AI Operator điều phối sản xuất video affiliate cho TOAN DAAS. "
+        "Lập brief sản xuất có thể giao cho Claude/Gemini/Runway/Kling/CapCut/FFmpeg, không spam, không mạo danh, "
+        "không hướng dẫn né kiểm duyệt. Nội dung người mẫu/OnlyFans chỉ dùng nhân vật tự tạo hoặc người thật có đồng ý rõ ràng, đủ 18 tuổi.\n\n"
+        f"Calendar slot: #{slot_id}\n"
+        f"Ngày đăng dự kiến: {post_date}\n"
+        f"Nền tảng: {platform}\n"
+        f"Kênh: {channel_name or channel_id} / account={account_label or 'main'}\n"
+        f"Audience: {audience or 'general'}\n"
+        f"Focus: {topic_focus or 'công nghệ'}\n"
+        f"Topic: {topic}\n"
+        f"Campaign ID: {campaign_id or 'chưa gắn'}\n"
+        f"Affiliate: {network or 'chưa gắn'} - {product_name or ''} - {affiliate_url or ''}\n"
+        f"Hoa hồng/ghi chú: {commission_note or notes or 'chưa có'}\n\n"
+        "Trả về tiếng Việt dạng checklist gồm: mục tiêu video, hook 3 giây, kịch bản 45-60s, cảnh quay/visual prompt, "
+        "voice style, caption, hashtag, CTA, vị trí gắn link affiliate, asset cần tạo, bước kiểm duyệt trước đăng, và next action cho admin."
+    )
+
 def slots_per_day(posting_slots: str) -> int:
     digits = "".join(ch for ch in (posting_slots or "") if ch.isdigit())
     if not digits:
@@ -1025,24 +1174,6 @@ class AgentVoice:
         )
         used_fish = False
         try:
-            edge_ok = False
-            try:
-                communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
-                await communicate.save(out)
-                if os.path.exists(out) and os.path.getsize(out) > 0:
-                    edge_ok = True
-            except Exception as e:
-                logger.warning(f"Edge TTS lỗi: {e} — thử Fish Audio...")
-
-            if edge_ok:
-                with open(out, "rb") as f:
-                    await context.bot.send_audio(
-                        chat_id=chat_id, audio=f,
-                        caption=f"🔊 Gói Tiết Kiệm — Tổng hợp giọng nói thành công! (-{VOICE_FREE_COST} Xu)"
-                    )
-                await msg.delete()
-                return False
-
             if FISH_AUDIO_KEY:
                 async with httpx.AsyncClient() as client:
                     res = await client.post(
@@ -1068,11 +1199,21 @@ class AgentVoice:
                             caption=f"🎙️ Gói Cao Cấp — Tổng hợp thành công! (-{cost} Xu)"
                         )
                     await msg.delete()
+                    return True
                 else:
-                    logger.error(f"Fish Audio lỗi {res.status_code}")
-                    await msg.edit_text("❌ Cả hai gói đều gặp lỗi.")
-            else:
-                await msg.edit_text("❌ Edge TTS lỗi và chưa cấu hình FISH_AUDIO_KEY.")
+                    logger.warning(f"Fish Audio lỗi {res.status_code} — fallback Edge TTS")
+
+            communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
+            await communicate.save(out)
+            if os.path.exists(out) and os.path.getsize(out) > 0:
+                with open(out, "rb") as f:
+                    await context.bot.send_audio(
+                        chat_id=chat_id, audio=f,
+                        caption=f"🔊 Gói Tiết Kiệm — Tổng hợp giọng nói thành công! (-{VOICE_FREE_COST} Xu)"
+                    )
+                await msg.delete()
+                return False
+            await msg.edit_text("❌ Cả hai gói đều gặp lỗi.")
 
         except Exception as e:
             logger.error(f"Voice error: {e}")
@@ -1169,14 +1310,7 @@ def consume_free_chat(user_id) -> bool:
 def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup:
     trial = is_trial_account(uid)
     if service == "voice":
-        buttons = [
-            [
-                InlineKeyboardButton(
-                    f"🔊 Gói Tiết Kiệm — -{VOICE_FREE_COST} Xu",
-                    callback_data=f"prov|voice|free|{uid}"
-                )
-            ],
-        ]
+        buttons = []
         if not trial:
             buttons.append([
                 InlineKeyboardButton(
@@ -1184,15 +1318,14 @@ def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup
                     callback_data=f"prov|voice|paid|{uid}"
                 )
             ])
+        buttons.append([
+            InlineKeyboardButton(
+                f"🔊 Gói Tiết Kiệm — -{VOICE_FREE_COST} Xu",
+                callback_data=f"prov|voice|free|{uid}"
+            )
+        ])
     else:
-        buttons = [
-            [
-                InlineKeyboardButton(
-                    f"✂️ Gói Tiết Kiệm — -{IMAGE_FREE_COST} Xu",
-                    callback_data=f"prov|image|free|{uid}"
-                )
-            ],
-        ]
+        buttons = []
         if not trial:
             buttons.append([
                 InlineKeyboardButton(
@@ -1200,6 +1333,12 @@ def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup
                     callback_data=f"prov|image|paid|{uid}"
                 )
             ])
+        buttons.append([
+            InlineKeyboardButton(
+                f"✂️ Gói Tiết Kiệm — -{IMAGE_FREE_COST} Xu",
+                callback_data=f"prov|image|free|{uid}"
+            )
+        ])
     buttons.append([InlineKeyboardButton("❌ Huỷ", callback_data=f"prov|cancel|cancel|{uid}")])
     return InlineKeyboardMarkup(buttons)
 
@@ -1263,43 +1402,74 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Cao Cấp)...</i>", parse_mode="HTML")
             out = f"v_{uid}.mp3"
             ok = False
+            premium_refunded = False
+            fallback_charged = False
             try:
                 if FISH_AUDIO_KEY:
-                    async with httpx.AsyncClient() as client:
-                        res = await client.post(
-                            "https://api.fish.audio/v1/tts",
-                            headers={"Authorization": f"Bearer {FISH_AUDIO_KEY}", "Content-Type": "application/json"},
-                            json={"text": data, "reference_id": "7f0955e88846433e9ecb241357608bf8", "format": "mp3"},
-                            timeout=30.0
-                        )
-                    if res.status_code == 200:
-                        with open(out, "wb") as f:
-                            f.write(res.content)
-                        ok = True
-                        with open(out, "rb") as f:
-                            await context.bot.send_audio(
-                                chat_id=chat_id, audio=f,
-                                caption=f"🎙️ Gói Cao Cấp — Tổng hợp thành công! (-{cost} Xu)"
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            res = await client.post(
+                                "https://api.fish.audio/v1/tts",
+                                headers={"Authorization": f"Bearer {FISH_AUDIO_KEY}", "Content-Type": "application/json"},
+                                json={"text": data, "reference_id": "7f0955e88846433e9ecb241357608bf8", "format": "mp3"},
+                                timeout=30.0
                             )
-                        await query.delete_message()
-                    else:
-                        logger.warning(f"Fish Audio {res.status_code} — fallback Edge TTS")
+                        if res.status_code == 200:
+                            with open(out, "wb") as f:
+                                f.write(res.content)
+                            ok = True
+                            with open(out, "rb") as f:
+                                await context.bot.send_audio(
+                                    chat_id=chat_id, audio=f,
+                                    caption=f"🎙️ Gói Cao Cấp — Tổng hợp thành công! (-{cost} Xu)"
+                                )
+                            await query.delete_message()
+                        else:
+                            logger.warning(f"Fish Audio {res.status_code} — fallback Edge TTS")
+                            await alert_admin(
+                                context,
+                                "Fish Audio HD",
+                                f"HTTP {res.status_code}. Đã fallback Edge TTS cho user={uid}. Kiểm tra quota/số dư/API key."
+                            )
+                    except Exception as e:
+                        logger.error(f"Fish Audio exception: {e} — fallback Edge TTS")
+                        await alert_admin(
+                            context,
+                            "Fish Audio HD",
+                            f"Exception: {str(e)}. Đã fallback Edge TTS cho user={uid}. Kiểm tra quota/số dư/API key."
+                        )
+                else:
+                    await alert_admin(
+                        context,
+                        "Fish Audio HD",
+                        f"Chưa cấu hình FISH_AUDIO_KEY. Đã fallback Edge TTS cho user={uid}."
+                    )
                 if not ok:
                     if cost > 0 and str(uid) != ADMIN_ID:
                         add_credit(uid, cost, "refund", "", "Hoàn phí voice cao cấp do fallback")
+                        premium_refunded = True
                     if not spend_fixed_credit(uid, VOICE_FREE_COST, "spend_voice_free_fallback", "Fallback sang Edge TTS"):
                         await query.edit_message_text(f"❌ Không đủ xu cho gói fallback. Cần ít nhất {VOICE_FREE_COST} Xu.")
                         return
-                    communicate = edge_tts.Communicate(data, "vi-VN-NamMinhNeural")
-                    await communicate.save(out)
-                    with open(out, "rb") as f:
-                        await context.bot.send_audio(
-                            chat_id=chat_id, audio=f,
-                            caption=f"🔊 Gói Tiết Kiệm — Hoàn thành! (-{VOICE_FREE_COST} Xu)"
-                        )
-                    await query.delete_message()
+                    fallback_charged = True
+                    try:
+                        communicate = edge_tts.Communicate(data, "vi-VN-NamMinhNeural")
+                        await communicate.save(out)
+                        with open(out, "rb") as f:
+                            await context.bot.send_audio(
+                                chat_id=chat_id, audio=f,
+                                caption=f"🔊 Gói Tiết Kiệm — Hoàn thành! (-{VOICE_FREE_COST} Xu)"
+                            )
+                        await query.delete_message()
+                    except Exception as e:
+                        logger.error(f"Edge TTS fallback error: {e}")
+                        if str(uid) != ADMIN_ID and fallback_charged:
+                            add_credit(uid, VOICE_FREE_COST, "refund", "", "Hoàn gói voice fallback do lỗi")
+                        await query.edit_message_text("❌ Cả Fish Audio và Edge TTS đều lỗi. Xu đã hoàn lại.")
             except Exception as e:
                 logger.error(f"Voice paid error: {e}")
+                if cost > 0 and str(uid) != ADMIN_ID and not premium_refunded:
+                    add_credit(uid, cost, "refund", "", "Hoàn phí voice cao cấp do lỗi")
                 await query.edit_message_text("❌ Lỗi tổng hợp giọng.")
             finally:
                 if os.path.exists(out):
@@ -1363,8 +1533,24 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         ok = True
                     else:
                         logger.warning(f"RemoveBG {res.status_code} → fallback Cutout")
+                        await alert_admin(
+                            context,
+                            "RemoveBG HD",
+                            f"HTTP {res.status_code}. Đã fallback Cutout.pro cho user={uid}. Kiểm tra quota/số dư/API key."
+                        )
                 except Exception as e:
                     logger.error(f"RemoveBG error: {e}")
+                    await alert_admin(
+                        context,
+                        "RemoveBG HD",
+                        f"Exception: {str(e)}. Đã fallback Cutout.pro cho user={uid}. Kiểm tra quota/số dư/API key."
+                    )
+            else:
+                await alert_admin(
+                    context,
+                    "RemoveBG HD",
+                    f"Chưa cấu hình REMOVEBG_API_KEY. Đã fallback Cutout.pro cho user={uid}."
+                )
             if not ok:
                 if cost > 0 and str(uid) != ADMIN_ID:
                     add_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp do fallback")
@@ -1562,6 +1748,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /affiliates — Danh sách affiliate",
             "• /calendar_plan — Lên lịch nội dung",
             "• /calendar — Xem lịch nội dung",
+            "• /produce — Tạo job sản xuất từ lịch",
+            "• /pipeline — Theo dõi pipeline video",
+            "• /pipeline_set — Cập nhật stage/trạng thái",
             "• /dashboard — Dashboard quản trị",
             "• /checkpayos &lt;mã_đơn&gt; — Kiểm tra lại đơn PayOS",
         ])
@@ -1679,7 +1868,13 @@ async def cmd_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Tài liệu:</b> PDF24, OCR Space, Convertio, Google Drive, Google Forms\n"
         "<b>Ý tưởng & quản lý:</b> Excalidraw, XMind, Cursor, GitHub\n"
         "<b>Marketing/Web:</b> Ahrefs Free Tools, Framer\n\n"
-        "💡 Gửi yêu cầu cụ thể, bot sẽ gợi ý quy trình dùng công cụ phù hợp."
+        "⚙️ <b>Stack đang chạy trong bot:</b>\n"
+        "• Chat: Gemini → fallback OpenAI\n"
+        "• Voice: Fish Audio HD → fallback Edge TTS + hoàn chênh lệch\n"
+        "• Tách nền: RemoveBG HD → fallback Cutout.pro + hoàn chênh lệch\n"
+        "• Bóc băng: Deepgram\n"
+        "• Download: Cobalt\n\n"
+        "💡 Nguyên tắc: ưu tiên công cụ tốt nhất trước; nếu lỗi/quota thì chuyển công cụ dự phòng và ghi refund."
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -2036,6 +2231,181 @@ async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  camp=<code>{campaign_id or '-'}</code> aff=<code>{affiliate_id or '-'}</code>"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_produce(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    if not context.args:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/produce slot=&lt;calendar_id&gt;</code>\n"
+            "Ví dụ: <code>/produce slot=12</code>",
+            parse_mode="HTML"
+        )
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        slot_id = int(data.get("slot") or data.get("calendar") or data.get("id") or context.args[0])
+    except (TypeError, ValueError):
+        return await update.message.reply_text("⚠️ Thiếu <code>slot=&lt;calendar_id&gt;</code>", parse_mode="HTML")
+    slot = get_calendar_slot(slot_id, update.effective_user.id)
+    if not slot:
+        return await update.message.reply_text("❌ Không tìm thấy lịch nội dung hoặc không có quyền.")
+    brief = ""
+    if gemini_client or openai_client:
+        prompt = build_production_prompt(slot)
+        brief = AgentGemini.chat(
+            "Bạn là AI Operator trưởng, lập lệnh sản xuất video affiliate hợp pháp và có bước kiểm duyệt.",
+            prompt,
+            update.effective_user.id,
+            is_json=False
+        )
+    else:
+        brief = "Chưa cấu hình AI Provider. Job đã được tạo, admin bổ sung brief thủ công ở ghi chú."
+    (
+        _, _, channel_id, campaign_id, affiliate_id, _, platform, topic, _, notes,
+        channel_name, account_label, _, _, network, product_name, affiliate_url, _
+    ) = slot
+    job_id = create_production_job(
+        update.effective_user.id,
+        slot_id,
+        campaign_id or 0,
+        channel_id or 0,
+        affiliate_id or 0,
+        platform or "",
+        topic or "",
+        brief,
+        notes or ""
+    )
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎙 Voice", callback_data=f"pipe|stage|voice|{job_id}"),
+            InlineKeyboardButton("🎞 Edit", callback_data=f"pipe|stage|edit|{job_id}"),
+            InlineKeyboardButton("✅ Review", callback_data=f"pipe|stage|review|{job_id}")
+        ],
+        [
+            InlineKeyboardButton("🚀 Published", callback_data=f"pipe|status|published|{job_id}"),
+            InlineKeyboardButton("⛔ Blocked", callback_data=f"pipe|status|blocked|{job_id}")
+        ]
+    ])
+    await update.message.reply_text(
+        f"🎬 <b>PRODUCTION JOB #{job_id}</b>\n"
+        f"• Slot: <code>#{slot_id}</code>\n"
+        f"• Kênh: <b>{html.escape(channel_name or '-')}</b> / <code>{html.escape(account_label or 'main')}</code>\n"
+        f"• Nền tảng: <code>{html.escape(platform or '-')}</code>\n"
+        f"• Affiliate: <code>{html.escape((network or '-') + ' / ' + (product_name or '-'))}</code>\n"
+        f"• Link: <code>{html.escape(affiliate_url or 'chưa có')}</code>\n"
+        f"• Stage: <b>brief</b> | Status: <b>queued</b>\n\n"
+        f"<pre>{html_pre(brief)}</pre>",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+async def cmd_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    if context.args:
+        try:
+            job_id = int(context.args[0])
+        except ValueError:
+            job_id = 0
+        if job_id:
+            job = get_production_job(job_id, update.effective_user.id)
+            if not job:
+                return await update.message.reply_text("❌ Không tìm thấy production job.")
+            (
+                jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+                note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+            ) = job
+            return await update.message.reply_text(
+                f"🎬 <b>PRODUCTION JOB #{jid}</b>\n"
+                f"• Calendar: <code>{calendar_id or '-'}</code> | Campaign: <code>{campaign_id or '-'}</code>\n"
+                f"• Channel: <b>{html.escape(channel_name or '-')}</b> / <code>{html.escape(account_label or 'main')}</code>\n"
+                f"• Platform: <code>{html.escape(platform or '-')}</code>\n"
+                f"• Topic: {html.escape(topic or '-')}\n"
+                f"• Stage: <b>{html.escape(stage or '-')}</b> | Status: <b>{html.escape(status or '-')}</b>\n"
+                f"• Affiliate: <code>{html.escape(network or '-')} / {html.escape(product_name or '-')}</code>\n"
+                f"• Link affiliate: <code>{html.escape(affiliate_url or 'chưa có')}</code>\n"
+                f"• Asset: <code>{html.escape(asset_url or 'chưa có')}</code>\n"
+                f"• Publish: <code>{html.escape(publish_url or 'chưa có')}</code>\n"
+                f"• Note: {html.escape(note or '-')}\n\n"
+                f"<pre>{html_pre(brief or 'Chưa có brief')}</pre>",
+                parse_mode="HTML"
+            )
+    rows = list_production_jobs(update.effective_user.id)
+    if not rows:
+        return await update.message.reply_text("📭 Chưa có production job. Tạo bằng /produce slot=<id>.")
+    lines = ["🎛️ <b>PIPELINE VIDEO</b>\n"]
+    for jid, stage, status, platform, topic, channel_name, product_name, updated_at in rows:
+        lines.append(
+            f"• #{jid} | <b>{html.escape(stage or '-')}</b>/{html.escape(status or '-')} | "
+            f"<code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n"
+            f"  {html.escape(topic or '-')}\n"
+            f"  aff={html.escape(product_name or '-')} | {updated_at or '-'}"
+        )
+    lines.append("\nXem chi tiết: <code>/pipeline &lt;id&gt;</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_pipeline_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("id") or data.get("job") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/pipeline_set id=1 stage=edit status=working asset=https://... publish=https://... note=...</code>",
+            parse_mode="HTML"
+        )
+    stage = data.get("stage")
+    status = data.get("status")
+    note = data.get("note")
+    asset_url = data.get("asset")
+    publish_url = data.get("publish")
+    allowed_stages = {"brief", "script", "voice", "visuals", "edit", "review", "publish", "done"}
+    allowed_status = {"queued", "working", "waiting", "blocked", "ready", "published", "done", "cancelled"}
+    if stage and stage not in allowed_stages:
+        return await update.message.reply_text(f"⚠️ stage hợp lệ: <code>{', '.join(sorted(allowed_stages))}</code>", parse_mode="HTML")
+    if status and status not in allowed_status:
+        return await update.message.reply_text(f"⚠️ status hợp lệ: <code>{', '.join(sorted(allowed_status))}</code>", parse_mode="HTML")
+    changed = update_production_job(job_id, update.effective_user.id, stage, status, note, asset_url, publish_url)
+    if not changed:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    await update.message.reply_text(
+        f"✅ Đã cập nhật pipeline #{job_id}\n"
+        f"• stage=<code>{html.escape(stage or 'giữ nguyên')}</code>\n"
+        f"• status=<code>{html.escape(status or 'giữ nguyên')}</code>",
+        parse_mode="HTML"
+    )
+
+async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if str(query.from_user.id) != ADMIN_ID:
+        return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    parts = query.data.split("|")
+    if len(parts) != 4:
+        return
+    _, field, value, job_id_raw = parts
+    try:
+        job_id = int(job_id_raw)
+    except ValueError:
+        return
+    if field == "stage":
+        update_production_job(job_id, query.from_user.id, stage=value, status="working")
+    elif field == "status":
+        stage = "done" if value in ("published", "done") else None
+        update_production_job(job_id, query.from_user.id, stage=stage, status=value)
+    else:
+        return
+    job = get_production_job(job_id, query.from_user.id)
+    if not job:
+        return await query.edit_message_text("❌ Không tìm thấy production job.")
+    await query.edit_message_text(
+        f"✅ Pipeline #{job_id} đã cập nhật\n"
+        f"Stage: <b>{html.escape(job[7] or '-')}</b>\n"
+        f"Status: <b>{html.escape(job[8] or '-')}</b>\n\n"
+        "Xem chi tiết: /pipeline " + str(job_id),
+        parse_mode="HTML"
+    )
 
 async def handle_video_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -2442,9 +2812,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         img_desc = (
             f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
-            f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{IMAGE_FREE_COST} Xu</b>\n"
-            f"🖼️ <b>Gói Cao Cấp</b> — Chất lượng HD, trừ <b>{final_cost} Xu</b>\n\n"
-            f"<i>If premium engine fails, system auto switch to save engine & refund.</i>"
+            f"🖼️ <b>Gói Cao Cấp</b> — RemoveBG HD, trừ <b>{final_cost} Xu</b>\n"
+            f"✂️ <b>Gói Tiết Kiệm</b> — Cutout.pro, trừ <b>{IMAGE_FREE_COST} Xu</b>\n\n"
+            f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển Cutout.pro và hoàn phần chênh lệch.</i>"
         )
     await update.message.reply_text(img_desc, parse_mode="HTML", reply_markup=kb)
 
@@ -2568,9 +2938,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             voice_desc = (
                 f"🎙️ <b>Chọn gói đọc giọng nói:</b>\n\n"
-                f"🔊 <b>Gói Tiết Kiệm</b> — Giọng chuẩn, trừ <b>{VOICE_FREE_COST} Xu</b>\n"
-                f"🎙️ <b>Gói Cao Cấp</b> — Giọng nhân bản siêu thực, trừ <b>{fish_cost} Xu</b>\n\n"
-                f"<i>If premium voice system crash, system auto fallback to save engine & refund.</i>"
+                f"🎙️ <b>Gói Cao Cấp</b> — Fish Audio HD, trừ <b>{fish_cost} Xu</b>\n"
+                f"🔊 <b>Gói Tiết Kiệm</b> — Edge TTS, trừ <b>{VOICE_FREE_COST} Xu</b>\n\n"
+                f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển Edge TTS và hoàn phần chênh lệch.</i>"
             )
         await update.message.reply_text(voice_desc, parse_mode="HTML", reply_markup=kb)
     elif act == "download":
@@ -2622,6 +2992,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
+    tg_app.add_handler(CommandHandler("produce",     cmd_produce))
+    tg_app.add_handler(CommandHandler("pipeline",    cmd_pipeline))
+    tg_app.add_handler(CommandHandler("pipeline_set", cmd_pipeline_set))
     tg_app.add_handler(CommandHandler("ref",         cmd_ref))
     tg_app.add_handler(CommandHandler("gopy",        cmd_gopy))
     tg_app.add_handler(CommandHandler("add",         cmd_admin_add))
@@ -2639,6 +3012,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_job_callback, pattern=r"^job\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_pipeline_callback, pattern=r"^pipe\|"))
 
     await tg_app.initialize()
     await tg_app.start()
