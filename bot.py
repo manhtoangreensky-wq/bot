@@ -81,9 +81,12 @@ user_memory: dict = {}
 
 # ─── DANH SÁCH GÓI CƯỚC NẠP ────────────────────────────────────────────────────
 PAYMENT_PACKAGES = {
-    "50k": {"amount": 50000, "xu": 500, "text": "Gói Cà Phê: 50.000đ ➔ 500 Xu"},
-    "100k": {"amount": 100000, "xu": 1050, "text": "Gói Tiêu Chuẩn: 100.000đ ➔ 1.050 Xu"},
-    "500k": {"amount": 500000, "xu": 6000, "text": "Gói Doanh Nghiệp: 500.000đ ➔ 6.000 Xu"}
+    "10k":  {"amount":  10000, "xu":  100,  "text": "Gói Dùng Thử: 10.000đ ➔ 100 Xu"},
+    "20k":  {"amount":  20000, "xu":  200,  "text": "Gói Nhỏ: 20.000đ ➔ 200 Xu"},
+    "50k":  {"amount":  50000, "xu":  500,  "text": "Gói Trung: 50.000đ ➔ 500 Xu"},
+    "100k": {"amount": 100000, "xu": 1050,  "text": "Gói Tiêu Chuẩn: 100.000đ ➔ 1.050 Xu (Tặng 50 Xu)"},
+    "200k": {"amount": 200000, "xu": 2150,  "text": "Gói Nâng Cao: 200.000đ ➔ 2.150 Xu (Tặng 150 Xu)"},
+    "500k": {"amount": 500000, "xu": 5500,  "text": "Gói Doanh Nghiệp: 500.000đ ➔ 5.500 Xu (Tặng 500 Xu)"}
 }
 
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
@@ -853,15 +856,21 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 ID Telegram: <code>{uid}</code>\n"
         f"🪙 Số dư hiện tại: <b>{credits} Xu</b>\n\n"
         f"<b>🛒 BẢNG GIÁ (1 Xu = 100đ):</b>\n"
-        f"• Gói Cà Phê: 50.000đ ➔ <b>500 Xu</b>\n"
-        f"• Gói Tiêu Chuẩn: 100.000đ ➔ <b>1.050 Xu</b>\n"
-        f"• Gói Doanh Nghiệp: 500.000đ ➔ <b>6.000 Xu</b>\n\n"
+        f"• Gói Dùng Thử: 10.000đ ➔ <b>100 Xu</b>\n"
+        f"• Gói Nhỏ: 20.000đ ➔ <b>200 Xu</b>\n"
+        f"• Gói Trung: 50.000đ ➔ <b>500 Xu</b>\n"
+        f"• Gói Tiêu Chuẩn: 100.000đ ➔ <b>1.050 Xu</b> 🎁 Tặng 50 Xu\n"
+        f"• Gói Nâng Cao: 200.000đ ➔ <b>2.150 Xu</b> 🎁 Tặng 150 Xu\n"
+        f"• Gói Doanh Nghiệp: 500.000đ ➔ <b>5.500 Xu</b> 🎁 Tặng 500 Xu\n\n"
         f"⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. Không lo điền sai nội dung chuyển khoản.\n\n"
         f"👇 <b>Vui lòng click chọn gói cước mong muốn dưới đây:</b>"
     )
     buttons = [
-        [InlineKeyboardButton("☕ Gói Cà Phê (50k)", callback_data=f"pkg|50k|{uid}")],
+        [InlineKeyboardButton("🧪 Gói Dùng Thử (10k)", callback_data=f"pkg|10k|{uid}")],
+        [InlineKeyboardButton("📦 Gói Nhỏ (20k)", callback_data=f"pkg|20k|{uid}")],
+        [InlineKeyboardButton("⚡ Gói Trung (50k)", callback_data=f"pkg|50k|{uid}")],
         [InlineKeyboardButton("⭐ Gói Tiêu Chuẩn (100k)", callback_data=f"pkg|100k|{uid}")],
+        [InlineKeyboardButton("🚀 Gói Nâng Cao (200k)", callback_data=f"pkg|200k|{uid}")],
         [InlineKeyboardButton("🏢 Gói Doanh Nghiệp (500k)", callback_data=f"pkg|500k|{uid}")]
     ]
     USER_BILL_STATE[uid] = True

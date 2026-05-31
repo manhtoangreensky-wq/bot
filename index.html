@@ -279,17 +279,9 @@ section { position:relative; z-index:2; }
 }
 .submit-btn:hover { background:#4EEADB; transform:translateY(-1px); box-shadow:0 6px 20px rgba(45,212,191,0.25); }
 
-/* Contact box */
-.contact-box {
-  margin-top:32px; padding:20px;
-  border:1px solid var(--teal-border); background:var(--teal-glow);
-}
-.contact-box-label { font-size:10px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--teal); margin-bottom:8px; }
-.contact-box a { font-size:14px; font-weight:500; color:var(--gold); text-decoration:none; }
-
 /* ── NẠP XU SECTION ── */
 #naptien { padding:100px 64px; background:var(--bg-2); }
-.pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; max-width:900px; margin:0 auto 60px; }
+.pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; max-width:1000px; margin:0 auto 60px; }
 .pricing-card {
   background:var(--bg-3); border:1px solid var(--line);
   padding:32px 28px; position:relative; transition:all 0.3s;
@@ -329,6 +321,7 @@ section { position:relative; z-index:2; }
 }
 .payment-bank-label { font-size:10px; color:var(--text-3); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:4px; }
 
+@media(max-width:992px){ .pricing-grid{grid-template-columns:repeat(2,1fr)} }
 @media(max-width:768px){ #naptien{padding:72px 24px} .pricing-grid{grid-template-columns:1fr} .payment-flow{padding:24px 20px} }
 
 /* ── FOOTER ── */
@@ -522,8 +515,32 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   </div>
 
   <div class="pricing-grid reveal">
+    <!-- GÓI 10K DÙNG THỬ -->
     <div class="pricing-card">
-      <div class="pricing-name">Gói Cà Phê</div>
+      <div class="pricing-name">Gói Dùng Thử</div>
+      <div class="pricing-price">10.000đ</div>
+      <div class="pricing-xu">100 Xu</div>
+      <div class="pricing-divider"></div>
+      <div class="pricing-feature">Trải nghiệm Chat AI cơ bản</div>
+      <div class="pricing-feature">Tách nền ~2 ảnh</div>
+      <div class="pricing-feature">Hút video ~20 lần</div>
+    </div>
+
+    <!-- GÓI 20K NHỎ -->
+    <div class="pricing-card">
+      <div class="pricing-name">Gói Nhỏ</div>
+      <div class="pricing-price">20.000đ</div>
+      <div class="pricing-xu">200 Xu</div>
+      <div class="pricing-divider"></div>
+      <div class="pricing-feature">Chat AI cơ bản</div>
+      <div class="pricing-feature">Bóc băng audio ~3 file</div>
+      <div class="pricing-feature">Tách nền ~5 ảnh</div>
+      <div class="pricing-feature">Hút video ~40 lần</div>
+    </div>
+
+    <!-- GÓI 50K TRUNG (CŨ LÀ CÀ PHÊ) -->
+    <div class="pricing-card">
+      <div class="pricing-name">Gói Trung</div>
       <div class="pricing-price">50.000đ</div>
       <div class="pricing-xu">500 Xu</div>
       <div class="pricing-divider"></div>
@@ -532,26 +549,32 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
       <div class="pricing-feature">Tách nền 10–12 ảnh</div>
       <div class="pricing-feature">Hút video ~100 lần</div>
     </div>
+
+    <!-- GÓI 100K TIÊU CHUẨN -->
     <div class="pricing-card featured">
       <div class="pricing-name">Gói Tiêu Chuẩn</div>
       <div class="pricing-price">100.000đ</div>
-      <div class="pricing-xu">1.100 Xu — Tặng 100 Xu</div>
+      <div class="pricing-xu">1.050 Xu — Tặng 50 Xu</div>
       <div class="pricing-divider"></div>
       <div class="pricing-feature">Chat AI + Voice tổng hợp</div>
       <div class="pricing-feature">Bóc băng audio Deepgram Nova-2</div>
       <div class="pricing-feature">Tách nền chất lượng cao</div>
       <div class="pricing-feature">Giảm 10% khi tổng chi &gt; 5.000 Xu</div>
     </div>
+
+    <!-- GÓI 200K NÂNG CAO -->
     <div class="pricing-card">
       <div class="pricing-name">Gói Nâng Cao</div>
       <div class="pricing-price">200.000đ</div>
-      <div class="pricing-xu">2.200 Xu — Tặng 200 Xu</div>
+      <div class="pricing-xu">2.150 Xu — Tặng 150 Xu</div>
       <div class="pricing-divider"></div>
       <div class="pricing-feature">Toàn bộ dịch vụ không giới hạn</div>
       <div class="pricing-feature">Giảm 10% khi tổng chi &gt; 5.000 Xu</div>
       <div class="pricing-feature">Giá trị tốt nhất trong tầm giá</div>
       <div class="pricing-feature">Hỗ trợ kỹ thuật qua Telegram</div>
     </div>
+
+    <!-- GÓI 500K DOANH NGHIỆP -->
     <div class="pricing-card">
       <div class="pricing-name">Gói Doanh Nghiệp</div>
       <div class="pricing-price">500.000đ</div>
