@@ -2225,6 +2225,106 @@ def list_publish_queue(owner_id, limit=15):
     conn.close()
     return rows
 
+def get_publish_queue_item(owner_id, queue_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT pq.id, pq.job_id, pq.channel_id, pq.platform, sc.channel_name, sc.account_label,
+                  pq.mode, pq.status, pq.scheduled_at, pq.publish_url, pq.note, pq.updated_at,
+                  pj.topic, pj.asset_url, pj.brief_text, pj.stage, pj.status,
+                  al.network, al.product_name, al.url
+        FROM publish_queue pq
+        LEFT JOIN social_channels sc ON sc.id = pq.channel_id
+        LEFT JOIN production_jobs pj ON pj.id = pq.job_id
+        LEFT JOIN affiliate_links al ON al.id = pj.affiliate_id
+        WHERE pq.owner_id=? AND pq.id=?""",
+        (str(owner_id), queue_id)
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def next_publish_queue_item(owner_id, platform="", mode=""):
+    where = ["pq.owner_id=?", "pq.status IN ('queued','scheduled')"]
+    params = [str(owner_id)]
+    if platform:
+        where.append("LOWER(pq.platform)=?")
+        params.append(platform.lower())
+    if mode:
+        where.append("LOWER(pq.mode)=?")
+        params.append(mode.lower())
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        f"""SELECT pq.id
+        FROM publish_queue pq
+        WHERE {' AND '.join(where)}
+        ORDER BY
+            CASE pq.status WHEN 'queued' THEN 0 WHEN 'scheduled' THEN 1 ELSE 2 END,
+            pq.scheduled_at ASC,
+            pq.id ASC
+        LIMIT 1""",
+        params
+    )
+    row = c.fetchone()
+    conn.close()
+    return get_publish_queue_item(owner_id, row[0]) if row else None
+
+def serialize_publish_queue_item(row):
+    if not row:
+        return None
+    (
+        qid, job_id, channel_id, platform, channel_name, account_label, mode, status,
+        scheduled_at, publish_url, note, updated_at, topic, asset_url, brief_text,
+        stage, job_status, network, product_name, affiliate_url
+    ) = row
+    assets = list_production_assets(ADMIN_ID, job_id, limit=20)
+    final_asset = next(
+        (
+            {"id": aid, "type": asset_type, "url": url, "file_id": file_id, "note": asset_note, "created_at": created_at}
+            for aid, asset_type, url, file_id, asset_note, created_at in assets
+            if (asset_type or "").lower() == "final_video" and (url or file_id)
+        ),
+        None
+    )
+    variants = list_creative_variants(ADMIN_ID, job_id, limit=20)
+    selected_variant = next((row for row in variants if (row[8] or "").lower() == "selected"), None)
+    caption = selected_variant[5] if selected_variant else ""
+    cta = selected_variant[6] if selected_variant else ""
+    hashtags = selected_variant[7] if selected_variant else ""
+    return {
+        "id": qid,
+        "job_id": job_id,
+        "channel_id": channel_id,
+        "platform": platform,
+        "channel_name": channel_name,
+        "account_label": account_label,
+        "mode": mode,
+        "status": status,
+        "scheduled_at": scheduled_at,
+        "publish_url": publish_url,
+        "note": note,
+        "updated_at": updated_at,
+        "topic": topic,
+        "asset_url": asset_url,
+        "final_video": final_asset,
+        "brief": brief_text,
+        "stage": stage,
+        "job_status": job_status,
+        "affiliate": {
+            "network": network,
+            "product_name": product_name,
+            "url": affiliate_url,
+        },
+        "publish_pack": {
+            "caption": caption,
+            "cta": cta,
+            "hashtags": hashtags,
+            "affiliate_placement": affiliate_url,
+        },
+        "rule": "Publish only approved/queued jobs. Keep affiliate disclosure and platform rules.",
+    }
+
 def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None, note=None):
     updates = []
     params = []
@@ -2953,6 +3053,13 @@ class OperatorTaskCompleteRequest(BaseModel):
     status: str = Field(default="ready", max_length=30)
     output_url: str = Field(default="", max_length=2000)
     note: str = Field(default="", max_length=1200)
+
+class OperatorPublishCompleteRequest(BaseModel):
+    status: str = Field(default="published", max_length=30)
+    publish_url: str = Field(default="", max_length=2000)
+    note: str = Field(default="", max_length=1200)
+    views: int = Field(default=0, ge=0)
+    clicks: int = Field(default=0, ge=0)
 
 class AgentGemini:
     @staticmethod
@@ -7346,6 +7453,70 @@ async def api_operator_job_ready(job_id: int, request: Request):
             {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
             for key, ok, detail, next_cmd in readiness["checks"]
         ],
+    }
+
+@fastapi_app.get("/api/operator/publish/next")
+async def api_operator_publish_next(request: Request, platform: str = "", mode: str = ""):
+    verify_operator_api_token(request)
+    item = next_publish_queue_item(ADMIN_ID, platform=platform, mode=mode)
+    if not item:
+        return {"ok": True, "queue": None, "message": "no queued publish item"}
+    queue_id = item[0]
+    update_publish_queue_item(ADMIN_ID, queue_id, status="publishing", note=f"api_publisher_claim platform={platform or item[3] or '-'}")
+    item = get_publish_queue_item(ADMIN_ID, queue_id)
+    return {
+        "ok": True,
+        "queue": serialize_publish_queue_item(item),
+        "submit_url": f"/api/operator/publish/{queue_id}/complete",
+        "rule": "Return publish_url after posting. If blocked by platform/compliance, submit status=blocked and note.",
+    }
+
+@fastapi_app.post("/api/operator/publish/{queue_id}/complete")
+async def api_operator_publish_complete(queue_id: int, payload: OperatorPublishCompleteRequest, request: Request):
+    verify_operator_api_token(request)
+    status = (payload.status or "published").lower()
+    allowed = {"published", "blocked", "scheduled", "cancelled", "queued"}
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {', '.join(sorted(allowed))}")
+    item = get_publish_queue_item(ADMIN_ID, queue_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Publish queue item not found")
+    changed, job_id = update_publish_queue_item(ADMIN_ID, queue_id, status=status, publish_url=payload.publish_url, note=payload.note)
+    if not changed:
+        raise HTTPException(status_code=400, detail="Publish queue not updated")
+    if status == "published":
+        update_production_job(job_id, ADMIN_ID, stage="done", status="published", note=payload.note or "api_publish_complete", publish_url=payload.publish_url)
+        add_performance_event(ADMIN_ID, job_id, "publish", 1, 0, payload.note or f"queue:{queue_id}")
+        if payload.views > 0:
+            add_performance_event(ADMIN_ID, job_id, "view", payload.views, 0, "api_initial_views")
+        if payload.clicks > 0:
+            add_performance_event(ADMIN_ID, job_id, "click", payload.clicks, 0, "api_initial_clicks")
+    elif status == "blocked":
+        update_production_job(job_id, ADMIN_ID, status="blocked", note=payload.note or f"publish_queue:{queue_id} blocked")
+    elif status == "scheduled":
+        update_production_job(job_id, ADMIN_ID, stage="publish", status="queued", note=payload.note or f"publish_queue:{queue_id} scheduled")
+
+    updated = get_publish_queue_item(ADMIN_ID, queue_id)
+    if tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"📡 <b>OPERATOR API PUBLISH UPDATE</b>\n\n"
+                    f"• Queue: <code>#{queue_id}</code> | Job: <code>#{job_id}</code>\n"
+                    f"• Status: <b>{html.escape(status)}</b>\n"
+                    f"• URL: <code>{html.escape(payload.publish_url or 'không có')}</code>\n"
+                    f"• Views/clicks: <b>{payload.views}</b>/<b>{payload.clicks}</b>\n"
+                    f"• Note: {html.escape(payload.note or '-')}"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Operator publish notify error: {e}")
+    return {
+        "ok": True,
+        "queue": serialize_publish_queue_item(updated),
+        "job_id": job_id,
     }
 
 # ─── WEBHOOK PAYOS (DYNAMIC UPDATED) ─────────────────────────────────────────

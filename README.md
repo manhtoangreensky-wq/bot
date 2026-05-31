@@ -114,6 +114,8 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
 - `POST /api/operator/tasks/{task_id}/complete`: worker ngoài trả `status`, `output_url`, `note`; bot tự lưu asset theo loại task và báo admin.
 - `GET /api/operator/jobs/{job_id}/ready`: worker ngoài kiểm tra job đã đủ điều kiện review/publish chưa.
+- `GET /api/operator/publish/next`: publisher worker lấy bài trong publish queue, hỗ trợ query `platform` và `mode`, rồi chuyển queue sang `publishing`.
+- `POST /api/operator/publish/{queue_id}/complete`: publisher worker trả `status`, `publish_url`, `views`, `clicks`, `note`; bot cập nhật job và performance.
 
 ## Ghi chú kiến trúc
 
@@ -123,7 +125,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - AI Operator v1 mới tạo kế hoạch video/caption/affiliate, lịch nội dung và production pipeline để admin duyệt/điều phối. Auto-post lên TikTok/Facebook/YouTube/OnlyFans cần cấu hình API/OAuth chính thức ở giai đoạn sau.
 - AI Brain là lớp điều khiển admin-only phía trên AI Operator: admin có thể gõ lệnh tự nhiên trong Telegram, bot sẽ phân tích intent và gọi đúng luồng nội bộ thay vì phải nhớ toàn bộ cú pháp.
 - Autopilot là lớp batch admin-only: một lệnh sẽ tìm trend, tạo job và chuẩn bị production bundle gồm creative variant, manifest và task. Video vẫn phải qua task output, review gate và publish queue trước khi đăng thật.
-- Operator API Bridge là cổng bảo mật cho n8n/Claude/tool worker: tool ngoài có thể lấy task, chạy Kling/Fish/CapCut/FFmpeg hoặc quy trình khác, rồi trả output URL về bot. Bridge chỉ bật khi có `OPERATOR_API_TOKEN`.
+- Operator API Bridge là cổng bảo mật cho n8n/Claude/tool worker: tool ngoài có thể lấy task, chạy Kling/Fish/CapCut/FFmpeg hoặc quy trình khác, rồi trả output URL về bot. Publisher worker cũng có thể lấy publish queue, đăng qua API chính thức/thủ công có kiểm soát và trả publish URL về bot. Bridge chỉ bật khi có `OPERATOR_API_TOKEN`.
 - Channel/affiliate/calendar registry là khu vực admin-only để quản lý kênh Facebook/TikTok/OnlyFans, tài khoản phụ, link affiliate và lịch đăng nội dung. Không hiển thị cho khách hàng.
 - Production pipeline là admin-only, dùng để theo dõi từng video qua các stage: `brief`, `script`, `voice`, `visuals`, `edit`, `review`, `publish`, `done`.
 - Performance tracking là admin-only, dùng để ghi view/click/order/revenue/lead sau khi đăng bài và theo dõi kênh hoặc affiliate nào đang tạo tiền.
