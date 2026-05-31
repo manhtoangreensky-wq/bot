@@ -21,6 +21,7 @@ import html
 import uvicorn
 import time
 import random
+import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -290,6 +291,21 @@ def init_db():
         note TEXT,
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS trend_candidates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        niche TEXT,
+        platform TEXT,
+        title TEXT,
+        source_url TEXT,
+        source_name TEXT,
+        summary TEXT,
+        channel_id INTEGER DEFAULT 0,
+        campaign_id INTEGER DEFAULT 0,
+        affiliate_id INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'new',
+        created_at DATETIME
+    )""")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -347,6 +363,12 @@ def init_db():
             ("value", "INTEGER DEFAULT 0"),
             ("amount", "INTEGER DEFAULT 0"),
             ("note", "TEXT"),
+        ],
+        "trend_candidates": [
+            ("channel_id", "INTEGER DEFAULT 0"),
+            ("campaign_id", "INTEGER DEFAULT 0"),
+            ("affiliate_id", "INTEGER DEFAULT 0"),
+            ("status", "TEXT DEFAULT 'new'"),
         ],
     }.items():
         for col, col_type in columns:
@@ -1009,6 +1031,64 @@ def performance_report_data(owner_id, limit=10):
     conn.close()
     return event_totals, channel_totals, recent_events
 
+def save_trend_candidate(owner_id, niche, platform, title, source_url, source_name="", summary="", channel_id=0, campaign_id=0, affiliate_id=0):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO trend_candidates
+        (owner_id, niche, platform, title, source_url, source_name, summary, channel_id, campaign_id, affiliate_id, status, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(owner_id), niche, platform, title, source_url, source_name, summary,
+            int(channel_id or 0), int(campaign_id or 0), int(affiliate_id or 0), "new", now_text()
+        )
+    )
+    trend_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return trend_id
+
+def get_trend_candidate(trend_id, owner_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, niche, platform, title, source_url, source_name, summary, channel_id, campaign_id, affiliate_id, status
+        FROM trend_candidates WHERE id=? AND owner_id=?""",
+        (trend_id, str(owner_id))
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_trend_status(trend_id, owner_id, status):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("UPDATE trend_candidates SET status=? WHERE id=? AND owner_id=?", (status, trend_id, str(owner_id)))
+    conn.commit()
+    conn.close()
+
+async def fetch_google_news_trends(niche, platform="", limit=5):
+    query_parts = [niche, "trend", "mới nhất"]
+    if platform:
+        query_parts.append(platform)
+    query = quote(" ".join(query_parts))
+    url = f"https://news.google.com/rss/search?q={query}&hl=vi&gl=VN&ceid=VN:vi"
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        res = await client.get(url, headers={"User-Agent": "TOAN-DAAS-Bot/1.0"})
+    if res.status_code != 200:
+        raise RuntimeError(f"Google News RSS HTTP {res.status_code}")
+    root = ET.fromstring(res.content)
+    items = []
+    for item in root.findall(".//item")[:limit]:
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        source_node = item.find("source")
+        source_name = source_node.text.strip() if source_node is not None and source_node.text else "Google News"
+        summary = (item.findtext("description") or "").strip()
+        if title and link:
+            items.append({"title": title, "url": link, "source": source_name, "summary": summary})
+    return items
+
 def build_production_prompt(slot):
     (
         slot_id, _, channel_id, campaign_id, affiliate_id, post_date, platform, topic, _, notes,
@@ -1093,6 +1173,51 @@ def build_publish_pack_prompt(job):
         "4. CTA và vị trí gắn link affiliate.\n"
         "5. Checklist trước khi đăng.\n"
         "6. Sau khi đăng cần ghi lại: publish_url, view, click, order, revenue bằng /pipeline_set và /performance_add."
+    )
+
+def build_handoff_prompt(job, target_tool, target_stage):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    tool_hint = {
+        "claude": "Claude Opus: kiểm tra logic, viết script/caption/prompt chi tiết, bóc tách task cho các AI khác.",
+        "gemini": "Gemini: nghiên cứu nhanh, viết kịch bản, tối ưu caption/hashtag theo nền tảng.",
+        "runway": "Runway: tạo footage/video asset theo visual prompt, ưu tiên cảnh hợp pháp và không mạo danh.",
+        "kling": "Kling: tạo video từ prompt, giữ style nhất quán và không dùng người thật khi chưa có consent.",
+        "capcut": "CapCut: dựng video 9:16, subtitle, nhạc, CTA, logo/watermark nếu cần.",
+        "ffmpeg": "FFmpeg: xử lý kỹ thuật như ghép audio/video, resize 9:16, burn subtitle, xuất mp4.",
+        "fish": "Fish Audio HD: tạo voice cao cấp; nếu quota/số dư/key lỗi thì fallback Edge TTS và báo admin.",
+        "edge": "Edge TTS: fallback voice miễn phí/ít phí.",
+    }
+    return (
+        f"VAI TRÒ: Bạn là {target_tool.upper()} trong hệ thống AI Operator TOAN DAAS.\n"
+        "NHIỆM VỤ: Hoàn thành đúng stage được giao, tạo output có thể dùng trực tiếp cho sản xuất video affiliate.\n\n"
+        "QUY TẮC BẮT BUỘC:\n"
+        "- Ưu tiên công cụ tốt/có phí trước; nếu hết quota/hết tiền/lỗi thì ghi rõ fallback ít phí/miễn phí và báo admin.\n"
+        "- Không spam, không mạo danh, không hướng dẫn né kiểm duyệt.\n"
+        "- Với OnlyFans/AI influencer/người mẫu: chỉ dùng nhân vật tự tạo hoặc người thật có consent rõ ràng, đủ 18 tuổi.\n"
+        "- Không cam kết thu nhập phi thực tế; affiliate CTA phải minh bạch.\n\n"
+        f"TOOL/STAGE: {target_tool} / {target_stage}\n"
+        f"Gợi ý tool: {tool_hint.get(target_tool, 'Dùng công cụ phù hợp, xuất kết quả rõ ràng để đưa về pipeline.')}\n\n"
+        f"JOB ID: #{jid}\n"
+        f"Calendar: {calendar_id or '-'} | Campaign: {campaign_id or '-'}\n"
+        f"Nền tảng đăng: {platform or '-'}\n"
+        f"Kênh/account: {channel_name or channel_id or '-'} / {account_label or 'main'}\n"
+        f"Topic: {topic or '-'}\n"
+        f"Stage hiện tại: {stage or '-'} | Status: {status or '-'}\n"
+        f"Affiliate: {network or '-'} - {product_name or '-'}\n"
+        f"Affiliate URL: {affiliate_url or 'chưa có'}\n"
+        f"Asset URL: {asset_url or 'chưa có'}\n"
+        f"Publish URL: {publish_url or 'chưa có'}\n"
+        f"Ghi chú operator: {note or '-'}\n\n"
+        f"BRIEF GỐC:\n{brief or 'Chưa có brief'}\n\n"
+        "OUTPUT CẦN TRẢ VỀ:\n"
+        "1. Kết quả chính cho stage này.\n"
+        "2. File/link/asset cần lưu lại nếu có.\n"
+        "3. Prompt tiếp theo cho tool sau.\n"
+        "4. Checklist chất lượng và compliance.\n"
+        "5. Dòng cập nhật đề xuất cho Telegram: /pipeline_set id=... stage=... status=... asset=... publish=... note=..."
     )
 
 def slots_per_day(posting_slots: str) -> int:
@@ -1933,6 +2058,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /operator — Ra lệnh tạo video một bước",
             "• /operator_next — Điều phối stage tiếp theo",
             "• /operator_dashboard — Tổng quan vận hành",
+            "• /trend_search — Tìm trend mới để làm video",
+            "• /handoff — Prompt giao việc cho AI/tool khác",
             "• /publish_pack — Gói caption/link để đăng",
             "• /performance_add — Ghi hiệu quả bài đăng",
             "• /performance — Báo cáo hiệu quả kiếm tiền",
@@ -2864,6 +2991,175 @@ async def cmd_publish_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+async def cmd_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("id") or data.get("job") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/handoff job=1 tool=claude stage=script</code>\n"
+            "Tool gợi ý: <code>claude, gemini, runway, kling, capcut, ffmpeg, fish, edge</code>",
+            parse_mode="HTML"
+        )
+    job = get_production_job(job_id, update.effective_user.id)
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    target_tool = (data.get("tool") or data.get("ai") or "claude").lower()
+    target_stage = (data.get("stage") or data.get("step") or job[7] or "script").lower()
+    handoff = build_handoff_prompt(job, target_tool, target_stage)
+    update_production_job(
+        job_id,
+        update.effective_user.id,
+        stage=target_stage,
+        status="waiting",
+        note=f"handoff:{target_tool}/{target_stage} | {truncate_text(handoff, 500)}"
+    )
+    await update.message.reply_text(
+        f"🤝 <b>HANDOFF PROMPT — JOB #{job_id}</b>\n"
+        f"Tool: <b>{html.escape(target_tool)}</b> | Stage: <b>{html.escape(target_stage)}</b>\n\n"
+        f"<pre>{html_pre(handoff)}</pre>",
+        parse_mode="HTML"
+    )
+
+async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    niche = data.get("niche") or data.get("ngach") or data.get("topic") or data.get("chude") or "công nghệ AI"
+    platform = data.get("platform") or data.get("nen") or "tiktok"
+    try:
+        channel_id = int(data.get("channel") or data.get("kenh") or 0)
+    except ValueError:
+        channel_id = 0
+    try:
+        affiliate_id = int(data.get("affiliate_id") or data.get("aff") or 0)
+    except ValueError:
+        affiliate_id = 0
+    try:
+        campaign_id = int(data.get("campaign") or data.get("camp") or 0)
+    except ValueError:
+        campaign_id = 0
+    if channel_id and not get_social_channel(channel_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy channel.")
+    if affiliate_id and not get_affiliate_link(affiliate_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy affiliate.")
+    if campaign_id and not get_campaign(campaign_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy campaign.")
+
+    msg = await update.message.reply_text("🔎 Đang tìm trend mới nhất...")
+    try:
+        items = await fetch_google_news_trends(niche, platform, limit=5)
+    except Exception as e:
+        await alert_admin(context, "Trend Search", f"{str(e)} | niche={niche} platform={platform}")
+        return await msg.edit_text("❌ Tìm trend lỗi. Đã báo admin kiểm tra mạng/RSS.")
+    if not items:
+        return await msg.edit_text("📭 Chưa tìm thấy trend phù hợp. Thử niche khác.")
+
+    lines = [
+        "🔥 <b>TREND MỚI GỢI Ý LÀM VIDEO</b>",
+        f"• Niche: <b>{html.escape(niche)}</b>",
+        f"• Nền tảng mục tiêu: <code>{html.escape(platform)}</code>",
+        "",
+    ]
+    buttons = []
+    for item in items:
+        trend_id = save_trend_candidate(
+            update.effective_user.id,
+            niche,
+            platform,
+            item["title"],
+            item["url"],
+            item.get("source", ""),
+            item.get("summary", ""),
+            channel_id,
+            campaign_id,
+            affiliate_id
+        )
+        lines.append(f"• #{trend_id} | <b>{html.escape(item['title'])}</b>\n  Nguồn: {html.escape(item.get('source') or '-')}")
+        buttons.append([InlineKeyboardButton(f"🎬 Tạo video trend #{trend_id}", callback_data=f"trend|video|{trend_id}")])
+    lines.append("\nChọn nút bên dưới để đưa trend vào pipeline affiliate.")
+    await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if str(query.from_user.id) != ADMIN_ID:
+        return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    parts = query.data.split("|")
+    if len(parts) != 3 or parts[1] != "video":
+        return
+    try:
+        trend_id = int(parts[2])
+    except ValueError:
+        return
+    trend = get_trend_candidate(trend_id, query.from_user.id)
+    if not trend:
+        return await query.edit_message_text("❌ Không tìm thấy trend.")
+    _, niche, platform, title, source_url, source_name, summary, channel_id, campaign_id, affiliate_id, status = trend
+    if not channel_id:
+        return await query.edit_message_text(
+            "⚠️ Trend này chưa gắn channel. Tìm lại bằng:\n"
+            f"<code>/trend_search niche={html.escape(niche)} platform={html.escape(platform)} channel=&lt;ID&gt; aff=&lt;ID&gt;</code>",
+            parse_mode="HTML"
+        )
+    channel = get_social_channel(channel_id, query.from_user.id)
+    if not channel:
+        return await query.edit_message_text("❌ Channel của trend không còn tồn tại.")
+    _, channel_platform, channel_name, account_label, focus, audience, slots, channel_status = channel
+    topic = f"{title} | góc nhìn {niche} | chèn sản phẩm affiliate phù hợp"
+    note = f"trend #{trend_id} | source={source_name} | {source_url}"
+    slot_id = create_calendar_slot(
+        query.from_user.id,
+        channel_id,
+        campaign_id,
+        affiliate_id,
+        datetime.now().date().isoformat(),
+        channel_platform or platform,
+        topic,
+        note
+    )
+    slot = get_calendar_slot(slot_id, query.from_user.id)
+    if gemini_client or openai_client:
+        brief = AgentGemini.chat(
+            "Bạn là AI Operator trưởng, biến trend mới thành brief video affiliate có kiểm duyệt.",
+            build_production_prompt(slot) + f"\n\nNguồn trend: {source_url}\nTóm tắt trend: {summary}",
+            query.from_user.id,
+            is_json=False
+        )
+    else:
+        brief = f"Trend: {title}\nNguồn: {source_url}\nTạo video affiliate theo trend này và kiểm duyệt trước khi đăng."
+    job_id = create_production_job(
+        query.from_user.id,
+        slot_id,
+        campaign_id,
+        channel_id,
+        affiliate_id,
+        channel_platform or platform,
+        topic,
+        brief,
+        note
+    )
+    update_trend_status(trend_id, query.from_user.id, f"job:{job_id}")
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🧠 Next script", callback_data=f"pipe|stage|script|{job_id}"),
+            InlineKeyboardButton("📦 Publish pack", callback_data=f"pipe|stage|publish|{job_id}")
+        ],
+        [InlineKeyboardButton("⛔ Blocked", callback_data=f"pipe|status|blocked|{job_id}")]
+    ])
+    await query.edit_message_text(
+        f"✅ <b>Đã tạo video job từ trend #{trend_id}</b>\n"
+        f"• Production job: <code>#{job_id}</code>\n"
+        f"• Slot: <code>#{slot_id}</code>\n"
+        f"• Kênh: <b>{html.escape(channel_name or '-')}</b> / <code>{html.escape(account_label or 'main')}</code>\n"
+        f"• Trend: {html.escape(title)}\n\n"
+        f"<pre>{html_pre(brief)}</pre>",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
 async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -3483,6 +3779,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
     tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
+    tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
+    tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
     tg_app.add_handler(CommandHandler("publish_pack", cmd_publish_pack))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
@@ -3507,6 +3805,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_job_callback, pattern=r"^job\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_pipeline_callback, pattern=r"^pipe\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_trend_callback, pattern=r"^trend\|"))
 
     await tg_app.initialize()
     await tg_app.start()

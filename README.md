@@ -62,6 +62,8 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/operator topic=... channel=<ID> aff=<ID> campaign=<ID> date=YYYY-MM-DD`: ra lệnh một bước để tạo lịch nội dung + production job + brief AI.
 - `/operator_next id=<JOB_ID> stage=script|voice|visuals|edit|review|publish`: AI điều phối stage tiếp theo, kèm tool chính/fallback và output cần lưu.
 - `/operator_dashboard`: tổng quan kênh, affiliate, lịch sắp tới và production job cần xử lý.
+- `/trend_search niche=... platform=tiktok channel=<ID> aff=<ID> campaign=<ID>`: tìm trend mới từ nguồn RSS/news công khai, hiện nút tạo video trend vào pipeline.
+- `/handoff job=<ID> tool=claude|gemini|runway|kling|capcut|ffmpeg|fish|edge stage=...`: xuất prompt giao việc cho AI/tool khác và chuyển job sang `waiting`.
 - `/publish_pack job=<ID>`: tạo gói caption, hashtag, CTA, link affiliate và checklist trước khi đăng.
 - `/performance_add job=<ID> type=view|click|order|revenue|lead value=... amount=... note=...`: ghi hiệu quả bài đăng/affiliate.
 - `/performance`: báo cáo hiệu quả theo loại sự kiện, kênh và job gần nhất.
@@ -86,5 +88,6 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Channel/affiliate/calendar registry là khu vực admin-only để quản lý kênh Facebook/TikTok/OnlyFans, tài khoản phụ, link affiliate và lịch đăng nội dung. Không hiển thị cho khách hàng.
 - Production pipeline là admin-only, dùng để theo dõi từng video qua các stage: `brief`, `script`, `voice`, `visuals`, `edit`, `review`, `publish`, `done`.
 - Performance tracking là admin-only, dùng để ghi view/click/order/revenue/lead sau khi đăng bài và theo dõi kênh hoặc affiliate nào đang tạo tiền.
+- Trend search là admin-only, dùng để tìm trend mới trước khi tạo video; bot lưu trend candidate, tạo lịch/job từ trend và vẫn yêu cầu admin kiểm duyệt trước khi đăng.
 - Tool routing giữ đúng ý tưởng gốc: ưu tiên công cụ tốt/có phí trước, sau đó mới fallback sang công cụ ít phí/miễn phí. Gemini → OpenAI cho chat, Fish Audio HD → Edge TTS cho voice, RemoveBG HD → Cutout.pro cho tách nền. Khi gói cao cấp lỗi/quota, bot hoàn phần chênh lệch, chuyển sang gói dự phòng và báo admin kiểm tra quota/số dư/API key.
 - Với AI influencer/người mẫu AI: chỉ dùng nhân vật tự tạo hoặc người thật có đồng ý rõ ràng, đủ 18 tuổi; không dùng để giả mạo, lừa đảo hoặc tạo nội dung vi phạm nền tảng/pháp luật.
