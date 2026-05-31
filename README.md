@@ -80,6 +80,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/operator_loop limit=10 queue=1`: quét job đang mở, tự đưa job đủ điều kiện vào publish queue và báo task tiếp theo cho worker.
 - `/operator_api`: xem trạng thái `OPERATOR_API_TOKEN`, base URL và mẫu endpoint/payload cho n8n/Claude/tool worker.
 - `/operator_status`: kiểm tra hệ thống đã sẵn sàng scale chưa, gồm channel, affiliate, campaign, API token, publish readiness, queue, task và job blocked.
+- `/operator_playbook`: checklist vận hành từ kiểm tra hệ thống, chọn affiliate, tạo video theo trend, giao task cho AI/tool, review, publish và đo doanh thu.
 - `/operator_daily days=1`: báo cáo vận hành theo ngày gồm job mới, publish queue, performance và việc cần xử lý.
 - `/trend_search niche=... platform=tiktok channel=<ID> aff=<ID> campaign=<ID>`: tìm trend mới từ nguồn RSS/news công khai, chấm điểm trend/affiliate/cạnh tranh và hiện nút tạo video trend vào pipeline.
 - `/trend_rank 10`: xem bảng xếp hạng trend đã lưu theo điểm ưu tiên sản xuất video affiliate.

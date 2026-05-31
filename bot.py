@@ -5989,6 +5989,43 @@ async def cmd_operator_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     lines.append("\nLệnh nhanh: <code>/operator_menu</code> | <code>/affiliate_scale aff=&lt;ID&gt; build=1</code> | <code>/operator_loop</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    text = (
+        "📘 <b>OPERATOR PLAYBOOK — KIẾM TIỀN BẰNG VIDEO + AFFILIATE</b>\n\n"
+        "<b>0. Kiểm tra hệ thống</b>\n"
+        "• <code>/operator_status</code>\n"
+        "• Nếu thiếu kênh: <code>/channel_add platform=tiktok name=... slots=2/day mode=manual</code>\n"
+        "• Nếu thiếu link: <code>/affiliate_seed</code> hoặc <code>/affiliate_add ...</code>\n\n"
+        "<b>1. Chọn link cần scale</b>\n"
+        "• <code>/affiliate_report days=30</code> để xem link nào có view/click/doanh thu.\n"
+        "• <code>/affiliates</code> để lấy ID link.\n\n"
+        "<b>2. Tạo video theo trend từ affiliate</b>\n"
+        "• Cách nhanh: <code>/brain scale affiliate &lt;ID&gt; lên TikTok build luôn 3 video</code>\n"
+        "• Cách rõ tham số: <code>/affiliate_scale aff=&lt;ID&gt; platform=tiktok channel=all limit=3 build=1 duration=45</code>\n\n"
+        "<b>3. Giao việc cho AI/tool ngoài</b>\n"
+        "• Lấy task: <code>/next_task</code>\n"
+        "• Xuất prompt: <code>/task_handoff id=&lt;TASK_ID&gt;</code> hoặc <code>/manifest_handoff job=&lt;JOB_ID&gt; tool=kling</code>\n"
+        "• Worker API: <code>GET /api/operator/tasks/next</code> rồi trả output qua <code>POST /api/operator/tasks/&lt;ID&gt;/complete</code>\n\n"
+        "<b>4. Kiểm duyệt trước đăng</b>\n"
+        "• <code>/job_ready job=&lt;JOB_ID&gt;</code>\n"
+        "• <code>/review_gate job=&lt;JOB_ID&gt;</code>\n"
+        "• Không đăng nếu thiếu quyền hình ảnh/voice/nhạc, claim affiliate quá mức, mạo danh hoặc nội dung nhạy cảm sai chính sách.\n\n"
+        "<b>5. Đăng bài và gắn link</b>\n"
+        "• <code>/publish_pack job=&lt;JOB_ID&gt;</code>\n"
+        "• <code>/queue_publish job=&lt;JOB_ID&gt; mode=manual</code>\n"
+        "• Sau khi đăng: <code>/mark_published job=&lt;JOB_ID&gt; url=https://...</code>\n\n"
+        "<b>6. Đo tiền và tối ưu</b>\n"
+        "• <code>/performance_add job=&lt;JOB_ID&gt; type=click value=1</code>\n"
+        "• <code>/performance_add job=&lt;JOB_ID&gt; type=revenue value=1 amount=150000</code>\n"
+        "• <code>/affiliate_report days=30</code> và <code>/growth days=30</code> để quyết định scale tiếp.\n\n"
+        "<b>7. Tự động hóa bằng API</b>\n"
+        "• <code>/operator_api</code> để lấy endpoint/payload.\n"
+        "• Luồng API chuẩn: status → affiliate-report → affiliate-scale → tasks/next → publish/next → performance.\n"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -6018,6 +6055,7 @@ def operator_category_keyboard(category):
         "cat_control": [
             ("🧠 Brain command", "brain"), ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
+            ("📘 Playbook", "playbook"),
             ("🧭 System status", "status"), ("📊 Daily digest", "daily"),
             ("🧭 Dashboard", "dashboard"),
         ],
@@ -6060,7 +6098,8 @@ def operator_category_keyboard(category):
         ],
         "cat_internal": [
             ("🛠 Tools", "tools"), ("💼 MMO workflow", "mmo"),
-            ("🤝 Handoff AI", "handoff"), ("📊 Campaign stats", "campaignstats"),
+            ("📘 Playbook", "playbook"), ("🤝 Handoff AI", "handoff"),
+            ("📊 Campaign stats", "campaignstats"),
         ],
     }
     rows = []
@@ -6159,6 +6198,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     snippets = {
         "dashboard": "/operator_dashboard",
         "status": "/operator_status",
+        "playbook": "/operator_playbook",
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
@@ -8415,6 +8455,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
+    tg_app.add_handler(CommandHandler("operator_playbook", cmd_operator_playbook))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
