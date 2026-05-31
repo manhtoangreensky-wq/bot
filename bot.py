@@ -277,6 +277,19 @@ def init_db():
         created_at DATETIME,
         updated_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS performance_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        job_id INTEGER,
+        channel_id INTEGER,
+        affiliate_id INTEGER,
+        platform TEXT,
+        event_type TEXT,
+        value INTEGER DEFAULT 0,
+        amount INTEGER DEFAULT 0,
+        note TEXT,
+        created_at DATETIME
+    )""")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -329,6 +342,11 @@ def init_db():
             ("asset_url", "TEXT"),
             ("publish_url", "TEXT"),
             ("updated_at", "DATETIME"),
+        ],
+        "performance_events": [
+            ("value", "INTEGER DEFAULT 0"),
+            ("amount", "INTEGER DEFAULT 0"),
+            ("note", "TEXT"),
         ],
     }.items():
         for col, col_type in columns:
@@ -940,6 +958,56 @@ def update_production_job(job_id, owner_id, stage=None, status=None, note=None, 
     conn.commit()
     conn.close()
     return changed > 0
+
+def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note=""):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return False, None
+    _, _, _, channel_id, affiliate_id, platform, *_ = job
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO performance_events
+        (owner_id, job_id, channel_id, affiliate_id, platform, event_type, value, amount, note, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (str(owner_id), job_id, channel_id, affiliate_id, platform, event_type, int(value), int(amount), note, now_text())
+    )
+    conn.commit()
+    conn.close()
+    return True, job
+
+def performance_report_data(owner_id, limit=10):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT event_type, COALESCE(SUM(value),0), COALESCE(SUM(amount),0), COUNT(*)
+        FROM performance_events WHERE owner_id=? GROUP BY event_type ORDER BY event_type""",
+        (str(owner_id),)
+    )
+    event_totals = c.fetchall()
+    c.execute(
+        """SELECT pe.platform, sc.channel_name, COALESCE(SUM(pe.value),0), COALESCE(SUM(pe.amount),0), COUNT(*)
+        FROM performance_events pe
+        LEFT JOIN social_channels sc ON sc.id = pe.channel_id
+        WHERE pe.owner_id=?
+        GROUP BY pe.platform, sc.channel_name
+        ORDER BY COALESCE(SUM(pe.amount),0) DESC, COALESCE(SUM(pe.value),0) DESC
+        LIMIT ?""",
+        (str(owner_id), limit)
+    )
+    channel_totals = c.fetchall()
+    c.execute(
+        """SELECT pe.job_id, pe.event_type, pe.value, pe.amount, pe.platform, pj.topic, pe.note, pe.created_at
+        FROM performance_events pe
+        LEFT JOIN production_jobs pj ON pj.id = pe.job_id
+        WHERE pe.owner_id=?
+        ORDER BY pe.id DESC
+        LIMIT ?""",
+        (str(owner_id), limit)
+    )
+    recent_events = c.fetchall()
+    conn.close()
+    return event_totals, channel_totals, recent_events
 
 def build_production_prompt(slot):
     (
@@ -1836,6 +1904,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /operator — Ra lệnh tạo video một bước",
             "• /operator_next — Điều phối stage tiếp theo",
             "• /operator_dashboard — Tổng quan vận hành",
+            "• /performance_add — Ghi hiệu quả bài đăng",
+            "• /performance — Báo cáo hiệu quả kiếm tiền",
             "• /produce — Tạo job sản xuất từ lịch",
             "• /pipeline — Theo dõi pipeline video",
             "• /pipeline_set — Cập nhật stage/trạng thái",
@@ -2654,6 +2724,78 @@ async def cmd_operator_dashboard(update: Update, context: ContextTypes.DEFAULT_T
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("id") or data.get("job") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/performance_add job=1 type=view value=1000 amount=0 note=tiktok ngay 1</code>\n"
+            "Type: <code>view, click, order, revenue, lead</code>",
+            parse_mode="HTML"
+        )
+    event_type = (data.get("type") or data.get("event") or "view").lower()
+    allowed = {"view", "click", "order", "revenue", "lead"}
+    if event_type not in allowed:
+        return await update.message.reply_text(f"⚠️ type hợp lệ: <code>{', '.join(sorted(allowed))}</code>", parse_mode="HTML")
+    try:
+        value = int(data.get("value") or data.get("count") or 0)
+    except ValueError:
+        value = 0
+    try:
+        amount = int(data.get("amount") or data.get("money") or data.get("vnd") or 0)
+    except ValueError:
+        amount = 0
+    note = data.get("note") or ""
+    ok, job = add_performance_event(update.effective_user.id, job_id, event_type, value, amount, note)
+    if not ok:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    if event_type in {"revenue", "order", "lead"} and amount > 0:
+        update_production_job(job_id, update.effective_user.id, status="published")
+    await update.message.reply_text(
+        f"✅ <b>Đã ghi hiệu quả job #{job_id}</b>\n"
+        f"• Type: <code>{html.escape(event_type)}</code>\n"
+        f"• Value: <b>{value}</b>\n"
+        f"• Amount: <b>{amount:,}đ</b>\n"
+        f"• Note: {html.escape(note or '-')}",
+        parse_mode="HTML"
+    )
+
+async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    event_totals, channel_totals, recent_events = performance_report_data(update.effective_user.id)
+    lines = ["💰 <b>OPERATOR PERFORMANCE</b>", ""]
+    lines.append("<b>Tổng theo loại:</b>")
+    if event_totals:
+        for event_type, value_sum, amount_sum, count in event_totals:
+            lines.append(f"• {event_type}: value=<b>{value_sum}</b> | amount=<b>{amount_sum:,}đ</b> | events={count}")
+    else:
+        lines.append("• Chưa có dữ liệu. Ghi bằng /performance_add.")
+    lines.append("\n<b>Kênh/sàn hiệu quả:</b>")
+    if channel_totals:
+        for platform, channel_name, value_sum, amount_sum, count in channel_totals:
+            lines.append(
+                f"• <code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}: "
+                f"value=<b>{value_sum}</b> | amount=<b>{amount_sum:,}đ</b> | events={count}"
+            )
+    else:
+        lines.append("• Chưa có dữ liệu.")
+    lines.append("\n<b>Sự kiện gần nhất:</b>")
+    if recent_events:
+        for job_id, event_type, value, amount, platform, topic, note, created_at in recent_events:
+            lines.append(
+                f"• {created_at} | job #{job_id} | <code>{html.escape(event_type)}</code> | "
+                f"{html.escape(platform or '-')} | value={value} | amount={amount:,}đ\n"
+                f"  {html.escape(topic or '-')}\n"
+                f"  note={html.escape(note or '-')}"
+            )
+    else:
+        lines.append("• Chưa có sự kiện.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -3273,6 +3415,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
     tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
+    tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
+    tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
     tg_app.add_handler(CommandHandler("pipeline",    cmd_pipeline))
     tg_app.add_handler(CommandHandler("pipeline_set", cmd_pipeline_set))
