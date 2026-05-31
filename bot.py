@@ -306,6 +306,20 @@ def init_db():
         status TEXT DEFAULT 'new',
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS publish_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        job_id INTEGER,
+        channel_id INTEGER,
+        platform TEXT,
+        mode TEXT DEFAULT 'manual',
+        status TEXT DEFAULT 'queued',
+        scheduled_at TEXT,
+        publish_url TEXT,
+        note TEXT,
+        created_at DATETIME,
+        updated_at DATETIME
+    )""")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -369,6 +383,14 @@ def init_db():
             ("campaign_id", "INTEGER DEFAULT 0"),
             ("affiliate_id", "INTEGER DEFAULT 0"),
             ("status", "TEXT DEFAULT 'new'"),
+        ],
+        "publish_queue": [
+            ("mode", "TEXT DEFAULT 'manual'"),
+            ("status", "TEXT DEFAULT 'queued'"),
+            ("scheduled_at", "TEXT"),
+            ("publish_url", "TEXT"),
+            ("note", "TEXT"),
+            ("updated_at", "DATETIME"),
         ],
     }.items():
         for col, col_type in columns:
@@ -1030,6 +1052,75 @@ def performance_report_data(owner_id, limit=10):
     recent_events = c.fetchall()
     conn.close()
     return event_totals, channel_totals, recent_events
+
+def create_publish_queue_item(owner_id, job_id, mode="manual", scheduled_at="", note=""):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return False, None
+    _, _, _, channel_id, _, platform, *_ = job
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO publish_queue
+        (owner_id, job_id, channel_id, platform, mode, status, scheduled_at, publish_url, note, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (str(owner_id), job_id, channel_id, platform, mode, "queued", scheduled_at, "", note, now_text(), now_text())
+    )
+    queue_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    update_production_job(job_id, owner_id, stage="publish", status="queued", note=f"publish_queue:{queue_id} mode={mode} {note}")
+    return True, queue_id
+
+def list_publish_queue(owner_id, limit=15):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT pq.id, pq.job_id, pq.platform, sc.channel_name, pq.mode, pq.status, pq.scheduled_at, pq.publish_url, pj.topic, pq.updated_at
+        FROM publish_queue pq
+        LEFT JOIN social_channels sc ON sc.id = pq.channel_id
+        LEFT JOIN production_jobs pj ON pj.id = pq.job_id
+        WHERE pq.owner_id=?
+        ORDER BY
+            CASE pq.status
+                WHEN 'blocked' THEN 0
+                WHEN 'queued' THEN 1
+                WHEN 'scheduled' THEN 2
+                WHEN 'publishing' THEN 3
+                ELSE 4
+            END,
+            pq.id DESC
+        LIMIT ?""",
+        (str(owner_id), limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None, note=None):
+    updates = []
+    params = []
+    if status:
+        updates.append("status=?")
+        params.append(status)
+    if publish_url is not None:
+        updates.append("publish_url=?")
+        params.append(publish_url)
+    if note is not None:
+        updates.append("note=?")
+        params.append(note)
+    updates.append("updated_at=?")
+    params.append(now_text())
+    params.extend([queue_id, str(owner_id)])
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(f"UPDATE publish_queue SET {', '.join(updates)} WHERE id=? AND owner_id=?", params)
+    changed = c.rowcount
+    c.execute("SELECT job_id FROM publish_queue WHERE id=? AND owner_id=?", (queue_id, str(owner_id)))
+    row = c.fetchone()
+    conn.commit()
+    conn.close()
+    return changed > 0, row[0] if row else None
 
 def save_trend_candidate(owner_id, niche, platform, title, source_url, source_name="", summary="", channel_id=0, campaign_id=0, affiliate_id=0):
     conn = db_connect()
@@ -2095,6 +2186,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /handoff — Prompt giao việc cho AI/tool khác",
             "• /publish_pack — Gói caption/link để đăng",
             "• /review_gate — Kiểm duyệt trước khi đăng",
+            "• /queue_publish — Đưa job vào hàng đợi đăng",
+            "• /publish_queue — Xem hàng đợi đăng",
             "• /mark_published — Ghi nhận đã đăng bài",
             "• /performance_add — Ghi hiệu quả bài đăng",
             "• /performance — Báo cáo hiệu quả kiếm tiền",
@@ -2962,7 +3055,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
-        "publish": "/publish_pack job=<JOB_ID>\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
+        "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "review": "/review_gate job=<JOB_ID>",
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
@@ -3056,6 +3149,83 @@ async def cmd_mark_published(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"• Clicks ban đầu: <b>{clicks}</b>\n"
         f"• Note: {html.escape(note)}\n\n"
         f"Cập nhật doanh thu sau: <code>/performance_add job={job_id} type=revenue value=1 amount=...</code>",
+        parse_mode="HTML"
+    )
+
+async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("id") or data.get("job") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/queue_publish job=1 mode=manual schedule=2026-06-01 note=...</code>",
+            parse_mode="HTML"
+        )
+    mode = (data.get("mode") or "manual").lower()
+    if mode not in {"manual", "api"}:
+        return await update.message.reply_text("⚠️ mode hợp lệ: <code>manual</code> hoặc <code>api</code>", parse_mode="HTML")
+    scheduled_at = data.get("schedule") or data.get("time") or ""
+    note = data.get("note") or ""
+    ok, queue_id = create_publish_queue_item(update.effective_user.id, job_id, mode, scheduled_at, note)
+    if not ok:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    await update.message.reply_text(
+        f"✅ <b>Đã đưa job #{job_id} vào hàng đợi đăng</b>\n"
+        f"• Queue ID: <code>{queue_id}</code>\n"
+        f"• Mode: <code>{mode}</code>\n"
+        f"• Schedule: <code>{html.escape(scheduled_at or 'chưa hẹn')}</code>\n\n"
+        f"Khi đăng xong: <code>/mark_published job={job_id} url=https://...</code>",
+        parse_mode="HTML"
+    )
+
+async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    rows = list_publish_queue(update.effective_user.id)
+    if not rows:
+        return await update.message.reply_text("📭 Hàng đợi đăng trống. Dùng /queue_publish job=<ID>.")
+    lines = ["📮 <b>PUBLISH QUEUE</b>\n"]
+    for qid, job_id, platform, channel_name, mode, status, scheduled_at, publish_url, topic, updated_at in rows:
+        lines.append(
+            f"• queue #{qid} | job #{job_id} | <code>{html.escape(platform or '-')}</code> | "
+            f"{html.escape(channel_name or '-')} | {mode}/{status}\n"
+            f"  {html.escape(topic or '-')}\n"
+            f"  schedule={html.escape(scheduled_at or '-')} | url={html.escape(publish_url or '-')}"
+        )
+    lines.append("\nCập nhật: <code>/publish_queue_set id=&lt;QUEUE_ID&gt; status=published url=https://...</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_publish_queue_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        queue_id = int(data.get("id") or data.get("queue") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/publish_queue_set id=1 status=published url=https://... note=...</code>",
+            parse_mode="HTML"
+        )
+    status = (data.get("status") or "").lower()
+    allowed = {"queued", "scheduled", "publishing", "published", "blocked", "cancelled"}
+    if status and status not in allowed:
+        return await update.message.reply_text(f"⚠️ status hợp lệ: <code>{', '.join(sorted(allowed))}</code>", parse_mode="HTML")
+    publish_url = data.get("url") or data.get("publish")
+    note = data.get("note")
+    changed, job_id = update_publish_queue_item(update.effective_user.id, queue_id, status, publish_url, note)
+    if not changed:
+        return await update.message.reply_text("❌ Không tìm thấy queue item.")
+    if job_id and status == "published":
+        update_production_job(job_id, update.effective_user.id, stage="done", status="published", note=note or "publish_queue_set", publish_url=publish_url or "")
+        add_performance_event(update.effective_user.id, job_id, "publish", 1, 0, note or f"queue:{queue_id}")
+    elif job_id and status == "blocked":
+        update_production_job(job_id, update.effective_user.id, status="blocked", note=note or f"queue:{queue_id} blocked")
+    await update.message.reply_text(
+        f"✅ Đã cập nhật publish queue #{queue_id}\n"
+        f"• status=<code>{html.escape(status or 'giữ nguyên')}</code>\n"
+        f"• url=<code>{html.escape(publish_url or 'giữ nguyên')}</code>",
         parse_mode="HTML"
     )
 
@@ -3969,6 +4139,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
     tg_app.add_handler(CommandHandler("publish_pack", cmd_publish_pack))
     tg_app.add_handler(CommandHandler("review_gate", cmd_review_gate))
+    tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
+    tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
+    tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
