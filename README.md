@@ -123,6 +123,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/queue_publish job=<ID> mode=manual|api schedule=... note=...`: đưa job đã duyệt vào hàng đợi đăng.
 - `/publish_queue`: xem hàng đợi đăng.
 - `/publisher_handoff queue=<QUEUE_ID>`: xuất runbook đăng bài theo nền tảng cho publisher worker hoặc đăng thủ công, gồm final video, caption, comment ghim, env token cần có và payload trả kết quả.
+- `/publisher_run platform=tiktok mode=api`: claim queue kế tiếp và trả quyết định `api_ready`, `manual_required` hoặc `blocked_missing_final_video` cho publisher worker/admin.
 - `/publish_queue_set id=<QUEUE_ID> status=published|blocked|scheduled url=https://... note=...`: cập nhật trạng thái hàng đợi đăng.
 - `/asset_add job=<ID> type=script|voice|raw_video|subtitle|thumbnail|final_video url=... note=...`: lưu asset/link/file vào production job.
 - `/assets <JOB_ID>`: xem toàn bộ asset đã lưu của job.
@@ -152,6 +153,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
 - `GET /api/operator/status`: worker ngoài kiểm tra readiness tổng thể trước khi tự động scale hoặc publish.
 - `GET /api/operator/publisher/status`: worker ngoài kiểm tra readiness riêng cho publisher: kênh nào manual/API-ready, queue nào chờ đăng, blocker token/env/page_id.
+- `POST /api/operator/publisher/run`: worker ngoài claim queue kế tiếp an toàn, nhận handoff và quyết định nên auto đăng qua API chính thức hay chuyển manual.
 - `GET /api/operator/audit`: worker ngoài kiểm tra mức sẵn sàng end-to-end và blocker còn thiếu trước khi bật automation.
 - `GET /api/operator/worker-spec`: worker ngoài đọc runbook máy đọc được cho Director, Creative, Tool Worker, Publisher và Growth Analyst.
 - `GET /api/operator/toolchain`: worker ngoài đọc chính sách paid-first/fallback theo từng stage, gồm Claude/Gemini/OpenAI, Fish/Edge, RemoveBG/Cutout, Kling/Runway, CapCut/FFmpeg, publisher và payment.
@@ -203,6 +205,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Publish queue là admin-only, dùng để gom job đã duyệt vào hàng đợi đăng thủ công hoặc chuẩn bị sẵn điểm nối API/OAuth chính thức.
 - Publisher handoff là lớp nối giữa bot và publisher worker: bot không lưu secret nền tảng, chỉ trả tên biến môi trường/token cần có, nội dung cần đăng và endpoint để worker báo kết quả.
 - Publisher status là chốt vận hành cho auto-post: cron/n8n nên gọi trước khi claim queue để biết có kênh API-ready hay chỉ nên trả handoff cho admin đăng thủ công.
+- Publisher run là bước cron/n8n an toàn: claim một queue, kiểm tra final video/token/mode, trả handoff và chỉ cho API worker đăng khi kênh thật sự `api_ready`.
 - Job ready check là admin-only, dùng như chốt cuối trước khi đưa video vào hàng đợi đăng; nếu thiếu asset/review/creative/manifest/task, bot trả về lệnh cần chạy tiếp.
 - Production assets là admin-only, dùng để lưu script, voice, raw video, subtitle, thumbnail, final video hoặc source link theo từng job trước khi review/publish.
 - Auto-post readiness là admin-only, dùng để kiểm tra channel nào có thể đăng thủ công, channel nào đã có `token_env` trỏ tới biến môi trường trên server, và channel nào còn thiếu cấu hình. Secret không lưu trong SQLite.

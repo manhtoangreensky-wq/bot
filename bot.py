@@ -5195,6 +5195,48 @@ def build_publisher_handoff(queue_payload):
         "rule": "Không publish nếu thiếu final video, thiếu consent/quyền nội dung, hoặc review gate/publish queue chưa duyệt.",
     }
 
+def publisher_run_payload(owner_id, platform="", mode="", auto_claim=True):
+    item = next_publish_queue_item(owner_id, platform=platform, mode=mode)
+    if not item:
+        return {
+            "claimed": False,
+            "queue": None,
+            "publisher_handoff": None,
+            "decision": "no_queue",
+            "message": "Không có queue đang chờ đăng.",
+            "next": {"queue_url": "/api/operator/publish/next", "status_url": "/api/operator/publisher/status"},
+        }
+    queue_id = item[0]
+    if auto_claim:
+        update_publish_queue_item(owner_id, queue_id, status="publishing", note=f"publisher_run_claim platform={platform or item[3] or '-'} mode={mode or item[6] or '-'}")
+        item = get_publish_queue_item(owner_id, queue_id)
+    queue_payload = serialize_publish_queue_item(item)
+    handoff = build_publisher_handoff(queue_payload)
+    final_media = (handoff.get("media") or {}).get("final_video_url") or (handoff.get("media") or {}).get("telegram_file_id")
+    if not final_media:
+        decision = "blocked_missing_final_video"
+        message = "Thiếu final video; worker không được đăng."
+    elif handoff.get("can_auto_publish"):
+        decision = "api_ready"
+        message = "Có thể giao cho publisher worker dùng API chính thức của nền tảng."
+    else:
+        decision = "manual_required"
+        message = "Chưa đủ API token hoặc nền tảng cần đăng thủ công; trả handoff cho admin/worker manual."
+    return {
+        "claimed": bool(auto_claim),
+        "queue": queue_payload,
+        "publisher_handoff": handoff,
+        "decision": decision,
+        "message": message,
+        "submit_url": f"/api/operator/publish/{queue_id}/complete",
+        "next": {
+            "handoff_url": f"/api/operator/publish/{queue_id}/handoff",
+            "complete_url": f"/api/operator/publish/{queue_id}/complete",
+            "status_url": "/api/operator/publisher/status",
+        },
+        "rule": "API-ready mới tự đăng bằng API chính thức. Manual-required thì chỉ gửi handoff, không bypass ToS/nền tảng.",
+    }
+
 def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None, note=None):
     updates = []
     params = []
@@ -6232,6 +6274,12 @@ class OperatorPublishCompleteRequest(BaseModel):
     note: str = Field(default="", max_length=1200)
     views: int = Field(default=0, ge=0)
     clicks: int = Field(default=0, ge=0)
+
+class OperatorPublisherRunRequest(BaseModel):
+    platform: str = Field(default="", max_length=40)
+    mode: str = Field(default="", max_length=20)
+    auto_claim: bool = True
+    notify_admin: bool = True
 
 class OperatorApprovePublishRequest(BaseModel):
     queue: bool = True
@@ -9119,7 +9167,8 @@ def operator_category_keyboard(category):
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
             ("🤖 Publisher handoff", "publisherhandoff"), ("✅ Approve publish", "approvepublish"),
-            ("📡 Publisher status", "publisherstatus"), ("🧪 Publish readiness", "readiness"),
+            ("▶️ Publisher run", "publisherrun"), ("📡 Publisher status", "publisherstatus"),
+            ("🧪 Publish readiness", "readiness"),
             ("✅ Mark published", "markpublished"),
         ],
         "cat_money": [
@@ -9202,6 +9251,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Trạng thái publisher: <code>GET {html.escape(base_url)}/api/operator/publisher/status</code>",
+        f"• Publisher run an toàn: <code>POST {html.escape(base_url)}/api/operator/publisher/run</code>",
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
         f"• Make video pipeline: <code>POST {html.escape(base_url)}/api/operator/make-video</code>",
@@ -9439,6 +9489,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
         "publishqueue": "/publish_queue\n/publisher_handoff queue=<QUEUE_ID>\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
         "publisherhandoff": "/publisher_handoff queue=<QUEUE_ID>\nGET /api/operator/publish/<QUEUE_ID>/handoff",
+        "publisherrun": "/publisher_run platform=tiktok mode=api\nPOST /api/operator/publisher/run",
         "publisherstatus": "/publisher_status\nGET /api/operator/publisher/status",
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
@@ -10445,6 +10496,36 @@ async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TY
         "\nSau khi đăng xong gọi:\n"
         f"<code>/publish_queue_set id={queue_id} status=published url=https://...</code>"
     )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    platform = (data.get("platform") or data.get("nen") or "").lower()
+    mode = (data.get("mode") or "").lower()
+    auto_claim = (data.get("claim") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    result = publisher_run_payload(update.effective_user.id, platform=platform, mode=mode, auto_claim=auto_claim)
+    if not result.get("queue"):
+        return await update.message.reply_text("📭 Không có publish queue đang chờ đăng.")
+    queue = result["queue"]
+    handoff = result.get("publisher_handoff") or {}
+    media = handoff.get("media") or {}
+    copy = handoff.get("copy") or {}
+    lines = [
+        "▶️ <b>PUBLISHER RUN</b>",
+        f"• Decision: <b>{html.escape(result.get('decision') or '-')}</b>",
+        f"• Message: {html.escape(result.get('message') or '-')}",
+        f"• Queue/job: <code>#{queue.get('id')}</code> / <code>#{queue.get('job_id')}</code>",
+        f"• Platform/mode: <code>{html.escape(queue.get('platform') or '-')}</code> / <code>{html.escape(queue.get('mode') or '-')}</code>",
+        f"• Final video: <code>{html.escape(media.get('final_video_url') or media.get('telegram_file_id') or 'thiếu')}</code>",
+        f"• Env cần có: <code>{html.escape(', '.join(handoff.get('required_env') or []) or '-')}</code>",
+        "",
+        "<b>Caption:</b>",
+        f"<pre>{html_pre(copy.get('caption') or '-', 800)}</pre>",
+        "Sau khi đăng xong:",
+        f"<code>/publish_queue_set id={queue.get('id')} status=published url=https://...</code>",
+    ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_queue_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -12125,6 +12206,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publisher_handoff", cmd_publisher_handoff))
+    tg_app.add_handler(CommandHandler("publisher_run", cmd_publisher_run))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
     tg_app.add_handler(CommandHandler("assets", cmd_assets))
@@ -12381,6 +12463,34 @@ async def api_operator_publisher_status(request: Request):
     verify_operator_api_token(request)
     data = publisher_status_data(ADMIN_ID)
     return {"ok": True, **data}
+
+@fastapi_app.post("/api/operator/publisher/run")
+async def api_operator_publisher_run(payload: OperatorPublisherRunRequest, request: Request):
+    verify_operator_api_token(request)
+    result = publisher_run_payload(
+        ADMIN_ID,
+        platform=(payload.platform or "").lower(),
+        mode=(payload.mode or "").lower(),
+        auto_claim=payload.auto_claim,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID and result.get("queue"):
+        try:
+            queue = result.get("queue") or {}
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "▶️ <b>PUBLISHER RUN API</b>\n\n"
+                    f"• Decision: <b>{html.escape(result.get('decision') or '-')}</b>\n"
+                    f"• Queue/job: <code>#{queue.get('id')}</code> / <code>#{queue.get('job_id')}</code>\n"
+                    f"• Platform/mode: <code>{html.escape(queue.get('platform') or '-')}</code> / <code>{html.escape(queue.get('mode') or '-')}</code>\n"
+                    f"• Message: {html.escape(result.get('message') or '-')}\n"
+                    f"• Complete: <code>{html.escape(result.get('submit_url') or '-')}</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Publisher run notify error: {e}")
+    return {"ok": True, **result}
 
 @fastapi_app.get("/api/operator/audit")
 async def api_operator_audit(request: Request):
