@@ -278,6 +278,16 @@ def init_db():
         created_at DATETIME,
         updated_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS production_assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        job_id INTEGER,
+        asset_type TEXT,
+        url TEXT,
+        file_id TEXT,
+        note TEXT,
+        created_at DATETIME
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS performance_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -375,6 +385,10 @@ def init_db():
             ("asset_url", "TEXT"),
             ("publish_url", "TEXT"),
             ("updated_at", "DATETIME"),
+        ],
+        "production_assets": [
+            ("file_id", "TEXT"),
+            ("note", "TEXT"),
         ],
         "performance_events": [
             ("value", "INTEGER DEFAULT 0"),
@@ -1058,6 +1072,39 @@ def update_production_job(job_id, owner_id, stage=None, status=None, note=None, 
     conn.commit()
     conn.close()
     return changed > 0
+
+def add_production_asset(owner_id, job_id, asset_type, url="", file_id="", note=""):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return False, None
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO production_assets
+        (owner_id, job_id, asset_type, url, file_id, note, created_at)
+        VALUES (?,?,?,?,?,?,?)""",
+        (str(owner_id), job_id, asset_type, url, file_id, note, now_text())
+    )
+    asset_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    if url:
+        update_production_job(job_id, owner_id, asset_url=url)
+    return True, asset_id
+
+def list_production_assets(owner_id, job_id, limit=20):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, asset_type, url, file_id, note, created_at
+        FROM production_assets
+        WHERE owner_id=? AND job_id=?
+        ORDER BY id DESC LIMIT ?""",
+        (str(owner_id), job_id, limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
 
 def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note=""):
     job = get_production_job(job_id, owner_id)
@@ -2247,6 +2294,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /review_gate — Kiểm duyệt trước khi đăng",
             "• /queue_publish — Đưa job vào hàng đợi đăng",
             "• /publish_queue — Xem hàng đợi đăng",
+            "• /asset_add — Lưu asset vào job",
+            "• /assets — Xem asset của job",
             "• /mark_published — Ghi nhận đã đăng bài",
             "• /performance_add — Ghi hiệu quả bài đăng",
             "• /performance — Báo cáo hiệu quả kiếm tiền",
@@ -3257,6 +3306,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("📦 Publish pack", callback_data="opmenu|publish"),
             InlineKeyboardButton("🛡 Review gate", callback_data="opmenu|review")
         ],
+        [InlineKeyboardButton("🗂 Assets", callback_data="opmenu|assets")],
         [InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")],
         [
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
@@ -3294,6 +3344,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
         "publishqueue": "/publish_queue\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
+        "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
         "review": "/review_gate job=<JOB_ID>",
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
@@ -3417,6 +3468,58 @@ async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Khi đăng xong: <code>/mark_published job={job_id} url=https://...</code>",
         parse_mode="HTML"
     )
+
+async def cmd_asset_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/asset_add job=1 type=final_video url=https://... note=...</code>\n"
+            "Type gợi ý: script, voice, raw_video, subtitle, thumbnail, final_video, source.",
+            parse_mode="HTML"
+        )
+    asset_type = (data.get("type") or data.get("asset_type") or "source").lower()
+    url = data.get("url") or data.get("link") or ""
+    file_id = data.get("file_id") or ""
+    note = data.get("note") or ""
+    if not url and not file_id:
+        return await update.message.reply_text("⚠️ Cần <code>url=...</code> hoặc <code>file_id=...</code>", parse_mode="HTML")
+    ok, asset_id = add_production_asset(update.effective_user.id, job_id, asset_type, url, file_id, note)
+    if not ok:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    await update.message.reply_text(
+        f"✅ <b>Đã lưu asset #{asset_id} cho job #{job_id}</b>\n"
+        f"• Type: <code>{html.escape(asset_type)}</code>\n"
+        f"• URL: <code>{html.escape(url or '-')}</code>\n"
+        f"• File ID: <code>{html.escape(file_id or '-')}</code>\n"
+        f"• Note: {html.escape(note or '-')}",
+        parse_mode="HTML"
+    )
+
+async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    try:
+        job_id = int(context.args[0])
+    except (IndexError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/assets &lt;JOB_ID&gt;</code>", parse_mode="HTML")
+    if not get_production_job(job_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    rows = list_production_assets(update.effective_user.id, job_id)
+    if not rows:
+        return await update.message.reply_text(f"📭 Job #{job_id} chưa có asset. Thêm bằng /asset_add.")
+    lines = [f"🗂️ <b>ASSETS — JOB #{job_id}</b>\n"]
+    for aid, asset_type, url, file_id, note, created_at in rows:
+        lines.append(
+            f"• #{aid} | <code>{html.escape(asset_type or '-')}</code> | {created_at}\n"
+            f"  url=<code>{html.escape(url or '-')}</code>\n"
+            f"  file_id=<code>{html.escape(file_id or '-')}</code>\n"
+            f"  note={html.escape(note or '-')}"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -4383,6 +4486,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
+    tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
+    tg_app.add_handler(CommandHandler("assets", cmd_assets))
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
