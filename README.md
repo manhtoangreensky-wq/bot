@@ -100,6 +100,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/mark_published job=<ID> url=https://... views=0 clicks=0 note=...`: ghi nhận bài đã đăng thủ công, lưu URL và chuyển job sang `published`.
 - `/performance_add job=<ID> variant=<VARIANT_ID> type=view|click|order|revenue|lead value=... amount=... note=...`: ghi hiệu quả bài đăng/affiliate, có thể gắn vào biến thể creative.
 - `/performance`: báo cáo hiệu quả theo loại sự kiện, kênh và job gần nhất.
+- `/growth days=14`: xếp hạng job/kênh/creative theo view, click, order, revenue, cost và đề xuất lệnh sản xuất/remix tiếp theo.
 - `/produce slot=<calendar_id>`: tạo production job từ lịch nội dung, kèm brief AI nếu đã cấu hình provider.
 - `/pipeline`: xem hàng đợi sản xuất video.
 - `/pipeline <ID>`: xem chi tiết production job.
@@ -130,6 +131,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Channel/affiliate/calendar registry là khu vực admin-only để quản lý kênh Facebook/TikTok/OnlyFans, tài khoản phụ, link affiliate và lịch đăng nội dung. Không hiển thị cho khách hàng.
 - Production pipeline là admin-only, dùng để theo dõi từng video qua các stage: `brief`, `script`, `voice`, `visuals`, `edit`, `review`, `publish`, `done`.
 - Performance tracking là admin-only, dùng để ghi view/click/order/revenue/lead/cost sau khi đăng bài và theo dõi kênh hoặc affiliate nào đang tạo tiền. Dữ liệu có thể nhập bằng Telegram hoặc đẩy tự động qua Operator API Bridge.
+- Growth optimizer là admin-only, dùng dữ liệu performance để chọn job/creative/kênh thắng, gợi ý remix hoặc chạy autopilot tiếp theo thay vì sản xuất mù.
 - Trend search là admin-only, dùng để tìm trend mới trước khi tạo video; bot lưu trend candidate, tạo lịch/job từ trend và vẫn yêu cầu admin kiểm duyệt trước khi đăng.
 - Operator auto là admin-only, dùng để tạo hàng loạt production job từ trend mới cho các channel active; vẫn đi qua review gate/publish queue trước khi đăng.
 - Review gate là admin-only, dùng làm chốt kiểm duyệt trước khi đăng; job đạt có thể chuyển sang `ready`, job rủi ro chuyển `blocked`.

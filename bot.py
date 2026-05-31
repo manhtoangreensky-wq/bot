@@ -2181,6 +2181,75 @@ def performance_report_data(owner_id, limit=10):
     conn.close()
     return event_totals, channel_totals, recent_events
 
+def growth_optimizer_data(owner_id, days=14, limit=8):
+    since = (datetime.now() - timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d %H:%M:%S")
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT pe.job_id, pj.topic, pe.platform, sc.channel_name, al.product_name,
+                  SUM(CASE WHEN pe.event_type='view' THEN pe.value ELSE 0 END) AS views,
+                  SUM(CASE WHEN pe.event_type='click' THEN pe.value ELSE 0 END) AS clicks,
+                  SUM(CASE WHEN pe.event_type IN ('order','lead','revenue') THEN pe.value ELSE 0 END) AS conversions,
+                  SUM(CASE WHEN pe.event_type IN ('order','lead','revenue') THEN pe.amount ELSE 0 END) AS revenue,
+                  SUM(CASE WHEN pe.event_type='cost' THEN pe.amount ELSE 0 END) AS cost,
+                  COUNT(*) AS events
+        FROM performance_events pe
+        LEFT JOIN production_jobs pj ON pj.id = pe.job_id
+        LEFT JOIN social_channels sc ON sc.id = pe.channel_id
+        LEFT JOIN affiliate_links al ON al.id = pe.affiliate_id
+        WHERE pe.owner_id=? AND pe.created_at>=?
+        GROUP BY pe.job_id, pj.topic, pe.platform, sc.channel_name, al.product_name
+        ORDER BY revenue DESC, clicks DESC, views DESC
+        LIMIT ?""",
+        (str(owner_id), since, limit)
+    )
+    job_rows = c.fetchall()
+    c.execute(
+        """SELECT pe.platform, sc.channel_name,
+                  SUM(CASE WHEN pe.event_type='view' THEN pe.value ELSE 0 END) AS views,
+                  SUM(CASE WHEN pe.event_type='click' THEN pe.value ELSE 0 END) AS clicks,
+                  SUM(CASE WHEN pe.event_type IN ('order','lead','revenue') THEN pe.value ELSE 0 END) AS conversions,
+                  SUM(CASE WHEN pe.event_type IN ('order','lead','revenue') THEN pe.amount ELSE 0 END) AS revenue,
+                  COUNT(*) AS events
+        FROM performance_events pe
+        LEFT JOIN social_channels sc ON sc.id = pe.channel_id
+        WHERE pe.owner_id=? AND pe.created_at>=?
+        GROUP BY pe.platform, sc.channel_name
+        ORDER BY revenue DESC, clicks DESC, views DESC
+        LIMIT ?""",
+        (str(owner_id), since, limit)
+    )
+    channel_rows = c.fetchall()
+    c.execute(
+        """SELECT pe.variant_id, cv.variant_label, cv.hook,
+                  SUM(CASE WHEN pe.event_type='view' THEN pe.value ELSE 0 END) AS views,
+                  SUM(CASE WHEN pe.event_type='click' THEN pe.value ELSE 0 END) AS clicks,
+                  SUM(CASE WHEN pe.event_type IN ('order','lead','revenue') THEN pe.value ELSE 0 END) AS conversions,
+                  SUM(CASE WHEN pe.event_type IN ('order','lead','revenue') THEN pe.amount ELSE 0 END) AS revenue
+        FROM performance_events pe
+        LEFT JOIN creative_variants cv ON cv.id = pe.variant_id
+        WHERE pe.owner_id=? AND pe.created_at>=? AND COALESCE(pe.variant_id,0)>0
+        GROUP BY pe.variant_id, cv.variant_label, cv.hook
+        ORDER BY revenue DESC, clicks DESC, views DESC
+        LIMIT ?""",
+        (str(owner_id), since, limit)
+    )
+    variant_rows = c.fetchall()
+    conn.close()
+    return since, job_rows, channel_rows, variant_rows
+
+def growth_score(views=0, clicks=0, conversions=0, revenue=0, cost=0):
+    views = int(views or 0)
+    clicks = int(clicks or 0)
+    conversions = int(conversions or 0)
+    revenue = int(revenue or 0)
+    cost = int(cost or 0)
+    ctr = (clicks / views * 100) if views else 0
+    cvr = (conversions / clicks * 100) if clicks else 0
+    roi = ((revenue - cost) / cost * 100) if cost else (100 if revenue > 0 else 0)
+    score = min(100, int((ctr * 3) + (cvr * 5) + min(revenue / 10000, 40) + max(min(roi / 10, 20), 0)))
+    return score, ctr, cvr, roi
+
 def create_publish_queue_item(owner_id, job_id, mode="manual", scheduled_at="", note=""):
     job = get_production_job(job_id, owner_id)
     if not job:
@@ -3776,6 +3845,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /mark_published — Ghi nhận đã đăng bài",
             "• /performance_add — Ghi hiệu quả bài đăng",
             "• /performance — Báo cáo hiệu quả kiếm tiền",
+            "• /growth — Tối ưu nội dung/kênh/affiliate theo performance",
             "• /produce — Tạo job sản xuất từ lịch",
             "• /pipeline — Theo dõi pipeline video",
             "• /pipeline_set — Cập nhật stage/trạng thái",
@@ -5314,6 +5384,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
             InlineKeyboardButton("💰 Performance", callback_data="opmenu|performance")
         ],
+        [InlineKeyboardButton("📈 Growth optimizer", callback_data="opmenu|growth")],
         [InlineKeyboardButton("📊 Daily digest", callback_data="opmenu|daily")],
     ])
 
@@ -5365,6 +5436,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "review": "/review_gate job=<JOB_ID>",
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
+        "growth": "/growth\n/growth days=30",
         "daily": "/operator_daily\n/operator_daily days=7",
     }
     await query.edit_message_text(
@@ -6334,6 +6406,89 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("• Chưa có sự kiện.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or (context.args[0] if context.args else 14)), 90))
+    except (TypeError, ValueError):
+        days = 14
+    since, job_rows, channel_rows, variant_rows = growth_optimizer_data(update.effective_user.id, days=days, limit=8)
+    lines = [
+        f"📈 <b>GROWTH OPTIMIZER — {days} ngày</b>",
+        f"• Từ: <code>{html.escape(since)}</code>",
+        "",
+        "<b>Job/nội dung thắng:</b>",
+    ]
+    best_job = None
+    if job_rows:
+        ranked_jobs = []
+        for row in job_rows:
+            job_id, topic, platform, channel_name, product_name, views, clicks, conversions, revenue, cost, events = row
+            score, ctr, cvr, roi = growth_score(views, clicks, conversions, revenue, cost)
+            ranked_jobs.append((score, row, ctr, cvr, roi))
+        ranked_jobs.sort(key=lambda item: item[0], reverse=True)
+        best_job = ranked_jobs[0][1]
+        for score, row, ctr, cvr, roi in ranked_jobs[:6]:
+            job_id, topic, platform, channel_name, product_name, views, clicks, conversions, revenue, cost, events = row
+            lines.append(
+                f"• job #{job_id} | score=<b>{score}</b> | <code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n"
+                f"  views={views or 0} click={clicks or 0} conv={conversions or 0} rev={int(revenue or 0):,}đ cost={int(cost or 0):,}đ\n"
+                f"  CTR={ctr:.2f}% | CVR={cvr:.2f}% | ROI={roi:.1f}%\n"
+                f"  {html.escape(topic or '-')}"
+            )
+    else:
+        lines.append("• Chưa có dữ liệu. Đẩy dữ liệu qua /performance_add hoặc /api/operator/performance.")
+
+    lines.append("\n<b>Kênh/sàn nên ưu tiên:</b>")
+    if channel_rows:
+        for platform, channel_name, views, clicks, conversions, revenue, events in channel_rows[:5]:
+            score, ctr, cvr, roi = growth_score(views, clicks, conversions, revenue, 0)
+            lines.append(
+                f"• <code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}: "
+                f"score=<b>{score}</b> | views={views or 0} click={clicks or 0} conv={conversions or 0} rev={int(revenue or 0):,}đ"
+            )
+    else:
+        lines.append("• Chưa có dữ liệu kênh.")
+
+    lines.append("\n<b>Creative/variant nên remix:</b>")
+    if variant_rows:
+        for variant_id, label, hook, views, clicks, conversions, revenue in variant_rows[:5]:
+            score, ctr, cvr, roi = growth_score(views, clicks, conversions, revenue, 0)
+            lines.append(
+                f"• variant #{variant_id} | score=<b>{score}</b> | {html.escape(label or '-')}\n"
+                f"  CTR={ctr:.2f}% | revenue={int(revenue or 0):,}đ | Hook: {html.escape(hook or '-')}"
+            )
+    else:
+        lines.append("• Chưa có variant có dữ liệu.")
+
+    next_commands = []
+    if best_job:
+        job_id, topic, platform, channel_name, product_name, *_ = best_job
+        next_commands.append(f"/operator_build job={job_id} n=5 duration=45")
+        next_commands.append(f"/autopilot niche={topic or product_name or 'công nghệ AI'} platform={platform or 'tiktok'} channel=all limit=3 duration=45")
+    else:
+        next_commands.append("/autopilot niche=công nghệ AI platform=tiktok channel=all limit=3 duration=45")
+    lines.append("\n<b>Lệnh đề xuất:</b>")
+    for cmd in next_commands[:3]:
+        lines.append(f"• <code>{html.escape(cmd)}</code>")
+
+    if (gemini_client or openai_client) and job_rows:
+        compact = "\n".join(
+            f"job {row[0]} | {row[2]} | {row[3]} | views={row[5]} clicks={row[6]} conv={row[7]} rev={row[8]} | {row[1]}"
+            for row in job_rows[:8]
+        )
+        advice = AgentGemini.chat(
+            "Bạn là growth strategist cho hệ thống AI affiliate video. Dựa trên dữ liệu, đề xuất 3 hành động ngắn, thực dụng, không hứa doanh thu phi thực tế.",
+            compact,
+            update.effective_user.id,
+            is_json=False
+        )
+        lines.append(f"\n<b>AI nhận định:</b>\n<pre>{html_pre(advice, 1200)}</pre>")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_publish_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -7291,6 +7446,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
+    tg_app.add_handler(CommandHandler("growth", cmd_growth))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
     tg_app.add_handler(CommandHandler("pipeline",    cmd_pipeline))
     tg_app.add_handler(CommandHandler("pipeline_set", cmd_pipeline_set))
