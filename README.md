@@ -129,6 +129,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/publish_queue`: xem hàng đợi đăng.
 - `/publisher_handoff queue=<QUEUE_ID>`: xuất runbook đăng bài theo nền tảng cho publisher worker hoặc đăng thủ công, gồm final video, caption, comment ghim, env token cần có và payload trả kết quả.
 - `/publisher_run platform=tiktok mode=api`: claim queue kế tiếp và trả quyết định `api_ready`, `manual_required` hoặc `blocked_missing_final_video` cho publisher worker/admin.
+- `/publisher_auto queue=<QUEUE_ID>`: thử auto publish bằng API chính thức, hiện giới hạn Facebook Page `api_ready` có `token_env` và `page_id`; nền tảng khác trả handoff/manual.
 - `/publish_queue_set id=<QUEUE_ID> status=published|blocked|scheduled url=https://... note=...`: cập nhật trạng thái hàng đợi đăng.
 - `/asset_add job=<ID> type=script|voice|raw_video|subtitle|thumbnail|final_video url=... note=...`: lưu asset/link/file vào production job.
 - `/assets <JOB_ID>`: xem toàn bộ asset đã lưu của job.
@@ -195,6 +196,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /api/operator/affiliate-scale`: n8n/Claude worker gửi `affiliate_id`, `platform`, `channel`, `limit`, `build`, `duration`; nếu không gửi `campaign_id`, bot tự chọn campaign active phù hợp rồi tìm trend, tạo batch job và có thể build luôn creative/manifest/task cho link affiliate.
 - `GET /api/operator/publish/next`: publisher worker lấy bài trong publish queue, hỗ trợ query `platform` và `mode`, rồi chuyển queue sang `publishing`.
 - `GET /api/operator/publish/{queue_id}/handoff`: lấy runbook đăng bài cho queue đã duyệt, phân biệt TikTok, Facebook/Reels, OnlyFans/manual và trả sẵn copy/pinned comment/complete payload.
+- `POST /api/operator/publish/{queue_id}/auto`: thử auto publish chính thức, hiện hỗ trợ Facebook Page video bằng Meta Graph API khi queue/channel `api_ready`; nếu không đạt thì block và trả lý do/manual handoff.
 - `POST /api/operator/publish/{queue_id}/complete`: publisher worker trả `status`, `publish_url`, `views`, `clicks`, `note`; bot cập nhật job và performance.
 - `POST /api/operator/performance`: worker ngoài gửi `job_id`, `event_type=view|click|order|revenue|lead|cost`, `value`, `amount`, `variant_id`, `source`, `note` để bot tự ghi hiệu quả affiliate.
 
@@ -221,6 +223,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Publisher handoff là lớp nối giữa bot và publisher worker: bot không lưu secret nền tảng, chỉ trả tên biến môi trường/token cần có, nội dung cần đăng và endpoint để worker báo kết quả.
 - Publisher status là chốt vận hành cho auto-post: cron/n8n nên gọi trước khi claim queue để biết có kênh API-ready hay chỉ nên trả handoff cho admin đăng thủ công.
 - Publisher run là bước cron/n8n an toàn: claim một queue, kiểm tra final video/token/mode, trả handoff và chỉ cho API worker đăng khi kênh thật sự `api_ready`.
+- Publisher auto hiện chỉ mở cho Facebook Page qua Meta Graph API; TikTok/OnlyFans giữ manual/API worker riêng cho đến khi có OAuth/quyền đăng chính thức phù hợp.
 - Worker spec/n8n workflow đã có endpoint mới `/api/operator/make-video`, `/api/operator/publisher/status` và `/api/operator/publisher/run` để Claude/n8n chạy theo cùng một runbook với Telegram.
 - Operator smoke test là chốt nhẹ trước khi bật automation: nếu fail ở env/file/db/surface thì xử lý trước, nếu chỉ warning ở audit/publisher thì vẫn có thể chạy manual nhưng chưa nên bật full auto.
 - Job ready check là admin-only, dùng như chốt cuối trước khi đưa video vào hàng đợi đăng; nếu thiếu asset/review/creative/manifest/task, bot trả về lệnh cần chạy tiếp.

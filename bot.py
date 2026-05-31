@@ -87,6 +87,7 @@ OPERATOR_API_TOKEN  = _env("OPERATOR_API_TOKEN")
 AFFILIATE_POSTBACK_TOKEN = _env("AFFILIATE_POSTBACK_TOKEN")
 OPERATOR_UPLOAD_DIR = _env("OPERATOR_UPLOAD_DIR", "operator_uploads")
 MAX_OPERATOR_UPLOAD_MB = int(_env("MAX_OPERATOR_UPLOAD_MB", "200") or "200")
+META_GRAPH_VERSION = _env("META_GRAPH_VERSION", "v24.0")
 
 # ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -2411,6 +2412,7 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/jobs/<JOB_ID>/assets/upload"),
         ("GET", "/api/operator/assets/<ASSET_ID>/file"),
         ("GET", "/api/operator/publish/<QUEUE_ID>/handoff"),
+        ("POST", "/api/operator/publish/<QUEUE_ID>/auto"),
         ("POST", "/api/operator/publish/<QUEUE_ID>/complete"),
         ("POST", "/api/operator/performance"),
         ("POST", "/webhook/payos"),
@@ -2651,6 +2653,11 @@ def operator_worker_spec_data():
                 "views": 0,
                 "clicks": 0,
                 "note": "manual/api publisher",
+            },
+            "publish_auto_facebook": {
+                "method": "POST",
+                "url": "/api/operator/publish/<QUEUE_ID>/auto",
+                "purpose": "Chỉ Facebook Page api_ready; bot dùng Meta Graph Page video endpoint, rồi tự complete queue nếu thành công.",
             },
             "performance": {
                 "job_id": 1,
@@ -6058,6 +6065,112 @@ def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None,
     conn.commit()
     conn.close()
     return changed > 0, row[0] if row else None
+
+def facebook_page_video_permalink(page_id: str, video_id: str) -> str:
+    if page_id and video_id:
+        return f"https://www.facebook.com/{page_id}/videos/{video_id}/"
+    if video_id:
+        return f"https://www.facebook.com/watch/?v={video_id}"
+    return ""
+
+async def publish_facebook_page_video(queue_payload: dict):
+    platform = (queue_payload.get("platform") or "").lower()
+    if platform not in {"facebook", "fb", "meta", "reels"}:
+        return False, "unsupported_platform", {}
+    mode = (queue_payload.get("mode") or queue_payload.get("channel_publish_mode") or "").lower()
+    if mode != "api":
+        return False, "queue_not_api_mode", {}
+    token_env = queue_payload.get("token_env") or ""
+    page_id = str(queue_payload.get("page_id") or "").strip()
+    token = _env(token_env) if token_env else ""
+    if not token_env or not token:
+        return False, "missing_token", {"token_env": token_env}
+    if not page_id:
+        return False, "missing_page_id", {}
+
+    handoff = build_publisher_handoff(queue_payload)
+    media = handoff.get("media") or {}
+    copy = handoff.get("copy") or {}
+    final_video = queue_payload.get("final_video") or {}
+    asset = get_production_asset(ADMIN_ID, final_video.get("id")) if final_video.get("id") else None
+    media_url = media.get("final_video_url") or ""
+    description_parts = [
+        copy.get("caption") or "",
+        copy.get("pinned_comment") or "",
+        copy.get("disclosure") or "",
+    ]
+    description = "\n\n".join([part for part in description_parts if part]).strip()
+    graph_base = f"https://graph.facebook.com/{META_GRAPH_VERSION.strip('/')}/{page_id}/videos"
+    data = {
+        "access_token": token,
+        "description": description[:6000],
+        "published": "true",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
+            if asset:
+                _aid, _owner_id, _job_id, _asset_type, _url, _file_id, _note, local_path, content_type, filename, _created_at = asset
+                if local_path:
+                    upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+                    abs_path = os.path.abspath(local_path)
+                    if not abs_path.startswith(upload_root) or not os.path.exists(abs_path):
+                        return False, "local_asset_missing", {"asset_id": final_video.get("id")}
+                    with open(abs_path, "rb") as f:
+                        files = {"source": (filename or os.path.basename(abs_path), f, content_type or "video/mp4")}
+                        res = await client.post(graph_base, data=data, files=files)
+                elif media_url and re.match(r"^https?://", media_url, re.IGNORECASE) and "/api/operator/assets/" not in media_url:
+                    res = await client.post(graph_base, data={**data, "file_url": media_url})
+                else:
+                    return False, "asset_not_public_for_meta", {"asset_id": final_video.get("id"), "media_url": media_url}
+            elif media_url and re.match(r"^https?://", media_url, re.IGNORECASE) and "/api/operator/assets/" not in media_url:
+                res = await client.post(graph_base, data={**data, "file_url": media_url})
+            else:
+                return False, "missing_final_video", {"media_url": media_url}
+        try:
+            payload = res.json()
+        except Exception:
+            payload = {"raw": res.text[:1000]}
+        if res.status_code >= 400 or payload.get("error"):
+            err = payload.get("error") if isinstance(payload, dict) else {}
+            return False, "facebook_api_error", {
+                "status_code": res.status_code,
+                "error": err or payload,
+            }
+        video_id = str(payload.get("id") or payload.get("video_id") or "")
+        post_id = str(payload.get("post_id") or "")
+        return True, "published", {
+            "video_id": video_id,
+            "post_id": post_id,
+            "publish_url": facebook_page_video_permalink(page_id, video_id) or (f"https://www.facebook.com/{post_id}" if post_id else ""),
+            "raw": payload,
+        }
+    except Exception as e:
+        logger.error(f"Facebook auto publish error: {e}")
+        return False, "exception", {"error": str(e)}
+
+async def official_auto_publish_queue_item(owner_id, queue_id):
+    item = get_publish_queue_item(owner_id, queue_id)
+    if not item:
+        return False, "queue_not_found", {}
+    queue_payload = serialize_publish_queue_item(item)
+    platform = (queue_payload.get("platform") or "").lower()
+    if platform in {"facebook", "fb", "meta", "reels"}:
+        ok, reason, info = await publish_facebook_page_video(queue_payload)
+    else:
+        return False, "official_auto_not_supported", {
+            "platform": platform,
+            "manual_handoff": build_publisher_handoff(queue_payload),
+        }
+    if not ok:
+        update_publish_queue_item(owner_id, queue_id, status="blocked", note=f"official_auto_publish_failed:{reason}")
+        return False, reason, info
+    publish_url = info.get("publish_url") or ""
+    update_publish_queue_item(owner_id, queue_id, status="published", publish_url=publish_url, note=f"official_auto_publish:{platform}")
+    job_id = queue_payload.get("job_id") or 0
+    if job_id:
+        update_production_job(job_id, owner_id, stage="done", status="published", note=f"official_auto_publish queue:{queue_id}", publish_url=publish_url)
+        add_performance_event(owner_id, job_id, "publish", 1, 0, f"official_auto_publish:{platform}")
+    return True, "published", {**info, "queue": serialize_publish_queue_item(get_publish_queue_item(owner_id, queue_id))}
 
 def clamp_score(value, low=0, high=100):
     return max(low, min(high, int(value)))
@@ -10556,8 +10669,8 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "approvepublish": "/approve_publish job=<JOB_ID> queue=1 mode=manual note=duyet_ok\nPOST /api/operator/jobs/<JOB_ID>/approve",
         "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
-        "publishqueue": "/publish_queue\n/publisher_handoff queue=<QUEUE_ID>\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
-        "publisherhandoff": "/publisher_handoff queue=<QUEUE_ID>\nGET /api/operator/publish/<QUEUE_ID>/handoff",
+        "publishqueue": "/publish_queue\n/publisher_handoff queue=<QUEUE_ID>\n/publisher_auto queue=<QUEUE_ID>\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
+        "publisherhandoff": "/publisher_handoff queue=<QUEUE_ID>\n/publisher_auto queue=<QUEUE_ID>\nGET /api/operator/publish/<QUEUE_ID>/handoff",
         "publisherrun": "/publisher_run platform=tiktok mode=api\nPOST /api/operator/publisher/run",
         "publisherstatus": "/publisher_status\nGET /api/operator/publisher/status",
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
@@ -11634,6 +11747,7 @@ async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(
         "\nLệnh tiếp:\n"
         "<code>/publisher_handoff queue=&lt;QUEUE_ID&gt;</code>\n"
+        "<code>/publisher_auto queue=&lt;QUEUE_ID&gt;</code> — chỉ Facebook Page api_ready\n"
         "<code>/publish_queue_set id=&lt;QUEUE_ID&gt; status=published url=https://...</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -11678,6 +11792,8 @@ async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TY
         "\nSau khi đăng xong gọi:\n"
         f"<code>/publish_queue_set id={queue_id} status=published url=https://...</code>"
     )
+    if handoff.get("can_auto_publish") and (handoff.get("platform") or "") in {"facebook", "fb", "meta", "reels"}:
+        lines.append(f"\nAuto chính thức: <code>/publisher_auto queue={queue_id}</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -11709,7 +11825,41 @@ async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Sau khi đăng xong:",
         f"<code>/publish_queue_set id={queue.get('id')} status=published url=https://...</code>",
     ]
+    if result.get("decision") == "api_ready" and (queue.get("platform") or "").lower() in {"facebook", "fb", "meta", "reels"}:
+        lines.append(f"Auto chính thức: <code>/publisher_auto queue={queue.get('id')}</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_publisher_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        queue_id = int(data.get("id") or data.get("queue") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/publisher_auto queue=&lt;QUEUE_ID&gt;</code>\n"
+            "Hiện chỉ bật auto chính thức cho Facebook Page api_ready.",
+            parse_mode="HTML"
+        )
+    msg = await update.message.reply_text(f"⏳ Đang thử auto publish queue #{queue_id} qua API chính thức...")
+    ok, reason, info = await official_auto_publish_queue_item(update.effective_user.id, queue_id)
+    if ok:
+        await msg.edit_text(
+            f"✅ <b>Đã auto publish queue #{queue_id}</b>\n"
+            f"• URL: <code>{html.escape(info.get('publish_url') or '-')}</code>\n"
+            f"• Video ID: <code>{html.escape(info.get('video_id') or '-')}</code>\n\n"
+            "Bot đã tự chuyển queue/job sang published và ghi performance publish.",
+            parse_mode="HTML"
+        )
+    else:
+        detail = json.dumps(info, ensure_ascii=False)[:1200] if info else "-"
+        await msg.edit_text(
+            f"⚠️ <b>Không auto publish được queue #{queue_id}</b>\n"
+            f"• Lý do: <code>{html.escape(reason)}</code>\n"
+            f"• Chi tiết: <pre>{html_pre(detail, 1200)}</pre>\n\n"
+            f"Chuyển manual: <code>/publisher_handoff queue={queue_id}</code>",
+            parse_mode="HTML"
+        )
 
 async def cmd_publish_queue_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -13396,6 +13546,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publisher_handoff", cmd_publisher_handoff))
     tg_app.add_handler(CommandHandler("publisher_run", cmd_publisher_run))
+    tg_app.add_handler(CommandHandler("publisher_auto", cmd_publisher_auto))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
     tg_app.add_handler(CommandHandler("assets", cmd_assets))
@@ -14728,6 +14879,7 @@ async def api_operator_publish_next(request: Request, platform: str = "", mode: 
         "queue": queue_payload,
         "publisher_handoff": build_publisher_handoff(queue_payload),
         "submit_url": f"/api/operator/publish/{queue_id}/complete",
+        "auto_publish_url": f"/api/operator/publish/{queue_id}/auto",
         "rule": "Return publish_url after posting. If blocked by platform/compliance, submit status=blocked and note.",
     }
 
@@ -14743,7 +14895,38 @@ async def api_operator_publish_handoff(queue_id: int, request: Request):
         "queue": queue_payload,
         "publisher_handoff": build_publisher_handoff(queue_payload),
         "submit_url": f"/api/operator/publish/{queue_id}/complete",
+        "auto_publish_url": f"/api/operator/publish/{queue_id}/auto",
         "rule": "Use official platform API or manual publishing. Never bypass platform rules, consent, or review gate.",
+    }
+
+@fastapi_app.post("/api/operator/publish/{queue_id}/auto")
+async def api_operator_publish_auto(queue_id: int, request: Request):
+    verify_operator_api_token(request)
+    ok, reason, info = await official_auto_publish_queue_item(ADMIN_ID, queue_id)
+    if tg_app and ADMIN_ID:
+        try:
+            if ok:
+                text = (
+                    f"✅ <b>OFFICIAL AUTO PUBLISH</b>\n\n"
+                    f"• Queue: <code>#{queue_id}</code>\n"
+                    f"• URL: <code>{html.escape(info.get('publish_url') or '-')}</code>\n"
+                    f"• Video ID: <code>{html.escape(info.get('video_id') or '-')}</code>"
+                )
+            else:
+                text = (
+                    f"⚠️ <b>OFFICIAL AUTO PUBLISH FAILED</b>\n\n"
+                    f"• Queue: <code>#{queue_id}</code>\n"
+                    f"• Reason: <code>{html.escape(reason)}</code>\n"
+                    f"• Manual: <code>/publisher_handoff queue={queue_id}</code>"
+                )
+            await tg_app.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Official auto publish notify error: {e}")
+    return {
+        "ok": ok,
+        "reason": reason,
+        "result": info,
+        "rule": "Currently only Facebook Page api_ready is supported for official auto publish. Other platforms return manual handoff.",
     }
 
 @fastapi_app.post("/api/operator/publish/{queue_id}/complete")
