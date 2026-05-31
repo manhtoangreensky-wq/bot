@@ -1462,6 +1462,13 @@ def get_production_manifest(owner_id, manifest_id):
     conn.close()
     return row
 
+def latest_production_manifest(owner_id, job_id):
+    rows = list_production_manifests(owner_id, job_id, limit=1)
+    if not rows:
+        return None
+    mid, variant_id, status, manifest_json, created_at, updated_at = rows[0]
+    return (mid, job_id, variant_id, status, manifest_json, created_at, updated_at)
+
 def build_manifest_prompt(job, variant=None, duration=45):
     (
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
@@ -1584,6 +1591,115 @@ def parse_manifest_json(raw_text, job, variant=None, duration=45):
     if raw_text:
         manifest["ai_raw_unparsed"] = truncate_text(raw_text, 1200)
     return manifest
+
+def build_manifest_handoff_prompt(job, manifest_row, target_tool):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    manifest_id, _, variant_id, manifest_status, manifest_json, created_at, updated_at = manifest_row
+    try:
+        manifest = json.loads(manifest_json or "{}")
+    except Exception:
+        manifest = {}
+    target_tool = (target_tool or "claude").lower()
+    scenes = manifest.get("scenes") or []
+    voice = manifest.get("voice") or {}
+    edit = manifest.get("edit_instructions") or {}
+    publish = manifest.get("publish") or {}
+    compliance = manifest.get("compliance_checklist") or []
+    title = manifest.get("title") or topic or f"job #{jid}"
+    common = (
+        f"VAI TRÒ: Bạn là {target_tool.upper()} trong AI Operator TOAN DAAS.\n"
+        f"Manifest: #{manifest_id} | Job: #{jid} | Variant: {variant_id or '-'} | Platform: {platform or '-'} | Format: {manifest.get('format','9:16')}\n"
+        f"Title: {title}\n"
+        f"Affiliate: {network or '-'} / {product_name or '-'} / {affiliate_url or '-'}\n\n"
+        "QUY TẮC:\n"
+        "- Ưu tiên công cụ tốt/có phí trước, nếu lỗi/quota/hết tiền thì ghi fallback và báo admin.\n"
+        "- Không spam, không mạo danh, không dùng likeness/người thật nếu chưa có consent rõ ràng, đủ 18 tuổi.\n"
+        "- Không cam kết thu nhập/kết quả phi thực tế; affiliate CTA phải minh bạch.\n"
+        "- Output phải có file/link/asset cần lưu vào /asset_add hoặc trạng thái cần cập nhật bằng /pipeline_set.\n\n"
+    )
+    if target_tool in {"kling", "runway", "pika", "luma", "visuals"}:
+        scene_lines = []
+        for scene in scenes:
+            scene_lines.append(
+                f"SCENE {scene.get('scene')} ({scene.get('start')}-{scene.get('end')}s, {scene.get('goal')}):\n"
+                f"Visual prompt: {scene.get('visual_prompt')}\n"
+                f"On-screen text: {scene.get('on_screen_text')}\n"
+                f"Voice line: {scene.get('voice_line')}\n"
+                f"Asset cần xuất: {scene.get('asset_needed')}"
+            )
+        return (
+            common +
+            "NHIỆM VỤ VISUAL VIDEO:\n"
+            "Tạo từng scene video 9:16 theo prompt. Giữ style nhất quán, không dùng logo/nhân vật bản quyền khi chưa có quyền.\n\n"
+            + "\n\n".join(scene_lines) +
+            "\n\nOUTPUT:\n"
+            "1. Link/file từng scene.\n"
+            "2. Scene nào lỗi và fallback đề xuất.\n"
+            f"3. Lệnh cập nhật: /asset_add job={jid} type=raw_video url=<LINK> note=manifest:{manifest_id} scene=<N>"
+        )
+    if target_tool in {"fish", "edge", "tts", "voice"}:
+        return (
+            common +
+            "NHIỆM VỤ VOICE:\n"
+            f"Provider chính: {voice.get('provider_primary','Fish Audio HD')} | fallback: {voice.get('provider_fallback','Edge TTS')}\n"
+            f"Style: {voice.get('style','giọng Việt rõ, đáng tin')}\n\n"
+            f"SCRIPT:\n{voice.get('script') or ' '.join(str(s.get('voice_line','')) for s in scenes)}\n\n"
+            "OUTPUT:\n"
+            "1. File/link audio.\n"
+            "2. Duration thực tế.\n"
+            "3. Nếu Fish lỗi/quota, dùng Edge và báo admin.\n"
+            f"4. Lệnh cập nhật: /asset_add job={jid} type=voice url=<LINK> note=manifest:{manifest_id}"
+        )
+    if target_tool in {"capcut", "ffmpeg", "edit"}:
+        return (
+            common +
+            "NHIỆM VỤ EDIT:\n"
+            f"Tool: {edit.get('tool','capcut|ffmpeg')}\n"
+            f"Music: {edit.get('music','nhạc hợp lệ, âm lượng thấp')}\n"
+            f"Subtitle: {edit.get('subtitle','burn subtitle tiếng Việt')}\n"
+            f"Transitions: {edit.get('transitions','cut nhanh, sạch')}\n"
+            f"CTA overlay: {edit.get('cta_overlay') or publish.get('cta') or '-'}\n\n"
+            "INPUT CẦN DÙNG:\n"
+            "- raw_video scenes từ /assets\n"
+            "- voice audio từ /assets\n"
+            "- caption/CTA từ manifest\n\n"
+            "OUTPUT:\n"
+            "1. final_video mp4 9:16.\n"
+            "2. subtitle file nếu có.\n"
+            "3. thumbnail nếu có.\n"
+            f"4. Lệnh cập nhật: /asset_add job={jid} type=final_video url=<LINK> note=manifest:{manifest_id}"
+        )
+    if target_tool in {"publish", "caption", "social"}:
+        return (
+            common +
+            "NHIỆM VỤ PUBLISH PACK:\n"
+            f"Caption: {publish.get('caption','-')}\n"
+            f"Hashtags: {publish.get('hashtags','-')}\n"
+            f"Affiliate placement: {publish.get('affiliate_placement','-')}\n"
+            f"CTA: {publish.get('cta','-')}\n\n"
+            "OUTPUT:\n"
+            "1. Caption cuối cùng theo nền tảng.\n"
+            "2. Checklist trước khi đăng.\n"
+            f"3. Queue đăng: /queue_publish job={jid} mode=manual note=manifest:{manifest_id}"
+        )
+    if target_tool in {"review", "review_gate", "compliance"}:
+        return (
+            common +
+            "NHIỆM VỤ REVIEW GATE:\n"
+            "Checklist manifest:\n" + "\n".join(f"- {item}" for item in compliance) + "\n\n"
+            "Kiểm tra thêm: quyền hình ảnh/voice/nhạc, affiliate claim, nội dung người mẫu/OnlyFans nếu có, CTA, link, publish URL.\n"
+            "OUTPUT: APPROVE/FIX/BLOCK, lý do, sửa gì trước khi đăng."
+        )
+    return (
+        common +
+        "NHIỆM VỤ ORCHESTRATION:\n"
+        "Đọc manifest dưới đây và chia việc cho tool phù hợp theo handoff_order.\n\n"
+        f"<MANIFEST_JSON>\n{manifest_json}\n</MANIFEST_JSON>\n\n"
+        "OUTPUT: danh sách việc theo thứ tự, lệnh Telegram cần chạy tiếp, và điểm rủi ro cần xử lý."
+    )
 
 def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0):
     job = get_production_job(job_id, owner_id)
@@ -2960,6 +3076,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /creative_report — Báo cáo biến thể thắng",
             "• /manifest — Tạo production manifest cho AI/tool",
             "• /manifests — Xem manifest của job",
+            "• /manifest_handoff — Giao manifest cho từng AI/tool",
             "• /queue_publish — Đưa job vào hàng đợi đăng",
             "• /publish_queue — Xem hàng đợi đăng",
             "• /asset_add — Lưu asset vào job",
@@ -4175,7 +4292,10 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🗂 Assets", callback_data="opmenu|assets"),
             InlineKeyboardButton("📋 Job report", callback_data="opmenu|report")
         ],
-        [InlineKeyboardButton("🎬 Production manifest", callback_data="opmenu|manifest")],
+        [
+            InlineKeyboardButton("🎬 Production manifest", callback_data="opmenu|manifest"),
+            InlineKeyboardButton("🤝 Manifest handoff", callback_data="opmenu|manifesthandoff")
+        ],
         [InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")],
         [
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
@@ -4220,6 +4340,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
+        "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
         "report": "/job_report <JOB_ID>",
         "review": "/review_gate job=<JOB_ID>",
@@ -4672,6 +4793,56 @@ async def cmd_manifests(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"  first_scene={html.escape(str(first.get('visual_prompt') or first.get('voice_line') or '-'))[:400]}")
     lines.append("\nTạo lại manifest: <code>/manifest job=%s duration=45</code>" % job_id)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_manifest_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    target_tool = (data.get("tool") or data.get("ai") or "kling").lower()
+    manifest_row = None
+    job = None
+    try:
+        manifest_id = int(data.get("manifest") or data.get("mid") or 0)
+    except ValueError:
+        manifest_id = 0
+    if manifest_id:
+        manifest_row = get_production_manifest(update.effective_user.id, manifest_id)
+        if not manifest_row:
+            return await update.message.reply_text("❌ Không tìm thấy manifest.")
+        job = get_production_job(manifest_row[1], update.effective_user.id)
+    else:
+        try:
+            job_id = int(data.get("job") or data.get("id") or context.args[0])
+        except (IndexError, TypeError, ValueError):
+            return await update.message.reply_text(
+                "⚠️ Cú pháp: <code>/manifest_handoff job=1 tool=kling</code> hoặc <code>/manifest_handoff manifest=2 tool=capcut</code>",
+                parse_mode="HTML"
+            )
+        job = get_production_job(job_id, update.effective_user.id)
+        if not job:
+            return await update.message.reply_text("❌ Không tìm thấy production job.")
+        manifest_row = latest_production_manifest(update.effective_user.id, job_id)
+        if not manifest_row:
+            return await update.message.reply_text(
+                f"📭 Job #{job_id} chưa có manifest. Tạo trước bằng <code>/manifest job={job_id}</code>.",
+                parse_mode="HTML"
+            )
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy production job của manifest.")
+    prompt = build_manifest_handoff_prompt(job, manifest_row, target_tool)
+    update_production_job(
+        job[0],
+        update.effective_user.id,
+        stage="visuals" if target_tool in {"kling", "runway", "visuals"} else ("edit" if target_tool in {"capcut", "ffmpeg", "edit"} else job[7]),
+        status="waiting",
+        note=f"manifest_handoff:{manifest_row[0]}/{target_tool} | {truncate_text(prompt, 500)}"
+    )
+    await update.message.reply_text(
+        f"🤝 <b>MANIFEST HANDOFF — #{manifest_row[0]}</b>\n"
+        f"Job: <code>#{job[0]}</code> | Tool: <b>{html.escape(target_tool)}</b>\n\n"
+        f"<pre>{html_pre(prompt)}</pre>",
+        parse_mode="HTML"
+    )
 
 async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -5777,6 +5948,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
     tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
     tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
+    tg_app.add_handler(CommandHandler("manifest_handoff", cmd_manifest_handoff))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
