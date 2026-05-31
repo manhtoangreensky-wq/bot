@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phân Tích Chuyên Sâu: Kỷ Nguyên AI Influencer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Chosen Palette: Midnight Corporate (Slate-900 base, Teal-500 accents, Light Slate text) -->
+    <!-- Application Structure Plan: The SPA uses a sidebar navigation dashboard layout. This structure allows the user to logically progress from understanding the market potential (Overview), learning the specific technical workflows required to maintain face consistency (Technology), analyzing the revenue models (Monetization), and finally reviewing the risks. This modular approach is best for digesting complex technical and business strategies without overwhelming the user. -->
+    <!-- Visualization & Content Choices: 
+         - Market Growth -> Line Chart -> Shows trend over time -> Chart.js Canvas (NO SVG).
+         - Tech Workflow -> Interactive Steps -> Click to reveal details of LoRA/ControlNet -> Vanilla JS + Tailwind styling.
+         - Revenue Streams -> Doughnut Chart -> Shows proportions of income sources -> Chart.js Canvas (NO SVG).
+         - Risk Matrix -> CSS Grid layout -> Highlights severity of platform/legal risks. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .tab-content { display: none; animation: fadeIn 0.3s ease-in-out; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* STRICT CHART CONTAINER CONSTRAINTS */
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            height: 400px;
+            max-height: 50vh;
+        }
+        
+        .nav-btn.active {
+            background-color: #0f172a;
+            color: white;
+            border-left: 4px solid #14b8a6;
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased h-screen flex overflow-hidden">
+
+    <!-- Sidebar Navigation -->
+    <aside class="w-64 bg-white border-r border-slate-200 flex flex-col h-full shadow-sm z-10 flex-shrink-0">
+        <div class="p-6 border-b border-slate-100">
+            <h1 class="text-2xl font-black text-slate-900 tracking-tight">AI<span class="text-teal-500">.</span>MODEL</h1>
+            <p class="text-xs text-slate-500 mt-1 uppercase tracking-wider font-semibold">Báo Cáo Nghiên Cứu</p>
+        </div>
+        <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
+            <button onclick="switchTab('overview')" id="btn-overview" class="nav-btn active w-full flex items-center gap-3 text-left px-4 py-3 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors font-medium">
+                <span class="text-lg">📊</span> Tổng Quan Thị Trường
+            </button>
+            <button onclick="switchTab('technology')" id="btn-technology" class="nav-btn w-full flex items-center gap-3 text-left px-4 py-3 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors font-medium">
+                <span class="text-lg">⚙️</span> Công Nghệ Lõi (Workflow)
+            </button>
+            <button onclick="switchTab('monetization')" id="btn-monetization" class="nav-btn w-full flex items-center gap-3 text-left px-4 py-3 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors font-medium">
+                <span class="text-lg">💰</span> Mô Hình Doanh Thu
+            </button>
+            <button onclick="switchTab('risks')" id="btn-risks" class="nav-btn w-full flex items-center gap-3 text-left px-4 py-3 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors font-medium">
+                <span class="text-lg">⚠️</span> Đánh Giá Rủi Ro
+            </button>
+        </nav>
+        <div class="p-4 border-t border-slate-100 text-xs text-slate-400 text-center">
+            Bảo mật nội bộ &copy; 2026
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 h-full overflow-y-auto bg-slate-50 scroll-smooth">
+        
+        <!-- HEADER -->
+        <header class="bg-white px-8 py-6 border-b border-slate-200 sticky top-0 z-20 shadow-sm">
+            <h2 id="section-title" class="text-2xl font-bold text-slate-800">Tổng Quan Thị Trường AI Influencer</h2>
+            <p id="section-desc" class="text-sm text-slate-500 mt-1">Phân tích tiềm năng tăng trưởng và sự dịch chuyển hành vi người dùng trên các nền tảng mạng xã hội.</p>
+        </header>
+
+        <div class="p-8 max-w-6xl mx-auto space-y-8">
+
+            <!-- TAB 1: OVERVIEW -->
+            <section id="tab-overview" class="tab-content active">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8">
+                    <p class="text-slate-600 leading-relaxed">
+                        Thị trường <strong>Virtual Influencer (Người có ảnh hưởng ảo)</strong> đang chứng kiến sự bùng nổ chưa từng có nhờ sự phát triển của Generative AI. Chi phí vận hành thấp (gần như bằng 0 sau khi setup thành công), không có rủi ro scandal đời tư, và khả năng sản xuất nội dung 24/7 đang biến đây thành kênh đầu tư "siêu lợi nhuận" trên các nền tảng trả phí như OnlyFans, Patreon, kết hợp phễu traffic từ X, Threads, và TikTok.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm border-l-4 border-l-teal-500">
+                        <div class="text-sm text-slate-500 font-semibold uppercase tracking-wide">Quy mô thị trường (2025)</div>
+                        <div class="text-3xl font-black text-slate-800 mt-2">$4.6 Tỷ</div>
+                        <div class="text-sm text-emerald-500 mt-1 font-medium">▲ +26% so với cùng kỳ</div>
+                    </div>
+                    <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm border-l-4 border-l-blue-500">
+                        <div class="text-sm text-slate-500 font-semibold uppercase tracking-wide">Tỷ lệ tương tác (ER)</div>
+                        <div class="text-3xl font-black text-slate-800 mt-2">Gấp 3x</div>
+                        <div class="text-sm text-slate-600 mt-1">So với Influencer người thật</div>
+                    </div>
+                    <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm border-l-4 border-l-purple-500">
+                        <div class="text-sm text-slate-500 font-semibold uppercase tracking-wide">Chi phí vận hành</div>
+                        <div class="text-3xl font-black text-slate-800 mt-2">-85%</div>
+                        <div class="text-sm text-slate-600 mt-1">Tiết kiệm chi phí ekip, studio</div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                    <h3 class="text-lg font-bold text-slate-800 mb-4">Dự Báo Tăng Trưởng Doanh Thu (Triệu USD)</h3>
+                    <div class="chart-container">
+                        <canvas id="marketChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 2: TECHNOLOGY WORKFLOW -->
+            <section id="tab-technology" class="tab-content">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8">
+                    <p class="text-slate-600 leading-relaxed">
+                        Để tạo ra một AI Model có khả năng thương mại hóa, yếu tố sống còn là <strong>Tính Nhất Quán (Consistency)</strong>. Người xem phải nhận ra đó là cùng một người ở mọi góc độ, trang phục, và hoàn cảnh. Dưới đây là Workflow kỹ thuật tiêu chuẩn ngành hiện nay để "nhân bản" một nguyên mẫu.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Interactive Steps -->
+                    <div class="space-y-4">
+                        <div class="tech-step cursor-pointer bg-white p-5 rounded-xl border-2 border-teal-500 shadow-md transition-all" onclick="showTechDetail(1)">
+                            <div class="flex items-center justify-between">
+                                <h4 class="font-bold text-slate-800 text-lg flex items-center gap-2"><span class="bg-teal-100 text-teal-700 px-2 py-1 rounded text-sm">Bước 1</span> Tạo Dataset & Huấn Luyện LoRA</h4>
+                                <span class="text-teal-500">▶</span>
+                            </div>
+                        </div>
+                        <div class="tech-step cursor-pointer bg-white p-5 rounded-xl border border-slate-200 hover:border-teal-300 transition-all opacity-70 hover:opacity-100" onclick="showTechDetail(2)">
+                            <div class="flex items-center justify-between">
+                                <h4 class="font-bold text-slate-800 text-lg flex items-center gap-2"><span class="bg-slate-100 text-slate-700 px-2 py-1 rounded text-sm">Bước 2</span> Kiểm Soát Tư Thế (ControlNet)</h4>
+                                <span class="text-slate-400">▶</span>
+                            </div>
+                        </div>
+                        <div class="tech-step cursor-pointer bg-white p-5 rounded-xl border border-slate-200 hover:border-teal-300 transition-all opacity-70 hover:opacity-100" onclick="showTechDetail(3)">
+                            <div class="flex items-center justify-between">
+                                <h4 class="font-bold text-slate-800 text-lg flex items-center gap-2"><span class="bg-slate-100 text-slate-700 px-2 py-1 rounded text-sm">Bước 3</span> Face Swapping & Detailing</h4>
+                                <span class="text-slate-400">▶</span>
+                            </div>
+                        </div>
+                        <div class="tech-step cursor-pointer bg-white p-5 rounded-xl border border-slate-200 hover:border-teal-300 transition-all opacity-70 hover:opacity-100" onclick="showTechDetail(4)">
+                            <div class="flex items-center justify-between">
+                                <h4 class="font-bold text-slate-800 text-lg flex items-center gap-2"><span class="bg-slate-100 text-slate-700 px-2 py-1 rounded text-sm">Bước 4</span> Chuyển Đổi Video (AnimateDiff)</h4>
+                                <span class="text-slate-400">▶</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Details Display -->
+                    <div class="bg-slate-900 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+                        <div class="absolute top-0 right-0 w-32 h-32 bg-teal-500 rounded-full blur-3xl opacity-20 -mr-10 -mt-10"></div>
+                        <div id="tech-detail-content" class="relative z-10">
+                            <h3 class="text-xl font-bold text-teal-400 mb-4">1. Đào tạo mô hình LoRA (Low-Rank Adaptation)</h3>
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                Để tạo ra hình ảnh nguyên vẹn của một cô gái từ người thật, công cụ phổ biến nhất là <strong>Stable Diffusion</strong> kết hợp với <strong>LoRA</strong>.
+                            </p>
+                            <ul class="space-y-3 text-sm text-slate-300">
+                                <li class="flex gap-2">
+                                    <span class="text-teal-400">❖</span> 
+                                    <span><strong>Chuẩn bị Dataset:</strong> Thu thập 15-30 bức ảnh chất lượng cao của khuôn mặt mục tiêu ở nhiều góc độ, biểu cảm, ánh sáng khác nhau.</span>
+                                </li>
+                                <li class="flex gap-2">
+                                    <span class="text-teal-400">❖</span> 
+                                    <span><strong>Captioning:</strong> Gắn thẻ (tag) mô tả chi tiết cho từng bức ảnh để AI hiểu đặc điểm khuôn mặt.</span>
+                                </li>
+                                <li class="flex gap-2">
+                                    <span class="text-teal-400">❖</span> 
+                                    <span><strong>Training:</strong> Dùng Kohya_ss hoặc các nền tảng cloud để huấn luyện LoRA. Kết quả là 1 file nhỏ (khoảng 100MB) chứa "nhận dạng DNA" của khuôn mặt đó.</span>
+                                </li>
+                            </ul>
+                            <div class="mt-6 p-4 bg-slate-800 rounded-lg border border-slate-700">
+                                <p class="text-xs text-amber-400 font-mono">Lưu ý: Chất lượng Dataset quyết định 90% độ chân thực của kết quả cuối cùng.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 3: MONETIZATION -->
+            <section id="tab-monetization" class="tab-content">
+                 <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8">
+                    <p class="text-slate-600 leading-relaxed">
+                        Phễu (Funnel) kinh điển của một mô hình AI Influencer thành công bao gồm việc sử dụng các nền tảng mạng xã hội mở (Top of Funnel) để thu hút lượng lớn sự chú ý, sau đó chuyển đổi họ thành người dùng trả phí trên các nền tảng đóng (Bottom of Funnel).
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <h3 class="text-lg font-bold text-slate-800 mb-4 text-center">Cơ Cấu Dòng Tiền Tiêu Chuẩn</h3>
+                        <div class="chart-container" style="height: 350px;">
+                            <canvas id="revenueChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
+                            <h4 class="font-bold text-slate-800 flex justify-between items-center">
+                                1. Nền tảng Đăng Ký (Subscriptions)
+                                <span class="text-teal-600 bg-teal-50 px-2 py-1 rounded text-xs">55%</span>
+                            </h4>
+                            <p class="text-sm text-slate-500 mt-2">OnlyFans, Patreon, Fansly. Đây là nguồn thu khổng lồ nhất. Khách hàng trả phí hàng tháng (thường từ $5 - $20) để xem nội dung độc quyền, ảnh/video không che hoặc mang tính cá nhân hóa.</p>
+                        </div>
+                        <div class="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
+                            <h4 class="font-bold text-slate-800 flex justify-between items-center">
+                                2. Chat Trả Phí (Pay-Per-View/Tips)
+                                <span class="text-blue-600 bg-blue-50 px-2 py-1 rounded text-xs">25%</span>
+                            </h4>
+                            <p class="text-sm text-slate-500 mt-2">Sử dụng Chatbot AI (tích hợp API của ChatGPT/Claude được tinh chỉnh tính cách) để nhắn tin 1-1 với fan. Fan trả tiền để mở khóa tin nhắn thoại, ảnh, hoặc tặng tip.</p>
+                        </div>
+                        <div class="bg-white p-5 rounded-xl border border-slate-100 shadow-sm">
+                            <h4 class="font-bold text-slate-800 flex justify-between items-center">
+                                3. Tài Trợ (Brand Deals & Affiliate)
+                                <span class="text-amber-600 bg-amber-50 px-2 py-1 rounded text-xs">15%</span>
+                            </h4>
+                            <p class="text-sm text-slate-500 mt-2">Khi tài khoản X, Instagram, TikTok đạt lượng follower lớn, các nhãn hàng thời trang, mỹ phẩm, hoặc app game sẽ trả tiền để AI Model mặc đồ hoặc quảng bá sản phẩm.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 4: RISKS -->
+            <section id="tab-risks" class="tab-content">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8">
+                    <p class="text-slate-600 leading-relaxed">
+                        Mặc dù lợi nhuận cận biên rất cao, việc xây dựng và vận hành AI Models đối mặt với những rủi ro pháp lý và thuật toán đáng kể. Cần xây dựng chiến lược quản trị rủi ro ngay từ đầu.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-rose-50 p-6 rounded-2xl border border-rose-100">
+                        <div class="text-2xl mb-2">⚖️</div>
+                        <h4 class="font-bold text-rose-900 mb-2">Rủi ro Pháp lý & Deepfake</h4>
+                        <p class="text-sm text-rose-800 leading-relaxed">
+                            Sử dụng khuôn mặt của người thật (kể cả idol, người nổi tiếng, hay người bình thường) mà <strong>không có sự đồng ý bằng văn bản</strong> để trục lợi, đặc biệt trên các nền tảng nội dung nhạy cảm, vi phạm nghiêm trọng luật hình ảnh cá nhân và có nguy cơ bị khởi kiện, cấm bay IP vĩnh viễn.
+                        </p>
+                    </div>
+                    
+                    <div class="bg-amber-50 p-6 rounded-2xl border border-amber-100">
+                        <div class="text-2xl mb-2">🚫</div>
+                        <h4 class="font-bold text-amber-900 mb-2">Chính sách Nền tảng (Shadowban)</h4>
+                        <p class="text-sm text-amber-800 leading-relaxed">
+                            Instagram và TikTok ngày càng có thuật toán quét "ảnh AI" mạnh mẽ. Nếu phát hiện lạm dụng, tài khoản sẽ bị bóp tương tác (Shadowban) hoặc khóa. <strong>Bắt buộc</strong> phải khai báo tag "Nội dung do AI tạo ra" theo luật mới của các nền tảng.
+                        </p>
+                    </div>
+
+                    <div class="bg-blue-50 p-6 rounded-2xl border border-blue-100">
+                        <div class="text-2xl mb-2">📉</div>
+                        <h4 class="font-bold text-blue-900 mb-2">Hội chứng Thung lũng Kỳ lạ (Uncanny Valley)</h4>
+                        <p class="text-sm text-blue-800 leading-relaxed">
+                            Nếu kỹ thuật AI yếu kém, để lại các lỗi ở bàn tay (nhiều ngón), ánh mắt đờ đẫn vô hồn, hoặc da quá nhựa (plastic), người xem sẽ cảm thấy rợn người và ngay lập tức bỏ theo dõi.
+                        </p>
+                    </div>
+
+                    <div class="bg-slate-100 p-6 rounded-2xl border border-slate-200">
+                        <div class="text-2xl mb-2">💸</div>
+                        <h4 class="font-bold text-slate-800 mb-2">Chi phí Máy chủ & GPU</h4>
+                        <p class="text-sm text-slate-600 leading-relaxed">
+                            Việc tạo video nhất quán (AnimateDiff) hoặc gen ảnh hàng loạt yêu cầu sức mạnh tính toán (VRAM) cực lớn. Nếu không tối ưu hóa workflow, chi phí thuê máy chủ (RunPod, AWS) sẽ ăn mòn lợi nhuận.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Application Logic & Data -->
+    <script>
+        // --- Navigation Logic ---
+        const sections = {
+            'overview': { title: 'Tổng Quan Thị Trường AI Influencer', desc: 'Phân tích tiềm năng tăng trưởng và sự dịch chuyển hành vi người dùng trên các nền tảng mạng xã hội.' },
+            'technology': { title: 'Công Nghệ Lõi (Workflow Kỹ Thuật)', desc: 'Quy trình tiêu chuẩn để tạo và duy trì sự nhất quán hình ảnh cho một nhân vật AI đa nền tảng.' },
+            'monetization': { title: 'Mô Hình Doanh Thu Khép Kín', desc: 'Phân tích phễu chuyển đổi và các dòng tiền chính nuôi sống ngành công nghiệp Virtual Model.' },
+            'risks': { title: 'Đánh Giá Rủi Ro Tiềm Ẩn', desc: 'Các cảnh báo về pháp lý, đạo đức và thuật toán nền tảng cần lưu ý trước khi triển khai.' }
+        };
+
+        function switchTab(tabId) {
+            // Update Tab Content
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.getElementById('tab-' + tabId).classList.add('active');
+            
+            // Update Nav Buttons
+            document.querySelectorAll('.nav-btn').forEach(el => {
+                el.classList.remove('active');
+                el.classList.add('opacity-70');
+                el.classList.remove('border-l-4', 'border-teal-500', 'bg-slate-900', 'text-white');
+                el.classList.add('text-slate-600', 'hover:bg-slate-50');
+            });
+            const activeBtn = document.getElementById('btn-' + tabId);
+            activeBtn.classList.remove('opacity-70', 'text-slate-600', 'hover:bg-slate-50');
+            activeBtn.classList.add('active', 'border-l-4', 'border-teal-500', 'bg-slate-900', 'text-white');
+
+            // Update Header
+            document.getElementById('section-title').innerText = sections[tabId].title;
+            document.getElementById('section-desc').innerText = sections[tabId].desc;
+        }
+
+        // --- Interactive Tech Workflow Content ---
+        const techData = {
+            1: {
+                title: "1. Đào tạo mô hình LoRA (Low-Rank Adaptation)",
+                steps: [
+                    "<strong>Chuẩn bị Dataset:</strong> Thu thập 15-30 bức ảnh chất lượng cao của khuôn mặt mục tiêu ở nhiều góc độ, biểu cảm, ánh sáng khác nhau.",
+                    "<strong>Captioning:</strong> Gắn thẻ (tag) mô tả chi tiết cho từng bức ảnh để AI hiểu đặc điểm khuôn mặt.",
+                    "<strong>Training:</strong> Dùng Kohya_ss hoặc các nền tảng cloud để huấn luyện LoRA. Kết quả là 1 file nhỏ (khoảng 100MB) chứa 'nhận dạng DNA' của khuôn mặt đó."
+                ],
+                note: "Chất lượng Dataset quyết định 90% độ chân thực của kết quả cuối cùng."
+            },
+            2: {
+                title: "2. Kiểm Soát Tư Thế với ControlNet",
+                steps: [
+                    "<strong>Bắt Frame:</strong> Sử dụng ảnh gốc hoặc ảnh pose tham khảo từ internet.",
+                    "<strong>OpenPose/Depth:</strong> ControlNet sẽ trích xuất 'bộ xương' (pose) hoặc chiều sâu từ ảnh tham khảo.",
+                    "<strong>Generation:</strong> Stable Diffusion sử dụng LoRA (khuôn mặt) kết hợp ControlNet (tư thế) để tạo ra bức ảnh có khuôn mặt mong muốn với dáng pose chuẩn xác, không bị biến dạng."
+                ],
+                note: "Đây là bí quyết để chụp AI Influencer đang làm nhiều hành động khác nhau (uống cafe, tập gym) một cách tự nhiên."
+            },
+            3: {
+                title: "3. Face Swapping & Detailing (IPAdapter / ReActor)",
+                steps: [
+                    "<strong>Giữ nguyên nét:</strong> Kể cả khi có LoRA, đôi khi AI gen ra khuôn mặt vẫn bị lệch 5-10%.",
+                    "<strong>Kỹ thuật IPAdapter:</strong> Tiêm trực tiếp hình ảnh khuôn mặt mẫu vào quá trình gen để khóa chặt nét.",
+                    "<strong>Face Swap Post-Process:</strong> Sử dụng các script như ReActor hoặc FaceID để đổi lại khuôn mặt một lần cuối vào bức ảnh đã gen xong để đảm bảo giống nguyên mẫu 100%."
+                ],
+                note: "Kỹ thuật này rất quan trọng để đăng nền tảng trả phí, nơi fan trả tiền để xem 'đúng người đó'."
+            },
+            4: {
+                title: "4. Chuyển Đổi Video (Workflow Cao Cấp)",
+                steps: [
+                    "<strong>AnimateDiff:</strong> Module giúp tạo chuyển động mượt mà từ một bức ảnh tĩnh ban đầu.",
+                    "<strong>Video-to-Video:</strong> Quay một video người thật múa/diễn, sau đó dùng AI bóc toàn bộ da/mặt của người thật và đắp mô hình AI lên trên (như mặc một bộ đồ da ảo).",
+                    "<strong>Audio Sync:</strong> Dùng công cụ lip-sync ghép giọng nói (đã clone) sao cho khớp khẩu hình miệng."
+                ],
+                note: "Sản xuất video khó và tốn tài nguyên gấp 50 lần hình ảnh tĩnh, nhưng tỷ lệ viral trên TikTok cao hơn nhiều."
+            }
+        };
+
+        function showTechDetail(stepNum) {
+            // Update styling of buttons
+            document.querySelectorAll('.tech-step').forEach((el, index) => {
+                if (index + 1 === stepNum) {
+                    el.classList.add('border-2', 'border-teal-500', 'shadow-md');
+                    el.classList.remove('border', 'border-slate-200', 'opacity-70');
+                    el.querySelector('h4 span').className = 'bg-teal-100 text-teal-700 px-2 py-1 rounded text-sm';
+                    el.querySelector('.flex > span:last-child').className = 'text-teal-500';
+                } else {
+                    el.classList.remove('border-2', 'border-teal-500', 'shadow-md');
+                    el.classList.add('border', 'border-slate-200', 'opacity-70');
+                    el.querySelector('h4 span').className = 'bg-slate-100 text-slate-700 px-2 py-1 rounded text-sm';
+                    el.querySelector('.flex > span:last-child').className = 'text-slate-400';
+                }
+            });
+
+            // Update content
+            const data = techData[stepNum];
+            let htmlList = data.steps.map(step => `
+                <li class="flex gap-2">
+                    <span class="text-teal-400">❖</span> 
+                    <span>${step}</span>
+                </li>
+            `).join('');
+
+            document.getElementById('tech-detail-content').innerHTML = `
+                <h3 class="text-xl font-bold text-teal-400 mb-4">${data.title}</h3>
+                <ul class="space-y-3 text-sm text-slate-300">
+                    ${htmlList}
+                </ul>
+                <div class="mt-6 p-4 bg-slate-800 rounded-lg border border-slate-700">
+                    <p class="text-xs text-amber-400 font-mono">Lưu ý: ${data.note}</p>
+                </div>
+            `;
+        }
+
+        // --- Chart.js Implementations ---
+        document.addEventListener("DOMContentLoaded", () => {
+            
+            // Chart 1: Market Growth (Line Chart)
+            const ctxMarket = document.getElementById('marketChart').getContext('2d');
+            new Chart(ctxMarket, {
+                type: 'bar', // Using bar for solid financial representation, with a trend line if needed
+                data: {
+                    labels: ['2020', '2021', '2022', '2023', '2024', '2025(E)', '2026(E)'],
+                    datasets: [{
+                        label: 'Quy mô thị trường (Triệu USD)',
+                        data: [450, 800, 1300, 2100, 3200, 4600, 6800],
+                        backgroundColor: '#14b8a6', // Teal-500
+                        borderRadius: 4,
+                        barPercentage: 0.6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#0f172a',
+                            padding: 12,
+                            titleFont: { size: 14, family: 'Inter' },
+                            bodyFont: { size: 14, family: 'Inter' },
+                            callbacks: {
+                                label: function(context) {
+                                    return '$' + context.parsed.y + ' Triệu';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#f1f5f9' },
+                            border: { display: false }
+                        },
+                        x: {
+                            grid: { display: false },
+                            border: { display: false }
+                        }
+                    }
+                }
+            });
+
+            // Chart 2: Revenue Streams (Doughnut Chart)
+            const ctxRev = document.getElementById('revenueChart').getContext('2d');
+            new Chart(ctxRev, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Subscriptions (OnlyFans, v.v.)', 'Pay-Per-View & Tips', 'Brand Deals & Affiliate', 'Bán File Prompts/Models'],
+                    datasets: [{
+                        data: [55, 25, 15, 5],
+                        backgroundColor: [
+                            '#0d9488', // Teal-600
+                            '#2563eb', // Blue-600
+                            '#d97706', // Amber-600
+                            '#475569'  // Slate-600
+                        ],
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '70%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 20,
+                                font: { family: 'Inter', size: 12 },
+                                usePointStyle: true,
+                                boxWidth: 8
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: '#0f172a',
+                            callbacks: {
+                                label: function(context) {
+                                    return ' ' + context.label + ': ' + context.parsed + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>

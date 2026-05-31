@@ -7,32 +7,32 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  /* ── DARK TEAL PALETTE ── */
-  --bg-0:       #0D1117;   /* nền sâu nhất */
-  --bg-1:       #111820;   /* nền chính */
-  --bg-2:       #162030;   /* card/section xen kẽ */
-  --bg-3:       #1C2A3A;   /* card nổi */
-  --bg-4:       #223344;   /* hover state */
+  /* ── SLATE GREY PALETTE (xám lông chuột) ── */
+  --bg-0:       #1A1D21;   /* nền sâu nhất – xám than đậm */
+  --bg-1:       #22262B;   /* nền chính – xám lông chuột */
+  --bg-2:       #2A2F36;   /* card/section xen kẽ */
+  --bg-3:       #32383F;   /* card nổi */
+  --bg-4:       #3A4048;   /* hover state */
 
   /* Teal accent */
-  --teal:       #2DD4BF;   /* xanh teal sáng */
-  --teal-dim:   #0F9080;   /* teal tối hơn */
-  --teal-glow:  rgba(45,212,191,0.12);
-  --teal-border:rgba(45,212,191,0.2);
+  --teal:       #2DD4BF;
+  --teal-dim:   #0F9080;
+  --teal-glow:  rgba(45,212,191,0.10);
+  --teal-border:rgba(45,212,191,0.18);
 
   /* Gold accent */
   --gold:       #F0B429;
   --gold-dim:   #B8860B;
-  --gold-glow:  rgba(240,180,41,0.12);
+  --gold-glow:  rgba(240,180,41,0.10);
 
   /* Typography */
-  --text-1:  #E8F0F8;   /* tiêu đề chính */
-  --text-2:  #A8BDD0;   /* phụ đề */
-  --text-3:  #607D8B;   /* muted */
+  --text-1:  #ECF0F4;
+  --text-2:  #9AAAB8;
+  --text-3:  #5E7080;
 
   /* Border/Divider */
-  --line:    rgba(45,212,191,0.1);
-  --line-2:  rgba(255,255,255,0.05);
+  --line:    rgba(45,212,191,0.09);
+  --line-2:  rgba(255,255,255,0.06);
 }
 
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -67,7 +67,7 @@ nav {
   position:fixed; top:0; left:0; right:0; z-index:100;
   padding:18px 64px;
   display:flex; align-items:center; justify-content:space-between;
-  background:rgba(13,17,23,0.85);
+  background:rgba(26,29,33,0.90);
   backdrop-filter:blur(24px);
   border-bottom:1px solid var(--line);
 }
@@ -287,6 +287,50 @@ section { position:relative; z-index:2; }
 .contact-box-label { font-size:10px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--teal); margin-bottom:8px; }
 .contact-box a { font-size:14px; font-weight:500; color:var(--gold); text-decoration:none; }
 
+/* ── NẠP XU SECTION ── */
+#naptien { padding:100px 64px; background:var(--bg-2); }
+.pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; max-width:900px; margin:0 auto 60px; }
+.pricing-card {
+  background:var(--bg-3); border:1px solid var(--line);
+  padding:32px 28px; position:relative; transition:all 0.3s;
+}
+.pricing-card:hover { border-color:var(--teal-dim); transform:translateY(-4px); box-shadow:0 12px 32px rgba(0,0,0,0.25); }
+.pricing-card.featured { border-color:var(--teal-dim); background:var(--bg-4); }
+.pricing-card.featured::before {
+  content:'PHỔ BIẾN'; position:absolute; top:-1px; left:50%; transform:translateX(-50%);
+  background:var(--teal); color:var(--bg-0); font-size:9px; font-weight:700;
+  letter-spacing:0.15em; padding:4px 14px;
+}
+.pricing-name { font-size:11px; font-weight:600; letter-spacing:0.15em; text-transform:uppercase; color:var(--text-3); margin-bottom:16px; }
+.pricing-price { font-family:'Space Grotesk',sans-serif; font-size:32px; font-weight:700; color:var(--gold); margin-bottom:4px; }
+.pricing-xu { font-size:13px; font-weight:600; color:var(--teal); margin-bottom:20px; }
+.pricing-divider { height:1px; background:var(--line); margin-bottom:20px; }
+.pricing-feature { font-size:13px; color:var(--text-2); margin-bottom:8px; display:flex; gap:8px; align-items:flex-start; }
+.pricing-feature::before { content:'✓'; color:var(--teal); font-weight:700; flex-shrink:0; }
+
+.payment-flow {
+  max-width:700px; margin:0 auto;
+  background:var(--bg-3); border:1px solid var(--teal-border); padding:36px 40px;
+}
+.payment-flow-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:var(--text-1); margin-bottom:24px; }
+.payment-step { display:flex; gap:20px; align-items:flex-start; margin-bottom:18px; }
+.payment-step-num {
+  width:32px; height:32px; border-radius:50%; background:var(--teal); color:var(--bg-0);
+  font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13px;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.payment-step-text { font-size:14px; color:var(--text-2); line-height:1.65; }
+.payment-step-text b { color:var(--text-1); }
+.payment-bank {
+  margin-top:8px; padding:14px 18px;
+  background:var(--bg-2); border:1px solid var(--line);
+  font-family:'Space Grotesk',sans-serif; font-size:14px; color:var(--text-1);
+  display:flex; align-items:center; gap:12px;
+}
+.payment-bank-label { font-size:10px; color:var(--text-3); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:4px; }
+
+@media(max-width:768px){ #naptien{padding:72px 24px} .pricing-grid{grid-template-columns:1fr} .payment-flow{padding:24px 20px} }
+
 /* ── FOOTER ── */
 footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid var(--line); }
 .footer-neon-line { height:1px; background:linear-gradient(90deg,transparent,var(--teal-dim),transparent); margin-bottom:48px; opacity:0.4; }
@@ -333,6 +377,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   <ul class="nav-links">
     <li><a href="#services">Dịch vụ API</a></li>
     <li><a href="#process">Quy trình</a></li>
+    <li><a href="#naptien">Nạp Xu</a></li>
     <li><a href="#tech">Công nghệ</a></li>
     <li><a href="#order">Liên Hệ</a></li>
   </ul>
@@ -344,7 +389,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   <div class="hero-orb-2"></div>
   <div style="position:relative;z-index:2;">
     <div class="hero-badge">
-      <div class="hero-badge-dot"></div> Hệ thống Multi-Agent AI V11.0
+      <div class="hero-badge-dot"></div> Hệ thống Multi-Agent AI — Dynamic Billing
     </div>
     <h1>
       Cỗ Máy AI <br>
@@ -352,14 +397,14 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
       <span class="line-neon">Doanh Nghiệp</span>
     </h1>
     <p class="hero-sub">
-      Tích hợp trí tuệ nhân tạo vào mọi khâu: Từ lập trình hệ thống, viết kịch bản, xử lý hình ảnh OCR, dịch thuật đa ngữ đến tự động tạo video Affiliate.
+      Tích hợp trí tuệ nhân tạo vào mọi khâu: Từ lập trình hệ thống, viết kịch bản, xử lý hình ảnh, bóc băng audio Deepgram đến tự động hóa thanh toán Xu nội bộ.
     </p>
     <div class="hero-actions">
-      <a href="#order" class="btn-primary">Tích Hợp API Ngay</a>
+      <a href="#naptien" class="btn-primary">Nạp Xu Ngay</a>
       <a href="#services" class="btn-ghost">Xem Các Phân Hệ</a>
     </div>
     <div class="hero-stats">
-      <div class="stat-item"><div class="stat-num">V11</div><div class="stat-label">Phiên bản lõi</div></div>
+      <div class="stat-item"><div class="stat-num">V14</div><div class="stat-label">Phiên bản lõi</div></div>
       <div class="stat-item"><div class="stat-num">100%</div><div class="stat-label">Tự động hóa</div></div>
       <div class="stat-item"><div class="stat-num">24/7</div><div class="stat-label">Vận hành liên tục</div></div>
       <div class="stat-item"><div class="stat-num">API</div><div class="stat-label">Mở rộng vô hạn</div></div>
@@ -369,7 +414,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
 
 <section id="services">
   <div class="section-header reveal">
-    <div class="section-tag">— Hệ Sinh Thái V11.0 —</div>
+    <div class="section-tag">— Hệ Sinh Thái —</div>
     <h2 class="section-title">Các Phân Hệ <span class="gold">Trí Tuệ Nhân Tạo</span></h2>
     <p class="section-desc">Hệ thống Bot Telegram sở hữu sức mạnh của những API hàng đầu thế giới năm 2026</p>
   </div>
@@ -383,8 +428,8 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
     </div>
     <div class="service-card reveal" style="transition-delay:0.1s">
       <div class="service-icon">🎙️</div>
-      <h3>Voice Clone & Nghe Hiểu (Whisper)</h3>
-      <p>Sử dụng API Fish Audio nhân bản giọng nói tiếng Việt chuẩn xác. Kết hợp OpenAI Whisper biến mọi tin nhắn thoại thành lệnh văn bản trong nháy mắt.</p>
+      <h3>Voice Clone & Bóc Băng (Deepgram)</h3>
+      <p>Sử dụng API Fish Audio nhân bản giọng nói tiếng Việt chuẩn xác. Kết hợp Deepgram Nova-2 biến mọi tin nhắn thoại thành lệnh văn bản trong nháy mắt — nhanh hơn Whisper 3×.</p>
       <div class="service-price">Xử lý Âm thanh</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.2s">
@@ -447,24 +492,89 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
 
 <section id="tech">
   <div class="section-header reveal" style="margin-bottom:40px">
-    <div class="section-tag">— Công Nghệ V11 —</div>
+    <div class="section-tag">— Công Nghệ —</div>
     <h2 class="section-title">Hệ Sinh Thái <span class="gold">API Khổng Lồ</span></h2>
   </div>
   <div class="tech-track-wrapper">
     <div class="tech-track" id="techTrack">
       <div class="tech-pill"><span>🤖</span> Gemini 2.0 Flash</div>
-      <div class="tech-pill"><span>🧠</span> Claude 3.5 Sonnet</div>
-      <div class="tech-pill"><span>🗣️</span> OpenAI Whisper</div>
+      <div class="tech-pill"><span>🧠</span> Claude Sonnet 4.6</div>
+      <div class="tech-pill"><span>🗣️</span> Deepgram Nova-2</div>
       <div class="tech-pill"><span>🐟</span> Fish Audio Clone</div>
-      <div class="tech-pill"><span>🌐</span> DeepL Translator</div>
       <div class="tech-pill"><span>✂️</span> Remove.bg API</div>
       <div class="tech-pill"><span>📥</span> Cobalt Downloader</div>
-      <div class="tech-pill"><span>📋</span> OCR Space</div>
+      <div class="tech-pill"><span>🪙</span> Dynamic Billing</div>
+      <div class="tech-pill"><span>🏦</span> VietQR Payment</div>
       <div class="tech-pill"><span>🐍</span> Python Core</div>
       <div class="tech-pill"><span>🤖</span> Gemini 2.0 Flash</div>
-      <div class="tech-pill"><span>🧠</span> Claude 3.5 Sonnet</div>
-      <div class="tech-pill"><span>🗣️</span> OpenAI Whisper</div>
+      <div class="tech-pill"><span>🧠</span> Claude Sonnet 4.6</div>
+      <div class="tech-pill"><span>🗣️</span> Deepgram Nova-2</div>
       <div class="tech-pill"><span>🐟</span> Fish Audio Clone</div>
+    </div>
+  </div>
+</section>
+
+<section id="naptien">
+  <div class="section-header reveal">
+    <div class="section-tag">— Hạn Mức —</div>
+    <h2 class="section-title">Nạp Xu <span class="gold">Sử Dụng Dịch Vụ</span></h2>
+    <p class="section-desc">Hệ thống thanh toán linh hoạt theo dung lượng thực tế — không phí hàng tháng, không lãng phí</p>
+  </div>
+
+  <div class="pricing-grid reveal">
+    <div class="pricing-card">
+      <div class="pricing-name">Gói Cà Phê</div>
+      <div class="pricing-price">50.000đ</div>
+      <div class="pricing-xu">500 Xu</div>
+      <div class="pricing-divider"></div>
+      <div class="pricing-feature">Chat AI không giới hạn chủ đề</div>
+      <div class="pricing-feature">Bóc băng audio ~10 file nhỏ</div>
+      <div class="pricing-feature">Tách nền 10–12 ảnh</div>
+      <div class="pricing-feature">Hút video ~100 lần</div>
+    </div>
+    <div class="pricing-card featured">
+      <div class="pricing-name">Gói Tiêu Chuẩn</div>
+      <div class="pricing-price">100.000đ</div>
+      <div class="pricing-xu">1.050 Xu — Thêm 50 Xu ưu đãi</div>
+      <div class="pricing-divider"></div>
+      <div class="pricing-feature">Chat AI + Voice tổng hợp</div>
+      <div class="pricing-feature">Bóc băng audio Deepgram Nova-2</div>
+      <div class="pricing-feature">Tách nền Remove.bg chất lượng cao</div>
+      <div class="pricing-feature">Giảm 10% khi tổng chi &gt; 5.000 Xu</div>
+    </div>
+    <div class="pricing-card">
+      <div class="pricing-name">Gói Doanh Nghiệp</div>
+      <div class="pricing-price">500.000đ</div>
+      <div class="pricing-xu">6.000 Xu — Tiết kiệm nhất</div>
+      <div class="pricing-divider"></div>
+      <div class="pricing-feature">Toàn bộ tính năng không giới hạn</div>
+      <div class="pricing-feature">Ưu tiên duyệt bill nhanh nhất</div>
+      <div class="pricing-feature">Giảm 20% khi tổng chi &gt; 20.000 Xu</div>
+      <div class="pricing-feature">Hỗ trợ kỹ thuật qua Telegram 24/7</div>
+    </div>
+  </div>
+
+  <div class="payment-flow reveal" style="transition-delay:0.2s">
+    <div class="payment-flow-title">📋 Quy trình nạp Xu (3 bước)</div>
+    <div class="payment-step">
+      <div class="payment-step-num">1</div>
+      <div class="payment-step-text">
+        Chuyển khoản về tài khoản ACB bên dưới. Nội dung chuyển khoản <b>bắt buộc</b> ghi: <b>DAAS [ID Telegram của bạn]</b> (lấy ID bằng cách gõ /naptien trong bot).
+        <div class="payment-bank">
+          <div>
+            <div class="payment-bank-label">Ngân hàng ACB</div>
+            <b>8899397968</b> — NGUYEN MANH TOAN
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="payment-step">
+      <div class="payment-step-num">2</div>
+      <div class="payment-step-text">Chụp màn hình bill ngân hàng (cần thấy rõ: <b>số tiền, nội dung, thời gian</b>).</div>
+    </div>
+    <div class="payment-step">
+      <div class="payment-step-num">3</div>
+      <div class="payment-step-text">Gửi ảnh bill vào <b>Bot Telegram</b> → Bot tự báo Admin → Xu được cộng trong vài phút. <a href="https://t.me/Httdhtoan" style="color:var(--teal);text-decoration:none;">Mở Bot ngay →</a></div>
     </div>
   </div>
 </section>
@@ -477,7 +587,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   </div>
   <div class="order-wrapper">
     <div class="order-info reveal">
-      <h3>Sức mạnh của Bot V11.0</h3>
+      <h3>Sức mạnh của TOAN DAAS</h3>
       <p>Thay vì thuê 5 nhân sự (Content, Design, Video Editor, Dịch thuật, Code), hệ thống tự động hóa này xử lý toàn bộ khối lượng công việc ngay trên điện thoại của bạn.</p>
       <div style="margin-top:32px; padding:20px; border:1px solid rgba(10, 109, 99, 0.15); background:var(--bg-primary); border-radius:8px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--blue);margin-bottom:8px;">Liên hệ Kỹ sư hệ thống</div>
@@ -531,20 +641,21 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
           <path d="M2 17l10 5 10-5"></path>
           <path d="M2 12l10 5 10-5"></path>
         </svg>
-        TOAN DAAS V11
+        TOAN DAAS
       </div>
-      <p class="footer-tagline">Kiến trúc hệ thống điều phối đa AI (Multi-Agent) chuyên nghiệp dành cho Affiliate & Automation.</p>
+      <p class="footer-tagline">Kiến trúc hệ thống điều phối đa AI (Multi-Agent) với Dynamic Billing — dành cho Affiliate & Automation.</p>
     </div>
     <div class="footer-links-col">
       <h4>Module Nổi Bật</h4>
       <a href="#services">Fish Audio Clone</a>
-      <a href="#services">Whisper OpenAI</a>
+      <a href="#services">Deepgram Nova-2</a>
       <a href="#services">Cobalt Downloader</a>
-      <a href="#services">Remove.bg & OCR</a>
+      <a href="#services">Remove.bg Studio</a>
     </div>
     <div class="footer-links-col">
       <h4>Liên hệ</h4>
       <a href="https://t.me/Httdhtoan">Telegram: @Httdhtoan</a>
+      <a href="#naptien">Nạp Xu Hệ Thống</a>
       <a href="#order">Cấu hình Hệ thống</a>
     </div>
   </div>
