@@ -6015,6 +6015,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Endpoint cho n8n/worker:</b>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
+        f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
+        f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
@@ -8626,6 +8628,103 @@ async def api_operator_affiliate_scale(payload: OperatorAffiliateScaleRequest, r
             "loop_url": "/api/operator/loop",
             "publish_url": "/api/operator/publish/next",
             "telegram_report": "/affiliate_report days=30",
+        },
+    }
+
+@fastapi_app.get("/api/operator/affiliates")
+async def api_operator_affiliates(request: Request, limit: int = 50):
+    verify_operator_api_token(request)
+    limit = max(1, min(int(limit or 50), 100))
+    rows = list_affiliate_links(ADMIN_ID, limit=limit)
+    return {
+        "ok": True,
+        "affiliates": [
+            {
+                "id": aid,
+                "network": network,
+                "product": product,
+                "niche": niche,
+                "url": url,
+                "commission_note": note,
+                "status": status,
+                "price_vnd": int(price_vnd or 0),
+                "commission_rate": float(commission_rate or 0),
+                "target_audience": audience,
+                "allowed_claims": allowed_claims,
+                "blocked_claims": blocked_claims,
+                "product_score": int(product_score or 0),
+                "scale_url": "/api/operator/affiliate-scale",
+            }
+            for (
+                aid, network, product, niche, url, note, status,
+                price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
+            ) in rows
+        ],
+        "rule": "Pick an active affiliate id, then call POST /api/operator/affiliate-scale. Keep affiliate claims compliant.",
+    }
+
+@fastapi_app.get("/api/operator/affiliate-report")
+async def api_operator_affiliate_report(request: Request, days: int = 30, limit: int = 15):
+    verify_operator_api_token(request)
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 15), 30))
+    since, affiliate_rows, job_rows = affiliate_performance_report_data(ADMIN_ID, days=days, limit=limit)
+    affiliates = []
+    for (
+        aid, network, product, niche, url, product_score, jobs, publishes, views,
+        clicks, conversions, revenue, cost, events
+    ) in affiliate_rows:
+        score, ctr, cvr, roi = growth_score(views, clicks, conversions, revenue, cost)
+        affiliates.append({
+            "id": aid,
+            "network": network,
+            "product": product,
+            "niche": niche,
+            "url": url,
+            "score": score,
+            "base_score": int(product_score or 0),
+            "jobs": int(jobs or 0),
+            "publishes": int(publishes or 0),
+            "views": int(views or 0),
+            "clicks": int(clicks or 0),
+            "conversions": int(conversions or 0),
+            "revenue": int(revenue or 0),
+            "cost": int(cost or 0),
+            "events": int(events or 0),
+            "ctr": round(ctr, 2),
+            "cvr": round(cvr, 2),
+            "roi": round(roi, 1),
+        })
+    jobs = [
+        {
+            "affiliate_id": aid,
+            "network": network,
+            "product": product,
+            "job_id": job_id,
+            "platform": platform,
+            "topic": topic,
+            "status": status,
+            "publish_url": publish_url,
+            "views": int(views or 0),
+            "clicks": int(clicks or 0),
+            "revenue": int(revenue or 0),
+            "last_seen": last_seen,
+        }
+        for (
+            aid, network, product, job_id, platform, topic, status, publish_url,
+            views, clicks, revenue, last_seen
+        ) in job_rows
+    ]
+    return {
+        "ok": True,
+        "days": days,
+        "since": since,
+        "affiliates": affiliates,
+        "jobs": jobs,
+        "next": {
+            "list_url": "/api/operator/affiliates",
+            "scale_url": "/api/operator/affiliate-scale",
+            "performance_url": "/api/operator/performance",
         },
     }
 
