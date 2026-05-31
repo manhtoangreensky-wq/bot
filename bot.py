@@ -2157,6 +2157,129 @@ def operator_audit_data(owner_id):
         "next_command": blockers[0]["next"] if blockers else "/operator_director",
     }
 
+def operator_worker_spec_data():
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    return {
+        "name": "TOAN DAAS AI Operator Worker Spec",
+        "version": "1.0",
+        "base_url": base_url,
+        "auth": {
+            "type": "bearer",
+            "header": "Authorization: Bearer <OPERATOR_API_TOKEN>",
+            "note": "Không nhúng token vào prompt công khai, repo, caption hoặc log gửi cho khách.",
+        },
+        "mission": (
+            "Điều phối sản xuất video affiliate hợp pháp: chọn affiliate, tìm trend, tạo job, giao task cho AI/tool, "
+            "chuẩn bị publish pack, đăng có kiểm soát và ghi performance."
+        ),
+        "roles": [
+            {
+                "role": "director",
+                "owner": "Claude/n8n hoặc admin Telegram",
+                "input": "GET /api/operator/audit, GET /api/operator/director",
+                "allowed_actions": [
+                    "POST /api/operator/director/run để scale/build hoặc queue publish manual an toàn",
+                    "POST /api/operator/affiliate-scale khi đã chọn affiliate rõ ràng",
+                    "Không tự đăng ra mạng xã hội nếu chưa qua publish pack/review gate",
+                ],
+            },
+            {
+                "role": "creative_strategist",
+                "owner": "Claude/Gemini",
+                "input": "production job, affiliate profile, trend, related links",
+                "allowed_actions": [
+                    "Tạo hook, script, caption, CTA, hashtag, checklist compliance",
+                    "Không cam kết doanh thu/lợi nhuận/phê duyệt tài chính",
+                    "Không mạo danh thương hiệu/người thật",
+                ],
+            },
+            {
+                "role": "tool_worker",
+                "owner": "Kling/Runway/Fish/Edge/CapCut/FFmpeg/n8n",
+                "input": "GET /api/operator/tasks/next",
+                "submit": "POST /api/operator/tasks/<TASK_ID>/complete",
+                "allowed_actions": [
+                    "Tạo voice, visual, edit, subtitle, final_video theo task",
+                    "Trả output_url hoặc note lỗi rõ ràng",
+                    "Không tự thay đổi affiliate link hoặc claim chính sách",
+                ],
+            },
+            {
+                "role": "publisher",
+                "owner": "Admin/manual publisher hoặc API chính thức",
+                "input": "GET /api/operator/publish/next và GET /api/operator/jobs/<JOB_ID>/publish-pack",
+                "submit": "POST /api/operator/publish/<QUEUE_ID>/complete",
+                "allowed_actions": [
+                    "Đăng theo publish_pack, gắn disclosure, link chính và link liên quan phù hợp",
+                    "Nếu nền tảng/API chặn thì trả status=blocked và note",
+                    "OnlyFans giữ manual/official tool, chỉ dùng nhân vật tự tạo hoặc consent 18+",
+                ],
+            },
+            {
+                "role": "growth_analyst",
+                "owner": "Claude/n8n/admin",
+                "input": "GET /api/operator/affiliate-report, GET /api/operator/affiliate-decisions",
+                "submit": "POST /api/operator/performance",
+                "allowed_actions": [
+                    "Ghi view/click/order/lead/revenue/cost",
+                    "Đề xuất SCALE/FIX/TEST/PAUSE dựa trên dữ liệu",
+                    "Không scale khi chưa có dữ liệu hoặc khi compliance bị chặn",
+                ],
+            },
+        ],
+        "standard_loop": [
+            {"step": 1, "name": "audit", "method": "GET", "url": "/api/operator/audit"},
+            {"step": 2, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
+            {"step": 3, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
+            {"step": 4, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/next"},
+            {"step": 5, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
+            {"step": 6, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
+            {"step": 7, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
+            {"step": 8, "name": "claim_publish", "method": "GET", "url": "/api/operator/publish/next"},
+            {"step": 9, "name": "submit_publish", "method": "POST", "url": "/api/operator/publish/<QUEUE_ID>/complete"},
+            {"step": 10, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
+        ],
+        "payloads": {
+            "director_run": {
+                "days": 30,
+                "platform": "tiktok",
+                "limit": 10,
+                "execute": True,
+                "build": True,
+                "duration": 45,
+                "notify_admin": True,
+            },
+            "task_complete": {
+                "status": "ready",
+                "output_url": "https://.../asset.mp4",
+                "note": "tool output or error detail",
+            },
+            "publish_complete": {
+                "status": "published",
+                "publish_url": "https://...",
+                "views": 0,
+                "clicks": 0,
+                "note": "manual/api publisher",
+            },
+            "performance": {
+                "job_id": 1,
+                "event_type": "view|click|order|lead|revenue|cost",
+                "value": 1,
+                "amount": 0,
+                "source": "tiktok|facebook|onlyfans|manual",
+                "note": "tracking detail",
+            },
+        },
+        "safety_rules": [
+            "Không dùng ảnh/voice người thật nếu không có consent rõ ràng.",
+            "Mọi nhân vật người mẫu/OnlyFans phải tự tạo hoặc có consent và đủ 18 tuổi.",
+            "Không hứa thu nhập, lợi nhuận, phê duyệt vay/thẻ, hoặc kết quả tài chính.",
+            "Không spam link; gắn disclosure affiliate rõ ràng.",
+            "Không tự publish nếu readiness/review bị blocked.",
+            "Không ghi secret/token/API key vào database, caption, note công khai hoặc repo.",
+        ],
+    }
+
 def operator_today_data(owner_id):
     status = operator_status_data(owner_id)
     since, affiliate_rows, job_rows = affiliate_performance_report_data(owner_id, days=30, limit=8)
@@ -7292,7 +7415,8 @@ def operator_category_keyboard(category):
         ],
         "cat_api": [
             ("🔌 Operator API", "api"), ("🔁 Operator loop", "loop"),
-            ("🧪 Auto-post ready", "readiness"), ("📮 Publish API queue", "publishqueue"),
+            ("📜 Worker spec", "workerspec"), ("🧪 Auto-post ready", "readiness"),
+            ("📮 Publish API queue", "publishqueue"),
         ],
         "cat_internal": [
             ("🛠 Tools", "tools"), ("💼 MMO workflow", "mmo"),
@@ -7352,6 +7476,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Director next action: <code>GET {html.escape(base_url)}/api/operator/director</code>",
         f"• Director execute an toàn: <code>POST {html.escape(base_url)}/api/operator/director/run</code>",
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
+        f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
@@ -7385,6 +7510,26 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("⚠️ Chưa set <code>PUBLIC_BASE_URL</code>, hãy dùng domain Railway thật trong n8n.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_worker_spec(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    spec = operator_worker_spec_data()
+    compact = {
+        "base_url": spec["base_url"],
+        "auth": spec["auth"],
+        "standard_loop": spec["standard_loop"],
+        "payloads": spec["payloads"],
+        "safety_rules": spec["safety_rules"],
+    }
+    text = (
+        "📜 <b>OPERATOR WORKER SPEC</b>\n\n"
+        "Dùng spec này làm system/runbook cho Claude, n8n hoặc tool worker.\n\n"
+        f"• API: <code>{html.escape(spec['base_url'])}/api/operator/worker-spec</code>\n"
+        "• Luồng chuẩn: audit → director → director/run → tasks/next → task complete → ready → publish-pack → publish → performance\n\n"
+        f"<pre>{html_pre(json.dumps(compact, ensure_ascii=False, indent=2), 3000)}</pre>"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
 async def handle_operator_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -7411,6 +7556,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "playbook": "/operator_playbook",
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
+        "workerspec": "/operator_worker_spec\nGET /api/operator/worker-spec",
         "director": "/operator_director days=30 platform=tiktok limit=10",
         "execute": "/operator_execute days=30 platform=tiktok build=1 duration=45",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
@@ -9852,6 +9998,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_today", cmd_operator_today))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
+    tg_app.add_handler(CommandHandler("operator_worker_spec", cmd_operator_worker_spec))
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
     tg_app.add_handler(CommandHandler("brain", cmd_brain))
     tg_app.add_handler(CommandHandler("autopilot", cmd_autopilot))
@@ -10066,6 +10213,11 @@ async def api_operator_audit(request: Request):
         "next_command": data["next_command"],
         "rule": "Score >=85 with API/content/publish readiness means ready for director-run automation. Missing checks must be configured before claiming full automation.",
     }
+
+@fastapi_app.get("/api/operator/worker-spec")
+async def api_operator_worker_spec(request: Request):
+    verify_operator_api_token(request)
+    return {"ok": True, "spec": operator_worker_spec_data()}
 
 @fastapi_app.get("/api/operator/director")
 async def api_operator_director(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 10):
