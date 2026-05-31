@@ -4383,6 +4383,93 @@ def tracking_report_data(owner_id, days=30, limit=15):
         "jobs": finalize(by_job.values()),
     }
 
+def scale_plan_action(item, min_clicks=20, min_views=200):
+    views = int(item.get("views") or 0)
+    clicks = int(item.get("clicks") or 0)
+    conversions = int(item.get("conversions") or 0)
+    revenue = int(item.get("revenue") or 0)
+    cost = int(item.get("cost") or 0)
+    score = int(item.get("score") or 0)
+    if cost > 0 and revenue < cost and (views >= min_views or clicks >= min_clicks):
+        return "PAUSE_CHECK", "Có chi phí nhưng doanh thu chưa bù chi phí; tạm dừng scale và kiểm tra offer/targeting."
+    if revenue > 0 or conversions > 0 or score >= 45:
+        return "SCALE", "Đã có tín hiệu doanh thu/chuyển đổi hoặc score đủ mạnh để tạo thêm biến thể."
+    if views >= min_views and clicks == 0:
+        return "FIX_CTA", "Có view nhưng chưa có click; cần sửa hook, caption, CTA hoặc vị trí link."
+    if clicks >= min_clicks and conversions == 0:
+        return "FIX_OFFER", "Có click nhưng chưa có đơn/lead; cần đổi offer, landing, sản phẩm liên quan hoặc góc nội dung."
+    return "TEST_MORE", "Dữ liệu còn mỏng; tiếp tục test thêm creative/source trước khi scale."
+
+def scale_plan_command(item, action, platform="tiktok"):
+    aid = int(item.get("affiliate_id") or 0)
+    job_id = int(item.get("job_id") or 0)
+    platform = (item.get("platform") or platform or "tiktok").lower()
+    if action == "SCALE" and aid:
+        return f"/affiliate_scale aff={aid} platform={platform} channel=all limit=3 build=1 duration=45"
+    if action == "FIX_CTA" and job_id:
+        return f"/creative_test job={job_id} n=5"
+    if action == "FIX_OFFER" and aid:
+        return f"/affiliate_related aff={aid} limit=12"
+    if action == "PAUSE_CHECK" and aid:
+        return f"/tracking_report days=30 limit=20 và kiểm tra cost/revenue aff={aid}"
+    if aid:
+        return f"/affiliate_ideas aff={aid} platform={platform} n=5 topic=remix"
+    return "/tracking_report days=30"
+
+def scale_plan_data(owner_id, days=30, limit=10, platform="tiktok"):
+    report = tracking_report_data(owner_id, days=days, limit=max(limit, 20))
+    candidates = []
+    for scope, rows in (("source", report["sources"]), ("job", report["jobs"]), ("affiliate", report["affiliates"])):
+        for item in rows:
+            if not item.get("affiliate_id") and not item.get("job_id"):
+                continue
+            action, reason = scale_plan_action(item)
+            command = scale_plan_command(item, action, platform=platform)
+            candidates.append({
+                "scope": scope,
+                "action": action,
+                "reason": reason,
+                "command": command,
+                "affiliate_id": int(item.get("affiliate_id") or 0),
+                "job_id": int(item.get("job_id") or 0),
+                "source": item.get("source", ""),
+                "product": item.get("product", ""),
+                "topic": item.get("topic", ""),
+                "platform": item.get("platform", platform),
+                "score": int(item.get("score") or 0),
+                "views": int(item.get("views") or 0),
+                "clicks": int(item.get("clicks") or 0),
+                "conversions": int(item.get("conversions") or 0),
+                "revenue": int(item.get("revenue") or 0),
+                "cost": int(item.get("cost") or 0),
+                "ctr": item.get("ctr", 0),
+                "cvr": item.get("cvr", 0),
+                "roi": item.get("roi", 0),
+            })
+    action_rank = {"SCALE": 5, "FIX_OFFER": 4, "FIX_CTA": 3, "TEST_MORE": 2, "PAUSE_CHECK": 1}
+    candidates.sort(
+        key=lambda x: (
+            action_rank.get(x["action"], 0),
+            x["revenue"],
+            x["conversions"],
+            x["clicks"],
+            x["score"],
+        ),
+        reverse=True,
+    )
+    return {
+        "since": report["since"],
+        "days": days,
+        "platform": platform,
+        "plans": candidates[:limit],
+        "summary": {
+            "scale": sum(1 for item in candidates if item["action"] == "SCALE"),
+            "fix": sum(1 for item in candidates if item["action"] in {"FIX_CTA", "FIX_OFFER"}),
+            "test": sum(1 for item in candidates if item["action"] == "TEST_MORE"),
+            "pause": sum(1 for item in candidates if item["action"] == "PAUSE_CHECK"),
+        },
+    }
+
 def affiliate_decision_label(score, views, clicks, conversions, revenue, cost, jobs, publishes, min_views=200):
     views = int(views or 0)
     clicks = int(clicks or 0)
@@ -8442,7 +8529,8 @@ def operator_category_keyboard(category):
         "cat_money": [
             ("💰 Performance", "performance"), ("📈 Growth optimizer", "growth"),
             ("🔗 Báo cáo affiliate", "affreport"), ("📊 Tracking funnel", "trackingreport"),
-            ("📊 Daily digest", "daily"), ("🏦 Dashboard quản trị", "admin_dashboard"),
+            ("🎯 Scale plan", "scaleplan"), ("📊 Daily digest", "daily"),
+            ("🏦 Dashboard quản trị", "admin_dashboard"),
             ("💳 Check PayOS", "checkpayos"),
         ],
         "cat_api": [
@@ -8523,6 +8611,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
         f"• Tracking funnel: <code>GET {html.escape(base_url)}/api/operator/tracking-report</code>",
+        f"• Scale plan: <code>GET {html.escape(base_url)}/api/operator/scale-plan</code>",
         f"• Quyết định scale affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-decisions</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
@@ -8758,6 +8847,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
         "trackingreport": "/tracking_report days=30 limit=10\nGET /api/operator/tracking-report?days=30",
+        "scaleplan": "/scale_plan days=30 platform=tiktok limit=10\nGET /api/operator/scale-plan?days=30",
         "growth": "/growth\n/growth days=30",
         "loop": "/operator_loop\n/operator_loop limit=10 queue=1",
         "daily": "/operator_daily\n/operator_daily days=7",
@@ -9822,6 +9912,47 @@ async def cmd_tracking_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         lines.append("• Chưa có job performance.")
     lines.append("\nAPI: <code>GET /api/operator/tracking-report?days=30</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_scale_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or (context.args[0] if context.args else 30)), 180))
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        limit = max(3, min(int(data.get("limit") or 10), 30))
+    except ValueError:
+        limit = 10
+    platform = (data.get("platform") or "tiktok").lower()
+    plan = scale_plan_data(update.effective_user.id, days=days, limit=limit, platform=platform)
+    lines = [
+        f"🎯 <b>AFFILIATE SCALE PLAN — {days} ngày</b>",
+        f"• Từ: <code>{html.escape(plan['since'])}</code> | Platform mặc định: <code>{html.escape(platform)}</code>",
+        f"• SCALE={plan['summary']['scale']} | FIX={plan['summary']['fix']} | TEST={plan['summary']['test']} | PAUSE={plan['summary']['pause']}",
+        "",
+    ]
+    if not plan["plans"]:
+        lines.append("📭 Chưa đủ dữ liệu. Hãy dùng tracking URL/postback hoặc ghi /performance_add trước.")
+    for item in plan["plans"]:
+        icon = {
+            "SCALE": "🚀",
+            "FIX_OFFER": "🛒",
+            "FIX_CTA": "✍️",
+            "TEST_MORE": "🧪",
+            "PAUSE_CHECK": "⏸️",
+        }.get(item["action"], "•")
+        title = item["source"] or item["topic"] or item["product"] or f"aff #{item['affiliate_id']}"
+        lines.append(
+            f"{icon} <b>{html.escape(item['action'])}</b> | {html.escape(item['scope'])}: {html.escape(str(title)[:90])}\n"
+            f"• aff=<code>{item['affiliate_id'] or '-'}</code> job=<code>{item['job_id'] or '-'}</code> score=<b>{item['score']}</b>\n"
+            f"• view={item['views']} click={item['clicks']} conv={item['conversions']} rev={item['revenue']:,}đ cost={item['cost']:,}đ\n"
+            f"• Lý do: {html.escape(item['reason'])}\n"
+            f"• Next: <code>{html.escape(item['command'])}</code>"
+        )
+    lines.append("\nAPI: <code>GET /api/operator/scale-plan?days=30</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -11287,6 +11418,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("tracking_report", cmd_tracking_report))
+    tg_app.add_handler(CommandHandler("scale_plan", cmd_scale_plan))
     tg_app.add_handler(CommandHandler("affiliate_report", cmd_affiliate_report))
     tg_app.add_handler(CommandHandler("affiliate_decisions", cmd_affiliate_decisions))
     tg_app.add_handler(CommandHandler("affiliate_scale", cmd_affiliate_scale))
@@ -11509,6 +11641,7 @@ async def api_operator_status(request: Request):
             "director": "/api/operator/director",
             "affiliate_report": "/api/operator/affiliate-report",
             "tracking_report": "/api/operator/tracking-report",
+            "scale_plan": "/api/operator/scale-plan",
             "affiliate_decisions": "/api/operator/affiliate-decisions",
             "affiliate_scale": "/api/operator/affiliate-scale",
             "approve_publish": "/api/operator/jobs/<JOB_ID>/approve",
@@ -12147,6 +12280,28 @@ async def api_operator_tracking_report(request: Request, days: int = 30, limit: 
         "sources": report["sources"],
         "jobs": report["jobs"],
         "rule": "Scale sources/jobs with revenue or high conversion rate; fix CTA when views/clicks exist without conversions; pause when cost exceeds revenue.",
+    }
+
+@fastapi_app.get("/api/operator/scale-plan")
+async def api_operator_scale_plan(request: Request, days: int = 30, limit: int = 10, platform: str = "tiktok"):
+    verify_operator_api_token(request)
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 10), 50))
+    platform = (platform or "tiktok").lower()
+    plan = scale_plan_data(ADMIN_ID, days=days, limit=limit, platform=platform)
+    return {
+        "ok": True,
+        "days": days,
+        "since": plan["since"],
+        "platform": platform,
+        "summary": plan["summary"],
+        "plans": plan["plans"],
+        "rule": "Run SCALE commands for winners, fix CTA/offer before spending more, pause items where cost exceeds revenue.",
+        "next": {
+            "tracking_report_url": "/api/operator/tracking-report",
+            "affiliate_scale_url": "/api/operator/affiliate-scale",
+            "performance_url": "/api/operator/performance",
+        },
     }
 
 @fastapi_app.get("/api/operator/affiliate-decisions")
