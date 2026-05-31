@@ -67,6 +67,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/affiliates`: liệt kê link affiliate nội bộ.
 - `/affiliate_profile id=<AFF_ID> price=... rate=... audience=... allowed=... blocked=... score=...`: cập nhật hồ sơ, claim được phép và claim cấm cho sản phẩm affiliate.
 - `/affiliate_match niche=... platform=tiktok trend=...`: xếp hạng affiliate phù hợp với trend/niche để chọn link trước khi tạo video.
+- `/affiliate_related aff=<AFF_ID>` hoặc `/affiliate_related brand=Samsung niche=điện thoại limit=12`: tìm link cùng brand/nhóm sản phẩm, gồm các cặp Android/iOS, để chèn thêm vào caption, comment ghim, status hoặc mô tả video.
 - `/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=...`: tạo hook, angle, outline, CTA và rủi ro kiểm duyệt cho video ngắn từ một link affiliate đã lưu.
 - `/affiliate_report days=30 limit=15`: báo cáo link affiliate nào có job, bài đăng, view, click, conversion, doanh thu, chi phí và ROI để quyết định scale.
 - `/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID> build=1 duration=45`: lấy niche của affiliate, tự chọn campaign active phù hợp nếu chưa truyền `campaign`, tìm trend phù hợp, tạo batch production job gắn sẵn link đó; thêm `build=1` để tự tạo creative variants, manifest và production tasks.

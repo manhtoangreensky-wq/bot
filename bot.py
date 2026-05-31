@@ -1227,6 +1227,330 @@ DEFAULT_AFFILIATE_LINKS = [
         "target_audience": "nguoi mua online, san voucher, khach hang lazada vip",
         "product_score": 82,
     },
+    {
+        "network": "ShortenAsia",
+        "product_name": "Nguyen Kim",
+        "niche": "dien may cong nghe gia dung",
+        "url": "https://shorten.asia/xaE7DBsX",
+        "target_audience": "gia dinh, nguoi mua dien may, do gia dung, thiet bi cong nghe",
+        "commission_note": "brand=Nguyen Kim | family=dien may gia dung cong nghe | os=all",
+        "product_score": 82,
+    },
+    {
+        "network": "TrackEcom",
+        "product_name": "JUNO",
+        "niche": "thoi trang giay tui phu nu",
+        "url": "https://trackecom.asia/uq3Z3zhF",
+        "target_audience": "phu nu, dan van phong, nguoi mua giay tui thoi trang",
+        "commission_note": "brand=JUNO | family=thoi trang giay tui | os=all",
+        "product_score": 74,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "BEN Computer",
+        "niche": "may tinh laptop gaming cong nghe",
+        "url": "https://attracking.asia/gzGJAWXZ",
+        "target_audience": "sinh vien, dan van phong, game thu, nguoi mua laptop pc",
+        "commission_note": "brand=BEN Computer | family=cong nghe laptop pc | os=all",
+        "product_score": 82,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "ELMICH",
+        "niche": "do gia dung nha bep",
+        "url": "https://attracking.asia/VU3B73xB",
+        "target_audience": "gia dinh, noi tro, nguoi mua do bep va do gia dung",
+        "commission_note": "brand=ELMICH | family=do gia dung nha bep | os=all",
+        "product_score": 72,
+    },
+    {
+        "network": "ShortenAsia",
+        "product_name": "PNJ",
+        "niche": "trang suc qua tang thoi trang",
+        "url": "https://shorten.asia/JxpW7rgv",
+        "target_audience": "nguoi mua trang suc, qua tang, cuoi hoi, phu kien cao cap",
+        "commission_note": "brand=PNJ | family=trang suc qua tang | os=all",
+        "product_score": 76,
+    },
+    {
+        "network": "GoEcom",
+        "product_name": "Lug",
+        "niche": "vali balo du lich",
+        "url": "https://goecom.asia/8F5QMNzs",
+        "target_audience": "nguoi di du lich, dan van phong, sinh vien can vali balo",
+        "commission_note": "brand=Lug | family=du lich vali balo | os=all",
+        "product_score": 72,
+    },
+    {
+        "network": "TrackEC",
+        "product_name": "ACFC",
+        "niche": "thoi trang lifestyle",
+        "url": "https://trackec.asia/UQn56Ycp",
+        "target_audience": "nguoi mua thoi trang, lifestyle, hang chinh hang",
+        "commission_note": "brand=ACFC | family=thoi trang lifestyle | os=all",
+        "product_score": 74,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "Con Cung",
+        "niche": "me va be tieu dung gia dinh",
+        "url": "https://trackfin.asia/cyrwNfdM",
+        "target_audience": "me bim, gia dinh co tre nho, nguoi mua do me va be",
+        "commission_note": "brand=Con Cung | family=me va be hang tieu dung | os=all",
+        "product_score": 76,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "SAMSUNG",
+        "niche": "dien thoai cong nghe dien may",
+        "url": "https://trackfin.asia/vVv8KEHu",
+        "target_audience": "nguoi mua smartphone, tablet, tv, do cong nghe samsung",
+        "commission_note": "brand=Samsung | family=cong nghe dien thoai dien may | os=all",
+        "product_score": 84,
+    },
+    {
+        "network": "GoEcom",
+        "product_name": "MediaMart",
+        "niche": "dien may cong nghe gia dung",
+        "url": "https://goecom.asia/4GGZ8meW",
+        "target_audience": "gia dinh, nguoi mua dien may, tv, tu lanh, may giat",
+        "commission_note": "brand=MediaMart | family=dien may gia dung cong nghe | os=all",
+        "product_score": 80,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "Biti's",
+        "niche": "thoi trang giay dep",
+        "url": "https://trackfin.asia/7wamMsFq",
+        "target_audience": "nguoi mua giay dep, hoc sinh sinh vien, gia dinh",
+        "commission_note": "brand=Bitis | family=thoi trang giay dep | os=all",
+        "product_score": 76,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "HDBank The Tin Dung",
+        "niche": "tai chinh ngan hang the tin dung",
+        "url": "https://trackfin.asia/SHXY6qMT",
+        "target_audience": "nguoi can the tin dung, uu dai chi tieu, tai chinh ca nhan",
+        "commission_note": "brand=HDBank | family=tai chinh the tin dung | os=all",
+        "product_score": 76,
+    },
+    {
+        "network": "GoEcom",
+        "product_name": "AppMax Vay Nhanh Max Card",
+        "niche": "tai chinh vay nhanh the",
+        "url": "https://goecom.asia/QYPZrGrU",
+        "target_audience": "nguoi can vay, the, giai phap tai chinh ca nhan",
+        "commission_note": "brand=AppMax | family=tai chinh vay the | os=all",
+        "product_score": 72,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "VIB AppMax The Thanh Toan",
+        "niche": "tai chinh ngan hang the thanh toan",
+        "url": "https://attracking.asia/AJSh3W9U",
+        "target_audience": "nguoi can the thanh toan, app ngan hang, tai chinh ca nhan",
+        "commission_note": "brand=VIB AppMax | family=tai chinh ngan hang the | os=all",
+        "product_score": 76,
+    },
+    {
+        "network": "GoEcom",
+        "product_name": "Cathay United Bank Android",
+        "niche": "tai chinh ngan hang app android",
+        "url": "https://goecom.asia/5pKeXgNU",
+        "target_audience": "nguoi dung android can ngan hang, the, tai chinh ca nhan",
+        "commission_note": "brand=Cathay United Bank | family=tai chinh ngan hang app | os=android | pair=ios",
+        "product_score": 76,
+    },
+    {
+        "network": "GoEcom",
+        "product_name": "Cathay United Bank iOS",
+        "niche": "tai chinh ngan hang app ios iphone",
+        "url": "https://goecom.asia/WWHZMPKm",
+        "target_audience": "nguoi dung iphone ios can ngan hang, the, tai chinh ca nhan",
+        "commission_note": "brand=Cathay United Bank | family=tai chinh ngan hang app | os=ios | pair=android",
+        "product_score": 76,
+    },
+    {
+        "network": "ShortenAsia",
+        "product_name": "Bao Hiem Hung Vuong",
+        "niche": "bao hiem tai chinh",
+        "url": "https://shorten.asia/gSrcTngW",
+        "target_audience": "nguoi can bao hiem, gia dinh, chu xe, tai chinh an toan",
+        "commission_note": "brand=Bao Hiem Hung Vuong | family=bao hiem tai chinh | os=all",
+        "product_score": 70,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "Liobank The Va Vay",
+        "niche": "tai chinh ngan hang the vay",
+        "url": "https://attracking.asia/jRG236hs",
+        "target_audience": "nguoi can the, vay, app ngan hang so",
+        "commission_note": "brand=Liobank | family=tai chinh ngan hang the vay | os=all",
+        "product_score": 74,
+    },
+    {
+        "network": "TrackEC",
+        "product_name": "VPBank The Direct",
+        "niche": "tai chinh ngan hang the",
+        "url": "https://trackec.asia/s6sWSVKG",
+        "target_audience": "nguoi can the ngan hang, uu dai thanh toan, tai chinh ca nhan",
+        "commission_note": "brand=VPBank | family=tai chinh ngan hang the | os=all",
+        "product_score": 78,
+    },
+    {
+        "network": "TrackEC",
+        "product_name": "Lotte Finance",
+        "niche": "tai chinh vay tieu dung",
+        "url": "https://trackec.asia/TGGjCWA2",
+        "target_audience": "nguoi can vay tieu dung, tai chinh ca nhan",
+        "commission_note": "brand=Lotte Finance | family=tai chinh vay tieu dung | os=all",
+        "product_score": 72,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "VPBank 3T The Tin Dung",
+        "niche": "tai chinh ngan hang the tin dung",
+        "url": "https://attracking.asia/CGxE1aYN",
+        "target_audience": "nguoi can the tin dung, uu dai chi tieu, khach hang vpbank",
+        "commission_note": "brand=VPBank | family=tai chinh the tin dung | os=all",
+        "product_score": 78,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "VPBank SENID Mo The",
+        "niche": "tai chinh ngan hang the",
+        "url": "https://attracking.asia/pjdNn2EA",
+        "target_audience": "nguoi can mo the vpbank, tai chinh ca nhan",
+        "commission_note": "brand=VPBank | family=tai chinh ngan hang the | os=all",
+        "product_score": 77,
+    },
+    {
+        "network": "ShortenAsia",
+        "product_name": "HomeCredit Cash Loan",
+        "niche": "tai chinh vay tieu dung",
+        "url": "https://shorten.asia/P6SstnNY",
+        "target_audience": "nguoi can vay tien mat, tai chinh ca nhan",
+        "commission_note": "brand=HomeCredit | family=tai chinh vay tieu dung | os=all",
+        "product_score": 72,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "VIB The Tin Dung",
+        "niche": "tai chinh ngan hang the tin dung",
+        "url": "https://trackfin.asia/UPbWDCPC",
+        "target_audience": "nguoi can the tin dung, uu dai hoan tien, chi tieu ca nhan",
+        "commission_note": "brand=VIB | family=tai chinh ngan hang the tin dung | os=all",
+        "product_score": 78,
+    },
+    {
+        "network": "TrackEcom",
+        "product_name": "Tima",
+        "niche": "tai chinh vay",
+        "url": "https://trackecom.asia/KuBZKykJ",
+        "target_audience": "nguoi can vay, tu van tai chinh ca nhan",
+        "commission_note": "brand=Tima | family=tai chinh vay | os=all",
+        "product_score": 70,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "Bao Minh",
+        "niche": "bao hiem tai chinh",
+        "url": "https://attracking.asia/cnuDXMgD",
+        "target_audience": "nguoi can bao hiem, gia dinh, chu xe, tai chinh an toan",
+        "commission_note": "brand=Bao Minh | family=bao hiem tai chinh | os=all",
+        "product_score": 70,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "EVOCARD The Tin Dung",
+        "niche": "tai chinh the tin dung",
+        "url": "https://trackfin.asia/wmqm9WMB",
+        "target_audience": "nguoi can the tin dung, uu dai chi tieu, tai chinh ca nhan",
+        "commission_note": "brand=EVOCARD | family=tai chinh the tin dung | os=all",
+        "product_score": 72,
+    },
+    {
+        "network": "TrackMobi",
+        "product_name": "Ve May Bay",
+        "niche": "du lich ve may bay",
+        "url": "https://trackmobi.asia/f5vK6kWh",
+        "target_audience": "nguoi dat ve may bay, du lich tu tuc, cong tac",
+        "commission_note": "brand=Ve May Bay | family=du lich ve may bay | os=all",
+        "product_score": 74,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "Xanh SM Tuyen Tai Xe Xe May",
+        "niche": "viec lam giao thong cong nghe",
+        "url": "https://attracking.asia/mhGF3BVF",
+        "target_audience": "nguoi tim viec tai xe, shipper, xe may cong nghe",
+        "commission_note": "brand=Xanh SM | family=viec lam tai xe giao thong | os=all",
+        "product_score": 74,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "BestPrice",
+        "niche": "du lich khach san ve may bay tour",
+        "url": "https://trackfin.asia/V9G8j3Gs",
+        "target_audience": "nguoi dat phong, ve may bay, tour du lich, gia dinh di choi",
+        "commission_note": "brand=BestPrice | family=du lich booking tour ve may bay khach san | os=all",
+        "product_score": 78,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "Vietnam Airlines",
+        "niche": "du lich hang khong ve may bay",
+        "url": "https://attracking.asia/xaqY9Mcq",
+        "target_audience": "nguoi dat ve may bay, cong tac, du lich gia dinh",
+        "commission_note": "brand=Vietnam Airlines | family=du lich hang khong ve may bay | os=all",
+        "product_score": 80,
+    },
+    {
+        "network": "Attracking",
+        "product_name": "VinWonders Website",
+        "niche": "du lich giai tri ve tham quan",
+        "url": "https://attracking.asia/6PBPz15b",
+        "target_audience": "gia dinh, khach du lich, nguoi mua ve vui choi giai tri",
+        "commission_note": "brand=VinWonders | family=du lich giai tri ve tham quan | os=all",
+        "product_score": 76,
+    },
+    {
+        "network": "ShortenAsia",
+        "product_name": "Ve Gia Re",
+        "niche": "du lich ve may bay gia re",
+        "url": "https://shorten.asia/7E5yK36E",
+        "target_audience": "nguoi san ve re, du lich tu tuc, sinh vien, gia dinh",
+        "commission_note": "brand=Ve Gia Re | family=du lich ve may bay | os=all",
+        "product_score": 74,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "GOTADI Ve May Bay",
+        "niche": "du lich ve may bay booking",
+        "url": "https://trackfin.asia/C2wmhSqG",
+        "target_audience": "nguoi dat ve may bay, du lich, cong tac",
+        "commission_note": "brand=GOTADI | family=du lich ve may bay booking | os=all",
+        "product_score": 76,
+    },
+    {
+        "network": "TrackMobi",
+        "product_name": "ATADI Dat Ve May Bay",
+        "niche": "du lich ve may bay booking",
+        "url": "https://trackmobi.asia/nbv6ZXPa",
+        "target_audience": "nguoi dat ve may bay online, du lich, cong tac",
+        "commission_note": "brand=ATADI | family=du lich ve may bay booking | os=all",
+        "product_score": 76,
+    },
+    {
+        "network": "TrackFin",
+        "product_name": "Klook SIM Ve Tham Quan Tour",
+        "niche": "du lich tour sim ve tham quan",
+        "url": "https://trackfin.asia/pagx7bx2",
+        "target_audience": "nguoi di du lich tu tuc, mua sim, ve tham quan, tour, van chuyen",
+        "commission_note": "brand=Klook | family=du lich tour sim ve tham quan van chuyen | os=all",
+        "product_score": 80,
+    },
 ]
 
 DEFAULT_AFFILIATE_ALLOWED_CLAIMS = (
@@ -1262,13 +1586,13 @@ def seed_default_affiliate_links(owner_id):
             item["product_name"],
             item["niche"],
             url,
-            "Affiliate link moi dang ky tu admin.",
+            item.get("commission_note") or "Affiliate link moi dang ky tu admin.",
             0,
             0,
-            item["target_audience"],
+            item.get("target_audience", ""),
             DEFAULT_AFFILIATE_ALLOWED_CLAIMS,
             DEFAULT_AFFILIATE_BLOCKED_CLAIMS,
-            item["product_score"],
+            item.get("product_score", 0),
         )
         created.append((affiliate_id, item["network"], item["product_name"], url))
     return created, skipped
@@ -1354,6 +1678,102 @@ def list_affiliate_matches(owner_id, niche="", trend_text="", platform="", limit
         ranked.append((score, hits, blocked_hits, row))
     ranked.sort(key=lambda item: item[0], reverse=True)
     return ranked[:limit]
+
+def affiliate_search_blob(affiliate):
+    (
+        aid, network, product_name, aff_niche, url, commission_note, status,
+        price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
+    ) = affiliate
+    return " ".join([
+        str(network or ""),
+        str(product_name or ""),
+        str(aff_niche or ""),
+        str(commission_note or ""),
+        str(target_audience or ""),
+    ]).lower()
+
+def extract_affiliate_brand_hint(text):
+    text = text or ""
+    match = re.search(r"brand\s*=\s*([^|,;\n]+)", text, flags=re.I)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+def affiliate_family_tokens(affiliate):
+    blob = affiliate_search_blob(affiliate)
+    groups = {
+        "finance": ["tai", "chinh", "ngan", "hang", "the", "vay", "credit", "bank", "loan", "bao", "hiem"],
+        "travel": ["du", "lich", "tour", "ve", "may", "bay", "khach", "san", "booking", "sim", "tham", "quan"],
+        "tech": ["cong", "nghe", "dien", "thoai", "laptop", "pc", "may", "tinh", "samsung", "iphone", "apple"],
+        "ecommerce": ["san", "thuong", "mai", "voucher", "deal", "mua", "online", "eshop"],
+        "fashion": ["thoi", "trang", "giay", "tui", "dep", "juno", "adidas", "vascara", "jockey", "vera"],
+        "home": ["gia", "dung", "dien", "may", "nha", "bep", "noi", "tro", "elmich"],
+        "mom_baby": ["me", "be", "con", "cung", "tre", "nho"],
+    }
+    found = set()
+    for family, tokens in groups.items():
+        if any(token in blob for token in tokens):
+            found.add(family)
+    return found
+
+def score_related_affiliate(base_affiliate, candidate, brand_query="", niche_query=""):
+    if not candidate or (candidate[6] or "active") != "active":
+        return 0, []
+    if base_affiliate and candidate[0] == base_affiliate[0]:
+        return 0, []
+
+    base_blob = affiliate_search_blob(base_affiliate) if base_affiliate else ""
+    cand_blob = affiliate_search_blob(candidate)
+    query_blob = f"{brand_query or ''} {niche_query or ''}".lower()
+    score = 0
+    reasons = []
+
+    brand_hint = extract_affiliate_brand_hint(base_blob) or brand_query
+    if brand_hint and brand_hint.lower() in cand_blob:
+        score += 60
+        reasons.append(f"cùng brand {brand_hint}")
+
+    base_tokens = set(tokenize_text(base_blob + " " + query_blob)[:80])
+    cand_tokens = set(tokenize_text(cand_blob)[:80])
+    overlap = sorted((base_tokens & cand_tokens) - {"affiliate", "link", "brand", "family", "all"})
+    if overlap:
+        score += min(40, len(overlap) * 5)
+        reasons.append("trùng từ khóa: " + ", ".join(overlap[:5]))
+
+    families = affiliate_family_tokens(base_affiliate) if base_affiliate else set()
+    query_family = affiliate_family_tokens((0, "", niche_query, niche_query, "", query_blob, "active", 0, 0, "", "", "", 0)) if niche_query else set()
+    family_overlap = (families | query_family) & affiliate_family_tokens(candidate)
+    if family_overlap:
+        score += 22
+        reasons.append("cùng nhóm: " + ", ".join(sorted(family_overlap)))
+
+    if "android" in (base_blob + query_blob) and "ios" in cand_blob:
+        score += 35
+        reasons.append("bổ sung link iOS")
+    if ("ios" in base_blob or "iphone" in base_blob or "iphone" in query_blob) and "android" in cand_blob:
+        score += 35
+        reasons.append("bổ sung link Android")
+
+    return score, reasons
+
+def list_related_affiliate_links(owner_id, affiliate_id=0, brand="", niche="", limit=12):
+    base = get_affiliate_link(affiliate_id, owner_id) if affiliate_id else None
+    rows = list_affiliate_links(owner_id, limit=300)
+    ranked = []
+    for row in rows:
+        score, reasons = score_related_affiliate(base, row, brand, niche)
+        if score > 0:
+            ranked.append((score, reasons, row))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return ranked[:limit]
+
+def format_related_affiliate_links(related, max_items=8):
+    lines = []
+    for score, reasons, row in related[:max_items]:
+        aid, network, product_name, aff_niche, url, *_ = row
+        reason_text = "; ".join(reasons[:2]) if reasons else f"score={score}"
+        lines.append(f"#{aid} | {network or '-'} | {product_name or '-'} | {url or '-'} | {reason_text}")
+    return "\n".join(lines)
 
 def fallback_affiliate_video_ideas(affiliate, platform="tiktok", limit=5):
     (
@@ -3204,6 +3624,8 @@ async def create_operator_auto_jobs(owner_id, niche, platform_filter="", channel
         return [], "Không tìm thấy trend để tạo job."
 
     affiliate = get_affiliate_link(affiliate_id, owner_id) if affiliate_id else None
+    related_affiliates = list_related_affiliate_links(owner_id, affiliate_id=affiliate_id, niche=niche, limit=8) if affiliate_id else []
+    related_note = format_related_affiliate_links(related_affiliates, max_items=6)
     primary_channel = channels[0] if channels else None
     scored_trends = []
     for item in trends:
@@ -3239,6 +3661,7 @@ async def create_operator_auto_jobs(owner_id, niche, platform_filter="", channel
                 f"operator_auto trend #{trend_id} | score={scores['trend_score']} "
                 f"aff_fit={scores['affiliate_fit_score']} competition={scores['competition_score']} | "
                 f"source={item.get('source','')} | {item['url']}"
+                + (f" | related_affiliates={related_note}" if related_note else "")
             )
             slot_id = create_calendar_slot(
                 owner_id,
@@ -3254,7 +3677,9 @@ async def create_operator_auto_jobs(owner_id, niche, platform_filter="", channel
             if gemini_client or openai_client:
                 brief = AgentGemini.chat(
                     "Bạn là AI Operator trưởng, tạo brief video affiliate từ trend cho pipeline batch.",
-                    build_production_prompt(slot) + f"\n\nNguồn trend: {item['url']}\nTóm tắt trend: {item.get('summary','')}",
+                    build_production_prompt(slot)
+                    + f"\n\nNguồn trend: {item['url']}\nTóm tắt trend: {item.get('summary','')}"
+                    + (f"\n\nLink affiliate liên quan để chèn caption/comment/status:\n{related_note}" if related_note else ""),
                     owner_id,
                     is_json=False
                 )
@@ -5311,6 +5736,8 @@ async def cmd_affiliate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE
         aid, network, product, niche, url, note, status,
         price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
     ) = affiliate
+    related = list_related_affiliate_links(update.effective_user.id, affiliate_id=aid, niche=niche or topic, limit=8)
+    related_text = format_related_affiliate_links(related, max_items=6)
     prompt = (
         "Tạo danh sách ý tưởng video ngắn affiliate hợp pháp, có thể đưa vào pipeline sản xuất.\n"
         f"Nền tảng: {platform}\n"
@@ -5321,6 +5748,7 @@ async def cmd_affiliate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"Claim được phép: {allowed_claims or DEFAULT_AFFILIATE_ALLOWED_CLAIMS}\n"
         f"Claim cấm: {blocked_claims or DEFAULT_AFFILIATE_BLOCKED_CLAIMS}\n"
         f"Topic/trend gợi ý: {topic or '-'}\n\n"
+        f"Link affiliate liên quan có thể chèn caption/comment/status:\n{related_text or '-'}\n\n"
         f"Hãy trả về {limit} ý tưởng. Mỗi ý tưởng gồm: hook 3 giây đầu, angle, script outline 30-45s, "
         "visual direction, CTA minh bạch affiliate, rủi ro cần kiểm duyệt. Không cam kết kết quả tài chính, "
         "không mạo danh thương hiệu/người thật, không spam."
@@ -5342,8 +5770,9 @@ async def cmd_affiliate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"• <code>{html.escape(network or '-')}</code> / <b>{html.escape(product or '-')}</b>\n"
             f"• Platform: <code>{html.escape(platform)}</code>\n"
             f"• Link: <code>{html.escape(url or '-')}</code>\n\n"
-            f"<pre>{html_pre(ideas)}</pre>\n\n"
-            f"Tạo batch từ trend: <code>{next_command}</code>",
+            + (f"<b>Link liên quan nên chèn kèm:</b>\n<pre>{html_pre(related_text)}</pre>\n\n" if related_text else "")
+            + f"<pre>{html_pre(ideas)}</pre>\n\n"
+            + f"Tạo batch từ trend: <code>{next_command}</code>",
             parse_mode="HTML"
         )
         return
@@ -5353,11 +5782,72 @@ async def cmd_affiliate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"• <code>{html.escape(network or '-')}</code> / <b>{html.escape(product or '-')}</b>\n"
         f"• Platform: <code>{html.escape(platform)}</code>\n"
         f"• Link: <code>{html.escape(url or '-')}</code>\n\n"
-        f"<pre>{html.escape(ideas)}</pre>\n\n"
-        f"⚠️ Chưa cấu hình AI provider nên bot dùng template fallback.\n"
-        f"Tạo batch từ trend: <code>{next_command}</code>",
+        + (f"<b>Link liên quan nên chèn kèm:</b>\n<pre>{html_pre(related_text)}</pre>\n\n" if related_text else "")
+        + f"<pre>{html.escape(ideas)}</pre>\n\n"
+        + f"⚠️ Chưa cấu hình AI provider nên bot dùng template fallback.\n"
+        + f"Tạo batch từ trend: <code>{next_command}</code>",
         parse_mode="HTML"
     )
+
+async def cmd_affiliate_related(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        affiliate_id = int(data.get("id") or data.get("aff") or (context.args[0] if context.args and context.args[0].isdigit() else 0))
+    except (TypeError, ValueError):
+        affiliate_id = 0
+    brand = data.get("brand") or data.get("thuonghieu") or data.get("product") or data.get("sanpham") or ""
+    niche = data.get("niche") or data.get("ngach") or data.get("topic") or data.get("chude") or ""
+    try:
+        limit = max(3, min(int(data.get("limit") or 12), 30))
+    except ValueError:
+        limit = 12
+    if not affiliate_id and not brand and not niche:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/affiliate_related aff=&lt;AFF_ID&gt;</code> hoặc "
+            "<code>/affiliate_related brand=Samsung niche=điện thoại limit=12</code>",
+            parse_mode="HTML"
+        )
+    base = get_affiliate_link(affiliate_id, update.effective_user.id) if affiliate_id else None
+    if affiliate_id and not base:
+        return await update.message.reply_text("❌ Không tìm thấy affiliate hoặc không có quyền.")
+    related = list_related_affiliate_links(
+        update.effective_user.id,
+        affiliate_id=affiliate_id,
+        brand=brand,
+        niche=niche or (base[3] if base else ""),
+        limit=limit,
+    )
+    title = f"🔎 <b>LINK AFFILIATE LIÊN QUAN</b>"
+    if base:
+        title += f"\n• Gốc: #{base[0]} | <b>{html.escape(base[2] or '-')}</b> | {html.escape(base[3] or '-')}"
+    if brand or niche:
+        title += f"\n• Query: brand=<code>{html.escape(brand or '-')}</code> | niche=<code>{html.escape(niche or '-')}</code>"
+    lines = [
+        title,
+        "",
+        "Dùng danh sách này để chèn link chính + link liên quan vào caption, comment ghim, status hoặc mô tả video.",
+    ]
+    if not related:
+        lines.append("\n📭 Chưa tìm thấy link liên quan. Thêm link bằng /affiliate_add hoặc chạy /affiliate_seed.")
+    else:
+        lines.append("\n<b>Gợi ý chèn kèm:</b>")
+        for score, reasons, row in related:
+            aid, network, product, aff_niche, url, note, status, price_vnd, commission_rate, audience, *_ = row
+            lines.append(
+                f"• #{aid} | match=<b>{score}</b> | <code>{html.escape(network or '-')}</code> / "
+                f"<b>{html.escape(product or '-')}</b>\n"
+                f"  {html.escape(aff_niche or '-')}\n"
+                f"  <code>{html.escape(url or '-')}</code>\n"
+                f"  lý do: {html.escape('; '.join(reasons[:3]) if reasons else '-')}"
+            )
+    lines.append(
+        "\nLệnh tiếp:\n"
+        "<code>/affiliate_ideas aff=&lt;AFF_ID&gt; platform=tiktok n=5 topic=...</code>\n"
+        "<code>/affiliate_scale aff=&lt;AFF_ID&gt; platform=tiktok channel=all limit=3 build=1</code>"
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_calendar_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -5582,6 +6072,8 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await msg.edit_text("📭 Không tìm thấy trend để tạo job.")
 
     affiliate = get_affiliate_link(affiliate_id, update.effective_user.id) if affiliate_id else None
+    related_affiliates = list_related_affiliate_links(update.effective_user.id, affiliate_id=affiliate_id, niche=niche, limit=8) if affiliate_id else []
+    related_note = format_related_affiliate_links(related_affiliates, max_items=6)
     primary_channel = channels[0] if channels else None
     scored_trends = []
     for item in trends:
@@ -5617,6 +6109,7 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"operator_auto trend #{trend_id} | score={scores['trend_score']} "
                 f"aff_fit={scores['affiliate_fit_score']} competition={scores['competition_score']} | "
                 f"source={item.get('source','')} | {item['url']}"
+                + (f" | related_affiliates={related_note}" if related_note else "")
             )
             slot_id = create_calendar_slot(
                 update.effective_user.id,
@@ -5632,7 +6125,9 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if gemini_client or openai_client:
                 brief = AgentGemini.chat(
                     "Bạn là AI Operator trưởng, tạo brief video affiliate từ trend cho pipeline batch.",
-                    build_production_prompt(slot) + f"\n\nNguồn trend: {item['url']}\nTóm tắt trend: {item.get('summary','')}",
+                    build_production_prompt(slot)
+                    + f"\n\nNguồn trend: {item['url']}\nTóm tắt trend: {item.get('summary','')}"
+                    + (f"\n\nLink affiliate liên quan để chèn caption/comment/status:\n{related_note}" if related_note else ""),
                     update.effective_user.id,
                     is_json=False
                 )
@@ -5657,8 +6152,14 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Campaign: <code>{campaign_id or 'chưa gắn'}</code>",
         f"• Affiliate: <code>{affiliate_id or 'chưa gắn'}</code>",
         "",
-        "<b>Job mới:</b>",
     ]
+    if related_note:
+        lines.extend([
+            "<b>Link liên quan nên chèn kèm caption/comment/status:</b>",
+            f"<pre>{html_pre(related_note)}</pre>",
+            "",
+        ])
+    lines.append("<b>Job mới:</b>")
     for job_id, slot_id, trend_id, platform, channel_name, title, score, reason in created[:12]:
         lines.append(
             f"• job #{job_id} | slot #{slot_id} | trend #{trend_id} | score=<b>{score}</b> | "
@@ -6199,7 +6700,7 @@ def operator_category_keyboard(category):
             ("🔗 Import catalog", "affseed"), ("🛒 Danh sách link", "affiliates"),
             ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
             ("🚀 Scale thành video", "affscale"), ("💰 Báo cáo affiliate", "affreport"),
-            ("✏️ Cập nhật hồ sơ", "affprofile"),
+            ("🔎 Link liên quan", "affrelated"), ("✏️ Cập nhật hồ sơ", "affprofile"),
         ],
         "cat_schedule": [
             ("📡 Kênh", "channels"), ("➕ Thêm kênh", "channeladd"),
@@ -6351,6 +6852,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "affscale": "/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID>\n/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=3 build=1 duration=45",
         "affideas": "/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=trend đang nóng",
         "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
+        "affrelated": "/affiliate_related aff=<AFF_ID>\n/affiliate_related brand=Samsung niche=điện thoại limit=12",
         "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
@@ -7420,6 +7922,8 @@ async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE
         aid, network, product, niche, url, note, status,
         price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
     ) = affiliate
+    related = list_related_affiliate_links(update.effective_user.id, affiliate_id=aid, niche=niche or product, limit=8)
+    related_text = format_related_affiliate_links(related, max_items=6)
     platform_filter = (data.get("platform") or data.get("nen") or "tiktok").lower()
     channel_filter = (data.get("channel") or data.get("kenh") or "all").lower()
     scale_niche = data.get("niche") or data.get("ngach") or niche or product or "affiliate"
@@ -7497,8 +8001,14 @@ async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"• Job tạo mới: <b>{len(created_jobs)}</b>",
         f"• Auto build: <b>{'bật' if auto_build else 'tắt'}</b>",
         "",
-        "<b>Job mới:</b>",
     ]
+    if related_text:
+        lines.extend([
+            "<b>Link liên quan nên chèn kèm caption/comment/status:</b>",
+            f"<pre>{html_pre(related_text)}</pre>",
+            "",
+        ])
+    lines.append("<b>Job mới:</b>")
     for item in created_jobs[:10]:
         build_note = ""
         built_item = next((row for row in built if row["job_id"] == item["job_id"]), None)
@@ -8590,6 +9100,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("affiliate_profile", cmd_affiliate_profile))
     tg_app.add_handler(CommandHandler("affiliate_match", cmd_affiliate_match))
     tg_app.add_handler(CommandHandler("affiliate_ideas", cmd_affiliate_ideas))
+    tg_app.add_handler(CommandHandler("affiliate_related", cmd_affiliate_related))
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
