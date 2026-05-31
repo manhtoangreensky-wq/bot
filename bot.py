@@ -2640,6 +2640,14 @@ def operator_n8n_template_data():
                 "note": "Lấy caption, disclosure, link chính, link liên quan/comment ghim và checklist.",
             },
             {
+                "node": "Approve Publish",
+                "type": "http_request",
+                "method": "POST",
+                "url": f"{base_url}/api/operator/jobs/<JOB_ID>/approve",
+                "body": {"queue": True, "mode": "manual", "note": "reviewed_by_admin_or_worker", "notify_admin": True},
+                "note": "Chỉ gọi sau khi admin/worker đã kiểm duyệt final video, caption, affiliate claim và quyền nội dung.",
+            },
+            {
                 "node": "Claim Publish Queue",
                 "type": "http_request",
                 "method": "GET",
@@ -2888,6 +2896,26 @@ def operator_n8n_workflow_json_data():
                     "url": f"{base_url_expr}/api/operator/publish/next?platform=tiktok&mode=manual",
                     "sendHeaders": True,
                     "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "approve-publish",
+                "name": "Approve Publish Gate",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [520, 80],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{{{$json.job_id}}}}/approve",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"queue\":true,\"mode\":\"manual\","
+                        "\"note\":\"approved by n8n/manual gate\",\"notify_admin\":true}"
+                    ),
                     "options": {"timeout": 60000},
                 },
             },
@@ -3270,8 +3298,8 @@ def production_readiness_data(owner_id, job_id):
 
     review_ok = (
         tasks_done(review_tasks)
-        or (stage or "").lower() in {"review", "publish", "done"}
-        and (status or "").lower() in {"ready", "queued", "published"}
+        or (stage or "").lower() in {"review", "publish", "approved", "done"}
+        and (status or "").lower() in {"ready", "approved", "queued", "published"}
     )
     final_ok = bool(final_asset or publish_url)
     checks = [
@@ -3285,7 +3313,7 @@ def production_readiness_data(owner_id, job_id):
         ("voice", tasks_done(voice_tasks) or bool(voice_asset) or final_ok, "Voice/audio đã có output hoặc final video.", f"/next_task job={job_id}"),
         ("edit_final", final_ok or tasks_done(edit_tasks), "Có final video hoặc edit task đã ready.", f"/next_task job={job_id}"),
         ("review", review_ok, "Đã qua review gate.", f"/review_gate job={job_id}"),
-        ("queue_or_published", bool(queue_open or publish_url or (status or "").lower() == "published"), "Đã vào hàng đợi hoặc đã đăng.", f"/publish_pack job={job_id} rồi /queue_publish job={job_id} mode=manual"),
+        ("queue_or_published", bool(queue_open or publish_url or (status or "").lower() == "published"), "Đã vào hàng đợi hoặc đã đăng.", f"/publish_pack job={job_id} rồi /approve_publish job={job_id} queue=1 mode=manual"),
     ]
     if blocked_tasks:
         checks.append(("blocked_tasks", False, f"Có {len(blocked_tasks)} task bị blocked.", f"/tasks job={job_id}"))
@@ -3294,7 +3322,7 @@ def production_readiness_data(owner_id, job_id):
     core_missing = [row for row in missing if row[0] != "queue_or_published"]
     if not core_missing and not queue_open and not publish_url and (status or "").lower() != "published":
         level = "READY_TO_QUEUE"
-        next_action = f"/publish_pack job={job_id} rồi /queue_publish job={job_id} mode=manual"
+        next_action = f"/publish_pack job={job_id} rồi /approve_publish job={job_id} queue=1 mode=manual"
     elif not missing:
         level = "READY_TO_PUBLISH"
         next_action = f"/publish_queue hoặc /mark_published job={job_id} url=https://..."
@@ -3317,6 +3345,36 @@ def production_readiness_data(owner_id, job_id):
         "final_asset": final_asset,
         "blocked_tasks": blocked_tasks,
     }
+
+def approve_publish_job(owner_id, job_id, note="", queue=True, mode="manual", scheduled_at=""):
+    readiness = production_readiness_data(owner_id, job_id)
+    if not readiness:
+        return False, "job_not_found", {}
+    blocking = [row for row in readiness["missing"] if row[0] != "queue_or_published"]
+    if blocking:
+        return False, "not_ready", {
+            "missing": [
+                {"key": key, "detail": detail, "next": next_cmd}
+                for key, _ok, detail, next_cmd in blocking
+            ],
+            "next_action": blocking[0][3],
+        }
+    update_production_job(
+        job_id,
+        owner_id,
+        stage="approved",
+        status="approved",
+        note=note or "approved_publish_gate",
+    )
+    queue_id = 0
+    queued = False
+    if queue:
+        ok, result = create_publish_queue_item(owner_id, job_id, mode=mode or "manual", scheduled_at=scheduled_at or "", note=note or "approved_publish_gate")
+        queued = bool(ok)
+        queue_id = result if ok else 0
+        if not ok:
+            return False, str(result), {"approved": True, "queued": False}
+    return True, "approved", {"approved": True, "queued": queued, "queue_id": queue_id}
 
 def create_creative_variant(owner_id, job_id, variant_label, hook="", script_angle="", caption="", cta="", hashtags="", creative_score=0, note=""):
     job = get_production_job(job_id, owner_id)
@@ -4418,6 +4476,16 @@ async def execute_operator_director_action(owner_id, action, build=True, duratio
         job_id = int(match.group(1)) if match else 0
         if not job_id:
             return {"executed": False, "message": "PUBLISH_READY thiếu job_id."}
+        job = get_production_job(job_id, owner_id)
+        if job and (job[8] or "").lower() != "approved":
+            return {
+                "executed": False,
+                "action": action_type,
+                "job_id": job_id,
+                "message": "Job đã đủ điều kiện nhưng chưa có duyệt cuối. Admin cần /approve_publish trước khi queue đăng.",
+                "telegram_command": f"/approve_publish job={job_id} queue=1 mode=manual",
+                "api": {"method": "POST", "url": f"/api/operator/jobs/{job_id}/approve"},
+            }
         ok, queue_id = create_publish_queue_item(owner_id, job_id, mode="manual", scheduled_at="", note="director_execute_queue")
         return {
             "executed": bool(ok),
@@ -4454,11 +4522,14 @@ def operator_loop_data(owner_id, limit=10, auto_queue=True):
         readiness = production_readiness_data(owner_id, jid)
         level = readiness["level"] if readiness else "UNKNOWN"
         next_action = readiness["next_action"] if readiness else ""
-        if level == "READY_TO_QUEUE" and auto_queue:
+        if level == "READY_TO_QUEUE" and auto_queue and (status or "").lower() == "approved":
             ok, queue_id = create_publish_queue_item(owner_id, jid, mode="manual", scheduled_at="", note="operator_loop_auto_queue")
             if ok:
                 advanced.append((jid, "queued_publish", queue_id, topic, platform, channel_name))
                 continue
+        if level == "READY_TO_QUEUE" and auto_queue:
+            blocked.append((jid, "NEEDS_APPROVAL", f"/approve_publish job={jid} queue=1 mode=manual", topic, platform, channel_name))
+            continue
         if level == "READY_TO_PUBLISH":
             ready_publish.append((jid, topic, platform, channel_name))
             continue
@@ -5499,6 +5570,13 @@ class OperatorPublishCompleteRequest(BaseModel):
     note: str = Field(default="", max_length=1200)
     views: int = Field(default=0, ge=0)
     clicks: int = Field(default=0, ge=0)
+
+class OperatorApprovePublishRequest(BaseModel):
+    queue: bool = True
+    mode: str = Field(default="manual", max_length=20)
+    scheduled_at: str = Field(default="", max_length=80)
+    note: str = Field(default="", max_length=1200)
+    notify_admin: bool = True
 
 class OperatorPerformanceRequest(BaseModel):
     job_id: int = Field(gt=0)
@@ -8170,7 +8248,8 @@ def operator_category_keyboard(category):
         ],
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
-            ("🧪 Publish readiness", "readiness"), ("✅ Mark published", "markpublished"),
+            ("✅ Approve publish", "approvepublish"), ("🧪 Publish readiness", "readiness"),
+            ("✅ Mark published", "markpublished"),
         ],
         "cat_money": [
             ("💰 Performance", "performance"), ("📈 Growth optimizer", "growth"),
@@ -8260,6 +8339,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
+        f"• Duyệt publish: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/approve</code>",
         f"• Lấy hàng đợi đăng: <code>GET {html.escape(base_url)}/api/operator/publish/next</code>",
         f"• Trả URL đã đăng: <code>POST {html.escape(base_url)}/api/operator/publish/&lt;QUEUE_ID&gt;/complete</code>",
         f"• Ghi view/click/doanh thu: <code>POST {html.escape(base_url)}/api/operator/performance</code>",
@@ -8472,6 +8552,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "calendarplan": "/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
+        "approvepublish": "/approve_publish job=<JOB_ID> queue=1 mode=manual note=duyet_ok\nPOST /api/operator/jobs/<JOB_ID>/approve",
         "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
         "publishqueue": "/publish_queue\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
@@ -8886,6 +8967,41 @@ async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Mode: <code>{mode}</code>\n"
         f"• Schedule: <code>{html.escape(scheduled_at or 'chưa hẹn')}</code>\n\n"
         f"Khi đăng xong: <code>/mark_published job={job_id} url=https://...</code>",
+        parse_mode="HTML"
+    )
+
+async def cmd_approve_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/approve_publish job=1 queue=1 mode=manual note=...</code>",
+            parse_mode="HTML"
+        )
+    queue = str(data.get("queue") or data.get("enqueue") or "1").lower() not in {"0", "false", "no", "khong"}
+    mode = (data.get("mode") or "manual").lower()
+    if mode not in {"manual", "api"}:
+        return await update.message.reply_text("⚠️ mode hợp lệ: <code>manual</code> hoặc <code>api</code>", parse_mode="HTML")
+    note = data.get("note") or "admin_approved_publish"
+    scheduled_at = data.get("schedule") or data.get("time") or ""
+    ok, reason, info = approve_publish_job(update.effective_user.id, job_id, note=note, queue=queue, mode=mode, scheduled_at=scheduled_at)
+    if not ok:
+        if reason == "not_ready":
+            missing = info.get("missing") or []
+            lines = [f"⚠️ <b>Job #{job_id} chưa đủ điều kiện duyệt đăng</b>\n"]
+            for item in missing[:8]:
+                lines.append(f"• <code>{html.escape(item['key'])}</code>: {html.escape(item['detail'])}\n  Next: <code>{html.escape(item['next'])}</code>")
+            return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        return await update.message.reply_text(f"❌ Không duyệt được: <code>{html.escape(reason)}</code>", parse_mode="HTML")
+    await update.message.reply_text(
+        f"✅ <b>Đã duyệt publish job #{job_id}</b>\n"
+        f"• Queue: <b>{'có' if info.get('queued') else 'không'}</b>\n"
+        f"• Queue ID: <code>{info.get('queue_id') or '-'}</code>\n"
+        f"• Mode: <code>{html.escape(mode)}</code>\n\n"
+        f"Xem hàng đợi: <code>/publish_queue</code>",
         parse_mode="HTML"
     )
 
@@ -10916,6 +11032,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
+    tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
@@ -11092,6 +11209,7 @@ async def api_operator_status(request: Request):
             "affiliate_report": "/api/operator/affiliate-report",
             "affiliate_decisions": "/api/operator/affiliate-decisions",
             "affiliate_scale": "/api/operator/affiliate-scale",
+            "approve_publish": "/api/operator/jobs/<JOB_ID>/approve",
             "loop": "/api/operator/loop",
         },
     }
@@ -11356,6 +11474,40 @@ async def api_operator_job_ready(job_id: int, request: Request):
             for key, ok, detail, next_cmd in readiness["checks"]
         ],
     }
+
+@fastapi_app.post("/api/operator/jobs/{job_id}/approve")
+async def api_operator_approve_publish(job_id: int, payload: OperatorApprovePublishRequest, request: Request):
+    verify_operator_api_token(request)
+    mode = (payload.mode or "manual").lower()
+    if mode not in {"manual", "api"}:
+        raise HTTPException(status_code=400, detail="mode must be manual or api")
+    ok, reason, info = approve_publish_job(
+        ADMIN_ID,
+        job_id,
+        note=payload.note or "api_approved_publish",
+        queue=payload.queue,
+        mode=mode,
+        scheduled_at=payload.scheduled_at,
+    )
+    if not ok:
+        status_code = 404 if reason == "job_not_found" else 400
+        raise HTTPException(status_code=status_code, detail={"reason": reason, **info})
+    if tg_app and ADMIN_ID and payload.notify_admin:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"✅ <b>OPERATOR APPROVED PUBLISH</b>\n\n"
+                    f"• Job: <code>#{job_id}</code>\n"
+                    f"• Queue: <b>{'có' if info.get('queued') else 'không'}</b> | ID: <code>{info.get('queue_id') or '-'}</code>\n"
+                    f"• Mode: <code>{html.escape(mode)}</code>\n"
+                    f"• Note: {html.escape(payload.note or '-')}"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Approve publish notify error: {e}")
+    return {"ok": True, "job_id": job_id, **info}
 
 @fastapi_app.get("/api/operator/jobs/{job_id}/publish-pack")
 async def api_operator_job_publish_pack(job_id: int, request: Request):
