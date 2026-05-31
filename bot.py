@@ -81,6 +81,7 @@ BOT_USERNAME        = _env("BOT_USERNAME", "Httdhtoan")
 PUBLIC_BASE_URL     = _env("PUBLIC_BASE_URL")
 LEAD_WEBHOOK_SECRET = _env("LEAD_WEBHOOK_SECRET")
 OPERATOR_API_TOKEN  = _env("OPERATOR_API_TOKEN")
+AFFILIATE_POSTBACK_TOKEN = _env("AFFILIATE_POSTBACK_TOKEN")
 
 # ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -4082,6 +4083,49 @@ def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note=
     conn.close()
     return True, job
 
+def record_affiliate_postback(owner_id, job_id=0, affiliate_id=0, event_type="order", value=1, amount=0, source="affiliate_postback", order_id="", note=""):
+    event_type = (event_type or "order").lower()
+    if event_type not in {"order", "revenue", "lead"}:
+        event_type = "order"
+    affiliate_id = int(affiliate_id or 0)
+    job_id = int(job_id or 0)
+    if not job_id and affiliate_id:
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute(
+            """SELECT id FROM production_jobs
+               WHERE owner_id=? AND affiliate_id=?
+               ORDER BY updated_at DESC, id DESC LIMIT 1""",
+            (str(owner_id), affiliate_id)
+        )
+        row = c.fetchone()
+        conn.close()
+        job_id = int(row[0]) if row else 0
+    if not job_id:
+        return False, "missing_job_id", {}
+    note_parts = [source or "affiliate_postback"]
+    if affiliate_id:
+        note_parts.append(f"affiliate:{affiliate_id}")
+    if order_id:
+        note_parts.append(f"order:{order_id}")
+    if note:
+        note_parts.append(note)
+    ok, job = add_performance_event(
+        owner_id,
+        job_id,
+        event_type,
+        int(value or 1),
+        int(amount or 0),
+        " | ".join(note_parts),
+        0,
+        affiliate_id_override=affiliate_id,
+    )
+    if not ok:
+        return False, "job_not_found", {}
+    if amount:
+        update_production_job(job_id, owner_id, status="published", note=f"affiliate_postback:{event_type} amount={amount}")
+    return True, "recorded", {"job_id": job_id, "affiliate_id": affiliate_id, "event_type": event_type, "amount": int(amount or 0)}
+
 def performance_report_data(owner_id, limit=10):
     conn = db_connect()
     c = conn.cursor()
@@ -5607,6 +5651,17 @@ class OperatorPerformanceRequest(BaseModel):
     variant_id: int = Field(default=0, ge=0)
     note: str = Field(default="", max_length=1200)
     source: str = Field(default="api", max_length=120)
+
+class AffiliatePostbackRequest(BaseModel):
+    job_id: int = Field(default=0, ge=0)
+    affiliate_id: int = Field(default=0, ge=0)
+    event_type: str = Field(default="order", max_length=40)
+    value: int = Field(default=1, ge=0)
+    amount: int = Field(default=0, ge=0)
+    order_id: str = Field(default="", max_length=160)
+    source: str = Field(default="affiliate_postback", max_length=120)
+    note: str = Field(default="", max_length=1200)
+    token: str = Field(default="", max_length=240)
 
 class OperatorToolEventRequest(BaseModel):
     stage: str = Field(default="", max_length=80)
@@ -11136,6 +11191,42 @@ async def affiliate_redirect(affiliate_id: int, request: Request, job: int = 0, 
     if job:
         add_performance_event(ADMIN_ID, job, "click", 1, 0, " | ".join(note_parts), affiliate_id_override=aid)
     return RedirectResponse(url=url, status_code=302)
+
+@fastapi_app.post("/api/affiliate/postback")
+async def affiliate_postback(payload: AffiliatePostbackRequest, request: Request):
+    token = payload.token or request.headers.get("x-affiliate-postback-token", "")
+    if AFFILIATE_POSTBACK_TOKEN and not hmac.compare_digest(str(token), AFFILIATE_POSTBACK_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid affiliate postback token")
+    ok, reason, info = record_affiliate_postback(
+        ADMIN_ID,
+        job_id=payload.job_id,
+        affiliate_id=payload.affiliate_id,
+        event_type=payload.event_type,
+        value=payload.value,
+        amount=payload.amount,
+        source=payload.source,
+        order_id=payload.order_id,
+        note=payload.note,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+    if tg_app and ADMIN_ID and payload.amount > 0:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"💰 <b>AFFILIATE POSTBACK</b>\n\n"
+                    f"• Job: <code>#{info.get('job_id')}</code> | Affiliate: <code>{info.get('affiliate_id') or '-'}</code>\n"
+                    f"• Type: <code>{html.escape(info.get('event_type') or '-')}</code> | Value: <b>{payload.value}</b>\n"
+                    f"• Amount: <b>{payload.amount:,}đ</b>\n"
+                    f"• Order: <code>{html.escape(payload.order_id or '-')}</code>\n"
+                    f"• Source: <code>{html.escape(payload.source or 'affiliate_postback')}</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Affiliate postback notify error: {e}")
+    return {"ok": True, **info}
 
 @fastapi_app.post("/lead")
 async def create_lead(payload: LeadRequest, request: Request):

@@ -133,6 +133,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /`: health check.
 - `GET /landing`: phục vụ landing page `index.html` cùng domain với API.
 - `GET /r/{affiliate_id}?job=<JOB_ID>&src=<SOURCE>`: redirect sang link affiliate gốc và tự ghi click vào performance khi có `job`.
+- `POST /api/affiliate/postback`: nhận conversion/order/lead/revenue từ n8n hoặc network affiliate, hỗ trợ `AFFILIATE_POSTBACK_TOKEN`.
 - `POST /webhook/payos`: nhận webhook PayOS, kiểm tra chữ ký, mã đơn, số tiền, trạng thái và chống cộng xu trùng.
 - `POST /lead`: nhận lead từ landing page và gửi thông báo về admin Telegram.
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
