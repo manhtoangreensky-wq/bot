@@ -4564,6 +4564,118 @@ def serialize_operator_task(row):
         "job": job_payload,
     }
 
+def serialize_production_job(job):
+    if not job:
+        return None
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    return {
+        "id": jid,
+        "calendar_id": calendar_id,
+        "campaign_id": campaign_id,
+        "channel_id": channel_id,
+        "affiliate_id": affiliate_id,
+        "platform": platform,
+        "topic": topic,
+        "stage": stage,
+        "status": status,
+        "operator_note": note,
+        "brief": brief,
+        "asset_url": asset_url,
+        "publish_url": publish_url,
+        "channel": {"name": channel_name, "account_label": account_label},
+        "affiliate": {"network": network, "product": product_name, "url": affiliate_url},
+    }
+
+def operator_job_context_data(owner_id, job_id):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return None
+    readiness = production_readiness_data(owner_id, job_id)
+    assets = list_production_assets(owner_id, job_id, limit=80)
+    variants = list_creative_variants(owner_id, job_id, limit=20)
+    manifests = list_production_manifests(owner_id, job_id, limit=5)
+    tasks = list_production_tasks(owner_id, job_id=job_id, limit=120)
+    next_task = next_worker_task(owner_id, job_id=job_id)
+    publish_pack = build_static_publish_pack(job, owner_id)
+    selected_manifest = latest_production_manifest(owner_id, job_id)
+
+    def parse_manifest(row):
+        if not row:
+            return None
+        mid, row_job_id, variant_id, manifest_status, manifest_json, created_at, updated_at = row
+        try:
+            parsed = json.loads(manifest_json or "{}")
+        except Exception:
+            parsed = {"raw": manifest_json or ""}
+        return {
+            "id": mid,
+            "job_id": row_job_id,
+            "variant_id": variant_id,
+            "status": manifest_status,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "data": parsed,
+        }
+
+    return {
+        "job": serialize_production_job(job),
+        "readiness": {
+            "level": (readiness or {}).get("level", "UNKNOWN"),
+            "next_action": (readiness or {}).get("next_action", ""),
+            "checks": [
+                {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
+                for key, ok, detail, next_cmd in ((readiness or {}).get("checks") or [])
+            ],
+        },
+        "assets": [
+            {"id": aid, "type": asset_type, "url": url, "file_id": file_id, "note": asset_note, "created_at": created_at}
+            for aid, asset_type, url, file_id, asset_note, created_at in assets
+        ],
+        "creative_variants": [
+            {
+                "id": vid,
+                "label": label,
+                "hook": hook,
+                "script_angle": angle,
+                "caption": caption,
+                "cta": cta,
+                "hashtags": hashtags,
+                "score": score,
+                "status": v_status,
+                "note": v_note,
+                "created_at": created_at,
+                "selected_at": selected_at,
+            }
+            for vid, label, hook, angle, caption, cta, hashtags, score, v_status, v_note, created_at, selected_at in variants
+        ],
+        "manifests": [
+            parse_manifest((mid, job_id, variant_id, manifest_status, manifest_json, created_at, updated_at))
+            for mid, variant_id, manifest_status, manifest_json, created_at, updated_at in manifests
+        ],
+        "selected_manifest": parse_manifest(selected_manifest),
+        "tasks": [serialize_operator_task(get_production_task(owner_id, row[0])) for row in tasks],
+        "next_task": serialize_operator_task(next_task),
+        "publish_pack": publish_pack,
+        "worker_runbook": {
+            "sequence": [
+                "Nếu next_task có status queued/waiting: thực hiện đúng prompt/tool.",
+                "Trả output qua POST /api/operator/tasks/<TASK_ID>/complete.",
+                "Khi readiness READY_TO_QUEUE: lấy publish_pack, admin review rồi approve publish.",
+                "Publisher chỉ đăng khi queue đã approved và publisher_run cho phép.",
+                "Sau đăng, ghi publish_url và performance.",
+            ],
+            "task_complete_url": "/api/operator/tasks/<TASK_ID>/complete",
+            "ready_url": f"/api/operator/jobs/{job_id}/ready",
+            "publish_pack_url": f"/api/operator/jobs/{job_id}/publish-pack",
+            "approve_url": f"/api/operator/jobs/{job_id}/approve",
+            "performance_url": "/api/operator/performance",
+        },
+        "rule": "Không tự publish hoặc sửa claim affiliate nếu chưa qua review/approve. Không dùng tài sản thiếu quyền/consent.",
+    }
+
 def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0, affiliate_id_override=0):
     job = get_production_job(job_id, owner_id)
     if not job:
@@ -9716,7 +9828,8 @@ def operator_category_keyboard(category):
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
             ("🗂 Assets", "assets"), ("📋 Job report", "report"),
-            ("🚦 Job ready", "jobready"), ("🛡 Review gate", "review"),
+            ("🧠 Job context", "jobcontext"), ("🚦 Job ready", "jobready"),
+            ("🛡 Review gate", "review"),
             ("🧪 Creative test", "creative"), ("🏁 Creative report", "creativereport"),
         ],
         "cat_publish": [
@@ -9824,6 +9937,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
+        f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
         f"• Duyệt publish: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/approve</code>",
         f"• Lấy hàng đợi đăng: <code>GET {html.escape(base_url)}/api/operator/publish/next</code>",
@@ -10086,6 +10200,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "nexttask": "/next_task\n/next_task job=<JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
         "report": "/job_report <JOB_ID>",
+        "jobcontext": "/job_context job=<JOB_ID>\nGET /api/operator/jobs/<JOB_ID>/context",
         "jobready": "/job_ready job=<JOB_ID>",
         "review": "/review_gate job=<JOB_ID>",
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
@@ -10968,6 +11083,49 @@ async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("• Chưa có. Dùng /task_plan job=%s." % job_id)
     lines.append("\nLệnh tiếp theo: /creative_test, /manifest, /task_plan, /review_gate, /publish_pack, /queue_publish hoặc /performance_add tùy checklist.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_job_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/job_context job=&lt;JOB_ID&gt;</code>", parse_mode="HTML")
+    context_data = operator_job_context_data(update.effective_user.id, job_id)
+    if not context_data:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    job = context_data["job"] or {}
+    next_task = context_data.get("next_task") or {}
+    pack = context_data.get("publish_pack") or {}
+    compact = {
+        "job": {
+            "id": job.get("id"),
+            "platform": job.get("platform"),
+            "topic": job.get("topic"),
+            "stage": job.get("stage"),
+            "status": job.get("status"),
+            "affiliate": job.get("affiliate"),
+        },
+        "readiness": context_data.get("readiness"),
+        "next_task": next_task,
+        "assets_count": len(context_data.get("assets") or []),
+        "tasks_count": len(context_data.get("tasks") or []),
+        "publish_pack": {
+            "caption": pack.get("caption"),
+            "pinned_comment": pack.get("pinned_comment"),
+            "placement_plan": pack.get("placement_plan"),
+        },
+        "worker_runbook": context_data.get("worker_runbook"),
+    }
+    await update.message.reply_text(
+        f"🧠 <b>JOB CONTEXT #{job_id}</b>\n"
+        f"• Readiness: <b>{html.escape((context_data.get('readiness') or {}).get('level') or 'UNKNOWN')}</b>\n"
+        f"• Next task: <code>{html.escape(str(next_task.get('id') or '-'))}</code> / <code>{html.escape(next_task.get('task_type') or '-')}</code>\n"
+        f"• API: <code>GET /api/operator/jobs/{job_id}/context</code>\n\n"
+        f"<pre>{html_pre(json.dumps(compact, ensure_ascii=False, indent=2), 3000)}</pre>",
+        parse_mode="HTML"
+    )
 
 async def cmd_job_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -12804,6 +12962,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
     tg_app.add_handler(CommandHandler("assets", cmd_assets))
     tg_app.add_handler(CommandHandler("job_report", cmd_job_report))
+    tg_app.add_handler(CommandHandler("job_context", cmd_job_context))
     tg_app.add_handler(CommandHandler("job_ready", cmd_job_ready))
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
@@ -13357,6 +13516,14 @@ async def api_operator_job_ready(job_id: int, request: Request):
             for key, ok, detail, next_cmd in readiness["checks"]
         ],
     }
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/context")
+async def api_operator_job_context(job_id: int, request: Request):
+    verify_operator_api_token(request)
+    data = operator_job_context_data(ADMIN_ID, job_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"ok": True, **data}
 
 @fastapi_app.post("/api/operator/jobs/{job_id}/approve")
 async def api_operator_approve_publish(job_id: int, payload: OperatorApprovePublishRequest, request: Request):

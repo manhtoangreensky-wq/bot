@@ -132,6 +132,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/asset_add job=<ID> type=script|voice|raw_video|subtitle|thumbnail|final_video url=... note=...`: lưu asset/link/file vào production job.
 - `/assets <JOB_ID>`: xem toàn bộ asset đã lưu của job.
 - `/job_report <JOB_ID>`: báo cáo tổng hợp brief, asset, publish queue, publish URL, affiliate và performance của một job.
+- `/job_context job=<JOB_ID>`: xuất context máy đọc được cho Claude/n8n/tool worker, gồm job, readiness, assets, creative, manifest, tasks, next_task, publish pack và runbook.
 - `/job_ready job=<JOB_ID>`: kiểm tra job đã đủ brief, affiliate, creative, manifest, task, final video, review và publish queue trước khi đăng chưa.
 - `/approve_publish job=<ID> queue=1 mode=manual note=...`: duyệt cuối sau review gate/final video; có thể tự đưa job vào publish queue manual/API.
 - `/mark_published job=<ID> url=https://... views=0 clicks=0 note=...`: ghi nhận bài đã đăng thủ công, lưu URL và chuyển job sang `published`.
@@ -171,6 +172,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/today`: worker ngoài lấy danh sách hành động ưu tiên trong ngày, gồm setup, task, publish queue và affiliate nên scale.
 - `POST /api/operator/tasks/{task_id}/complete`: worker ngoài trả `status`, `output_url`, `note`; bot tự lưu asset theo loại task và báo admin.
 - `GET /api/operator/jobs/{job_id}/ready`: worker ngoài kiểm tra job đã đủ điều kiện review/publish chưa.
+- `GET /api/operator/jobs/{job_id}/context`: worker ngoài lấy toàn bộ context và runbook của một job trong một lần gọi, thay vì phải tự ghép nhiều endpoint rời.
 - `POST /api/operator/jobs/{job_id}/approve`: duyệt cuối job đã đủ điều kiện và tùy chọn đưa vào publish queue; dùng làm gate trước khi n8n/publisher lấy bài đăng.
 - `GET /api/operator/jobs/{job_id}/publish-pack`: worker ngoài lấy caption, CTA, disclosure, tracking URL affiliate chính, link liên quan, comment ghim, checklist compliance và kế hoạch ghi performance.
 - `POST /api/operator/loop`: cron/n8n gọi vòng điều phối an toàn với `limit`, `auto_queue`, `notify_admin`; bot tự queue job ready và trả task tiếp theo.
