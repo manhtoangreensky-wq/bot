@@ -21,6 +21,7 @@ import html
 import uvicorn
 import time
 import random
+import re
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode
 from contextlib import asynccontextmanager
@@ -3406,6 +3407,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command_lines.extend([
             "• /tools — Kho 30 công cụ AI/MMO (Admin)",
             "• /mmo — Quy trình kiếm tiền bằng AI (Admin)",
+            "• /brain — Ra lệnh tự nhiên cho AI Operator",
             "• /operator_menu — Menu vận hành AI Operator",
             "• /campaign_new — Tạo chiến dịch affiliate/video",
             "• /campaigns — Danh sách chiến dịch",
@@ -3609,6 +3611,201 @@ def parse_key_value_args(raw: str) -> dict:
         elif current_key:
             data[current_key] += " " + token.strip()
     return data
+
+def int_from_text(text, keys, default=0):
+    for key in keys:
+        match = re.search(rf"(?:{re.escape(key)}|{re.escape(key)}=)\s*#?(\d+)", text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return default
+
+def first_number_near(text, words, default=0):
+    for word in words:
+        match = re.search(rf"(\d+)\s+(?:\S+\s+){{0,2}}{re.escape(word)}", text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        match = re.search(rf"{re.escape(word)}\s*(?:=|#)?\s*(\d+)", text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return default
+
+def compact_arg_value(value):
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    if any(ch.isspace() for ch in value):
+        return value
+    return value
+
+def operator_brain_fallback(raw_text):
+    text = raw_text.strip()
+    lower = text.lower()
+    platform = "tiktok"
+    for candidate in ["tiktok", "facebook", "fb", "reels", "youtube", "shorts", "onlyfan", "onlyfans"]:
+        if candidate in lower:
+            platform = "facebook" if candidate in {"fb", "reels"} else ("youtube" if candidate == "shorts" else candidate)
+            break
+    channel_id = int_from_text(lower, ["channel", "kenh", "kênh"], 0)
+    affiliate_id = int_from_text(lower, ["aff", "affiliate"], 0)
+    campaign_id = int_from_text(lower, ["campaign", "camp", "chiến dịch", "chien dich"], 0)
+    job_id = int_from_text(lower, ["job", "video job"], 0)
+    limit = first_number_near(lower, ["video", "job", "trend"], 0) or int_from_text(lower, ["limit", "max"], 0) or 5
+    duration = int_from_text(lower, ["duration", "dai", "dài"], 45) or 45
+
+    if any(word in lower for word in ["ready", "sẵn sàng", "san sang", "đủ điều kiện", "du dieu kien"]):
+        return {"intent": "job_ready", "job": job_id, "confidence": 70}
+    if any(word in lower for word in ["build", "dựng", "san xuat", "sản xuất", "manifest", "task"]):
+        return {"intent": "operator_build", "job": job_id, "duration": duration, "limit": limit, "confidence": 70}
+    if any(word in lower for word in ["daily", "báo cáo ngày", "bao cao ngay", "tổng quan", "tong quan", "dashboard"]):
+        return {"intent": "operator_daily", "days": int_from_text(lower, ["days", "ngày", "ngay"], 1) or 1, "confidence": 65}
+    if any(word in lower for word in ["trend", "viral", "mới nhất", "moi nhat"]) or "tạo" in lower and "video" in lower and channel_id == 0:
+        niche = re.sub(r"\b(tạo|tao|làm|lam|video|trend|viral|mới nhất|moi nhat|cho|trên|tren|kênh|kenh|gắn|gan|link|affiliate|aff|campaign|camp|limit|job)\b", " ", lower)
+        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
+        niche = re.sub(r"\s+", " ", niche).strip(" :=#") or "công nghệ AI"
+        return {
+            "intent": "operator_auto",
+            "niche": niche,
+            "platform": platform,
+            "channel": channel_id or "all",
+            "affiliate": affiliate_id,
+            "campaign": campaign_id,
+            "limit": max(1, min(limit, 15)),
+            "confidence": 60,
+        }
+    return {
+        "intent": "operator",
+        "topic": text,
+        "platform": platform,
+        "channel": channel_id,
+        "affiliate": affiliate_id,
+        "campaign": campaign_id,
+        "confidence": 45,
+    }
+
+def parse_operator_brain(raw_text, owner_id):
+    fallback = operator_brain_fallback(raw_text)
+    if not (gemini_client or openai_client):
+        return fallback
+    prompt = (
+        "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
+        "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
+        "Chỉ chọn một intent trong: operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
+        "Quy tắc:\n"
+        "- operator_auto: khi admin muốn tìm trend/tạo nhiều video theo niche/platform.\n"
+        "- operator: khi admin nêu một topic cụ thể và có channel để tạo một job.\n"
+        "- operator_build: khi admin muốn dựng tiếp một job đã có thành creative/manifest/task.\n"
+        "- job_ready: khi admin muốn kiểm tra đủ điều kiện đăng.\n"
+        "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
+        "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
+        "Schema:\n"
+        '{"intent":"operator_auto","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":5,"duration":45,"days":1,"topic":"","confidence":0,"safety_note":""}'
+    )
+    try:
+        raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict) and parsed.get("intent"):
+            merged = {**fallback, **{k: v for k, v in parsed.items() if v not in (None, "")}}
+            return merged
+    except Exception as e:
+        logger.warning(f"Operator brain parse fallback: {e}")
+    return fallback
+
+def brain_command_preview(plan):
+    intent = (plan.get("intent") or "help").lower()
+    if intent == "operator_auto":
+        return (
+            f"/operator_auto niche={plan.get('niche') or 'công nghệ AI'} "
+            f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
+            f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
+            f"limit={max(1, min(int(plan.get('limit') or 5), 15))}"
+        )
+    if intent == "operator":
+        return (
+            f"/operator topic={plan.get('topic') or plan.get('niche') or 'video affiliate'} "
+            f"channel={int(plan.get('channel') or 0)} aff={int(plan.get('affiliate') or 0)} "
+            f"campaign={int(plan.get('campaign') or 0)}"
+        )
+    if intent == "operator_build":
+        return f"/operator_build job={int(plan.get('job') or 0)} n={max(2, min(int(plan.get('limit') or 5), 8))} duration={int(plan.get('duration') or 45)}"
+    if intent == "job_ready":
+        return f"/job_ready job={int(plan.get('job') or 0)}"
+    if intent == "operator_daily":
+        return f"/operator_daily days={max(1, min(int(plan.get('days') or 1), 30))}"
+    if intent == "trend_search":
+        return (
+            f"/trend_search niche={plan.get('niche') or 'công nghệ AI'} "
+            f"platform={plan.get('platform') or 'tiktok'} channel={int(plan.get('channel') or 0)} "
+            f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)}"
+        )
+    if intent == "publish_queue":
+        return "/publish_queue"
+    if intent == "performance":
+        return "/performance"
+    return "/operator_menu"
+
+async def run_brain_plan(update, context, plan):
+    intent = (plan.get("intent") or "help").lower()
+    old_args = list(getattr(context, "args", []) or [])
+    try:
+        if intent == "operator_auto":
+            context.args = [
+                f"niche={plan.get('niche') or 'công nghệ AI'}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"channel={plan.get('channel') or 'all'}",
+                f"aff={int(plan.get('affiliate') or 0)}",
+                f"campaign={int(plan.get('campaign') or 0)}",
+                f"limit={max(1, min(int(plan.get('limit') or 5), 15))}",
+            ]
+            return await cmd_operator_auto(update, context)
+        if intent == "operator":
+            if not int(plan.get("channel") or 0):
+                return await update.message.reply_text(
+                    "⚠️ Lệnh tạo một video cần <code>channel=&lt;ID&gt;</code>. Xem ID bằng /channels hoặc dùng /brain tạo video trend ... để chạy batch channel=all.",
+                    parse_mode="HTML"
+                )
+            context.args = [
+                f"topic={plan.get('topic') or plan.get('niche') or 'video affiliate'}",
+                f"channel={int(plan.get('channel') or 0)}",
+                f"aff={int(plan.get('affiliate') or 0)}",
+                f"campaign={int(plan.get('campaign') or 0)}",
+            ]
+            return await cmd_operator(update, context)
+        if intent == "operator_build":
+            if not int(plan.get("job") or 0):
+                return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain build job 12</code>", parse_mode="HTML")
+            context.args = [
+                f"job={int(plan.get('job') or 0)}",
+                f"n={max(2, min(int(plan.get('limit') or 5), 8))}",
+                f"duration={int(plan.get('duration') or 45)}",
+            ]
+            return await cmd_operator_build(update, context)
+        if intent == "job_ready":
+            if not int(plan.get("job") or 0):
+                return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain kiểm tra job 12 đã ready chưa</code>", parse_mode="HTML")
+            context.args = [f"job={int(plan.get('job') or 0)}"]
+            return await cmd_job_ready(update, context)
+        if intent == "operator_daily":
+            context.args = [f"days={max(1, min(int(plan.get('days') or 1), 30))}"]
+            return await cmd_operator_daily(update, context)
+        if intent == "trend_search":
+            context.args = [
+                f"niche={plan.get('niche') or 'công nghệ AI'}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"channel={int(plan.get('channel') or 0)}",
+                f"aff={int(plan.get('affiliate') or 0)}",
+                f"campaign={int(plan.get('campaign') or 0)}",
+            ]
+            return await cmd_trend_search(update, context)
+        if intent == "publish_queue":
+            context.args = []
+            return await cmd_publish_queue(update, context)
+        if intent == "performance":
+            context.args = []
+            return await cmd_performance(update, context)
+        context.args = []
+        return await cmd_operator_menu(update, context)
+    finally:
+        context.args = old_args
 
 def truncate_text(text: str, limit: int = 3500) -> str:
     return text if len(text) <= limit else text[: limit - 20] + "\n...[đã rút gọn]"
@@ -4631,6 +4828,7 @@ async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧠 Brain command", callback_data="opmenu|brain")],
         [InlineKeyboardButton("⚡ Operator build", callback_data="opmenu|build")],
         [
             InlineKeyboardButton("🧭 Dashboard", callback_data="opmenu|dashboard"),
@@ -4699,6 +4897,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     action = query.data.split("|", 1)[1]
     snippets = {
         "dashboard": "/operator_dashboard",
+        "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
         "build": "/operator_build job=<JOB_ID> n=5 duration=45",
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
@@ -4730,6 +4929,35 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         parse_mode="HTML",
         reply_markup=operator_menu_keyboard()
     )
+
+async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw_text = " ".join(context.args).strip()
+    if not raw_text:
+        return await update.message.reply_text(
+            "🧠 <b>AI BRAIN</b>\n\n"
+            "Gõ lệnh tự nhiên để bot tự định tuyến vào AI Operator.\n\n"
+            "Ví dụ:\n"
+            "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
+            "• <code>/brain build job 12 duration 45</code>\n"
+            "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
+            "• <code>/brain báo cáo vận hành 7 ngày</code>",
+            parse_mode="HTML"
+        )
+    plan = parse_operator_brain(raw_text, update.effective_user.id)
+    command_preview = brain_command_preview(plan)
+    safety_note = plan.get("safety_note") or "Giữ review gate trước khi đăng; không mạo danh/deepfake/claim affiliate quá mức."
+    await update.message.reply_text(
+        "🧠 <b>AI BRAIN ĐÃ HIỂU LỆNH</b>\n\n"
+        f"• Intent: <code>{html.escape(str(plan.get('intent') or 'help'))}</code>\n"
+        f"• Confidence: <b>{int(plan.get('confidence') or 0)}</b>\n"
+        f"• Lệnh nội bộ:\n<code>{html.escape(command_preview)}</code>\n"
+        f"• Safety: {html.escape(str(safety_note))}\n\n"
+        "Đang thực thi nếu đủ tham số...",
+        parse_mode="HTML"
+    )
+    await run_brain_plan(update, context, plan)
 
 async def cmd_operator_build(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -6596,6 +6824,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
+    tg_app.add_handler(CommandHandler("brain", cmd_brain))
     tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
     tg_app.add_handler(CommandHandler("trend_rank", cmd_trend_rank))
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
