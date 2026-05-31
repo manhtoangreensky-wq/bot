@@ -2438,6 +2438,299 @@ def operator_n8n_template_data():
         ],
     }
 
+def operator_n8n_workflow_json_data():
+    base_url_expr = "={{$env.OPERATOR_BASE_URL || 'https://<RAILWAY_DOMAIN>'}}"
+    auth_header = "Bearer {{$env.OPERATOR_API_TOKEN}}"
+    headers = {
+        "parameters": [
+            {"name": "Authorization", "value": auth_header},
+            {"name": "Content-Type", "value": "application/json"},
+        ]
+    }
+    return {
+        "name": "TOAN DAAS Safe Operator Loop",
+        "active": False,
+        "nodes": [
+            {
+                "id": "manual-trigger",
+                "name": "Manual Test",
+                "type": "n8n-nodes-base.manualTrigger",
+                "typeVersion": 1,
+                "position": [-1180, -180],
+                "parameters": {},
+            },
+            {
+                "id": "schedule-trigger",
+                "name": "Every 30 Minutes",
+                "type": "n8n-nodes-base.scheduleTrigger",
+                "typeVersion": 1.2,
+                "position": [-1180, 80],
+                "parameters": {
+                    "rule": {
+                        "interval": [
+                            {
+                                "field": "minutes",
+                                "minutesInterval": 30,
+                            }
+                        ]
+                    }
+                },
+            },
+            {
+                "id": "audit",
+                "name": "Audit Operator",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-900, -40],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/audit",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "audit-ready",
+                "name": "Audit Ready?",
+                "type": "n8n-nodes-base.if",
+                "typeVersion": 2,
+                "position": [-640, -40],
+                "parameters": {
+                    "conditions": {
+                        "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "strict"},
+                        "conditions": [
+                            {
+                                "id": "audit-not-setup",
+                                "leftValue": "={{$json.level}}",
+                                "rightValue": "SETUP_REQUIRED",
+                                "operator": {"type": "string", "operation": "notEquals"},
+                            }
+                        ],
+                        "combinator": "and",
+                    }
+                },
+            },
+            {
+                "id": "director-run",
+                "name": "Director Run Safe Action",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-360, -120],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/director/run",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"days\":30,\"platform\":\"tiktok\",\"limit\":10,"
+                        "\"execute\":true,\"build\":true,\"duration\":45,\"notify_admin\":true}"
+                    ),
+                    "options": {"timeout": 120000},
+                },
+            },
+            {
+                "id": "claim-task",
+                "name": "Claim Next Task",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-80, -120],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/tasks/next",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "tool-worker-note",
+                "name": "Tool Worker Placeholder",
+                "type": "n8n-nodes-base.stickyNote",
+                "typeVersion": 1,
+                "position": [180, -300],
+                "parameters": {
+                    "content": (
+                        "Gắn node Claude/Gemini/Kling/Runway/Fish/Edge/CapCut tại đây.\n"
+                        "Luật vận hành: dùng tool trả phí/chất lượng cao trước; hết quota/lỗi thì fallback tool rẻ/miễn phí và báo admin.\n"
+                        "Output cần có: status, output_url, note. Không tự đổi affiliate link, không tự publish nếu chưa qua review."
+                    ),
+                    "height": 260,
+                    "width": 360,
+                },
+            },
+            {
+                "id": "complete-task",
+                "name": "Complete Task",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [240, -120],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/tasks/{{$json.task.id}}/complete",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"status\":\"blocked\",\"output_url\":\"\","
+                        "\"note\":\"Replace this node body with real tool output from Claude/Kling/CapCut/etc.\"}"
+                    ),
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "claim-publish",
+                "name": "Claim Publish Queue",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [540, -120],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/publish/next?platform=tiktok&mode=manual",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "publish-pack",
+                "name": "Get Publish Pack",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [820, -120],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{$json.item.job_id}}/publish-pack",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "publisher-note",
+                "name": "Manual/Official Publisher Gate",
+                "type": "n8n-nodes-base.stickyNote",
+                "typeVersion": 1,
+                "position": [1080, -300],
+                "parameters": {
+                    "content": (
+                        "Đăng bằng tay hoặc API chính thức sau khi kiểm duyệt.\n"
+                        "TikTok/Facebook: gắn disclosure affiliate.\n"
+                        "OnlyFans: chỉ dùng nhân vật tự tạo hoặc người thật có consent, đủ 18+, không auto bằng tool trái điều khoản."
+                    ),
+                    "height": 220,
+                    "width": 340,
+                },
+            },
+            {
+                "id": "complete-publish",
+                "name": "Complete Publish",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [1120, -120],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/publish/{{$json.item.queue_id}}/complete",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"status\":\"blocked\",\"publish_url\":\"\","
+                        "\"views\":0,\"clicks\":0,\"note\":\"Fill after manual/official publish.\"}"
+                    ),
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "performance-note",
+                "name": "Performance Tracking Reminder",
+                "type": "n8n-nodes-base.stickyNote",
+                "typeVersion": 1,
+                "position": [1380, -300],
+                "parameters": {
+                    "content": (
+                        "Sau khi có số liệu, gọi /api/operator/performance cho view/click/lead/order/revenue/cost.\n"
+                        "Dữ liệu này nuôi /affiliate_decisions để chọn SCALE, FIX, TEST hoặc PAUSE."
+                    ),
+                    "height": 180,
+                    "width": 340,
+                },
+            },
+            {
+                "id": "record-performance",
+                "name": "Record Performance Sample",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [1440, -120],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/performance",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"job_id\":{{$json.job_id || 0}},\"event_type\":\"view\","
+                        "\"value\":0,\"amount\":0,\"source\":\"n8n\",\"note\":\"sample, replace with real metrics\"}"
+                    ),
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "blocked-note",
+                "name": "Setup Required",
+                "type": "n8n-nodes-base.set",
+                "typeVersion": 3.4,
+                "position": [-360, 120],
+                "parameters": {
+                    "assignments": {
+                        "assignments": [
+                            {
+                                "id": "setup-required-message",
+                                "name": "message",
+                                "type": "string",
+                                "value": "Audit đang báo SETUP_REQUIRED. Xem next_command trong output và xử lý trên Telegram trước khi bật workflow.",
+                            }
+                        ]
+                    },
+                    "includeOtherFields": True,
+                },
+            },
+        ],
+        "connections": {
+            "Manual Test": {"main": [[{"node": "Audit Operator", "type": "main", "index": 0}]]},
+            "Every 30 Minutes": {"main": [[{"node": "Audit Operator", "type": "main", "index": 0}]]},
+            "Audit Operator": {"main": [[{"node": "Audit Ready?", "type": "main", "index": 0}]]},
+            "Audit Ready?": {
+                "main": [
+                    [{"node": "Director Run Safe Action", "type": "main", "index": 0}],
+                    [{"node": "Setup Required", "type": "main", "index": 0}],
+                ]
+            },
+            "Director Run Safe Action": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
+            "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
+            "Complete Task": {"main": [[{"node": "Claim Publish Queue", "type": "main", "index": 0}]]},
+            "Claim Publish Queue": {"main": [[{"node": "Get Publish Pack", "type": "main", "index": 0}]]},
+            "Get Publish Pack": {"main": [[{"node": "Complete Publish", "type": "main", "index": 0}]]},
+            "Complete Publish": {"main": [[{"node": "Record Performance Sample", "type": "main", "index": 0}]]},
+        },
+        "settings": {
+            "executionOrder": "v1",
+            "saveManualExecutions": True,
+        },
+        "staticData": None,
+        "pinData": {},
+        "meta": {
+            "templateCredsSetupCompleted": False,
+            "description": "Set OPERATOR_BASE_URL and OPERATOR_API_TOKEN in n8n environment before activation.",
+        },
+        "tags": ["toan-daas", "ai-operator", "affiliate", "safe-loop"],
+    }
+
 def operator_today_data(owner_id):
     status = operator_status_data(owner_id)
     since, affiliate_rows, job_rows = affiliate_performance_report_data(owner_id, days=30, limit=8)
@@ -7574,7 +7867,8 @@ def operator_category_keyboard(category):
         "cat_api": [
             ("🔌 Operator API", "api"), ("🔁 Operator loop", "loop"),
             ("📜 Worker spec", "workerspec"), ("🧪 Auto-post ready", "readiness"),
-            ("🧩 n8n template", "n8ntemplate"), ("📮 Publish API queue", "publishqueue"),
+            ("🧩 n8n template", "n8ntemplate"), ("📥 n8n import", "n8nworkflow"),
+            ("📮 Publish API queue", "publishqueue"),
         ],
         "cat_internal": [
             ("🛠 Tools", "tools"), ("💼 MMO workflow", "mmo"),
@@ -7636,6 +7930,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• n8n template: <code>GET {html.escape(base_url)}/api/operator/n8n-template</code>",
+        f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
@@ -7712,6 +8007,21 @@ async def cmd_operator_n8n_template(update: Update, context: ContextTypes.DEFAUL
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
+async def cmd_operator_n8n_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = operator_n8n_workflow_json_data()
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    text = (
+        "🧩 <b>N8N IMPORT WORKFLOW JSON</b>\n\n"
+        "Dùng endpoint này trong trình duyệt/Postman để lấy JSON rồi import vào n8n.\n\n"
+        f"• URL: <code>{html.escape(base_url)}/api/operator/n8n-workflow.json</code>\n"
+        "• Trước khi bật workflow, set env trong n8n: <code>OPERATOR_BASE_URL</code> và <code>OPERATOR_API_TOKEN</code>.\n"
+        "• Workflow mặc định inactive và có gate thủ công ở bước publish.\n\n"
+        f"<pre>{html_pre(json.dumps({'name': data['name'], 'active': data['active'], 'nodes': len(data['nodes']), 'tags': data['tags']}, ensure_ascii=False, indent=2), 1200)}</pre>"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
 async def handle_operator_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -7740,6 +8050,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "api": "/operator_api",
         "workerspec": "/operator_worker_spec\nGET /api/operator/worker-spec",
         "n8ntemplate": "/operator_n8n_template\nGET /api/operator/n8n-template",
+        "n8nworkflow": "/operator_n8n_workflow\nGET /api/operator/n8n-workflow.json",
         "director": "/operator_director days=30 platform=tiktok limit=10",
         "execute": "/operator_execute days=30 platform=tiktok build=1 duration=45",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
@@ -10183,6 +10494,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_worker_spec", cmd_operator_worker_spec))
     tg_app.add_handler(CommandHandler("operator_n8n_template", cmd_operator_n8n_template))
+    tg_app.add_handler(CommandHandler("operator_n8n_workflow", cmd_operator_n8n_workflow))
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
     tg_app.add_handler(CommandHandler("brain", cmd_brain))
     tg_app.add_handler(CommandHandler("autopilot", cmd_autopilot))
@@ -10373,6 +10685,7 @@ async def api_operator_status(request: Request):
             "audit": "/api/operator/audit",
             "worker_spec": "/api/operator/worker-spec",
             "n8n_template": "/api/operator/n8n-template",
+            "n8n_workflow": "/api/operator/n8n-workflow.json",
             "director": "/api/operator/director",
             "affiliate_report": "/api/operator/affiliate-report",
             "affiliate_decisions": "/api/operator/affiliate-decisions",
@@ -10409,6 +10722,11 @@ async def api_operator_worker_spec(request: Request):
 async def api_operator_n8n_template(request: Request):
     verify_operator_api_token(request)
     return {"ok": True, "template": operator_n8n_template_data()}
+
+@fastapi_app.get("/api/operator/n8n-workflow.json")
+async def api_operator_n8n_workflow(request: Request):
+    verify_operator_api_token(request)
+    return operator_n8n_workflow_json_data()
 
 @fastapi_app.get("/api/operator/director")
 async def api_operator_director(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 10):
