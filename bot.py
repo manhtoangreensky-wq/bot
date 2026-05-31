@@ -2305,6 +2305,110 @@ def operator_audit_data(owner_id):
         "next_command": blockers[0]["next"] if blockers else "/operator_director",
     }
 
+def operator_smoke_test_data(owner_id):
+    required_commands = [
+        "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
+        "publisher_status", "publisher_run", "publisher_handoff", "affiliate_seed", "affiliate_scale",
+        "review_gate", "approve_publish", "performance_add", "checkpayos",
+    ]
+    required_endpoints = [
+        ("GET", "/api/operator/audit"),
+        ("GET", "/api/operator/worker-spec"),
+        ("GET", "/api/operator/n8n-workflow.json"),
+        ("POST", "/api/operator/make-video"),
+        ("GET", "/api/operator/publisher/status"),
+        ("POST", "/api/operator/publisher/run"),
+        ("GET", "/api/operator/publish/<QUEUE_ID>/handoff"),
+        ("POST", "/api/operator/publish/<QUEUE_ID>/complete"),
+        ("POST", "/api/operator/performance"),
+        ("POST", "/webhook/payos"),
+    ]
+    env_checks = {
+        "TELEGRAM_TOKEN": bool(TELEGRAM_TOKEN),
+        "ADMIN_ID": bool(ADMIN_ID),
+        "OPERATOR_API_TOKEN": bool(OPERATOR_API_TOKEN),
+        "PUBLIC_BASE_URL": bool(PUBLIC_BASE_URL),
+        "AI_PROVIDER": bool(gemini_client or openai_client),
+        "PAYOS_KEYS": bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY),
+    }
+    root_dir = os.path.dirname(__file__)
+    file_checks = {
+        "index_html": os.path.exists(os.path.join(root_dir, "index.html")),
+        "logo_png": os.path.exists(os.path.join(root_dir, "LOGO.png")),
+        "env_example": os.path.exists(os.path.join(root_dir, ".env.example")),
+    }
+    conn = db_connect()
+    c = conn.cursor()
+    table_names = [
+        "users", "payos_orders", "affiliate_links", "social_channels", "campaigns",
+        "production_jobs", "production_tasks", "publish_queue", "performance_events",
+        "tool_events",
+    ]
+    db_tables = {}
+    for table in table_names:
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+        db_tables[table] = bool(c.fetchone())
+    conn.close()
+
+    audit = operator_audit_data(owner_id)
+    publisher = publisher_status_data(owner_id)
+    spec = operator_worker_spec_data()
+    n8n = operator_n8n_workflow_json_data()
+    spec_text = json.dumps(spec, ensure_ascii=False)
+    n8n_text = json.dumps(n8n, ensure_ascii=False)
+    endpoint_text = " ".join(f"{method} {path}" for method, path in required_endpoints)
+    surface_checks = {
+        "commands_documented": all(cmd for cmd in required_commands),
+        "make_video_in_spec": "/api/operator/make-video" in spec_text and "/api/operator/make-video" in n8n_text,
+        "publisher_run_in_spec": "/api/operator/publisher/run" in spec_text and "/api/operator/publisher/run" in n8n_text,
+        "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
+        "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
+        "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
+    }
+    sections = {
+        "env": env_checks,
+        "files": file_checks,
+        "db": db_tables,
+        "surface": surface_checks,
+        "audit": {key: ok for key, ok, _detail, _next in audit["checks"]},
+        "publisher": {
+            "ready": publisher["ready"],
+            "api_ready": publisher["api_ready"],
+            "has_channels": bool(publisher["channels"]),
+            "has_open_queue": bool(publisher["open_queue"]),
+        },
+    }
+    failed = []
+    warnings = []
+    for section, checks in sections.items():
+        for key, ok in checks.items():
+            if not ok:
+                item = {"section": section, "key": key}
+                if section in {"env", "files", "db", "surface"}:
+                    failed.append(item)
+                else:
+                    warnings.append(item)
+    ready_for_worker = not failed and bool(OPERATOR_API_TOKEN) and bool(PUBLIC_BASE_URL)
+    return {
+        "ready_for_worker": ready_for_worker,
+        "failed": failed,
+        "warnings": warnings,
+        "sections": sections,
+        "audit_level": audit["level"],
+        "audit_score": audit["score"],
+        "publisher_ready": publisher["ready"],
+        "publisher_api_ready": publisher["api_ready"],
+        "next": {
+            "telegram_audit": "/operator_audit",
+            "telegram_status": "/operator_status",
+            "telegram_publisher": "/publisher_status",
+            "api_audit": "/api/operator/audit",
+            "api_publisher": "/api/operator/publisher/status",
+            "api_n8n": "/api/operator/n8n-workflow.json",
+        },
+        "rule": "Smoke test không tạo job/queue và không gọi API ngoài; chỉ kiểm tra cấu hình/surface/readiness cục bộ.",
+    }
+
 def operator_worker_spec_data():
     base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
     return {
@@ -9133,6 +9237,35 @@ async def cmd_operator_audit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = operator_smoke_test_data(update.effective_user.id)
+    lines = [
+        "🧯 <b>OPERATOR SMOKE TEST</b>",
+        f"• Ready for worker: <b>{'YES' if data['ready_for_worker'] else 'NO'}</b>",
+        f"• Audit: <b>{html.escape(data['audit_level'])}</b> / <b>{data['audit_score']}</b>",
+        f"• Publisher: manual=<b>{'YES' if data['publisher_ready'] else 'NO'}</b> | api=<b>{'YES' if data['publisher_api_ready'] else 'NO'}</b>",
+        "",
+    ]
+    for section, checks in data["sections"].items():
+        ok_count = sum(1 for ok in checks.values() if ok)
+        lines.append(f"<b>{html.escape(section.upper())}</b> {ok_count}/{len(checks)}")
+        for key, ok in checks.items():
+            icon = "✅" if ok else "⚠️"
+            lines.append(f"{icon} <code>{html.escape(key)}</code>")
+        lines.append("")
+    if data["failed"]:
+        lines.append("<b>Fail cần xử lý trước khi bật worker:</b>")
+        for item in data["failed"][:12]:
+            lines.append(f"• {html.escape(item['section'])}.<code>{html.escape(item['key'])}</code>")
+    if data["warnings"]:
+        lines.append("\n<b>Warning vận hành:</b>")
+        for item in data["warnings"][:12]:
+            lines.append(f"• {html.escape(item['section'])}.<code>{html.escape(item['key'])}</code>")
+    lines.append("\nAPI: <code>GET /api/operator/smoke-test</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -9140,6 +9273,7 @@ async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TY
         "📘 <b>OPERATOR PLAYBOOK — KIẾM TIỀN BẰNG VIDEO + AFFILIATE</b>\n\n"
         "<b>0. Kiểm tra hệ thống</b>\n"
         "• <code>/operator_status</code>\n"
+        "• <code>/operator_smoke</code> để kiểm tra nhanh env, DB, API surface, n8n và publisher.\n"
         "• <code>/operator_director</code> để lấy đúng một next action cho admin/Claude/n8n.\n"
         "• Nếu thiếu kênh: <code>/channel_add platform=tiktok name=... slots=2/day mode=manual</code>\n"
         "• Nếu thiếu link: <code>/affiliate_seed</code> hoặc <code>/affiliate_add ...</code>\n\n"
@@ -9167,7 +9301,7 @@ async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TY
         "• <code>/affiliate_report days=30</code> và <code>/growth days=30</code> để quyết định scale tiếp.\n\n"
         "<b>7. Tự động hóa bằng API</b>\n"
         "• <code>/operator_api</code> để lấy endpoint/payload.\n"
-        "• Luồng API chuẩn: director → affiliate-scale → tasks/next → publish/next → performance.\n"
+        "• Luồng API chuẩn: smoke-test → make-video/director-run → tasks/next → publisher/run → performance.\n"
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -9233,7 +9367,8 @@ def operator_category_keyboard(category):
             ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
             ("🎛 Director", "director"), ("▶️ Execute", "execute"),
-            ("🧪 Audit", "audit"), ("📌 Today plan", "today"),
+            ("🧯 Smoke test", "smoke"), ("🧪 Audit", "audit"),
+            ("📌 Today plan", "today"),
             ("📘 Playbook", "playbook"),
             ("🧭 System status", "status"), ("📊 Daily digest", "daily"),
             ("🧭 Dashboard", "dashboard"),
@@ -9340,6 +9475,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Header bắt buộc: <code>Authorization: Bearer &lt;OPERATOR_API_TOKEN&gt;</code>",
         "",
         "<b>Endpoint cho n8n/worker:</b>",
+        f"• Smoke test: <code>GET {html.escape(base_url)}/api/operator/smoke-test</code>",
         f"• Director next action: <code>GET {html.escape(base_url)}/api/operator/director</code>",
         f"• Director execute an toàn: <code>POST {html.escape(base_url)}/api/operator/director/run</code>",
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
@@ -9550,6 +9686,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "dashboard": "/operator_dashboard",
         "status": "/operator_status",
         "audit": "/operator_audit",
+        "smoke": "/operator_smoke\nGET /api/operator/smoke-test",
         "today": "/operator_today",
         "playbook": "/operator_playbook",
         "admin_dashboard": "/dashboard",
@@ -12269,6 +12406,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
     tg_app.add_handler(CommandHandler("operator_audit", cmd_operator_audit))
+    tg_app.add_handler(CommandHandler("operator_smoke", cmd_operator_smoke))
     tg_app.add_handler(CommandHandler("operator_playbook", cmd_operator_playbook))
     tg_app.add_handler(CommandHandler("operator_director", cmd_operator_director))
     tg_app.add_handler(CommandHandler("operator_execute", cmd_operator_execute))
@@ -12538,6 +12676,7 @@ async def api_operator_status(request: Request):
         ],
         "next": {
             "telegram": "/operator_status",
+            "smoke_test": "/api/operator/smoke-test",
             "audit": "/api/operator/audit",
             "worker_spec": "/api/operator/worker-spec",
             "toolchain": "/api/operator/toolchain",
@@ -12556,6 +12695,12 @@ async def api_operator_status(request: Request):
             "loop": "/api/operator/loop",
         },
     }
+
+@fastapi_app.get("/api/operator/smoke-test")
+async def api_operator_smoke_test(request: Request):
+    verify_operator_api_token(request)
+    data = operator_smoke_test_data(ADMIN_ID)
+    return {"ok": True, **data}
 
 @fastapi_app.get("/api/operator/publisher/status")
 async def api_operator_publisher_status(request: Request):

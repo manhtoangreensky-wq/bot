@@ -99,6 +99,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/operator_director days=30 platform=tiktok limit=10`: trả đúng một next action ưu tiên cho admin/Claude/n8n, kèm Telegram command hoặc API endpoint/payload cần gọi.
 - `/operator_execute days=30 platform=tiktok build=1 duration=45`: chạy action an toàn tiếp theo từ director, ví dụ scale affiliate thành job/bundle hoặc đưa job ready vào publish queue; không tự đăng bài thật.
 - `/operator_audit`: kiểm tra end-to-end hệ thống đầu não, gồm Telegram brain, API token, AI provider, PayOS, affiliate catalog, channel, publish readiness, production pipeline và performance tracking.
+- `/operator_smoke`: smoke test nhẹ không tạo job, kiểm tra env, DB, file logo/landing, API surface, worker spec, n8n workflow và publisher readiness.
 - `/operator_status`: kiểm tra hệ thống đã sẵn sàng scale chưa, gồm channel, affiliate, campaign, API token, publish readiness, queue, task và job blocked.
 - `/operator_today`: kế hoạch ưu tiên trong ngày, tự gom việc setup còn thiếu, job blocked, task kế tiếp, publish queue và affiliate nên scale.
 - `/operator_playbook`: checklist vận hành từ kiểm tra hệ thống, chọn affiliate, tạo video theo trend, giao task cho AI/tool, review, publish và đo doanh thu.
@@ -152,6 +153,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /lead`: nhận lead từ landing page và gửi thông báo về admin Telegram.
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
 - `GET /api/operator/status`: worker ngoài kiểm tra readiness tổng thể trước khi tự động scale hoặc publish.
+- `GET /api/operator/smoke-test`: worker ngoài kiểm tra nhanh hệ thống trước khi bật cron/n8n; không tạo job/queue và không gọi API ngoài.
 - `GET /api/operator/publisher/status`: worker ngoài kiểm tra readiness riêng cho publisher: kênh nào manual/API-ready, queue nào chờ đăng, blocker token/env/page_id.
 - `POST /api/operator/publisher/run`: worker ngoài claim queue kế tiếp an toàn, nhận handoff và quyết định nên auto đăng qua API chính thức hay chuyển manual.
 - `GET /api/operator/audit`: worker ngoài kiểm tra mức sẵn sàng end-to-end và blocker còn thiếu trước khi bật automation.
@@ -207,6 +209,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Publisher status là chốt vận hành cho auto-post: cron/n8n nên gọi trước khi claim queue để biết có kênh API-ready hay chỉ nên trả handoff cho admin đăng thủ công.
 - Publisher run là bước cron/n8n an toàn: claim một queue, kiểm tra final video/token/mode, trả handoff và chỉ cho API worker đăng khi kênh thật sự `api_ready`.
 - Worker spec/n8n workflow đã có endpoint mới `/api/operator/make-video`, `/api/operator/publisher/status` và `/api/operator/publisher/run` để Claude/n8n chạy theo cùng một runbook với Telegram.
+- Operator smoke test là chốt nhẹ trước khi bật automation: nếu fail ở env/file/db/surface thì xử lý trước, nếu chỉ warning ở audit/publisher thì vẫn có thể chạy manual nhưng chưa nên bật full auto.
 - Job ready check là admin-only, dùng như chốt cuối trước khi đưa video vào hàng đợi đăng; nếu thiếu asset/review/creative/manifest/task, bot trả về lệnh cần chạy tiếp.
 - Production assets là admin-only, dùng để lưu script, voice, raw video, subtitle, thumbnail, final video hoặc source link theo từng job trước khi review/publish.
 - Auto-post readiness là admin-only, dùng để kiểm tra channel nào có thể đăng thủ công, channel nào đã có `token_env` trỏ tới biến môi trường trên server, và channel nào còn thiếu cấu hình. Secret không lưu trong SQLite.
