@@ -6039,6 +6039,7 @@ def publisher_run_payload(owner_id, platform="", mode="", auto_claim=True):
             "status_url": "/api/operator/publisher/status",
         },
         "rule": "API-ready mới tự đăng bằng API chính thức. Manual-required thì chỉ gửi handoff, không bypass ToS/nền tảng.",
+        "auto_publish_rule": "Auto chỉ chạy khi queue mode=api, job READY_TO_PUBLISH, final video tồn tại, token/page_id hợp lệ và nền tảng được hỗ trợ.",
     }
 
 def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None, note=None):
@@ -6153,6 +6154,25 @@ async def official_auto_publish_queue_item(owner_id, queue_id):
     if not item:
         return False, "queue_not_found", {}
     queue_payload = serialize_publish_queue_item(item)
+    queue_status = (queue_payload.get("status") or "").lower()
+    if queue_status in {"published", "cancelled"}:
+        return False, f"queue_already_{queue_status}", {"queue": queue_payload}
+    if queue_status not in {"queued", "scheduled", "publishing"}:
+        return False, f"queue_status_not_publishable:{queue_status or 'unknown'}", {"queue": queue_payload}
+    if (queue_payload.get("mode") or "").lower() != "api":
+        return False, "queue_not_api_mode", {"queue": queue_payload}
+    readiness = production_readiness_data(owner_id, queue_payload.get("job_id") or 0)
+    if not readiness:
+        return False, "job_not_found", {"queue": queue_payload}
+    if readiness.get("level") != "READY_TO_PUBLISH":
+        return False, "job_not_ready_to_publish", {
+            "level": readiness.get("level"),
+            "next_action": readiness.get("next_action"),
+            "missing": [
+                {"key": key, "detail": detail, "next": next_cmd}
+                for key, ok, detail, next_cmd in readiness.get("missing", [])
+            ],
+        }
     platform = (queue_payload.get("platform") or "").lower()
     if platform in {"facebook", "fb", "meta", "reels"}:
         ok, reason, info = await publish_facebook_page_video(queue_payload)
@@ -6162,7 +6182,8 @@ async def official_auto_publish_queue_item(owner_id, queue_id):
             "manual_handoff": build_publisher_handoff(queue_payload),
         }
     if not ok:
-        update_publish_queue_item(owner_id, queue_id, status="blocked", note=f"official_auto_publish_failed:{reason}")
+        if reason not in {"job_not_ready_to_publish", "queue_not_api_mode"} and not str(reason).startswith("queue_already_"):
+            update_publish_queue_item(owner_id, queue_id, status="blocked", note=f"official_auto_publish_failed:{reason}")
         return False, reason, info
     publish_url = info.get("publish_url") or ""
     update_publish_queue_item(owner_id, queue_id, status="published", publish_url=publish_url, note=f"official_auto_publish:{platform}")
