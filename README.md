@@ -84,6 +84,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/operator_api`: xem trạng thái `OPERATOR_API_TOKEN`, base URL và mẫu endpoint/payload cho n8n/Claude/tool worker.
 - `/operator_director days=30 platform=tiktok limit=10`: trả đúng một next action ưu tiên cho admin/Claude/n8n, kèm Telegram command hoặc API endpoint/payload cần gọi.
 - `/operator_execute days=30 platform=tiktok build=1 duration=45`: chạy action an toàn tiếp theo từ director, ví dụ scale affiliate thành job/bundle hoặc đưa job ready vào publish queue; không tự đăng bài thật.
+- `/operator_audit`: kiểm tra end-to-end hệ thống đầu não, gồm Telegram brain, API token, AI provider, PayOS, affiliate catalog, channel, publish readiness, production pipeline và performance tracking.
 - `/operator_status`: kiểm tra hệ thống đã sẵn sàng scale chưa, gồm channel, affiliate, campaign, API token, publish readiness, queue, task và job blocked.
 - `/operator_today`: kế hoạch ưu tiên trong ngày, tự gom việc setup còn thiếu, job blocked, task kế tiếp, publish queue và affiliate nên scale.
 - `/operator_playbook`: checklist vận hành từ kiểm tra hệ thống, chọn affiliate, tạo video theo trend, giao task cho AI/tool, review, publish và đo doanh thu.
@@ -129,6 +130,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /lead`: nhận lead từ landing page và gửi thông báo về admin Telegram.
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
 - `GET /api/operator/status`: worker ngoài kiểm tra readiness tổng thể trước khi tự động scale hoặc publish.
+- `GET /api/operator/audit`: worker ngoài kiểm tra mức sẵn sàng end-to-end và blocker còn thiếu trước khi bật automation.
 - `GET /api/operator/director`: endpoint “đầu não” cho Claude/n8n, gom setup, blocker, task, publish queue và affiliate decisions thành một next action có method/url/payload rõ ràng.
 - `POST /api/operator/director/run`: chạy action an toàn tiếp theo từ director; scale affiliate/build job hoặc queue publish manual, nhưng không tự publish ngoài mạng xã hội.
 - `GET /api/operator/today`: worker ngoài lấy danh sách hành động ưu tiên trong ngày, gồm setup, task, publish queue và affiliate nên scale.

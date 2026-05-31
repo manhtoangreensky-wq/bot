@@ -2074,6 +2074,89 @@ def operator_status_data(owner_id):
         "blocked_jobs": blocked_jobs,
     }
 
+def operator_audit_data(owner_id):
+    status = operator_status_data(owner_id)
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM affiliate_links WHERE owner_id=? AND status='active'", (str(owner_id),))
+    active_affiliates = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM social_channels WHERE owner_id=? AND status='active'", (str(owner_id),))
+    active_channels = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM campaigns WHERE owner_id=? AND status='active'", (str(owner_id),))
+    active_campaigns = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM production_jobs WHERE owner_id=?", (str(owner_id),))
+    total_jobs = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM production_tasks WHERE owner_id=?", (str(owner_id),))
+    total_tasks = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM publish_queue WHERE owner_id=?", (str(owner_id),))
+    total_publish_queue = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM performance_events WHERE owner_id=?", (str(owner_id),))
+    total_performance = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM trend_candidates WHERE owner_id=?", (str(owner_id),))
+    total_trends = c.fetchone()[0]
+    conn.close()
+
+    channel_rows = list_social_publish_readiness(owner_id)
+    manual_ready = 0
+    api_ready = 0
+    channel_issues = []
+    for row in channel_rows:
+        readiness, reason = channel_publish_readiness(row)
+        if readiness == "manual_ready":
+            manual_ready += 1
+        elif readiness == "api_ready":
+            api_ready += 1
+        elif readiness != "manual_required":
+            channel_issues.append({"channel_id": row[0], "platform": row[1], "readiness": readiness, "reason": reason})
+
+    api_ok = bool(OPERATOR_API_TOKEN and PUBLIC_BASE_URL)
+    ai_ok = bool(gemini_client or openai_client)
+    payos_ok = bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY)
+    content_ok = active_affiliates > 0 and active_channels > 0 and active_campaigns > 0
+    production_ok = total_jobs > 0 or total_tasks > 0
+    publish_ok = manual_ready > 0 or api_ready > 0
+    tracking_ok = total_performance > 0
+
+    checks = [
+        ("telegram_brain", True, "Telegram bot có /brain, /operator_director, /operator_execute.", "/brain đầu não nên làm gì tiếp theo"),
+        ("operator_api", api_ok, "OPERATOR_API_TOKEN và PUBLIC_BASE_URL đã sẵn sàng." if api_ok else "Thiếu OPERATOR_API_TOKEN hoặc PUBLIC_BASE_URL cho n8n/Claude.", "/operator_api"),
+        ("ai_provider", ai_ok, "Có Gemini/OpenAI để tạo brief/prompt." if ai_ok else "Thiếu GEMINI_API_KEY hoặc OPENAI_API_KEY; bot dùng fallback template.", "Set GEMINI_API_KEY hoặc OPENAI_API_KEY trên Railway"),
+        ("payos", payos_ok, "PayOS env đủ 3 khóa." if payos_ok else "Thiếu PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY.", "Kiểm tra biến PayOS trên Railway"),
+        ("affiliate_catalog", active_affiliates > 0, f"{active_affiliates} affiliate active.", "/affiliate_seed"),
+        ("channels", active_channels > 0, f"{active_channels} kênh active.", "/channel_add platform=tiktok name=... mode=manual"),
+        ("campaigns", active_campaigns > 0, f"{active_campaigns} campaign active.", "/campaign_new name=... niche=... platforms=tiktok"),
+        ("publish_readiness", publish_ok, f"manual_ready={manual_ready}, api_ready={api_ready}.", "/publish_readiness"),
+        ("production_pipeline", production_ok, f"jobs={total_jobs}, tasks={total_tasks}.", "/operator_execute"),
+        ("performance_tracking", tracking_ok, f"performance_events={total_performance}.", "/performance_add job=<ID> type=view value=..."),
+    ]
+    ready_count = sum(1 for _, ok, _, _ in checks if ok)
+    score = int(ready_count / len(checks) * 100)
+    blockers = [{"key": key, "detail": detail, "next": next_cmd} for key, ok, detail, next_cmd in checks if not ok]
+    if score >= 85 and api_ok and content_ok and publish_ok:
+        level = "READY_FOR_OPERATOR"
+    elif score >= 60 and content_ok:
+        level = "PARTIAL_READY"
+    else:
+        level = "SETUP_REQUIRED"
+    return {
+        "level": level,
+        "score": score,
+        "checks": checks,
+        "blockers": blockers,
+        "channel_issues": channel_issues,
+        "counts": {
+            **status["counts"],
+            "total_jobs": total_jobs,
+            "total_tasks": total_tasks,
+            "total_publish_queue": total_publish_queue,
+            "total_performance": total_performance,
+            "total_trends": total_trends,
+            "manual_ready_channels": manual_ready,
+            "api_ready_channels": api_ready,
+        },
+        "next_command": blockers[0]["next"] if blockers else "/operator_director",
+    }
+
 def operator_today_data(owner_id):
     status = operator_status_data(owner_id)
     since, affiliate_rows, job_rows = affiliate_performance_report_data(owner_id, days=30, limit=8)
@@ -7034,6 +7117,41 @@ async def cmd_operator_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     lines.append("\nLệnh nhanh: <code>/operator_menu</code> | <code>/affiliate_scale aff=&lt;ID&gt; build=1</code> | <code>/operator_loop</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = operator_audit_data(update.effective_user.id)
+    lines = [
+        "🧪 <b>OPERATOR AUDIT — END TO END</b>",
+        f"• Level: <b>{html.escape(data['level'])}</b>",
+        f"• Score: <b>{data['score']}/100</b>",
+        "",
+        "<b>Checklist:</b>",
+    ]
+    for key, ok, detail, next_cmd in data["checks"]:
+        icon = "✅" if ok else "⚠️"
+        lines.append(f"{icon} <code>{html.escape(key)}</code> — {html.escape(detail)}")
+        if not ok:
+            lines.append(f"  next: <code>{html.escape(next_cmd)}</code>")
+    if data["channel_issues"]:
+        lines.append("\n<b>Channel cần kiểm tra:</b>")
+        for item in data["channel_issues"][:8]:
+            lines.append(
+                f"• #{item['channel_id']} | <code>{html.escape(item['platform'] or '-')}</code> | "
+                f"{html.escape(item['readiness'])}: {html.escape(item['reason'])}"
+            )
+    counts = data["counts"]
+    lines.extend([
+        "",
+        "<b>Số liệu:</b>",
+        f"• Affiliates={counts['active_affiliates']} | Channels={counts['active_channels']} | Campaigns={counts['active_campaigns']}",
+        f"• Jobs={counts['total_jobs']} | Tasks={counts['total_tasks']} | Queue={counts['total_publish_queue']} | Trends={counts['total_trends']}",
+        f"• Performance events={counts['total_performance']} | manual_ready={counts['manual_ready_channels']} | api_ready={counts['api_ready_channels']}",
+        "",
+        f"Next: <code>{html.escape(data['next_command'])}</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -7133,7 +7251,8 @@ def operator_category_keyboard(category):
             ("🧠 Brain command", "brain"), ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
             ("🎛 Director", "director"), ("▶️ Execute", "execute"),
-            ("📌 Today plan", "today"), ("📘 Playbook", "playbook"),
+            ("🧪 Audit", "audit"), ("📌 Today plan", "today"),
+            ("📘 Playbook", "playbook"),
             ("🧭 System status", "status"), ("📊 Daily digest", "daily"),
             ("🧭 Dashboard", "dashboard"),
         ],
@@ -7232,6 +7351,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Endpoint cho n8n/worker:</b>",
         f"• Director next action: <code>GET {html.escape(base_url)}/api/operator/director</code>",
         f"• Director execute an toàn: <code>POST {html.escape(base_url)}/api/operator/director/run</code>",
+        f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
@@ -7286,6 +7406,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     snippets = {
         "dashboard": "/operator_dashboard",
         "status": "/operator_status",
+        "audit": "/operator_audit",
         "today": "/operator_today",
         "playbook": "/operator_playbook",
         "admin_dashboard": "/dashboard",
@@ -9724,6 +9845,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
+    tg_app.add_handler(CommandHandler("operator_audit", cmd_operator_audit))
     tg_app.add_handler(CommandHandler("operator_playbook", cmd_operator_playbook))
     tg_app.add_handler(CommandHandler("operator_director", cmd_operator_director))
     tg_app.add_handler(CommandHandler("operator_execute", cmd_operator_execute))
@@ -9917,12 +10039,32 @@ async def api_operator_status(request: Request):
         ],
         "next": {
             "telegram": "/operator_status",
+            "audit": "/api/operator/audit",
             "director": "/api/operator/director",
             "affiliate_report": "/api/operator/affiliate-report",
             "affiliate_decisions": "/api/operator/affiliate-decisions",
             "affiliate_scale": "/api/operator/affiliate-scale",
             "loop": "/api/operator/loop",
         },
+    }
+
+@fastapi_app.get("/api/operator/audit")
+async def api_operator_audit(request: Request):
+    verify_operator_api_token(request)
+    data = operator_audit_data(ADMIN_ID)
+    return {
+        "ok": True,
+        "level": data["level"],
+        "score": data["score"],
+        "checks": [
+            {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
+            for key, ok, detail, next_cmd in data["checks"]
+        ],
+        "blockers": data["blockers"],
+        "channel_issues": data["channel_issues"],
+        "counts": data["counts"],
+        "next_command": data["next_command"],
+        "rule": "Score >=85 with API/content/publish readiness means ready for director-run automation. Missing checks must be configured before claiming full automation.",
     }
 
 @fastapi_app.get("/api/operator/director")
