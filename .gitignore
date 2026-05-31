@@ -1,0 +1,10 @@
+.env
+*.env
+__pycache__/
+*.py[cod]
+toandaas_system.db
+*.sqlite
+*.sqlite3
+v_*.mp3
+no_bg.png
+toan-daas-updated-files/

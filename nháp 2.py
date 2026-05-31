@@ -29,7 +29,7 @@ ADMIN_ID = str(os.environ.get("ADMIN_ID", "7126457028"))
 REMOVEBG_API_KEY = os.environ.get("REMOVEBG_API_KEY")
 FISH_AUDIO_KEY = os.environ.get("FISH_AUDIO_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "28c47440be06a578356c7f636388f3e818a4337b") # Đã gắn key Deepgram của sếp
+DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "") # Cấu hình bằng biến môi trường
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 user_memory = {}       

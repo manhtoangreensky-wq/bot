@@ -1,1 +1,2 @@
-8323884388:AAGtcyKZ3bzkK-Bdxc6-61l4gdD9Y6FE23g
+Đã xoá token thật khỏi file này.
+Hãy tạo token mới trong BotFather và cấu hình bằng biến môi trường TELEGRAM_TOKEN.

@@ -397,7 +397,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
       <a href="#services" class="btn-ghost">Xem Các Phân Hệ</a>
     </div>
     <div class="hero-stats">
-      <div class="stat-item"><div class="stat-num">V14</div><div class="stat-label">Phiên bản lõi</div></div>
+      <div class="stat-item"><div class="stat-num">V15.2</div><div class="stat-label">Phiên bản lõi</div></div>
       <div class="stat-item"><div class="stat-num">100%</div><div class="stat-label">Tự động hóa</div></div>
       <div class="stat-item"><div class="stat-num">24/7</div><div class="stat-label">Vận hành liên tục</div></div>
       <div class="stat-item"><div class="stat-num">API</div><div class="stat-label">Mở rộng vô hạn</div></div>
@@ -415,8 +415,8 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   <div class="services-grid">
     <div class="service-card reveal">
       <div class="service-icon">🤖</div>
-      <h3>Multi-Agent AI (Gemini + Claude)</h3>
-      <p>Bộ não trung tâm điều phối tác vụ. Tự động nhận diện ý định, chuyển lệnh code cho Claude Sonnet 4.6 và viết kịch bản Affiliate bằng Gemini 2.0 Flash.</p>
+      <h3>Multi-Agent AI (Gemini + OpenAI)</h3>
+      <p>Bộ não trung tâm điều phối tác vụ. Gemini 2.0 Flash phân loại ý định và trả lời chính, OpenAI đóng vai trò fallback khi cần duy trì dịch vụ ổn định.</p>
       <div class="service-price">Phân hệ Cốt lõi</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.1s">
@@ -433,20 +433,20 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
     </div>
     <div class="service-card reveal" style="transition-delay:0.3s">
       <div class="service-icon">🖼️</div>
-      <h3>Thị Giác Máy Tính (OCR & Remove.bg)</h3>
-      <p>Chỉ cần gửi ảnh, AI lập tức bóc tách phông nền với Remove.bg hoặc trích xuất toàn bộ văn bản (hóa đơn, tài liệu) siêu việt qua OCR.Space.</p>
+      <h3>Tách Nền Ảnh (Remove.bg + Cutout)</h3>
+      <p>Chỉ cần gửi ảnh, bot tự tính phí theo dung lượng và cho chọn gói tiết kiệm hoặc gói cao cấp để bóc tách phông nền.</p>
       <div class="service-price">Xử lý Đồ họa</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.4s">
       <div class="service-icon">🌐</div>
-      <h3>Dịch Thuật Chuyên Sâu (DeepL)</h3>
-      <p>Tự động tối ưu hóa prompt (câu lệnh) từ tiếng Việt sang tiếng Anh kỹ thuật qua DeepL API trước khi đẩy sang các xưởng vẽ ảnh AI quốc tế.</p>
-      <div class="service-price">Module Ngôn ngữ</div>
+      <h3>Kho Công Cụ AI/MMO</h3>
+      <p>Menu /tools và /mmo gom bộ 30 công cụ, checklist faceless video, TikTok affiliate, bán dịch vụ video AI và nguyên tắc dùng người mẫu AI hợp pháp.</p>
+      <div class="service-price">Module Kiếm tiền AI</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.5s">
       <div class="service-icon">📈</div>
-      <h3>Automation & Data Scraping</h3>
-      <p>Bot tự động cào dữ liệu từ DuckDuckGo để bắt trend thiết bị công nghệ mới nhất, hỗ trợ sếp chốt đơn MMO Affiliate mượt mà ngay trên Telegram.</p>
+      <h3>Thanh Toán & Quản Trị</h3>
+      <p>PayOS QR động tự đối chiếu đơn, chống cộng xu trùng, có dashboard admin, lịch sử biến động xu, bill thủ công và referral thưởng xu.</p>
       <div class="service-price">Tối ưu Doanh thu</div>
     </div>
   </div>
@@ -470,7 +470,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
       <div class="step-num">02</div>
       <div class="step-content">
         <h3>Điều Phối (Router Agent)</h3>
-        <p>Gemini 2.0 hoạt động như vị Tướng quân, phân loại lệnh và đánh thức các API phù hợp (DeepL, Whisper, Cobalt...) mà không độ trễ.</p>
+        <p>Gemini 2.0 phân loại lệnh và gọi đúng luồng xử lý: chat, đọc voice, bóc băng audio, tách nền ảnh hoặc tải video sạch.</p>
       </div>
     </div>
     <div class="process-step reveal" style="transition-delay:0.2s">
@@ -491,16 +491,16 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   <div class="tech-track-wrapper">
     <div class="tech-track" id="techTrack">
       <div class="tech-pill"><span>🤖</span> Gemini 2.0 Flash</div>
-      <div class="tech-pill"><span>🧠</span> Claude Sonnet 4.6</div>
+      <div class="tech-pill"><span>🧠</span> OpenAI Fallback</div>
       <div class="tech-pill"><span>🗣️</span> Deepgram Nova-2</div>
       <div class="tech-pill"><span>🐟</span> Fish Audio Clone</div>
       <div class="tech-pill"><span>✂️</span> Remove.bg API</div>
       <div class="tech-pill"><span>📥</span> Cobalt Downloader</div>
       <div class="tech-pill"><span>🪙</span> Dynamic Billing</div>
-      <div class="tech-pill"><span>🏦</span> VietQR Payment</div>
+      <div class="tech-pill"><span>🏦</span> PayOS QR Động</div>
       <div class="tech-pill"><span>🐍</span> Python Core</div>
       <div class="tech-pill"><span>🤖</span> Gemini 2.0 Flash</div>
-      <div class="tech-pill"><span>🧠</span> Claude Sonnet 4.6</div>
+      <div class="tech-pill"><span>🧠</span> OpenAI Fallback</div>
       <div class="tech-pill"><span>🗣️</span> Deepgram Nova-2</div>
       <div class="tech-pill"><span>🐟</span> Fish Audio Clone</div>
     </div>
@@ -588,26 +588,26 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   </div>
 
   <div class="payment-flow reveal" style="transition-delay:0.2s">
-    <div class="payment-flow-title">📋 Quy trình nạp Xu (3 bước)</div>
+    <div class="payment-flow-title">📋 Quy trình nạp Xu PayOS QR động</div>
     <div class="payment-step">
       <div class="payment-step-num">1</div>
       <div class="payment-step-text">
-        Chuyển khoản về tài khoản ACB bên dưới. Nội dung chuyển khoản <b>bắt buộc</b> ghi: <b>DAAS [ID Telegram của bạn]</b> (lấy ID bằng cách gõ /naptien trong bot).
+        Gõ <b>/naptien</b> trong bot, chọn gói và mở link thanh toán PayOS. QR động tự điền đúng số tiền, nội dung và mã đơn.
         <div class="payment-bank">
           <div>
-            <div class="payment-bank-label">Ngân hàng ACB</div>
-            <b>8899397968</b> — NGUYEN MANH TOAN
+            <div class="payment-bank-label">Bot Telegram</div>
+            <b>@Httdhtoan</b> — chọn gói trực tiếp trong bot
           </div>
         </div>
       </div>
     </div>
     <div class="payment-step">
       <div class="payment-step-num">2</div>
-      <div class="payment-step-text">Chụp màn hình bill ngân hàng (cần thấy rõ: <b>số tiền, nội dung, thời gian</b>).</div>
+      <div class="payment-step-text">PayOS gọi webhook về hệ thống. Bot kiểm tra chữ ký, mã đơn, số tiền và chống cộng xu trùng.</div>
     </div>
     <div class="payment-step">
       <div class="payment-step-num">3</div>
-      <div class="payment-step-text">Gửi ảnh bill vào <b>Bot Telegram</b> → Bot tự báo Admin → Xu được cộng trong vài phút. <a href="https://t.me/Httdhtoan" style="color:var(--teal);text-decoration:none;">Mở Bot ngay →</a></div>
+      <div class="payment-step-text">Xu được cộng tự động. Nếu cần xử lý thủ công, bạn vẫn có thể gửi bill vào <b>Bot Telegram</b>. <a href="https://t.me/Httdhtoan" style="color:var(--teal);text-decoration:none;">Mở Bot ngay →</a></div>
     </div>
   </div>
 </section>
@@ -656,9 +656,14 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
             </div>
           </div>
         </div>
-        <button class="submit-btn" onclick="alert('Đã gửi thông tin! Kỹ sư Toàn Nguyễn sẽ liên hệ lại.')">
+        <div class="form-group">
+          <label>Ghi chú triển khai</label>
+          <textarea id="fnote" placeholder="Ví dụ: muốn bot PayOS, tách nền, voice, dashboard admin..."></textarea>
+        </div>
+        <button class="submit-btn" onclick="submitLead()">
           GỬI YÊU CẦU CẤU HÌNH →
         </button>
+        <div id="leadStatus" style="margin-top:14px;color:var(--text-2);font-size:13px;line-height:1.5;"></div>
       </div>
     </div>
   </div>
@@ -710,6 +715,36 @@ document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
 function toggleService(el) {
   el.classList.toggle('selected');
   el.querySelector('input').checked = el.classList.contains('selected');
+}
+async function submitLead() {
+  const status = document.getElementById('leadStatus');
+  const name = document.getElementById('fname').value.trim();
+  const phone = document.getElementById('fphone').value.trim();
+  const note = document.getElementById('fnote').value.trim();
+  const services = Array.from(document.querySelectorAll('.service-opt input:checked')).map(i => i.value);
+  if (!name || !phone || services.length === 0) {
+    status.textContent = 'Vui lòng nhập tên, số điện thoại và chọn ít nhất một module.';
+    return;
+  }
+  status.textContent = 'Đang gửi yêu cầu...';
+  try {
+    const res = await fetch('/lead', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, phone, services, note, source: 'toan-daas-landing'})
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    status.textContent = 'Đã gửi yêu cầu. TOAN DAAS sẽ liên hệ lại qua Telegram/điện thoại.';
+    document.getElementById('fname').value = '';
+    document.getElementById('fphone').value = '';
+    document.getElementById('fnote').value = '';
+    document.querySelectorAll('.service-opt').forEach(el => {
+      el.classList.remove('selected');
+      el.querySelector('input').checked = false;
+    });
+  } catch (err) {
+    status.innerHTML = 'Chưa gửi được qua API. Vui lòng nhắn trực tiếp Telegram: <a href="https://t.me/Httdhtoan" style="color:var(--teal);text-decoration:none;">@Httdhtoan</a>.';
+  }
 }
 </script>
 </body>

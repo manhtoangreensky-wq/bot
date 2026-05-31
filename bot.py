@@ -24,7 +24,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from google import genai
 from google.genai import types
 from openai import OpenAI
@@ -73,6 +73,9 @@ PAYOS_CHECKSUM_KEY  = _env("PAYOS_CHECKSUM_KEY")
 RAPIDAPI_KEY        = _env("RAPIDAPI_KEY")
 RAPIDAPI_HOST       = _env("RAPIDAPI_HOST")
 PORT                = int(_env("PORT", "8000"))
+BOT_USERNAME        = _env("BOT_USERNAME", "Httdhtoan")
+PUBLIC_BASE_URL     = _env("PUBLIC_BASE_URL")
+LEAD_WEBHOOK_SECRET = _env("LEAD_WEBHOOK_SECRET")
 
 # ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -92,6 +95,13 @@ PAYMENT_PACKAGES = {
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
 DB_FILE           = "toandaas_system.db"
 TRIAL_CREDITS     = 150
+ORDER_TTL_MINUTES  = 30
+REFERRAL_BONUS_XU  = 20
+
+PAYOS_STATUS_PENDING   = "PENDING"
+PAYOS_STATUS_PAID      = "PAID"
+PAYOS_STATUS_EXPIRED   = "EXPIRED"
+PAYOS_STATUS_CANCELLED = "CANCELLED"
 
 # ─── FREE CHAT CONFIG ─────────────────────────────────────────────────────────
 FREE_CHAT_DAILY   = 20   # lượt chat/ngày cho tài khoản chưa nạp tiền
@@ -105,8 +115,14 @@ FREE_CHAT_DAILY   = 20   # lượt chat/ngày cho tài khoản chưa nạp tiề
 # GROQ_KEY        = _env("GROQ_KEY")         # Groq Llama-3 — siêu nhanh, có free tier
 # COHERE_KEY      = _env("COHERE_KEY")       # Cohere Command R+
 
+def db_connect():
+    conn = sqlite3.connect(DB_FILE, timeout=30)
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
+    conn.execute("PRAGMA journal_mode=WAL")
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY,
@@ -140,6 +156,34 @@ def init_db():
         amount INTEGER,
         xu INTEGER,
         status TEXT DEFAULT 'PENDING',
+        created_at DATETIME,
+        expires_at DATETIME,
+        paid_at DATETIME,
+        checkout_url TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS credit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        delta INTEGER,
+        balance_after INTEGER,
+        event_type TEXT,
+        ref_id TEXT,
+        note TEXT,
+        created_at DATETIME
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        phone TEXT,
+        services TEXT,
+        note TEXT,
+        source TEXT,
+        created_at DATETIME
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS referrals (
+        referred_user_id TEXT PRIMARY KEY,
+        referrer_user_id TEXT,
+        bonus_paid INTEGER DEFAULT 0,
         created_at DATETIME
     )""")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
@@ -148,33 +192,75 @@ def init_db():
             c.execute(f"ALTER TABLE users ADD COLUMN {col} {'INTEGER' if 'count' in col or 'spent' in col or 'vip' in col or 'deposited' in col else 'TEXT'} DEFAULT {defval}")
         except Exception:
             pass
+    for col, col_type in [
+        ("expires_at", "DATETIME"),
+        ("paid_at", "DATETIME"),
+        ("checkout_url", "TEXT"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE payos_orders ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
+def now_text():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def record_credit_event(conn, user_id, delta, event_type, ref_id="", note=""):
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id=?", (str(user_id),))
+    row = c.fetchone()
+    balance_after = row[0] if row else 0
+    c.execute(
+        "INSERT INTO credit_events (user_id, delta, balance_after, event_type, ref_id, note, created_at) VALUES (?,?,?,?,?,?,?)",
+        (str(user_id), int(delta), balance_after, event_type, str(ref_id), note, now_text())
+    )
+
 def get_user(user_id, username="Unknown"):
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute("SELECT credits, total_spent, is_vip FROM users WHERE user_id=?", (str(user_id),))
     row = c.fetchone()
     if not row:
         c.execute(
             "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
-            (str(user_id), username, TRIAL_CREDITS, 0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 0)
+            (str(user_id), username, TRIAL_CREDITS, 0, now_text(), 0)
         )
+        record_credit_event(conn, user_id, TRIAL_CREDITS, "trial_grant", "", "Tặng xu dùng thử")
         conn.commit()
         row = (TRIAL_CREDITS, 0, 0)
     conn.close()
     return row[0], row[1], row[2]
 
-def add_credit(user_id, amount):
-    conn = sqlite3.connect(DB_FILE)
+def add_credit(user_id, amount, event_type="manual_add", ref_id="", note=""):
+    get_user(user_id)
+    conn = db_connect()
     c = conn.cursor()
     c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (amount, str(user_id)))
+    record_credit_event(conn, user_id, amount, event_type, ref_id, note)
     conn.commit()
     conn.close()
 
+def spend_fixed_credit(user_id, amount, event_type, note="") -> bool:
+    if str(user_id) == ADMIN_ID:
+        return True
+    get_user(user_id)
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("SELECT credits FROM users WHERE user_id=?", (str(user_id),))
+    row = c.fetchone()
+    if not row or row[0] < amount:
+        conn.close()
+        return False
+    c.execute("UPDATE users SET credits = credits - ?, total_spent = total_spent + ? WHERE user_id=?", (amount, amount, str(user_id)))
+    record_credit_event(conn, user_id, -amount, event_type, "", note)
+    conn.commit()
+    conn.close()
+    return True
+
 def is_payos_order_processed(order_code: str) -> bool:
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute("SELECT 1 FROM payos_processed WHERE order_code=?", (str(order_code),))
     exists = c.fetchone() is not None
@@ -182,39 +268,115 @@ def is_payos_order_processed(order_code: str) -> bool:
     return exists
 
 def mark_payos_order_processed(order_code: str):
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute(
         "INSERT OR IGNORE INTO payos_processed (order_code, processed_at) VALUES (?,?)",
-        (str(order_code), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        (str(order_code), now_text())
     )
     conn.commit()
     conn.close()
 
 def create_order(order_code, user_id, amount, xu):
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
+    created_at = datetime.now()
+    expires_at = created_at + timedelta(minutes=ORDER_TTL_MINUTES)
     c.execute(
-        "INSERT INTO payos_orders (order_code, user_id, amount, xu, status, created_at) VALUES (?,?,?,?,?,?)",
-        (str(order_code), str(user_id), amount, xu, 'PENDING', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        "INSERT INTO payos_orders (order_code, user_id, amount, xu, status, created_at, expires_at) VALUES (?,?,?,?,?,?,?)",
+        (str(order_code), str(user_id), amount, xu, PAYOS_STATUS_PENDING,
+         created_at.strftime("%Y-%m-%d %H:%M:%S"), expires_at.strftime("%Y-%m-%d %H:%M:%S"))
     )
     conn.commit()
     conn.close()
 
 def get_order(order_code):
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
-    c.execute("SELECT user_id, amount, xu, status FROM payos_orders WHERE order_code=?", (str(order_code),))
+    c.execute("SELECT user_id, amount, xu, status, expires_at FROM payos_orders WHERE order_code=?", (str(order_code),))
     row = c.fetchone()
     conn.close()
     return row
 
 def update_order_status(order_code, status):
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute("UPDATE payos_orders SET status=? WHERE order_code=?", (status, str(order_code)))
     conn.commit()
     conn.close()
+
+def update_order_checkout_url(order_code, checkout_url):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("UPDATE payos_orders SET checkout_url=? WHERE order_code=?", (checkout_url, str(order_code)))
+    conn.commit()
+    conn.close()
+
+def make_payos_return_url(context: ContextTypes.DEFAULT_TYPE) -> str:
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL.rstrip("/") + "/landing"
+    bot_name = context.bot.username or BOT_USERNAME
+    return f"https://t.me/{bot_name}" if bot_name else "https://t.me"
+
+def make_payos_description(pkg_key: str) -> str:
+    # payOS giới hạn 9 ký tự mô tả với một số kênh ngân hàng chưa liên kết.
+    return f"DAAS{pkg_key.upper()}"[:9]
+
+def sign_payos_payment_request(data: dict) -> tuple[str, str]:
+    raw_str = (
+        f"amount={data['amount']}"
+        f"&cancelUrl={data['cancelUrl']}"
+        f"&description={data['description']}"
+        f"&orderCode={data['orderCode']}"
+        f"&returnUrl={data['returnUrl']}"
+    )
+    signature = hmac.new(
+        PAYOS_CHECKSUM_KEY.encode("utf-8"),
+        raw_str.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    return signature, raw_str
+
+def expire_old_payos_orders():
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE payos_orders SET status=? WHERE status=? AND expires_at IS NOT NULL AND expires_at < ?",
+        (PAYOS_STATUS_EXPIRED, PAYOS_STATUS_PENDING, now_text())
+    )
+    conn.commit()
+    conn.close()
+
+def register_referral(referred_user_id, referrer_user_id) -> bool:
+    if str(referred_user_id) == str(referrer_user_id):
+        return False
+    get_user(referrer_user_id)
+    get_user(referred_user_id)
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR IGNORE INTO referrals (referred_user_id, referrer_user_id, bonus_paid, created_at) VALUES (?,?,0,?)",
+        (str(referred_user_id), str(referrer_user_id), now_text())
+    )
+    inserted = c.rowcount > 0
+    conn.commit()
+    conn.close()
+    return inserted
+
+def award_referral_bonus_if_needed(conn, referred_user_id) -> int:
+    c = conn.cursor()
+    c.execute(
+        "SELECT referrer_user_id FROM referrals WHERE referred_user_id=? AND bonus_paid=0",
+        (str(referred_user_id),)
+    )
+    row = c.fetchone()
+    if not row:
+        return 0
+    referrer_id = row[0]
+    c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (REFERRAL_BONUS_XU, str(referrer_id)))
+    c.execute("UPDATE referrals SET bonus_paid=1 WHERE referred_user_id=?", (str(referred_user_id),))
+    record_credit_event(conn, referrer_id, REFERRAL_BONUS_XU, "referral_bonus", referred_user_id, "Thưởng giới thiệu khách nạp lần đầu")
+    return REFERRAL_BONUS_XU
 
 def calculate_dynamic_cost(action_type, size_or_length):
     if action_type == "chat":
@@ -247,7 +409,7 @@ def deduct_dynamic_credit(user_id, action_type, size_or_length) -> tuple:
     raw_cost  = calculate_dynamic_cost(action_type, size_or_length)
     final_cost, discount_rate = apply_discount(total_spent, raw_cost)
     if credits >= final_cost:
-        conn = sqlite3.connect(DB_FILE)
+        conn = db_connect()
         c = conn.cursor()
         c.execute(
             "UPDATE users SET credits = credits - ?, total_spent = total_spent + ? WHERE user_id=?",
@@ -255,12 +417,91 @@ def deduct_dynamic_credit(user_id, action_type, size_or_length) -> tuple:
         )
         c.execute(
             "INSERT INTO transactions (user_id, action, cost, discount_rate, created_at) VALUES (?,?,?,?,?)",
-            (str(user_id), action_type, final_cost, discount_rate, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            (str(user_id), action_type, final_cost, discount_rate, now_text())
         )
+        record_credit_event(conn, user_id, -final_cost, f"spend_{action_type}", "", f"Trừ xu cho {action_type}")
         conn.commit()
         conn.close()
         return True, final_cost, discount_rate
     return False, final_cost, discount_rate
+
+def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, str, dict]:
+    """
+    Cộng xu cho đơn PayOS trong một transaction để tránh cộng trùng.
+    Trả về (processed, desc, info).
+    """
+    if not order_code:
+        return False, "missing_order_code", {}
+
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        c.execute(
+            "SELECT user_id, amount, xu, status, expires_at FROM payos_orders WHERE order_code=?",
+            (str(order_code),)
+        )
+        order = c.fetchone()
+        if not order:
+            conn.rollback()
+            return False, "order_not_found", {}
+
+        target_id, expected_amount, xu, status, expires_at = order
+        info = {
+            "target_id": target_id,
+            "expected_amount": expected_amount,
+            "xu": xu,
+            "status": status,
+        }
+
+        if status == PAYOS_STATUS_PAID:
+            conn.rollback()
+            return False, "already_paid", info
+        if status in (PAYOS_STATUS_EXPIRED, PAYOS_STATUS_CANCELLED):
+            conn.rollback()
+            return False, status.lower(), info
+        if expires_at and expires_at < now_text():
+            c.execute("UPDATE payos_orders SET status=? WHERE order_code=?", (PAYOS_STATUS_EXPIRED, str(order_code)))
+            conn.commit()
+            return False, "expired", info
+        if int(expected_amount) != int(amount_vnd):
+            conn.rollback()
+            return False, "amount_mismatch", info
+
+        c.execute("SELECT 1 FROM payos_processed WHERE order_code=?", (str(order_code),))
+        if c.fetchone():
+            conn.rollback()
+            return False, "duplicate", info
+
+        c.execute("SELECT user_id FROM users WHERE user_id=?", (str(target_id),))
+        if not c.fetchone():
+            c.execute(
+                "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent, has_deposited) VALUES (?,?,?,?,?,?,?)",
+                (str(target_id), "PayOS user", 0, 0, now_text(), 0, 1)
+            )
+
+        c.execute(
+            "UPDATE users SET credits = credits + ?, has_deposited=1 WHERE user_id=?",
+            (int(xu), str(target_id))
+        )
+        c.execute(
+            "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
+            (PAYOS_STATUS_PAID, now_text(), str(order_code))
+        )
+        c.execute(
+            "INSERT INTO payos_processed (order_code, processed_at) VALUES (?,?)",
+            (str(order_code), now_text())
+        )
+        record_credit_event(conn, target_id, int(xu), "payos_deposit", order_code, f"Nạp PayOS {amount_vnd}đ")
+        referral_bonus = award_referral_bonus_if_needed(conn, target_id)
+        info["referral_bonus"] = referral_bonus
+        conn.commit()
+        return True, "success", info
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # ─── ADMIN ALERT ─────────────────────────────────────────────────────────────
 async def alert_admin(context: ContextTypes.DEFAULT_TYPE, service_name: str, error_msg: str):
@@ -277,6 +518,13 @@ async def alert_admin(context: ContextTypes.DEFAULT_TYPE, service_name: str, err
 class AgentRouter(BaseModel):
     action: str = Field(description="voice, code, content, image, download, general")
     data:   str = Field(description="Từ khóa hoặc URL")
+
+class LeadRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    phone: str = Field(min_length=6, max_length=30)
+    services: list[str] = Field(default_factory=list)
+    note: str = Field(default="", max_length=1000)
+    source: str = Field(default="landing", max_length=80)
 
 class AgentGemini:
     @staticmethod
@@ -317,8 +565,7 @@ class AgentGemini:
                     for m in user_memory[uid][-6:]:
                         role = "user" if m.role == "user" else "assistant"
                         messages.append({"role": role, "content": m.parts[0].text})
-                else:
-                    messages.append({"role": "user", "content": text})
+                messages.append({"role": "user", "content": text})
 
                 res = openai_client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -468,7 +715,7 @@ VOICE_FREE_COST  = 5
 IMAGE_FREE_COST  = 5
 
 def is_trial_account(user_id) -> bool:
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute("SELECT has_deposited FROM users WHERE user_id=?", (str(user_id),))
     row = c.fetchone()
@@ -480,7 +727,7 @@ def is_trial_account(user_id) -> bool:
 def get_free_chat_status(user_id) -> tuple:
     """Trả về (đã dùng hôm nay, còn lại). Reset tự động sang ngày mới."""
     today = datetime.now().strftime("%Y-%m-%d")
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute("SELECT free_chat_count, free_chat_date FROM users WHERE user_id=?", (str(user_id),))
     row = c.fetchone()
@@ -493,7 +740,7 @@ def get_free_chat_status(user_id) -> tuple:
 def consume_free_chat(user_id) -> bool:
     """Tiêu 1 lượt free chat. Trả về True nếu thành công, False nếu hết."""
     today = datetime.now().strftime("%Y-%m-%d")
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute("SELECT free_chat_count, free_chat_date FROM users WHERE user_id=?", (str(user_id),))
     row = c.fetchone()
@@ -572,7 +819,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
 
     if mode == "cancel":
         if pending.get("cost", 0) > 0:
-            add_credit(uid, pending["cost"])
+            add_credit(uid, pending["cost"], "refund", "", "Hoàn xu do khách hủy yêu cầu")
         await query.edit_message_text("❌ Đã huỷ. Xu được hoàn lại.")
         return
 
@@ -584,19 +831,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
         data = pending["data"]
         if mode == "free":
             if cost > 0 and str(uid) != ADMIN_ID:
-                add_credit(uid, cost)
-            can_afford_free = True
-            if str(uid) != ADMIN_ID:
-                credits_now, _, _ = get_user(uid)
-                if credits_now >= VOICE_FREE_COST:
-                    conn = sqlite3.connect(DB_FILE)
-                    c = conn.cursor()
-                    c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (VOICE_FREE_COST, str(uid)))
-                    conn.commit()
-                    conn.close()
-                else:
-                    can_afford_free = False
-            if not can_afford_free:
+                add_credit(uid, cost, "refund", "", "Hoàn phí voice cao cấp trước khi chọn gói tiết kiệm")
+            if not spend_fixed_credit(uid, VOICE_FREE_COST, "spend_voice_free", "Gói voice tiết kiệm"):
                 await query.edit_message_text(f"❌ Không đủ xu. Cần ít nhất {VOICE_FREE_COST} Xu.")
                 return
             await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Tiết Kiệm)...</i>", parse_mode="HTML")
@@ -612,6 +848,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 await query.delete_message()
             except Exception as e:
                 logger.error(f"Edge TTS error: {e}")
+                if str(uid) != ADMIN_ID:
+                    add_credit(uid, VOICE_FREE_COST, "refund", "", "Hoàn gói voice tiết kiệm do lỗi")
                 await query.edit_message_text("❌ Gói Tiết Kiệm gặp lỗi.")
             finally:
                 if os.path.exists(out):
@@ -643,13 +881,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         logger.warning(f"Fish Audio {res.status_code} — fallback Edge TTS")
                 if not ok:
                     if cost > 0 and str(uid) != ADMIN_ID:
-                        add_credit(uid, cost)
-                    if str(uid) != ADMIN_ID:
-                        conn = sqlite3.connect(DB_FILE)
-                        c = conn.cursor()
-                        c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (VOICE_FREE_COST, str(uid)))
-                        conn.commit()
-                        conn.close()
+                        add_credit(uid, cost, "refund", "", "Hoàn phí voice cao cấp do fallback")
+                    if not spend_fixed_credit(uid, VOICE_FREE_COST, "spend_voice_free_fallback", "Fallback sang Edge TTS"):
+                        await query.edit_message_text(f"❌ Không đủ xu cho gói fallback. Cần ít nhất {VOICE_FREE_COST} Xu.")
+                        return
                     communicate = edge_tts.Communicate(data, "vi-VN-NamMinhNeural")
                     await communicate.save(out)
                     with open(out, "rb") as f:
@@ -669,19 +904,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
         img_bytes = pending["file_bytes"]
         if mode == "free":
             if cost > 0 and str(uid) != ADMIN_ID:
-                add_credit(uid, cost)
-            can_afford_free = True
-            if str(uid) != ADMIN_ID:
-                credits_now, _, _ = get_user(uid)
-                if credits_now >= IMAGE_FREE_COST:
-                    conn = sqlite3.connect(DB_FILE)
-                    c = conn.cursor()
-                    c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (IMAGE_FREE_COST, str(uid)))
-                    conn.commit()
-                    conn.close()
-                else:
-                    can_afford_free = False
-            if not can_afford_free:
+                add_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp trước khi chọn gói tiết kiệm")
+            if not spend_fixed_credit(uid, IMAGE_FREE_COST, "spend_image_free", "Gói tách nền tiết kiệm"):
                 await query.edit_message_text(f"❌ Không đủ xu. Cần ít nhất {IMAGE_FREE_COST} Xu.")
                 return
             await query.edit_message_text("⏳ <i>Đang tách nền (Gói Tiết Kiệm)...</i>", parse_mode="HTML")
@@ -708,6 +932,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 except Exception as e:
                     logger.error(f"Cutout error: {e}")
             if not ok:
+                if str(uid) != ADMIN_ID:
+                    add_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền tiết kiệm do lỗi")
                 await query.edit_message_text("❌ Cutout.pro lỗi hoặc chưa cấu hình CUTOUT_API_KEY.")
         else:
             await query.edit_message_text("⏳ <i>Đang tách nền (Gói Cao Cấp)...</i>", parse_mode="HTML")
@@ -736,13 +962,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     logger.error(f"RemoveBG error: {e}")
             if not ok:
                 if cost > 0 and str(uid) != ADMIN_ID:
-                    add_credit(uid, cost)
-                if str(uid) != ADMIN_ID:
-                    conn = sqlite3.connect(DB_FILE)
-                    c = conn.cursor()
-                    c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (IMAGE_FREE_COST, str(uid)))
-                    conn.commit()
-                    conn.close()
+                    add_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp do fallback")
+                if not spend_fixed_credit(uid, IMAGE_FREE_COST, "spend_image_free_fallback", "Fallback sang Cutout"):
+                    await query.edit_message_text(f"❌ Không đủ xu cho gói fallback. Cần ít nhất {IMAGE_FREE_COST} Xu.")
+                    return
                 cutout_ok = False
                 if CUTOUT_API_KEY:
                     try:
@@ -764,11 +987,14 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     except Exception as e:
                         logger.error(f"Cutout fallback error: {e}")
                 if not cutout_ok:
+                    if str(uid) != ADMIN_ID:
+                        add_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền fallback do lỗi")
                     await query.edit_message_text("❌ Cả 2 dịch vụ đều lỗi. Xu đã hoàn lại.")
 
 
 async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Xử lý sinh hóa đơn và link QR Động từ PayOS khi khách click chọn gói"""
+    expire_old_payos_orders()
     query = update.callback_query
     await query.answer()
     parts = query.data.split("|")
@@ -788,6 +1014,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     pkg = PAYMENT_PACKAGES[pkg_key]
     amount = pkg["amount"]
     xu = pkg["xu"]
+    get_user(uid, query.from_user.first_name or "PayOS user")
 
     if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
         await query.edit_message_text("❌ Hệ thống chưa cấu hình đầy đủ API Key PayOS.")
@@ -797,22 +1024,16 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     order_code = int(time.time() * 10) + random.randint(0, 9)
     create_order(order_code, uid, amount, xu)
 
-    bot_link = f"https://t.me/{context.bot.username}" if context.bot.username else "https://t.me"
+    return_url = make_payos_return_url(context)
     payos_body = {
         "orderCode": order_code,
         "amount": amount,
-        "description": f"DAAS {uid} PKG {pkg_key}"[:25],
-        "cancelUrl": bot_link,
-        "returnUrl": bot_link
+        "description": make_payos_description(pkg_key),
+        "cancelUrl": return_url,
+        "returnUrl": return_url
     }
 
-    sorted_keys = sorted(payos_body.keys())
-    raw_str = "&".join(f"{k}={payos_body[k]}" for k in sorted_keys)
-    signature = hmac.new(
-        PAYOS_CHECKSUM_KEY.encode("utf-8"),
-        raw_str.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
+    signature, raw_str = sign_payos_payment_request(payos_body)
     payos_body["signature"] = signature
 
     headers = {
@@ -832,26 +1053,38 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         res_data = res.json()
         if res.status_code == 200 and res_data.get("code") == "00":
             checkout_url = res_data["data"]["checkoutUrl"]
+            update_order_checkout_url(order_code, checkout_url)
             qr_text = (
                 f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
                 f"📋 Gói lựa chọn: <b>{pkg['text']}</b>\n"
                 f"💰 Số tiền cần chuyển: <b>{amount:,}đ</b>\n"
                 f"🪙 Hạn mức nhận được: <b>+{xu} Xu</b>\n"
                 f"🆔 Mã đơn định danh: <code>{order_code}</code>\n\n"
+                f"⏳ Hóa đơn hết hạn sau <b>{ORDER_TTL_MINUTES} phút</b>.\n\n"
                 f"👉 Nhấn vào nút liên kết dưới đây để nhận diện mã QR thanh toán động. Hệ thống sẽ tự động điền sẵn số tiền và nội dung hóa đơn chính xác!"
             )
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 QUÉT MÃ QR THANH TOÁN", url=checkout_url)]])
             await query.edit_message_text(qr_text, parse_mode="HTML", reply_markup=kb)
         else:
-            logger.error(f"PayOS error response: {res_data}")
-            await query.edit_message_text(f"❌ PayOS từ chối tạo hóa đơn: {res_data.get('desc', 'Lỗi không rõ')}")
+            update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+            logger.error(f"PayOS error response: {res_data} | signed={raw_str}")
+            desc = res_data.get("desc", "Lỗi không rõ")
+            hint = "\n\n⚠️ Nếu vẫn báo signature không hợp lệ, kiểm tra lại biến PAYOS_CHECKSUM_KEY trên server."
+            await query.edit_message_text(f"❌ PayOS từ chối tạo hóa đơn: {desc}{hint}")
     except Exception as e:
+        update_order_status(order_code, PAYOS_STATUS_CANCELLED)
         logger.error(f"PayOS Exception: {e}")
         await query.edit_message_text(f"❌ Thất bại khi kết nối API cổng PayOS: {str(e)}")
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(update.effective_user.id, update.effective_user.first_name)
+    if context.args and context.args[0].startswith("ref_"):
+        referrer = context.args[0].replace("ref_", "", 1)
+        if register_referral(update.effective_user.id, referrer):
+            await update.message.reply_text(
+                f"🎁 Đã ghi nhận mã giới thiệu. Người giới thiệu sẽ nhận {REFERRAL_BONUS_XU} Xu khi bạn nạp lần đầu."
+            )
     text = (
         "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.2</b>\n\n"
         "Chào mừng! Hệ thống tính phí thông minh theo dung lượng thực tế.\n\n"
@@ -864,6 +1097,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💡 <b>Lệnh hệ thống:</b>\n"
         "• /profile — Xem Hạng VIP & Số dư\n"
         "• /naptien — Nạp thêm hạn mức\n"
+        "• /tools — Kho 30 công cụ AI/MMO\n"
+        "• /mmo — Quy trình kiếm tiền bằng AI\n"
         "• /gopy &lt;nội dung&gt; — Góp ý / báo lỗi"
     )
     await update.message.reply_text(
@@ -926,18 +1161,54 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     USER_BILL_STATE[uid] = True
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
+async def cmd_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "🧰 <b>KHO 30 CÔNG CỤ CHUẨN</b>\n\n"
+        "<b>Viết & nghiên cứu:</b> ChatGPT, Perplexity, DeepL, Notion\n"
+        "<b>Ảnh & thiết kế:</b> Ideogram, Photopea, Remove.bg, Upscale.media, ResizePixel, Canva, Figma\n"
+        "<b>Video:</b> CapCut, Kling AI, Cobalt Tools, DaVinci Resolve\n"
+        "<b>Audio:</b> ElevenLabs, Whisper, Suno, Moises\n"
+        "<b>Tài liệu:</b> PDF24, OCR Space, Convertio, Google Drive, Google Forms\n"
+        "<b>Ý tưởng & quản lý:</b> Excalidraw, XMind, Cursor, GitHub\n"
+        "<b>Marketing/Web:</b> Ahrefs Free Tools, Framer\n\n"
+        "💡 Gửi yêu cầu cụ thể, bot sẽ gợi ý quy trình dùng công cụ phù hợp."
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "💰 <b>WORKFLOW AI KIẾM TIỀN HỢP PHÁP</b>\n\n"
+        "<b>1. Faceless video:</b> ChatGPT/Claude viết kịch bản → ElevenLabs/Edge TTS đọc → Kling/CapCut dựng → đăng TikTok/Reels/YouTube Shorts.\n"
+        "<b>2. TikTok Affiliate:</b> chọn niche dễ mua → tạo 3-5 video/ngày → gắn sản phẩm → đo video thắng và remix.\n"
+        "<b>3. Dịch vụ video AI:</b> nhận brief doanh nghiệp nhỏ → báo giá 500k-2M/video → giao kịch bản, voice, phụ đề, bản dựng.\n"
+        "<b>4. Ảnh người mẫu AI:</b> chỉ dùng nhân vật tự tạo hoặc người thật có đồng ý rõ ràng, đủ 18 tuổi; không giả mạo người khác.\n\n"
+        "✅ Bắt đầu nhỏ: 1 niche, 1 format, 30 video đầu tiên. Dùng /tools để lấy bộ công cụ."
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    bot_name = context.bot.username or BOT_USERNAME
+    link = f"https://t.me/{bot_name}?start=ref_{uid}"
+    await update.message.reply_text(
+        f"🔗 <b>LINK GIỚI THIỆU CỦA BẠN</b>\n\n"
+        f"<code>{link}</code>\n\n"
+        f"🎁 Thưởng <b>{REFERRAL_BONUS_XU} Xu</b> khi người được giới thiệu nạp lần đầu.",
+        parse_mode="HTML"
+    )
+
 async def cmd_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     content = " ".join(context.args)
     if not content:
         return await update.message.reply_text(
             "⚠️ VD: <code>/gopy Thêm thanh toán Momo đi bot</code>", parse_mode="HTML"
         )
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute(
         "INSERT INTO feedback (user_id, username, content, timestamp) VALUES (?,?,?,?)",
         (str(update.effective_user.id), update.effective_user.first_name,
-         content, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+         content, now_text())
     )
     conn.commit()
     conn.close()
@@ -949,8 +1220,8 @@ async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         target_id, amount = context.args[0], int(context.args[1])
-        add_credit(target_id, amount)
-        conn = sqlite3.connect(DB_FILE)
+        add_credit(target_id, amount, "admin_add", "", "Admin cộng xu thủ công")
+        conn = db_connect()
         c = conn.cursor()
         c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
         conn.commit()
@@ -963,7 +1234,7 @@ async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_admin_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute(
         "SELECT username, content FROM feedback WHERE timestamp >= ?",
@@ -987,8 +1258,8 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         target_id, amount = context.args[0], int(context.args[1])
-        add_credit(target_id, amount)
-        conn = sqlite3.connect(DB_FILE)
+        add_credit(target_id, amount, "manual_deposit", "", "Admin duyệt bill thủ công")
+        conn = db_connect()
         c = conn.cursor()
         c.execute(
             "UPDATE pending_deposits SET status='approved' WHERE user_id=? AND status='pending'",
@@ -1017,7 +1288,7 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         target_id = context.args[0]
-        conn = sqlite3.connect(DB_FILE)
+        conn = db_connect()
         c = conn.cursor()
         c.execute(
             "UPDATE pending_deposits SET status='rejected' WHERE user_id=? AND status='pending'",
@@ -1041,7 +1312,7 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute(
         "SELECT id, user_id, username, submitted_at FROM pending_deposits "
@@ -1062,7 +1333,7 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
-    conn = sqlite3.connect(DB_FILE)
+    conn = db_connect()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM users")
     total_users = c.fetchone()[0]
@@ -1087,13 +1358,48 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("SELECT user_id, username, credits, total_spent, is_vip FROM users ORDER BY CAST(credits AS INTEGER) DESC LIMIT 8")
+    top_users = c.fetchall()
+    c.execute("SELECT order_code, user_id, amount, xu, status, created_at FROM payos_orders ORDER BY created_at DESC LIMIT 8")
+    recent_orders = c.fetchall()
+    c.execute("SELECT user_id, delta, balance_after, event_type, created_at FROM credit_events ORDER BY id DESC LIMIT 8")
+    recent_credit = c.fetchall()
+    c.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM payos_orders WHERE status=?", (PAYOS_STATUS_PAID,))
+    paid_count, paid_amount = c.fetchone()
+    conn.close()
+
+    lines = [
+        "🧭 <b>ADMIN DASHBOARD</b>",
+        f"💳 PayOS đã thanh toán: <b>{paid_count}</b> đơn / <b>{paid_amount:,}đ</b>",
+        "",
+        "<b>Top user theo số dư:</b>",
+    ]
+    for user_id, username, credits, total_spent, is_vip in top_users:
+        vip = " VIP" if is_vip else ""
+        lines.append(f"• {username or 'Unknown'} <code>{user_id}</code>: {credits} Xu, chi {total_spent}{vip}")
+
+    lines.append("\n<b>Đơn PayOS gần nhất:</b>")
+    for order_code, user_id, amount, xu, status, created_at in recent_orders:
+        lines.append(f"• <code>{order_code}</code> | {user_id} | {amount:,}đ → {xu} Xu | {status}")
+
+    lines.append("\n<b>Biến động xu gần nhất:</b>")
+    for user_id, delta, balance_after, event_type, created_at in recent_credit:
+        lines.append(f"• {created_at} | {user_id} | {delta:+} Xu | còn {balance_after} | {event_type}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_setvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
     try:
         target_id = context.args[0]
         flag = int(context.args[1])
-        conn = sqlite3.connect(DB_FILE)
+        conn = db_connect()
         c = conn.cursor()
         c.execute("UPDATE users SET is_vip=? WHERE user_id=?", (flag, str(target_id)))
         conn.commit()
@@ -1119,12 +1425,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_bill:
         USER_BILL_STATE.pop(uid, None)
-        conn = sqlite3.connect(DB_FILE)
+        conn = db_connect()
         c = conn.cursor()
         c.execute(
             "INSERT INTO pending_deposits (user_id, username, file_id, submitted_at, status) VALUES (?,?,?,?,?)",
             (str(uid), username, update.message.photo[-1].file_id,
-             datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "pending")
+             now_text(), "pending")
         )
         deposit_id = c.lastrowid
         conn.commit()
@@ -1347,6 +1653,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
+    tg_app.add_handler(CommandHandler("tools",       cmd_tools))
+    tg_app.add_handler(CommandHandler("mmo",         cmd_mmo))
+    tg_app.add_handler(CommandHandler("ref",         cmd_ref))
     tg_app.add_handler(CommandHandler("gopy",        cmd_gopy))
     tg_app.add_handler(CommandHandler("add",         cmd_admin_add))
     tg_app.add_handler(CommandHandler("admin_gopy",  cmd_admin_gopy))
@@ -1354,6 +1663,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tuchoi",      cmd_tuchoi))
     tg_app.add_handler(CommandHandler("pending",     cmd_pending))
     tg_app.add_handler(CommandHandler("stats",       cmd_stats))
+    tg_app.add_handler(CommandHandler("dashboard",   cmd_dashboard))
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
@@ -1377,6 +1687,47 @@ fastapi_app = FastAPI(title="TOAN DAAS V15.2", lifespan=lifespan)
 @fastapi_app.get("/")
 async def health():
     return {"status": "ok", "service": "TOAN DAAS V15.2 — Dynamic Billing Verified"}
+
+@fastapi_app.get("/landing")
+async def landing_page():
+    index_path = os.path.join(os.path.dirname(__file__), "index.html")
+    if not os.path.exists(index_path):
+        raise HTTPException(status_code=404, detail="Landing page not found")
+    return FileResponse(index_path)
+
+@fastapi_app.post("/lead")
+async def create_lead(payload: LeadRequest, request: Request):
+    if LEAD_WEBHOOK_SECRET and request.headers.get("x-lead-secret") != LEAD_WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid lead secret")
+
+    services_text = ", ".join(payload.services) if payload.services else "Chưa chọn"
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO leads (name, phone, services, note, source, created_at) VALUES (?,?,?,?,?,?)",
+        (payload.name.strip(), payload.phone.strip(), services_text, payload.note.strip(), payload.source.strip(), now_text())
+    )
+    lead_id = c.lastrowid
+    conn.commit()
+    conn.close()
+
+    if tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"📩 <b>LEAD LANDING PAGE #{lead_id}</b>\n\n"
+                    f"👤 {payload.name}\n"
+                    f"☎️ <code>{payload.phone}</code>\n"
+                    f"🧩 {services_text}\n"
+                    f"📝 {payload.note or 'Không có ghi chú'}"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Lead notify error: {e}")
+
+    return {"ok": True, "lead_id": lead_id}
 
 # ─── WEBHOOK PAYOS (DYNAMIC UPDATED) ─────────────────────────────────────────
 def verify_payos_signature(data: dict, received_sig: str) -> bool:
@@ -1413,38 +1764,20 @@ async def webhook_payos(request: Request):
         return JSONResponse({"code": "00", "desc": "ignored"})
 
     order_code = str(data.get("orderCode", data.get("order_code", "")))
-    amount_vnd = int(data.get("amount", 0))
+    try:
+        amount_vnd = int(data.get("amount", 0))
+    except (TypeError, ValueError):
+        logger.warning(f"PayOS webhook: amount không hợp lệ | order={order_code} | data={data}")
+        return JSONResponse({"code": "00", "desc": "invalid_amount"})
 
-    if order_code and is_payos_order_processed(order_code):
-        logger.info(f"PayOS: order {order_code} đã xử lý từ trước, bỏ qua.")
-        return JSONResponse({"code": "00", "desc": "duplicate"})
+    processed, desc, info = process_payos_paid_order(order_code, amount_vnd)
+    if not processed:
+        logger.warning(f"PayOS webhook ignored: {desc} | order={order_code} | amount={amount_vnd} | info={info}")
+        return JSONResponse({"code": "00", "desc": desc})
 
-    # Tìm đơn hàng trong cơ sở dữ liệu để lấy UID và số xu tương ứng
-    order_info = get_order(order_code)
-    if not order_info:
-        logger.warning(f"PayOS Webhook: Không tìm thấy hóa đơn định danh {order_code} trên DB!")
-        return JSONResponse({"code": "00", "desc": "order_not_found"})
-
-    target_id, _, xu, status = order_info
-
-    if status == "PAID":
-        return JSONResponse({"code": "00", "desc": "already_paid"})
-
-    # Thực hiện cộng hạn mức tự động
-    add_credit(target_id, xu)
-    
-    # Cập nhật cờ kích hoạt nạp tiền thành công
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
-    conn.commit()
-    conn.close()
-
-    # Khóa hóa đơn chống trùng lắp double-spending
-    update_order_status(order_code, "PAID")
-    if order_code:
-        mark_payos_order_processed(order_code)
-
+    target_id = info["target_id"]
+    xu = info["xu"]
+    referral_bonus = info.get("referral_bonus", 0)
     credits_now, _, _ = get_user(target_id)
     logger.info(f"✅ PayOS dynamic QR nạp thành công {xu} Xu cho {target_id} | Đơn: {order_code}")
 
@@ -1468,7 +1801,8 @@ async def webhook_payos(request: Request):
                     f"💸 <b>AUTO NẠP PAYOS (QR ĐỘNG SUCCESS)</b>\n\n"
                     f"🆔 Khách hàng: <code>{target_id}</code>\n"
                     f"💰 {amount_vnd:,}đ → +{xu} Xu\n"
-                    f"📋 Order Code: <code>{order_code}</code>"
+                    f"📋 Order Code: <code>{order_code}</code>\n"
+                    f"🎁 Referral bonus: <b>{referral_bonus} Xu</b>"
                 ),
                 parse_mode="HTML"
             )
