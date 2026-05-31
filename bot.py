@@ -5380,6 +5380,122 @@ async def execute_scale_plan_actions(owner_id, days=30, platform="tiktok", limit
             logger.error(f"Scale plan execute notify error: {e}")
     return {"plan": plan, "executed": executed, "skipped": skipped}
 
+async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all", affiliate_id=0, campaign_id=0, limit=3, build=True, duration=45, variants=5):
+    topic = (topic or "").strip()
+    if not topic:
+        return False, "missing_topic", {}
+    platform = (platform or "tiktok").lower()
+    channel = (channel or "all").lower()
+
+    selected_affiliate = get_affiliate_link(affiliate_id, owner_id) if affiliate_id else None
+    affiliate_score = 0
+    affiliate_hits = 0
+    if affiliate_id and not selected_affiliate:
+        return False, "affiliate_not_found", {}
+    if not selected_affiliate:
+        matches = list_affiliate_matches(owner_id, niche=topic, trend_text=topic, platform=platform, limit=5)
+        if matches:
+            affiliate_score, affiliate_hits, _blocked, selected_affiliate = matches[0]
+            affiliate_id = selected_affiliate[0]
+
+    selected_campaign = get_campaign(campaign_id, owner_id) if campaign_id else None
+    campaign_score = 0
+    if campaign_id and not selected_campaign:
+        return False, "campaign_not_found", {}
+    if not selected_campaign:
+        selected_campaign, campaign_score = find_matching_campaign(owner_id, topic, platform)
+        campaign_id = selected_campaign[0] if selected_campaign else 0
+
+    created_jobs, error = await create_operator_auto_jobs(
+        owner_id,
+        topic,
+        platform,
+        channel,
+        campaign_id,
+        affiliate_id,
+        limit,
+    )
+    if error:
+        return False, error, {
+            "affiliate_id": affiliate_id,
+            "campaign_id": campaign_id,
+            "topic": topic,
+            "platform": platform,
+            "channel": channel,
+        }
+
+    built = []
+    failed = []
+    publish_packs = []
+    if build:
+        for item in created_jobs:
+            ok, bundle = build_operator_job_bundle(owner_id, item["job_id"], count=variants, duration=duration)
+            if ok:
+                readiness = bundle.get("readiness") or {}
+                built_item = {
+                    **item,
+                    "manifest_id": bundle.get("manifest_id"),
+                    "task_count": len(bundle.get("task_ids") or []),
+                    "variant_id": bundle.get("best_variant_id"),
+                    "readiness": readiness.get("level", "UNKNOWN") if isinstance(readiness, dict) else "UNKNOWN",
+                }
+                built.append(built_item)
+                job = get_production_job(item["job_id"], owner_id)
+                if job:
+                    pack = build_static_publish_pack(job, owner_id)
+                    publish_packs.append({
+                        "job_id": item["job_id"],
+                        "caption": pack.get("caption", ""),
+                        "tracking_url": (pack.get("primary_affiliate") or {}).get("tracking_url", ""),
+                        "related_links": pack.get("related_affiliates", [])[:6],
+                        "disclosure": pack.get("disclosure", ""),
+                    })
+            else:
+                failed.append({"job_id": item["job_id"], "error": bundle.get("error", "build lỗi") if isinstance(bundle, dict) else "build lỗi"})
+
+    affiliate_payload = None
+    if selected_affiliate:
+        aid, network, product, niche, url, note, status, *_rest = selected_affiliate
+        affiliate_payload = {
+            "id": aid,
+            "network": network,
+            "product": product,
+            "niche": niche,
+            "url": url,
+            "match_score": affiliate_score,
+            "match_hits": affiliate_hits,
+        }
+
+    campaign_payload = None
+    if selected_campaign:
+        if len(selected_campaign) >= 8:
+            campaign_name = selected_campaign[2]
+            campaign_niche = selected_campaign[3]
+            campaign_platforms = selected_campaign[4]
+        else:
+            campaign_name = selected_campaign[1]
+            campaign_niche = selected_campaign[2]
+            campaign_platforms = selected_campaign[3]
+        campaign_payload = {
+            "id": selected_campaign[0],
+            "name": campaign_name,
+            "niche": campaign_niche,
+            "platforms": campaign_platforms,
+            "match_score": campaign_score,
+        }
+
+    return True, "ok", {
+        "topic": topic,
+        "platform": platform,
+        "channel": channel,
+        "affiliate": affiliate_payload,
+        "campaign": campaign_payload,
+        "created_jobs": created_jobs,
+        "built_jobs": built,
+        "failed_builds": failed,
+        "publish_packs": publish_packs,
+    }
+
 def build_production_prompt(slot):
     (
         slot_id, _, channel_id, campaign_id, affiliate_id, post_date, platform, topic, _, notes,
@@ -5975,6 +6091,18 @@ class OperatorAffiliateScaleRequest(BaseModel):
     campaign_id: int = Field(default=0, ge=0)
     limit: int = Field(default=3, ge=1, le=12)
     build: bool = False
+    duration: int = Field(default=45, ge=15, le=120)
+    variants: int = Field(default=5, ge=3, le=8)
+    notify_admin: bool = True
+
+class OperatorMakeVideoRequest(BaseModel):
+    topic: str = Field(min_length=1, max_length=300)
+    platform: str = Field(default="tiktok", max_length=40)
+    channel: str = Field(default="all", max_length=40)
+    affiliate_id: int = Field(default=0, ge=0)
+    campaign_id: int = Field(default=0, ge=0)
+    limit: int = Field(default=3, ge=1, le=8)
+    build: bool = True
     duration: int = Field(default=45, ge=15, le=120)
     variants: int = Field(default=5, ge=3, le=8)
     notify_admin: bool = True
@@ -6915,7 +7043,24 @@ def operator_brain_fallback(raw_text):
             "duration": duration,
             "confidence": 75,
         }
-    if any(word in lower for word in ["trend", "viral", "mới nhất", "moi nhat"]) or "tạo" in lower and "video" in lower and channel_id == 0:
+    if "video" in lower and any(word in lower for word in ["tạo", "tao", "làm", "lam", "kiếm tiền", "kiem tien", "affiliate", "bán hàng", "ban hang"]):
+        niche = re.sub(r"\b(tạo|tao|làm|lam|video|trend|viral|mới nhất|moi nhat|cho|trên|tren|kênh|kenh|gắn|gan|link|affiliate|aff|campaign|camp|limit|job)\b", " ", lower)
+        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
+        niche = re.sub(r"\s+", " ", niche).strip(" :=#") or "công nghệ AI"
+        return {
+            "intent": "make_video",
+            "niche": niche,
+            "topic": niche,
+            "platform": platform,
+            "channel": channel_id or "all",
+            "affiliate": affiliate_id,
+            "campaign": campaign_id,
+            "limit": max(1, min(limit, 8)),
+            "duration": duration,
+            "build": 1,
+            "confidence": 72,
+        }
+    if any(word in lower for word in ["trend", "viral", "mới nhất", "moi nhat"]):
         niche = re.sub(r"\b(tạo|tao|làm|lam|video|trend|viral|mới nhất|moi nhat|cho|trên|tren|kênh|kenh|gắn|gan|link|affiliate|aff|campaign|camp|limit|job)\b", " ", lower)
         niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
         niche = re.sub(r"\s+", " ", niche).strip(" :=#") or "công nghệ AI"
@@ -6946,11 +7091,12 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: operator_director, operator_execute, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
+        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
         "Quy tắc:\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
         "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
         "- affiliate_scale: khi admin muốn scale/đẩy một link affiliate cụ thể thành nhiều video theo trend; cần affiliate/aff ID.\n"
+        "- make_video: khi admin ra lệnh tạo video kiếm tiền/affiliate theo chủ đề nhưng không muốn nhớ nhiều lệnh; có thể tự chọn affiliate phù hợp nếu thiếu aff ID.\n"
         "- operator_auto: khi admin muốn tìm trend/tạo nhiều video theo niche/platform.\n"
         "- autopilot: khi admin muốn tìm trend, tạo job và build luôn creative/manifest/task trong một lệnh.\n"
         "- operator: khi admin nêu một topic cụ thể và có channel để tạo một job.\n"
@@ -6990,6 +7136,14 @@ def brain_command_preview(plan):
             f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
             f"limit={max(1, min(int(plan.get('limit') or 5), 12))} "
             f"campaign={int(plan.get('campaign') or 0)} build={int(plan.get('build') or 0)} "
+            f"duration={int(plan.get('duration') or 45)}"
+        )
+    if intent == "make_video":
+        return (
+            f"/make_video topic={plan.get('topic') or plan.get('niche') or 'công nghệ AI'} "
+            f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
+            f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
+            f"limit={max(1, min(int(plan.get('limit') or 3), 8))} build={int(plan.get('build') or 1)} "
             f"duration={int(plan.get('duration') or 45)}"
         )
     if intent == "operator_auto":
@@ -7068,6 +7222,18 @@ async def run_brain_plan(update, context, plan):
             if plan.get("niche"):
                 context.args.append(f"niche={plan.get('niche')}")
             return await cmd_affiliate_scale(update, context)
+        if intent == "make_video":
+            context.args = [
+                f"topic={plan.get('topic') or plan.get('niche') or 'công nghệ AI'}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"channel={plan.get('channel') or 'all'}",
+                f"aff={int(plan.get('affiliate') or 0)}",
+                f"campaign={int(plan.get('campaign') or 0)}",
+                f"limit={max(1, min(int(plan.get('limit') or 3), 8))}",
+                f"build={int(plan.get('build') or 1)}",
+                f"duration={int(plan.get('duration') or 45)}",
+            ]
+            return await cmd_make_video(update, context)
         if intent == "operator_auto":
             context.args = [
                 f"niche={plan.get('niche') or 'công nghệ AI'}",
@@ -8122,6 +8288,103 @@ async def cmd_autopilot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args).strip()
+    data = parse_key_value_args(raw)
+    topic = data.get("topic") or data.get("chude") or data.get("niche") or data.get("ngach") or (raw if "=" not in raw else "")
+    if not topic:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/make_video topic=đồ công nghệ văn phòng platform=tiktok channel=all limit=3 build=1</code>\n"
+            "Có thể thêm <code>aff=&lt;ID&gt;</code> hoặc để bot tự chọn affiliate phù hợp.",
+            parse_mode="HTML"
+        )
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    channel = (data.get("channel") or data.get("kenh") or "all").lower()
+    try:
+        affiliate_id = int(data.get("affiliate_id") or data.get("aff") or 0)
+    except ValueError:
+        affiliate_id = 0
+    try:
+        campaign_id = int(data.get("campaign") or data.get("camp") or 0)
+    except ValueError:
+        campaign_id = 0
+    try:
+        limit = max(1, min(int(data.get("limit") or data.get("max") or 3), 8))
+    except ValueError:
+        limit = 3
+    build = (data.get("build") or data.get("autobuild") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    try:
+        duration = max(15, min(int(data.get("duration") or data.get("sec") or 45), 120))
+    except ValueError:
+        duration = 45
+    try:
+        variants = max(3, min(int(data.get("variants") or data.get("n") or 5), 8))
+    except ValueError:
+        variants = 5
+
+    msg = await update.message.reply_text("🎬 Đang tạo pipeline video kiếm tiền: chọn affiliate, tìm trend, tạo job và build task...")
+    try:
+        ok, reason, result = await make_video_pipeline(
+            update.effective_user.id,
+            topic,
+            platform=platform,
+            channel=channel,
+            affiliate_id=affiliate_id,
+            campaign_id=campaign_id,
+            limit=limit,
+            build=build,
+            duration=duration,
+            variants=variants,
+        )
+    except Exception as e:
+        await alert_admin(context, "Make Video", f"{str(e)} | topic={topic} platform={platform}")
+        return await msg.edit_text("❌ Make Video lỗi khi tìm trend/tạo job. Đã báo admin.")
+    if not ok:
+        return await msg.edit_text(f"❌ {html.escape(str(reason))}", parse_mode="HTML")
+
+    affiliate = result.get("affiliate") or {}
+    campaign = result.get("campaign") or {}
+    created_jobs = result.get("created_jobs") or []
+    built_jobs = result.get("built_jobs") or []
+    packs = result.get("publish_packs") or []
+    lines = [
+        "🎬 <b>MAKE VIDEO PIPELINE</b>",
+        f"• Chủ đề: <b>{html.escape(topic)}</b>",
+        f"• Platform/channel: <code>{html.escape(platform)}</code> / <code>{html.escape(channel)}</code>",
+        f"• Affiliate chọn: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product') or 'chưa có')}"
+        + (f" | score={affiliate.get('match_score')}" if affiliate.get("id") else ""),
+        f"• Campaign: <code>#{campaign.get('id') or '-'}</code> {html.escape(campaign.get('name') or '')}",
+        f"• Job tạo: <b>{len(created_jobs)}</b> | Built: <b>{len(built_jobs)}</b>",
+        "",
+        "<b>Job sản xuất:</b>",
+    ]
+    for item in created_jobs[:8]:
+        built_item = next((row for row in built_jobs if row["job_id"] == item["job_id"]), None)
+        build_note = ""
+        if built_item:
+            build_note = f" | manifest #{built_item['manifest_id']} | tasks={built_item['task_count']} | {built_item['readiness']}"
+        lines.append(
+            f"• job #{item['job_id']} | trend #{item['trend_id']} | score=<b>{item['score']}</b>{html.escape(build_note)}\n"
+            f"  {html.escape(item['title'])}\n"
+            f"  next: <code>/tasks job={item['job_id']}</code> | <code>/job_ready job={item['job_id']}</code>"
+        )
+    if packs:
+        first_pack = packs[0]
+        lines.extend([
+            "",
+            "<b>Publish pack đầu tiên:</b>",
+            f"• Tracking URL: <code>{html.escape(first_pack.get('tracking_url') or 'cần PUBLIC_BASE_URL')}</code>",
+            f"• Disclosure: {html.escape(first_pack.get('disclosure') or '-')}",
+        ])
+    if result.get("failed_builds"):
+        lines.append("\n<b>Build lỗi:</b>")
+        for item in result["failed_builds"][:5]:
+            lines.append(f"• job #{item.get('job_id')}: {html.escape(item.get('error') or '-')}")
+    lines.append("\nChốt đăng: <code>/review_gate job=&lt;JOB_ID&gt;</code> → <code>/approve_publish job=&lt;JOB_ID&gt; queue=1</code>")
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_produce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -8587,7 +8850,8 @@ def operator_menu_keyboard():
 def operator_category_keyboard(category):
     categories = {
         "cat_control": [
-            ("🧠 Brain command", "brain"), ("🚀 Autopilot batch", "autopilot"),
+            ("🧠 Brain command", "brain"), ("🎬 Make video", "makevideo"),
+            ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
             ("🎛 Director", "director"), ("▶️ Execute", "execute"),
             ("🧪 Audit", "audit"), ("📌 Today plan", "today"),
@@ -8612,7 +8876,8 @@ def operator_category_keyboard(category):
             ("🧪 Auto-post ready", "readiness"),
         ],
         "cat_production": [
-            ("⚡ Build bundle", "build"), ("🎛 Pipeline", "pipeline"),
+            ("🎬 Make video", "makevideo"), ("⚡ Build bundle", "build"),
+            ("🎛 Pipeline", "pipeline"),
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
             ("🗂 Assets", "assets"), ("📋 Job report", "report"),
@@ -8705,6 +8970,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
+        f"• Make video pipeline: <code>POST {html.escape(base_url)}/api/operator/make-video</code>",
         f"• Danh sách kênh: <code>GET {html.escape(base_url)}/api/operator/channels</code>",
         f"• Danh sách campaign: <code>GET {html.escape(base_url)}/api/operator/campaigns</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
@@ -8726,6 +8992,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"limit":10,"auto_queue":true,"notify_admin":true}</pre>',
         "<b>Payload director-run mẫu:</b>",
         '<pre>{"days":30,"platform":"tiktok","limit":10,"execute":true,"build":true,"duration":45,"notify_admin":true}</pre>',
+        "<b>Payload make-video mẫu:</b>",
+        '<pre>{"topic":"đồ công nghệ văn phòng","platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload affiliate-scale mẫu:</b>",
         '<pre>{"affiliate_id":3,"platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload task complete mẫu:</b>",
@@ -8910,6 +9178,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "director": "/operator_director days=30 platform=tiktok limit=10",
         "execute": "/operator_execute days=30 platform=tiktok build=1 duration=45",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
+        "makevideo": "/make_video topic=công nghệ AI platform=tiktok channel=all limit=3 build=1\nPOST /api/operator/make-video",
         "autopilot": "/autopilot niche=công nghệ AI platform=tiktok channel=all aff=<AFF_ID> campaign=<ID> limit=3 duration=45",
         "build": "/operator_build job=<JOB_ID> n=5 duration=45",
         "channels": "/channels",
@@ -11551,6 +11820,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
     tg_app.add_handler(CommandHandler("brain", cmd_brain))
     tg_app.add_handler(CommandHandler("autopilot", cmd_autopilot))
+    tg_app.add_handler(CommandHandler("make_video", cmd_make_video))
     tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
     tg_app.add_handler(CommandHandler("trend_rank", cmd_trend_rank))
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
@@ -11810,6 +12080,7 @@ async def api_operator_status(request: Request):
             "n8n_template": "/api/operator/n8n-template",
             "n8n_workflow": "/api/operator/n8n-workflow.json",
             "director": "/api/operator/director",
+            "make_video": "/api/operator/make-video",
             "affiliate_report": "/api/operator/affiliate-report",
             "tracking_report": "/api/operator/tracking-report",
             "scale_plan": "/api/operator/scale-plan",
@@ -12169,6 +12440,53 @@ async def api_operator_loop(payload: OperatorLoopRequest, request: Request):
         "limit": payload.limit,
         "auto_queue": payload.auto_queue,
         **result,
+    }
+
+@fastapi_app.post("/api/operator/make-video")
+async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Request):
+    verify_operator_api_token(request)
+    ok, reason, result = await make_video_pipeline(
+        ADMIN_ID,
+        payload.topic,
+        platform=payload.platform,
+        channel=payload.channel,
+        affiliate_id=payload.affiliate_id,
+        campaign_id=payload.campaign_id,
+        limit=payload.limit,
+        build=payload.build,
+        duration=payload.duration,
+        variants=payload.variants,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            affiliate = result.get("affiliate") or {}
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🎬 <b>OPERATOR API MAKE VIDEO</b>\n\n"
+                    f"• Topic: <b>{html.escape(payload.topic)}</b>\n"
+                    f"• Platform/channel: <code>{html.escape(payload.platform)}</code> / <code>{html.escape(payload.channel)}</code>\n"
+                    f"• Affiliate: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product') or '')}\n"
+                    f"• Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
+                    "• Next: <code>/tasks</code> → <code>/review_gate</code> → <code>/approve_publish</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Operator make-video notify error: {e}")
+    return {
+        "ok": True,
+        **result,
+        "next": {
+            "tasks_url": "/api/operator/tasks/next",
+            "ready_url": "/api/operator/jobs/<JOB_ID>/ready",
+            "publish_pack_url": "/api/operator/jobs/<JOB_ID>/publish-pack",
+            "approve_url": "/api/operator/jobs/<JOB_ID>/approve",
+            "publish_queue_url": "/api/operator/publish/next",
+        },
+        "rule": "Creates monetizable video production jobs and task bundles only. Real publishing still requires review/approval gate.",
     }
 
 @fastapi_app.post("/api/operator/affiliate-scale")

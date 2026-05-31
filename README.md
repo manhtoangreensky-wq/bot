@@ -27,6 +27,12 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `MANUAL_BANK_NAME`, `MANUAL_BANK_CODE`, `MANUAL_BANK_ACCOUNT`, `MANUAL_BANK_OWNER`: tài khoản và mã VietQR nạp thủ công khi PayOS lỗi.
 - `OPERATOR_API_TOKEN`: token riêng cho n8n/Claude/tool worker gọi Operator API Bridge. Không set thì bridge tự đóng.
 
+## Domain web
+
+- Nếu mua được domain `toanaas.com`, `toanaas.vn` hoặc biến thể gần nhất, trỏ DNS về Railway Custom Domain theo hướng dẫn Railway.
+- Sau khi domain hoạt động HTTPS, set `PUBLIC_BASE_URL=https://<domain>` trên Railway để landing page, tracking affiliate `/r/...`, PayOS return/cancel URL và n8n worker dùng đúng domain mới.
+- Không cần đổi code khi đổi domain; chỉ cần cập nhật DNS và biến môi trường.
+
 ## Lệnh người dùng
 
 - `/start`: menu chính.
@@ -51,7 +57,9 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/mmo`: workflow kiếm tiền bằng AI hợp pháp nội bộ.
 - `/brain <lệnh tự nhiên>`: đầu não admin-only, hiểu lệnh tiếng Việt và tự định tuyến sang Director, Execute an toàn, Operator Auto, tạo job, build job, job ready check hoặc báo cáo vận hành.
 - Ví dụ `/brain scale affiliate 3 lên TikTok build luôn 3 video`: tự gọi `/affiliate_scale` để tìm trend, tạo job và build bundle cho link affiliate đó.
+- Ví dụ `/brain tạo 3 video kiếm tiền về đồ công nghệ văn phòng lên TikTok`: tự gọi `/make_video`, bot tự chọn affiliate phù hợp nếu chưa truyền `aff`.
 - Ví dụ `/brain đầu não chạy bước tiếp theo an toàn`: tự gọi `/operator_execute` để scale/build hoặc queue publish manual theo next action.
+- `/make_video topic=... platform=tiktok channel=all aff=<ID> campaign=<ID> limit=3 build=1 duration=45`: lệnh gọn để tạo pipeline video kiếm tiền; nếu thiếu `aff`, bot tự chấm điểm và chọn link affiliate phù hợp, tìm trend, tạo job, build creative/manifest/task và chuẩn bị publish pack.
 - `/autopilot niche=... platform=tiktok channel=all aff=<ID> campaign=<ID> limit=3 duration=45`: tìm trend, tạo production job và tự build creative/manifest/task cho batch video.
 - `/operator_menu`: menu nút bấm dạng thư mục, gom lệnh theo Điều hành, Trend, Affiliate, Kênh/Lịch, Sản xuất, Đăng bài, Doanh thu và API.
 - `/campaign_new name=... niche=... platforms=... affiliate=...`: tạo chiến dịch AI Operator.
@@ -155,6 +163,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /api/operator/jobs/{job_id}/approve`: duyệt cuối job đã đủ điều kiện và tùy chọn đưa vào publish queue; dùng làm gate trước khi n8n/publisher lấy bài đăng.
 - `GET /api/operator/jobs/{job_id}/publish-pack`: worker ngoài lấy caption, CTA, disclosure, tracking URL affiliate chính, link liên quan, comment ghim, checklist compliance và kế hoạch ghi performance.
 - `POST /api/operator/loop`: cron/n8n gọi vòng điều phối an toàn với `limit`, `auto_queue`, `notify_admin`; bot tự queue job ready và trả task tiếp theo.
+- `POST /api/operator/make-video`: endpoint một lệnh cho Claude/n8n tạo pipeline video kiếm tiền từ `topic`; bot tự chọn affiliate/campaign nếu thiếu, tìm trend, tạo job, build bundle và trả publish pack/tracking URL.
 - `GET /api/operator/channels`: worker ngoài đọc danh sách kênh, topic focus, posting slots, publish mode và readiness manual/API để chọn nơi đăng.
 - `GET /api/operator/campaigns`: worker ngoài đọc campaign active, niche, platform, affiliate/pay URL để chọn `campaign_id` khi scale.
 - `GET /api/operator/affiliates`: worker ngoài đọc catalog affiliate active, gồm ID, niche, audience, claim được phép/cấm và link để chọn sản phẩm.
@@ -178,6 +187,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Autopilot là lớp batch admin-only: một lệnh sẽ tìm trend, tạo job và chuẩn bị production bundle gồm creative variant, manifest và task. Video vẫn phải qua task output, review gate và publish queue trước khi đăng thật.
 - Operator API Bridge là cổng bảo mật cho n8n/Claude/tool worker: tool ngoài có thể lấy task, chạy Kling/Fish/CapCut/FFmpeg hoặc quy trình khác, rồi trả output URL về bot. Publisher worker cũng có thể lấy publish queue, đăng qua API chính thức/thủ công có kiểm soát và trả publish URL về bot. Bridge chỉ bật khi có `OPERATOR_API_TOKEN`.
 - `/operator_api` là lệnh admin-only để lấy checklist cấu hình n8n/worker mà không lộ token thật.
+- `/make_video` và `POST /api/operator/make-video` là lớp lệnh gọn cho mục tiêu “ra lệnh trên Telegram/API là có pipeline video affiliate”; hệ thống vẫn giữ gate review/approve trước khi đăng thật để tránh spam, claim sai hoặc vi phạm nền tảng.
 - Channel/affiliate/calendar registry là khu vực admin-only để quản lý kênh Facebook/TikTok/OnlyFans, tài khoản phụ, link affiliate và lịch đăng nội dung. Không hiển thị cho khách hàng.
 - Production pipeline là admin-only, dùng để theo dõi từng video qua các stage: `brief`, `script`, `voice`, `visuals`, `edit`, `review`, `publish`, `done`.
 - Performance tracking là admin-only, dùng để ghi view/click/order/revenue/lead/cost sau khi đăng bài và theo dõi kênh hoặc affiliate nào đang tạo tiền. Dữ liệu có thể nhập bằng Telegram hoặc đẩy tự động qua Operator API Bridge.
