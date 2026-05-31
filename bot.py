@@ -1066,6 +1066,35 @@ def build_operator_stage_prompt(job, target_stage):
         "tiêu chí đạt, lỗi cần báo admin, output cần lưu vào pipeline."
     )
 
+def build_publish_pack_prompt(job):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    return (
+        "Bạn là AI Operator trưởng chuẩn bị gói đăng bài kiếm tiền cho TOAN DAAS. "
+        "Tạo nội dung đăng hợp pháp, không spam, không mạo danh, không cam kết thu nhập phi thực tế, "
+        "không hướng dẫn né kiểm duyệt. Nếu nền tảng là OnlyFans hoặc có người mẫu/AI influencer thì chỉ dùng nhân vật tự tạo "
+        "hoặc người thật có consent rõ ràng và đủ 18 tuổi.\n\n"
+        f"Job ID: #{jid}\n"
+        f"Nền tảng: {platform or '-'}\n"
+        f"Kênh: {channel_name or channel_id or '-'} / account={account_label or 'main'}\n"
+        f"Topic: {topic or '-'}\n"
+        f"Affiliate: {network or '-'} - {product_name or '-'}\n"
+        f"Affiliate URL: {affiliate_url or 'chưa có'}\n"
+        f"Asset URL: {asset_url or 'chưa có'}\n"
+        f"Publish URL hiện tại: {publish_url or 'chưa có'}\n"
+        f"Ghi chú: {note or '-'}\n\n"
+        f"Brief/job context:\n{brief or 'Chưa có brief'}\n\n"
+        "Trả về tiếng Việt theo format:\n"
+        "1. Caption chính theo nền tảng.\n"
+        "2. Caption ngắn A/B.\n"
+        "3. Hashtag.\n"
+        "4. CTA và vị trí gắn link affiliate.\n"
+        "5. Checklist trước khi đăng.\n"
+        "6. Sau khi đăng cần ghi lại: publish_url, view, click, order, revenue bằng /pipeline_set và /performance_add."
+    )
+
 def slots_per_day(posting_slots: str) -> int:
     digits = "".join(ch for ch in (posting_slots or "") if ch.isdigit())
     if not digits:
@@ -1904,6 +1933,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /operator — Ra lệnh tạo video một bước",
             "• /operator_next — Điều phối stage tiếp theo",
             "• /operator_dashboard — Tổng quan vận hành",
+            "• /publish_pack — Gói caption/link để đăng",
             "• /performance_add — Ghi hiệu quả bài đăng",
             "• /performance — Báo cáo hiệu quả kiếm tiền",
             "• /produce — Tạo job sản xuất từ lịch",
@@ -2796,6 +2826,44 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("• Chưa có sự kiện.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_publish_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("id") or data.get("job") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/publish_pack job=1</code>\n"
+            "Sau khi đăng: <code>/pipeline_set id=1 stage=publish status=published publish=https://...</code>",
+            parse_mode="HTML"
+        )
+    job = get_production_job(job_id, update.effective_user.id)
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    if gemini_client or openai_client:
+        pack = AgentGemini.chat(
+            "Bạn là AI Operator trưởng chuẩn bị publish pack cho video affiliate.",
+            build_publish_pack_prompt(job),
+            update.effective_user.id,
+            is_json=False
+        )
+    else:
+        pack = (
+            "Chưa cấu hình AI Provider. Publish pack tối thiểu:\n"
+            "- Dùng brief hiện có trong /pipeline <id>.\n"
+            "- Gắn link affiliate rõ ràng.\n"
+            "- Kiểm tra quyền hình ảnh/âm thanh và chính sách nền tảng.\n"
+            "- Sau khi đăng, cập nhật publish URL và performance."
+        )
+    update_production_job(job_id, update.effective_user.id, stage="publish", status="ready", note=f"publish_pack | {truncate_text(pack, 800)}")
+    await update.message.reply_text(
+        f"📦 <b>PUBLISH PACK — JOB #{job_id}</b>\n"
+        f"Stage: <b>publish</b> | Status: <b>ready</b>\n\n"
+        f"<pre>{html_pre(pack)}</pre>",
+        parse_mode="HTML"
+    )
+
 async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -3415,6 +3483,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
     tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
+    tg_app.add_handler(CommandHandler("publish_pack", cmd_publish_pack))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
