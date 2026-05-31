@@ -28,7 +28,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from google import genai
 from google.genai import types
 from openai import OpenAI
@@ -1645,6 +1645,21 @@ def get_affiliate_link(affiliate_id, owner_id):
     row = c.fetchone()
     conn.close()
     return row
+
+def public_tracking_base_url():
+    return (PUBLIC_BASE_URL or "").rstrip("/")
+
+def affiliate_tracking_url(affiliate_id, job_id=0, source=""):
+    base_url = public_tracking_base_url()
+    if not base_url or not affiliate_id:
+        return ""
+    query = {}
+    if job_id:
+        query["job"] = int(job_id)
+    if source:
+        query["src"] = str(source)[:80]
+    suffix = f"?{urlencode(query)}" if query else ""
+    return f"{base_url}/r/{int(affiliate_id)}{suffix}"
 
 def update_affiliate_profile(owner_id, affiliate_id, **fields):
     allowed = {
@@ -4044,7 +4059,7 @@ def serialize_operator_task(row):
         "job": job_payload,
     }
 
-def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0):
+def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0, affiliate_id_override=0):
     job = get_production_job(job_id, owner_id)
     if not job:
         return False, None
@@ -4053,6 +4068,8 @@ def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note=
         if not variant or int(variant[1]) != int(job_id):
             return False, None
     _, _, _, channel_id, affiliate_id, platform, *_ = job
+    if affiliate_id_override:
+        affiliate_id = int(affiliate_id_override)
     conn = db_connect()
     c = conn.cursor()
     c.execute(
@@ -5152,22 +5169,25 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
             "product": row[2],
             "niche": row[3],
             "url": row[4],
+            "tracking_url": affiliate_tracking_url(row[0], jid, f"{platform or 'social'}_related"),
             "match_score": int(score or 0),
             "reasons": reasons[:3],
         }
         for score, reasons, row in related
     ]
+    primary_tracking_url = affiliate_tracking_url(affiliate_id, jid, f"{platform or 'social'}_primary") if affiliate_id else ""
+    primary_display_url = primary_tracking_url or affiliate_url
     disclosure = "Có thể nhận hoa hồng affiliate nếu người xem mua/đăng ký qua link."
     caption = (
         f"{topic or product_name or 'Gợi ý sản phẩm/dịch vụ'}\n\n"
-        f"Link chính: {affiliate_url or 'chưa có'}\n"
+        f"Link chính: {primary_display_url or 'chưa có'}\n"
         f"{disclosure}"
     )
     pinned_comment_parts = []
-    if affiliate_url:
-        pinned_comment_parts.append(f"Link chính: {affiliate_url}")
+    if primary_display_url:
+        pinned_comment_parts.append(f"Link chính: {primary_display_url}")
     for item in related_links[:5]:
-        pinned_comment_parts.append(f"{item['product']}: {item['url']}")
+        pinned_comment_parts.append(f"{item['product']}: {item.get('tracking_url') or item['url']}")
     checklist = [
         "Đã kiểm tra quyền hình ảnh/voice/nhạc.",
         "Đã ghi disclosure affiliate rõ ràng.",
@@ -5187,6 +5207,7 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
             "network": network,
             "product": product_name,
             "url": affiliate_url,
+            "tracking_url": primary_tracking_url,
         },
         "related_links": related_links,
         "caption": caption,
@@ -11095,6 +11116,26 @@ async def landing_page():
     if not os.path.exists(index_path):
         raise HTTPException(status_code=404, detail="Landing page not found")
     return FileResponse(index_path)
+
+@fastapi_app.get("/r/{affiliate_id}")
+async def affiliate_redirect(affiliate_id: int, request: Request, job: int = 0, src: str = ""):
+    affiliate = get_affiliate_link(affiliate_id, ADMIN_ID)
+    if not affiliate:
+        raise HTTPException(status_code=404, detail="Affiliate link not found")
+    aid, network, product_name, niche, url, commission_note, status, *_ = affiliate
+    if (status or "active").lower() != "active" or not url:
+        raise HTTPException(status_code=404, detail="Affiliate link is inactive")
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="Affiliate URL must start with http:// or https://")
+    note_parts = [f"redirect_affiliate:{aid}", f"network:{network or '-'}", f"product:{product_name or '-'}"]
+    if src:
+        note_parts.append(f"src:{src[:80]}")
+    referer = request.headers.get("referer") or ""
+    if referer:
+        note_parts.append(f"ref:{referer[:160]}")
+    if job:
+        add_performance_event(ADMIN_ID, job, "click", 1, 0, " | ".join(note_parts), affiliate_id_override=aid)
+    return RedirectResponse(url=url, status_code=302)
 
 @fastapi_app.post("/lead")
 async def create_lead(payload: LeadRequest, request: Request):

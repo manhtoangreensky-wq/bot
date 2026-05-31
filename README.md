@@ -132,6 +132,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 
 - `GET /`: health check.
 - `GET /landing`: phục vụ landing page `index.html` cùng domain với API.
+- `GET /r/{affiliate_id}?job=<JOB_ID>&src=<SOURCE>`: redirect sang link affiliate gốc và tự ghi click vào performance khi có `job`.
 - `POST /webhook/payos`: nhận webhook PayOS, kiểm tra chữ ký, mã đơn, số tiền, trạng thái và chống cộng xu trùng.
 - `POST /lead`: nhận lead từ landing page và gửi thông báo về admin Telegram.
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
@@ -148,7 +149,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /api/operator/tasks/{task_id}/complete`: worker ngoài trả `status`, `output_url`, `note`; bot tự lưu asset theo loại task và báo admin.
 - `GET /api/operator/jobs/{job_id}/ready`: worker ngoài kiểm tra job đã đủ điều kiện review/publish chưa.
 - `POST /api/operator/jobs/{job_id}/approve`: duyệt cuối job đã đủ điều kiện và tùy chọn đưa vào publish queue; dùng làm gate trước khi n8n/publisher lấy bài đăng.
-- `GET /api/operator/jobs/{job_id}/publish-pack`: worker ngoài lấy caption, CTA, disclosure, link affiliate chính, link liên quan, comment ghim, checklist compliance và kế hoạch ghi performance.
+- `GET /api/operator/jobs/{job_id}/publish-pack`: worker ngoài lấy caption, CTA, disclosure, tracking URL affiliate chính, link liên quan, comment ghim, checklist compliance và kế hoạch ghi performance.
 - `POST /api/operator/loop`: cron/n8n gọi vòng điều phối an toàn với `limit`, `auto_queue`, `notify_admin`; bot tự queue job ready và trả task tiếp theo.
 - `GET /api/operator/channels`: worker ngoài đọc danh sách kênh, topic focus, posting slots, publish mode và readiness manual/API để chọn nơi đăng.
 - `GET /api/operator/campaigns`: worker ngoài đọc campaign active, niche, platform, affiliate/pay URL để chọn `campaign_id` khi scale.
