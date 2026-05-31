@@ -1,8 +1,9 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║   TOAN DAAS V15.0 - PRODUCTION READY                            ║
+║   TOAN DAAS V15.1 - PRODUCTION READY                            ║
 ║   FastAPI + Telegram Bot (Shared Event Loop via Lifespan)        ║
-║   Dynamic Billing | Deepgram | Auto-Tiers | HMAC Webhook Ready  ║
+║   Dynamic Billing | Deepgram | Auto-Tiers | PayOS Auto Xu       ║
+║   Cutout Fallback | OpenAI Fallback | Full Env Vars              ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -24,6 +25,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
+from openai import OpenAI
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
     ReplyKeyboardMarkup, KeyboardButton
@@ -41,21 +43,38 @@ logging.basicConfig(
 logger = logging.getLogger("TOAN_DAAS")
 
 # ─── BIẾN MÔI TRƯỜNG ─────────────────────────────────────────────────────────
-# .strip() loại bỏ \n, \r, space thừa do copy-paste vào Railway
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
 
-TELEGRAM_TOKEN   = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
-ADMIN_ID         = _env("ADMIN_ID", "7126457028")
-REMOVEBG_API_KEY = _env("REMOVEBG_API_KEY")
-FISH_AUDIO_KEY   = _env("FISH_AUDIO_KEY")
-GEMINI_API_KEY   = _env("GEMINI_API_KEY")
-DEEPGRAM_API_KEY = _env("DEEPGRAM_API_KEY")
-PAYOS_CHECKSUM_KEY = _env("PAYOS_CHECKSUM_KEY")
-PORT             = int(_env("PORT", "8000"))
+TELEGRAM_TOKEN      = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
+ADMIN_ID            = _env("ADMIN_ID", "7126457028")
 
-# ─── GEMINI CLIENT ────────────────────────────────────────────────────────────
+# AI Providers
+GEMINI_API_KEY      = _env("GEMINI_API_KEY")
+OPENAI_API_KEY      = _env("OPENAI_API_KEY")
+
+# Audio
+DEEPGRAM_API_KEY    = _env("DEEPGRAM_API_KEY")
+DEEPL_API_KEY       = _env("DEEPL_API_KEY")
+FISH_AUDIO_KEY      = _env("FISH_AUDIO_KEY")
+
+# Image
+REMOVEBG_API_KEY    = _env("REMOVEBG_API_KEY")
+CUTOUT_API_KEY      = _env("CUTOUT_API_KEY")
+
+# Payment
+PAYOS_CLIENT_ID     = _env("PAYOS_CLIENT_ID")
+PAYOS_API_KEY       = _env("PAYOS_API_KEY")
+PAYOS_CHECKSUM_KEY  = _env("PAYOS_CHECKSUM_KEY")
+
+# Misc
+RAPIDAPI_KEY        = _env("RAPIDAPI_KEY")
+RAPIDAPI_HOST       = _env("RAPIDAPI_HOST")
+PORT                = int(_env("PORT", "8000"))
+
+# ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 user_memory: dict = {}
 
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
@@ -87,7 +106,10 @@ def init_db():
         user_id TEXT, action TEXT, cost INTEGER,
         discount_rate REAL, created_at DATETIME
     )""")
-    # Migration an toàn: thêm cột nếu thiếu
+    c.execute("""CREATE TABLE IF NOT EXISTS payos_processed (
+        order_code TEXT PRIMARY KEY,
+        processed_at DATETIME
+    )""")
     for col, defval in [("total_spent","0"), ("is_vip","0")]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT {defval}")
@@ -109,12 +131,31 @@ def get_user(user_id, username="Unknown"):
         conn.commit()
         row = (TRIAL_CREDITS, 0, 0)
     conn.close()
-    return row[0], row[1], row[2]  # credits, total_spent, is_vip
+    return row[0], row[1], row[2]
 
 def add_credit(user_id, amount):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (amount, str(user_id)))
+    conn.commit()
+    conn.close()
+
+def is_payos_order_processed(order_code: str) -> bool:
+    """Kiểm tra order đã xử lý chưa (chống duplicate)"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM payos_processed WHERE order_code=?", (str(order_code),))
+    exists = c.fetchone() is not None
+    conn.close()
+    return exists
+
+def mark_payos_order_processed(order_code: str):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR IGNORE INTO payos_processed (order_code, processed_at) VALUES (?,?)",
+        (str(order_code), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
     conn.commit()
     conn.close()
 
@@ -183,33 +224,59 @@ class AgentRouter(BaseModel):
 class AgentGemini:
     @staticmethod
     def chat(prompt: str, text: str, uid, is_json: bool = False) -> str:
-        if not gemini_client:
-            return "❌ Chưa cấu hình GEMINI_API_KEY."
-        if uid not in user_memory:
-            user_memory[uid] = []
-        user_memory[uid].append(types.Content(role="user", parts=[types.Part(text=text)]))
-        if len(user_memory[uid]) > 10:
-            user_memory[uid] = user_memory[uid][-10:]
-        cfg = {
-            "system_instruction": prompt,
-            "response_mime_type": "application/json" if is_json else "text/plain"
-        }
-        if is_json:
-            cfg["response_schema"] = AgentRouter
-        try:
-            res = gemini_client.models.generate_content(
-                model="gemini-2.0-flash",
-                config=types.GenerateContentConfig(**cfg),
-                contents=user_memory[uid] if not is_json else text
-            )
-            if not is_json:
-                user_memory[uid].append(
-                    types.Content(role="model", parts=[types.Part(text=res.text)])
+        if not gemini_client and not openai_client:
+            return "❌ Chưa cấu hình AI Provider."
+
+        # --- Thử Gemini trước ---
+        if gemini_client:
+            if uid not in user_memory:
+                user_memory[uid] = []
+            user_memory[uid].append(types.Content(role="user", parts=[types.Part(text=text)]))
+            if len(user_memory[uid]) > 10:
+                user_memory[uid] = user_memory[uid][-10:]
+            cfg = {
+                "system_instruction": prompt,
+                "response_mime_type": "application/json" if is_json else "text/plain"
+            }
+            if is_json:
+                cfg["response_schema"] = AgentRouter
+            try:
+                res = gemini_client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    config=types.GenerateContentConfig(**cfg),
+                    contents=user_memory[uid] if not is_json else text
                 )
-            return res.text
-        except Exception as e:
-            logger.error(f"Gemini error: {e}")
-            return "Lỗi hệ thống Gemini."
+                if not is_json:
+                    user_memory[uid].append(
+                        types.Content(role="model", parts=[types.Part(text=res.text)])
+                    )
+                return res.text
+            except Exception as e:
+                logger.error(f"Gemini error: {e} — Thử fallback OpenAI...")
+
+        # --- Fallback OpenAI ---
+        if openai_client:
+            try:
+                messages = [{"role": "system", "content": prompt}]
+                if uid in user_memory:
+                    for m in user_memory[uid][-6:]:
+                        role = "user" if m.role == "user" else "assistant"
+                        messages.append({"role": role, "content": m.parts[0].text})
+                else:
+                    messages.append({"role": "user", "content": text})
+
+                res = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    response_format={"type": "json_object"} if is_json else {"type": "text"},
+                    max_tokens=1000
+                )
+                return res.choices[0].message.content
+            except Exception as e:
+                logger.error(f"OpenAI error: {e}")
+                return "❌ Lỗi cả Gemini lẫn OpenAI."
+
+        return "❌ Không có AI Provider nào hoạt động."
 
 class AgentDeepgram:
     @staticmethod
@@ -243,7 +310,12 @@ class AgentDeepgram:
 class AgentVoice:
     @staticmethod
     async def render(text: str, user_id, context: ContextTypes.DEFAULT_TYPE, chat_id: int, cost: int) -> bool:
-        """Trả về True = Fish Audio (tính phí), False = Edge TTS (hoàn xu)."""
+        """
+        Thứ tự ưu tiên FREE → TRẢ PHÍ:
+        1. Edge TTS (hoàn toàn miễn phí) — thử trước, hoàn xu nếu thành công
+        2. Fish Audio (có phí quota) — chỉ dùng khi Edge TTS lỗi, giữ xu
+        Trả về True = đã dùng Fish Audio (tính phí), False = Edge TTS (hoàn xu)
+        """
         out = f"v_{user_id}.mp3"
         msg = await context.bot.send_message(
             chat_id=chat_id,
@@ -252,6 +324,27 @@ class AgentVoice:
         )
         used_fish = False
         try:
+            # Bước 1: Thử Edge TTS FREE trước
+            edge_ok = False
+            try:
+                communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
+                await communicate.save(out)
+                if os.path.exists(out) and os.path.getsize(out) > 0:
+                    edge_ok = True
+            except Exception as e:
+                logger.warning(f"Edge TTS lỗi: {e} — thử Fish Audio...")
+
+            if edge_ok:
+                # Edge TTS thành công → miễn phí, hoàn xu
+                with open(out, "rb") as f:
+                    await context.bot.send_audio(
+                        chat_id=chat_id, audio=f,
+                        caption=f"🔊 Gói Tiết Kiệm — Tổng hợp giọng nói thành công! (-{VOICE_FREE_COST} Xu)"
+                    )
+                await msg.delete()
+                return False  # hoàn xu ở caller
+
+            # Bước 2: Edge TTS lỗi → fallback Fish Audio (tính phí)
             if FISH_AUDIO_KEY:
                 async with httpx.AsyncClient() as client:
                     res = await client.post(
@@ -271,16 +364,18 @@ class AgentVoice:
                     with open(out, "wb") as f:
                         f.write(res.content)
                     used_fish = True
-            if not used_fish:
-                communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
-                await communicate.save(out)
-            with open(out, "rb") as f:
-                if used_fish:
-                    caption = f"🎙️ Fish Audio — Giọng nhân bản! (-{cost} Xu)"
+                    with open(out, "rb") as f:
+                        await context.bot.send_audio(
+                            chat_id=chat_id, audio=f,
+                            caption=f"🎙️ Gói Cao Cấp — Tổng hợp thành công! (-{cost} Xu)"
+                        )
+                    await msg.delete()
                 else:
-                    caption = "🔊 Edge TTS — Giọng chuẩn! (Miễn phí 0 Xu)"
-                await context.bot.send_audio(chat_id=chat_id, audio=f, caption=caption)
-            await msg.delete()
+                    logger.error(f"Fish Audio lỗi {res.status_code}")
+                    await msg.edit_text("❌ Cả hai gói đều gặp lỗi.")
+            else:
+                await msg.edit_text("❌ Edge TTS lỗi và chưa cấu hình FISH_AUDIO_KEY.")
+
         except Exception as e:
             logger.error(f"Voice error: {e}")
             await msg.edit_text("❌ Lỗi Voice.")
@@ -319,14 +414,287 @@ class AgentDownloader:
             logger.error(f"Downloader error: {e}")
             await msg.edit_text("❌ Lỗi luồng tải.")
 
-# ─── STATE: THEO DÕI USER VỪA GỬI /naptien ──────────────────────────────────
+# ─── STATE ───────────────────────────────────────────────────────────────────
 USER_BILL_STATE: dict = {}
+# Lưu pending action khi khách đang chọn provider
+# key=user_id, value={type, data, cost, file_bytes, chat_id, msg_id}
+USER_PENDING: dict = {}
+
+VOICE_FREE_COST  = 5   # xu cho gói tiết kiệm giọng nói
+IMAGE_FREE_COST  = 5   # xu cho gói tiết kiệm tách nền
+
+def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup:
+    """
+    Tạo inline keyboard cho khách chọn provider.
+    service: 'voice' | 'image'
+    """
+    if service == "voice":
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    f"🔊 Gói Tiết Kiệm — -{VOICE_FREE_COST} Xu",
+                    callback_data=f"prov|voice|free|{uid}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"🎙️ Gói Cao Cấp — -{cost} Xu",
+                    callback_data=f"prov|voice|paid|{uid}"
+                )
+            ],
+        ]
+    else:  # image
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    f"✂️ Gói Tiết Kiệm — -{IMAGE_FREE_COST} Xu",
+                    callback_data=f"prov|image|free|{uid}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"🖼️ Gói Cao Cấp — -{cost} Xu",
+                    callback_data=f"prov|image|paid|{uid}"
+                )
+            ],
+        ]
+    buttons.append([InlineKeyboardButton("❌ Huỷ", callback_data=f"prov|cancel|cancel|{uid}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý khi khách bấm chọn provider từ inline keyboard."""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("|")
+    if len(parts) != 4:
+        return
+    _, service, mode, uid_str = parts
+    uid = int(uid_str)
+
+    # Bảo vệ: chỉ chính user đó mới được bấm
+    if query.from_user.id != uid:
+        await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+        return
+
+    pending = USER_PENDING.pop(uid, None)
+    if not pending:
+        await query.edit_message_text("⏰ Yêu cầu đã hết hạn hoặc đã xử lý.")
+        return
+
+    if mode == "cancel":
+        # Hoàn xu nếu đã trừ
+        if pending.get("cost", 0) > 0:
+            add_credit(uid, pending["cost"])
+        await query.edit_message_text("❌ Đã huỷ. Xu được hoàn lại.")
+        return
+
+    chat_id  = pending["chat_id"]
+    cost     = pending["cost"]
+    svc_type = pending["type"]
+
+    # ── VOICE ──
+    if svc_type == "voice":
+        data = pending["data"]
+        if mode == "free":
+            # Gói tiết kiệm — hoàn xu đã tạm trừ, sau đó trừ 5 xu
+            if cost > 0 and str(uid) != ADMIN_ID:
+                add_credit(uid, cost)  # hoàn lại khoản tạm trừ
+            # Trừ 5 xu cho gói tiết kiệm
+            can_afford_free = True
+            if str(uid) != ADMIN_ID:
+                credits_now, _, _ = get_user(uid)
+                if credits_now >= VOICE_FREE_COST:
+                    conn = __import__('sqlite3').connect(DB_FILE)
+                    c = conn.cursor()
+                    c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (VOICE_FREE_COST, str(uid)))
+                    conn.commit()
+                    conn.close()
+                else:
+                    can_afford_free = False
+            if not can_afford_free:
+                await query.edit_message_text(f"❌ Không đủ xu. Cần ít nhất {VOICE_FREE_COST} Xu.")
+                return
+            await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Tiết Kiệm)...</i>", parse_mode="HTML")
+            out = f"v_{uid}.mp3"
+            try:
+                communicate = edge_tts.Communicate(data, "vi-VN-NamMinhNeural")
+                await communicate.save(out)
+                with open(out, "rb") as f:
+                    await context.bot.send_audio(
+                        chat_id=chat_id, audio=f,
+                        caption=f"🔊 Gói Tiết Kiệm — Tổng hợp giọng nói thành công! (-{VOICE_FREE_COST} Xu)"
+                    )
+                await query.delete_message()
+            except Exception as e:
+                logger.error(f"Edge TTS error: {e}")
+                await query.edit_message_text("❌ Gói Tiết Kiệm gặp lỗi.")
+            finally:
+                if os.path.exists(out):
+                    os.remove(out)
+        else:
+            # Fish Audio — giữ xu, nếu lỗi hoàn xu + fallback
+            await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Cao Cấp)...</i>", parse_mode="HTML")
+            out = f"v_{uid}.mp3"
+            ok = False
+            try:
+                if FISH_AUDIO_KEY:
+                    async with httpx.AsyncClient() as client:
+                        res = await client.post(
+                            "https://api.fish.audio/v1/tts",
+                            headers={"Authorization": f"Bearer {FISH_AUDIO_KEY}", "Content-Type": "application/json"},
+                            json={"text": data, "reference_id": "7f0955e88846433e9ecb241357608bf8", "format": "mp3"},
+                            timeout=30.0
+                        )
+                    if res.status_code == 200:
+                        with open(out, "wb") as f:
+                            f.write(res.content)
+                        ok = True
+                        with open(out, "rb") as f:
+                            await context.bot.send_audio(
+                                chat_id=chat_id, audio=f,
+                                caption=f"🎙️ Gói Cao Cấp — Tổng hợp thành công! (-{cost} Xu)"
+                            )
+                        await query.delete_message()
+                    else:
+                        logger.warning(f"Fish Audio {res.status_code} — fallback Edge TTS")
+                if not ok:
+                    # Fallback gói tiết kiệm — hoàn xu cao cấp, trừ 5 xu tiết kiệm
+                    if cost > 0 and str(uid) != ADMIN_ID:
+                        add_credit(uid, cost)  # hoàn xu gói cao cấp
+                    if str(uid) != ADMIN_ID:
+                        conn = __import__('sqlite3').connect(DB_FILE)
+                        c = conn.cursor()
+                        c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (VOICE_FREE_COST, str(uid)))
+                        conn.commit()
+                        conn.close()
+                    communicate = edge_tts.Communicate(data, "vi-VN-NamMinhNeural")
+                    await communicate.save(out)
+                    with open(out, "rb") as f:
+                        await context.bot.send_audio(
+                            chat_id=chat_id, audio=f,
+                            caption=f"🔊 Gói Tiết Kiệm — Hoàn thành! (-{VOICE_FREE_COST} Xu)"
+                        )
+                    await query.delete_message()
+            except Exception as e:
+                logger.error(f"Voice paid error: {e}")
+                await query.edit_message_text("❌ Lỗi tổng hợp giọng.")
+            finally:
+                if os.path.exists(out):
+                    os.remove(out)
+
+    # ── IMAGE ──
+    elif svc_type == "image":
+        img_bytes = pending["file_bytes"]
+        if mode == "free":
+            # Gói tiết kiệm — hoàn xu tạm trừ, sau đó trừ 5 xu
+            if cost > 0 and str(uid) != ADMIN_ID:
+                add_credit(uid, cost)  # hoàn lại khoản tạm trừ
+            # Trừ 5 xu cho gói tiết kiệm
+            can_afford_free = True
+            if str(uid) != ADMIN_ID:
+                credits_now, _, _ = get_user(uid)
+                if credits_now >= IMAGE_FREE_COST:
+                    conn = __import__('sqlite3').connect(DB_FILE)
+                    c = conn.cursor()
+                    c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (IMAGE_FREE_COST, str(uid)))
+                    conn.commit()
+                    conn.close()
+                else:
+                    can_afford_free = False
+            if not can_afford_free:
+                await query.edit_message_text(f"❌ Không đủ xu. Cần ít nhất {IMAGE_FREE_COST} Xu.")
+                return
+            await query.edit_message_text("⏳ <i>Đang tách nền (Gói Tiết Kiệm)...</i>", parse_mode="HTML")
+            ok = False
+            if CUTOUT_API_KEY:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        res = await client.post(
+                            "https://www.cutout.pro/api/v1/matting2?mattingType=2&crop=true",
+                            headers={"APIKEY": CUTOUT_API_KEY},
+                            files={"file": img_bytes},
+                            timeout=30.0
+                        )
+                    if res.status_code == 200:
+                        await context.bot.send_document(
+                            chat_id=chat_id, document=res.content,
+                            filename="no_bg.png",
+                            caption=f"✂️ Gói Tiết Kiệm — Tách nền thành công! (-{IMAGE_FREE_COST} Xu)"
+                        )
+                        await query.delete_message()
+                        ok = True
+                    else:
+                        logger.warning(f"Cutout {res.status_code}")
+                except Exception as e:
+                    logger.error(f"Cutout error: {e}")
+            if not ok:
+                await query.edit_message_text("❌ Cutout.pro lỗi hoặc chưa cấu hình CUTOUT_API_KEY.")
+        else:
+            # RemoveBG — giữ xu, nếu lỗi tự chuyển Cutout
+            await query.edit_message_text("⏳ <i>Đang tách nền (Gói Cao Cấp)...</i>", parse_mode="HTML")
+            ok = False
+            if REMOVEBG_API_KEY:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        res = await client.post(
+                            "https://api.remove.bg/v1.0/removebg",
+                            headers={"X-Api-Key": REMOVEBG_API_KEY},
+                            files={"image_file": img_bytes},
+                            data={"size": "auto"},
+                            timeout=30.0
+                        )
+                    if res.status_code == 200:
+                        await context.bot.send_document(
+                            chat_id=chat_id, document=res.content,
+                            filename="no_bg.png",
+                            caption=f"✂️ Gói Cao Cấp — Tách nền HD thành công! (-{cost} Xu)"
+                        )
+                        await query.delete_message()
+                        ok = True
+                    else:
+                        logger.warning(f"RemoveBG {res.status_code} → fallback Cutout")
+                except Exception as e:
+                    logger.error(f"RemoveBG error: {e}")
+            if not ok:
+                # Fallback gói tiết kiệm — hoàn xu cao cấp, trừ 5 xu tiết kiệm
+                if cost > 0 and str(uid) != ADMIN_ID:
+                    add_credit(uid, cost)  # hoàn xu gói cao cấp
+                if str(uid) != ADMIN_ID:
+                    conn = __import__('sqlite3').connect(DB_FILE)
+                    c = conn.cursor()
+                    c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (IMAGE_FREE_COST, str(uid)))
+                    conn.commit()
+                    conn.close()
+                cutout_ok = False
+                if CUTOUT_API_KEY:
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            res = await client.post(
+                                "https://www.cutout.pro/api/v1/matting2?mattingType=2&crop=true",
+                                headers={"APIKEY": CUTOUT_API_KEY},
+                                files={"file": img_bytes},
+                                timeout=30.0
+                            )
+                        if res.status_code == 200:
+                            await context.bot.send_document(
+                                chat_id=chat_id, document=res.content,
+                                filename="no_bg.png",
+                                caption=f"✂️ Gói Tiết Kiệm — Hoàn thành! (-{IMAGE_FREE_COST} Xu)"
+                            )
+                            await query.delete_message()
+                            cutout_ok = True
+                    except Exception as e:
+                        logger.error(f"Cutout fallback error: {e}")
+                if not cutout_ok:
+                    await query.edit_message_text("❌ Cả 2 dịch vụ đều lỗi. Xu đã hoàn lại.")
+
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(update.effective_user.id, update.effective_user.first_name)
     text = (
-        "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.0</b>\n\n"
+        "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.1</b>\n\n"
         "Chào mừng! Hệ thống tính phí thông minh theo dung lượng thực tế.\n\n"
         "🛠️ <b>CÁCH SỬ DỤNG:</b>\n"
         "<b>1. Chat AI:</b> Nhắn tin bình thường (tính theo độ dài chữ).\n"
@@ -386,11 +754,13 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"- Ngân hàng: <b>ACB</b>\n"
         f"- STK: <b>8899397968</b> (NGUYEN MANH TOAN)\n"
         f"- Nội dung BẮT BUỘC: <code>DAAS {uid}</code>\n\n"
-        f"<b>📋 QUY TRÌNH 3 BƯỚC:</b>\n"
+        f"<b>⚡ NẠP TỰ ĐỘNG:</b>\n"
+        f"Hệ thống tự xác nhận qua PayOS trong vài giây!\n\n"
+        f"<b>📋 QUY TRÌNH:</b>\n"
         f"1️⃣ Chuyển khoản với nội dung <code>DAAS {uid}</code>\n"
-        f"2️⃣ Chụp màn hình bill ngân hàng\n"
-        f"3️⃣ Gửi ảnh bill vào đây → Bot tự báo Admin duyệt!\n\n"
-        f"⚠️ <i>Không ghi sai nội dung — Admin sẽ không thể xác nhận.</i>"
+        f"2️⃣ Xu tự động vào tài khoản trong 5-10 giây ⚡\n"
+        f"3️⃣ Bot sẽ gửi thông báo xác nhận\n\n"
+        f"⚠️ <i>Không ghi sai nội dung — hệ thống sẽ không nhận diện được.</i>"
     )
     qr_url = (
         f"https://img.vietqr.io/image/ACB-8899397968-compact.png"
@@ -528,7 +898,6 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin: thống kê nhanh hệ thống"""
     if str(update.effective_user.id) != ADMIN_ID:
         return
     conn = sqlite3.connect(DB_FILE)
@@ -543,23 +912,25 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     revenue_today = c.fetchone()[0] or 0
     c.execute("SELECT COUNT(*) FROM pending_deposits WHERE status='pending'")
     pending = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM payos_processed")
+    payos_auto = c.fetchone()[0]
     conn.close()
     await update.message.reply_text(
         f"📊 <b>THỐNG KÊ HỆ THỐNG</b>\n\n"
         f"👥 Tổng user: <b>{total_users}</b>\n"
         f"⚡ Giao dịch hôm nay: <b>{tx_today}</b>\n"
         f"💰 Xu tiêu hôm nay: <b>{revenue_today}</b>\n"
-        f"📋 Bill chờ duyệt: <b>{pending}</b>",
+        f"📋 Bill chờ duyệt (thủ công): <b>{pending}</b>\n"
+        f"🤖 Nạp tự động PayOS: <b>{payos_auto}</b>",
         parse_mode="HTML"
     )
 
 async def cmd_setvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin: bật/tắt VIP cho user"""
     if str(update.effective_user.id) != ADMIN_ID:
         return
     try:
         target_id = context.args[0]
-        flag = int(context.args[1])  # 1 = VIP, 0 = thường
+        flag = int(context.args[1])
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("UPDATE users SET is_vip=? WHERE user_id=?", (flag, str(target_id)))
@@ -619,37 +990,34 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ── Tách nền ──
-    if not REMOVEBG_API_KEY:
+    # -- Tach nen: cho khach chon provider --
+    if not REMOVEBG_API_KEY and not CUTOUT_API_KEY:
         return await update.message.reply_text("❌ Dịch vụ tách nền chưa được cấu hình.")
     file_size = update.message.photo[-1].file_size
-    can_afford, cost, _ = deduct_dynamic_credit(uid, "image", file_size)
-    if not can_afford:
+    raw_cost = calculate_dynamic_cost("image", file_size)
+    credits, total_spent, is_vip = get_user(uid)
+    final_cost, _ = apply_discount(total_spent, raw_cost)
+    if credits < final_cost and str(uid) != ADMIN_ID and is_vip != 1:
         return await update.message.reply_text(
-            f"❌ Cần {cost} Xu để xử lý ảnh {math.ceil(file_size/(1024*1024))}MB.\n"
-            f"<i>Nếu muốn gửi bill, thêm caption 'bill' vào ảnh.</i>",
+            f"❌ Cần {final_cost} Xu để dùng Gói Cao Cấp.\n"
+            f"Chọn Gói Tiết Kiệm (-5 Xu) hoặc /naptien để nạp thêm.",
             parse_mode="HTML"
         )
-    msg = await update.message.reply_text("⏳ <i>[Studio] Đang xử lý tách nền...</i>", parse_mode="HTML")
     img_bytes = bytes(await (await update.message.photo[-1].get_file()).download_as_bytearray())
-    async with httpx.AsyncClient() as client:
-        res = await client.post(
-            "https://api.remove.bg/v1.0/removebg",
-            headers={"X-Api-Key": REMOVEBG_API_KEY},
-            files={"image_file": img_bytes},
-            data={"size": "auto"},
-            timeout=30.0
-        )
-    if res.status_code == 200:
-        await context.bot.send_document(
-            chat_id=update.effective_chat.id,
-            document=res.content,
-            filename="no_bg.png",
-            caption=f"✂️ Tách nền thành công! (-{cost} Xu)"
-        )
-        await msg.delete()
-    else:
-        await msg.edit_text("❌ Lỗi API tách nền.")
+    USER_PENDING[uid] = {
+        "type": "image",
+        "file_bytes": img_bytes,
+        "cost": final_cost,
+        "chat_id": update.effective_chat.id,
+    }
+    kb = provider_keyboard("image", uid, final_cost)
+    await update.message.reply_text(
+        f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
+        f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{IMAGE_FREE_COST} Xu</b>\n"
+        f"🖼️ <b>Gói Cao Cấp</b> — Chất lượng HD, trừ <b>{final_cost} Xu</b>\n\n"
+        f"<i>Nếu gói cao cấp gặp sự cố → tự chuyển gói tiết kiệm và hoàn phần dư.</i>",
+        parse_mode="HTML", reply_markup=kb
+    )
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_obj = update.message.voice or update.message.audio
@@ -686,8 +1054,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🛸 MENU DỊCH VỤ TOAN DAAS":
         return await cmd_start(update, context)
 
-    if not gemini_client:
-        return await update.message.reply_text("❌ Hệ thống AI chưa sẵn sàng (thiếu GEMINI_API_KEY).")
+    if not gemini_client and not openai_client:
+        return await update.message.reply_text("❌ Hệ thống AI chưa sẵn sàng (thiếu GEMINI_API_KEY và OPENAI_API_KEY).")
 
     try:
         route_raw = AgentGemini.chat(
@@ -711,10 +1079,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     if act == "voice":
-        used_fish = await AgentVoice.render(data, uid, context, update.effective_chat.id, cost)
-        # Nếu fallback Edge TTS (miễn phí) → hoàn xu đã trừ
-        if not used_fish and cost > 0 and str(uid) != ADMIN_ID:
-            add_credit(uid, cost)
+        # Hoi khach chon provider truoc khi xu ly
+        # Tinh cost cho Fish Audio (co phi); neu chon Edge TTS mien phi thi khong tru xu
+        raw_cost_v = calculate_dynamic_cost("voice", size_calc)
+        _, ts_v, _ = get_user(uid)
+        fish_cost, _ = apply_discount(ts_v, raw_cost_v)
+        # Hoan xu da tru (vi deduct_dynamic_credit da tru cho 'voice')
+        if cost > 0 and str(uid) != ADMIN_ID:
+            add_credit(uid, cost)  # hoan tam, se tru lai neu chon paid
+        USER_PENDING[uid] = {
+            "type": "voice",
+            "data": data,
+            "cost": fish_cost,
+            "chat_id": update.effective_chat.id,
+            "file_bytes": None,
+        }
+        kb = provider_keyboard("voice", uid, fish_cost)
+        await update.message.reply_text(
+            f"🎙️ <b>Chọn gói đọc giọng nói:</b>\n\n"
+            f"🔊 <b>Gói Tiết Kiệm</b> — Giọng chuẩn, trừ <b>{VOICE_FREE_COST} Xu</b>\n"
+            f"🎙️ <b>Gói Cao Cấp</b> — Giọng nhân bản siêu thực, trừ <b>{fish_cost} Xu</b>\n\n"
+            f"<i>Nếu gói cao cấp gặp sự cố → tự chuyển gói tiết kiệm và hoàn phần dư.</i>",
+            parse_mode="HTML", reply_markup=kb
+        )
     elif act == "download":
         await AgentDownloader.download(data, context, update.effective_chat.id, cost)
     else:
@@ -729,12 +1116,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-# ─── FASTAPI + LIFESPAN (GIẢI QUYẾT EVENT LOOP CONFLICT) ─────────────────────
+# ─── FASTAPI + LIFESPAN ───────────────────────────────────────────────────────
 tg_app: Application = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Khởi động Telegram bot cùng vòng lặp sự kiện của FastAPI"""
     global tg_app
     init_db()
     if not TELEGRAM_TOKEN:
@@ -744,7 +1130,6 @@ async def lifespan(app: FastAPI):
 
     tg_app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Đăng ký handlers
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
@@ -759,31 +1144,31 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
 
     await tg_app.initialize()
     await tg_app.start()
-    # Chạy polling trong background task (không block event loop)
     asyncio.create_task(tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES))
-    logger.info("🚀 TOAN DAAS V15.0 ONLINE — Bot + API đang chạy.")
+    logger.info("🚀 TOAN DAAS V15.1 ONLINE — Bot + API đang chạy.")
     yield
-    # Graceful shutdown
     await tg_app.updater.stop()
     await tg_app.stop()
     await tg_app.shutdown()
     logger.info("🛑 Bot đã dừng an toàn.")
 
-fastapi_app = FastAPI(title="TOAN DAAS V15.0", lifespan=lifespan)
+fastapi_app = FastAPI(title="TOAN DAAS V15.1", lifespan=lifespan)
 
-# ─── HEALTH CHECK (Railway dùng để kiểm tra container còn sống) ───────────────
+# ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 @fastapi_app.get("/")
 async def health():
-    return {"status": "ok", "service": "TOAN DAAS V15.0"}
+    return {"status": "ok", "service": "TOAN DAAS V15.1"}
 
-# ─── WEBHOOK PAYOS (TUỲ CHỌN — BẬT KHI CÓ PAYOS_CHECKSUM_KEY) ───────────────
+# ─── WEBHOOK PAYOS ────────────────────────────────────────────────────────────
 def verify_payos_signature(data: dict, received_sig: str) -> bool:
     """Xác thực chữ ký HMAC-SHA256 từ payOS"""
     if not PAYOS_CHECKSUM_KEY:
         return False
+    # PayOS yêu cầu sort key theo alphabet, ghép thành key=value&key=value
     sorted_keys = sorted(data.keys())
     raw_str = "&".join(f"{k}={data[k]}" for k in sorted_keys)
     computed = hmac.new(
@@ -795,40 +1180,103 @@ def verify_payos_signature(data: dict, received_sig: str) -> bool:
 
 @fastapi_app.post("/webhook/payos")
 async def webhook_payos(request: Request):
-    body = await request.json()
+    """
+    PayOS gọi endpoint này sau mỗi giao dịch thành công.
+    Khách chuyển khoản nội dung: DAAS <user_id>
+    Bot tự cộng Xu và thông báo cho khách.
+    """
+    try:
+        body = await request.json()
+        logger.info(f"PayOS webhook received: {body}")
+    except Exception:
+        logger.warning("PayOS webhook: body không phải JSON hợp lệ")
+        return JSONResponse({"code": "00", "desc": "ok"})
+
     sig  = body.get("signature", "")
     data = body.get("data", {})
 
-    if PAYOS_CHECKSUM_KEY and not verify_payos_signature(data, sig):
-        raise HTTPException(status_code=400, detail="Invalid signature")
+    # Xác thực chữ ký — chỉ bật khi đã cấu hình PAYOS_CHECKSUM_KEY
+    if PAYOS_CHECKSUM_KEY:
+        if not sig:
+            logger.warning("PayOS webhook: không có signature, bỏ qua xác thực.")
+        elif not verify_payos_signature(data, sig):
+            logger.warning("PayOS webhook: chữ ký không hợp lệ!")
+            return JSONResponse({"code": "01", "desc": "invalid_signature"}, status_code=200)
 
-    if body.get("success") and data.get("description", ""):
-        desc = data["description"].upper()
-        # Tìm pattern "DAAS <user_id>" trong nội dung chuyển khoản
-        parts = desc.split()
-        for i, p in enumerate(parts):
-            if p == "DAAS" and i + 1 < len(parts):
-                target_id = parts[i + 1]
-                amount_vnd = int(data.get("amount", 0))
-                xu = math.floor(amount_vnd / 100)  # 100đ = 1 Xu
-                if xu > 0:
-                    add_credit(target_id, xu)
-                    logger.info(f"✅ Auto nạp {xu} Xu cho {target_id} (payOS)")
-                    if tg_app:
-                        try:
-                            await tg_app.bot.send_message(
-                                chat_id=target_id,
-                                text=(
-                                    f"🎉 <b>NẠP TỰ ĐỘNG THÀNH CÔNG!</b>\n\n"
-                                    f"payOS xác nhận +<b>{xu} Xu</b>.\n"
-                                    f"💰 Số tiền: {amount_vnd:,}đ\n\n"
-                                    f"Cảm ơn bạn đã tin dùng TOAN DAAS! 🙏"
-                                ),
-                                parse_mode="HTML"
-                            )
-                        except Exception as e:
-                            logger.error(f"Notify user error: {e}")
-                break
+    # Chỉ xử lý khi giao dịch thành công
+    if not (body.get("success") or data.get("status") == "PAID"):
+        return JSONResponse({"code": "00", "desc": "ignored"})
+
+    order_code = str(data.get("orderCode", data.get("order_code", "")))
+    desc = data.get("description", data.get("addInfo", "")).upper()
+    amount_vnd = int(data.get("amount", 0))
+
+    # Chống xử lý trùng
+    if order_code and is_payos_order_processed(order_code):
+        logger.info(f"PayOS: order {order_code} đã xử lý, bỏ qua.")
+        return JSONResponse({"code": "00", "desc": "duplicate"})
+
+    # Tìm pattern "DAAS <user_id>" trong nội dung chuyển khoản
+    target_id = None
+    parts = desc.split()
+    for i, p in enumerate(parts):
+        if p == "DAAS" and i + 1 < len(parts) and parts[i + 1].isdigit():
+            target_id = parts[i + 1]
+            break
+
+    if not target_id:
+        logger.warning(f"PayOS webhook: không tìm thấy DAAS <user_id> trong nội dung: {desc}")
+        return JSONResponse({"code": "00", "desc": "no_target"})
+
+    # Tính xu — bảng quy đổi có thưởng
+    if amount_vnd >= 500000:
+        xu = 6000
+    elif amount_vnd >= 100000:
+        xu = 1050
+    elif amount_vnd >= 50000:
+        xu = 500
+    else:
+        xu = math.floor(amount_vnd / 100)  # fallback: 100đ = 1 Xu
+
+    if xu <= 0:
+        return JSONResponse({"code": "00", "desc": "amount_too_low"})
+
+    add_credit(target_id, xu)
+    if order_code:
+        mark_payos_order_processed(order_code)
+
+    credits_now, _, _ = get_user(target_id)
+    logger.info(f"✅ PayOS auto nạp {xu} Xu cho {target_id} | {amount_vnd:,}đ | order: {order_code}")
+
+    # Thông báo cho khách qua Telegram
+    if tg_app:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=target_id,
+                text=(
+                    f"🎉 <b>NẠP TỰ ĐỘNG THÀNH CÔNG!</b>\n\n"
+                    f"✅ PayOS xác nhận thanh toán!\n"
+                    f"💰 Số tiền: <b>{amount_vnd:,}đ</b>\n"
+                    f"🪙 Cộng: <b>+{xu} Xu</b>\n"
+                    f"💼 Số dư hiện tại: <b>{credits_now} Xu</b>\n\n"
+                    f"Cảm ơn bạn đã tin dùng TOAN DAAS! 🙏"
+                ),
+                parse_mode="HTML"
+            )
+            # Thông báo admin
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"💸 <b>AUTO NẠP PAYOS</b>\n\n"
+                    f"🆔 User: <code>{target_id}</code>\n"
+                    f"💰 {amount_vnd:,}đ → +{xu} Xu\n"
+                    f"📋 Order: {order_code}"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Notify error: {e}")
+
     return JSONResponse({"code": "00", "desc": "success"})
 
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
