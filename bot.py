@@ -4443,9 +4443,26 @@ def operator_brain_fallback(raw_text):
     job_id = int_from_text(lower, ["job", "video job"], 0)
     limit = first_number_near(lower, ["video", "job", "trend"], 0) or int_from_text(lower, ["limit", "max"], 0) or 5
     duration = int_from_text(lower, ["duration", "dai", "dài"], 45) or 45
+    build_requested = any(word in lower for word in ["build", "dựng", "dung", "xây", "xay", "tạo bundle", "tao bundle", "build luôn", "build luon"])
 
     if any(word in lower for word in ["ready", "sẵn sàng", "san sang", "đủ điều kiện", "du dieu kien"]):
         return {"intent": "job_ready", "job": job_id, "confidence": 70}
+    if affiliate_id and any(word in lower for word in ["scale", "nhân rộng", "nhan rong", "đẩy link", "day link", "affiliate", "link này", "link nay"]):
+        niche = re.sub(r"\b(scale|nhân rộng|nhan rong|đẩy link|day link|affiliate|aff|link này|link nay|tạo|tao|làm|lam|video|trend|cho|trên|tren|kênh|kenh|campaign|camp|limit|job|build|luôn|luon)\b", " ", lower)
+        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
+        niche = re.sub(r"\s+", " ", niche).strip(" :=#")
+        return {
+            "intent": "affiliate_scale",
+            "niche": niche,
+            "platform": platform,
+            "channel": channel_id or "all",
+            "affiliate": affiliate_id,
+            "campaign": campaign_id,
+            "limit": max(1, min(limit, 12)),
+            "duration": duration,
+            "build": 1 if build_requested else 0,
+            "confidence": 78,
+        }
     if any(word in lower for word in ["build", "dựng", "san xuat", "sản xuất", "manifest", "task"]):
         return {"intent": "operator_build", "job": job_id, "duration": duration, "limit": limit, "confidence": 70}
     if any(word in lower for word in ["daily", "báo cáo ngày", "bao cao ngay", "tổng quan", "tong quan", "dashboard"]):
@@ -4496,8 +4513,9 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
+        "Chỉ chọn một intent trong: affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
         "Quy tắc:\n"
+        "- affiliate_scale: khi admin muốn scale/đẩy một link affiliate cụ thể thành nhiều video theo trend; cần affiliate/aff ID.\n"
         "- operator_auto: khi admin muốn tìm trend/tạo nhiều video theo niche/platform.\n"
         "- autopilot: khi admin muốn tìm trend, tạo job và build luôn creative/manifest/task trong một lệnh.\n"
         "- operator: khi admin nêu một topic cụ thể và có channel để tạo một job.\n"
@@ -4506,7 +4524,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"autopilot","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":3,"duration":45,"days":1,"topic":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":3,"duration":45,"build":1,"days":1,"topic":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -4520,6 +4538,14 @@ def parse_operator_brain(raw_text, owner_id):
 
 def brain_command_preview(plan):
     intent = (plan.get("intent") or "help").lower()
+    if intent == "affiliate_scale":
+        return (
+            f"/affiliate_scale aff={int(plan.get('affiliate') or 0)} "
+            f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
+            f"limit={max(1, min(int(plan.get('limit') or 5), 12))} "
+            f"campaign={int(plan.get('campaign') or 0)} build={int(plan.get('build') or 0)} "
+            f"duration={int(plan.get('duration') or 45)}"
+        )
     if intent == "operator_auto":
         return (
             f"/operator_auto niche={plan.get('niche') or 'công nghệ AI'} "
@@ -4562,6 +4588,24 @@ async def run_brain_plan(update, context, plan):
     intent = (plan.get("intent") or "help").lower()
     old_args = list(getattr(context, "args", []) or [])
     try:
+        if intent == "affiliate_scale":
+            if not int(plan.get("affiliate") or 0):
+                return await update.message.reply_text(
+                    "⚠️ Lệnh scale affiliate cần <code>aff=&lt;ID&gt;</code>. Xem ID bằng /affiliates.",
+                    parse_mode="HTML"
+                )
+            context.args = [
+                f"aff={int(plan.get('affiliate') or 0)}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"channel={plan.get('channel') or 'all'}",
+                f"limit={max(1, min(int(plan.get('limit') or 5), 12))}",
+                f"campaign={int(plan.get('campaign') or 0)}",
+                f"build={int(plan.get('build') or 0)}",
+                f"duration={int(plan.get('duration') or 45)}",
+            ]
+            if plan.get("niche"):
+                context.args.append(f"niche={plan.get('niche')}")
+            return await cmd_affiliate_scale(update, context)
         if intent == "operator_auto":
             context.args = [
                 f"niche={plan.get('niche') or 'công nghệ AI'}",
