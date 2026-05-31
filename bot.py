@@ -3407,6 +3407,87 @@ def operator_director_data(owner_id, days=30, platform="tiktok", limit=10):
         "rule": "Director ưu tiên setup/blocker/task/publish trước, sau đó mới scale affiliate có tín hiệu tốt.",
     }
 
+async def execute_operator_director_action(owner_id, action, build=True, duration=45):
+    if not action:
+        return {"executed": False, "message": "Không có action để chạy."}
+    action_type = action.get("action") or ""
+    if action_type == "SCALE_AFFILIATE":
+        payload = ((action.get("api") or {}).get("payload") or {}).copy()
+        affiliate_id = int(payload.get("affiliate_id") or 0)
+        if not affiliate_id:
+            return {"executed": False, "message": "SCALE_AFFILIATE thiếu affiliate_id."}
+        affiliate = get_affiliate_link(affiliate_id, owner_id)
+        if not affiliate:
+            return {"executed": False, "message": "Không tìm thấy affiliate."}
+        aid, network, product, affiliate_niche, url, note, status, price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score = affiliate
+        scale_niche = payload.get("niche") or affiliate_niche or product or "affiliate"
+        platform = (payload.get("platform") or "tiktok").lower()
+        channel = payload.get("channel") or "all"
+        limit = max(1, min(int(payload.get("limit") or 3), 12))
+        campaign_id = int(payload.get("campaign_id") or 0)
+        if not campaign_id:
+            matched_campaign, _ = find_matching_campaign(owner_id, scale_niche, platform)
+            if matched_campaign:
+                campaign_id = matched_campaign[0]
+        created_jobs, error = await create_operator_auto_jobs(owner_id, scale_niche, platform, channel, campaign_id, affiliate_id, limit)
+        if error:
+            return {"executed": False, "message": error, "action": action_type}
+        built = []
+        failed = []
+        if build:
+            for item in created_jobs:
+                ok, bundle = build_operator_job_bundle(owner_id, item["job_id"], count=5, duration=duration)
+                if ok:
+                    readiness = bundle.get("readiness") or {}
+                    built.append({
+                        **item,
+                        "manifest_id": bundle["manifest_id"],
+                        "task_count": len(bundle["task_ids"]),
+                        "variant_id": bundle["best_variant_id"],
+                        "readiness": readiness.get("level", "UNKNOWN") if isinstance(readiness, dict) else "UNKNOWN",
+                    })
+                else:
+                    failed.append({"job_id": item["job_id"], "error": bundle.get("error", "build lỗi")})
+        return {
+            "executed": True,
+            "action": action_type,
+            "affiliate_id": affiliate_id,
+            "scale_niche": scale_niche,
+            "campaign_id": campaign_id,
+            "created_jobs": created_jobs,
+            "built_jobs": built,
+            "failed_builds": failed,
+            "next": {"tasks_url": "/api/operator/tasks/next", "publish_url": "/api/operator/publish/next"},
+        }
+    if action_type == "PUBLISH_READY":
+        match = re.search(r"job[ =#]*(\d+)", action.get("telegram_command", "") + " " + action.get("title", ""))
+        job_id = int(match.group(1)) if match else 0
+        if not job_id:
+            return {"executed": False, "message": "PUBLISH_READY thiếu job_id."}
+        ok, queue_id = create_publish_queue_item(owner_id, job_id, mode="manual", scheduled_at="", note="director_execute_queue")
+        return {
+            "executed": bool(ok),
+            "action": action_type,
+            "job_id": job_id,
+            "queue_id": queue_id if ok else 0,
+            "message": "Đã đưa vào publish queue manual." if ok else str(queue_id),
+            "next": {"publish_pack_url": f"/api/operator/jobs/{job_id}/publish-pack", "publish_next_url": "/api/operator/publish/next"},
+        }
+    if action_type == "WORK_TASK":
+        return {
+            "executed": False,
+            "action": action_type,
+            "message": "Task cần worker AI/tool xử lý qua GET /api/operator/tasks/next; director không tự giả lập output.",
+            "next": action.get("api") or {"method": "GET", "url": "/api/operator/tasks/next"},
+        }
+    return {
+        "executed": False,
+        "action": action_type,
+        "message": "Action này cần admin cấu hình/xác nhận thủ công.",
+        "telegram_command": action.get("telegram_command", ""),
+        "api": action.get("api"),
+    }
+
 def operator_loop_data(owner_id, limit=10, auto_queue=True):
     jobs = list_production_jobs(owner_id, limit=limit)
     advanced = []
@@ -4489,6 +4570,15 @@ class OperatorAffiliateScaleRequest(BaseModel):
     build: bool = False
     duration: int = Field(default=45, ge=15, le=120)
     variants: int = Field(default=5, ge=3, le=8)
+    notify_admin: bool = True
+
+class OperatorDirectorRunRequest(BaseModel):
+    days: int = Field(default=30, ge=1, le=180)
+    platform: str = Field(default="tiktok", max_length=40)
+    limit: int = Field(default=10, ge=3, le=20)
+    execute: bool = True
+    build: bool = True
+    duration: int = Field(default=45, ge=15, le=120)
     notify_admin: bool = True
 
 class AgentGemini:
@@ -6993,7 +7083,7 @@ def operator_category_keyboard(category):
         "cat_control": [
             ("🧠 Brain command", "brain"), ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
-            ("🎛 Director", "director"),
+            ("🎛 Director", "director"), ("▶️ Execute", "execute"),
             ("📌 Today plan", "today"), ("📘 Playbook", "playbook"),
             ("🧭 System status", "status"), ("📊 Daily digest", "daily"),
             ("🧭 Dashboard", "dashboard"),
@@ -7092,6 +7182,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Endpoint cho n8n/worker:</b>",
         f"• Director next action: <code>GET {html.escape(base_url)}/api/operator/director</code>",
+        f"• Director execute an toàn: <code>POST {html.escape(base_url)}/api/operator/director/run</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Việc ưu tiên hôm nay: <code>GET {html.escape(base_url)}/api/operator/today</code>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
@@ -7110,6 +7201,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Payload loop mẫu:</b>",
         '<pre>{"limit":10,"auto_queue":true,"notify_admin":true}</pre>',
+        "<b>Payload director-run mẫu:</b>",
+        '<pre>{"days":30,"platform":"tiktok","limit":10,"execute":true,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload affiliate-scale mẫu:</b>",
         '<pre>{"affiliate_id":3,"platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload task complete mẫu:</b>",
@@ -7149,6 +7242,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
         "director": "/operator_director days=30 platform=tiktok limit=10",
+        "execute": "/operator_execute days=30 platform=tiktok build=1 duration=45",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
         "autopilot": "/autopilot niche=công nghệ AI platform=tiktok channel=all aff=<AFF_ID> campaign=<ID> limit=3 duration=45",
         "build": "/operator_build job=<JOB_ID> n=5 duration=45",
@@ -8323,6 +8417,50 @@ async def cmd_operator_director(update: Update, context: ContextTypes.DEFAULT_TY
         "<code>GET /api/operator/director?days=30&amp;platform=tiktok</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_operator_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or 30), 180))
+    except ValueError:
+        days = 30
+    try:
+        limit = max(3, min(int(data.get("limit") or 10), 20))
+    except ValueError:
+        limit = 10
+    try:
+        duration = max(15, min(int(data.get("duration") or data.get("sec") or 45), 120))
+    except ValueError:
+        duration = 45
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    build = (data.get("build") or "1").lower() not in {"0", "false", "no", "off"}
+    director = operator_director_data(update.effective_user.id, days=days, platform=platform, limit=limit)
+    action = director.get("next_action")
+    msg = await update.message.reply_text("🎛 Director Execute đang chạy action an toàn tiếp theo...")
+    try:
+        result = await execute_operator_director_action(update.effective_user.id, action, build=build, duration=duration)
+    except Exception as e:
+        await alert_admin(context, "Operator Execute", str(e))
+        return await msg.edit_text("❌ Director Execute lỗi. Đã báo admin.")
+    lines = [
+        "🎛 <b>DIRECTOR EXECUTE</b>",
+        f"• Action: <b>{html.escape((action or {}).get('action') or '-')}</b>",
+        f"• Executed: <b>{'có' if result.get('executed') else 'chưa'}</b>",
+    ]
+    if result.get("message"):
+        lines.append(f"• Ghi chú: {html.escape(str(result.get('message')))}")
+    if result.get("created_jobs") is not None:
+        lines.append(f"• Jobs tạo: <b>{len(result.get('created_jobs') or [])}</b>")
+    if result.get("built_jobs") is not None:
+        lines.append(f"• Jobs build: <b>{len(result.get('built_jobs') or [])}</b>")
+    if result.get("queue_id"):
+        lines.append(f"• Queue publish: <code>#{result.get('queue_id')}</code>")
+    if result.get("next"):
+        lines.append(f"\n<b>Next:</b>\n<pre>{html_pre(json.dumps(result.get('next'), ensure_ascii=False), 900)}</pre>")
+    lines.append("\nXem tiếp: <code>/operator_director</code> | <code>/operator_loop</code> | <code>/publish_queue</code>")
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -9537,6 +9675,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
     tg_app.add_handler(CommandHandler("operator_playbook", cmd_operator_playbook))
     tg_app.add_handler(CommandHandler("operator_director", cmd_operator_director))
+    tg_app.add_handler(CommandHandler("operator_execute", cmd_operator_execute))
     tg_app.add_handler(CommandHandler("operator_today", cmd_operator_today))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
@@ -9754,6 +9893,50 @@ async def api_operator_director(request: Request, days: int = 30, platform: str 
         "next": {
             "director_url": "/api/operator/director",
             "scale_url": "/api/operator/affiliate-scale",
+            "tasks_url": "/api/operator/tasks/next",
+            "publish_url": "/api/operator/publish/next",
+            "performance_url": "/api/operator/performance",
+        },
+    }
+
+@fastapi_app.post("/api/operator/director/run")
+async def api_operator_director_run(payload: OperatorDirectorRunRequest, request: Request):
+    verify_operator_api_token(request)
+    data = operator_director_data(ADMIN_ID, days=payload.days, platform=payload.platform.lower(), limit=payload.limit)
+    action = data.get("next_action")
+    result = {"executed": False, "message": "execute=false", "action": (action or {}).get("action")}
+    if payload.execute:
+        result = await execute_operator_director_action(
+            ADMIN_ID,
+            action,
+            build=payload.build,
+            duration=payload.duration,
+        )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🎛 <b>OPERATOR DIRECTOR RUN</b>\n\n"
+                    f"• Action: <b>{html.escape((action or {}).get('action') or '-')}</b>\n"
+                    f"• Executed: <b>{'có' if result.get('executed') else 'chưa'}</b>\n"
+                    f"• Note: {html.escape(str(result.get('message') or '-'))}\n"
+                    f"• Xem: <code>/operator_director</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Operator director run notify error: {e}")
+    return {
+        "ok": True,
+        "director": {
+            "next_action": action,
+            "ready_to_scale": data["status"]["ready_to_scale"],
+            "counts": data["status"]["counts"],
+        },
+        "result": result,
+        "next": {
+            "director_url": "/api/operator/director",
             "tasks_url": "/api/operator/tasks/next",
             "publish_url": "/api/operator/publish/next",
             "performance_url": "/api/operator/performance",
