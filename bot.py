@@ -80,6 +80,7 @@ PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "Httdhtoan")
 PUBLIC_BASE_URL     = _env("PUBLIC_BASE_URL")
 LEAD_WEBHOOK_SECRET = _env("LEAD_WEBHOOK_SECRET")
+OPERATOR_API_TOKEN  = _env("OPERATOR_API_TOKEN")
 
 # ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -2031,6 +2032,25 @@ def next_production_task(owner_id, job_id=None):
     actionable.sort(key=lambda row: (status_priority.get(row[7] or "queued", 9), type_priority.get(row[3] or "", 9), row[5] or 0, row[0]))
     return actionable[0]
 
+def next_worker_task(owner_id, job_id=None, tool=""):
+    rows = list_production_tasks(owner_id, job_id=job_id, limit=200)
+    allowed_status = {"queued", "waiting"}
+    tool = (tool or "").strip().lower()
+    candidates = []
+    for row in rows:
+        row_tool = (row[4] or "").lower()
+        row_status = (row[7] or "queued").lower()
+        if row_status not in allowed_status:
+            continue
+        if tool and tool not in {row_tool, (row[3] or "").lower()}:
+            continue
+        candidates.append(row)
+    if not candidates:
+        return None
+    type_priority = {"visual_scene": 0, "voice": 1, "edit": 2, "review": 3, "publish": 4}
+    candidates.sort(key=lambda row: (type_priority.get(row[3] or "", 9), row[5] or 0, row[0]))
+    return get_production_task(owner_id, candidates[0][0])
+
 def update_production_task(owner_id, task_id, status=None, output_url=None, note=None):
     updates = []
     params = []
@@ -2065,6 +2085,47 @@ def update_production_task(owner_id, task_id, status=None, output_url=None, note
         }.get(row[1], "source")
         add_production_asset(owner_id, row[0], asset_type, output_url, "", f"task:{task_id} {note or ''}")
     return changed > 0, row
+
+def serialize_operator_task(row):
+    if not row:
+        return None
+    task_id, job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = row
+    job = get_production_job(job_id, ADMIN_ID)
+    job_payload = None
+    if job:
+        (
+            jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, job_status,
+            operator_note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+        ) = job
+        job_payload = {
+            "id": jid,
+            "platform": platform,
+            "topic": topic,
+            "stage": stage,
+            "status": job_status,
+            "channel_name": channel_name,
+            "account_label": account_label,
+            "affiliate_network": network,
+            "affiliate_product": product_name,
+            "affiliate_url": affiliate_url,
+            "asset_url": asset_url,
+            "publish_url": publish_url,
+        }
+    return {
+        "id": task_id,
+        "job_id": job_id,
+        "manifest_id": manifest_id,
+        "task_type": task_type,
+        "tool": tool,
+        "scene_no": scene_no,
+        "title": title,
+        "prompt": prompt,
+        "status": status,
+        "output_url": output_url,
+        "note": note,
+        "updated_at": updated_at,
+        "job": job_payload,
+    }
 
 def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0):
     job = get_production_job(job_id, owner_id)
@@ -2887,6 +2948,11 @@ class LeadRequest(BaseModel):
     services: list[str] = Field(default_factory=list)
     note: str = Field(default="", max_length=1000)
     source: str = Field(default="landing", max_length=80)
+
+class OperatorTaskCompleteRequest(BaseModel):
+    status: str = Field(default="ready", max_length=30)
+    output_url: str = Field(default="", max_length=2000)
+    note: str = Field(default="", max_length=1200)
 
 class AgentGemini:
     @staticmethod
@@ -7192,6 +7258,95 @@ async def create_lead(payload: LeadRequest, request: Request):
             logger.error(f"Lead notify error: {e}")
 
     return {"ok": True, "lead_id": lead_id}
+
+# ─── OPERATOR API BRIDGE ─────────────────────────────────────────────────────
+def verify_operator_api_token(request: Request):
+    if not OPERATOR_API_TOKEN:
+        raise HTTPException(status_code=503, detail="OPERATOR_API_TOKEN is not configured")
+    auth = request.headers.get("authorization", "")
+    bearer = auth.replace("Bearer ", "", 1).strip() if auth.lower().startswith("bearer ") else ""
+    token = request.headers.get("x-operator-token") or bearer
+    if not token or not hmac.compare_digest(str(token), OPERATOR_API_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid operator token")
+
+@fastapi_app.get("/api/operator/tasks/next")
+async def api_operator_next_task(request: Request, job_id: int = 0, tool: str = ""):
+    verify_operator_api_token(request)
+    task = next_worker_task(ADMIN_ID, job_id=job_id or None, tool=tool)
+    if not task:
+        return {"ok": True, "task": None, "message": "no queued task"}
+    update_production_task(ADMIN_ID, task[0], status="working", note=f"api_worker_claim tool={tool or task[4] or '-'}")
+    task = get_production_task(ADMIN_ID, task[0])
+    return {
+        "ok": True,
+        "task": serialize_operator_task(task),
+        "submit_url": f"/api/operator/tasks/{task[0]}/complete",
+        "rule": "Submit output_url when the external AI/tool finishes. Do not publish without review gate.",
+    }
+
+@fastapi_app.post("/api/operator/tasks/{task_id}/complete")
+async def api_operator_complete_task(task_id: int, payload: OperatorTaskCompleteRequest, request: Request):
+    verify_operator_api_token(request)
+    status = (payload.status or "ready").lower()
+    allowed = {"queued", "working", "waiting", "ready", "blocked", "done", "cancelled"}
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {', '.join(sorted(allowed))}")
+    task = get_production_task(ADMIN_ID, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    changed, row = update_production_task(ADMIN_ID, task_id, status=status, output_url=payload.output_url, note=payload.note)
+    if not changed:
+        raise HTTPException(status_code=400, detail="Task not updated")
+    job_id, task_type = row
+    if status in {"ready", "done"}:
+        update_production_job(job_id, ADMIN_ID, status="working", note=f"api_task_complete:{task_id} {task_type} {status}")
+    if status == "blocked":
+        update_production_job(job_id, ADMIN_ID, status="blocked", note=f"api_task_blocked:{task_id} {payload.note}")
+    updated_task = get_production_task(ADMIN_ID, task_id)
+    readiness = production_readiness_data(ADMIN_ID, job_id)
+
+    if tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"🤖 <b>OPERATOR API TASK UPDATE</b>\n\n"
+                    f"• Task: <code>#{task_id}</code> | Job: <code>#{job_id}</code>\n"
+                    f"• Type: <code>{html.escape(task_type or '-')}</code> | Status: <b>{html.escape(status)}</b>\n"
+                    f"• Output: <code>{html.escape(payload.output_url or 'không có')}</code>\n"
+                    f"• Ready: <b>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</b>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Operator API notify error: {e}")
+
+    return {
+        "ok": True,
+        "task": serialize_operator_task(updated_task),
+        "job_id": job_id,
+        "readiness": {
+            "level": (readiness or {}).get("level", "UNKNOWN"),
+            "next_action": (readiness or {}).get("next_action", ""),
+        },
+    }
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/ready")
+async def api_operator_job_ready(job_id: int, request: Request):
+    verify_operator_api_token(request)
+    readiness = production_readiness_data(ADMIN_ID, job_id)
+    if not readiness:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "level": readiness["level"],
+        "next_action": readiness["next_action"],
+        "checks": [
+            {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
+            for key, ok, detail, next_cmd in readiness["checks"]
+        ],
+    }
 
 # ─── WEBHOOK PAYOS (DYNAMIC UPDATED) ─────────────────────────────────────────
 def verify_payos_signature(data: dict, received_sig: str) -> bool:
