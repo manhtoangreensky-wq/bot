@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 toandaas_system.db
+operator_uploads/
 *.sqlite
 *.sqlite3
 v_*.mp3

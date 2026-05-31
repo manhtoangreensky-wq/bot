@@ -173,6 +173,9 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /api/operator/director/run`: chạy action an toàn tiếp theo từ director; scale affiliate/build job hoặc queue publish manual, nhưng không tự publish ngoài mạng xã hội.
 - `GET /api/operator/today`: worker ngoài lấy danh sách hành động ưu tiên trong ngày, gồm setup, task, publish queue và affiliate nên scale.
 - `POST /api/operator/tasks/{task_id}/complete`: worker ngoài trả `status`, `output_url` hoặc `output_urls`, `asset_type`, `note`; bot tự lưu asset theo loại task và báo admin. `failed` được quy về `blocked` để pipeline không kẹt im lặng.
+- `POST /api/operator/tasks/{task_id}/upload`: worker ngoài upload file thật dạng multipart khi Kling/CapCut/Fish/FFmpeg chưa có public URL; bot lưu vào `operator_uploads`, tạo asset URL nội bộ và cập nhật task.
+- `POST /api/operator/jobs/{job_id}/assets/upload`: upload asset trực tiếp vào job.
+- `GET /api/operator/assets/{asset_id}/file`: tải asset nội bộ, cần `Authorization: Bearer OPERATOR_API_TOKEN` hoặc `?token=...`.
 - `GET /api/operator/jobs/{job_id}/ready`: worker ngoài kiểm tra job đã đủ điều kiện review/publish chưa.
 - `GET /api/operator/jobs/{job_id}/context`: worker ngoài lấy toàn bộ context và runbook của một job trong một lần gọi, thay vì phải tự ghép nhiều endpoint rời.
 - `POST /api/operator/jobs/{job_id}/approve`: duyệt cuối job đã đủ điều kiện và tùy chọn đưa vào publish queue; dùng làm gate trước khi n8n/publisher lấy bài đăng.

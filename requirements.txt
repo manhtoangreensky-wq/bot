@@ -6,3 +6,4 @@ edge-tts
 google-genai
 openai
 pydantic
+python-multipart

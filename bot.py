@@ -28,7 +28,7 @@ from urllib.parse import quote, urlencode
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from google import genai
 from google.genai import types
@@ -85,6 +85,8 @@ PUBLIC_BASE_URL     = _env("PUBLIC_BASE_URL")
 LEAD_WEBHOOK_SECRET = _env("LEAD_WEBHOOK_SECRET")
 OPERATOR_API_TOKEN  = _env("OPERATOR_API_TOKEN")
 AFFILIATE_POSTBACK_TOKEN = _env("AFFILIATE_POSTBACK_TOKEN")
+OPERATOR_UPLOAD_DIR = _env("OPERATOR_UPLOAD_DIR", "operator_uploads")
+MAX_OPERATOR_UPLOAD_MB = int(_env("MAX_OPERATOR_UPLOAD_MB", "200") or "200")
 
 # ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -467,6 +469,9 @@ def init_db():
         "production_assets": [
             ("file_id", "TEXT"),
             ("note", "TEXT"),
+            ("local_path", "TEXT"),
+            ("content_type", "TEXT"),
+            ("filename", "TEXT"),
         ],
         "creative_variants": [
             ("variant_label", "TEXT"),
@@ -2400,6 +2405,11 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/make-video"),
         ("GET", "/api/operator/publisher/status"),
         ("POST", "/api/operator/publisher/run"),
+        ("GET", "/api/operator/tasks/claim"),
+        ("POST", "/api/operator/tasks/<TASK_ID>/complete"),
+        ("POST", "/api/operator/tasks/<TASK_ID>/upload"),
+        ("POST", "/api/operator/jobs/<JOB_ID>/assets/upload"),
+        ("GET", "/api/operator/assets/<ASSET_ID>/file"),
         ("GET", "/api/operator/publish/<QUEUE_ID>/handoff"),
         ("POST", "/api/operator/publish/<QUEUE_ID>/complete"),
         ("POST", "/api/operator/performance"),
@@ -2445,6 +2455,7 @@ def operator_smoke_test_data(owner_id):
         "publisher_run_in_spec": "/api/operator/publisher/run" in spec_text and "/api/operator/publisher/run" in n8n_text,
         "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
+        "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
     }
     sections = {
@@ -2532,11 +2543,11 @@ def operator_worker_spec_data():
             {
                 "role": "tool_worker",
                 "owner": "Kling/Runway/Fish/Edge/CapCut/FFmpeg/n8n",
-                "input": "GET /api/operator/tasks/next",
-                "submit": "POST /api/operator/tasks/<TASK_ID>/complete",
+                "input": "GET /api/operator/tasks/claim?include_context=1",
+                "submit": "POST /api/operator/tasks/<TASK_ID>/complete hoặc POST /api/operator/tasks/<TASK_ID>/upload",
                 "allowed_actions": [
                     "Tạo voice, visual, edit, subtitle, final_video theo task",
-                    "Trả output_url/output_urls hoặc note lỗi rõ ràng",
+                    "Trả output_url/output_urls, hoặc upload file thật qua endpoint /upload",
                     "Không tự thay đổi affiliate link hoặc claim chính sách",
                 ],
             },
@@ -2572,6 +2583,7 @@ def operator_worker_spec_data():
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
             {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1"},
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
+            {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
             {"step": 9, "name": "affiliate_bundle", "method": "GET", "url": "/api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>"},
@@ -2616,6 +2628,17 @@ def operator_worker_spec_data():
                 "output_urls": ["https://.../scene-1.mp4", "https://.../scene-2.mp4"],
                 "asset_type": "raw_video|voice|final_video|source",
                 "note": "tool output or error detail",
+            },
+            "task_upload": {
+                "method": "multipart/form-data",
+                "url": "/api/operator/tasks/<TASK_ID>/upload",
+                "fields": {
+                    "file": "binary mp4/mp3/png/srt",
+                    "status": "ready",
+                    "asset_type": "raw_video|voice|final_video|subtitle|thumbnail",
+                    "note": "tool output",
+                },
+                "purpose": "Dùng khi Kling/CapCut/Fish/FFmpeg tạo file thật nhưng chưa có public URL.",
             },
             "task_claim": {
                 "method": "GET",
@@ -2879,6 +2902,26 @@ def operator_tool_readiness_data():
         "Set OPERATOR_API_TOKEN và PUBLIC_BASE_URL.",
         "operator_bridge",
     )
+    upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+    upload_ready = True
+    upload_detail = f"Upload dir sẵn sàng: {upload_root}"
+    try:
+        os.makedirs(upload_root, exist_ok=True)
+        test_path = os.path.join(upload_root, ".write_test")
+        with open(test_path, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(test_path)
+    except Exception as e:
+        upload_ready = False
+        upload_detail = f"Không ghi được upload dir {upload_root}: {e}"
+    add_check(
+        "operator_uploads",
+        upload_ready,
+        "ok" if upload_ready else "blocked",
+        upload_detail,
+        "Set OPERATOR_UPLOAD_DIR vào thư mục writable trên server.",
+        "operator_bridge",
+    )
     add_check(
         "video_generation",
         bool(_env("KLING_API_KEY") or _env("RUNWAY_API_KEY")),
@@ -3090,6 +3133,13 @@ def operator_n8n_template_data():
                 "method": "POST",
                 "url": f"{base_url}/api/operator/tasks/<TASK_ID>/complete",
                 "body": {"status": "ready", "output_url": "https://.../asset.mp4", "output_urls": ["https://.../scene-1.mp4"], "asset_type": "raw_video", "note": "tool output"},
+            },
+            {
+                "node": "Upload Task File",
+                "type": "http_request_multipart",
+                "method": "POST",
+                "url": f"{base_url}/api/operator/tasks/<TASK_ID>/upload",
+                "form": {"file": "<binary>", "status": "ready", "asset_type": "final_video", "note": "uploaded by worker"},
             },
             {
                 "node": "Job Readiness",
@@ -3705,7 +3755,7 @@ def update_production_job(job_id, owner_id, stage=None, status=None, note=None, 
     conn.close()
     return changed > 0
 
-def add_production_asset(owner_id, job_id, asset_type, url="", file_id="", note=""):
+def add_production_asset(owner_id, job_id, asset_type, url="", file_id="", note="", local_path="", content_type="", filename=""):
     job = get_production_job(job_id, owner_id)
     if not job:
         return False, None
@@ -3713,9 +3763,9 @@ def add_production_asset(owner_id, job_id, asset_type, url="", file_id="", note=
     c = conn.cursor()
     c.execute(
         """INSERT INTO production_assets
-        (owner_id, job_id, asset_type, url, file_id, note, created_at)
-        VALUES (?,?,?,?,?,?,?)""",
-        (str(owner_id), job_id, asset_type, url, file_id, note, now_text())
+        (owner_id, job_id, asset_type, url, file_id, note, local_path, content_type, filename, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (str(owner_id), job_id, asset_type, url, file_id, note, local_path, content_type, filename, now_text())
     )
     asset_id = c.lastrowid
     conn.commit()
@@ -3723,6 +3773,83 @@ def add_production_asset(owner_id, job_id, asset_type, url="", file_id="", note=
     if url:
         update_production_job(job_id, owner_id, asset_url=url)
     return True, asset_id
+
+def get_production_asset(owner_id, asset_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, owner_id, job_id, asset_type, url, file_id, note, local_path, content_type, filename, created_at
+        FROM production_assets
+        WHERE owner_id=? AND id=?""",
+        (str(owner_id), int(asset_id))
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_production_asset_url(owner_id, asset_id, url):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE production_assets SET url=? WHERE owner_id=? AND id=?",
+        (url, str(owner_id), int(asset_id))
+    )
+    changed = c.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0
+
+def safe_upload_filename(filename: str) -> str:
+    base = os.path.basename(filename or "asset.bin")
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._")
+    return base[:120] or "asset.bin"
+
+def operator_asset_url(asset_id: int) -> str:
+    path = f"/api/operator/assets/{int(asset_id)}/file"
+    base = (PUBLIC_BASE_URL or "").rstrip("/")
+    return f"{base}{path}" if base else path
+
+async def save_operator_upload_file(upload: UploadFile, job_id: int) -> tuple[bool, str, dict]:
+    filename = safe_upload_filename(upload.filename)
+    content_type = upload.content_type or "application/octet-stream"
+    upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+    job_dir = os.path.abspath(os.path.join(upload_root, f"job_{int(job_id)}"))
+    if not job_dir.startswith(upload_root):
+        return False, "invalid_upload_path", {}
+    os.makedirs(job_dir, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    local_path = os.path.abspath(os.path.join(job_dir, f"{stamp}_{filename}"))
+    max_bytes = max(1, MAX_OPERATOR_UPLOAD_MB) * 1024 * 1024
+    total = 0
+    try:
+        with open(local_path, "wb") as f:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    f.close()
+                    try:
+                        os.remove(local_path)
+                    except Exception:
+                        pass
+                    return False, f"file_too_large_{MAX_OPERATOR_UPLOAD_MB}mb", {}
+                f.write(chunk)
+        if total <= 0:
+            try:
+                os.remove(local_path)
+            except Exception:
+                pass
+            return False, "empty_file", {}
+        return True, "ok", {
+            "local_path": local_path,
+            "filename": filename,
+            "content_type": content_type,
+            "size": total,
+        }
+    finally:
+        await upload.close()
 
 def list_production_assets(owner_id, job_id, limit=20):
     conn = db_connect()
@@ -10024,6 +10151,9 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
         f"• Claim task + context: <code>GET {html.escape(base_url)}/api/operator/tasks/claim?include_context=1</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
+        f"• Upload file task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/upload</code>",
+        f"• Upload asset job: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/assets/upload</code>",
+        f"• Tải asset nội bộ: <code>GET {html.escape(base_url)}/api/operator/assets/&lt;ASSET_ID&gt;/file</code>",
         f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
         f"• Duyệt publish: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/approve</code>",
@@ -10041,7 +10171,9 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Payload affiliate-scale mẫu:</b>",
         '<pre>{"affiliate_id":3,"platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload task complete mẫu:</b>",
-        '<pre>{"status":"ready","output_url":"https://.../final.mp4","note":"kling/capcut output"}</pre>',
+        '<pre>{"status":"ready","output_url":"https://.../final.mp4","output_urls":["https://.../scene1.mp4"],"asset_type":"raw_video","note":"kling/capcut output"}</pre>',
+        "<b>Task upload multipart mẫu:</b>",
+        '<pre>file=&lt;binary&gt;\nstatus=ready\nasset_type=final_video\nnote=capcut output</pre>',
         "<b>Payload performance mẫu:</b>",
         '<pre>{"job_id":12,"event_type":"revenue","value":1,"amount":150000,"source":"tiktok_affiliate","note":"order"}</pre>',
     ]
@@ -13245,6 +13377,15 @@ def verify_operator_api_token(request: Request):
     if not token or not hmac.compare_digest(str(token), OPERATOR_API_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid operator token")
 
+def verify_operator_file_token(request: Request):
+    if not OPERATOR_API_TOKEN:
+        raise HTTPException(status_code=503, detail="OPERATOR_API_TOKEN is not configured")
+    auth = request.headers.get("authorization", "")
+    bearer = auth.replace("Bearer ", "", 1).strip() if auth.lower().startswith("bearer ") else ""
+    token = request.headers.get("x-operator-token") or bearer or request.query_params.get("token", "")
+    if not token or not hmac.compare_digest(str(token), OPERATOR_API_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid operator token")
+
 def claim_operator_task_payload(job_id=0, tool="", include_context=False):
     task = next_worker_task(ADMIN_ID, job_id=job_id or None, tool=tool)
     if not task:
@@ -13255,7 +13396,8 @@ def claim_operator_task_payload(job_id=0, tool="", include_context=False):
         "ok": True,
         "task": serialize_operator_task(task),
         "submit_url": f"/api/operator/tasks/{task[0]}/complete",
-        "rule": "Submit output_url when the external AI/tool finishes. Do not publish without review gate.",
+        "upload_url": f"/api/operator/tasks/{task[0]}/upload",
+        "rule": "Submit output_url/output_urls or upload the real file when the external AI/tool finishes. Do not publish without review gate.",
     }
     if include_context:
         payload["job_context"] = operator_job_context_data(ADMIN_ID, task[1])
@@ -13648,6 +13790,156 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
             "next_action": (readiness or {}).get("next_action", ""),
         },
     }
+
+@fastapi_app.post("/api/operator/tasks/{task_id}/upload")
+async def api_operator_upload_task_asset(
+    task_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    status: str = Form("ready"),
+    asset_type: str = Form(""),
+    note: str = Form(""),
+):
+    verify_operator_api_token(request)
+    status = (status or "ready").lower()
+    if status == "failed":
+        status = "blocked"
+    allowed = {"queued", "working", "waiting", "ready", "blocked", "done", "cancelled"}
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {', '.join(sorted(allowed))}")
+    task = get_production_task(ADMIN_ID, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    tid, job_id, manifest_id, task_type, tool, scene_no, title, prompt, old_status, output_url, old_note, updated_at = task
+    ok, reason, saved = await save_operator_upload_file(file, job_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+    resolved_asset_type = (asset_type or "").strip() or {
+        "visual_scene": "raw_video",
+        "voice": "voice",
+        "edit": "final_video",
+        "publish": "source",
+    }.get(task_type, "source")
+    ok, asset_id = add_production_asset(
+        ADMIN_ID,
+        job_id,
+        resolved_asset_type,
+        "",
+        "",
+        f"api_upload_task:{task_id} {note or ''}".strip(),
+        saved["local_path"],
+        saved["content_type"],
+        saved["filename"],
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Job not found")
+    asset_url = operator_asset_url(asset_id)
+    update_production_asset_url(ADMIN_ID, asset_id, asset_url)
+    update_production_task(ADMIN_ID, task_id, status=status, output_url=asset_url, note=note or f"uploaded asset #{asset_id}")
+    if status in {"ready", "done"}:
+        update_production_job(job_id, ADMIN_ID, status="working", asset_url=asset_url, note=f"api_task_upload:{task_id} asset:{asset_id}")
+    if status == "blocked":
+        update_production_job(job_id, ADMIN_ID, status="blocked", note=f"api_task_upload_blocked:{task_id} {note}")
+    readiness = production_readiness_data(ADMIN_ID, job_id)
+    if tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"📥 <b>OPERATOR FILE UPLOAD</b>\n\n"
+                    f"• Task: <code>#{task_id}</code> | Job: <code>#{job_id}</code>\n"
+                    f"• Asset: <code>#{asset_id}</code> | Type: <code>{html.escape(resolved_asset_type)}</code>\n"
+                    f"• File: <code>{html.escape(saved['filename'])}</code> | {saved['size']:,} bytes\n"
+                    f"• Ready: <b>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</b>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Operator upload notify error: {e}")
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "job_id": job_id,
+        "asset_id": asset_id,
+        "asset_type": resolved_asset_type,
+        "asset_url": asset_url,
+        "download_requires_token": True,
+        "file": {
+            "filename": saved["filename"],
+            "content_type": saved["content_type"],
+            "size": saved["size"],
+        },
+        "readiness": {
+            "level": (readiness or {}).get("level", "UNKNOWN"),
+            "next_action": (readiness or {}).get("next_action", ""),
+        },
+    }
+
+@fastapi_app.post("/api/operator/jobs/{job_id}/assets/upload")
+async def api_operator_upload_job_asset(
+    job_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    asset_type: str = Form("source"),
+    note: str = Form(""),
+):
+    verify_operator_api_token(request)
+    job = get_production_job(job_id, ADMIN_ID)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    ok, reason, saved = await save_operator_upload_file(file, job_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+    ok, asset_id = add_production_asset(
+        ADMIN_ID,
+        job_id,
+        asset_type or "source",
+        "",
+        "",
+        f"api_upload_job {note or ''}".strip(),
+        saved["local_path"],
+        saved["content_type"],
+        saved["filename"],
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Job not found")
+    asset_url = operator_asset_url(asset_id)
+    update_production_asset_url(ADMIN_ID, asset_id, asset_url)
+    update_production_job(job_id, ADMIN_ID, asset_url=asset_url, note=f"api_job_upload asset:{asset_id} {note or ''}".strip())
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "asset_id": asset_id,
+        "asset_type": asset_type or "source",
+        "asset_url": asset_url,
+        "download_requires_token": True,
+        "file": {
+            "filename": saved["filename"],
+            "content_type": saved["content_type"],
+            "size": saved["size"],
+        },
+    }
+
+@fastapi_app.get("/api/operator/assets/{asset_id}/file")
+async def api_operator_asset_file(asset_id: int, request: Request):
+    verify_operator_file_token(request)
+    asset = get_production_asset(ADMIN_ID, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    _aid, _owner_id, _job_id, _asset_type, url, file_id, note, local_path, content_type, filename, created_at = asset
+    if not local_path:
+        if url and re.match(r"^https?://", url, re.IGNORECASE):
+            return RedirectResponse(url=url, status_code=302)
+        raise HTTPException(status_code=404, detail="Asset has no local file")
+    upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+    abs_path = os.path.abspath(local_path)
+    if not abs_path.startswith(upload_root) or not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="Asset file missing")
+    return FileResponse(
+        abs_path,
+        media_type=content_type or "application/octet-stream",
+        filename=filename or os.path.basename(abs_path),
+    )
 
 @fastapi_app.get("/api/operator/jobs/{job_id}/ready")
 async def api_operator_job_ready(job_id: int, request: Request):
