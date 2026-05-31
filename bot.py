@@ -3590,6 +3590,18 @@ class OperatorLoopRequest(BaseModel):
     auto_queue: bool = True
     notify_admin: bool = True
 
+class OperatorAffiliateScaleRequest(BaseModel):
+    affiliate_id: int = Field(gt=0)
+    niche: str = Field(default="", max_length=240)
+    platform: str = Field(default="tiktok", max_length=40)
+    channel: str = Field(default="all", max_length=40)
+    campaign_id: int = Field(default=0, ge=0)
+    limit: int = Field(default=3, ge=1, le=12)
+    build: bool = False
+    duration: int = Field(default=45, ge=15, le=120)
+    variants: int = Field(default=5, ge=3, le=8)
+    notify_admin: bool = True
+
 class AgentGemini:
     @staticmethod
     def chat(prompt: str, text: str, uid, is_json: bool = False) -> str:
@@ -6003,6 +6015,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Endpoint cho n8n/worker:</b>",
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
+        f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
         f"• Lấy hàng đợi đăng: <code>GET {html.escape(base_url)}/api/operator/publish/next</code>",
@@ -6011,6 +6024,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Payload loop mẫu:</b>",
         '<pre>{"limit":10,"auto_queue":true,"notify_admin":true}</pre>',
+        "<b>Payload affiliate-scale mẫu:</b>",
+        '<pre>{"affiliate_id":3,"platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload task complete mẫu:</b>",
         '<pre>{"status":"ready","output_url":"https://.../final.mp4","note":"kling/capcut output"}</pre>',
         "<b>Payload performance mẫu:</b>",
@@ -8535,6 +8550,83 @@ async def api_operator_loop(payload: OperatorLoopRequest, request: Request):
         "limit": payload.limit,
         "auto_queue": payload.auto_queue,
         **result,
+    }
+
+@fastapi_app.post("/api/operator/affiliate-scale")
+async def api_operator_affiliate_scale(payload: OperatorAffiliateScaleRequest, request: Request):
+    verify_operator_api_token(request)
+    affiliate = get_affiliate_link(payload.affiliate_id, ADMIN_ID)
+    if not affiliate:
+        raise HTTPException(status_code=404, detail="Affiliate not found")
+    if payload.campaign_id and not get_campaign(payload.campaign_id, ADMIN_ID):
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    (
+        aid, network, product, affiliate_niche, url, note, status,
+        price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
+    ) = affiliate
+    scale_niche = payload.niche or affiliate_niche or product or "affiliate"
+    created_jobs, error = await create_operator_auto_jobs(
+        ADMIN_ID,
+        scale_niche,
+        (payload.platform or "tiktok").lower(),
+        payload.channel or "all",
+        payload.campaign_id,
+        payload.affiliate_id,
+        payload.limit,
+    )
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    built = []
+    failed = []
+    if payload.build:
+        for item in created_jobs:
+            ok, bundle = build_operator_job_bundle(ADMIN_ID, item["job_id"], count=payload.variants, duration=payload.duration)
+            if ok:
+                readiness = bundle.get("readiness") or {}
+                built.append({
+                    **item,
+                    "manifest_id": bundle["manifest_id"],
+                    "task_count": len(bundle["task_ids"]),
+                    "variant_id": bundle["best_variant_id"],
+                    "readiness": readiness.get("level", "UNKNOWN") if isinstance(readiness, dict) else "UNKNOWN",
+                })
+            else:
+                failed.append({"job_id": item["job_id"], "error": bundle.get("error", "build lỗi")})
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"🚀 <b>OPERATOR API AFFILIATE SCALE</b>\n\n"
+                    f"• Affiliate: <code>#{aid}</code> {html.escape(product or '-')}\n"
+                    f"• Niche: <b>{html.escape(scale_niche)}</b>\n"
+                    f"• Platform/channel: <code>{html.escape(payload.platform or 'tiktok')}</code> / <code>{html.escape(payload.channel or 'all')}</code>\n"
+                    f"• Jobs: <b>{len(created_jobs)}</b> | Built: <b>{len(built)}</b> | Failed: <b>{len(failed)}</b>\n"
+                    f"• Xem: <code>/affiliate_report days=30</code> hoặc <code>/operator_dashboard</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Operator affiliate scale notify error: {e}")
+    return {
+        "ok": True,
+        "affiliate": {
+            "id": aid,
+            "network": network,
+            "product": product,
+            "niche": affiliate_niche,
+            "url": url,
+        },
+        "scale_niche": scale_niche,
+        "created_jobs": created_jobs,
+        "built_jobs": built,
+        "failed_builds": failed,
+        "next": {
+            "tasks_url": "/api/operator/tasks/next",
+            "loop_url": "/api/operator/loop",
+            "publish_url": "/api/operator/publish/next",
+            "telegram_report": "/affiliate_report days=30",
+        },
     }
 
 @fastapi_app.get("/api/operator/publish/next")
