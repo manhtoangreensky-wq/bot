@@ -63,6 +63,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=...`: tạo lịch nội dung theo kênh.
 - `/calendar`: xem lịch nội dung đã lên.
 - `/operator topic=... channel=<ID> aff=<ID> campaign=<ID> date=YYYY-MM-DD`: ra lệnh một bước để tạo lịch nội dung + production job + brief AI.
+- `/operator_auto niche=... platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5`: tự tìm trend và tạo batch production job cho nhiều kênh active.
 - `/operator_next id=<JOB_ID> stage=script|voice|visuals|edit|review|publish`: AI điều phối stage tiếp theo, kèm tool chính/fallback và output cần lưu.
 - `/operator_dashboard`: tổng quan kênh, affiliate, lịch sắp tới và production job cần xử lý.
 - `/trend_search niche=... platform=tiktok channel=<ID> aff=<ID> campaign=<ID>`: tìm trend mới từ nguồn RSS/news công khai, hiện nút tạo video trend vào pipeline.
@@ -97,6 +98,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Production pipeline là admin-only, dùng để theo dõi từng video qua các stage: `brief`, `script`, `voice`, `visuals`, `edit`, `review`, `publish`, `done`.
 - Performance tracking là admin-only, dùng để ghi view/click/order/revenue/lead sau khi đăng bài và theo dõi kênh hoặc affiliate nào đang tạo tiền.
 - Trend search là admin-only, dùng để tìm trend mới trước khi tạo video; bot lưu trend candidate, tạo lịch/job từ trend và vẫn yêu cầu admin kiểm duyệt trước khi đăng.
+- Operator auto là admin-only, dùng để tạo hàng loạt production job từ trend mới cho các channel active; vẫn đi qua review gate/publish queue trước khi đăng.
 - Review gate là admin-only, dùng làm chốt kiểm duyệt trước khi đăng; job đạt có thể chuyển sang `ready`, job rủi ro chuyển `blocked`.
 - Publish queue là admin-only, dùng để gom job đã duyệt vào hàng đợi đăng thủ công hoặc chuẩn bị sẵn điểm nối API/OAuth chính thức.
 - Auto-post readiness là admin-only, dùng để kiểm tra channel nào có thể đăng thủ công, channel nào đã có `token_env` trỏ tới biến môi trường trên server, và channel nào còn thiếu cấu hình. Secret không lưu trong SQLite.

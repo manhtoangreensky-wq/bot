@@ -2236,6 +2236,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /calendar_plan — Lên lịch nội dung",
             "• /calendar — Xem lịch nội dung",
             "• /operator — Ra lệnh tạo video một bước",
+            "• /operator_auto — Tự tạo batch job từ trend",
             "• /operator_next — Điều phối stage tiếp theo",
             "• /operator_dashboard — Tổng quan vận hành",
             "• /publish_readiness — Kiểm tra sẵn sàng auto-post",
@@ -2884,6 +2885,119 @@ async def cmd_operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=kb
     )
 
+async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    niche = data.get("niche") or data.get("ngach") or data.get("topic") or data.get("chude") or "công nghệ AI"
+    platform_filter = (data.get("platform") or data.get("nen") or "").lower()
+    channel_filter = (data.get("channel") or data.get("kenh") or "all").lower()
+    try:
+        limit = max(1, min(int(data.get("limit") or data.get("max") or 5), 15))
+    except ValueError:
+        limit = 5
+    try:
+        campaign_id = int(data.get("campaign") or data.get("camp") or 0)
+    except ValueError:
+        campaign_id = 0
+    try:
+        affiliate_id = int(data.get("affiliate_id") or data.get("aff") or 0)
+    except ValueError:
+        affiliate_id = 0
+    if campaign_id and not get_campaign(campaign_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy campaign.")
+    if affiliate_id and not get_affiliate_link(affiliate_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy affiliate.")
+    if channel_filter == "all":
+        channels = list_social_channels(update.effective_user.id, limit=80)
+        if platform_filter:
+            channels = [ch for ch in channels if (ch[1] or "").lower() == platform_filter]
+    else:
+        try:
+            one = get_social_channel(int(channel_filter), update.effective_user.id)
+        except ValueError:
+            one = None
+        channels = [one] if one else []
+    channels = [ch for ch in channels if ch and ch[7] == "active"]
+    if not channels:
+        return await update.message.reply_text("📭 Chưa có channel active phù hợp. Tạo bằng /channel_add.")
+
+    msg = await update.message.reply_text("🤖 Operator Auto đang tìm trend và tạo job...")
+    search_platform = platform_filter or (channels[0][1] if channels else "tiktok")
+    try:
+        trends = await fetch_google_news_trends(niche, search_platform, limit=limit)
+    except Exception as e:
+        await alert_admin(context, "Operator Auto Trend", f"{str(e)} | niche={niche} platform={search_platform}")
+        return await msg.edit_text("❌ Operator Auto lỗi khi tìm trend. Đã báo admin.")
+    if not trends:
+        return await msg.edit_text("📭 Không tìm thấy trend để tạo job.")
+
+    created = []
+    for item in trends:
+        for channel in channels:
+            if len(created) >= limit:
+                break
+            cid, channel_platform, channel_name, account_label, focus, audience, slots, status = channel
+            trend_id = save_trend_candidate(
+                update.effective_user.id,
+                niche,
+                channel_platform or search_platform,
+                item["title"],
+                item["url"],
+                item.get("source", ""),
+                item.get("summary", ""),
+                cid,
+                campaign_id,
+                affiliate_id
+            )
+            topic = f"{item['title']} | {niche} | affiliate product placement"
+            note = f"operator_auto trend #{trend_id} | source={item.get('source','')} | {item['url']}"
+            slot_id = create_calendar_slot(
+                update.effective_user.id,
+                cid,
+                campaign_id,
+                affiliate_id,
+                datetime.now().date().isoformat(),
+                channel_platform or search_platform,
+                topic,
+                note
+            )
+            slot = get_calendar_slot(slot_id, update.effective_user.id)
+            if gemini_client or openai_client:
+                brief = AgentGemini.chat(
+                    "Bạn là AI Operator trưởng, tạo brief video affiliate từ trend cho pipeline batch.",
+                    build_production_prompt(slot) + f"\n\nNguồn trend: {item['url']}\nTóm tắt trend: {item.get('summary','')}",
+                    update.effective_user.id,
+                    is_json=False
+                )
+            else:
+                brief = f"Trend: {item['title']}\nNguồn: {item['url']}\nTạo video affiliate theo trend này và kiểm duyệt trước khi đăng."
+            job_id = create_production_job(
+                update.effective_user.id,
+                slot_id,
+                campaign_id,
+                cid,
+                affiliate_id,
+                channel_platform or search_platform,
+                topic,
+                brief,
+                note
+            )
+            update_trend_status(trend_id, update.effective_user.id, f"job:{job_id}")
+            created.append((job_id, slot_id, trend_id, channel_platform or search_platform, channel_name, item["title"]))
+    lines = [
+        f"✅ <b>Operator Auto đã tạo {len(created)} production job</b>",
+        f"• Niche: <b>{html.escape(niche)}</b>",
+        f"• Campaign: <code>{campaign_id or 'chưa gắn'}</code>",
+        f"• Affiliate: <code>{affiliate_id or 'chưa gắn'}</code>",
+        "",
+        "<b>Job mới:</b>",
+    ]
+    for job_id, slot_id, trend_id, platform, channel_name, title in created[:12]:
+        lines.append(f"• job #{job_id} | slot #{slot_id} | trend #{trend_id} | <code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n  {html.escape(title)}")
+    lines.append("\nBước tiếp: /operator_dashboard hoặc /operator_next id=<JOB_ID> stage=script")
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_produce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -3132,6 +3246,10 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🔥 Tìm trend", callback_data="opmenu|trend")
         ],
         [
+            InlineKeyboardButton("🤖 Auto batch", callback_data="opmenu|auto"),
+            InlineKeyboardButton("🧪 Auto-post ready", callback_data="opmenu|readiness")
+        ],
+        [
             InlineKeyboardButton("🎛 Pipeline", callback_data="opmenu|pipeline"),
             InlineKeyboardButton("📅 Calendar", callback_data="opmenu|calendar")
         ],
@@ -3139,10 +3257,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("📦 Publish pack", callback_data="opmenu|publish"),
             InlineKeyboardButton("🛡 Review gate", callback_data="opmenu|review")
         ],
-        [
-            InlineKeyboardButton("🧪 Auto-post ready", callback_data="opmenu|readiness"),
-            InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")
-        ],
+        [InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")],
         [
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
             InlineKeyboardButton("💰 Performance", callback_data="opmenu|performance")
@@ -3173,6 +3288,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     snippets = {
         "dashboard": "/operator_dashboard",
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
+        "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
@@ -4256,6 +4372,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
+    tg_app.add_handler(CommandHandler("operator_auto", cmd_operator_auto))
     tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
