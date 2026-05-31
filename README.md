@@ -48,6 +48,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/admin_gopy`: tóm tắt góp ý 7 ngày.
 - `/tools`: kho 30 công cụ AI/MMO nội bộ.
 - `/mmo`: workflow kiếm tiền bằng AI hợp pháp nội bộ.
+- `/operator_menu`: menu nút bấm cho toàn bộ quy trình AI Operator.
 - `/campaign_new name=... niche=... platforms=... affiliate=...`: tạo chiến dịch AI Operator.
 - `/campaigns`: liệt kê chiến dịch.
 - `/video_plan campaign=<ID> topic=... platforms=... channel=<ID> aff=<ID>`: AI tạo brief video, caption, hashtag, CTA và compliance checklist.

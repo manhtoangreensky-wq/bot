@@ -2076,6 +2076,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command_lines.extend([
             "• /tools — Kho 30 công cụ AI/MMO (Admin)",
             "• /mmo — Quy trình kiếm tiền bằng AI (Admin)",
+            "• /operator_menu — Menu vận hành AI Operator",
             "• /campaign_new — Tạo chiến dịch affiliate/video",
             "• /campaigns — Danh sách chiến dịch",
             "• /video_plan — AI lập kế hoạch video",
@@ -2914,6 +2915,64 @@ async def cmd_operator_dashboard(update: Update, context: ContextTypes.DEFAULT_T
         "<code>/operator_next id=... stage=script</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+def operator_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🧭 Dashboard", callback_data="opmenu|dashboard"),
+            InlineKeyboardButton("🔥 Tìm trend", callback_data="opmenu|trend")
+        ],
+        [
+            InlineKeyboardButton("🎛 Pipeline", callback_data="opmenu|pipeline"),
+            InlineKeyboardButton("📅 Calendar", callback_data="opmenu|calendar")
+        ],
+        [
+            InlineKeyboardButton("📦 Publish pack", callback_data="opmenu|publish"),
+            InlineKeyboardButton("🛡 Review gate", callback_data="opmenu|review")
+        ],
+        [
+            InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
+            InlineKeyboardButton("💰 Performance", callback_data="opmenu|performance")
+        ],
+    ])
+
+async def cmd_operator_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    text = (
+        "🧠 <b>AI OPERATOR MENU</b>\n\n"
+        "Quy trình chuẩn:\n"
+        "1. Tìm trend hoặc tạo lệnh trực tiếp.\n"
+        "2. Tạo production job và handoff cho AI/tool.\n"
+        "3. Review gate trước khi đăng.\n"
+        "4. Publish pack, đăng thủ công/API chính thức.\n"
+        "5. Mark published và ghi performance.\n\n"
+        "Chọn nút bên dưới để lấy lệnh nhanh."
+    )
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=operator_menu_keyboard())
+
+async def handle_operator_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if str(query.from_user.id) != ADMIN_ID:
+        return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    action = query.data.split("|", 1)[1]
+    snippets = {
+        "dashboard": "/operator_dashboard",
+        "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
+        "pipeline": "/pipeline\n/pipeline <JOB_ID>",
+        "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
+        "publish": "/publish_pack job=<JOB_ID>\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
+        "review": "/review_gate job=<JOB_ID>",
+        "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
+        "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
+    }
+    await query.edit_message_text(
+        f"🧠 <b>AI OPERATOR MENU</b>\n\n"
+        f"Lệnh nhanh:\n<pre>{html.escape(snippets.get(action, '/operator_dashboard'))}</pre>",
+        parse_mode="HTML",
+        reply_markup=operator_menu_keyboard()
+    )
 
 async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -3905,6 +3964,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
     tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
+    tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
     tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
     tg_app.add_handler(CommandHandler("publish_pack", cmd_publish_pack))
@@ -3934,6 +3994,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_video_job_callback, pattern=r"^job\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_pipeline_callback, pattern=r"^pipe\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_callback, pattern=r"^trend\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
 
     await tg_app.initialize()
     await tg_app.start()
