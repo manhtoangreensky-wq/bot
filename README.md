@@ -24,7 +24,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`: PayOS QR động.
 - `BOT_USERNAME`: username bot, ví dụ `Httdhtoan`.
 - `PUBLIC_BASE_URL`: domain public nếu cần dùng cho link ngoài.
-- `MANUAL_BANK_NAME`, `MANUAL_BANK_ACCOUNT`, `MANUAL_BANK_OWNER`: tài khoản nạp thủ công khi PayOS lỗi.
+- `MANUAL_BANK_NAME`, `MANUAL_BANK_CODE`, `MANUAL_BANK_ACCOUNT`, `MANUAL_BANK_OWNER`: tài khoản và mã VietQR nạp thủ công khi PayOS lỗi.
 
 ## Lệnh người dùng
 

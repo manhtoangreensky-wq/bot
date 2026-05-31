@@ -20,6 +20,7 @@ import hashlib
 import uvicorn
 import time
 import random
+from urllib.parse import quote, urlencode
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
@@ -94,6 +95,7 @@ PAYMENT_PACKAGES = {
 
 # ─── MANUAL BANK FALLBACK ────────────────────────────────────────────────────
 MANUAL_BANK_NAME      = _env("MANUAL_BANK_NAME", "ACB")
+MANUAL_BANK_CODE      = _env("MANUAL_BANK_CODE", "ACB")
 MANUAL_BANK_ACCOUNT   = _env("MANUAL_BANK_ACCOUNT", "8899397968")
 MANUAL_BANK_OWNER     = _env("MANUAL_BANK_OWNER", "NGUYEN MANH TOAN")
 
@@ -392,6 +394,37 @@ def manual_payment_text(uid: int, amount: int, xu: int, order_code: int, reason:
         f"• Nội dung: <code>DAAS {uid} {order_code}</code>\n\n"
         f"📸 Sau khi chuyển khoản, gửi ảnh bill ngay tại đây. Admin sẽ kiểm tra và cộng <b>{xu} Xu</b>."
     )
+
+def manual_qr_url(uid: int, amount: int, order_code: int) -> str:
+    params = {
+        "amount": int(amount),
+        "addInfo": f"DAAS {uid} {order_code}",
+        "accountName": MANUAL_BANK_OWNER,
+    }
+    bank_code = quote(MANUAL_BANK_CODE, safe="")
+    account = quote(MANUAL_BANK_ACCOUNT, safe="")
+    return f"https://img.vietqr.io/image/{bank_code}-{account}-compact2.png?{urlencode(params)}"
+
+async def send_manual_payment(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    uid: int,
+    amount: int,
+    xu: int,
+    order_code: int,
+    reason: str = "",
+):
+    text = manual_payment_text(uid, amount, xu, order_code, reason)
+    try:
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=manual_qr_url(uid, amount, order_code),
+            caption=text,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Manual QR send error: {e}")
+        await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 
 def expire_old_payos_orders():
     conn = db_connect()
@@ -1082,12 +1115,15 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
     if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
-        await query.edit_message_text(
-            manual_payment_text(
-                uid, amount, xu, order_code,
-                "Cổng QR tự động đang bảo trì, vui lòng nạp thủ công theo thông tin dưới đây."
-            ),
-            parse_mode="HTML"
+        await query.edit_message_text("⚠️ Cổng QR tự động đang bảo trì. Bot đã gửi mã QR nạp thủ công bên dưới.")
+        await send_manual_payment(
+            context,
+            update.effective_chat.id,
+            uid,
+            amount,
+            xu,
+            order_code,
+            "Cổng QR tự động đang bảo trì, vui lòng nạp thủ công theo mã QR dưới đây."
         )
         return
 
@@ -1142,23 +1178,29 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 "PayOS tạo hóa đơn",
                 f"{desc} | order={order_code} | amount={amount} | signed={raw_str} | kiểm tra PAYOS_CHECKSUM_KEY"
             )
-            await query.edit_message_text(
-                manual_payment_text(
-                    uid, amount, xu, order_code,
-                    "Cổng QR tự động đang bận, vui lòng nạp thủ công theo thông tin dưới đây."
-                ),
-                parse_mode="HTML"
+            await query.edit_message_text("⚠️ Cổng QR tự động đang bận. Bot đã gửi mã QR nạp thủ công bên dưới.")
+            await send_manual_payment(
+                context,
+                update.effective_chat.id,
+                uid,
+                amount,
+                xu,
+                order_code,
+                "Cổng QR tự động đang bận, vui lòng nạp thủ công theo mã QR dưới đây."
             )
     except Exception as e:
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
         logger.error(f"PayOS Exception: {e}")
         await alert_admin(context, "PayOS API", f"Exception order={order_code}: {str(e)}")
-        await query.edit_message_text(
-            manual_payment_text(
-                uid, amount, xu, order_code,
-                "Cổng QR tự động đang bận, vui lòng nạp thủ công theo thông tin dưới đây."
-            ),
-            parse_mode="HTML"
+        await query.edit_message_text("⚠️ Cổng QR tự động đang bận. Bot đã gửi mã QR nạp thủ công bên dưới.")
+        await send_manual_payment(
+            context,
+            update.effective_chat.id,
+            uid,
+            amount,
+            xu,
+            order_code,
+            "Cổng QR tự động đang bận, vui lòng nạp thủ công theo mã QR dưới đây."
         )
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
@@ -1269,7 +1311,7 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
     if amount and xu:
         create_order(order_code, uid, amount, xu)
         USER_BILL_STATE[uid] = {"order_code": order_code, "amount": amount, "xu": xu, "pkg_key": context.args[0].lower()}
-        text = manual_payment_text(uid, amount, xu, order_code)
+        return await send_manual_payment(context, update.effective_chat.id, uid, amount, xu, order_code)
     else:
         USER_BILL_STATE[uid] = True
         text = (
