@@ -24,12 +24,14 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`: PayOS QR động.
 - `BOT_USERNAME`: username bot, ví dụ `Httdhtoan`.
 - `PUBLIC_BASE_URL`: domain public nếu cần dùng cho link ngoài.
+- `MANUAL_BANK_NAME`, `MANUAL_BANK_ACCOUNT`, `MANUAL_BANK_OWNER`: tài khoản nạp thủ công khi PayOS lỗi.
 
 ## Lệnh người dùng
 
 - `/start`: menu chính.
 - `/profile`: xem số dư, hạng, tổng chi.
 - `/naptien`: tạo hóa đơn PayOS QR động.
+- `/thucong`: nạp thủ công khi QR tự động lỗi.
 - `/tools`: kho 30 công cụ AI/MMO.
 - `/mmo`: workflow kiếm tiền bằng AI hợp pháp.
 - `/ref`: lấy link giới thiệu nhận thưởng.
@@ -39,6 +41,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 
 - `/add <ID> <Số_Xu>`: cộng xu thủ công.
 - `/duyet <ID> <Số_Xu>`: duyệt bill thủ công.
+- `/checkpayos <Mã_đơn>`: admin gọi PayOS kiểm tra lại đơn đã tạo link và tự cộng xu nếu trạng thái đã thanh toán.
 - `/tuchoi <ID>`: từ chối bill thủ công.
 - `/pending`: xem bill đang chờ.
 - `/stats`: thống kê nhanh.

@@ -92,6 +92,11 @@ PAYMENT_PACKAGES = {
     "500k": {"amount": 500000, "xu": 5500,  "text": "Gói Doanh Nghiệp: 500.000đ ➔ 5.500 Xu (Tặng 500 Xu)"}
 }
 
+# ─── MANUAL BANK FALLBACK ────────────────────────────────────────────────────
+MANUAL_BANK_NAME      = _env("MANUAL_BANK_NAME", "ACB")
+MANUAL_BANK_ACCOUNT   = _env("MANUAL_BANK_ACCOUNT", "8899397968")
+MANUAL_BANK_OWNER     = _env("MANUAL_BANK_OWNER", "NGUYEN MANH TOAN")
+
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
 DB_FILE           = "toandaas_system.db"
 TRIAL_CREDITS     = 150
@@ -139,7 +144,10 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS pending_deposits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT, username TEXT, file_id TEXT,
-        submitted_at DATETIME, status TEXT DEFAULT 'pending'
+        submitted_at DATETIME, status TEXT DEFAULT 'pending',
+        order_code TEXT,
+        amount INTEGER DEFAULT 0,
+        xu INTEGER DEFAULT 0
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,7 +167,8 @@ def init_db():
         created_at DATETIME,
         expires_at DATETIME,
         paid_at DATETIME,
-        checkout_url TEXT
+        checkout_url TEXT,
+        payment_link_id TEXT
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS credit_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -196,9 +205,19 @@ def init_db():
         ("expires_at", "DATETIME"),
         ("paid_at", "DATETIME"),
         ("checkout_url", "TEXT"),
+        ("payment_link_id", "TEXT"),
     ]:
         try:
             c.execute(f"ALTER TABLE payos_orders ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    for col, col_type in [
+        ("order_code", "TEXT"),
+        ("amount", "INTEGER DEFAULT 0"),
+        ("xu", "INTEGER DEFAULT 0"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE pending_deposits ADD COLUMN {col} {col_type}")
         except Exception:
             pass
     conn.commit()
@@ -305,12 +324,32 @@ def update_order_status(order_code, status):
     conn.commit()
     conn.close()
 
-def update_order_checkout_url(order_code, checkout_url):
+def update_order_checkout_info(order_code, checkout_url, payment_link_id=""):
     conn = db_connect()
     c = conn.cursor()
-    c.execute("UPDATE payos_orders SET checkout_url=? WHERE order_code=?", (checkout_url, str(order_code)))
+    c.execute(
+        "UPDATE payos_orders SET checkout_url=?, payment_link_id=? WHERE order_code=?",
+        (checkout_url, str(payment_link_id), str(order_code))
+    )
     conn.commit()
     conn.close()
+
+def get_order_payment_link_id(order_code):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("SELECT payment_link_id FROM payos_orders WHERE order_code=?", (str(order_code),))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else ""
+
+def generate_order_code() -> int:
+    # payOS hoạt động ổn định hơn với orderCode trong phạm vi số nguyên 32-bit.
+    base = int(time.time())
+    for _ in range(20):
+        code = base + random.randint(0, 999)
+        if not get_order(code):
+            return code
+    return base
 
 def make_payos_return_url(context: ContextTypes.DEFAULT_TYPE) -> str:
     if PUBLIC_BASE_URL:
@@ -336,6 +375,23 @@ def sign_payos_payment_request(data: dict) -> tuple[str, str]:
         hashlib.sha256
     ).hexdigest()
     return signature, raw_str
+
+def manual_payment_text(uid: int, amount: int, xu: int, order_code: int, reason: str = "") -> str:
+    reason_line = f"⚠️ {reason}\n\n" if reason else ""
+    return (
+        f"{reason_line}"
+        f"🏦 <b>NẠP XU THỦ CÔNG</b>\n\n"
+        f"📋 Gói: <b>{amount:,}đ → +{xu} Xu</b>\n"
+        f"👤 ID Telegram: <code>{uid}</code>\n"
+        f"🆔 Mã đơn: <code>{order_code}</code>\n\n"
+        f"<b>Thông tin chuyển khoản:</b>\n"
+        f"• Ngân hàng: <b>{MANUAL_BANK_NAME}</b>\n"
+        f"• Số tài khoản: <code>{MANUAL_BANK_ACCOUNT}</code>\n"
+        f"• Chủ tài khoản: <b>{MANUAL_BANK_OWNER}</b>\n"
+        f"• Số tiền: <b>{amount:,}đ</b>\n"
+        f"• Nội dung: <code>DAAS {uid} {order_code}</code>\n\n"
+        f"📸 Sau khi chuyển khoản, gửi ảnh bill ngay tại đây. Admin sẽ kiểm tra và cộng <b>{xu} Xu</b>."
+    )
 
 def expire_old_payos_orders():
     conn = db_connect()
@@ -1015,14 +1071,25 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     amount = pkg["amount"]
     xu = pkg["xu"]
     get_user(uid, query.from_user.first_name or "PayOS user")
+    order_code = generate_order_code()
+    create_order(order_code, uid, amount, xu)
+    USER_BILL_STATE[uid] = {
+        "order_code": order_code,
+        "amount": amount,
+        "xu": xu,
+        "pkg_key": pkg_key,
+    }
 
     if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
-        await query.edit_message_text("❌ Hệ thống chưa cấu hình đầy đủ API Key PayOS.")
+        update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        await query.edit_message_text(
+            manual_payment_text(
+                uid, amount, xu, order_code,
+                "Cổng QR tự động đang bảo trì, vui lòng nạp thủ công theo thông tin dưới đây."
+            ),
+            parse_mode="HTML"
+        )
         return
-
-    # Sinh mã đơn hàng dạng số nguyên (timestamp + random) hợp lệ với PayOS
-    order_code = int(time.time() * 10) + random.randint(0, 9)
-    create_order(order_code, uid, amount, xu)
 
     return_url = make_payos_return_url(context)
     payos_body = {
@@ -1052,8 +1119,9 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             )
         res_data = res.json()
         if res.status_code == 200 and res_data.get("code") == "00":
-            checkout_url = res_data["data"]["checkoutUrl"]
-            update_order_checkout_url(order_code, checkout_url)
+            checkout_data = res_data["data"]
+            checkout_url = checkout_data["checkoutUrl"]
+            update_order_checkout_info(order_code, checkout_url, checkout_data.get("paymentLinkId", ""))
             qr_text = (
                 f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
                 f"📋 Gói lựa chọn: <b>{pkg['text']}</b>\n"
@@ -1075,8 +1143,10 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 f"{desc} | order={order_code} | amount={amount} | signed={raw_str} | kiểm tra PAYOS_CHECKSUM_KEY"
             )
             await query.edit_message_text(
-                "⚠️ <b>Cổng thanh toán đang bận, chưa tạo được mã QR.</b>\n\n"
-                "Bạn vui lòng thử lại sau ít phút hoặc nhắn Admin để được hỗ trợ nạp Xu thủ công.",
+                manual_payment_text(
+                    uid, amount, xu, order_code,
+                    "Cổng QR tự động đang bận, vui lòng nạp thủ công theo thông tin dưới đây."
+                ),
                 parse_mode="HTML"
             )
     except Exception as e:
@@ -1084,8 +1154,10 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"PayOS Exception: {e}")
         await alert_admin(context, "PayOS API", f"Exception order={order_code}: {str(e)}")
         await query.edit_message_text(
-            "⚠️ <b>Cổng thanh toán đang bận, chưa tạo được mã QR.</b>\n\n"
-            "Bạn vui lòng thử lại sau ít phút hoặc nhắn Admin để được hỗ trợ nạp Xu thủ công.",
+            manual_payment_text(
+                uid, amount, xu, order_code,
+                "Cổng QR tự động đang bận, vui lòng nạp thủ công theo thông tin dưới đây."
+            ),
             parse_mode="HTML"
         )
 
@@ -1102,6 +1174,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     command_lines = [
         "• /profile — Xem Hạng VIP & Số dư",
         "• /naptien — Nạp thêm hạn mức",
+        "• /thucong — Nạp thủ công khi QR tự động lỗi",
         "• /gopy &lt;nội dung&gt; — Góp ý / báo lỗi",
     ]
     if is_admin:
@@ -1109,6 +1182,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /tools — Kho 30 công cụ AI/MMO (Admin)",
             "• /mmo — Quy trình kiếm tiền bằng AI (Admin)",
             "• /dashboard — Dashboard quản trị",
+            "• /checkpayos &lt;mã_đơn&gt; — Kiểm tra lại đơn PayOS",
         ])
     text = (
         "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.2</b>\n\n"
@@ -1181,6 +1255,34 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     USER_BILL_STATE[uid] = True
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    amount = 0
+    xu = 0
+    if context.args:
+        pkg_key = context.args[0].lower()
+        if pkg_key in PAYMENT_PACKAGES:
+            pkg = PAYMENT_PACKAGES[pkg_key]
+            amount, xu = pkg["amount"], pkg["xu"]
+    order_code = generate_order_code()
+    if amount and xu:
+        create_order(order_code, uid, amount, xu)
+        USER_BILL_STATE[uid] = {"order_code": order_code, "amount": amount, "xu": xu, "pkg_key": context.args[0].lower()}
+        text = manual_payment_text(uid, amount, xu, order_code)
+    else:
+        USER_BILL_STATE[uid] = True
+        text = (
+            "🏦 <b>NẠP XU THỦ CÔNG</b>\n\n"
+            f"👤 ID Telegram: <code>{uid}</code>\n\n"
+            f"• Ngân hàng: <b>{MANUAL_BANK_NAME}</b>\n"
+            f"• Số tài khoản: <code>{MANUAL_BANK_ACCOUNT}</code>\n"
+            f"• Chủ tài khoản: <b>{MANUAL_BANK_OWNER}</b>\n"
+            f"• Nội dung: <code>DAAS {uid}</code>\n\n"
+            "📸 Sau khi chuyển khoản, gửi ảnh bill tại đây.\n"
+            "Gợi ý: <code>/thucong 10k</code>, <code>/thucong 100k</code> để bot tự điền số tiền và số Xu."
+        )
+    await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -1291,9 +1393,19 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = db_connect()
         c = conn.cursor()
         c.execute(
+            "SELECT order_code FROM pending_deposits WHERE user_id=? AND status='pending' ORDER BY submitted_at DESC LIMIT 1",
+            (str(target_id),)
+        )
+        pending_order = c.fetchone()
+        c.execute(
             "UPDATE pending_deposits SET status='approved' WHERE user_id=? AND status='pending'",
             (str(target_id),)
         )
+        if pending_order and pending_order[0]:
+            c.execute(
+                "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
+                (PAYOS_STATUS_PAID, now_text(), str(pending_order[0]))
+            )
         c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
         conn.commit()
         conn.close()
@@ -1311,6 +1423,55 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Đã duyệt {amount} Xu cho ID: {target_id}")
     except (IndexError, ValueError):
         await update.message.reply_text("⚠️ Cú pháp: /duyet <ID> <Số_Xu>")
+
+async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    try:
+        order_code = context.args[0]
+    except IndexError:
+        return await update.message.reply_text("⚠️ Cú pháp: /checkpayos <Mã_đơn>")
+
+    payment_link_id = get_order_payment_link_id(order_code)
+    if not payment_link_id:
+        return await update.message.reply_text(
+            "⚠️ Đơn này chưa có paymentLinkId PayOS. Nếu khách đã chuyển khoản thủ công, dùng /duyet <ID> <Xu>."
+        )
+    if not PAYOS_CLIENT_ID or not PAYOS_API_KEY:
+        return await update.message.reply_text("❌ Thiếu PAYOS_CLIENT_ID hoặc PAYOS_API_KEY.")
+
+    headers = {"x-client-id": PAYOS_CLIENT_ID, "x-api-key": PAYOS_API_KEY}
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(
+                f"https://api-merchant.payos.vn/v2/payment-requests/{payment_link_id}",
+                headers=headers,
+                timeout=30.0
+            )
+        data = res.json()
+        payment_data = data.get("data", {})
+        status = payment_data.get("status", "")
+        amount_vnd = int(payment_data.get("amount", 0) or 0)
+        if res.status_code == 200 and data.get("code") == "00" and status == PAYOS_STATUS_PAID:
+            processed, desc, info = process_payos_paid_order(str(order_code), amount_vnd)
+            if processed:
+                target_id = info["target_id"]
+                credits_now, _, _ = get_user(target_id)
+                await context.bot.send_message(
+                    chat_id=target_id,
+                    text=(
+                        f"🎉 <b>NẠP TỰ ĐỘNG THÀNH CÔNG!</b>\n\n"
+                        f"PayOS đã xác nhận đơn <code>{order_code}</code>.\n"
+                        f"🪙 Đã cộng: <b>+{info['xu']} Xu</b>\n"
+                        f"💼 Số dư hiện tại: <b>{credits_now} Xu</b>"
+                    ),
+                    parse_mode="HTML"
+                )
+            return await update.message.reply_text(f"✅ Check PayOS: {desc} | status={status}")
+        await update.message.reply_text(f"ℹ️ PayOS trả về status=<b>{status or 'UNKNOWN'}</b> cho đơn <code>{order_code}</code>.", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Check PayOS error: {e}")
+        await update.message.reply_text(f"❌ Không kiểm tra được PayOS: {str(e)}")
 
 async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -1344,7 +1505,7 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = db_connect()
     c = conn.cursor()
     c.execute(
-        "SELECT id, user_id, username, submitted_at FROM pending_deposits "
+        "SELECT id, user_id, username, submitted_at, order_code, amount, xu FROM pending_deposits "
         "WHERE status='pending' ORDER BY submitted_at DESC LIMIT 10"
     )
     rows = c.fetchall()
@@ -1353,9 +1514,10 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("📭 Không có bill nào đang chờ.")
     lines = ["📋 <b>BILL CHỜ DUYỆT (THỦ CÔNG):</b>\n"]
     for r in rows:
+        expected = f" | {r[5]:,}đ → {r[6]} Xu | đơn {r[4]}" if r[5] and r[6] else ""
         lines.append(
-            f"• #{r[0]} | {r[2]} | <code>{r[1]}</code> | {r[3]}\n"
-            f"  ➔ <code>/duyet {r[1]} &lt;Xu&gt;</code>"
+            f"• #{r[0]} | {r[2]} | <code>{r[1]}</code>{expected} | {r[3]}\n"
+            f"  ➔ <code>/duyet {r[1]} {r[6] or '&lt;Xu&gt;'}</code>"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -1448,28 +1610,41 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     username = update.effective_user.first_name
     caption_lower = (update.message.caption or "").lower()
-    is_bill = USER_BILL_STATE.get(uid, False) or any(
+    bill_state = USER_BILL_STATE.get(uid)
+    is_bill = bill_state or any(
         k in caption_lower for k in ["bill", "nạp", "chuyển khoản", "ck", "daas"]
     )
 
     if is_bill:
         USER_BILL_STATE.pop(uid, None)
+        if isinstance(bill_state, dict):
+            order_code = bill_state.get("order_code", "")
+            amount = int(bill_state.get("amount", 0) or 0)
+            xu = int(bill_state.get("xu", 0) or 0)
+        else:
+            order_code, amount, xu = "", 0, 0
         conn = db_connect()
         c = conn.cursor()
         c.execute(
-            "INSERT INTO pending_deposits (user_id, username, file_id, submitted_at, status) VALUES (?,?,?,?,?)",
+            "INSERT INTO pending_deposits (user_id, username, file_id, submitted_at, status, order_code, amount, xu) VALUES (?,?,?,?,?,?,?,?)",
             (str(uid), username, update.message.photo[-1].file_id,
-             now_text(), "pending")
+             now_text(), "pending", str(order_code), amount, xu)
         )
         deposit_id = c.lastrowid
         conn.commit()
         conn.close()
+        expected_line = (
+            f"💰 Gói khách chọn: <b>{amount:,}đ → {xu} Xu</b>\n"
+            f"🆔 Mã đơn: <code>{order_code}</code>\n"
+            if amount and xu and order_code else ""
+        )
         admin_caption = (
             f"💸 <b>BILL MỚI TẢI LÊN THỦ CÔNG #{deposit_id}</b>\n\n"
             f"👤 Khách: <b>{username}</b>\n"
             f"🆔 ID: <code>{uid}</code>\n"
+            f"{expected_line}"
             f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
-            f"👉 Duyệt: <code>/duyet {uid} &lt;Số_Xu&gt;</code>\n"
+            f"👉 Duyệt: <code>/duyet {uid} {xu or '&lt;Số_Xu&gt;'}</code>\n"
             f"❌ Từ chối: <code>/tuchoi {uid}</code>"
         )
         await context.bot.send_photo(
@@ -1482,7 +1657,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ <b>Đã gửi bill cho Admin!</b>\n\n"
             f"📋 Mã đơn: <b>#{deposit_id}</b>\n"
             f"🆔 ID của bạn: <code>{uid}</code>\n\n"
-            f"⏳ Vui lòng chờ Admin kiểm tra chéo sao kê thủ công.",
+            f"⏳ Vui lòng chờ Admin kiểm tra sao kê và cộng Xu.",
             parse_mode="HTML"
         )
         return
@@ -1682,6 +1857,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
+    tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
     tg_app.add_handler(CommandHandler("tools",       cmd_tools))
     tg_app.add_handler(CommandHandler("mmo",         cmd_mmo))
     tg_app.add_handler(CommandHandler("ref",         cmd_ref))
@@ -1689,6 +1865,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("add",         cmd_admin_add))
     tg_app.add_handler(CommandHandler("admin_gopy",  cmd_admin_gopy))
     tg_app.add_handler(CommandHandler("duyet",       cmd_duyet))
+    tg_app.add_handler(CommandHandler("checkpayos",  cmd_checkpayos))
     tg_app.add_handler(CommandHandler("tuchoi",      cmd_tuchoi))
     tg_app.add_handler(CommandHandler("pending",     cmd_pending))
     tg_app.add_handler(CommandHandler("stats",       cmd_stats))
