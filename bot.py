@@ -3787,6 +3787,86 @@ def get_production_asset(owner_id, asset_id):
     conn.close()
     return row
 
+def latest_production_asset(owner_id, job_id, asset_type=""):
+    rows = list_production_assets(owner_id, job_id, limit=80)
+    asset_type = (asset_type or "").lower()
+    for row in rows:
+        aid, row_type, url, file_id, note, created_at = row
+        row_type_l = (row_type or "").lower()
+        if asset_type and row_type_l != asset_type:
+            continue
+        if row_type_l in {"final_video", "raw_video", "voice", "audio", "thumbnail", "subtitle", "source"} or not asset_type:
+            return get_production_asset(owner_id, aid)
+    return None
+
+async def send_production_asset_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int, owner_id, asset_id: int):
+    asset = get_production_asset(owner_id, asset_id)
+    if not asset:
+        return False, "asset_not_found"
+    aid, _owner_id, job_id, asset_type, url, file_id, note, local_path, content_type, filename, created_at = asset
+    caption = (
+        f"📦 Asset #{aid} | job #{job_id}\n"
+        f"Type: {asset_type or '-'}\n"
+        f"File: {filename or '-'}\n"
+        f"Note: {note or '-'}"
+    )
+    media_kind = (asset_type or "").lower()
+    ctype = (content_type or "").lower()
+    ext = os.path.splitext(filename or local_path or url or "")[1].lower()
+
+    def is_video():
+        return media_kind in {"final_video", "raw_video", "scene_video", "video", "source"} or ctype.startswith("video/") or ext in {".mp4", ".mov", ".mkv", ".webm"}
+
+    def is_audio():
+        return media_kind in {"voice", "audio"} or ctype.startswith("audio/") or ext in {".mp3", ".wav", ".m4a", ".ogg"}
+
+    def is_photo():
+        return media_kind in {"thumbnail", "image", "photo"} or ctype.startswith("image/") or ext in {".png", ".jpg", ".jpeg", ".webp"}
+
+    async def send_opened_file(path):
+        with open(path, "rb") as f:
+            try:
+                if is_video():
+                    await context.bot.send_video(chat_id=chat_id, video=f, caption=caption)
+                elif is_audio():
+                    await context.bot.send_audio(chat_id=chat_id, audio=f, caption=caption)
+                elif is_photo():
+                    await context.bot.send_photo(chat_id=chat_id, photo=f, caption=caption)
+                else:
+                    await context.bot.send_document(chat_id=chat_id, document=f, filename=filename or os.path.basename(path), caption=caption)
+            except Exception:
+                f.seek(0)
+                await context.bot.send_document(chat_id=chat_id, document=f, filename=filename or os.path.basename(path), caption=caption)
+
+    if local_path:
+        upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+        abs_path = os.path.abspath(local_path)
+        if not abs_path.startswith(upload_root) or not os.path.exists(abs_path):
+            return False, "local_file_missing"
+        await send_opened_file(abs_path)
+        return True, "sent_local"
+    if file_id:
+        if is_video():
+            await context.bot.send_video(chat_id=chat_id, video=file_id, caption=caption)
+        elif is_audio():
+            await context.bot.send_audio(chat_id=chat_id, audio=file_id, caption=caption)
+        elif is_photo():
+            await context.bot.send_photo(chat_id=chat_id, photo=file_id, caption=caption)
+        else:
+            await context.bot.send_document(chat_id=chat_id, document=file_id, caption=caption)
+        return True, "sent_file_id"
+    if url:
+        if is_video():
+            await context.bot.send_video(chat_id=chat_id, video=url, caption=caption)
+        elif is_audio():
+            await context.bot.send_audio(chat_id=chat_id, audio=url, caption=caption)
+        elif is_photo():
+            await context.bot.send_photo(chat_id=chat_id, photo=url, caption=caption)
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=f"{caption}\n\n{url}")
+        return True, "sent_url"
+    return False, "asset_has_no_media"
+
 def update_production_asset_url(owner_id, asset_id, url):
     conn = db_connect()
     c = conn.cursor()
@@ -5812,8 +5892,10 @@ def build_publisher_handoff(queue_payload):
         "can_auto_publish": mode == "api" and bool(queue_payload.get("token_env")),
         "required_env": [item for item in required_env if item],
         "media": {
+            "asset_id": final_video.get("id", 0),
             "final_video_url": media_url,
             "telegram_file_id": final_video.get("file_id", ""),
+            "telegram_send_command": f"/asset_send id={final_video.get('id')}" if final_video.get("id") else "",
             "required": "final_video_url hoặc telegram_file_id",
         },
         "copy": {
@@ -10417,7 +10499,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
         "nexttask": "/next_task\n/next_task job=<JOB_ID>",
-        "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
+        "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>\n/asset_send id=<ASSET_ID>\n/asset_send job=<JOB_ID> type=final_video",
         "report": "/job_report <JOB_ID>",
         "jobcontext": "/job_context job=<JOB_ID>\nGET /api/operator/jobs/<JOB_ID>/context",
         "jobready": "/job_ready job=<JOB_ID>",
@@ -10911,10 +10993,52 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(
             f"• #{aid} | <code>{html.escape(asset_type or '-')}</code> | {created_at}\n"
             f"  url=<code>{html.escape(url or '-')}</code>\n"
+            f"  gửi Telegram: <code>/asset_send id={aid}</code>\n"
             f"  file_id=<code>{html.escape(file_id or '-')}</code>\n"
             f"  note={html.escape(note or '-')}"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_asset_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    asset = None
+    try:
+        asset_id = int(data.get("id") or data.get("asset") or (context.args[0] if context.args else 0))
+    except (TypeError, ValueError):
+        asset_id = 0
+    if asset_id:
+        asset = get_production_asset(update.effective_user.id, asset_id)
+    else:
+        try:
+            job_id = int(data.get("job") or data.get("job_id") or 0)
+        except (TypeError, ValueError):
+            job_id = 0
+        asset_type = data.get("type") or data.get("asset_type") or "final_video"
+        if job_id:
+            asset = latest_production_asset(update.effective_user.id, job_id, asset_type)
+            if asset:
+                asset_id = asset[0]
+    if not asset or not asset_id:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/asset_send id=&lt;ASSET_ID&gt;</code> hoặc <code>/asset_send job=&lt;JOB_ID&gt; type=final_video</code>",
+            parse_mode="HTML"
+        )
+    msg = await update.message.reply_text(f"⏳ Đang gửi asset #{asset_id} về Telegram...")
+    try:
+        ok, reason = await send_production_asset_to_chat(context, update.effective_chat.id, update.effective_user.id, asset_id)
+    except Exception as e:
+        logger.error(f"asset_send error: {e}")
+        ok, reason = False, str(e)
+    if ok:
+        await msg.delete()
+    else:
+        await msg.edit_text(
+            f"❌ Không gửi được asset #{asset_id}: <code>{html.escape(reason)}</code>\n"
+            "Nếu asset là link nội bộ, hãy kiểm tra file còn nằm trong OPERATOR_UPLOAD_DIR.",
+            parse_mode="HTML"
+        )
 
 async def cmd_manifest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -11473,6 +11597,7 @@ async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TY
         f"• Auto publish: <b>{'có thể' if handoff.get('can_auto_publish') else 'manual/API chưa đủ token'}</b>",
         f"• Env cần có: <code>{html.escape(', '.join(handoff.get('required_env') or []) or '-')}</code>",
         f"• Final video: <code>{html.escape(media.get('final_video_url') or media.get('telegram_file_id') or 'thiếu')}</code>",
+        f"• Gửi video về Telegram: <code>{html.escape(media.get('telegram_send_command') or 'chưa có asset_id')}</code>",
         "",
         "<b>Caption:</b>",
         f"<pre>{html_pre(copy.get('caption') or '-', 900)}</pre>",
@@ -11509,6 +11634,7 @@ async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Queue/job: <code>#{queue.get('id')}</code> / <code>#{queue.get('job_id')}</code>",
         f"• Platform/mode: <code>{html.escape(queue.get('platform') or '-')}</code> / <code>{html.escape(queue.get('mode') or '-')}</code>",
         f"• Final video: <code>{html.escape(media.get('final_video_url') or media.get('telegram_file_id') or 'thiếu')}</code>",
+        f"• Gửi video về Telegram: <code>{html.escape(media.get('telegram_send_command') or 'chưa có asset_id')}</code>",
         f"• Env cần có: <code>{html.escape(', '.join(handoff.get('required_env') or []) or '-')}</code>",
         "",
         "<b>Caption:</b>",
@@ -13206,6 +13332,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
     tg_app.add_handler(CommandHandler("assets", cmd_assets))
+    tg_app.add_handler(CommandHandler("asset_send", cmd_asset_send))
     tg_app.add_handler(CommandHandler("job_report", cmd_job_report))
     tg_app.add_handler(CommandHandler("job_context", cmd_job_context))
     tg_app.add_handler(CommandHandler("job_ready", cmd_job_ready))
@@ -13850,7 +13977,8 @@ async def api_operator_upload_task_asset(
                     f"• Task: <code>#{task_id}</code> | Job: <code>#{job_id}</code>\n"
                     f"• Asset: <code>#{asset_id}</code> | Type: <code>{html.escape(resolved_asset_type)}</code>\n"
                     f"• File: <code>{html.escape(saved['filename'])}</code> | {saved['size']:,} bytes\n"
-                    f"• Ready: <b>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</b>"
+                    f"• Ready: <b>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</b>\n"
+                    f"• Xem ngay: <code>/asset_send id={asset_id}</code>"
                 ),
                 parse_mode="HTML"
             )
@@ -13906,6 +14034,21 @@ async def api_operator_upload_job_asset(
     asset_url = operator_asset_url(asset_id)
     update_production_asset_url(ADMIN_ID, asset_id, asset_url)
     update_production_job(job_id, ADMIN_ID, asset_url=asset_url, note=f"api_job_upload asset:{asset_id} {note or ''}".strip())
+    if tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"📥 <b>OPERATOR JOB ASSET UPLOAD</b>\n\n"
+                    f"• Job: <code>#{job_id}</code>\n"
+                    f"• Asset: <code>#{asset_id}</code> | Type: <code>{html.escape(asset_type or 'source')}</code>\n"
+                    f"• File: <code>{html.escape(saved['filename'])}</code> | {saved['size']:,} bytes\n"
+                    f"• Xem ngay: <code>/asset_send id={asset_id}</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Operator job upload notify error: {e}")
     return {
         "ok": True,
         "job_id": job_id,

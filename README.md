@@ -132,6 +132,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/publish_queue_set id=<QUEUE_ID> status=published|blocked|scheduled url=https://... note=...`: cập nhật trạng thái hàng đợi đăng.
 - `/asset_add job=<ID> type=script|voice|raw_video|subtitle|thumbnail|final_video url=... note=...`: lưu asset/link/file vào production job.
 - `/assets <JOB_ID>`: xem toàn bộ asset đã lưu của job.
+- `/asset_send id=<ASSET_ID>` hoặc `/asset_send job=<JOB_ID> type=final_video`: gửi asset nội bộ/link/file_id về Telegram để admin kiểm duyệt hoặc tải đăng thủ công.
 - `/job_report <JOB_ID>`: báo cáo tổng hợp brief, asset, publish queue, publish URL, affiliate và performance của một job.
 - `/job_context job=<JOB_ID>`: xuất context máy đọc được cho Claude/n8n/tool worker, gồm job, readiness, assets, creative, manifest, tasks, next_task, publish pack và runbook.
 - `/job_ready job=<JOB_ID>`: kiểm tra job đã đủ brief, affiliate, creative, manifest, task, final video, review và publish queue trước khi đăng chưa.
