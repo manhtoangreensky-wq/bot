@@ -84,6 +84,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/manifest_handoff job=<ID> tool=kling|runway|fish|capcut|ffmpeg|publish|review`: xuất prompt riêng từ manifest cho từng AI/tool thực thi.
 - `/task_plan job=<ID>`: tách manifest mới nhất thành các task scene/voice/edit/review/publish.
 - `/tasks job=<ID>`: xem hàng việc sản xuất chi tiết theo job.
+- `/next_task job=<ID>`: lấy task ưu tiên tiếp theo và tự chuyển sang `working` để giao cho AI/tool.
 - `/task_handoff id=<TASK_ID>`: xuất prompt giao riêng một task cho AI/tool.
 - `/task_set id=<TASK_ID> status=ready url=https://... note=...`: cập nhật task, tự lưu output thành asset nếu có URL.
 - `/queue_publish job=<ID> mode=manual|api schedule=... note=...`: đưa job đã duyệt vào hàng đợi đăng.

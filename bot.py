@@ -1868,6 +1868,32 @@ def get_production_task(owner_id, task_id):
     conn.close()
     return row
 
+def next_production_task(owner_id, job_id=None):
+    rows = list_production_tasks(owner_id, job_id=job_id, limit=100)
+    if not rows:
+        return None
+    type_priority = {
+        "visual_scene": 0,
+        "voice": 1,
+        "edit": 2,
+        "review": 3,
+        "publish": 4,
+    }
+    status_priority = {
+        "blocked": 0,
+        "working": 1,
+        "queued": 2,
+        "waiting": 3,
+        "ready": 4,
+        "done": 5,
+        "cancelled": 6,
+    }
+    actionable = [row for row in rows if (row[7] or "queued") not in {"ready", "done", "cancelled"}]
+    if not actionable:
+        return None
+    actionable.sort(key=lambda row: (status_priority.get(row[7] or "queued", 9), type_priority.get(row[3] or "", 9), row[5] or 0, row[0]))
+    return actionable[0]
+
 def update_production_task(owner_id, task_id, status=None, output_url=None, note=None):
     updates = []
     params = []
@@ -3312,6 +3338,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /manifest_handoff — Giao manifest cho từng AI/tool",
             "• /task_plan — Tách manifest thành task",
             "• /tasks — Xem production task",
+            "• /next_task — Lấy task ưu tiên tiếp theo",
             "• /task_handoff — Giao từng task cho AI/tool",
             "• /task_set — Cập nhật output task",
             "• /queue_publish — Đưa job vào hàng đợi đăng",
@@ -4535,6 +4562,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🤝 Manifest handoff", callback_data="opmenu|manifesthandoff")
         ],
         [InlineKeyboardButton("✅ Production tasks", callback_data="opmenu|tasks")],
+        [InlineKeyboardButton("➡️ Next task", callback_data="opmenu|nexttask")],
         [InlineKeyboardButton("📮 Publish queue", callback_data="opmenu|publishqueue")],
         [
             InlineKeyboardButton("🤝 Handoff AI", callback_data="opmenu|handoff"),
@@ -4582,6 +4610,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
+        "nexttask": "/next_task\n/next_task job=<JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>",
         "report": "/job_report <JOB_ID>",
         "review": "/review_gate job=<JOB_ID>",
@@ -4803,6 +4832,42 @@ async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT
         f"Tiếp theo: /handoff job={job_id} tool=claude stage=script",
         parse_mode="HTML"
     )
+
+async def handle_task_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if str(query.from_user.id) != ADMIN_ID:
+        return await query.answer("Chỉ Admin được dùng.", show_alert=True)
+    parts = query.data.split("|")
+    if len(parts) != 4:
+        return
+    _, action, value, task_id_raw = parts
+    try:
+        task_id = int(task_id_raw)
+    except ValueError:
+        return
+    task = get_production_task(query.from_user.id, task_id)
+    if not task:
+        return await query.edit_message_text("❌ Không tìm thấy production task.")
+    if action == "status":
+        if value not in {"queued", "working", "waiting", "ready", "blocked", "done", "cancelled"}:
+            return
+        update_production_task(query.from_user.id, task_id, status=value)
+        return await query.edit_message_text(
+            f"✅ Task #{task_id} đã cập nhật status=<b>{html.escape(value)}</b>\n"
+            f"Xem tiếp: /next_task job={task[1]}",
+            parse_mode="HTML"
+        )
+    if action == "handoff":
+        tid, job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
+        update_production_task(query.from_user.id, task_id, status="working", note=note or "handoff_started")
+        return await query.edit_message_text(
+            f"🤝 <b>TASK HANDOFF #{tid}</b>\n"
+            f"Tool: <b>{html.escape(tool or '-')}</b> | Type: <code>{html.escape(task_type or '-')}</code>\n\n"
+            f"<pre>{html_pre(prompt or '-')}</pre>\n\n"
+            f"Khi có output: <code>/task_set id={tid} status=ready url=https://...</code>",
+            parse_mode="HTML"
+        )
 
 async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -5175,6 +5240,42 @@ async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     lines.append("\nChi tiết/giao việc: <code>/task_handoff id=&lt;TASK_ID&gt;</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_next_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or (context.args[0] if context.args else 0))
+    except ValueError:
+        job_id = 0
+    task = next_production_task(update.effective_user.id, job_id=job_id or None)
+    if not task:
+        if job_id:
+            return await update.message.reply_text(f"✅ Job #{job_id} không còn task cần xử lý hoặc chưa có task.")
+        return await update.message.reply_text("✅ Không có production task nào cần xử lý.")
+    tid, row_job_id, mid, task_type, tool, scene_no, title, status, output_url, note, updated_at = task
+    full_task = get_production_task(update.effective_user.id, tid)
+    prompt = full_task[7] if full_task else ""
+    update_production_task(update.effective_user.id, tid, status="working", note=note or "next_task_selected")
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Ready", callback_data=f"task|status|ready|{tid}"),
+            InlineKeyboardButton("⛔ Blocked", callback_data=f"task|status|blocked|{tid}")
+        ],
+        [InlineKeyboardButton("📋 Handoff", callback_data=f"task|handoff|x|{tid}")]
+    ])
+    await update.message.reply_text(
+        f"➡️ <b>NEXT TASK #{tid}</b>\n"
+        f"Job: <code>#{row_job_id}</code> | Manifest: <code>#{mid or '-'}</code>\n"
+        f"Type: <code>{html.escape(task_type or '-')}</code> | Tool: <b>{html.escape(tool or '-')}</b> | Scene: <b>{scene_no or '-'}</b>\n"
+        f"Status: <b>working</b>\n"
+        f"Title: {html.escape(title or '-')}\n\n"
+        f"<pre>{html_pre(prompt or '-')}</pre>\n\n"
+        f"Khi có output: <code>/task_set id={tid} status=ready url=https://...</code>",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
 
 async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -6349,6 +6450,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("manifest_handoff", cmd_manifest_handoff))
     tg_app.add_handler(CommandHandler("task_plan", cmd_task_plan))
     tg_app.add_handler(CommandHandler("tasks", cmd_tasks))
+    tg_app.add_handler(CommandHandler("next_task", cmd_next_task))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
@@ -6383,6 +6485,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_pipeline_callback, pattern=r"^pipe\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_callback, pattern=r"^trend\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_creative_callback, pattern=r"^creative\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_task_callback, pattern=r"^task\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
 
     await tg_app.initialize()
