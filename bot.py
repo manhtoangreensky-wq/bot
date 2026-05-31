@@ -1,8 +1,8 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║   TOAN DAAS V15.1 - PRODUCTION READY                            ║
+║   TOAN DAAS V15.2 - DYNAMIC QR READY                             ║
 ║   FastAPI + Telegram Bot (Shared Event Loop via Lifespan)        ║
-║   Dynamic Billing | Deepgram | Auto-Tiers | PayOS Auto Xu       ║
+║   Dynamic Billing | Deepgram | Auto-Tiers | PayOS Dynamic QR     ║
 ║   Cutout Fallback | OpenAI Fallback | Full Env Vars              ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
@@ -18,6 +18,8 @@ import math
 import hmac
 import hashlib
 import uvicorn
+import time
+import random
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
@@ -77,6 +79,13 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 user_memory: dict = {}
 
+# ─── DANH SÁCH GÓI CƯỚC NẠP ────────────────────────────────────────────────────
+PAYMENT_PACKAGES = {
+    "50k": {"amount": 50000, "xu": 500, "text": "Gói Cà Phê: 50.000đ ➔ 500 Xu"},
+    "100k": {"amount": 100000, "xu": 1050, "text": "Gói Tiêu Chuẩn: 100.000đ ➔ 1.050 Xu"},
+    "500k": {"amount": 500000, "xu": 6000, "text": "Gói Doanh Nghiệp: 500.000đ ➔ 6.000 Xu"}
+}
+
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
 DB_FILE       = "toandaas_system.db"
 TRIAL_CREDITS = 150
@@ -110,6 +119,14 @@ def init_db():
         order_code TEXT PRIMARY KEY,
         processed_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS payos_orders (
+        order_code TEXT PRIMARY KEY,
+        user_id TEXT,
+        amount INTEGER,
+        xu INTEGER,
+        status TEXT DEFAULT 'PENDING',
+        created_at DATETIME
+    )""")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0")]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT {defval}")
@@ -141,7 +158,6 @@ def add_credit(user_id, amount):
     conn.close()
 
 def is_payos_order_processed(order_code: str) -> bool:
-    """Kiểm tra order đã xử lý chưa (chống duplicate)"""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("SELECT 1 FROM payos_processed WHERE order_code=?", (str(order_code),))
@@ -156,6 +172,31 @@ def mark_payos_order_processed(order_code: str):
         "INSERT OR IGNORE INTO payos_processed (order_code, processed_at) VALUES (?,?)",
         (str(order_code), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     )
+    conn.commit()
+    conn.close()
+
+def create_order(order_code, user_id, amount, xu):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO payos_orders (order_code, user_id, amount, xu, status, created_at) VALUES (?,?,?,?,?,?)",
+        (str(order_code), str(user_id), amount, xu, 'PENDING', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
+    conn.commit()
+    conn.close()
+
+def get_order(order_code):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT user_id, amount, xu, status FROM payos_orders WHERE order_code=?", (str(order_code),))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def update_order_status(order_code, status):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("UPDATE payos_orders SET status=? WHERE order_code=?", (status, str(order_code)))
     conn.commit()
     conn.close()
 
@@ -227,7 +268,6 @@ class AgentGemini:
         if not gemini_client and not openai_client:
             return "❌ Chưa cấu hình AI Provider."
 
-        # --- Thử Gemini trước ---
         if gemini_client:
             if uid not in user_memory:
                 user_memory[uid] = []
@@ -254,7 +294,6 @@ class AgentGemini:
             except Exception as e:
                 logger.error(f"Gemini error: {e} — Thử fallback OpenAI...")
 
-        # --- Fallback OpenAI ---
         if openai_client:
             try:
                 messages = [{"role": "system", "content": prompt}]
@@ -310,12 +349,6 @@ class AgentDeepgram:
 class AgentVoice:
     @staticmethod
     async def render(text: str, user_id, context: ContextTypes.DEFAULT_TYPE, chat_id: int, cost: int) -> bool:
-        """
-        Thứ tự ưu tiên FREE → TRẢ PHÍ:
-        1. Edge TTS (hoàn toàn miễn phí) — thử trước, hoàn xu nếu thành công
-        2. Fish Audio (có phí quota) — chỉ dùng khi Edge TTS lỗi, giữ xu
-        Trả về True = đã dùng Fish Audio (tính phí), False = Edge TTS (hoàn xu)
-        """
         out = f"v_{user_id}.mp3"
         msg = await context.bot.send_message(
             chat_id=chat_id,
@@ -324,7 +357,6 @@ class AgentVoice:
         )
         used_fish = False
         try:
-            # Bước 1: Thử Edge TTS FREE trước
             edge_ok = False
             try:
                 communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
@@ -335,16 +367,14 @@ class AgentVoice:
                 logger.warning(f"Edge TTS lỗi: {e} — thử Fish Audio...")
 
             if edge_ok:
-                # Edge TTS thành công → miễn phí, hoàn xu
                 with open(out, "rb") as f:
                     await context.bot.send_audio(
                         chat_id=chat_id, audio=f,
                         caption=f"🔊 Gói Tiết Kiệm — Tổng hợp giọng nói thành công! (-{VOICE_FREE_COST} Xu)"
                     )
                 await msg.delete()
-                return False  # hoàn xu ở caller
+                return False
 
-            # Bước 2: Edge TTS lỗi → fallback Fish Audio (tính phí)
             if FISH_AUDIO_KEY:
                 async with httpx.AsyncClient() as client:
                     res = await client.post(
@@ -416,16 +446,12 @@ class AgentDownloader:
 
 # ─── STATE ───────────────────────────────────────────────────────────────────
 USER_BILL_STATE: dict = {}
-# Lưu pending action khi khách đang chọn provider
-# key=user_id, value={type, data, cost, file_bytes, chat_id, msg_id}
 USER_PENDING: dict = {}
 
-VOICE_FREE_COST  = 5   # xu cho gói tiết kiệm giọng nói
-IMAGE_FREE_COST  = 5   # xu cho gói tiết kiệm tách nền
+VOICE_FREE_COST  = 5
+IMAGE_FREE_COST  = 5
 
 def is_trial_account(user_id) -> bool:
-    """Tài khoản thử nghiệm = chưa từng nạp tiền (total_spent chỉ từ xu tặng, không có giao dịch nạp).
-    Dùng cờ has_deposited trong DB để phân biệt."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("SELECT has_deposited FROM users WHERE user_id=?", (str(user_id),))
@@ -433,15 +459,9 @@ def is_trial_account(user_id) -> bool:
     conn.close()
     if not row:
         return True
-    return row[0] != 1  # 0 = chưa nạp (trial), 1 = đã nạp
+    return row[0] != 1
 
 def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup:
-    """
-    Tạo inline keyboard cho khách chọn provider.
-    - Tài khoản trial (chưa nạp tiền): chỉ thấy Gói Tiết Kiệm
-    - Tài khoản đã nạp: thấy đủ 2 gói
-    service: 'voice' | 'image'
-    """
     trial = is_trial_account(uid)
     if service == "voice":
         buttons = [
@@ -459,7 +479,7 @@ def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup
                     callback_data=f"prov|voice|paid|{uid}"
                 )
             ])
-    else:  # image
+    else:
         buttons = [
             [
                 InlineKeyboardButton(
@@ -480,7 +500,6 @@ def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup
 
 
 async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý khi khách bấm chọn provider từ inline keyboard."""
     query = update.callback_query
     await query.answer()
     parts = query.data.split("|")
@@ -489,7 +508,6 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
     _, service, mode, uid_str = parts
     uid = int(uid_str)
 
-    # Bảo vệ: chỉ chính user đó mới được bấm
     if query.from_user.id != uid:
         await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
         return
@@ -500,7 +518,6 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if mode == "cancel":
-        # Hoàn xu nếu đã trừ
         if pending.get("cost", 0) > 0:
             add_credit(uid, pending["cost"])
         await query.edit_message_text("❌ Đã huỷ. Xu được hoàn lại.")
@@ -510,19 +527,16 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
     cost     = pending["cost"]
     svc_type = pending["type"]
 
-    # ── VOICE ──
     if svc_type == "voice":
         data = pending["data"]
         if mode == "free":
-            # Gói tiết kiệm — hoàn xu đã tạm trừ, sau đó trừ 5 xu
             if cost > 0 and str(uid) != ADMIN_ID:
-                add_credit(uid, cost)  # hoàn lại khoản tạm trừ
-            # Trừ 5 xu cho gói tiết kiệm
+                add_credit(uid, cost)
             can_afford_free = True
             if str(uid) != ADMIN_ID:
                 credits_now, _, _ = get_user(uid)
                 if credits_now >= VOICE_FREE_COST:
-                    conn = __import__('sqlite3').connect(DB_FILE)
+                    conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
                     c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (VOICE_FREE_COST, str(uid)))
                     conn.commit()
@@ -550,7 +564,6 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 if os.path.exists(out):
                     os.remove(out)
         else:
-            # Fish Audio — giữ xu, nếu lỗi hoàn xu + fallback
             await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Cao Cấp)...</i>", parse_mode="HTML")
             out = f"v_{uid}.mp3"
             ok = False
@@ -576,11 +589,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     else:
                         logger.warning(f"Fish Audio {res.status_code} — fallback Edge TTS")
                 if not ok:
-                    # Fallback gói tiết kiệm — hoàn xu cao cấp, trừ 5 xu tiết kiệm
                     if cost > 0 and str(uid) != ADMIN_ID:
-                        add_credit(uid, cost)  # hoàn xu gói cao cấp
+                        add_credit(uid, cost)
                     if str(uid) != ADMIN_ID:
-                        conn = __import__('sqlite3').connect(DB_FILE)
+                        conn = sqlite3.connect(DB_FILE)
                         c = conn.cursor()
                         c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (VOICE_FREE_COST, str(uid)))
                         conn.commit()
@@ -600,19 +612,16 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 if os.path.exists(out):
                     os.remove(out)
 
-    # ── IMAGE ──
     elif svc_type == "image":
         img_bytes = pending["file_bytes"]
         if mode == "free":
-            # Gói tiết kiệm — hoàn xu tạm trừ, sau đó trừ 5 xu
             if cost > 0 and str(uid) != ADMIN_ID:
-                add_credit(uid, cost)  # hoàn lại khoản tạm trừ
-            # Trừ 5 xu cho gói tiết kiệm
+                add_credit(uid, cost)
             can_afford_free = True
             if str(uid) != ADMIN_ID:
                 credits_now, _, _ = get_user(uid)
                 if credits_now >= IMAGE_FREE_COST:
-                    conn = __import__('sqlite3').connect(DB_FILE)
+                    conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
                     c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (IMAGE_FREE_COST, str(uid)))
                     conn.commit()
@@ -648,7 +657,6 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
             if not ok:
                 await query.edit_message_text("❌ Cutout.pro lỗi hoặc chưa cấu hình CUTOUT_API_KEY.")
         else:
-            # RemoveBG — giữ xu, nếu lỗi tự chuyển Cutout
             await query.edit_message_text("⏳ <i>Đang tách nền (Gói Cao Cấp)...</i>", parse_mode="HTML")
             ok = False
             if REMOVEBG_API_KEY:
@@ -674,11 +682,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 except Exception as e:
                     logger.error(f"RemoveBG error: {e}")
             if not ok:
-                # Fallback gói tiết kiệm — hoàn xu cao cấp, trừ 5 xu tiết kiệm
                 if cost > 0 and str(uid) != ADMIN_ID:
-                    add_credit(uid, cost)  # hoàn xu gói cao cấp
+                    add_credit(uid, cost)
                 if str(uid) != ADMIN_ID:
-                    conn = __import__('sqlite3').connect(DB_FILE)
+                    conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
                     c.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (IMAGE_FREE_COST, str(uid)))
                     conn.commit()
@@ -707,11 +714,93 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     await query.edit_message_text("❌ Cả 2 dịch vụ đều lỗi. Xu đã hoàn lại.")
 
 
+async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xử lý sinh hóa đơn và link QR Động từ PayOS khi khách click chọn gói"""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("|")
+    if len(parts) != 3:
+        return
+    _, pkg_key, uid_str = parts
+    uid = int(uid_str)
+
+    if query.from_user.id != uid:
+        await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+        return
+
+    if pkg_key not in PAYMENT_PACKAGES:
+        await query.edit_message_text("❌ Gói nạp không hợp lệ.")
+        return
+
+    pkg = PAYMENT_PACKAGES[pkg_key]
+    amount = pkg["amount"]
+    xu = pkg["xu"]
+
+    if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
+        await query.edit_message_text("❌ Hệ thống chưa cấu hình đầy đủ API Key PayOS.")
+        return
+
+    # Sinh mã đơn hàng dạng số nguyên (timestamp + random) hợp lệ với PayOS
+    order_code = int(time.time() * 10) + random.randint(0, 9)
+    create_order(order_code, uid, amount, xu)
+
+    bot_link = f"https://t.me/{context.bot.username}" if context.bot.username else "https://t.me"
+    payos_body = {
+        "orderCode": order_code,
+        "amount": amount,
+        "description": f"DAAS {uid} PKG {pkg_key}"[:25],
+        "cancelUrl": bot_link,
+        "returnUrl": bot_link
+    }
+
+    sorted_keys = sorted(payos_body.keys())
+    raw_str = "&".join(f"{k}={payos_body[k]}" for k in sorted_keys)
+    signature = hmac.new(
+        PAYOS_CHECKSUM_KEY.encode("utf-8"),
+        raw_str.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    payos_body["signature"] = signature
+
+    headers = {
+        "x-client-id": PAYOS_CLIENT_ID,
+        "x-api-key": PAYOS_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                "https://api-merchant.payos.vn/v2/payment-requests",
+                headers=headers,
+                json=payos_body,
+                timeout=30.0
+            )
+        res_data = res.json()
+        if res.status_code == 200 and res_data.get("code") == "00":
+            checkout_url = res_data["data"]["checkoutUrl"]
+            qr_text = (
+                f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
+                f"📋 Gói lựa chọn: <b>{pkg['text']}</b>\n"
+                f"💰 Số tiền cần chuyển: <b>{amount:,}đ</b>\n"
+                f"🪙 Hạn mức nhận được: <b>+{xu} Xu</b>\n"
+                f"🆔 Mã đơn định danh: <code>{order_code}</code>\n\n"
+                f"👉 Nhấn vào nút liên kết dưới đây để nhận diện mã QR thanh toán động. Hệ thống sẽ tự động điền sẵn số tiền và nội dung hóa đơn chính xác!"
+            )
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 QUÉT MÃ QR THANH TOÁN", url=checkout_url)]])
+            await query.edit_message_text(qr_text, parse_mode="HTML", reply_markup=kb)
+        else:
+            logger.error(f"PayOS error response: {res_data}")
+            await query.edit_message_text(f"❌ PayOS từ chối tạo hóa đơn: {res_data.get('desc', 'Lỗi không rõ')}")
+    except Exception as e:
+        logger.error(f"PayOS Exception: {e}")
+        await query.edit_message_text(f"❌ Thất bại khi kết nối API cổng PayOS: {str(e)}")
+
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(update.effective_user.id, update.effective_user.first_name)
     text = (
-        "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.1</b>\n\n"
+        "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.2</b>\n\n"
         "Chào mừng! Hệ thống tính phí thông minh theo dung lượng thực tế.\n\n"
         "🛠️ <b>CÁCH SỬ DỤNG:</b>\n"
         "<b>1. Chat AI:</b> Nhắn tin bình thường (tính theo độ dài chữ).\n"
@@ -760,31 +849,23 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     credits, _, _ = get_user(uid, update.effective_user.first_name)
     msg = (
-        f"💳 <b>NẠP SỐ DƯ — TOAN DAAS</b>\n\n"
+        f"💳 <b>NẠP SỐ DƯ TỰ ĐỘNG (QR ĐỘNG) — TOAN DAAS</b>\n\n"
         f"👤 ID Telegram: <code>{uid}</code>\n"
-        f"🪙 Số dư: <b>{credits} Xu</b>\n\n"
+        f"🪙 Số dư hiện tại: <b>{credits} Xu</b>\n\n"
         f"<b>🛒 BẢNG GIÁ (1 Xu = 100đ):</b>\n"
         f"• Gói Cà Phê: 50.000đ ➔ <b>500 Xu</b>\n"
         f"• Gói Tiêu Chuẩn: 100.000đ ➔ <b>1.050 Xu</b>\n"
         f"• Gói Doanh Nghiệp: 500.000đ ➔ <b>6.000 Xu</b>\n\n"
-        f"<b>🏦 CHUYỂN KHOẢN:</b>\n"
-        f"- Ngân hàng: <b>ACB</b>\n"
-        f"- STK: <b>8899397968</b> (NGUYEN MANH TOAN)\n"
-        f"- Nội dung BẮT BUỘC: <code>DAAS {uid}</code>\n\n"
-        f"<b>⚡ NẠP TỰ ĐỘNG:</b>\n"
-        f"Hệ thống tự xác nhận qua PayOS trong vài giây!\n\n"
-        f"<b>📋 QUY TRÌNH:</b>\n"
-        f"1️⃣ Chuyển khoản với nội dung <code>DAAS {uid}</code>\n"
-        f"2️⃣ Xu tự động vào tài khoản trong 5-10 giây ⚡\n"
-        f"3️⃣ Bot sẽ gửi thông báo xác nhận\n\n"
-        f"⚠️ <i>Không ghi sai nội dung — hệ thống sẽ không nhận diện được.</i>"
+        f"⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. Không lo điền sai nội dung chuyển khoản.\n\n"
+        f"👇 <b>Vui lòng click chọn gói cước mong muốn dưới đây:</b>"
     )
-    qr_url = (
-        f"https://img.vietqr.io/image/ACB-8899397968-compact.png"
-        f"?amount=&addInfo=DAAS+{uid}&accountName=NGUYEN+MANH+TOAN"
-    )
+    buttons = [
+        [InlineKeyboardButton("☕ Gói Cà Phê (50k)", callback_data=f"pkg|50k|{uid}")],
+        [InlineKeyboardButton("⭐ Gói Tiêu Chuẩn (100k)", callback_data=f"pkg|100k|{uid}")],
+        [InlineKeyboardButton("🏢 Gói Doanh Nghiệp (500k)", callback_data=f"pkg|500k|{uid}")]
+    ]
     USER_BILL_STATE[uid] = True
-    await update.message.reply_photo(photo=qr_url, caption=msg, parse_mode="HTML")
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def cmd_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     content = " ".join(context.args)
@@ -890,8 +971,7 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=(
                 f"❌ <b>BILL BỊ TỪ CHỐI</b>\n\n"
                 f"Admin không xác nhận được giao dịch.\n"
-                f"Kiểm tra lại nội dung: <code>DAAS {target_id}</code>\n"
-                f"Gửi bill rõ hơn hoặc liên hệ Admin."
+                f"Kiểm tra lại nội dung chuyển khoản hoặc liên hệ Admin."
             ),
             parse_mode="HTML"
         )
@@ -912,7 +992,7 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
     if not rows:
         return await update.message.reply_text("📭 Không có bill nào đang chờ.")
-    lines = ["📋 <b>BILL CHỜ DUYỆT:</b>\n"]
+    lines = ["📋 <b>BILL CHỜ DUYỆT (THỦ CÔNG):</b>\n"]
     for r in rows:
         lines.append(
             f"• #{r[0]} | {r[2]} | <code>{r[1]}</code> | {r[3]}\n"
@@ -944,7 +1024,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⚡ Giao dịch hôm nay: <b>{tx_today}</b>\n"
         f"💰 Xu tiêu hôm nay: <b>{revenue_today}</b>\n"
         f"📋 Bill chờ duyệt (thủ công): <b>{pending}</b>\n"
-        f"🤖 Nạp tự động PayOS: <b>{payos_auto}</b>",
+        f"🤖 Nạp tự động PayOS QR Động: <b>{payos_auto}</b>",
         parse_mode="HTML"
     )
 
@@ -991,7 +1071,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
         admin_caption = (
-            f"💸 <b>BILL MỚI #{deposit_id}</b>\n\n"
+            f"💸 <b>BILL MỚI TẢI LÊN THỦ CÔNG #{deposit_id}</b>\n\n"
             f"👤 Khách: <b>{username}</b>\n"
             f"🆔 ID: <code>{uid}</code>\n"
             f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
@@ -1006,14 +1086,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(
             f"✅ <b>Đã gửi bill cho Admin!</b>\n\n"
-            f"📋 Mã: <b>#{deposit_id}</b>\n"
+            f"📋 Mã đơn: <b>#{deposit_id}</b>\n"
             f"🆔 ID của bạn: <code>{uid}</code>\n\n"
-            f"⏳ Vui lòng chờ Admin xác nhận.",
+            f"⏳ Vui lòng chờ Admin kiểm tra chéo sao kê thủ công.",
             parse_mode="HTML"
         )
         return
 
-    # -- Tach nen: cho khach chon provider --
     if not REMOVEBG_API_KEY and not CUTOUT_API_KEY:
         return await update.message.reply_text("❌ Dịch vụ tách nền chưa được cấu hình.")
     file_size = update.message.photo[-1].file_size
@@ -1045,7 +1124,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
             f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{IMAGE_FREE_COST} Xu</b>\n"
             f"🖼️ <b>Gói Cao Cấp</b> — Chất lượng HD, trừ <b>{final_cost} Xu</b>\n\n"
-            f"<i>Nếu gói cao cấp gặp sự cố → tự chuyển gói tiết kiệm và hoàn phần dư.</i>"
+            f"<i>If premium engine fails, system auto switch to save engine & refund.</i>"
         )
     await update.message.reply_text(img_desc, parse_mode="HTML", reply_markup=kb)
 
@@ -1109,14 +1188,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     if act == "voice":
-        # Hoi khach chon provider truoc khi xu ly
-        # Tinh cost cho Fish Audio (co phi); neu chon Edge TTS mien phi thi khong tru xu
         raw_cost_v = calculate_dynamic_cost("voice", size_calc)
         _, ts_v, _ = get_user(uid)
         fish_cost, _ = apply_discount(ts_v, raw_cost_v)
-        # Hoan xu da tru (vi deduct_dynamic_credit da tru cho 'voice')
         if cost > 0 and str(uid) != ADMIN_ID:
-            add_credit(uid, cost)  # hoan tam, se tru lai neu chon paid
+            add_credit(uid, cost)
         USER_PENDING[uid] = {
             "type": "voice",
             "data": data,
@@ -1136,7 +1212,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🎙️ <b>Chọn gói đọc giọng nói:</b>\n\n"
                 f"🔊 <b>Gói Tiết Kiệm</b> — Giọng chuẩn, trừ <b>{VOICE_FREE_COST} Xu</b>\n"
                 f"🎙️ <b>Gói Cao Cấp</b> — Giọng nhân bản siêu thực, trừ <b>{fish_cost} Xu</b>\n\n"
-                f"<i>Nếu gói cao cấp gặp sự cố → tự chuyển gói tiết kiệm và hoàn phần dư.</i>"
+                f"<i>If premium voice system crash, system auto fallback to save engine & refund.</i>"
             )
         await update.message.reply_text(voice_desc, parse_mode="HTML", reply_markup=kb)
     elif act == "download":
@@ -1182,30 +1258,29 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
 
     await tg_app.initialize()
     await tg_app.start()
     asyncio.create_task(tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES))
-    logger.info("🚀 TOAN DAAS V15.1 ONLINE — Bot + API đang chạy.")
+    logger.info("🚀 TOAN DAAS ONLINE — Bot + Cổng QR Động PayOS Sẵn Sàng.")
     yield
     await tg_app.updater.stop()
     await tg_app.stop()
     await tg_app.shutdown()
     logger.info("🛑 Bot đã dừng an toàn.")
 
-fastapi_app = FastAPI(title="TOAN DAAS V15.1", lifespan=lifespan)
+fastapi_app = FastAPI(title="TOAN DAAS V15.2", lifespan=lifespan)
 
 # ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 @fastapi_app.get("/")
 async def health():
-    return {"status": "ok", "service": "TOAN DAAS V15.1"}
+    return {"status": "ok", "service": "TOAN DAAS V15.2 — Dynamic Billing Verified"}
 
-# ─── WEBHOOK PAYOS ────────────────────────────────────────────────────────────
+# ─── WEBHOOK PAYOS (DYNAMIC UPDATED) ─────────────────────────────────────────
 def verify_payos_signature(data: dict, received_sig: str) -> bool:
-    """Xác thực chữ ký HMAC-SHA256 từ payOS"""
     if not PAYOS_CHECKSUM_KEY:
         return False
-    # PayOS yêu cầu sort key theo alphabet, ghép thành key=value&key=value
     sorted_keys = sorted(data.keys())
     raw_str = "&".join(f"{k}={data[k]}" for k in sorted_keys)
     computed = hmac.new(
@@ -1218,9 +1293,8 @@ def verify_payos_signature(data: dict, received_sig: str) -> bool:
 @fastapi_app.post("/webhook/payos")
 async def webhook_payos(request: Request):
     """
-    PayOS gọi endpoint này sau mỗi giao dịch thành công.
-    Khách chuyển khoản nội dung: DAAS <user_id>
-    Bot tự cộng Xu và thông báo cho khách.
+    PayOS gọi Webhook tự động sau khi giao dịch QR động thành công.
+    Tự đối chiếu orderCode nội bộ để cộng Xu mà khách không cần điền nội dung.
     """
     try:
         body = await request.json()
@@ -1230,85 +1304,70 @@ async def webhook_payos(request: Request):
     sig  = body.get("signature", "")
     data = body.get("data", {})
 
-    # Xác thực chữ ký (bỏ qua nếu chưa cấu hình PAYOS_CHECKSUM_KEY)
     if PAYOS_CHECKSUM_KEY and not verify_payos_signature(data, sig):
-        logger.warning("PayOS webhook: chữ ký không hợp lệ!")
+        logger.warning("PayOS webhook: chữ ký xác thực không hợp lệ!")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # Chỉ xử lý khi giao dịch thành công
     if not (body.get("success") or data.get("status") == "PAID"):
         return JSONResponse({"code": "00", "desc": "ignored"})
 
     order_code = str(data.get("orderCode", data.get("order_code", "")))
-    desc = data.get("description", data.get("addInfo", "")).upper()
     amount_vnd = int(data.get("amount", 0))
 
-    # Chống xử lý trùng
     if order_code and is_payos_order_processed(order_code):
-        logger.info(f"PayOS: order {order_code} đã xử lý, bỏ qua.")
+        logger.info(f"PayOS: order {order_code} đã xử lý từ trước, bỏ qua.")
         return JSONResponse({"code": "00", "desc": "duplicate"})
 
-    # Tìm pattern "DAAS <user_id>" trong nội dung chuyển khoản
-    target_id = None
-    parts = desc.split()
-    for i, p in enumerate(parts):
-        if p == "DAAS" and i + 1 < len(parts) and parts[i + 1].isdigit():
-            target_id = parts[i + 1]
-            break
+    # Tìm đơn hàng trong cơ sở dữ liệu để lấy UID và số xu tương ứng
+    order_info = get_order(order_code)
+    if not order_info:
+        logger.warning(f"PayOS Webhook: Không tìm thấy hóa đơn định danh {order_code} trên DB!")
+        return JSONResponse({"code": "00", "desc": "order_not_found"})
 
-    if not target_id:
-        logger.warning(f"PayOS webhook: không tìm thấy DAAS <user_id> trong nội dung: {desc}")
-        return JSONResponse({"code": "00", "desc": "no_target"})
+    target_id, _, xu, status = order_info
 
-    # Tính xu — bảng quy đổi có thưởng
-    if amount_vnd >= 500000:
-        xu = 6000
-    elif amount_vnd >= 100000:
-        xu = 1050
-    elif amount_vnd >= 50000:
-        xu = 500
-    else:
-        xu = math.floor(amount_vnd / 100)  # fallback: 100đ = 1 Xu
+    if status == "PAID":
+        return JSONResponse({"code": "00", "desc": "already_paid"})
 
-    if xu <= 0:
-        return JSONResponse({"code": "00", "desc": "amount_too_low"})
-
+    # Thực hiện cộng hạn mức tự động
     add_credit(target_id, xu)
-    # Đánh dấu tài khoản đã nạp tiền → mở khoá gói cao cấp
+    
+    # Cập nhật cờ kích hoạt nạp tiền thành công
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
     conn.commit()
     conn.close()
+
+    # Khóa hóa đơn chống trùng lắp double-spending
+    update_order_status(order_code, "PAID")
     if order_code:
         mark_payos_order_processed(order_code)
 
     credits_now, _, _ = get_user(target_id)
-    logger.info(f"✅ PayOS auto nạp {xu} Xu cho {target_id} | {amount_vnd:,}đ | order: {order_code}")
+    logger.info(f"✅ PayOS dynamic QR nạp thành công {xu} Xu cho {target_id} | Đơn: {order_code}")
 
-    # Thông báo cho khách qua Telegram
     if tg_app:
         try:
             await tg_app.bot.send_message(
                 chat_id=target_id,
                 text=(
                     f"🎉 <b>NẠP TỰ ĐỘNG THÀNH CÔNG!</b>\n\n"
-                    f"✅ PayOS xác nhận thanh toán!\n"
-                    f"💰 Số tiền: <b>{amount_vnd:,}đ</b>\n"
-                    f"🪙 Cộng: <b>+{xu} Xu</b>\n"
-                    f"💼 Số dư hiện tại: <b>{credits_now} Xu</b>\n\n"
-                    f"Cảm ơn bạn đã tin dùng TOAN DAAS! 🙏"
+                    f"✅ PayOS xác nhận cổng QR Động trực tuyến!\n"
+                    f"💰 Số tiền giao dịch: <b>{amount_vnd:,}đ</b>\n"
+                    f"🪙 Hạn mức cộng: <b>+{xu} Xu</b>\n"
+                    f"💼 Số dư tài khoản hiện tại: <b>{credits_now} Xu</b>\n\n"
+                    f"Cảm ơn bạn đã tin dùng dịch vụ TOAN DAAS! 🙏"
                 ),
                 parse_mode="HTML"
             )
-            # Thông báo admin
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
-                    f"💸 <b>AUTO NẠP PAYOS</b>\n\n"
-                    f"🆔 User: <code>{target_id}</code>\n"
+                    f"💸 <b>AUTO NẠP PAYOS (QR ĐỘNG SUCCESS)</b>\n\n"
+                    f"🆔 Khách hàng: <code>{target_id}</code>\n"
                     f"💰 {amount_vnd:,}đ → +{xu} Xu\n"
-                    f"📋 Order: {order_code}"
+                    f"📋 Order Code: <code>{order_code}</code>"
                 ),
                 parse_mode="HTML"
             )
