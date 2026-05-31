@@ -2250,6 +2250,34 @@ def growth_score(views=0, clicks=0, conversions=0, revenue=0, cost=0):
     score = min(100, int((ctr * 3) + (cvr * 5) + min(revenue / 10000, 40) + max(min(roi / 10, 20), 0)))
     return score, ctr, cvr, roi
 
+def operator_loop_data(owner_id, limit=10, auto_queue=True):
+    jobs = list_production_jobs(owner_id, limit=limit)
+    advanced = []
+    blocked = []
+    next_tasks = []
+    ready_publish = []
+    for jid, stage, status, platform, topic, channel_name, product_name, updated_at in jobs:
+        if status in {"published", "done", "cancelled"}:
+            continue
+        readiness = production_readiness_data(owner_id, jid)
+        level = readiness["level"] if readiness else "UNKNOWN"
+        next_action = readiness["next_action"] if readiness else ""
+        if level == "READY_TO_QUEUE" and auto_queue:
+            ok, queue_id = create_publish_queue_item(owner_id, jid, mode="manual", scheduled_at="", note="operator_loop_auto_queue")
+            if ok:
+                advanced.append((jid, "queued_publish", queue_id, topic, platform, channel_name))
+                continue
+        if level == "READY_TO_PUBLISH":
+            ready_publish.append((jid, topic, platform, channel_name))
+            continue
+        task = next_production_task(owner_id, job_id=jid)
+        if task:
+            tid, job_id, manifest_id, task_type, tool, scene_no, title, t_status, output_url, note, task_updated = task
+            next_tasks.append((tid, job_id, task_type, tool, scene_no, title, t_status, topic, platform, channel_name))
+        else:
+            blocked.append((jid, level, next_action, topic, platform, channel_name))
+    return advanced, ready_publish, next_tasks, blocked
+
 def create_publish_queue_item(owner_id, job_id, mode="manual", scheduled_at="", note=""):
     job = get_production_job(job_id, owner_id)
     if not job:
@@ -3817,6 +3845,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /operator_auto — Tự tạo batch job từ trend",
             "• /operator_next — Điều phối stage tiếp theo",
             "• /operator_dashboard — Tổng quan vận hành",
+            "• /operator_loop — Quét job, tự queue job ready và báo task tiếp theo",
             "• /publish_readiness — Kiểm tra sẵn sàng auto-post",
             "• /channel_publish_set — Cấu hình mode/token kênh",
             "• /trend_search — Tìm trend mới để làm video",
@@ -5385,6 +5414,7 @@ def operator_menu_keyboard():
             InlineKeyboardButton("💰 Performance", callback_data="opmenu|performance")
         ],
         [InlineKeyboardButton("📈 Growth optimizer", callback_data="opmenu|growth")],
+        [InlineKeyboardButton("🔁 Operator loop", callback_data="opmenu|loop")],
         [InlineKeyboardButton("📊 Daily digest", callback_data="opmenu|daily")],
     ])
 
@@ -5437,6 +5467,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "handoff": "/handoff job=<JOB_ID> tool=claude stage=script",
         "performance": "/performance\n/performance_add job=<JOB_ID> type=revenue value=1 amount=... note=...",
         "growth": "/growth\n/growth days=30",
+        "loop": "/operator_loop\n/operator_loop limit=10 queue=1",
         "daily": "/operator_daily\n/operator_daily days=7",
     }
     await query.edit_message_text(
@@ -6489,6 +6520,63 @@ async def cmd_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        limit = max(1, min(int(data.get("limit") or data.get("max") or 10), 30))
+    except ValueError:
+        limit = 10
+    auto_queue = (data.get("queue") or data.get("auto_queue") or "1").lower() not in {"0", "false", "no", "off"}
+    advanced, ready_publish, next_tasks, blocked = operator_loop_data(update.effective_user.id, limit=limit, auto_queue=auto_queue)
+    lines = [
+        "🔁 <b>OPERATOR LOOP</b>",
+        f"• Quét tối đa: <b>{limit}</b> job",
+        f"• Auto queue publish: <b>{'bật' if auto_queue else 'tắt'}</b>",
+        "",
+    ]
+    lines.append("<b>Đã tự đẩy bước:</b>")
+    if advanced:
+        for jid, action, queue_id, topic, platform, channel_name in advanced[:10]:
+            lines.append(
+                f"• job #{jid} → queue #{queue_id} | <code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n"
+                f"  {html.escape(topic or '-')}"
+            )
+    else:
+        lines.append("• Chưa có job nào đủ điều kiện tự đưa vào publish queue.")
+
+    lines.append("\n<b>Queue sẵn sàng cho publisher worker:</b>")
+    if ready_publish:
+        for jid, topic, platform, channel_name in ready_publish[:8]:
+            lines.append(f"• job #{jid} | <code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')} | {html.escape(topic or '-')}")
+    else:
+        lines.append("• Chưa có queue ready/publishing mở.")
+
+    lines.append("\n<b>Task tiếp theo cho AI/tool worker:</b>")
+    if next_tasks:
+        for tid, job_id, task_type, tool, scene_no, title, status, topic, platform, channel_name in next_tasks[:10]:
+            lines.append(
+                f"• task #{tid} | job #{job_id} | <code>{html.escape(task_type or '-')}</code>/{html.escape(tool or '-')}"
+                f" | scene={scene_no or '-'} | {html.escape(status or '-')}\n"
+                f"  {html.escape(title or topic or '-')}"
+            )
+        lines.append("\nWorker API: <code>GET /api/operator/tasks/next</code>")
+    else:
+        lines.append("• Không có task queued/waiting.")
+
+    lines.append("\n<b>Cần admin xử lý:</b>")
+    if blocked:
+        for jid, level, next_action, topic, platform, channel_name in blocked[:8]:
+            lines.append(
+                f"• job #{jid} | {html.escape(level or '-') } | <code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n"
+                f"  next: <code>{html.escape(next_action or '/job_ready job=' + str(jid))}</code>"
+            )
+    else:
+        lines.append("• Không có job nghẽn rõ ràng.")
+    lines.append("\nLệnh liên quan: <code>/operator_dashboard</code> | <code>/publish_queue</code> | <code>/growth</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_publish_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -7417,6 +7505,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
+    tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
     tg_app.add_handler(CommandHandler("brain", cmd_brain))
     tg_app.add_handler(CommandHandler("autopilot", cmd_autopilot))
     tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
