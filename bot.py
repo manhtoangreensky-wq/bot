@@ -90,8 +90,20 @@ PAYMENT_PACKAGES = {
 }
 
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
-DB_FILE       = "toandaas_system.db"
-TRIAL_CREDITS = 150
+DB_FILE           = "toandaas_system.db"
+TRIAL_CREDITS     = 150
+
+# ─── FREE CHAT CONFIG ─────────────────────────────────────────────────────────
+FREE_CHAT_DAILY   = 20   # lượt chat/ngày cho tài khoản chưa nạp tiền
+
+# ─── PLACEHOLDER: AI KEYS CAO CẤP (bỏ comment khi sẵn sàng) ──────────────────
+# Bước 1: Thêm biến môi trường tương ứng trên server/render/railway
+# Bước 2: Bỏ comment dòng cần dùng bên dưới
+# OPENAI_PRO_KEY  = _env("OPENAI_PRO_KEY")   # GPT-4o Pro  — https://platform.openai.com
+# GEMINI_PRO_KEY  = _env("GEMINI_PRO_KEY")   # Gemini 1.5 Pro/Ultra
+# CLAUDE_KEY      = _env("CLAUDE_API_KEY")   # Claude Sonnet/Opus — https://console.anthropic.com
+# GROQ_KEY        = _env("GROQ_KEY")         # Groq Llama-3 — siêu nhanh, có free tier
+# COHERE_KEY      = _env("COHERE_KEY")       # Cohere Command R+
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -130,9 +142,10 @@ def init_db():
         status TEXT DEFAULT 'PENDING',
         created_at DATETIME
     )""")
-    for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0")]:
+    for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
+                        ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
-            c.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT {defval}")
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} {'INTEGER' if 'count' in col or 'spent' in col or 'vip' in col or 'deposited' in col else 'TEXT'} DEFAULT {defval}")
         except Exception:
             pass
     conn.commit()
@@ -463,6 +476,43 @@ def is_trial_account(user_id) -> bool:
     if not row:
         return True
     return row[0] != 1
+
+def get_free_chat_status(user_id) -> tuple:
+    """Trả về (đã dùng hôm nay, còn lại). Reset tự động sang ngày mới."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT free_chat_count, free_chat_date FROM users WHERE user_id=?", (str(user_id),))
+    row = c.fetchone()
+    conn.close()
+    if not row or row[1] != today:
+        return 0, FREE_CHAT_DAILY
+    used = row[0]
+    return used, max(0, FREE_CHAT_DAILY - used)
+
+def consume_free_chat(user_id) -> bool:
+    """Tiêu 1 lượt free chat. Trả về True nếu thành công, False nếu hết."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT free_chat_count, free_chat_date FROM users WHERE user_id=?", (str(user_id),))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return False
+    count, date = row
+    if date != today:
+        count = 0  # reset ngày mới
+    if count >= FREE_CHAT_DAILY:
+        conn.close()
+        return False
+    c.execute(
+        "UPDATE users SET free_chat_count=?, free_chat_date=? WHERE user_id=?",
+        (count + 1, today, str(user_id))
+    )
+    conn.commit()
+    conn.close()
+    return True
 
 def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup:
     trial = is_trial_account(uid)
@@ -1189,12 +1239,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     size_calc = len(data) if act != "download" else 0
     action_key = act if act in ("voice", "download") else "chat"
 
-    can_afford, cost, discount = deduct_dynamic_credit(uid, action_key, size_calc)
-    if not can_afford:
-        return await update.message.reply_text(
-            f"❌ <b>HẾT HẠN MỨC!</b> Yêu cầu {cost} Xu.\nGõ /naptien để nạp thêm.",
-            parse_mode="HTML"
-        )
+    # ── LOGIC CHAT MIỄN PHÍ / TRẢ PHÍ ───────────────────────────────────────
+    is_admin = str(uid) == ADMIN_ID
+    credits, total_spent, is_vip = get_user(uid)
+    trial = is_trial_account(uid)
+
+    if action_key == "chat" and not is_admin and not is_vip:
+        used_today, remaining = get_free_chat_status(uid)
+
+        if trial:
+            # Tài khoản chưa nạp: dùng lượt miễn phí, hết thì khoá đến hôm sau
+            if remaining <= 0:
+                reset_time = (datetime.now().replace(hour=0, minute=0, second=0) + timedelta(days=1)).strftime("%H:%M ngày %d/%m")
+                return await update.message.reply_text(
+                    f"🚫 <b>Hết {FREE_CHAT_DAILY} lượt chat miễn phí hôm nay!</b>\n\n"
+                    f"⏰ Lượt mới reset lúc <b>00:00 ngày mai</b>\n"
+                    f"💡 Hoặc nạp tiền để chat <b>không giới hạn</b> ngay bây giờ:\n"
+                    f"👉 /naptien",
+                    parse_mode="HTML"
+                )
+            # Còn lượt — dùng miễn phí, không trừ Xu
+            consume_free_chat(uid)
+            cost, discount = 0, 0.0
+            warn = f"\n\n<i>🆓 Lượt miễn phí: còn {remaining - 1}/{FREE_CHAT_DAILY} hôm nay</i>" if remaining <= 5 else ""
+        else:
+            # Đã nạp tiền: trừ Xu bình thường, không giới hạn lượt
+            can_afford, cost, discount = deduct_dynamic_credit(uid, action_key, size_calc)
+            if not can_afford:
+                return await update.message.reply_text(
+                    f"❌ <b>HẾT XU!</b> Yêu cầu {cost} Xu.\n"
+                    f"💳 Gõ /naptien để nạp thêm.",
+                    parse_mode="HTML"
+                )
+            warn = ""
+    elif action_key == "chat" and (is_admin or is_vip):
+        cost, discount, warn = 0, 0.0, ""
+    else:
+        # voice / download — xử lý bình thường
+        can_afford, cost, discount = deduct_dynamic_credit(uid, action_key, size_calc)
+        if not can_afford:
+            return await update.message.reply_text(
+                f"❌ <b>HẾT HẠN MỨC!</b> Yêu cầu {cost} Xu.\nGõ /naptien để nạp thêm.",
+                parse_mode="HTML"
+            )
+        warn = ""
 
     if act == "voice":
         raw_cost_v = calculate_dynamic_cost("voice", size_calc)
@@ -1232,9 +1320,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Bạn là Trợ Lý Ảo TOAN DAAS. Trả lời súc tích, thân thiện.",
             text, uid
         )
-        discount_text = " (Đã áp dụng VIP)" if discount > 0 else ""
+        if cost > 0:
+            discount_text = " (Đã áp dụng VIP)" if discount > 0 else ""
+            cost_line = f"\n\n<i>(-{cost} Xu){discount_text}</i>"
+        else:
+            cost_line = ""
         await update.message.reply_text(
-            f"🤖 {reply}\n\n<i>(-{cost} Xu){discount_text}</i>",
+            f"🤖 {reply}{cost_line}{warn}",
             parse_mode="HTML"
         )
 
