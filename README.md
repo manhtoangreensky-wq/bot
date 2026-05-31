@@ -58,8 +58,10 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/channels`: liệt kê kênh/tài khoản nội bộ.
 - `/channel_publish_set id=<CHANNEL_ID> mode=manual|api token_env=... page_id=...`: cấu hình khả năng đăng thủ công/API cho kênh, chỉ lưu tên biến môi trường token.
 - `/publish_readiness`: kiểm tra kênh nào sẵn sàng đăng thủ công hoặc đã đủ cấu hình API cơ bản.
-- `/affiliate_add network=... product=... niche=... url=... note=...`: lưu link affiliate Shopee/Lazada/TikTok hoặc sàn khác.
+- `/affiliate_add network=... product=... niche=... url=... price=... rate=... audience=... allowed=... blocked=...`: lưu link affiliate Shopee/Lazada/TikTok hoặc sàn khác kèm hồ sơ sản phẩm.
 - `/affiliates`: liệt kê link affiliate nội bộ.
+- `/affiliate_profile id=<AFF_ID> price=... rate=... audience=... allowed=... blocked=... score=...`: cập nhật hồ sơ, claim được phép và claim cấm cho sản phẩm affiliate.
+- `/affiliate_match niche=... platform=tiktok trend=...`: xếp hạng affiliate phù hợp với trend/niche để chọn link trước khi tạo video.
 - `/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=...`: tạo lịch nội dung theo kênh.
 - `/calendar`: xem lịch nội dung đã lên.
 - `/operator topic=... channel=<ID> aff=<ID> campaign=<ID> date=YYYY-MM-DD`: ra lệnh một bước để tạo lịch nội dung + production job + brief AI.

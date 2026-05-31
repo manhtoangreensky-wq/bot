@@ -244,6 +244,12 @@ def init_db():
         niche TEXT,
         url TEXT,
         commission_note TEXT,
+        price_vnd INTEGER DEFAULT 0,
+        commission_rate REAL DEFAULT 0,
+        target_audience TEXT,
+        allowed_claims TEXT,
+        blocked_claims TEXT,
+        product_score INTEGER DEFAULT 0,
         status TEXT DEFAULT 'active',
         created_at DATETIME
     )""")
@@ -394,6 +400,12 @@ def init_db():
         ],
         "affiliate_links": [
             ("commission_note", "TEXT"),
+            ("price_vnd", "INTEGER DEFAULT 0"),
+            ("commission_rate", "REAL DEFAULT 0"),
+            ("target_audience", "TEXT"),
+            ("allowed_claims", "TEXT"),
+            ("blocked_claims", "TEXT"),
+            ("product_score", "INTEGER DEFAULT 0"),
             ("status", "TEXT DEFAULT 'active'"),
         ],
         "content_calendar": [
@@ -891,14 +903,19 @@ def channel_publish_readiness(row):
         return "manual_required", "OnlyFans không có API public ổn định; giữ manual hoặc tool chính thức được phép."
     return "api_ready", "Đã có cấu hình API cơ bản. Vẫn cần OAuth/quyền đăng chính thức của nền tảng."
 
-def create_affiliate_link(owner_id, network, product_name, niche="", url="", commission_note="") -> int:
+def create_affiliate_link(owner_id, network, product_name, niche="", url="", commission_note="", price_vnd=0, commission_rate=0, target_audience="", allowed_claims="", blocked_claims="", product_score=0) -> int:
     conn = db_connect()
     c = conn.cursor()
     c.execute(
         """INSERT INTO affiliate_links
-        (owner_id, network, product_name, niche, url, commission_note, status, created_at)
-        VALUES (?,?,?,?,?,?,?,?)""",
-        (str(owner_id), network, product_name, niche, url, commission_note, "active", now_text())
+        (owner_id, network, product_name, niche, url, commission_note, price_vnd, commission_rate,
+         target_audience, allowed_claims, blocked_claims, product_score, status, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(owner_id), network, product_name, niche, url, commission_note,
+            int(price_vnd or 0), float(commission_rate or 0), target_audience,
+            allowed_claims, blocked_claims, int(product_score or 0), "active", now_text()
+        )
     )
     affiliate_id = c.lastrowid
     conn.commit()
@@ -909,7 +926,8 @@ def list_affiliate_links(owner_id, limit=30):
     conn = db_connect()
     c = conn.cursor()
     c.execute(
-        """SELECT id, network, product_name, niche, url, commission_note, status
+        """SELECT id, network, product_name, niche, url, commission_note, status,
+                  price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
         FROM affiliate_links WHERE owner_id=? ORDER BY id DESC LIMIT ?""",
         (str(owner_id), limit)
     )
@@ -921,13 +939,70 @@ def get_affiliate_link(affiliate_id, owner_id):
     conn = db_connect()
     c = conn.cursor()
     c.execute(
-        """SELECT id, network, product_name, niche, url, commission_note, status
+        """SELECT id, network, product_name, niche, url, commission_note, status,
+                  price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
         FROM affiliate_links WHERE id=? AND owner_id=?""",
         (affiliate_id, str(owner_id))
     )
     row = c.fetchone()
     conn.close()
     return row
+
+def update_affiliate_profile(owner_id, affiliate_id, **fields):
+    allowed = {
+        "network", "product_name", "niche", "url", "commission_note", "price_vnd",
+        "commission_rate", "target_audience", "allowed_claims", "blocked_claims",
+        "product_score", "status"
+    }
+    updates = []
+    params = []
+    for key, value in fields.items():
+        if key not in allowed or value is None:
+            continue
+        updates.append(f"{key}=?")
+        params.append(value)
+    if not updates:
+        return False
+    params.extend([affiliate_id, str(owner_id)])
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(f"UPDATE affiliate_links SET {', '.join(updates)} WHERE id=? AND owner_id=?", params)
+    changed = c.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0
+
+def affiliate_match_score(affiliate, niche="", trend_text="", platform=""):
+    (
+        aid, network, product_name, aff_niche, url, commission_note, status,
+        price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
+    ) = affiliate
+    text = f"{niche} {trend_text} {platform}".lower()
+    tokens = (
+        tokenize_text(product_name) + tokenize_text(aff_niche) + tokenize_text(network) +
+        tokenize_text(target_audience) + tokenize_text(allowed_claims)
+    )
+    hits = sum(1 for token in tokens[:30] if token in text)
+    score = int(product_score or 0) + hits * 8
+    if commission_rate:
+        score += min(20, int(float(commission_rate) * 2))
+    if commission_note:
+        score += 5
+    if url:
+        score += 5
+    blocked_hits = sum(1 for token in tokenize_text(blocked_claims)[:20] if token in text)
+    score -= blocked_hits * 12
+    return clamp_score(score), hits, blocked_hits
+
+def list_affiliate_matches(owner_id, niche="", trend_text="", platform="", limit=10):
+    rows = list_affiliate_links(owner_id, limit=100)
+    active_rows = [row for row in rows if (row[6] or "active") == "active"]
+    ranked = []
+    for row in active_rows:
+        score, hits, blocked_hits = affiliate_match_score(row, niche, trend_text, platform)
+        ranked.append((score, hits, blocked_hits, row))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return ranked[:limit]
 
 def create_calendar_slot(owner_id, channel_id, campaign_id, affiliate_id, post_date, platform, topic, notes="") -> int:
     conn = db_connect()
@@ -1470,12 +1545,25 @@ def score_trend_candidate(niche, platform, title, summary="", channel=None, affi
 
     affiliate_fit = 0
     if affiliate:
-        _, network, product_name, aff_niche, _, commission_note, *_ = affiliate
-        aff_tokens = tokenize_text(product_name) + tokenize_text(aff_niche) + tokenize_text(network)
+        (
+            _, network, product_name, aff_niche, _, commission_note, _, _price_vnd,
+            commission_rate, target_audience, allowed_claims, blocked_claims, product_score
+        ) = affiliate
+        aff_tokens = (
+            tokenize_text(product_name) + tokenize_text(aff_niche) + tokenize_text(network) +
+            tokenize_text(target_audience) + tokenize_text(allowed_claims)
+        )
         aff_hits = sum(1 for token in aff_tokens[:16] if token in text)
-        affiliate_fit = clamp_score(25 + aff_hits * 15 + (10 if aff_niche and aff_niche.lower() in text else 0))
+        blocked_hits = sum(1 for token in tokenize_text(blocked_claims)[:12] if token in text)
+        affiliate_fit = clamp_score(
+            20 + int(product_score or 0) // 3 + aff_hits * 12 +
+            (10 if aff_niche and aff_niche.lower() in text else 0) +
+            (5 if commission_rate else 0) - blocked_hits * 15
+        )
         if aff_hits:
             reasons.append("khớp affiliate")
+        if blocked_hits:
+            reasons.append("có claim cần tránh")
         if commission_note:
             affiliate_fit = clamp_score(affiliate_fit + 5)
     elif any(word in text for word in ["review", "mua", "shop", "giá", "deal", "sản phẩm", "product"]):
@@ -2654,6 +2742,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /channels — Danh sách kênh nội bộ",
             "• /affiliate_add — Lưu link affiliate",
             "• /affiliates — Danh sách affiliate",
+            "• /affiliate_profile — Cập nhật hồ sơ/claim affiliate",
+            "• /affiliate_match — Chọn affiliate phù hợp trend",
             "• /calendar_plan — Lên lịch nội dung",
             "• /calendar — Xem lịch nội dung",
             "• /operator — Ra lệnh tạo video một bước",
@@ -3108,17 +3198,34 @@ async def cmd_affiliate_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     niche = data.get("niche") or data.get("ngach") or ""
     url = data.get("url") or data.get("link") or ""
     note = data.get("note") or data.get("commission") or data.get("hh") or ""
+    try:
+        price_vnd = int(data.get("price") or data.get("gia") or 0)
+    except ValueError:
+        price_vnd = 0
+    try:
+        commission_rate = float(data.get("rate") or data.get("commission_rate") or data.get("tile") or 0)
+    except ValueError:
+        commission_rate = 0
+    audience = data.get("audience") or data.get("khach") or ""
+    allowed_claims = data.get("allowed") or data.get("claim_ok") or ""
+    blocked_claims = data.get("blocked") or data.get("claim_cam") or ""
+    base_score = clamp_score(40 + (15 if url else 0) + (10 if commission_rate else 0) + (10 if allowed_claims else 0) - (5 if blocked_claims else 0))
     if not network or not product:
         return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/affiliate_add network=shopee product=mic thu am niche=cong nghe url=https://... note=hoa hong 8%</code>",
+            "⚠️ Cú pháp: <code>/affiliate_add network=shopee product=mic thu am niche=cong nghe url=https://... price=199000 rate=8 audience=creator allowed=thu am ro blocked=cam ket doanh thu</code>",
             parse_mode="HTML"
         )
-    affiliate_id = create_affiliate_link(update.effective_user.id, network, product, niche, url, note)
+    affiliate_id = create_affiliate_link(
+        update.effective_user.id, network, product, niche, url, note,
+        price_vnd, commission_rate, audience, allowed_claims, blocked_claims, base_score
+    )
     await update.message.reply_text(
         f"✅ <b>Đã lưu affiliate #{affiliate_id}</b>\n"
         f"• Sàn: <code>{html.escape(network)}</code>\n"
         f"• Sản phẩm: <b>{html.escape(product)}</b>\n"
         f"• Niche: {html.escape(niche or 'chưa ghi')}\n"
+        f"• Giá: <b>{price_vnd:,}đ</b> | Hoa hồng: <b>{commission_rate:g}%</b>\n"
+        f"• Score nền: <b>{base_score}</b>\n"
         f"• Link: <code>{html.escape(url or 'chưa có')}</code>",
         parse_mode="HTML"
     )
@@ -3130,13 +3237,106 @@ async def cmd_affiliates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         return await update.message.reply_text("📭 Chưa có affiliate. Tạo bằng /affiliate_add.")
     lines = ["🛒 <b>LINK AFFILIATE NỘI BỘ</b>\n"]
-    for aid, network, product, niche, url, note, status in rows:
+    for aid, network, product, niche, url, note, status, price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score in rows:
         url_display = url if len(url or "") <= 70 else url[:67] + "..."
         lines.append(
             f"• #{aid} | <code>{html.escape(network)}</code> | <b>{html.escape(product)}</b> | "
-            f"{html.escape(niche or '-') } | {html.escape(note or '-') } | {status}\n"
+            f"{html.escape(niche or '-') } | score={product_score or 0} | {status}\n"
+            f"  giá={int(price_vnd or 0):,}đ | rate={float(commission_rate or 0):g}% | khách={html.escape(audience or '-')}\n"
+            f"  note={html.escape(note or '-')}\n"
             f"  <code>{html.escape(url_display or 'chưa có link')}</code>"
         )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_affiliate_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        affiliate_id = int(data.get("id") or data.get("aff") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/affiliate_profile id=1 price=199000 rate=8 audience=creator allowed=... blocked=... score=70 status=active</code>",
+            parse_mode="HTML"
+        )
+    if not get_affiliate_link(affiliate_id, update.effective_user.id):
+        return await update.message.reply_text("❌ Không tìm thấy affiliate.")
+    fields = {}
+    mapping = {
+        "network": "network", "product": "product_name", "name": "product_name",
+        "niche": "niche", "url": "url", "link": "url", "note": "commission_note",
+        "audience": "target_audience", "allowed": "allowed_claims", "blocked": "blocked_claims",
+        "status": "status",
+    }
+    for src, dest in mapping.items():
+        if src in data:
+            fields[dest] = data[src]
+    int_fields = {"price": "price_vnd", "gia": "price_vnd", "score": "product_score"}
+    for src, dest in int_fields.items():
+        if src in data:
+            try:
+                fields[dest] = int(data[src])
+            except ValueError:
+                pass
+    if "rate" in data or "commission_rate" in data:
+        try:
+            fields["commission_rate"] = float(data.get("rate") or data.get("commission_rate") or 0)
+        except ValueError:
+            pass
+    if not fields:
+        return await update.message.reply_text("⚠️ Chưa có trường nào để cập nhật.")
+    changed = update_affiliate_profile(update.effective_user.id, affiliate_id, **fields)
+    if not changed:
+        return await update.message.reply_text("❌ Không cập nhật được affiliate.")
+    affiliate = get_affiliate_link(affiliate_id, update.effective_user.id)
+    (
+        aid, network, product, niche, url, note, status,
+        price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
+    ) = affiliate
+    await update.message.reply_text(
+        f"✅ <b>Đã cập nhật affiliate #{aid}</b>\n"
+        f"• {html.escape(network or '-')} / <b>{html.escape(product or '-')}</b>\n"
+        f"• Niche: {html.escape(niche or '-')}\n"
+        f"• Giá: <b>{int(price_vnd or 0):,}đ</b> | Rate: <b>{float(commission_rate or 0):g}%</b> | Score: <b>{product_score or 0}</b>\n"
+        f"• Khách mục tiêu: {html.escape(audience or '-')}\n"
+        f"• Claim OK: {html.escape(allowed_claims or '-')}\n"
+        f"• Claim cấm: {html.escape(blocked_claims or '-')}",
+        parse_mode="HTML"
+    )
+
+async def cmd_affiliate_match(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    niche = data.get("niche") or data.get("ngach") or data.get("topic") or "công nghệ AI"
+    trend_text = data.get("trend") or data.get("text") or data.get("chude") or ""
+    platform = data.get("platform") or data.get("nen") or "tiktok"
+    try:
+        limit = max(1, min(int(data.get("limit") or 10), 20))
+    except ValueError:
+        limit = 10
+    ranked = list_affiliate_matches(update.effective_user.id, niche, trend_text, platform, limit)
+    if not ranked:
+        return await update.message.reply_text("📭 Chưa có affiliate active để match.")
+    lines = [
+        "🎯 <b>AFFILIATE MATCH</b>",
+        f"• Niche: <b>{html.escape(niche)}</b>",
+        f"• Platform: <code>{html.escape(platform)}</code>",
+        f"• Trend/topic: {html.escape(trend_text or '-')}\n",
+    ]
+    for score, hits, blocked_hits, row in ranked:
+        (
+            aid, network, product, aff_niche, url, note, status,
+            price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
+        ) = row
+        lines.append(
+            f"• #{aid} | match=<b>{score}</b> | hits={hits} | blocked={blocked_hits} | base={product_score or 0}\n"
+            f"  <code>{html.escape(network or '-')}</code> / <b>{html.escape(product or '-')}</b> | {html.escape(aff_niche or '-')}\n"
+            f"  giá={int(price_vnd or 0):,}đ | rate={float(commission_rate or 0):g}% | khách={html.escape(audience or '-')}\n"
+            f"  claim OK={html.escape(allowed_claims or '-')}\n"
+            f"  claim cấm={html.escape(blocked_claims or '-')}"
+        )
+    lines.append("\nDùng ID phù hợp trong /trend_search, /operator hoặc /operator_auto bằng <code>aff=&lt;ID&gt;</code>.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_calendar_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3757,6 +3957,10 @@ def operator_menu_keyboard():
             InlineKeyboardButton("🧪 Auto-post ready", callback_data="opmenu|readiness")
         ],
         [
+            InlineKeyboardButton("🎯 Affiliate match", callback_data="opmenu|affmatch"),
+            InlineKeyboardButton("🛒 Affiliate profile", callback_data="opmenu|affprofile")
+        ],
+        [
             InlineKeyboardButton("🎛 Pipeline", callback_data="opmenu|pipeline"),
             InlineKeyboardButton("📅 Calendar", callback_data="opmenu|calendar")
         ],
@@ -3806,6 +4010,8 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
         "rank": "/trend_rank\n/trend_rank 20",
+        "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
+        "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
@@ -5234,6 +5440,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("publish_readiness", cmd_publish_readiness))
     tg_app.add_handler(CommandHandler("affiliate_add", cmd_affiliate_add))
     tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
+    tg_app.add_handler(CommandHandler("affiliate_profile", cmd_affiliate_profile))
+    tg_app.add_handler(CommandHandler("affiliate_match", cmd_affiliate_match))
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
