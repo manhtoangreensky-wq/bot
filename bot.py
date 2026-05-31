@@ -2569,7 +2569,7 @@ def operator_worker_spec_data():
             {"step": 2, "name": "make_video_optional", "method": "POST", "url": "/api/operator/make-video"},
             {"step": 3, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
-            {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/next"},
+            {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1"},
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
@@ -2613,6 +2613,11 @@ def operator_worker_spec_data():
                 "status": "ready",
                 "output_url": "https://.../asset.mp4",
                 "note": "tool output or error detail",
+            },
+            "task_claim": {
+                "method": "GET",
+                "url": "/api/operator/tasks/claim?include_context=1&tool=kling",
+                "purpose": "Claim task và nhận luôn job_context để worker không phải ghép nhiều endpoint.",
             },
             "publish_complete": {
                 "status": "published",
@@ -3319,7 +3324,7 @@ def operator_n8n_workflow_json_data():
                 "position": [-80, -120],
                 "parameters": {
                     "method": "GET",
-                    "url": f"{base_url_expr}/api/operator/tasks/next",
+                    "url": f"{base_url_expr}/api/operator/tasks/claim?include_context=1",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -9936,6 +9941,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Quyết định scale affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-decisions</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
+        f"• Claim task + context: <code>GET {html.escape(base_url)}/api/operator/tasks/claim?include_context=1</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
         f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
@@ -13132,20 +13138,31 @@ def verify_operator_api_token(request: Request):
     if not token or not hmac.compare_digest(str(token), OPERATOR_API_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid operator token")
 
-@fastapi_app.get("/api/operator/tasks/next")
-async def api_operator_next_task(request: Request, job_id: int = 0, tool: str = ""):
-    verify_operator_api_token(request)
+def claim_operator_task_payload(job_id=0, tool="", include_context=False):
     task = next_worker_task(ADMIN_ID, job_id=job_id or None, tool=tool)
     if not task:
         return {"ok": True, "task": None, "message": "no queued task"}
     update_production_task(ADMIN_ID, task[0], status="working", note=f"api_worker_claim tool={tool or task[4] or '-'}")
     task = get_production_task(ADMIN_ID, task[0])
-    return {
+    payload = {
         "ok": True,
         "task": serialize_operator_task(task),
         "submit_url": f"/api/operator/tasks/{task[0]}/complete",
         "rule": "Submit output_url when the external AI/tool finishes. Do not publish without review gate.",
     }
+    if include_context:
+        payload["job_context"] = operator_job_context_data(ADMIN_ID, task[1])
+    return payload
+
+@fastapi_app.get("/api/operator/tasks/next")
+async def api_operator_next_task(request: Request, job_id: int = 0, tool: str = "", include_context: int = 0):
+    verify_operator_api_token(request)
+    return claim_operator_task_payload(job_id=job_id, tool=tool, include_context=bool(include_context))
+
+@fastapi_app.get("/api/operator/tasks/claim")
+async def api_operator_claim_task(request: Request, job_id: int = 0, tool: str = "", include_context: int = 1):
+    verify_operator_api_token(request)
+    return claim_operator_task_payload(job_id=job_id, tool=tool, include_context=bool(include_context))
 
 @fastapi_app.get("/api/operator/status")
 async def api_operator_status(request: Request):

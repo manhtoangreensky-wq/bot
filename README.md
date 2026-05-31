@@ -155,7 +155,8 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /api/affiliate/postback`: nhận conversion/order/lead/revenue từ n8n hoặc network affiliate, hỗ trợ `AFFILIATE_POSTBACK_TOKEN`.
 - `POST /webhook/payos`: nhận webhook PayOS, kiểm tra chữ ký, mã đơn, số tiền, trạng thái và chống cộng xu trùng.
 - `POST /lead`: nhận lead từ landing page và gửi thông báo về admin Telegram.
-- `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id` và `tool`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
+- `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id`, `tool`, `include_context=1`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
+- `GET /api/operator/tasks/claim?include_context=1`: alias claim task mới, trả luôn `job_context` để Claude/n8n/tool worker có đủ runbook trong một lần gọi.
 - `GET /api/operator/status`: worker ngoài kiểm tra readiness tổng thể trước khi tự động scale hoặc publish.
 - `GET /api/operator/smoke-test`: worker ngoài kiểm tra nhanh hệ thống trước khi bật cron/n8n; không tạo job/queue và không gọi API ngoài.
 - `GET /api/operator/publisher/status`: worker ngoài kiểm tra readiness riêng cho publisher: kênh nào manual/API-ready, queue nào chờ đăng, blocker token/env/page_id.
