@@ -844,6 +844,57 @@ def list_production_jobs(owner_id, limit=20):
     conn.close()
     return rows
 
+def operator_dashboard_data(owner_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM social_channels WHERE owner_id=? AND status='active'", (str(owner_id),))
+    active_channels = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM affiliate_links WHERE owner_id=? AND status='active'", (str(owner_id),))
+    active_affiliates = c.fetchone()[0]
+    c.execute(
+        """SELECT status, COUNT(*) FROM content_calendar
+        WHERE owner_id=? GROUP BY status""",
+        (str(owner_id),)
+    )
+    calendar_counts = dict(c.fetchall())
+    c.execute(
+        """SELECT stage, status, COUNT(*) FROM production_jobs
+        WHERE owner_id=? GROUP BY stage, status ORDER BY stage, status""",
+        (str(owner_id),)
+    )
+    pipeline_counts = c.fetchall()
+    c.execute(
+        """SELECT pj.id, pj.stage, pj.status, pj.platform, pj.topic, sc.channel_name, al.product_name, pj.updated_at
+        FROM production_jobs pj
+        LEFT JOIN social_channels sc ON sc.id = pj.channel_id
+        LEFT JOIN affiliate_links al ON al.id = pj.affiliate_id
+        WHERE pj.owner_id=? AND pj.status IN ('queued','working','waiting','blocked','ready')
+        ORDER BY
+            CASE pj.status
+                WHEN 'blocked' THEN 0
+                WHEN 'waiting' THEN 1
+                WHEN 'working' THEN 2
+                WHEN 'queued' THEN 3
+                ELSE 4
+            END,
+            pj.updated_at ASC
+        LIMIT 10""",
+        (str(owner_id),)
+    )
+    active_jobs = c.fetchall()
+    c.execute(
+        """SELECT cc.id, cc.post_date, cc.platform, sc.channel_name, cc.topic, cc.status, cc.campaign_id, cc.affiliate_id
+        FROM content_calendar cc
+        LEFT JOIN social_channels sc ON sc.id = cc.channel_id
+        WHERE cc.owner_id=? AND cc.status IN ('planned','in_production')
+        ORDER BY cc.post_date ASC, cc.id DESC
+        LIMIT 10""",
+        (str(owner_id),)
+    )
+    upcoming_slots = c.fetchall()
+    conn.close()
+    return active_channels, active_affiliates, calendar_counts, pipeline_counts, active_jobs, upcoming_slots
+
 def get_production_job(job_id, owner_id):
     conn = db_connect()
     c = conn.cursor()
@@ -1784,6 +1835,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /calendar — Xem lịch nội dung",
             "• /operator — Ra lệnh tạo video một bước",
             "• /operator_next — Điều phối stage tiếp theo",
+            "• /operator_dashboard — Tổng quan vận hành",
             "• /produce — Tạo job sản xuất từ lịch",
             "• /pipeline — Theo dõi pipeline video",
             "• /pipeline_set — Cập nhật stage/trạng thái",
@@ -2563,6 +2615,45 @@ async def cmd_operator_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=kb
     )
 
+async def cmd_operator_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    active_channels, active_affiliates, calendar_counts, pipeline_counts, active_jobs, upcoming_slots = operator_dashboard_data(update.effective_user.id)
+    lines = [
+        "🧠 <b>AI OPERATOR DASHBOARD</b>",
+        f"• Kênh active: <b>{active_channels}</b>",
+        f"• Affiliate active: <b>{active_affiliates}</b>",
+        "• Calendar: " + (", ".join(f"{k}={v}" for k, v in calendar_counts.items()) or "0"),
+        "• Pipeline: " + (", ".join(f"{stage}/{status}={count}" for stage, status, count in pipeline_counts) or "0"),
+        "",
+        "<b>Job cần xử lý:</b>",
+    ]
+    if active_jobs:
+        for jid, stage, status, platform, topic, channel_name, product_name, updated_at in active_jobs:
+            lines.append(
+                f"• #{jid} | <b>{html.escape(stage or '-')}</b>/{html.escape(status or '-')} | "
+                f"<code>{html.escape(platform or '-')}</code> | {html.escape(channel_name or '-')}\n"
+                f"  {html.escape(topic or '-')}\n"
+                f"  aff={html.escape(product_name or '-')} | {updated_at or '-'}"
+            )
+    else:
+        lines.append("• Không có job đang chờ.")
+    lines.append("\n<b>Lịch sắp tới:</b>")
+    if upcoming_slots:
+        for slot_id, post_date, platform, channel_name, topic, status, campaign_id, affiliate_id in upcoming_slots:
+            lines.append(
+                f"• slot #{slot_id} | {post_date} | <code>{html.escape(platform or '-')}</code> | "
+                f"{html.escape(channel_name or '-')} | {status}\n"
+                f"  {html.escape(topic or '-')}"
+            )
+    else:
+        lines.append("• Chưa có lịch. Dùng /calendar_plan hoặc /operator.")
+    lines.append(
+        "\nLệnh nhanh: <code>/operator topic=... channel=... aff=...</code> | "
+        "<code>/operator_next id=... stage=script</code>"
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -3181,6 +3272,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
     tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
+    tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
     tg_app.add_handler(CommandHandler("pipeline",    cmd_pipeline))
     tg_app.add_handler(CommandHandler("pipeline_set", cmd_pipeline_set))
