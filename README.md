@@ -68,7 +68,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/affiliate_match niche=... platform=tiktok trend=...`: xếp hạng affiliate phù hợp với trend/niche để chọn link trước khi tạo video.
 - `/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=...`: tạo hook, angle, outline, CTA và rủi ro kiểm duyệt cho video ngắn từ một link affiliate đã lưu.
 - `/affiliate_report days=30 limit=15`: báo cáo link affiliate nào có job, bài đăng, view, click, conversion, doanh thu, chi phí và ROI để quyết định scale.
-- `/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID>`: lấy niche của affiliate, tìm trend phù hợp và tạo batch production job gắn sẵn link đó.
+- `/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID> build=1 duration=45`: lấy niche của affiliate, tìm trend phù hợp, tạo batch production job gắn sẵn link đó; thêm `build=1` để tự tạo creative variants, manifest và production tasks.
 - `/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=...`: tạo lịch nội dung theo kênh.
 - `/calendar`: xem lịch nội dung đã lên.
 - `/operator topic=... channel=<ID> aff=<ID> campaign=<ID> date=YYYY-MM-DD`: ra lệnh một bước để tạo lịch nội dung + production job + brief AI.

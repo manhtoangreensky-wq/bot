@@ -6011,7 +6011,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "affseed": "/affiliate_seed\n/affiliates",
         "affiliates": "/affiliates",
         "affreport": "/affiliate_report days=30\n/affiliate_report days=90 limit=20",
-        "affscale": "/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID>",
+        "affscale": "/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID>\n/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=3 build=1 duration=45",
         "affideas": "/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=trend đang nóng",
         "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
         "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
@@ -7090,6 +7090,15 @@ async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE
         limit = max(1, min(int(data.get("limit") or data.get("max") or 5), 12))
     except ValueError:
         limit = 5
+    auto_build = (data.get("build") or data.get("autobuild") or "0").lower() in {"1", "true", "yes", "on"}
+    try:
+        duration = max(15, min(int(data.get("duration") or data.get("sec") or 45), 120))
+    except ValueError:
+        duration = 45
+    try:
+        variant_count = max(3, min(int(data.get("variants") or data.get("n") or 5), 8))
+    except ValueError:
+        variant_count = 5
     try:
         campaign_id = int(data.get("campaign") or data.get("camp") or 0)
     except ValueError:
@@ -7117,6 +7126,22 @@ async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE
         return await msg.edit_text(f"❌ {html.escape(error)}", parse_mode="HTML")
     if not created_jobs:
         return await msg.edit_text("📭 Chưa tạo được job nào. Kiểm tra lại channel active hoặc niche.")
+    built = []
+    failed = []
+    if auto_build:
+        for item in created_jobs:
+            ok, bundle = build_operator_job_bundle(update.effective_user.id, item["job_id"], count=variant_count, duration=duration)
+            if ok:
+                readiness = bundle.get("readiness") or {}
+                built.append({
+                    **item,
+                    "manifest_id": bundle["manifest_id"],
+                    "task_count": len(bundle["task_ids"]),
+                    "variant_id": bundle["best_variant_id"],
+                    "readiness": readiness.get("level", "UNKNOWN") if isinstance(readiness, dict) else "UNKNOWN",
+                })
+            else:
+                failed.append((item["job_id"], bundle.get("error", "build lỗi")))
     lines = [
         f"✅ <b>ĐÃ SCALE AFFILIATE #{aid}</b>",
         f"• Sản phẩm: <b>{html.escape(product or '-')}</b>",
@@ -7125,26 +7150,36 @@ async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"• Platform: <code>{html.escape(platform_filter or 'auto')}</code>",
         f"• Channel: <code>{html.escape(channel_filter)}</code>",
         f"• Job tạo mới: <b>{len(created_jobs)}</b>",
+        f"• Auto build: <b>{'bật' if auto_build else 'tắt'}</b>",
         "",
         "<b>Job mới:</b>",
     ]
     for item in created_jobs[:10]:
+        build_note = ""
+        built_item = next((row for row in built if row["job_id"] == item["job_id"]), None)
+        if built_item:
+            build_note = f" | manifest #{built_item['manifest_id']} | tasks={built_item['task_count']} | {built_item['readiness']}"
         lines.append(
             f"• job #{item['job_id']} | trend #{item['trend_id']} | score=<b>{item['score']}</b> | "
-            f"<code>{html.escape(item['platform'] or '-')}</code> | {html.escape(item['channel_name'] or '-')}\n"
+            f"<code>{html.escape(item['platform'] or '-')}</code> | {html.escape(item['channel_name'] or '-')}{html.escape(build_note)}\n"
             f"  {html.escape(item['title'])}\n"
             f"  lý do: {html.escape(item.get('reason') or '-')}"
         )
+    if failed:
+        lines.append("\n<b>Build lỗi:</b>")
+        for job_id, reason in failed[:8]:
+            lines.append(f"• job #{job_id}: {html.escape(reason)}")
     lines.append(
         "\nBước tiếp:\n"
         "<code>/operator_build job=&lt;JOB_ID&gt; n=5 duration=45</code>\n"
-        "<code>/autopilot niche=%s platform=%s channel=%s aff=%s campaign=%s limit=3 duration=45</code>"
+        "<code>/affiliate_scale aff=%s platform=%s channel=%s limit=%s campaign=%s build=1 duration=%s</code>"
         % (
-            html.escape(scale_niche),
+            aid,
             html.escape(platform_filter or "tiktok"),
             html.escape(channel_filter),
-            aid,
+            limit,
             campaign_id or "&lt;ID&gt;",
+            duration,
         )
     )
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
