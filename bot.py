@@ -242,15 +242,16 @@ class AgentDeepgram:
 
 class AgentVoice:
     @staticmethod
-    async def render(text: str, user_id, context: ContextTypes.DEFAULT_TYPE, chat_id: int, cost: int):
+    async def render(text: str, user_id, context: ContextTypes.DEFAULT_TYPE, chat_id: int, cost: int) -> bool:
+        """Trả về True = Fish Audio (tính phí), False = Edge TTS (hoàn xu)."""
         out = f"v_{user_id}.mp3"
         msg = await context.bot.send_message(
             chat_id=chat_id,
-            text="⏳ <i>[Nhân Bản Giọng Nói] Đang tổng hợp...</i>",
+            text="⏳ <i>[Giọng Nói] Đang tổng hợp...</i>",
             parse_mode="HTML"
         )
+        used_fish = False
         try:
-            used_fish = False
             if FISH_AUDIO_KEY:
                 async with httpx.AsyncClient() as client:
                     res = await client.post(
@@ -274,11 +275,11 @@ class AgentVoice:
                 communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
                 await communicate.save(out)
             with open(out, "rb") as f:
-                await context.bot.send_audio(
-                    chat_id=chat_id,
-                    audio=f,
-                    caption=f"🔊 Hoàn tất! (-{cost} Xu)"
-                )
+                if used_fish:
+                    caption = f"🎙️ Fish Audio — Giọng nhân bản! (-{cost} Xu)"
+                else:
+                    caption = "🔊 Edge TTS — Giọng chuẩn! (Miễn phí 0 Xu)"
+                await context.bot.send_audio(chat_id=chat_id, audio=f, caption=caption)
             await msg.delete()
         except Exception as e:
             logger.error(f"Voice error: {e}")
@@ -286,6 +287,7 @@ class AgentVoice:
         finally:
             if os.path.exists(out):
                 os.remove(out)
+        return used_fish
 
 class AgentDownloader:
     @staticmethod
@@ -709,7 +711,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     if act == "voice":
-        await AgentVoice.render(data, uid, context, update.effective_chat.id, cost)
+        used_fish = await AgentVoice.render(data, uid, context, update.effective_chat.id, cost)
+        # Nếu fallback Edge TTS (miễn phí) → hoàn xu đã trừ
+        if not used_fish and cost > 0 and str(uid) != ADMIN_ID:
+            add_credit(uid, cost)
     elif act == "download":
         await AgentDownloader.download(data, context, update.effective_chat.id, cost)
     else:
