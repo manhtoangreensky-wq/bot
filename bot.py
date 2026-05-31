@@ -2506,6 +2506,49 @@ def performance_report_data(owner_id, limit=10):
     conn.close()
     return event_totals, channel_totals, recent_events
 
+def affiliate_performance_report_data(owner_id, days=30, limit=15):
+    since = (datetime.now() - timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d %H:%M:%S")
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT al.id, al.network, al.product_name, al.niche, al.url, al.product_score,
+                  COUNT(DISTINCT pj.id) AS jobs,
+                  SUM(CASE WHEN pe.event_type='publish' THEN pe.value ELSE 0 END) AS publishes,
+                  SUM(CASE WHEN pe.event_type='view' THEN pe.value ELSE 0 END) AS views,
+                  SUM(CASE WHEN pe.event_type='click' THEN pe.value ELSE 0 END) AS clicks,
+                  SUM(CASE WHEN pe.event_type IN ('order','lead','revenue') THEN pe.value ELSE 0 END) AS conversions,
+                  SUM(CASE WHEN pe.event_type IN ('order','lead','revenue') THEN pe.amount ELSE 0 END) AS revenue,
+                  SUM(CASE WHEN pe.event_type='cost' THEN pe.amount ELSE 0 END) AS cost,
+                  COUNT(pe.id) AS events
+        FROM affiliate_links al
+        LEFT JOIN production_jobs pj ON pj.affiliate_id=al.id AND pj.owner_id=al.owner_id
+        LEFT JOIN performance_events pe ON pe.affiliate_id=al.id AND pe.owner_id=al.owner_id AND pe.created_at>=?
+        WHERE al.owner_id=? AND COALESCE(al.status,'active')='active'
+        GROUP BY al.id, al.network, al.product_name, al.niche, al.url, al.product_score
+        ORDER BY revenue DESC, clicks DESC, views DESC, jobs DESC, al.product_score DESC
+        LIMIT ?""",
+        (since, str(owner_id), limit)
+    )
+    affiliate_rows = c.fetchall()
+    c.execute(
+        """SELECT al.id, al.network, al.product_name, pj.id, pj.platform, pj.topic, pj.status, pj.publish_url,
+                  SUM(CASE WHEN pe.event_type='view' THEN pe.value ELSE 0 END) AS views,
+                  SUM(CASE WHEN pe.event_type='click' THEN pe.value ELSE 0 END) AS clicks,
+                  SUM(CASE WHEN pe.event_type IN ('order','lead','revenue') THEN pe.amount ELSE 0 END) AS revenue,
+                  MAX(COALESCE(pe.created_at, pj.updated_at, pj.created_at)) AS last_seen
+        FROM production_jobs pj
+        LEFT JOIN affiliate_links al ON al.id=pj.affiliate_id
+        LEFT JOIN performance_events pe ON pe.job_id=pj.id AND pe.owner_id=pj.owner_id AND pe.created_at>=?
+        WHERE pj.owner_id=? AND COALESCE(pj.affiliate_id,0)>0
+        GROUP BY al.id, al.network, al.product_name, pj.id, pj.platform, pj.topic, pj.status, pj.publish_url
+        ORDER BY revenue DESC, clicks DESC, views DESC, last_seen DESC
+        LIMIT ?""",
+        (since, str(owner_id), limit)
+    )
+    job_rows = c.fetchall()
+    conn.close()
+    return since, affiliate_rows, job_rows
+
 def growth_optimizer_data(owner_id, days=14, limit=8):
     since = (datetime.now() - timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d %H:%M:%S")
     conn = db_connect()
@@ -5830,7 +5873,7 @@ def operator_category_keyboard(category):
         "cat_affiliate": [
             ("🔗 Import catalog", "affseed"), ("🛒 Danh sách link", "affiliates"),
             ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
-            ("✏️ Cập nhật hồ sơ", "affprofile"),
+            ("💰 Báo cáo affiliate", "affreport"), ("✏️ Cập nhật hồ sơ", "affprofile"),
         ],
         "cat_schedule": [
             ("📡 Kênh", "channels"), ("➕ Thêm kênh", "channeladd"),
@@ -5851,6 +5894,7 @@ def operator_category_keyboard(category):
         ],
         "cat_money": [
             ("💰 Performance", "performance"), ("📈 Growth optimizer", "growth"),
+            ("🔗 Báo cáo affiliate", "affreport"),
             ("📊 Daily digest", "daily"), ("🏦 Dashboard quản trị", "admin_dashboard"),
             ("💳 Check PayOS", "checkpayos"),
         ],
@@ -5964,6 +6008,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "rank": "/trend_rank\n/trend_rank 20",
         "affseed": "/affiliate_seed\n/affiliates",
         "affiliates": "/affiliates",
+        "affreport": "/affiliate_report days=30\n/affiliate_report days=90 limit=20",
         "affideas": "/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=trend đang nóng",
         "affmatch": "/affiliate_match niche=công nghệ AI platform=tiktok trend=AI agent creator",
         "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
@@ -6959,6 +7004,62 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     else:
         lines.append("• Chưa có sự kiện.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or (context.args[0] if context.args else 30)), 180))
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        limit = max(3, min(int(data.get("limit") or 15), 30))
+    except ValueError:
+        limit = 15
+    since, affiliate_rows, job_rows = affiliate_performance_report_data(update.effective_user.id, days=days, limit=limit)
+    lines = [
+        f"🔗 <b>AFFILIATE MONEY REPORT — {days} ngày</b>",
+        f"• Từ: <code>{html.escape(since)}</code>",
+        "",
+        "<b>Link nên ưu tiên:</b>",
+    ]
+    if affiliate_rows:
+        for (
+            aid, network, product, niche, url, product_score, jobs, publishes, views,
+            clicks, conversions, revenue, cost, events
+        ) in affiliate_rows:
+            score, ctr, cvr, roi = growth_score(views, clicks, conversions, revenue, cost)
+            lines.append(
+                f"• #{aid} | <code>{html.escape(network or '-')}</code> | <b>{html.escape(product or '-')}</b> | score=<b>{score}</b>\n"
+                f"  niche={html.escape(niche or '-')} | jobs={jobs or 0} | post={publishes or 0} | events={events or 0}\n"
+                f"  views={views or 0} click={clicks or 0} conv={conversions or 0} rev={int(revenue or 0):,}đ cost={int(cost or 0):,}đ\n"
+                f"  CTR={ctr:.2f}% | CVR={cvr:.2f}% | ROI={roi:.1f}% | base={product_score or 0}\n"
+                f"  <code>{html.escape((url or '-')[:80])}</code>"
+            )
+    else:
+        lines.append("• Chưa có affiliate active. Dùng /affiliate_seed hoặc /affiliate_add.")
+    lines.append("\n<b>Job affiliate gần đây/có hiệu quả:</b>")
+    if job_rows:
+        for (
+            aid, network, product, job_id, platform, topic, status, publish_url,
+            views, clicks, revenue, last_seen
+        ) in job_rows[:10]:
+            lines.append(
+                f"• job #{job_id} | aff #{aid} {html.escape(product or '-') } | <code>{html.escape(platform or '-')}</code> | {html.escape(status or '-')}\n"
+                f"  views={views or 0} click={clicks or 0} rev={int(revenue or 0):,}đ | {html.escape(last_seen or '-')}\n"
+                f"  {html.escape(topic or '-')}\n"
+                f"  url={html.escape(publish_url or '-')}"
+            )
+    else:
+        lines.append("• Chưa có job nào gắn affiliate.")
+    lines.append(
+        "\nLệnh scale nhanh:\n"
+        "<code>/affiliate_ideas aff=&lt;ID&gt; platform=tiktok n=5 topic=...</code>\n"
+        "<code>/operator_auto niche=... platform=tiktok channel=all aff=&lt;ID&gt; campaign=&lt;ID&gt; limit=5</code>\n"
+        "<code>/performance_add job=&lt;JOB_ID&gt; type=click|order|revenue value=1 amount=...</code>"
+    )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -8062,6 +8163,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
+    tg_app.add_handler(CommandHandler("affiliate_report", cmd_affiliate_report))
     tg_app.add_handler(CommandHandler("growth", cmd_growth))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
     tg_app.add_handler(CommandHandler("pipeline",    cmd_pipeline))
