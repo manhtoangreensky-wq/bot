@@ -41,15 +41,18 @@ logging.basicConfig(
 logger = logging.getLogger("TOAN_DAAS")
 
 # ─── BIẾN MÔI TRƯỜNG ─────────────────────────────────────────────────────────
-# ⚠️  Trên Railway: đổi biến thành TELEGRAM_TOKEN (xem danh sách cần làm cuối file)
-TELEGRAM_TOKEN  = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("BOT_TOKEN")
-ADMIN_ID        = str(os.environ.get("ADMIN_ID", "7126457028"))
-REMOVEBG_API_KEY = os.environ.get("REMOVEBG_API_KEY", "")
-FISH_AUDIO_KEY  = os.environ.get("FISH_AUDIO_KEY", "")
-GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
-DEEPGRAM_API_KEY= os.environ.get("DEEPGRAM_API_KEY", "")
-PAYOS_CHECKSUM_KEY = os.environ.get("PAYOS_CHECKSUM_KEY", "")   # Cho webhook payOS (tuỳ chọn)
-PORT            = int(os.environ.get("PORT", 8000))
+# .strip() loại bỏ \n, \r, space thừa do copy-paste vào Railway
+def _env(key: str, default: str = "") -> str:
+    return os.environ.get(key, default).strip()
+
+TELEGRAM_TOKEN   = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
+ADMIN_ID         = _env("ADMIN_ID", "7126457028")
+REMOVEBG_API_KEY = _env("REMOVEBG_API_KEY")
+FISH_AUDIO_KEY   = _env("FISH_AUDIO_KEY")
+GEMINI_API_KEY   = _env("GEMINI_API_KEY")
+DEEPGRAM_API_KEY = _env("DEEPGRAM_API_KEY")
+PAYOS_CHECKSUM_KEY = _env("PAYOS_CHECKSUM_KEY")
+PORT             = int(_env("PORT", "8000"))
 
 # ─── GEMINI CLIENT ────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
