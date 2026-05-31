@@ -6799,7 +6799,7 @@ class AgentVoice:
 
 class AgentDownloader:
     @staticmethod
-    async def download(url: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int, cost: int):
+    async def download(url: str, context: ContextTypes.DEFAULT_TYPE, chat_id: int, cost: int, user_id=None):
         msg = await context.bot.send_message(
             chat_id=chat_id,
             text="⏳ <i>Đang bóc tách video...</i>",
@@ -6822,10 +6822,22 @@ class AgentDownloader:
                 )
                 await msg.delete()
             else:
-                await msg.edit_text("❌ Link không hỗ trợ hoặc dịch vụ tải đang bảo trì.")
+                if user_id and cost > 0:
+                    add_credit(user_id, cost)
+                await msg.edit_text(
+                    "❌ Link không hỗ trợ, video riêng tư/cần đăng nhập, hoặc dịch vụ tải đang bảo trì.\n"
+                    f"✅ Đã hoàn lại <b>{cost}</b> Xu.",
+                    parse_mode="HTML"
+                )
         except Exception as e:
             logger.error(f"Downloader error: {e}")
-            await msg.edit_text("❌ Lỗi luồng tải.")
+            if user_id and cost > 0:
+                add_credit(user_id, cost)
+            await msg.edit_text(
+                "❌ Lỗi luồng tải video.\n"
+                f"✅ Đã hoàn lại <b>{cost}</b> Xu.",
+                parse_mode="HTML"
+            )
 
 # ─── STATE ───────────────────────────────────────────────────────────────────
 USER_BILL_STATE: dict = {}
@@ -7480,6 +7492,21 @@ def safe_int(value, default=0):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+def extract_supported_video_url(text):
+    urls = re.findall(r"https?://[^\s<>\"]+", text or "", flags=re.I)
+    supported_hosts = (
+        "tiktok.com", "vt.tiktok.com",
+        "youtube.com", "youtu.be", "m.youtube.com",
+        "facebook.com", "fb.watch", "m.facebook.com", "web.facebook.com",
+        "instagram.com", "threads.net",
+    )
+    for url in urls:
+        cleaned = url.rstrip(").,!?;\"'")
+        lower_url = cleaned.lower()
+        if any(host in lower_url for host in supported_hosts):
+            return cleaned
+    return ""
 
 def first_number_near(text, words, default=0):
     for word in words:
@@ -12400,17 +12427,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🛸 MENU DỊCH VỤ TOAN DAAS":
         return await cmd_start(update, context)
 
-    if not gemini_client and not openai_client:
-        return await update.message.reply_text("❌ Hệ thống AI chưa sẵn sàng (thiếu GEMINI_API_KEY và OPENAI_API_KEY).")
-
-    try:
-        route_raw = AgentGemini.chat(
-            "Phân loại: 'voice' (đọc văn bản), 'download' (URL video), 'general' (còn lại). Trả về JSON.",
-            text, uid, is_json=True
-        )
-        route = json.loads(route_raw)
-    except Exception:
-        route = {"action": "general", "data": text}
+    detected_video_url = extract_supported_video_url(text)
+    if detected_video_url:
+        route = {"action": "download", "data": detected_video_url}
+    else:
+        if not gemini_client and not openai_client:
+            return await update.message.reply_text("❌ Hệ thống AI chưa sẵn sàng (thiếu GEMINI_API_KEY và OPENAI_API_KEY).")
+        try:
+            route_raw = AgentGemini.chat(
+                "Phân loại: 'voice' (đọc văn bản), 'download' (URL video), 'general' (còn lại). Trả về JSON.",
+                text, uid, is_json=True
+            )
+            route = json.loads(route_raw)
+        except Exception:
+            route = {"action": "general", "data": text}
 
     act  = route.get("action", "general")
     data = route.get("data", text)
@@ -12491,7 +12521,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         await update.message.reply_text(voice_desc, parse_mode="HTML", reply_markup=kb)
     elif act == "download":
-        await AgentDownloader.download(data, context, update.effective_chat.id, cost)
+        await AgentDownloader.download(data, context, update.effective_chat.id, cost, uid)
     else:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         reply = AgentGemini.chat(
