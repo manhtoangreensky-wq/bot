@@ -11636,6 +11636,14 @@ async def landing_page():
         raise HTTPException(status_code=404, detail="Landing page not found")
     return FileResponse(index_path)
 
+@fastapi_app.get("/LOGO.png")
+@fastapi_app.get("/logo.png")
+async def logo_image():
+    logo_path = os.path.join(os.path.dirname(__file__), "LOGO.png")
+    if not os.path.exists(logo_path):
+        raise HTTPException(status_code=404, detail="Logo not found")
+    return FileResponse(logo_path, media_type="image/png")
+
 @fastapi_app.get("/r/{affiliate_id}")
 async def affiliate_redirect(affiliate_id: int, request: Request, job: int = 0, src: str = ""):
     affiliate = get_affiliate_link(affiliate_id, ADMIN_ID)

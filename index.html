@@ -7,32 +7,34 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  /* ── SLATE GREY PALETTE (xám lông chuột) ── */
-  --bg-0:       #1A1D21;   /* nền sâu nhất – xám than đậm */
-  --bg-1:       #22262B;   /* nền chính – xám lông chuột */
-  --bg-2:       #2A2F36;   /* card/section xen kẽ */
-  --bg-3:       #32383F;   /* card nổi */
-  --bg-4:       #3A4048;   /* hover state */
+  /* ── LOGO GREEN LIGHT TECH PALETTE ── */
+  --bg-0:       #F6FAF8;
+  --bg-1:       #EEF6F2;
+  --bg-2:       #FFFFFF;
+  --bg-3:       #F8FCFA;
+  --bg-4:       #E5F3EC;
 
-  /* Teal accent */
-  --teal:       #2DD4BF;
-  --teal-dim:   #0F9080;
-  --teal-glow:  rgba(45,212,191,0.10);
-  --teal-border:rgba(45,212,191,0.18);
+  /* Logo green accent */
+  --teal:       #11B879;
+  --teal-dim:   #05764F;
+  --teal-deep:  #01402E;
+  --teal-glow:  rgba(17,184,121,0.12);
+  --teal-border:rgba(17,184,121,0.22);
 
-  /* Gold accent */
-  --gold:       #F0B429;
-  --gold-dim:   #B8860B;
-  --gold-glow:  rgba(240,180,41,0.10);
+  /* Premium accent */
+  --gold:       #B68A22;
+  --gold-dim:   #8A6614;
+  --gold-glow:  rgba(182,138,34,0.12);
 
   /* Typography */
-  --text-1:  #ECF0F4;
-  --text-2:  #9AAAB8;
-  --text-3:  #5E7080;
+  --text-1:  #10231B;
+  --text-2:  #52655D;
+  --text-3:  #879891;
 
   /* Border/Divider */
-  --line:    rgba(45,212,191,0.09);
-  --line-2:  rgba(255,255,255,0.06);
+  --line:    rgba(5,118,79,0.12);
+  --line-2:  rgba(16,35,27,0.10);
+  --shadow:  0 18px 50px rgba(1,64,46,0.10);
 }
 
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -40,7 +42,9 @@ html { scroll-behavior:smooth; }
 
 body {
   font-family: 'Inter', sans-serif;
-  background: var(--bg-1);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(17,184,121,0.12), transparent 30%),
+    linear-gradient(180deg, #FFFFFF 0%, var(--bg-0) 42%, var(--bg-1) 100%);
   color: var(--text-1);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
@@ -51,13 +55,13 @@ body::after {
   content:'';
   position:fixed; inset:0;
   background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
-  pointer-events:none; z-index:0; opacity:0.5;
+  pointer-events:none; z-index:0; opacity:0.32;
 }
 
 /* CURSOR GLOW */
 .cursor-glow {
   position:fixed; width:500px; height:500px; border-radius:50%;
-  background:radial-gradient(circle, rgba(45,212,191,0.05) 0%, transparent 65%);
+  background:radial-gradient(circle, rgba(17,184,121,0.08) 0%, transparent 65%);
   pointer-events:none; z-index:1;
   transform:translate(-50%,-50%);
 }
@@ -67,18 +71,23 @@ nav {
   position:fixed; top:0; left:0; right:0; z-index:100;
   padding:18px 64px;
   display:flex; align-items:center; justify-content:space-between;
-  background:rgba(26,29,33,0.90);
+  background:rgba(255,255,255,0.82);
   backdrop-filter:blur(24px);
   border-bottom:1px solid var(--line);
+  box-shadow:0 10px 30px rgba(1,64,46,0.06);
 }
 .nav-logo {
   display:flex; align-items:center; gap:10px;
   font-family:'Space Grotesk',sans-serif; font-weight:700;
   font-size:15px; letter-spacing:0.08em; color:var(--text-1); text-transform:uppercase;
 }
-.nav-logo svg { animation:float-logo 3s ease-in-out infinite; }
+.nav-logo-img {
+  width:34px; height:34px; object-fit:contain;
+  border-radius:8px; box-shadow:0 8px 22px rgba(17,184,121,0.16);
+  animation:float-logo 3s ease-in-out infinite;
+}
 @keyframes float-logo { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
-.nav-logo span { color:var(--teal); }
+.nav-logo span { color:var(--teal-dim); }
 .nav-links { display:flex; gap:32px; list-style:none; }
 .nav-links a {
   font-size:13px; font-weight:500; letter-spacing:0.04em;
@@ -86,42 +95,40 @@ nav {
 }
 .nav-links a:hover { color:var(--teal); }
 .nav-cta {
-  background:transparent; border:1px solid var(--teal-dim); color:var(--teal);
+  background:var(--teal-deep); border:1px solid var(--teal-deep); color:white;
   padding:10px 24px; font-family:'Space Grotesk',sans-serif;
   font-size:12px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase;
   cursor:pointer; transition:all 0.3s; text-decoration:none;
 }
-.nav-cta:hover { background:var(--teal); color:var(--bg-0); border-color:var(--teal); }
+.nav-cta:hover { background:var(--teal); color:white; border-color:var(--teal); box-shadow:0 10px 24px rgba(17,184,121,0.24); }
 
 /* ── HERO ── */
 .hero {
-  position:relative; min-height:100vh;
+  position:relative; min-height:96vh;
   display:flex; align-items:center; justify-content:center; text-align:center;
-  padding:120px 40px 80px; overflow:hidden; background:var(--bg-0);
+  padding:120px 40px 72px; overflow:hidden;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(246,250,248,0.94) 58%, rgba(238,246,242,0.98) 100%);
 }
 .hero-grid {
   position:absolute; inset:0;
   background-image:
-    linear-gradient(rgba(45,212,191,0.04) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(45,212,191,0.04) 1px,transparent 1px);
+    linear-gradient(rgba(5,118,79,0.055) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(5,118,79,0.055) 1px,transparent 1px);
   background-size:56px 56px;
   mask-image:radial-gradient(ellipse 80% 70% at 50% 50%, black 0%, transparent 100%);
 }
-.hero-orb-2 {
-  position:absolute; width:600px; height:600px; border-radius:50%;
-  background:radial-gradient(circle, rgba(45,212,191,0.07) 0%, transparent 60%);
-  top:-100px; right:-200px; animation:float2 12s ease-in-out infinite;
-}
-.hero-orb-3 {
-  position:absolute; width:400px; height:400px; border-radius:50%;
-  background:radial-gradient(circle, rgba(240,180,41,0.05) 0%, transparent 60%);
-  bottom:-80px; left:-100px; animation:float2 9s ease-in-out infinite reverse;
-}
 @keyframes float2 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(-20px,-30px)} }
+
+.hero-logo {
+  width:min(460px,78vw); height:auto; display:block;
+  margin:0 auto 28px;
+  filter:drop-shadow(0 26px 42px rgba(1,64,46,0.12));
+}
 
 .hero-badge {
   display:inline-flex; align-items:center; gap:10px;
-  border:1px solid var(--teal-border); background:var(--teal-glow);
+  border:1px solid var(--teal-border); background:rgba(255,255,255,0.78);
   padding:8px 20px; font-size:11px; font-weight:600;
   letter-spacing:0.15em; text-transform:uppercase; color:var(--teal);
   margin-bottom:36px; border-radius:4px;
@@ -132,10 +139,10 @@ nav {
 .hero h1 {
   font-family:'Space Grotesk',sans-serif; font-weight:700;
   font-size:clamp(40px,7vw,84px); line-height:1.05;
-  letter-spacing:-0.03em; margin-bottom:28px; color:var(--text-1);
+  letter-spacing:-0.03em; margin-bottom:24px; color:var(--text-1);
 }
 .hero h1 .line-gold { color:var(--gold); }
-.hero h1 .line-neon { color:var(--teal); }
+.hero h1 .line-neon { color:var(--teal-dim); }
 
 .hero-sub {
   font-size:16px; font-weight:400; color:var(--text-2);
@@ -144,23 +151,23 @@ nav {
 
 .hero-actions { display:flex; gap:16px; justify-content:center; flex-wrap:wrap; }
 .btn-primary {
-  background:var(--teal); color:var(--bg-0); border:none;
+  background:var(--teal-deep); color:white; border:none;
   padding:15px 40px; font-family:'Space Grotesk',sans-serif;
   font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
   cursor:pointer; transition:all 0.3s; text-decoration:none; display:inline-block;
 }
-.btn-primary:hover { background:#4EEADB; transform:translateY(-2px); box-shadow:0 8px 24px rgba(45,212,191,0.3); }
+.btn-primary:hover { background:var(--teal); transform:translateY(-2px); box-shadow:0 12px 26px rgba(17,184,121,0.28); }
 .btn-ghost {
-  background:transparent; color:var(--text-1); border:1px solid var(--line-2);
+  background:rgba(255,255,255,0.64); color:var(--text-1); border:1px solid var(--line-2);
   padding:15px 40px; font-family:'Space Grotesk',sans-serif;
   font-size:13px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase;
   cursor:pointer; transition:all 0.3s; text-decoration:none; display:inline-block;
 }
-.btn-ghost:hover { border-color:var(--gold-dim); color:var(--gold); }
+.btn-ghost:hover { border-color:var(--teal-dim); color:var(--teal-dim); background:white; }
 
 .hero-stats {
   display:flex; gap:56px; justify-content:center;
-  margin-top:72px; padding-top:48px; border-top:1px solid var(--line);
+  margin-top:64px; padding-top:38px; border-top:1px solid var(--line);
 }
 .stat-item { text-align:center; }
 .stat-num { font-family:'Space Grotesk',sans-serif; font-size:30px; font-weight:700; color:var(--gold); }
@@ -180,6 +187,7 @@ section { position:relative; z-index:2; }
 .service-card {
   background:var(--bg-2); padding:40px 32px;
   transition:all 0.3s; position:relative; overflow:hidden; cursor:default;
+  box-shadow:0 1px 0 rgba(255,255,255,0.8) inset;
 }
 .service-card::before {
   content:''; position:absolute; top:0; left:0; right:0; height:2px;
@@ -187,7 +195,7 @@ section { position:relative; z-index:2; }
   transform:scaleX(0); transition:transform 0.4s;
 }
 .service-card:hover::before { transform:scaleX(1); }
-.service-card:hover { background:var(--bg-3); }
+.service-card:hover { background:var(--bg-3); box-shadow:var(--shadow); }
 
 .service-icon {
   width:48px; height:48px; border:1px solid var(--teal-border);
@@ -230,7 +238,7 @@ section { position:relative; z-index:2; }
 @keyframes scroll-tech { from{transform:translateX(0)} to{transform:translateX(-50%)} }
 .tech-pill {
   display:flex; align-items:center; gap:10px; padding:10px 22px;
-  border:1px solid var(--line); background:var(--bg-3);
+  border:1px solid var(--line); background:white;
   font-size:13px; font-weight:500; color:var(--text-2);
   white-space:nowrap; transition:all 0.2s;
 }
@@ -253,7 +261,7 @@ section { position:relative; z-index:2; }
   letter-spacing:0.14em; text-transform:uppercase; color:var(--text-3); margin-bottom:8px;
 }
 .form-group input,.form-group select,.form-group textarea {
-  width:100%; background:var(--bg-3); border:1px solid var(--line);
+  width:100%; background:white; border:1px solid var(--line);
   color:var(--text-1); padding:13px 16px;
   font-family:'Inter',sans-serif; font-size:14px; outline:none; transition:all 0.2s;
 }
@@ -263,7 +271,7 @@ section { position:relative; z-index:2; }
 .form-group textarea { resize:vertical; min-height:90px; }
 .service-options { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:20px; }
 .service-opt {
-  border:1px solid var(--line); background:var(--bg-3);
+  border:1px solid var(--line); background:white;
   padding:12px 14px; cursor:pointer; transition:all 0.2s;
   display:flex; align-items:center; gap:8px;
 }
@@ -272,21 +280,21 @@ section { position:relative; z-index:2; }
 .service-opt-label { font-size:13px; font-weight:500; color:var(--text-2); }
 .service-opt.selected .service-opt-label { color:var(--teal); }
 .submit-btn {
-  width:100%; background:var(--teal); color:var(--bg-0); border:none;
+  width:100%; background:var(--teal-deep); color:white; border:none;
   padding:17px; font-family:'Space Grotesk',sans-serif;
   font-size:14px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
   cursor:pointer; transition:all 0.3s;
 }
-.submit-btn:hover { background:#4EEADB; transform:translateY(-1px); box-shadow:0 6px 20px rgba(45,212,191,0.25); }
+.submit-btn:hover { background:var(--teal); transform:translateY(-1px); box-shadow:0 8px 22px rgba(17,184,121,0.24); }
 
 /* ── NẠP XU SECTION ── */
 #naptien { padding:100px 64px; background:var(--bg-2); }
 .pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; max-width:1000px; margin:0 auto 60px; }
 .pricing-card {
-  background:var(--bg-3); border:1px solid var(--line);
+  background:white; border:1px solid var(--line);
   padding:32px 28px; position:relative; transition:all 0.3s;
 }
-.pricing-card:hover { border-color:var(--teal-dim); transform:translateY(-4px); box-shadow:0 12px 32px rgba(0,0,0,0.25); }
+.pricing-card:hover { border-color:var(--teal-dim); transform:translateY(-4px); box-shadow:var(--shadow); }
 .pricing-card.featured { border-color:var(--teal-dim); background:var(--bg-4); }
 .pricing-card.featured::before {
   content:'PHỔ BIẾN'; position:absolute; top:-1px; left:50%; transform:translateX(-50%);
@@ -302,7 +310,7 @@ section { position:relative; z-index:2; }
 
 .payment-flow {
   max-width:700px; margin:0 auto;
-  background:var(--bg-3); border:1px solid var(--teal-border); padding:36px 40px;
+  background:white; border:1px solid var(--teal-border); padding:36px 40px; box-shadow:var(--shadow);
 }
 .payment-flow-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:var(--text-1); margin-bottom:24px; }
 .payment-step { display:flex; gap:20px; align-items:flex-start; margin-bottom:18px; }
@@ -329,6 +337,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
 .footer-neon-line { height:1px; background:linear-gradient(90deg,transparent,var(--teal-dim),transparent); margin-bottom:48px; opacity:0.4; }
 .footer-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:48px; }
 .footer-brand { display:flex; align-items:center; gap:10px; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:var(--gold); margin-bottom:12px; }
+.footer-logo-img { width:40px; height:40px; object-fit:contain; border-radius:9px; }
 .footer-tagline { font-size:13px; font-weight:400; color:var(--text-3); max-width:260px; line-height:1.65; }
 .footer-links-col h4 { font-size:10px; font-weight:600; letter-spacing:0.15em; text-transform:uppercase; color:var(--text-3); margin-bottom:16px; }
 .footer-links-col a { display:block; font-size:13px; font-weight:400; color:var(--text-2); text-decoration:none; margin-bottom:10px; transition:color 0.2s; }
@@ -351,6 +360,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   .footer-top{flex-direction:column;gap:32px}
   .footer-bottom{flex-direction:column;gap:12px;text-align:center}
   .hero h1{font-size:clamp(34px,9vw,60px)}
+  .hero-logo{width:min(340px,82vw); margin-bottom:22px}
 }
 </style>
 </head>
@@ -360,11 +370,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
 
 <nav>
   <div class="nav-logo">
-    <svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-      <path d="M2 17l10 5 10-5"></path>
-      <path d="M2 12l10 5 10-5"></path>
-    </svg>
+    <img class="nav-logo-img" src="/LOGO.png" alt="TOAN DAAS logo">
     TOAN <span>DAAS</span>
   </div>
   <ul class="nav-links">
@@ -379,8 +385,8 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
 
 <section class="hero">
   <div class="hero-grid"></div>
-  <div class="hero-orb-2"></div>
   <div style="position:relative;z-index:2;">
+    <img class="hero-logo" src="/LOGO.png" alt="TOAN DAAS - AI Automation System">
     <div class="hero-badge">
       <div class="hero-badge-dot"></div> Hệ thống Multi-Agent AI — Dynamic Billing
     </div>
@@ -674,11 +680,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   <div class="footer-top">
     <div>
       <div class="footer-brand">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-          <path d="M2 17l10 5 10-5"></path>
-          <path d="M2 12l10 5 10-5"></path>
-        </svg>
+        <img class="footer-logo-img" src="/LOGO.png" alt="TOAN DAAS logo">
         TOAN DAAS
       </div>
       <p class="footer-tagline">Kiến trúc hệ thống điều phối đa AI (Multi-Agent) với Dynamic Billing — dành cho Affiliate & Automation.</p>
@@ -699,7 +701,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   </div>
   <div class="footer-bottom">
     <span>© 2026 TOAN DAAS System. All rights reserved.</span>
-    <span style="color:var(--text-muted); font-weight:700;">Hệ thống quản trị bởi Toàn Nguyễn</span>
+    <span style="color:var(--text-3); font-weight:700;">Hệ thống quản trị bởi Toàn Nguyễn</span>
   </div>
 </footer>
 
