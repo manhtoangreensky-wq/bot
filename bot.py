@@ -913,6 +913,40 @@ def build_production_prompt(slot):
         "voice style, caption, hashtag, CTA, vị trí gắn link affiliate, asset cần tạo, bước kiểm duyệt trước đăng, và next action cho admin."
     )
 
+def build_operator_stage_prompt(job, target_stage):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    tool_map = {
+        "script": "Gemini/OpenAI/Claude Opus để chốt kịch bản, hook, CTA và caption.",
+        "voice": "Fish Audio HD trước; nếu lỗi/quota/hết tiền thì Edge TTS fallback, báo admin và hoàn chênh lệch cho khách nếu đây là dịch vụ tính phí.",
+        "visuals": "Kling/Runway/Canva/CapCut assets theo prompt; chỉ dùng hình/nhân vật có quyền, AI model tự tạo hoặc người thật có consent 18+.",
+        "edit": "CapCut/DaVinci/FFmpeg để dựng 9:16, subtitle, nhạc nền hợp lệ và CTA rõ.",
+        "review": "Kiểm tra compliance, quyền hình ảnh/âm thanh, claim affiliate, nội dung không spam/không mạo danh.",
+        "publish": "Chuẩn bị caption, hashtag, affiliate placement và checklist đăng thủ công/API chính thức cho nền tảng.",
+    }
+    return (
+        "Bạn là AI Operator trưởng của TOAN DAAS. Hãy tạo lệnh điều phối stage tiếp theo cho production job. "
+        "Giữ nguyên triết lý công cụ: dùng công cụ tốt/có phí trước, khi hết quota/hết tiền/lỗi thì fallback sang công cụ ít phí/miễn phí, "
+        "đồng thời báo admin cần bổ sung quota/số dư/key. Không spam, không mạo danh, không hướng dẫn né kiểm duyệt.\n\n"
+        f"Job ID: #{jid}\n"
+        f"Calendar: {calendar_id or '-'} | Campaign: {campaign_id or '-'}\n"
+        f"Nền tảng: {platform or '-'}\n"
+        f"Kênh: {channel_name or channel_id or '-'} / account={account_label or 'main'}\n"
+        f"Topic: {topic or '-'}\n"
+        f"Stage hiện tại: {stage or '-'} | Status: {status or '-'}\n"
+        f"Stage cần làm: {target_stage}\n"
+        f"Affiliate: {network or '-'} - {product_name or '-'} - {affiliate_url or '-'}\n"
+        f"Asset hiện có: {asset_url or 'chưa có'}\n"
+        f"Publish URL: {publish_url or 'chưa có'}\n"
+        f"Ghi chú admin: {note or '-'}\n\n"
+        f"Tool routing stage này: {tool_map.get(target_stage, 'Tự chọn công cụ phù hợp, ưu tiên bản tốt/có phí trước.')}\n\n"
+        f"Brief gốc:\n{brief or 'Chưa có brief'}\n\n"
+        "Trả về tiếng Việt dạng checklist ngắn gọn gồm: mục tiêu stage, input cần dùng, tool chính, tool fallback, lệnh/prompt đưa vào tool, "
+        "tiêu chí đạt, lỗi cần báo admin, output cần lưu vào pipeline."
+    )
+
 def slots_per_day(posting_slots: str) -> int:
     digits = "".join(ch for ch in (posting_slots or "") if ch.isdigit())
     if not digits:
@@ -1749,6 +1783,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /calendar_plan — Lên lịch nội dung",
             "• /calendar — Xem lịch nội dung",
             "• /operator — Ra lệnh tạo video một bước",
+            "• /operator_next — Điều phối stage tiếp theo",
             "• /produce — Tạo job sản xuất từ lịch",
             "• /pipeline — Theo dõi pipeline video",
             "• /pipeline_set — Cập nhật stage/trạng thái",
@@ -2470,6 +2505,64 @@ async def cmd_pipeline_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+async def cmd_operator_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("id") or data.get("job") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/operator_next id=1 stage=script</code>\n"
+            "Stage: <code>script, voice, visuals, edit, review, publish</code>",
+            parse_mode="HTML"
+        )
+    target_stage = (data.get("stage") or data.get("next") or "").lower()
+    allowed = ["script", "voice", "visuals", "edit", "review", "publish"]
+    job = get_production_job(job_id, update.effective_user.id)
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    current_stage = job[7] or "brief"
+    if not target_stage:
+        try:
+            target_stage = allowed[min(allowed.index(current_stage) + 1, len(allowed) - 1)]
+        except ValueError:
+            target_stage = "script"
+    if target_stage not in allowed:
+        return await update.message.reply_text(f"⚠️ stage hợp lệ: <code>{', '.join(allowed)}</code>", parse_mode="HTML")
+    if gemini_client or openai_client:
+        instruction = AgentGemini.chat(
+            "Bạn là AI Operator trưởng điều phối từng stage sản xuất video affiliate.",
+            build_operator_stage_prompt(job, target_stage),
+            update.effective_user.id,
+            is_json=False
+        )
+    else:
+        instruction = (
+            "Chưa cấu hình AI Provider. Cập nhật thủ công theo stage: "
+            f"{target_stage}. Ưu tiên tool cao cấp trước, lỗi/quota thì fallback và báo admin."
+        )
+    note = f"operator_next:{target_stage} | {truncate_text(instruction, 800)}"
+    update_production_job(job_id, update.effective_user.id, stage=target_stage, status="working", note=note)
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎙 Voice", callback_data=f"pipe|stage|voice|{job_id}"),
+            InlineKeyboardButton("🎞 Edit", callback_data=f"pipe|stage|edit|{job_id}"),
+            InlineKeyboardButton("✅ Review", callback_data=f"pipe|stage|review|{job_id}")
+        ],
+        [
+            InlineKeyboardButton("🚀 Published", callback_data=f"pipe|status|published|{job_id}"),
+            InlineKeyboardButton("⛔ Blocked", callback_data=f"pipe|status|blocked|{job_id}")
+        ]
+    ])
+    await update.message.reply_text(
+        f"🧠 <b>OPERATOR NEXT — JOB #{job_id}</b>\n"
+        f"Stage: <b>{html.escape(target_stage)}</b> | Status: <b>working</b>\n\n"
+        f"<pre>{html_pre(instruction)}</pre>",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
 async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -3087,6 +3180,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
+    tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
     tg_app.add_handler(CommandHandler("pipeline",    cmd_pipeline))
     tg_app.add_handler(CommandHandler("pipeline_set", cmd_pipeline_set))
