@@ -3689,7 +3689,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "viral_remix", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3761,6 +3761,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/jobs/<JOB_ID>/review-video"),
         ("GET", "/api/operator/jobs/<JOB_ID>/post-publish"),
         ("GET", "/api/operator/money-pack"),
+        ("GET", "/api/operator/affiliate-cockpit"),
         ("GET", "/api/operator/revenue-destinations"),
         ("GET", "/api/operator/postback-setup"),
         ("GET", "/api/affiliate/postback"),
@@ -3843,6 +3844,7 @@ def operator_smoke_test_data(owner_id):
         "review_video_in_spec": "/api/operator/jobs/<JOB_ID>/review-video" in spec_text and "/api/operator/jobs/" in n8n_text and "/review-video" in n8n_text,
         "post_publish_in_spec": "/api/operator/jobs/<JOB_ID>/post-publish" in spec_text and "/api/operator/jobs/" in n8n_text and "/post-publish" in n8n_text,
         "money_pack_in_spec": "/api/operator/money-pack" in spec_text and "/api/operator/money-pack" in n8n_text,
+        "affiliate_cockpit_in_spec": "/api/operator/affiliate-cockpit" in spec_text,
         "revenue_destinations_in_spec": "/api/operator/revenue-destinations" in spec_text and "/api/operator/revenue-destinations" in n8n_text,
         "postback_setup_in_spec": "/api/operator/postback-setup" in spec_text and "/api/operator/postback-setup" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
@@ -3947,6 +3949,7 @@ def operator_worker_spec_data():
         "reference_scan_url": f"{base_url}/api/operator/reference-videos/scan",
         "viral_remix_url": f"{base_url}/api/operator/viral-remix",
         "postback_setup_url": f"{base_url}/api/operator/postback-setup",
+        "affiliate_cockpit_url": f"{base_url}/api/operator/affiliate-cockpit",
         "platform_adapters_url": f"{base_url}/api/operator/platform-adapters",
         "worker_intake_url": f"{base_url}/api/operator/worker-intake",
         "video_work_orders_url": f"{base_url}/api/operator/video-work-orders",
@@ -4071,6 +4074,7 @@ def operator_worker_spec_data():
             {"step": 12, "name": "submit_publish", "method": "POST", "url": "/api/operator/publish/<QUEUE_ID>/complete"},
             {"step": 12.5, "name": "post_publish_handoff", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/post-publish"},
             {"step": 12.7, "name": "money_pack", "method": "GET", "url": "/api/operator/money-pack?days=30&platform=tiktok&limit=10"},
+            {"step": 12.75, "name": "affiliate_cockpit", "method": "GET", "url": "/api/operator/affiliate-cockpit?days=30&platform=tiktok&limit=10"},
             {"step": 12.8, "name": "revenue_destinations", "method": "GET", "url": "/api/operator/revenue-destinations?days=30&platform=tiktok&limit=10"},
             {"step": 12.85, "name": "postback_setup", "method": "GET", "url": "/api/operator/postback-setup?network=trackfin&platform=tiktok"},
             {"step": 13, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
@@ -4387,6 +4391,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/money-pack?days=30&platform=tiktok&limit=10",
                 "purpose": "Gom doanh thu affiliate, nguồn tracking, tiền nạp PayOS/thủ công, quyết định scale và lệnh xử lý tiền.",
+            },
+            "affiliate_cockpit": {
+                "method": "GET",
+                "url": "/api/operator/affiliate-cockpit?days=30&platform=tiktok&limit=10&affiliate_id=0",
+                "purpose": "Bảng điều hành link/video/source: winner, bottleneck, queue cần đăng, lệnh tạo nội dung, event tracking và scale.",
             },
             "revenue_destinations": {
                 "method": "GET",
@@ -12458,6 +12467,156 @@ def operator_money_pack_data(owner_id, days=30, platform="tiktok", limit=10):
         "rule": "Money pack gom doanh thu affiliate, nguồn tracking, tiền nạp PayOS/thủ công và quyết định scale. Chỉ scale khi có tín hiệu thật; tiền affiliate ngoài nền tảng cần nhập bằng performance/postback để đo đúng.",
     }
 
+def affiliate_campaign_cockpit_data(owner_id, days=30, platform="tiktok", limit=10, affiliate_id=0):
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 10), 50))
+    platform = (platform or "tiktok").lower()
+    affiliate_id = safe_int(affiliate_id, 0)
+    money = operator_money_pack_data(owner_id, days=days, platform=platform, limit=limit)
+    tracking = tracking_report_data(owner_id, days=days, limit=max(limit, 20))
+    scale = scale_plan_data(owner_id, days=days, limit=limit, platform=platform)
+    _since, decisions, _jobs = affiliate_decision_data(owner_id, days=days, limit=limit, platform=platform)
+    queue_rows = list_publish_queue(owner_id, limit=limit)
+    open_queue = []
+    for row in queue_rows:
+        item = serialize_publish_queue_item(row)
+        if not item:
+            continue
+        status = (item.get("status") or "").lower()
+        if status in {"queued", "scheduled", "publishing", "blocked"}:
+            open_queue.append(item)
+    focus = get_affiliate_link(affiliate_id, owner_id) if affiliate_id else None
+    focus_payload = {}
+    if focus:
+        (
+            aid, network, product_name, niche, url, commission_note, status,
+            price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
+        ) = focus
+        related = list_related_affiliate_links(owner_id, affiliate_id=aid, niche=niche or product_name, limit=8)
+        focus_payload = {
+            "id": aid,
+            "network": network,
+            "product_name": product_name,
+            "niche": niche,
+            "url": url,
+            "status": status,
+            "tracking_urls": {
+                "caption": affiliate_tracking_url(aid, 0, f"{platform}_caption"),
+                "comment": affiliate_tracking_url(aid, 0, f"{platform}_comment"),
+                "status": affiliate_tracking_url(aid, 0, f"{platform}_status"),
+            },
+            "related_links": [
+                {
+                    "id": row[0],
+                    "network": row[1],
+                    "product_name": row[2],
+                    "niche": row[3],
+                    "url": row[4],
+                    "score": score,
+                    "reasons": reasons,
+                }
+                for score, reasons, row in related[:8]
+            ],
+        }
+    winners = []
+    for item in (tracking.get("affiliates") or [])[:limit]:
+        if affiliate_id and int(item.get("affiliate_id") or 0) != affiliate_id:
+            continue
+        action, reason = scale_plan_action(item)
+        winners.append({
+            **item,
+            "action": action,
+            "reason": reason,
+            "command": scale_plan_command(item, action, platform=platform),
+        })
+    if not winners:
+        for item in (money.get("top_affiliates") or [])[:limit]:
+            if affiliate_id and int(item.get("id") or 0) != affiliate_id:
+                continue
+            winners.append({
+                "affiliate_id": item.get("id"),
+                "product": item.get("product"),
+                "network": item.get("network"),
+                "views": item.get("views", 0),
+                "clicks": item.get("clicks", 0),
+                "conversions": item.get("conversions", 0),
+                "revenue": item.get("revenue", 0),
+                "cost": item.get("cost", 0),
+                "score": item.get("score", 0),
+                "action": "TEST_MORE",
+                "reason": "Chưa đủ performance source chi tiết; dùng top_affiliates để tiếp tục tạo biến thể.",
+                "command": item.get("next"),
+            })
+    content_actions = []
+    for item in winners[:limit]:
+        aid = int(item.get("affiliate_id") or item.get("id") or 0)
+        product = item.get("product") or item.get("product_name") or "affiliate"
+        content_actions.append({
+            "affiliate_id": aid,
+            "product": product,
+            "action": item.get("action") or "TEST_MORE",
+            "commands": {
+                "match": f"/affiliate_match niche={product} platform={platform}",
+                "ideas": f"/affiliate_ideas aff={aid} platform={platform} n=5 topic=trend" if aid else "/affiliate_ideas aff=<AFF_ID>",
+                "make_video": f"/affiliate_scale aff={aid} platform={platform} channel=all limit=3 build=1 duration=45" if aid else "/operator_launch topic=<TOPIC> build=1",
+                "viral_remix": f"/viral_remix topic={product} platform={platform} aff={aid}" if aid else f"/viral_remix topic={product} platform={platform}",
+                "postback": f"/postback_setup aff={aid} platform={platform}" if aid else "/postback_setup",
+            },
+        })
+    bottlenecks = []
+    summary = money.get("summary") or {}
+    if not (tracking.get("affiliates") or []):
+        bottlenecks.append({"key": "missing_tracking", "detail": "Chưa có view/click/order/revenue theo affiliate/source.", "next": "/performance_add job=<JOB_ID> type=view value=<VIEWS> note=src_caption"})
+    if open_queue:
+        bottlenecks.append({"key": "open_publish_queue", "detail": f"Còn {len(open_queue)} queue cần đăng/đánh dấu published.", "next": "/publish_queue"})
+    if int(summary.get("affiliate_clicks") or 0) > 0 and int(summary.get("affiliate_conversions") or 0) == 0:
+        bottlenecks.append({"key": "click_no_order", "detail": "Có click nhưng chưa có lead/order/revenue; cần đổi offer hoặc related links.", "next": "/affiliate_related aff=<AFF_ID> limit=12"})
+    if int(summary.get("affiliate_views") or 0) > 0 and int(summary.get("affiliate_clicks") or 0) == 0:
+        bottlenecks.append({"key": "view_no_click", "detail": "Có view nhưng chưa có click; cần sửa CTA/caption/comment.", "next": "/creative_test job=<JOB_ID> n=5"})
+    if not bottlenecks:
+        bottlenecks.append({"key": "ready_to_scale_or_test", "detail": "Không có blocker lớn; ưu tiên SCALE link thắng hoặc TEST thêm creative.", "next": "/scale_plan"})
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "days": days,
+        "platform": platform,
+        "focus_affiliate": focus_payload,
+        "summary": summary,
+        "winners": winners[:limit],
+        "scale_plans": (scale.get("plans") or [])[:limit],
+        "affiliate_decisions": decisions[:limit],
+        "open_publish_queue": open_queue[:limit],
+        "top_sources": (tracking.get("sources") or [])[:limit],
+        "top_jobs": (tracking.get("jobs") or [])[:limit],
+        "content_actions": content_actions[:limit],
+        "bottlenecks": bottlenecks,
+        "tracking_checklist": [
+            {"event": "published", "command": "/publish_queue_set id=<QUEUE_ID> status=published url=https://..."},
+            {"event": "view", "command": "/performance_add job=<JOB_ID> type=view value=<VIEWS> note=src_<caption|comment|status|bio>"},
+            {"event": "click", "command": "/performance_add job=<JOB_ID> aff=<AFF_ID> type=click value=<CLICKS> note=src_caption"},
+            {"event": "lead/order/revenue", "command": "/performance_add job=<JOB_ID> aff=<AFF_ID> type=revenue value=1 amount=<VND> note=<network>_order"},
+            {"event": "cost", "command": "/performance_add job=<JOB_ID> type=cost value=1 amount=<VND> note=ads_or_tool_cost"},
+        ],
+        "commands": {
+            "telegram": {
+                "cockpit": f"/affiliate_cockpit days={days} platform={platform} limit={limit}" + (f" aff={affiliate_id}" if affiliate_id else ""),
+                "money_pack": f"/money_pack days={days} platform={platform} limit={limit}",
+                "tracking_report": f"/tracking_report days={days} limit={limit}",
+                "scale_plan": f"/scale_plan days={days} platform={platform} limit={limit}",
+                "scale_execute": f"/scale_execute days={days} platform={platform} limit=3 per=3 build=1",
+                "publish_queue": "/publish_queue",
+            },
+            "api": {
+                "cockpit": f"/api/operator/affiliate-cockpit?days={days}&platform={platform}&limit={limit}" + (f"&affiliate_id={affiliate_id}" if affiliate_id else ""),
+                "money_pack": f"/api/operator/money-pack?days={days}&platform={platform}&limit={limit}",
+                "tracking_report": f"/api/operator/tracking-report?days={days}&limit={limit}",
+                "scale_plan": f"/api/operator/scale-plan?days={days}&platform={platform}&limit={limit}",
+                "performance": "/api/operator/performance",
+            },
+        },
+        "rule": "Affiliate cockpit là bảng điều hành link/video/source: tạo content, publish, comment, ghi metric, rồi scale dựa trên dữ liệu thật.",
+    }
+
 def revenue_destination_pack_data(owner_id, days=30, platform="tiktok", limit=10):
     days = max(1, min(int(days or 30), 180))
     limit = max(3, min(int(limit or 10), 50))
@@ -17608,6 +17767,19 @@ def operator_brain_fallback(raw_text):
             "confidence": 84,
         }
     if any(word in lower for word in [
+        "affiliate cockpit", "campaign cockpit", "bảng điều hành affiliate", "bang dieu hanh affiliate",
+        "điều hành affiliate", "dieu hanh affiliate", "quản lý link affiliate", "quan ly link affiliate",
+        "link nào hiệu quả", "link nao hieu qua", "đẩy mạnh link", "day manh link"
+    ]):
+        return {
+            "intent": "affiliate_cockpit",
+            "platform": platform,
+            "affiliate": affiliate_id,
+            "limit": max(3, min(limit, 30)),
+            "days": max(1, min(days, 180)),
+            "confidence": 85,
+        }
+    if any(word in lower for word in [
         "tiền về đâu", "tien ve dau", "revenue destination", "revenue destinations",
         "điểm nhận tiền", "diem nhan tien", "network nào trả tiền", "network nao tra tien"
     ]):
@@ -18047,7 +18219,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
@@ -18057,6 +18229,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- goal_audit: khi admin hỏi hệ thống đã đủ mục tiêu chưa, xong cấu trúc chưa, cần kiểm tra end-to-end từ lệnh tới tiền.\n"
         "- pipeline_pack: khi admin hỏi một job/pipeline đang ở bước nào, cần AI nào làm tiếp, next action, pipeline command pack.\n"
         "- money_pack: khi admin hỏi tiền về, doanh thu tổng, PayOS + affiliate, link/kênh/source nào tạo tiền và nên scale gì.\n"
+        "- affiliate_cockpit: khi admin hỏi điều hành/quản lý link affiliate, link nào hiệu quả, source nào nên đẩy, queue nào cần đăng và scale gì.\n"
         "- revenue_destinations: khi admin hỏi tiền về đâu, network nào trả tiền, cần ghi event/postback gì.\n"
         "- postback_setup: khi admin muốn cấu hình postback/callback affiliate network vào bot.\n"
         "- operator_commander_pack: khi admin muốn prompt/gói điều khiển cho Claude Opus hoặc AI cấp cao điều phối toàn pipeline.\n"
@@ -18154,6 +18327,13 @@ def brain_command_preview(plan):
             f"/money_pack days={max(1, min(int(plan.get('days') or 30), 180))} "
             f"platform={plan.get('platform') or 'tiktok'} "
             f"limit={max(3, min(int(plan.get('limit') or 10), 30))}"
+        )
+    if intent == "affiliate_cockpit":
+        return (
+            f"/affiliate_cockpit days={max(1, min(int(plan.get('days') or 30), 180))} "
+            f"platform={plan.get('platform') or 'tiktok'} "
+            f"limit={max(3, min(int(plan.get('limit') or 10), 30))} "
+            f"aff={int(plan.get('affiliate') or 0)}"
         )
     if intent == "revenue_destinations":
         return (
@@ -18400,6 +18580,14 @@ async def run_brain_plan(update, context, plan):
                 f"limit={max(3, min(int(plan.get('limit') or 10), 30))}",
             ]
             return await cmd_money_pack(update, context)
+        if intent == "affiliate_cockpit":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 10), 30))}",
+                f"aff={int(plan.get('affiliate') or 0)}",
+            ]
+            return await cmd_affiliate_cockpit(update, context)
         if intent == "revenue_destinations":
             context.args = [
                 f"days={max(1, min(int(plan.get('days') or 30), 180))}",
@@ -18859,7 +19047,7 @@ def operator_command_plan_data(owner_id, command):
         "confidence": int(plan.get("confidence") or 0),
         "safety_note": plan.get("safety_note") or "Không bỏ qua review/approve gate; không tự publish khi chưa sẵn sàng.",
         "execute_allowed": (plan.get("intent") or "").lower() in {
-            "command_center", "operator_next_run", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "goal_audit", "pipeline_pack", "money_pack", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
+            "command_center", "operator_next_run", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "goal_audit", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
             "operator_director", "operator_execute", "operator_launch", "film_series", "make_video", "compose_video",
             "tracking_report", "scale_plan", "affiliate_report", "affiliate_decisions",
             "scale_execute", "publisher_capabilities", "platform_adapters",
@@ -18882,6 +19070,8 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
         return {"executed": True, "intent": intent, "data": operator_pipeline_pack_data(owner_id, job_id=int(plan.get("job") or 0), days=days, platform=platform, limit=min(limit, 20))}
     if intent == "money_pack":
         return {"executed": True, "intent": intent, "data": operator_money_pack_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 30)))}
+    if intent == "affiliate_cockpit":
+        return {"executed": True, "intent": intent, "data": affiliate_campaign_cockpit_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 30)), affiliate_id=int(plan.get("affiliate") or 0))}
     if intent == "revenue_destinations":
         return {"executed": True, "intent": intent, "data": revenue_destination_pack_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 30)))}
     if intent == "postback_setup":
@@ -21924,6 +22114,7 @@ def operator_category_keyboard(category):
         ],
         "cat_affiliate": [
             ("🔗 Import catalog", "affseed"), ("🛒 Danh sách link", "affiliates"),
+            ("🎛 Affiliate cockpit", "affcockpit"),
             ("🎯 Campaign preset", "campaignpreset"),
             ("📥 Bulk import", "affimport"),
             ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
@@ -21975,7 +22166,8 @@ def operator_category_keyboard(category):
             ("✅ Mark published", "markpublished"),
         ],
         "cat_money": [
-            ("💸 Money pack", "moneypack"), ("💰 Performance", "performance"), ("📈 Growth optimizer", "growth"),
+            ("💸 Money pack", "moneypack"), ("🎛 Affiliate cockpit", "affcockpit"),
+            ("💰 Performance", "performance"), ("📈 Growth optimizer", "growth"),
             ("🏦 Revenue destinations", "revenuedestinations"),
             ("🔁 Postback setup", "postbacksetup"),
             ("🔗 Báo cáo affiliate", "affreport"), ("📊 Tracking funnel", "trackingreport"),
@@ -22084,6 +22276,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Báo lỗi/quota tool: <code>POST {html.escape(base_url)}/api/operator/tool-events</code>",
         f"• Reference videos: <code>GET {html.escape(base_url)}/api/operator/reference-videos?limit=40</code>",
         f"• Viral remix pack: <code>GET {html.escape(base_url)}/api/operator/viral-remix?url=&lt;URL&gt;&amp;topic=dao_ly</code>",
+        f"• Affiliate cockpit: <code>GET {html.escape(base_url)}/api/operator/affiliate-cockpit?days=30&amp;platform=tiktok</code>",
         f"• Add reference: <code>POST {html.escape(base_url)}/api/operator/reference-videos</code>",
         f"• Scan reference folder: <code>POST {html.escape(base_url)}/api/operator/reference-videos/scan</code>",
         f"• Bulk affiliate import: <code>POST {html.escape(base_url)}/api/operator/affiliates/import</code>",
@@ -22409,6 +22602,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "affseed": "/affiliate_seed\n/affiliate_import https://shorten.asia/abc (Tên sản phẩm)\n/affiliates",
         "affimport": "/affiliate_import https://shorten.asia/abc (Tên sản phẩm), https://trackfin.asia/xyz (Brand)\n/brain lưu link affiliate https://... (Tên sản phẩm)",
         "affiliates": "/affiliates",
+        "affcockpit": "/affiliate_cockpit days=30 platform=tiktok limit=10\n/affiliate_cockpit aff=<AFF_ID> days=30\nGET /api/operator/affiliate-cockpit?days=30&platform=tiktok",
         "affreport": "/affiliate_report days=30\n/affiliate_report days=90 limit=20",
         "postbacksetup": "/postback_setup\n/postback_setup network=trackfin platform=tiktok limit=12\n/postback_setup aff=<AFF_ID> job=<JOB_ID>\nGET /api/operator/postback-setup?network=trackfin",
         "affdecisions": "/affiliate_decisions days=30 platform=tiktok limit=12\n/affiliate_decisions days=7 min_views=200",
@@ -24864,6 +25058,84 @@ async def cmd_money_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_affiliate_cockpit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or (context.args[0] if context.args else 30)), 180))
+    except (TypeError, ValueError):
+        days = 30
+    try:
+        limit = max(3, min(int(data.get("limit") or 10), 30))
+    except ValueError:
+        limit = 10
+    platform = (data.get("platform") or "tiktok").lower()
+    affiliate_id = safe_int(data.get("aff") or data.get("affiliate") or data.get("affiliate_id"), 0)
+    pack = affiliate_campaign_cockpit_data(
+        update.effective_user.id,
+        days=days,
+        platform=platform,
+        limit=limit,
+        affiliate_id=affiliate_id,
+    )
+    summary = pack.get("summary") or {}
+    lines = [
+        f"🎛 <b>AFFILIATE CAMPAIGN COCKPIT — {days} ngày</b>",
+        f"• Platform: <code>{html.escape(platform)}</code> | Focus aff: <code>{affiliate_id or 'all'}</code>",
+        f"• Revenue: <b>{int(summary.get('affiliate_revenue') or 0):,}đ</b> | Cost: <b>{int(summary.get('affiliate_cost') or 0):,}đ</b> | Profit≈<b>{int(summary.get('affiliate_profit_estimate') or 0):,}đ</b>",
+        f"• Funnel: view=<b>{summary.get('affiliate_views', 0)}</b> click=<b>{summary.get('affiliate_clicks', 0)}</b> conv=<b>{summary.get('affiliate_conversions', 0)}</b>",
+        "",
+        "<b>Link/source nên xử lý:</b>",
+    ]
+    winners = pack.get("winners") or []
+    if winners:
+        for item in winners[:limit]:
+            aid = item.get("affiliate_id") or item.get("id") or "-"
+            label = item.get("product") or item.get("product_name") or item.get("source") or "-"
+            lines.append(
+                f"• aff <code>#{aid}</code> | <b>{html.escape(str(label)[:90])}</b> | <code>{html.escape(item.get('action') or 'TEST_MORE')}</code>\n"
+                f"  view={item.get('views', 0)} click={item.get('clicks', 0)} conv={item.get('conversions', 0)} rev={int(item.get('revenue') or 0):,}đ score={item.get('score', 0)}\n"
+                f"  <code>{html.escape(item.get('command') or '')}</code>"
+            )
+    else:
+        lines.append("• Chưa có winner. Cần ghi view/click/revenue hoặc tạo batch test.")
+    if pack.get("open_publish_queue"):
+        lines.append("\n<b>Queue cần xử lý:</b>")
+        for item in (pack.get("open_publish_queue") or [])[:5]:
+            job = item.get("job") or {}
+            lines.append(
+                f"• queue <code>#{item.get('id')}</code> | job <code>#{item.get('job_id')}</code> | <code>{html.escape(item.get('status') or '-')}</code>\n"
+                f"  {html.escape((job.get('topic') if isinstance(job, dict) else '') or item.get('topic') or '-')}\n"
+                f"  <code>/publisher_handoff queue={item.get('id')}</code>"
+            )
+    lines.append("\n<b>Bottleneck:</b>")
+    for item in (pack.get("bottlenecks") or [])[:5]:
+        lines.append(f"• {html.escape(item.get('detail') or '-')}\n  <code>{html.escape(item.get('next') or '-')}</code>")
+    actions = pack.get("content_actions") or []
+    if actions:
+        first = actions[0]
+        cmds = first.get("commands") or {}
+        lines.extend([
+            "",
+            "<b>Lệnh tạo tiền tiếp theo:</b>",
+            f"• Ideas: <code>{html.escape(cmds.get('ideas') or '')}</code>",
+            f"• Video: <code>{html.escape(cmds.get('make_video') or '')}</code>",
+            f"• Remix: <code>{html.escape(cmds.get('viral_remix') or '')}</code>",
+            f"• Postback: <code>{html.escape(cmds.get('postback') or '')}</code>",
+        ])
+    commands = (pack.get("commands") or {}).get("telegram") or {}
+    lines.extend([
+        "",
+        "<b>Điều hành:</b>",
+        f"• Tracking: <code>{html.escape(commands.get('tracking_report') or '')}</code>",
+        f"• Scale: <code>{html.escape(commands.get('scale_execute') or '')}</code>",
+        f"• Publish: <code>{html.escape(commands.get('publish_queue') or '')}</code>",
+        "",
+        "API: <code>GET /api/operator/affiliate-cockpit?days=30&amp;platform=tiktok</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_revenue_destinations(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -26680,6 +26952,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("money_pack", cmd_money_pack))
+    tg_app.add_handler(CommandHandler("affiliate_cockpit", cmd_affiliate_cockpit))
     tg_app.add_handler(CommandHandler("revenue_destinations", cmd_revenue_destinations))
     tg_app.add_handler(CommandHandler("tracking_report", cmd_tracking_report))
     tg_app.add_handler(CommandHandler("postback_setup", cmd_postback_setup))
@@ -29303,6 +29576,26 @@ async def api_operator_money_pack(request: Request, days: int = 30, platform: st
     limit = max(3, min(int(limit or 10), 50))
     platform = (platform or "tiktok").lower()
     return operator_money_pack_data(ADMIN_ID, days=days, platform=platform, limit=limit)
+
+@fastapi_app.get("/api/operator/affiliate-cockpit")
+async def api_operator_affiliate_cockpit(
+    request: Request,
+    days: int = 30,
+    platform: str = "tiktok",
+    limit: int = 10,
+    affiliate_id: int = 0,
+):
+    verify_operator_api_token(request)
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 10), 50))
+    platform = (platform or "tiktok").lower()
+    return affiliate_campaign_cockpit_data(
+        ADMIN_ID,
+        days=days,
+        platform=platform,
+        limit=limit,
+        affiliate_id=affiliate_id,
+    )
 
 @fastapi_app.get("/api/operator/revenue-destinations")
 async def api_operator_revenue_destinations(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 10):
