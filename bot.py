@@ -2909,7 +2909,7 @@ def operator_worker_spec_data():
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
-            {"step": 8.2, "name": "review_video", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/review-video"},
+            {"step": 8.2, "name": "review_video_decision", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/review-video"},
             {"step": 9, "name": "affiliate_bundle", "method": "GET", "url": "/api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>"},
             {"step": 10, "name": "publisher_status", "method": "GET", "url": "/api/operator/publisher/status"},
             {"step": 11, "name": "publisher_run", "method": "POST", "url": "/api/operator/publisher/run"},
@@ -3045,6 +3045,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/worker-next?job_id=<JOB_ID>&tool=kling&limit=5",
                 "purpose": "Peek task kế tiếp cho worker mà không đổi trạng thái; dùng trước claim khi n8n/Claude chỉ đang audit/điều phối.",
+            },
+            "review_video_decision": {
+                "method": "GET",
+                "url": "/api/operator/jobs/<JOB_ID>/review-video",
+                "purpose": "Trả review_decision cho Claude/n8n: READY_FOR_ADMIN_APPROVAL, NEEDS_FIX hoặc BLOCKED_NO_VIDEO; không tự publish.",
             },
             "publish_complete": {
                 "status": "published",
@@ -9007,7 +9012,7 @@ def build_video_review_summary(owner_id, job_id):
         for key, ok, detail, next_cmd in (readiness.get("checks", []) if readiness else [])
         if not ok
     ]
-    return {
+    summary = {
         "job": {
             "id": jid,
             "platform": platform,
@@ -9036,6 +9041,58 @@ def build_video_review_summary(owner_id, job_id):
             "fix_next": missing[0].get("next") if missing else "",
         },
     }
+    summary["review_decision"] = build_video_review_decision(summary)
+    return summary
+
+def build_video_review_decision(summary):
+    job = summary.get("job") or {}
+    readiness = summary.get("readiness") or {}
+    publish_gate = readiness.get("publish_gate") or {}
+    missing = summary.get("missing") or []
+    final_asset = summary.get("final_asset")
+    pack = summary.get("publish_pack") or {}
+    commands = summary.get("commands") or {}
+    core_missing = [item for item in missing if item.get("key") != "queue_or_published"]
+    has_final = bool(final_asset)
+    has_affiliate = bool(((pack.get("primary_affiliate") or {}).get("tracking_url")) or job.get("affiliate_url"))
+    has_disclosure = bool(pack.get("disclosure") or "affiliate" in (pack.get("caption") or "").lower())
+    risk_checks = [
+        {"key": "final_video", "ok": has_final, "detail": "Có final_video/raw_video để admin xem trước khi duyệt." if has_final else "Chưa có video để kiểm duyệt."},
+        {"key": "affiliate_link", "ok": has_affiliate, "detail": "Có link affiliate/tracking cho caption/comment." if has_affiliate else "Thiếu link affiliate."},
+        {"key": "affiliate_disclosure", "ok": has_disclosure, "detail": "Có disclosure affiliate trong caption/pack." if has_disclosure else "Thiếu disclosure affiliate rõ ràng."},
+        {"key": "admin_human_review", "ok": False, "detail": "Bắt buộc admin xem video thật, caption, claim, link và quyền nội dung trước khi approve."},
+        {"key": "rights_and_consent", "ok": False, "detail": "Admin xác nhận hình/giọng/nhạc/AI model có quyền dùng; OnlyFans/người mẫu phải 18+ và có consent nếu là người thật."},
+        {"key": "claim_safety", "ok": False, "detail": "Admin xác nhận không hứa chắc thu nhập, duyệt vay/thẻ, sức khỏe hoặc kết quả tài chính."},
+    ]
+    if not has_final:
+        decision = "BLOCKED_NO_VIDEO"
+        safety_gate = "blocked"
+        next_telegram = commands.get("fix_next") or f"/next_task job={job.get('id') or '<JOB_ID>'}"
+    elif core_missing:
+        decision = "NEEDS_FIX"
+        safety_gate = "needs_admin"
+        next_telegram = commands.get("fix_next") or f"/job_ready job={job.get('id') or '<JOB_ID>'}"
+    elif publish_gate.get("can_approve"):
+        decision = "READY_FOR_ADMIN_APPROVAL"
+        safety_gate = "needs_admin"
+        next_telegram = commands.get("approve_manual") or f"/approve_publish job={job.get('id') or '<JOB_ID>'} queue=1 mode=manual"
+    else:
+        decision = "REVIEW_REQUIRED"
+        safety_gate = "needs_admin"
+        next_telegram = commands.get("send_video") or f"/review_video job={job.get('id') or '<JOB_ID>'} send=1"
+    return {
+        "decision": decision,
+        "safety_gate": safety_gate,
+        "can_admin_approve": decision == "READY_FOR_ADMIN_APPROVAL",
+        "can_auto_publish": False,
+        "reason": "Auto publish luôn tắt ở review gate; chỉ queue sau khi admin approve.",
+        "core_missing": core_missing,
+        "risk_checks": risk_checks,
+        "next_telegram": next_telegram,
+        "next_api": f"/api/operator/jobs/{job.get('id')}/approve" if decision == "READY_FOR_ADMIN_APPROVAL" else "",
+        "approval_payload": {"queue": True, "mode": "manual", "note": "review_video_ok", "notify_admin": True} if decision == "READY_FOR_ADMIN_APPROVAL" else {},
+        "rule": "Claude/n8n chỉ được đề xuất approve, không tự bypass bước admin human review.",
+    }
 
 def format_video_review_summary(summary):
     job = summary.get("job") or {}
@@ -9043,6 +9100,7 @@ def format_video_review_summary(summary):
     readiness = summary.get("readiness") or {}
     final_asset = summary.get("final_asset")
     commands = summary.get("commands") or {}
+    decision = summary.get("review_decision") or {}
     level = readiness.get("level") or "UNKNOWN"
     missing = summary.get("missing") or []
     primary = pack.get("primary_affiliate") or {}
@@ -9059,6 +9117,7 @@ def format_video_review_summary(summary):
         f"• Channel: {html.escape(job.get('channel_name') or '-')} / <code>{html.escape(job.get('account_label') or 'main')}</code>",
         f"• Topic: {html.escape(job.get('topic') or '-')}",
         f"• Final asset: <code>{html.escape(final_asset_text)}</code>",
+        f"• Decision: <code>{html.escape(decision.get('decision') or 'REVIEW_REQUIRED')}</code> | gate=<code>{html.escape(decision.get('safety_gate') or 'needs_admin')}</code>",
         "",
         "<b>Affiliate chính:</b>",
         f"• {html.escape(primary.get('network') or job.get('network') or '-')} / {html.escape(primary.get('product') or job.get('product_name') or '-')}",
@@ -9080,6 +9139,11 @@ def format_video_review_summary(summary):
     lines.append("\n<b>Checklist trước đăng:</b>")
     for item in (pack.get("checklist") or [])[:8]:
         lines.append(f"• {html.escape(item)}")
+    if decision.get("risk_checks"):
+        lines.append("\n<b>Review decision/risk:</b>")
+        for item in decision.get("risk_checks", [])[:6]:
+            icon = "✅" if item.get("ok") else "⚠️"
+            lines.append(f"• {icon} <code>{html.escape(item.get('key') or '-')}</code>: {html.escape(item.get('detail') or '-')}")
     if missing:
         lines.append("\n<b>Đang thiếu:</b>")
         for item in missing[:6]:
@@ -18698,6 +18762,7 @@ async def api_operator_job_review_video(job_id: int, request: Request):
             "publish_gate": (summary.get("readiness") or {}).get("publish_gate", {}),
         },
         "missing": summary.get("missing") or [],
+        "review_decision": summary.get("review_decision") or {},
         "final_asset": final_asset_payload,
         "publish_pack": summary.get("publish_pack") or {},
         "commands": summary.get("commands") or {},
