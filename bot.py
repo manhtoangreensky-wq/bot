@@ -3688,7 +3688,7 @@ def operator_audit_data(owner_id):
 def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
-        "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "viral_remix", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
+        "publisher_status", "publisher_capabilities", "platform_adapters", "publish_cockpit", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "viral_remix", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
@@ -3734,6 +3734,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/publisher/status"),
         ("GET", "/api/operator/publisher/capabilities"),
         ("GET", "/api/operator/platform-adapters"),
+        ("GET", "/api/operator/publish-cockpit"),
         ("POST", "/api/operator/publisher/run"),
         ("GET", "/api/operator/worker-next"),
         ("GET", "/api/operator/worker-intake"),
@@ -3818,6 +3819,7 @@ def operator_smoke_test_data(owner_id):
         "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
         "publisher_capabilities_in_spec": "/api/operator/publisher/capabilities" in spec_text and "/api/operator/publisher/capabilities" in n8n_text,
         "platform_adapters_in_spec": "/api/operator/platform-adapters" in spec_text and "/api/operator/platform-adapters" in n8n_text,
+        "publish_cockpit_in_spec": "/api/operator/publish-cockpit" in spec_text and "/api/operator/publish-cockpit" in n8n_text,
         "video_patterns_in_spec": "/api/operator/video-patterns" in spec_text and "/api/operator/video-patterns" in n8n_text,
         "reference_pack_in_spec": "/api/operator/reference-pack" in spec_text and "/api/operator/reference-pack" in n8n_text,
         "viral_remix_in_spec": "/api/operator/viral-remix" in spec_text,
@@ -3950,6 +3952,7 @@ def operator_worker_spec_data():
         "viral_remix_url": f"{base_url}/api/operator/viral-remix",
         "postback_setup_url": f"{base_url}/api/operator/postback-setup",
         "affiliate_cockpit_url": f"{base_url}/api/operator/affiliate-cockpit",
+        "publish_cockpit_url": f"{base_url}/api/operator/publish-cockpit",
         "platform_adapters_url": f"{base_url}/api/operator/platform-adapters",
         "worker_intake_url": f"{base_url}/api/operator/worker-intake",
         "video_work_orders_url": f"{base_url}/api/operator/video-work-orders",
@@ -4068,6 +4071,7 @@ def operator_worker_spec_data():
             {"step": 8.2, "name": "review_video_decision", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/review-video"},
             {"step": 9, "name": "affiliate_bundle", "method": "GET", "url": "/api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>"},
             {"step": 10, "name": "publisher_status", "method": "GET", "url": "/api/operator/publisher/status"},
+            {"step": 10.1, "name": "publish_cockpit", "method": "GET", "url": "/api/operator/publish-cockpit?platform=tiktok&limit=10"},
             {"step": 10.2, "name": "publisher_capabilities", "method": "GET", "url": "/api/operator/publisher/capabilities?platform=tiktok"},
             {"step": 10.25, "name": "platform_adapters", "method": "GET", "url": "/api/operator/platform-adapters?platform=tiktok"},
             {"step": 11, "name": "publisher_run", "method": "POST", "url": "/api/operator/publisher/run"},
@@ -4275,6 +4279,11 @@ def operator_worker_spec_data():
                 "mode": "api",
                 "auto_claim": True,
                 "notify_admin": True,
+            },
+            "publish_cockpit": {
+                "method": "GET",
+                "url": "/api/operator/publish-cockpit?platform=tiktok&limit=10",
+                "purpose": "Bảng điều khiển đăng bài: gom queue, final_video, caption/comment/link affiliate, trạng thái kênh và quyết định auto/manual/blocked trước khi publish.",
             },
             "platform_adapters": {
                 "method": "GET",
@@ -5993,6 +6002,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "publish-cockpit",
+                "name": "Publish Cockpit",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [780, -250],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/publish-cockpit?platform=tiktok&limit=10",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "platform-adapters",
                 "name": "Platform Adapters",
                 "type": "n8n-nodes-base.httpRequest",
@@ -6281,7 +6304,8 @@ def operator_n8n_workflow_json_data():
             "Complete Task": {"main": [[{"node": "Output Acceptance", "type": "main", "index": 0}]]},
             "Output Acceptance": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
             "Publisher Status": {"main": [[{"node": "Publisher Capabilities", "type": "main", "index": 0}]]},
-            "Publisher Capabilities": {"main": [[{"node": "Publisher Run Safe Claim", "type": "main", "index": 0}]]},
+            "Publisher Capabilities": {"main": [[{"node": "Publish Cockpit", "type": "main", "index": 0}]]},
+            "Publish Cockpit": {"main": [[{"node": "Publisher Run Safe Claim", "type": "main", "index": 0}]]},
             "Publisher Run Safe Claim": {"main": [[{"node": "Get Publish Pack", "type": "main", "index": 0}]]},
             "Get Publish Pack": {"main": [[{"node": "Get Distribution Pack", "type": "main", "index": 0}]]},
             "Get Distribution Pack": {"main": [[{"node": "Complete Publish", "type": "main", "index": 0}]]},
@@ -13702,6 +13726,165 @@ def platform_adapter_plan_data(owner_id, platform=""):
         },
     }
 
+def social_publish_cockpit_data(owner_id, platform="tiktok", limit=10):
+    requested = (platform or "tiktok").lower().strip()
+    limit = max(1, min(safe_int(limit, 10), 30))
+    status = publisher_status_data(owner_id)
+    capability = publisher_capability_pack_data(owner_id, platform="" if requested == "all" else requested)
+    adapters = platform_adapter_plan_data(owner_id, platform="" if requested == "all" else requested)
+    queue_rows = list_publish_queue(owner_id, limit=limit)
+
+    aliases = {
+        "facebook": {"facebook", "fb", "meta", "reels"},
+        "instagram": {"instagram", "ig"},
+        "tiktok": {"tiktok", "tiktokshop"},
+        "youtube": {"youtube", "shorts"},
+        "onlyfans": {"onlyfans", "onlyfan"},
+        "all": set(),
+    }
+    requested_aliases = aliases.get(requested, {requested}) if requested != "all" else set()
+
+    queue_actions = []
+    for row in queue_rows:
+        queue_platform = (row[2] or "").lower()
+        if requested != "all" and requested_aliases and queue_platform not in requested_aliases:
+            continue
+        queue_id = row[0]
+        queue_payload = serialize_publish_queue_item(get_publish_queue_item(owner_id, queue_id))
+        if not queue_payload:
+            continue
+        handoff = build_publisher_handoff(queue_payload)
+        media = handoff.get("media") or {}
+        final_media = media.get("final_video_url") or media.get("telegram_file_id")
+        if not final_media:
+            decision = "BLOCKED_MISSING_FINAL_VIDEO"
+            next_action = f"/worker_intake job={queue_payload.get('job_id') or 0} include_prompt=1"
+        elif handoff.get("can_auto_publish"):
+            decision = "AUTO_API_READY"
+            next_action = f"/publisher_auto_check queue={queue_id}"
+        elif any((ch.get("platform") or "").lower() == queue_platform and ch.get("can_manual_publish") for ch in status.get("channels") or []):
+            decision = "MANUAL_HANDOFF_READY"
+            next_action = f"/publisher_handoff queue={queue_id}"
+        else:
+            decision = "BLOCKED_CHANNEL_CONFIG"
+            next_action = "/publisher_capabilities platform=%s" % (queue_platform or requested or "tiktok")
+
+        copy_pack = handoff.get("copy") or {}
+        comment_plan = handoff.get("comment_plan") or {}
+        queue_actions.append({
+            "queue_id": queue_id,
+            "job_id": queue_payload.get("job_id"),
+            "platform": queue_payload.get("platform"),
+            "mode": queue_payload.get("mode") or queue_payload.get("channel_publish_mode"),
+            "status": queue_payload.get("status"),
+            "topic": queue_payload.get("topic"),
+            "channel": {
+                "id": queue_payload.get("channel_id"),
+                "name": queue_payload.get("channel_name"),
+                "account": queue_payload.get("account_label"),
+                "publish_mode": queue_payload.get("channel_publish_mode"),
+            },
+            "decision": decision,
+            "next_action": next_action,
+            "media": {
+                "has_final_video": bool(final_media),
+                "asset_id": media.get("asset_id"),
+                "final_video_url": media.get("final_video_url"),
+                "telegram_file_id": media.get("telegram_file_id"),
+                "send_command": media.get("telegram_send_command"),
+            },
+            "copy_preview": {
+                "caption": (copy_pack.get("caption") or "")[:500],
+                "primary_comment": (comment_plan.get("primary_comment") or copy_pack.get("pinned_comment") or "")[:500],
+                "comment_count": comment_plan.get("count", 0),
+                "related_link_count": len(copy_pack.get("related_links") or []),
+                "disclosure": copy_pack.get("disclosure") or "",
+            },
+            "commands": {
+                "handoff": f"/publisher_handoff queue={queue_id}",
+                "auto_check": f"/publisher_auto_check queue={queue_id}",
+                "auto_publish": f"/publisher_auto queue={queue_id}",
+                "mark_published": f"/publish_queue_set id={queue_id} status=published url=https://...",
+                "distribution_pack": f"/distribution_pack job={queue_payload.get('job_id') or 0}",
+                "comment_pack": f"/comment_pack job={queue_payload.get('job_id') or 0} max=10 delay=30",
+                "post_publish": f"/post_publish job={queue_payload.get('job_id') or 0}",
+            },
+            "api": {
+                "handoff": f"/api/operator/publish/{queue_id}/handoff",
+                "auto_check": f"/api/operator/publish/{queue_id}/auto-check",
+                "auto_publish": f"/api/operator/publish/{queue_id}/auto",
+                "complete": f"/api/operator/publish/{queue_id}/complete",
+            },
+        })
+
+    channel_rows = [
+        ch for ch in status.get("channels") or []
+        if requested == "all" or (ch.get("platform") or "").lower() in requested_aliases
+    ]
+    blocked = [item for item in queue_actions if str(item.get("decision") or "").startswith("BLOCKED")]
+    auto_ready = [item for item in queue_actions if item.get("decision") == "AUTO_API_READY"]
+    manual_ready = [item for item in queue_actions if item.get("decision") == "MANUAL_HANDOFF_READY"]
+    if auto_ready:
+        overall = "AUTO_READY_WITH_REVIEW_GATE"
+    elif manual_ready:
+        overall = "MANUAL_PUBLISH_READY"
+    elif blocked:
+        overall = "NEEDS_FIX_BEFORE_PUBLISH"
+    elif status.get("queued_count"):
+        overall = "QUEUE_FILTER_EMPTY"
+    else:
+        overall = "NO_OPEN_PUBLISH_QUEUE"
+
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "platform": requested or "all",
+        "overall": overall,
+        "readiness_summary": {
+            "channels": len(channel_rows),
+            "manual_ready_channels": sum(1 for ch in channel_rows if ch.get("can_manual_publish")),
+            "api_ready_channels": sum(1 for ch in channel_rows if ch.get("can_api_publish")),
+            "open_queue": len(queue_actions),
+            "auto_ready": len(auto_ready),
+            "manual_ready": len(manual_ready),
+            "blocked": len(blocked),
+            "all_queued_count": status.get("queued_count", 0),
+        },
+        "channels": channel_rows,
+        "queue_actions": queue_actions,
+        "capabilities": capability.get("capabilities") or [],
+        "platform_adapters": adapters.get("adapters") or [],
+        "blockers": (status.get("blockers") or []) + [
+            {
+                "key": f"queue_{item.get('queue_id')}",
+                "detail": f"{item.get('decision')} | job #{item.get('job_id')} | {item.get('topic') or '-'}",
+                "next": item.get("next_action"),
+            }
+            for item in blocked
+        ],
+        "platform_rules": [
+            "Không đăng nếu thiếu final_video, review gate hoặc queue chưa được duyệt.",
+            "TikTok/YouTube/Instagram dùng handoff manual hoặc official API khi app/token hợp lệ.",
+            "Facebook Page có thể auto một phần bằng Meta Graph API khi channel api_ready.",
+            "OnlyFans giữ manual/official tool; chỉ dùng nội dung có consent, 18+ và quyền thương mại.",
+            "Mỗi bài sau khi đăng phải complete queue, ghi view/click/order/revenue để hệ thống biết link nào hiệu quả.",
+        ],
+        "next_commands": {
+            "telegram": f"/publish_cockpit platform={requested or 'all'} limit={limit}",
+            "queue": "/publish_queue",
+            "capability": f"/publisher_capabilities platform={requested or 'tiktok'}",
+            "adapters": f"/platform_adapters platform={requested or 'tiktok'}",
+            "first_action": queue_actions[0]["next_action"] if queue_actions else "/operator_launch topic=<chủ_đề> platform=tiktok channel=all limit=3 build=1",
+        },
+        "api": {
+            "cockpit": f"/api/operator/publish-cockpit?platform={requested or 'all'}&limit={limit}",
+            "publisher_status": "/api/operator/publisher/status",
+            "publisher_run": "/api/operator/publisher/run",
+            "publish_next": "/api/operator/publish/next",
+        },
+        "rule": "Publish cockpit chỉ điều phối và kiểm tra readiness; không tự đăng, không bypass ToS, không thay dữ liệu cũ.",
+    }
+
 def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None, note=None):
     updates = []
     params = []
@@ -17780,6 +17963,18 @@ def operator_brain_fallback(raw_text):
             "confidence": 85,
         }
     if any(word in lower for word in [
+        "publish cockpit", "social publish cockpit", "bảng đăng bài", "bang dang bai",
+        "đầu não đăng bài", "dau nao dang bai", "queue nào cần đăng", "queue nao can dang",
+        "kênh nào auto", "kenh nao auto", "đăng đa kênh", "dang da kenh",
+        "bảng publish", "bang publish", "đăng bài social", "dang bai social"
+    ]):
+        return {
+            "intent": "publish_cockpit",
+            "platform": platform,
+            "limit": max(3, min(limit, 30)),
+            "confidence": 85,
+        }
+    if any(word in lower for word in [
         "tiền về đâu", "tien ve dau", "revenue destination", "revenue destinations",
         "điểm nhận tiền", "diem nhan tien", "network nào trả tiền", "network nao tra tien"
     ]):
@@ -18219,7 +18414,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
@@ -18230,6 +18425,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- pipeline_pack: khi admin hỏi một job/pipeline đang ở bước nào, cần AI nào làm tiếp, next action, pipeline command pack.\n"
         "- money_pack: khi admin hỏi tiền về, doanh thu tổng, PayOS + affiliate, link/kênh/source nào tạo tiền và nên scale gì.\n"
         "- affiliate_cockpit: khi admin hỏi điều hành/quản lý link affiliate, link nào hiệu quả, source nào nên đẩy, queue nào cần đăng và scale gì.\n"
+        "- publish_cockpit: khi admin hỏi bảng đăng bài, queue nào sẵn đăng, kênh nào auto/manual, video nào thiếu final_video, social publish cockpit.\n"
         "- revenue_destinations: khi admin hỏi tiền về đâu, network nào trả tiền, cần ghi event/postback gì.\n"
         "- postback_setup: khi admin muốn cấu hình postback/callback affiliate network vào bot.\n"
         "- operator_commander_pack: khi admin muốn prompt/gói điều khiển cho Claude Opus hoặc AI cấp cao điều phối toàn pipeline.\n"
@@ -18334,6 +18530,11 @@ def brain_command_preview(plan):
             f"platform={plan.get('platform') or 'tiktok'} "
             f"limit={max(3, min(int(plan.get('limit') or 10), 30))} "
             f"aff={int(plan.get('affiliate') or 0)}"
+        )
+    if intent == "publish_cockpit":
+        return (
+            f"/publish_cockpit platform={plan.get('platform') or 'tiktok'} "
+            f"limit={max(3, min(int(plan.get('limit') or 10), 30))}"
         )
     if intent == "revenue_destinations":
         return (
@@ -18588,6 +18789,12 @@ async def run_brain_plan(update, context, plan):
                 f"aff={int(plan.get('affiliate') or 0)}",
             ]
             return await cmd_affiliate_cockpit(update, context)
+        if intent == "publish_cockpit":
+            context.args = [
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 10), 30))}",
+            ]
+            return await cmd_publish_cockpit(update, context)
         if intent == "revenue_destinations":
             context.args = [
                 f"days={max(1, min(int(plan.get('days') or 30), 180))}",
@@ -19741,6 +19948,55 @@ async def cmd_platform_adapters(update: Update, context: ContextTypes.DEFAULT_TY
         + "\n".join(f"• {html.escape(rule)}" for rule in (plan.get("safety_rules") or [])[:4])
     )
     lines.append("\nAPI: <code>GET /api/operator/platform-adapters</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_publish_cockpit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    platform = data.get("platform") or data.get("nen") or "tiktok"
+    limit = safe_int(data.get("limit") or data.get("max"), 10)
+    pack = social_publish_cockpit_data(update.effective_user.id, platform=platform, limit=limit)
+    summary = pack.get("readiness_summary") or {}
+    lines = [
+        "🎛 <b>PUBLISH COCKPIT</b>",
+        f"• Platform: <code>{html.escape(pack.get('platform') or 'all')}</code>",
+        f"• Overall: <b>{html.escape(pack.get('overall') or '-')}</b>",
+        f"• Kênh: <b>{summary.get('channels', 0)}</b> | manual={summary.get('manual_ready_channels', 0)} api={summary.get('api_ready_channels', 0)}",
+        f"• Queue mở: <b>{summary.get('open_queue', 0)}</b> | auto={summary.get('auto_ready', 0)} manual={summary.get('manual_ready', 0)} blocked={summary.get('blocked', 0)}",
+        "",
+    ]
+    if pack.get("queue_actions"):
+        lines.append("<b>Việc đăng cần xử lý:</b>")
+        for item in (pack.get("queue_actions") or [])[:8]:
+            media = item.get("media") or {}
+            copy_preview = item.get("copy_preview") or {}
+            commands = item.get("commands") or {}
+            lines.append(
+                f"• queue #{item.get('queue_id')} | job #{item.get('job_id')} | "
+                f"<code>{html.escape(item.get('platform') or '-')}</code>/{html.escape(item.get('mode') or '-')}\n"
+                f"  decision=<b>{html.escape(item.get('decision') or '-')}</b> | final_video={'YES' if media.get('has_final_video') else 'NO'}\n"
+                f"  {html.escape(item.get('topic') or '-')}\n"
+                f"  caption: {html.escape((copy_preview.get('caption') or '-')[:160])}\n"
+                f"  next: <code>{html.escape(item.get('next_action') or commands.get('handoff') or '-')}</code>"
+            )
+    else:
+        lines.append(
+            "📭 Chưa có publish queue theo filter này.\n"
+            "Tạo pipeline: <code>/operator_launch topic=&lt;chủ_đề&gt; platform=tiktok channel=all limit=3 build=1</code>"
+        )
+    if pack.get("blockers"):
+        lines.append("\n<b>Blocker:</b>")
+        for blocker in (pack.get("blockers") or [])[:8]:
+            lines.append(f"• {html.escape(blocker.get('detail') or '-')}\n  <code>{html.escape(blocker.get('next') or '-')}</code>")
+    lines.append(
+        "\n<b>Lệnh nhanh:</b>\n"
+        f"• Queue: <code>/publish_queue</code>\n"
+        f"• Handoff: <code>/publisher_handoff queue=&lt;QUEUE_ID&gt;</code>\n"
+        f"• Auto check: <code>/publisher_auto_check queue=&lt;QUEUE_ID&gt;</code>\n"
+        f"• Mark published: <code>/publish_queue_set id=&lt;QUEUE_ID&gt; status=published url=https://...</code>\n"
+        f"• API: <code>GET /api/operator/publish-cockpit?platform={html.escape(pack.get('platform') or 'all')}</code>"
+    )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -22158,6 +22414,7 @@ def operator_category_keyboard(category):
             ("📦 Publish pack", "publish"), ("📈 Post publish", "postpublish"),
             ("🧭 Distribution pack", "distributionpack"),
             ("💬 Comment pack", "commentpack"),
+            ("🎛 Publish cockpit", "publishcockpit"),
             ("📮 Publish queue", "publishqueue"),
             ("🤖 Publisher handoff", "publisherhandoff"), ("✅ Approve publish", "approvepublish"),
             ("▶️ Publisher run", "publisherrun"), ("📡 Publisher status", "publisherstatus"),
@@ -22284,6 +22541,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
         f"• Trạng thái publisher: <code>GET {html.escape(base_url)}/api/operator/publisher/status</code>",
+        f"• Publish cockpit: <code>GET {html.escape(base_url)}/api/operator/publish-cockpit?platform=tiktok&amp;limit=10</code>",
         f"• Năng lực publisher: <code>GET {html.escape(base_url)}/api/operator/publisher/capabilities</code>",
         f"• Platform adapters: <code>GET {html.escape(base_url)}/api/operator/platform-adapters?platform=tiktok</code>",
         f"• Publisher run an toàn: <code>POST {html.escape(base_url)}/api/operator/publisher/run</code>",
@@ -22620,6 +22878,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "postpublish": "/post_publish job=<JOB_ID> days=30\n/brain sau đăng job <JOB_ID> cần đo gì\nGET /api/operator/jobs/<JOB_ID>/post-publish",
         "distributionpack": "/distribution_pack job=<JOB_ID>\nGET /api/operator/jobs/<JOB_ID>/distribution-pack",
         "commentpack": "/comment_pack job=<JOB_ID> max=10 delay=30\nGET /api/operator/jobs/<JOB_ID>/comment-pack?max_comments=10",
+        "publishcockpit": "/publish_cockpit platform=tiktok limit=10\n/publish_cockpit platform=all limit=20\nGET /api/operator/publish-cockpit?platform=tiktok",
         "approvepublish": "/approve_publish job=<JOB_ID> queue=1 mode=manual note=duyet_ok\nPOST /api/operator/jobs/<JOB_ID>/approve",
         "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
@@ -26936,6 +27195,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
+    tg_app.add_handler(CommandHandler("publish_cockpit", cmd_publish_cockpit))
     tg_app.add_handler(CommandHandler("publisher_handoff", cmd_publisher_handoff))
     tg_app.add_handler(CommandHandler("publisher_run", cmd_publisher_run))
     tg_app.add_handler(CommandHandler("publisher_auto_check", cmd_publisher_auto_check))
@@ -27507,6 +27767,11 @@ async def api_operator_publisher_capabilities(request: Request, platform: str = 
 async def api_operator_platform_adapters(request: Request, platform: str = ""):
     verify_operator_api_token(request)
     return platform_adapter_plan_data(ADMIN_ID, platform=platform)
+
+@fastapi_app.get("/api/operator/publish-cockpit")
+async def api_operator_publish_cockpit(request: Request, platform: str = "tiktok", limit: int = 10):
+    verify_operator_api_token(request)
+    return social_publish_cockpit_data(ADMIN_ID, platform=platform, limit=limit)
 
 @fastapi_app.post("/api/operator/publisher/run")
 async def api_operator_publisher_run(payload: OperatorPublisherRunRequest, request: Request):
