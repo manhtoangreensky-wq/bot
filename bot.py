@@ -2667,7 +2667,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
+        "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
         "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "worker_next", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -2682,6 +2682,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/n8n-workflow.json"),
         ("GET", "/api/operator/mission"),
         ("POST", "/api/operator/bootstrap"),
+        ("POST", "/api/operator/launch"),
         ("GET", "/api/operator/command-center"),
         ("POST", "/api/operator/make-video"),
         ("POST", "/api/operator/affiliates/import"),
@@ -2747,6 +2748,7 @@ def operator_smoke_test_data(owner_id):
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
         "mission_control_in_spec": "/api/operator/mission" in spec_text and "/api/operator/mission" in n8n_text,
+        "launch_in_spec": "/api/operator/launch" in spec_text and "/api/operator/launch" in n8n_text,
         "affiliate_import_in_spec": "/api/operator/affiliates/import" in spec_text and "/api/operator/affiliates/import" in n8n_text,
         "review_video_in_spec": "/api/operator/jobs/<JOB_ID>/review-video" in spec_text and "/api/operator/jobs/" in n8n_text and "/review-video" in n8n_text,
         "post_publish_in_spec": "/api/operator/jobs/<JOB_ID>/post-publish" in spec_text and "/api/operator/jobs/" in n8n_text and "/post-publish" in n8n_text,
@@ -2884,6 +2886,7 @@ def operator_worker_spec_data():
         "standard_loop": [
             {"step": 1, "name": "audit", "method": "GET", "url": "/api/operator/audit"},
             {"step": 1.02, "name": "bootstrap_optional", "method": "POST", "url": "/api/operator/bootstrap"},
+            {"step": 1.03, "name": "launch_optional", "method": "POST", "url": "/api/operator/launch"},
             {"step": 1.05, "name": "command_center", "method": "GET", "url": "/api/operator/command-center?days=30&platform=tiktok"},
             {"step": 1.06, "name": "mission_control", "method": "GET", "url": "/api/operator/mission?days=30&platform=tiktok&limit=8"},
             {"step": 1.1, "name": "read_worker_spec", "method": "GET", "url": "/api/operator/worker-spec"},
@@ -2913,6 +2916,12 @@ def operator_worker_spec_data():
                 "url": "/api/operator/bootstrap",
                 "purpose": "Khởi tạo nhanh channel/campaign/affiliate/reference còn thiếu. Chỉ thêm mới nếu chưa có, không xóa dữ liệu cũ.",
                 "body": {"channels": True, "campaigns": True, "affiliates": True, "references": True, "reference_limit": 200, "notify_admin": True},
+            },
+            "launch_pipeline": {
+                "method": "POST",
+                "url": "/api/operator/launch",
+                "purpose": "Một lệnh launch: tự bootstrap nếu thiếu setup, chọn affiliate/campaign, tìm trend, tạo job/task và trả next commands.",
+                "body": {"topic": "công nghệ AI", "platform": "tiktok", "channel": "all", "limit": 3, "build": True, "bootstrap": True, "duration": 45, "notify_admin": True},
             },
             "command_center": {
                 "method": "GET",
@@ -3447,6 +3456,14 @@ def operator_n8n_template_data():
                 "note": "Chỉ chạy khi audit thiếu channel/campaign/affiliate/reference. Không xóa hoặc ghi đè dữ liệu cũ.",
             },
             {
+                "node": "Launch Pipeline Optional",
+                "type": "http_request",
+                "method": "POST",
+                "url": f"{base_url}/api/operator/launch",
+                "body": {"topic": "công nghệ AI", "platform": "tiktok", "channel": "all", "limit": 3, "build": True, "bootstrap": True, "duration": 45, "notify_admin": True},
+                "note": "Dùng khi admin/Claude muốn tạo pipeline từ một chủ đề bằng một API call, có bootstrap nếu thiếu setup.",
+            },
+            {
                 "node": "Read Mission Control",
                 "type": "http_request",
                 "method": "GET",
@@ -3795,6 +3812,33 @@ def operator_n8n_workflow_json_data():
                         ]
                     },
                     "options": {"timeout": 120000},
+                },
+            },
+            {
+                "id": "launch-pipeline-optional",
+                "name": "Launch Pipeline Optional",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-260, -820],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/launch",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "bodyParameters": {
+                        "parameters": [
+                            {"name": "topic", "value": "công nghệ AI"},
+                            {"name": "platform", "value": "tiktok"},
+                            {"name": "channel", "value": "all"},
+                            {"name": "limit", "value": 3},
+                            {"name": "build", "value": True},
+                            {"name": "bootstrap", "value": True},
+                            {"name": "duration", "value": 45},
+                            {"name": "notify_admin", "value": True},
+                        ]
+                    },
+                    "options": {"timeout": 180000},
                 },
             },
             {
@@ -4452,6 +4496,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
         },
         "next_action": next_action,
         "execution_order": [
+            {"step": "launch_one_command", "telegram": "/operator_launch topic=<chu_de> platform=tiktok channel=all limit=3 build=1", "api": "POST /api/operator/launch"},
             {"step": "bootstrap_if_missing", "telegram": "/operator_bootstrap", "api": "POST /api/operator/bootstrap"},
             {"step": "trend_or_topic", "telegram": "/make_video topic=<chu_de> platform=tiktok channel=all limit=3 build=1", "api": "POST /api/operator/make-video"},
             {"step": "worker_claim", "telegram": "/worker_next hoặc /next_task", "api": "GET /api/operator/worker-next rồi GET /api/operator/tasks/claim?include_context=1"},
@@ -4478,6 +4523,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
         "command_center": command_center,
         "worker_spec_urls": {
             "mission": f"{base_url}/api/operator/mission",
+            "launch": f"{base_url}/api/operator/launch",
             "bootstrap": f"{base_url}/api/operator/bootstrap",
             "worker_spec": f"{base_url}/api/operator/worker-spec",
             "toolchain": f"{base_url}/api/operator/toolchain",
@@ -8351,6 +8397,96 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
         "worker_next": worker_next,
     }
 
+async def operator_launch_pipeline(
+    owner_id,
+    topic,
+    platform="tiktok",
+    channel="all",
+    affiliate_id=0,
+    campaign_id=0,
+    limit=3,
+    build=True,
+    duration=45,
+    variants=5,
+    bootstrap=True,
+):
+    topic = (topic or "").strip()
+    if not topic:
+        return False, "missing_topic", {}
+    before = operator_audit_data(owner_id)
+    bootstrap_result = None
+    if bootstrap:
+        counts = before.get("counts") or {}
+        needs_bootstrap = (
+            int(counts.get("active_channels") or 0) <= 0
+            or int(counts.get("active_affiliates") or 0) <= 0
+            or int(counts.get("active_campaigns") or 0) <= 0
+        )
+        if needs_bootstrap:
+            bootstrap_result = operator_bootstrap_data(
+                owner_id,
+                include_channels=True,
+                include_campaigns=True,
+                include_affiliates=True,
+                include_references=True,
+                reference_limit=200,
+            )
+    ok, reason, result = await make_video_pipeline(
+        owner_id,
+        topic,
+        platform=platform,
+        channel=channel,
+        affiliate_id=affiliate_id,
+        campaign_id=campaign_id,
+        limit=limit,
+        build=build,
+        duration=duration,
+        variants=variants,
+    )
+    after = operator_audit_data(owner_id)
+    if not ok:
+        return False, reason, {
+            "topic": topic,
+            "platform": platform,
+            "channel": channel,
+            "bootstrap": bootstrap_result,
+            "audit_before": {"level": before.get("level"), "score": before.get("score"), "next_command": before.get("next_command")},
+            "audit_after": {"level": after.get("level"), "score": after.get("score"), "next_command": after.get("next_command")},
+        }
+    created_jobs = result.get("created_jobs") or []
+    first_job_id = created_jobs[0]["job_id"] if created_jobs else 0
+    first_job = get_production_job(first_job_id, owner_id) if first_job_id else None
+    readiness = production_readiness_data(owner_id, first_job_id) if first_job_id else {}
+    review_video = build_video_review_summary(owner_id, first_job_id) if first_job_id else {}
+    post_publish = build_post_publish_handoff(owner_id, first_job_id, days=30) if first_job_id else {}
+    return True, "ok", {
+        **result,
+        "bootstrap": bootstrap_result,
+        "audit_before": {"level": before.get("level"), "score": before.get("score"), "next_command": before.get("next_command")},
+        "audit_after": {"level": after.get("level"), "score": after.get("score"), "next_command": after.get("next_command")},
+        "launch_next": {
+            "first_job_id": first_job_id,
+            "readiness": readiness,
+            "review_video": review_video,
+            "post_publish": post_publish,
+            "telegram": {
+                "worker_next": f"/worker_next job={first_job_id}" if first_job_id else "/worker_next",
+                "tasks": f"/tasks job={first_job_id}" if first_job_id else "/tasks",
+                "review": f"/review_video job={first_job_id} send=1" if first_job_id else "/review_video job=<JOB_ID> send=1",
+                "approve": f"/approve_publish job={first_job_id} queue=1 mode=manual" if first_job_id else "/approve_publish job=<JOB_ID> queue=1 mode=manual",
+                "post_publish": f"/post_publish job={first_job_id}" if first_job_id else "/post_publish job=<JOB_ID>",
+            },
+            "api": {
+                "worker_next": "/api/operator/worker-next",
+                "claim_task": "/api/operator/tasks/claim?include_context=1",
+                "review_video": f"/api/operator/jobs/{first_job_id}/review-video" if first_job_id else "/api/operator/jobs/<JOB_ID>/review-video",
+                "approve": f"/api/operator/jobs/{first_job_id}/approve" if first_job_id else "/api/operator/jobs/<JOB_ID>/approve",
+                "publisher_run": "/api/operator/publisher/run",
+                "post_publish": f"/api/operator/jobs/{first_job_id}/post-publish" if first_job_id else "/api/operator/jobs/<JOB_ID>/post-publish",
+            },
+        },
+    }
+
 def build_production_prompt(slot):
     (
         slot_id, _, channel_id, campaign_id, affiliate_id, post_date, platform, topic, _, notes,
@@ -9282,6 +9418,19 @@ class OperatorMakeVideoRequest(BaseModel):
     build: bool = True
     duration: int = Field(default=45, ge=15, le=120)
     variants: int = Field(default=5, ge=3, le=8)
+    notify_admin: bool = True
+
+class OperatorLaunchRequest(BaseModel):
+    topic: str = Field(min_length=1, max_length=300)
+    platform: str = Field(default="tiktok", max_length=40)
+    channel: str = Field(default="all", max_length=40)
+    affiliate_id: int = Field(default=0, ge=0)
+    campaign_id: int = Field(default=0, ge=0)
+    limit: int = Field(default=3, ge=1, le=8)
+    build: bool = True
+    duration: int = Field(default=45, ge=15, le=120)
+    variants: int = Field(default=5, ge=3, le=8)
+    bootstrap: bool = True
     notify_admin: bool = True
 
 class OperatorDirectorRunRequest(BaseModel):
@@ -10688,6 +10837,22 @@ def operator_brain_fallback(raw_text):
             "confidence": 74,
         }
 
+    if any(word in lower for word in ["launch", "khởi chạy", "khoi chay", "chạy từ đầu", "chay tu dau", "một lệnh", "mot lenh", "tạo luôn pipeline", "tao luon pipeline"]):
+        niche = re.sub(r"\b(launch|khởi chạy|khoi chay|chạy từ đầu|chay tu dau|một lệnh|mot lenh|tạo|tao|làm|lam|video|pipeline|trend|cho|trên|tren|gắn|gan|link|affiliate|aff|campaign|camp|limit|job|build|luôn|luon)\b", " ", lower)
+        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
+        niche = re.sub(r"\s+", " ", niche).strip(" :=#") or "công nghệ AI"
+        return {
+            "intent": "operator_launch",
+            "topic": niche,
+            "platform": platform,
+            "channel": channel_id or "all",
+            "affiliate": affiliate_id,
+            "campaign": campaign_id,
+            "limit": max(1, min(limit, 8)),
+            "duration": duration,
+            "build": 1,
+            "confidence": 84,
+        }
     if any(word in lower for word in ["execute", "thực thi", "thuc thi", "chạy bước tiếp", "chay buoc tiep", "tự xử lý", "tu xu ly", "đầu não chạy", "dau nao chay"]):
         return {
             "intent": "operator_execute",
@@ -10792,9 +10957,10 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
+        "- operator_launch: khi admin muốn một lệnh chạy từ đầu: bootstrap nếu thiếu, tạo pipeline video, trả next task/review.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
         "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
         "- affiliate_scale: khi admin muốn scale/đẩy một link affiliate cụ thể thành nhiều video theo trend; cần affiliate/aff ID.\n"
@@ -10854,6 +11020,14 @@ def brain_command_preview(plan):
             f"/operator_execute days={max(1, min(int(plan.get('days') or 30), 180))} "
             f"platform={plan.get('platform') or 'tiktok'} build={int(plan.get('build') or 1)} "
             f"duration={int(plan.get('duration') or 45)}"
+        )
+    if intent == "operator_launch":
+        return (
+            f"/operator_launch topic={plan.get('topic') or plan.get('niche') or 'công nghệ AI'} "
+            f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
+            f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
+            f"limit={max(1, min(int(plan.get('limit') or 3), 8))} build={int(plan.get('build') or 1)} "
+            f"duration={int(plan.get('duration') or 45)} bootstrap=1"
         )
     if intent == "affiliate_scale":
         return (
@@ -11019,6 +11193,19 @@ async def run_brain_plan(update, context, plan):
                 f"limit={max(3, min(int(plan.get('limit') or 10), 20))}",
             ]
             return await cmd_operator_execute(update, context)
+        if intent == "operator_launch":
+            context.args = [
+                f"topic={plan.get('topic') or plan.get('niche') or 'công nghệ AI'}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"channel={plan.get('channel') or 'all'}",
+                f"aff={int(plan.get('affiliate') or 0)}",
+                f"campaign={int(plan.get('campaign') or 0)}",
+                f"limit={max(1, min(int(plan.get('limit') or 3), 8))}",
+                f"build={int(plan.get('build') or 1)}",
+                f"duration={int(plan.get('duration') or 45)}",
+                "bootstrap=1",
+            ]
+            return await cmd_operator_launch(update, context)
         if intent == "affiliate_scale":
             if not int(plan.get("affiliate") or 0):
                 return await update.message.reply_text(
@@ -12532,6 +12719,105 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append("\nChốt đăng: <code>/review_gate job=&lt;JOB_ID&gt;</code> → <code>/approve_publish job=&lt;JOB_ID&gt; queue=1</code>")
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args).strip()
+    data = parse_key_value_args(raw)
+    topic = data.get("topic") or data.get("chude") or data.get("niche") or data.get("ngach") or (raw if "=" not in raw else "")
+    if not topic:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/operator_launch topic=công nghệ AI platform=tiktok channel=all limit=3 build=1</code>\n"
+            "Lệnh này tự bootstrap nếu thiếu kênh/campaign/affiliate rồi tạo pipeline video.",
+            parse_mode="HTML",
+        )
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    channel = (data.get("channel") or data.get("kenh") or "all").lower()
+    affiliate_id = safe_int(data.get("affiliate_id") or data.get("aff"), 0)
+    campaign_id = safe_int(data.get("campaign") or data.get("camp"), 0)
+    limit = max(1, min(safe_int(data.get("limit") or data.get("max"), 3), 8))
+    duration = max(15, min(safe_int(data.get("duration") or data.get("sec"), 45), 120))
+    variants = max(3, min(safe_int(data.get("variants") or data.get("n"), 5), 8))
+    build = (data.get("build") or data.get("autobuild") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    bootstrap = (data.get("bootstrap") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    msg = await update.message.reply_text("🚀 Operator Launch đang kiểm tra setup, bootstrap nếu thiếu và tạo pipeline video...")
+    try:
+        ok, reason, result = await operator_launch_pipeline(
+            update.effective_user.id,
+            topic,
+            platform=platform,
+            channel=channel,
+            affiliate_id=affiliate_id,
+            campaign_id=campaign_id,
+            limit=limit,
+            build=build,
+            duration=duration,
+            variants=variants,
+            bootstrap=bootstrap,
+        )
+    except Exception as e:
+        await alert_admin(context, "Operator Launch", f"{str(e)} | topic={topic} platform={platform}")
+        return await msg.edit_text("❌ Operator Launch lỗi. Đã báo admin.")
+    if not ok:
+        after = (result or {}).get("audit_after") or {}
+        return await msg.edit_text(
+            f"❌ Launch chưa chạy được: {html.escape(str(reason))}\n"
+            f"• Audit: <code>{html.escape(after.get('level') or '-')}</code> score={after.get('score') or 0}\n"
+            f"• Next: <code>{html.escape(after.get('next_command') or '/operator_mission')}</code>",
+            parse_mode="HTML",
+        )
+    created_jobs = result.get("created_jobs") or []
+    built_jobs = result.get("built_jobs") or []
+    bootstrap_result = result.get("bootstrap") or {}
+    launch_next = result.get("launch_next") or {}
+    telegram_next = launch_next.get("telegram") or {}
+    first_job_id = launch_next.get("first_job_id") or (created_jobs[0]["job_id"] if created_jobs else 0)
+    affiliate = result.get("affiliate") or {}
+    campaign = result.get("campaign") or {}
+    lines = [
+        "🚀 <b>OPERATOR LAUNCH COMPLETE</b>",
+        f"• Chủ đề: <b>{html.escape(topic)}</b>",
+        f"• Platform/channel: <code>{html.escape(platform)}</code> / <code>{html.escape(channel)}</code>",
+        f"• Bootstrap: <b>{'đã chạy' if bootstrap_result else 'không cần/chưa bật'}</b>",
+        f"• Affiliate: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product') or '-')}",
+        f"• Campaign: <code>#{campaign.get('id') or '-'}</code> {html.escape(campaign.get('name') or '-')}",
+        f"• Jobs tạo/build: <b>{len(created_jobs)}</b>/<b>{len(built_jobs)}</b>",
+    ]
+    if bootstrap_result:
+        created = bootstrap_result.get("created") or {}
+        lines.append(
+            f"• Bootstrap tạo thêm: channels={len(created.get('channels') or [])}, "
+            f"campaigns={len(created.get('campaigns') or [])}, affiliates={len(created.get('affiliates') or [])}, refs={len(created.get('references') or [])}"
+        )
+    if created_jobs:
+        lines.append("\n<b>Jobs:</b>")
+        for item in created_jobs[:6]:
+            lines.append(
+                f"• job #{item['job_id']} | trend #{item['trend_id']} | score=<b>{item['score']}</b>\n"
+                f"  {html.escape(item['title'])}"
+            )
+    worker_next = result.get("worker_next") or []
+    if worker_next:
+        item = worker_next[0]
+        task = item.get("next_task") or {}
+        lines.extend([
+            "",
+            "<b>Worker kế tiếp:</b>",
+            f"• Job <code>#{item.get('job_id')}</code> | task <code>#{task.get('id') or '-'}</code> / <code>{html.escape(task.get('task_type') or '-')}</code> / tool=<code>{html.escape(task.get('tool') or '-')}</code>",
+            f"• Handoff: <code>/task_handoff id={task.get('id') or '<TASK_ID>'}</code>",
+        ])
+    if first_job_id:
+        lines.extend([
+            "",
+            "<b>Điều hành tiếp:</b>",
+            f"• Tasks: <code>{html.escape(telegram_next.get('tasks') or f'/tasks job={first_job_id}')}</code>",
+            f"• Review video: <code>{html.escape(telegram_next.get('review') or f'/review_video job={first_job_id} send=1')}</code>",
+            f"• Approve queue: <code>{html.escape(telegram_next.get('approve') or f'/approve_publish job={first_job_id} queue=1 mode=manual')}</code>",
+            f"• Sau đăng: <code>{html.escape(telegram_next.get('post_publish') or f'/post_publish job={first_job_id}')}</code>",
+        ])
+    lines.append("\nAPI cho Claude/n8n: <code>POST /api/operator/launch</code>")
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_produce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -13183,7 +13469,7 @@ def operator_category_keyboard(category):
     categories = {
         "cat_control": [
             ("🧠 Mission control", "mission"), ("🧠 Brain command", "brain"),
-            ("🧰 Bootstrap", "bootstrap"),
+            ("🚀 Launch", "launch"), ("🧰 Bootstrap", "bootstrap"),
             ("🎬 Make video", "makevideo"),
             ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
@@ -13310,6 +13596,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• Mission control: <code>GET {html.escape(base_url)}/api/operator/mission</code>",
         f"• Bootstrap thiếu setup: <code>POST {html.escape(base_url)}/api/operator/bootstrap</code>",
+        f"• Launch một lệnh: <code>POST {html.escape(base_url)}/api/operator/launch</code>",
         f"• Toolchain paid/fallback: <code>GET {html.escape(base_url)}/api/operator/toolchain</code>",
         f"• Tool runtime readiness: <code>GET {html.escape(base_url)}/api/operator/tool-readiness</code>",
         f"• Báo lỗi/quota tool: <code>POST {html.escape(base_url)}/api/operator/tool-events</code>",
@@ -13356,6 +13643,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"days":30,"platform":"tiktok","limit":10,"execute":true,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload bootstrap mẫu:</b>",
         '<pre>{"channels":true,"campaigns":true,"affiliates":true,"references":true,"reference_limit":200,"notify_admin":true}</pre>',
+        "<b>Payload launch mẫu:</b>",
+        '<pre>{"topic":"công nghệ AI","platform":"tiktok","channel":"all","limit":3,"build":true,"bootstrap":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload make-video mẫu:</b>",
         '<pre>{"topic":"đồ công nghệ văn phòng","platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload affiliate-scale mẫu:</b>",
@@ -13571,6 +13860,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "n8nworkflow": "/operator_n8n_workflow\nGET /api/operator/n8n-workflow.json",
         "director": "/operator_director days=30 platform=tiktok limit=10",
         "mission": "/operator_mission days=30 platform=tiktok limit=8\nGET /api/operator/mission",
+        "launch": "/operator_launch topic=công nghệ AI platform=tiktok channel=all limit=3 build=1\nPOST /api/operator/launch",
         "bootstrap": "/operator_bootstrap\nPOST /api/operator/bootstrap",
         "execute": "/operator_execute days=30 platform=tiktok build=1 duration=45",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
@@ -16824,6 +17114,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
     tg_app.add_handler(CommandHandler("brain", cmd_brain))
     tg_app.add_handler(CommandHandler("autopilot", cmd_autopilot))
+    tg_app.add_handler(CommandHandler("operator_launch", cmd_operator_launch))
     tg_app.add_handler(CommandHandler("make_video", cmd_make_video))
     tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
     tg_app.add_handler(CommandHandler("trend_rank", cmd_trend_rank))
@@ -17545,6 +17836,47 @@ async def api_operator_bootstrap(payload: OperatorBootstrapRequest, request: Req
         except Exception as e:
             logger.error(f"Operator bootstrap notify error: {e}")
     return {"ok": True, **result}
+
+@fastapi_app.post("/api/operator/launch")
+async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
+    verify_operator_api_token(request)
+    ok, reason, result = await operator_launch_pipeline(
+        ADMIN_ID,
+        payload.topic,
+        platform=payload.platform,
+        channel=payload.channel,
+        affiliate_id=payload.affiliate_id,
+        campaign_id=payload.campaign_id,
+        limit=payload.limit,
+        build=payload.build,
+        duration=payload.duration,
+        variants=payload.variants,
+        bootstrap=payload.bootstrap,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail={"reason": reason, **(result or {})})
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            launch_next = result.get("launch_next") or {}
+            telegram = launch_next.get("telegram") or {}
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🚀 <b>OPERATOR API LAUNCH</b>\n\n"
+                    f"• Topic: <b>{html.escape(payload.topic)}</b>\n"
+                    f"• Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
+                    f"• First job: <code>#{launch_next.get('first_job_id') or '-'}</code>\n"
+                    f"• Next: <code>{html.escape(telegram.get('review') or '/review_video job=<JOB_ID> send=1')}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Operator launch notify error: {e}")
+    return {
+        "ok": True,
+        **result,
+        "rule": "Launch có thể bootstrap setup còn thiếu rồi tạo pipeline; vẫn cần worker output, review gate và approve trước publish.",
+    }
 
 @fastapi_app.post("/api/operator/tasks/{task_id}/complete")
 async def api_operator_complete_task(task_id: int, payload: OperatorTaskCompleteRequest, request: Request):
