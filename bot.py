@@ -55,6 +55,20 @@ def _env(key: str, default: str = "") -> str:
 
 TELEGRAM_TOKEN      = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
 ADMIN_ID            = _env("ADMIN_ID", "7126457028")
+APP_VERSION         = "TOAN DAAS V15.2"
+APP_BUILD_SHA       = (
+    _env("RAILWAY_GIT_COMMIT_SHA")
+    or _env("GIT_COMMIT_SHA")
+    or _env("SOURCE_VERSION")
+    or ""
+)
+APP_BUILD           = APP_BUILD_SHA[:7] if APP_BUILD_SHA else "local"
+APP_DEPLOY_ID       = (
+    _env("RAILWAY_DEPLOYMENT_ID")
+    or _env("RENDER_SERVICE_ID")
+    or _env("DEPLOYMENT_ID")
+    or ""
+)[:12]
 
 # AI Providers
 GEMINI_API_KEY      = _env("GEMINI_API_KEY")
@@ -2788,12 +2802,13 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_pack", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
+        ("GET", "/runtime"),
         ("GET", "/api/operator/worker-spec"),
         ("GET", "/api/operator/commander-pack"),
         ("GET", "/api/operator/video-patterns"),
@@ -11919,6 +11934,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     if is_admin:
         command_lines.extend([
+            f"• /runtime — Kiểm tra bản đang chạy: <code>{APP_BUILD}</code>",
             "• /operator_menu — Menu nút theo thư mục: Trend, Affiliate, Sản xuất, Đăng bài, Doanh thu, API",
             "• /brain &lt;lệnh&gt; — Ra lệnh tự nhiên cho AI Operator",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
@@ -11930,6 +11946,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.2</b>\n\n"
         "Chào mừng! Hệ thống tính phí thông minh theo dung lượng thực tế.\n\n"
+        f"{f'🧬 <b>Runtime:</b> <code>{APP_BUILD}</code>\\n\\n' if is_admin else ''}"
         "🛠️ <b>CÁCH SỬ DỤNG:</b>\n"
         "<b>1. Chat AI:</b> Nhắn tin bình thường (tính theo độ dài chữ).\n"
         "<b>2. Bóc băng Audio:</b> Gửi tin nhắn thoại 🎤 hoặc file .mp3/.m4a (tính theo MB).\n"
@@ -11945,6 +11962,36 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [[KeyboardButton("🛸 MENU DỊCH VỤ TOAN DAAS")]],
             resize_keyboard=True
         )
+    )
+
+async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    bot_info = {}
+    try:
+        me = await context.bot.get_me()
+        bot_info = {
+            "id": me.id,
+            "username": me.username,
+            "first_name": me.first_name,
+        }
+    except Exception as e:
+        bot_info = {"error": str(e)}
+    payload = {
+        "app": APP_VERSION,
+        "build": APP_BUILD,
+        "deploy_id": APP_DEPLOY_ID or "-",
+        "bot_username_env": BOT_USERNAME,
+        "bot_info": bot_info,
+        "public_base_url": PUBLIC_BASE_URL or "-",
+        "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
+    }
+    await update.message.reply_text(
+        "🧬 <b>TOAN DAAS RUNTIME</b>\n\n"
+        f"<pre>{html_pre(json.dumps(payload, ensure_ascii=False, indent=2), 1900)}</pre>\n\n"
+        "Nếu Telegram vẫn hiện A_TOOLS X khi <code>/runtime</code> không trả về bản này, "
+        "đang có deployment/process cũ dùng cùng TELEGRAM_TOKEN.",
+        parse_mode="HTML"
     )
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -19398,6 +19445,7 @@ async def lifespan(app: FastAPI):
     tg_app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     tg_app.add_handler(CommandHandler("start",       cmd_start))
+    tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
@@ -19538,9 +19586,27 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
 
     await tg_app.initialize()
+    try:
+        await tg_app.bot.delete_webhook(drop_pending_updates=False)
+    except Exception as e:
+        logger.warning(f"Không xóa được webhook cũ trước khi polling: {e}")
     await tg_app.start()
     asyncio.create_task(tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES))
-    logger.info("🚀 TOAN DAAS ONLINE — Bot + Cổng QR Động PayOS Sẵn Sàng.")
+    logger.info(f"🚀 TOAN DAAS ONLINE — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
+    if ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🧬 <b>TOAN DAAS DEPLOYED</b>\n\n"
+                    f"• Build: <code>{APP_BUILD}</code>\n"
+                    f"• Deploy: <code>{APP_DEPLOY_ID or '-'}</code>\n"
+                    "• Lệnh kiểm tra: /runtime"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Không gửi được thông báo deploy cho admin: {e}")
     yield
     await tg_app.updater.stop()
     await tg_app.stop()
@@ -19552,7 +19618,24 @@ fastapi_app = FastAPI(title="TOAN DAAS V15.2", lifespan=lifespan)
 # ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 @fastapi_app.get("/")
 async def health():
-    return {"status": "ok", "service": "TOAN DAAS V15.2 — Dynamic Billing Verified"}
+    return {
+        "status": "ok",
+        "service": f"{APP_VERSION} — Dynamic Billing Verified",
+        "build": APP_BUILD,
+        "deploy_id": APP_DEPLOY_ID or "",
+    }
+
+@fastapi_app.get("/runtime")
+async def runtime_health():
+    return {
+        "status": "ok",
+        "service": APP_VERSION,
+        "build": APP_BUILD,
+        "deploy_id": APP_DEPLOY_ID or "",
+        "bot_username_env": BOT_USERNAME,
+        "public_base_url": PUBLIC_BASE_URL or "",
+        "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
+    }
 
 @fastapi_app.get("/landing")
 async def landing_page():
