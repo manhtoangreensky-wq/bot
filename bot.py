@@ -839,6 +839,25 @@ def add_credit(user_id, amount, event_type="manual_add", ref_id="", note=""):
     conn.commit()
     conn.close()
 
+def refund_charged_credit(user_id, amount, event_type="refund", ref_id="", note="", was_charged=True) -> bool:
+    if not was_charged or str(user_id) == ADMIN_ID or int(amount or 0) <= 0:
+        return False
+    get_user(user_id)
+    amount = int(amount)
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """UPDATE users
+        SET credits = credits + ?,
+            total_spent = CASE WHEN total_spent >= ? THEN total_spent - ? ELSE 0 END
+        WHERE user_id=?""",
+        (amount, amount, amount, str(user_id))
+    )
+    record_credit_event(conn, user_id, amount, event_type, ref_id, note)
+    conn.commit()
+    conn.close()
+    return True
+
 def spend_fixed_credit(user_id, amount, event_type, note="") -> bool:
     if str(user_id) == ADMIN_ID:
         return True
@@ -18313,7 +18332,7 @@ class AgentDownloader:
     @staticmethod
     async def _hide_suspicious_downloader_result(msg, user_id, cost, data, media_url="", chat_id=None):
         if user_id and cost > 0:
-            add_credit(user_id, cost, "download_refund", "", "Downloader trả quảng cáo/join channel ngoài")
+            refund_charged_credit(user_id, cost, "download_refund", "", "Downloader trả quảng cáo/join channel ngoài", True)
         is_admin = AgentDownloader._is_admin_target(user_id, chat_id)
         admin_detail = ""
         admin_note = ""
@@ -18408,7 +18427,7 @@ class AgentDownloader:
             is_admin = AgentDownloader._is_admin_target(user_id, chat_id)
             if AgentDownloader._uses_public_cobalt(api_base):
                 if user_id and cost > 0:
-                    add_credit(user_id, cost, "download_refund", "", "Public Cobalt bị tắt để tránh quảng cáo/join channel ngoài")
+                    refund_charged_credit(user_id, cost, "download_refund", "", "Public Cobalt bị tắt để tránh quảng cáo/join channel ngoài", True)
                 admin_hint = (
                     "\n\n⚠️ Admin: public <code>api.cobalt.tools</code> thường trả bot protection hoặc kênh quảng cáo. "
                     "Hãy self-host Cobalt trên Railway rồi set <code>COBALT_API_URL</code>."
@@ -18465,7 +18484,7 @@ class AgentDownloader:
                     await msg.delete()
                 else:
                     if user_id and cost > 0:
-                        add_credit(user_id, cost, "download_refund", "", f"Không gửi được media: {send_reason}")
+                        refund_charged_credit(user_id, cost, "download_refund", "", f"Không gửi được media: {send_reason}", True)
                     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Mở link tải video", url=media_url)]])
                     await msg.edit_text(
                         "⚠️ Đã lấy được link video nhưng Telegram không nhận được file trực tiếp.\n"
@@ -18476,7 +18495,7 @@ class AgentDownloader:
                     )
             else:
                 if user_id and cost > 0:
-                    add_credit(user_id, cost, "download_refund", "", "Cobalt không trả media_url")
+                    refund_charged_credit(user_id, cost, "download_refund", "", "Cobalt không trả media_url", True)
                 err = data.get("error") if isinstance(data, dict) else {}
                 err_code = err.get("code") if isinstance(err, dict) else ""
                 is_admin = AgentDownloader._is_admin_target(user_id, chat_id)
@@ -18499,7 +18518,7 @@ class AgentDownloader:
         except Exception as e:
             logger.error(f"Downloader error: {e}")
             if user_id and cost > 0:
-                add_credit(user_id, cost, "download_refund", "", "Exception trong downloader")
+                refund_charged_credit(user_id, cost, "download_refund", "", "Exception trong downloader", True)
             is_admin = AgentDownloader._is_admin_target(user_id, chat_id)
             admin_hint = (
                 "\n\n⚠️ Admin: kiểm tra <code>COBALT_API_URL</code>, <code>COBALT_API_KEY</code> hoặc self-host Cobalt."
@@ -18622,9 +18641,15 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if mode == "cancel":
-        if pending.get("cost", 0) > 0:
-            add_credit(uid, pending["cost"], "refund", "", "Hoàn xu do khách hủy yêu cầu")
-        await query.edit_message_text("❌ Đã huỷ. Xu được hoàn lại.")
+        refunded = refund_charged_credit(
+            uid,
+            pending.get("cost", 0),
+            "refund",
+            "",
+            "Hoàn xu do khách hủy yêu cầu",
+            pending.get("premium_charged", False),
+        )
+        await query.edit_message_text("❌ Đã huỷ." + (" Xu được hoàn lại." if refunded else ""))
         return
 
     chat_id  = pending["chat_id"]
@@ -18634,8 +18659,14 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
     if svc_type == "voice":
         data = pending["data"]
         if mode == "free":
-            if cost > 0 and str(uid) != ADMIN_ID:
-                add_credit(uid, cost, "refund", "", "Hoàn phí voice cao cấp trước khi chọn gói tiết kiệm")
+            refund_charged_credit(
+                uid,
+                cost,
+                "refund",
+                "",
+                "Hoàn phí voice cao cấp trước khi chọn gói tiết kiệm",
+                pending.get("premium_charged", False),
+            )
             if not spend_fixed_credit(uid, VOICE_FREE_COST, "spend_voice_free", "Gói voice tiết kiệm"):
                 await query.edit_message_text(f"❌ Không đủ xu. Cần ít nhất {VOICE_FREE_COST} Xu.")
                 return
@@ -18652,8 +18683,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 await query.delete_message()
             except Exception as e:
                 logger.error(f"Edge TTS error: {e}")
-                if str(uid) != ADMIN_ID:
-                    add_credit(uid, VOICE_FREE_COST, "refund", "", "Hoàn gói voice tiết kiệm do lỗi")
+                refund_charged_credit(uid, VOICE_FREE_COST, "refund", "", "Hoàn gói voice tiết kiệm do lỗi", True)
                 await query.edit_message_text("❌ Gói Tiết Kiệm gặp lỗi.")
             finally:
                 if os.path.exists(out):
@@ -18662,6 +18692,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Cao Cấp)...</i>", parse_mode="HTML")
             out = f"v_{uid}.mp3"
             ok = False
+            premium_charged = spend_fixed_credit(uid, cost, "spend_voice_paid", "Gói voice cao cấp Fish Audio")
+            if not premium_charged:
+                await query.edit_message_text(f"❌ Không đủ xu cho gói cao cấp. Cần {cost} Xu.")
+                return
             premium_refunded = False
             fallback_charged = False
             try:
@@ -18705,9 +18739,14 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         f"Chưa cấu hình FISH_AUDIO_KEY. Đã fallback Edge TTS cho user={uid}."
                     )
                 if not ok:
-                    if cost > 0 and str(uid) != ADMIN_ID:
-                        add_credit(uid, cost, "refund", "", "Hoàn phí voice cao cấp do fallback")
-                        premium_refunded = True
+                    premium_refunded = refund_charged_credit(
+                        uid,
+                        cost,
+                        "refund",
+                        "",
+                        "Hoàn phí voice cao cấp do fallback",
+                        premium_charged,
+                    )
                     if not spend_fixed_credit(uid, VOICE_FREE_COST, "spend_voice_free_fallback", "Fallback sang Edge TTS"):
                         await query.edit_message_text(f"❌ Không đủ xu cho gói fallback. Cần ít nhất {VOICE_FREE_COST} Xu.")
                         return
@@ -18723,13 +18762,12 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         await query.delete_message()
                     except Exception as e:
                         logger.error(f"Edge TTS fallback error: {e}")
-                        if str(uid) != ADMIN_ID and fallback_charged:
-                            add_credit(uid, VOICE_FREE_COST, "refund", "", "Hoàn gói voice fallback do lỗi")
+                        refund_charged_credit(uid, VOICE_FREE_COST, "refund", "", "Hoàn gói voice fallback do lỗi", fallback_charged)
                         await query.edit_message_text("❌ Cả Fish Audio và Edge TTS đều lỗi. Xu đã hoàn lại.")
             except Exception as e:
                 logger.error(f"Voice paid error: {e}")
-                if cost > 0 and str(uid) != ADMIN_ID and not premium_refunded:
-                    add_credit(uid, cost, "refund", "", "Hoàn phí voice cao cấp do lỗi")
+                if not premium_refunded:
+                    refund_charged_credit(uid, cost, "refund", "", "Hoàn phí voice cao cấp do lỗi", premium_charged)
                 await query.edit_message_text("❌ Lỗi tổng hợp giọng.")
             finally:
                 if os.path.exists(out):
@@ -18738,8 +18776,14 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
     elif svc_type == "image":
         img_bytes = pending["file_bytes"]
         if mode == "free":
-            if cost > 0 and str(uid) != ADMIN_ID:
-                add_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp trước khi chọn gói tiết kiệm")
+            refund_charged_credit(
+                uid,
+                cost,
+                "refund",
+                "",
+                "Hoàn phí ảnh cao cấp trước khi chọn gói tiết kiệm",
+                pending.get("premium_charged", False),
+            )
             if not spend_fixed_credit(uid, IMAGE_FREE_COST, "spend_image_free", "Gói tách nền tiết kiệm"):
                 await query.edit_message_text(f"❌ Không đủ xu. Cần ít nhất {IMAGE_FREE_COST} Xu.")
                 return
@@ -18767,12 +18811,16 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 except Exception as e:
                     logger.error(f"Cutout error: {e}")
             if not ok:
-                if str(uid) != ADMIN_ID:
-                    add_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền tiết kiệm do lỗi")
+                refund_charged_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền tiết kiệm do lỗi", True)
                 await query.edit_message_text("❌ Cutout.pro lỗi hoặc chưa cấu hình CUTOUT_API_KEY.")
         else:
             await query.edit_message_text("⏳ <i>Đang tách nền (Gói Cao Cấp)...</i>", parse_mode="HTML")
             ok = False
+            premium_charged = spend_fixed_credit(uid, cost, "spend_image_paid", "Gói tách nền cao cấp RemoveBG")
+            if not premium_charged:
+                await query.edit_message_text(f"❌ Không đủ xu cho gói cao cấp. Cần {cost} Xu.")
+                return
+            premium_refunded = False
             if REMOVEBG_API_KEY:
                 try:
                     async with httpx.AsyncClient() as client:
@@ -18812,8 +18860,14 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     f"Chưa cấu hình REMOVEBG_API_KEY. Đã fallback Cutout.pro cho user={uid}."
                 )
             if not ok:
-                if cost > 0 and str(uid) != ADMIN_ID:
-                    add_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp do fallback")
+                premium_refunded = refund_charged_credit(
+                    uid,
+                    cost,
+                    "refund",
+                    "",
+                    "Hoàn phí ảnh cao cấp do fallback",
+                    premium_charged,
+                )
                 if not spend_fixed_credit(uid, IMAGE_FREE_COST, "spend_image_free_fallback", "Fallback sang Cutout"):
                     await query.edit_message_text(f"❌ Không đủ xu cho gói fallback. Cần ít nhất {IMAGE_FREE_COST} Xu.")
                     return
@@ -18838,8 +18892,9 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     except Exception as e:
                         logger.error(f"Cutout fallback error: {e}")
                 if not cutout_ok:
-                    if str(uid) != ADMIN_ID:
-                        add_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền fallback do lỗi")
+                    refund_charged_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền fallback do lỗi", True)
+                    if not premium_refunded:
+                        refund_charged_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp do lỗi", premium_charged)
                     await query.edit_message_text("❌ Cả 2 dịch vụ đều lỗi. Xu đã hoàn lại.")
 
 
@@ -29323,6 +29378,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "file_bytes": img_bytes,
         "cost": final_cost,
         "chat_id": update.effective_chat.id,
+        "premium_charged": False,
     }
     kb = provider_keyboard("image", uid, final_cost)
     if is_trial_account(uid):
@@ -29344,27 +29400,38 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_obj = update.message.voice or update.message.audio
     if not file_obj:
         return
+    uid = update.effective_user.id
     file_size = file_obj.file_size
-    can_afford, cost, discount = deduct_dynamic_credit(update.effective_user.id, "whisper", file_size)
+    can_afford, cost, discount = deduct_dynamic_credit(uid, "whisper", file_size)
     if not can_afford:
         return await update.message.reply_text(
             f"❌ Cần {cost} Xu để bóc băng file {math.ceil(file_size/(1024*1024))}MB. Gõ /naptien."
         )
     msg = await update.message.reply_text("⚡ <i>[Deepgram] Đang chạy bóc băng...</i>", parse_mode="HTML")
-    file_bytes = bytes(await (await file_obj.get_file()).download_as_bytearray())
-    txt = await AgentDeepgram.transcribe(file_bytes, context)
-    await msg.delete()
-    if not txt.startswith("❌"):
-        discount_text = " (VIP)" if discount > 0 else ""
-        await update.message.reply_text(
-            f"🗣️ <i>\"{txt}\"</i>\n\n<i>(-{cost} Xu){discount_text}</i>",
-            parse_mode="HTML"
-        )
-        if update.message.voice:
-            update.message.text = txt
-            await handle_message(update, context)
-    else:
-        await update.message.reply_text(txt)
+    try:
+        file_bytes = bytes(await (await file_obj.get_file()).download_as_bytearray())
+        txt = await AgentDeepgram.transcribe(file_bytes, context)
+        await msg.delete()
+        if not txt.startswith("❌"):
+            discount_text = " (VIP)" if discount > 0 else ""
+            await update.message.reply_text(
+                f"🗣️ <i>\"{txt}\"</i>\n\n<i>(-{cost} Xu){discount_text}</i>",
+                parse_mode="HTML"
+            )
+            if update.message.voice:
+                update.message.text = txt
+                await handle_message(update, context)
+        else:
+            refund_charged_credit(uid, cost, "refund", "", "Hoàn phí bóc băng do Deepgram lỗi", True)
+            await update.message.reply_text(txt + ("\n✅ Xu đã hoàn lại." if cost > 0 and str(uid) != ADMIN_ID else ""))
+    except Exception as e:
+        logger.error(f"Deepgram media handler error: {e}")
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        refund_charged_credit(uid, cost, "refund", "", "Hoàn phí bóc băng do lỗi xử lý file", True)
+        await update.message.reply_text("❌ Lỗi xử lý audio." + (" Xu đã hoàn lại." if cost > 0 and str(uid) != ADMIN_ID else ""))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -29442,16 +29509,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if act == "voice":
         raw_cost_v = calculate_dynamic_cost("voice", size_calc)
-        _, ts_v, _ = get_user(uid)
-        fish_cost, _ = apply_discount(ts_v, raw_cost_v)
-        if cost > 0 and str(uid) != ADMIN_ID:
-            add_credit(uid, cost)
+        refund_charged_credit(uid, cost, "refund", "", "Hoàn phí phân loại voice trước khi khách chọn gói", True)
+        fish_cost, _ = apply_discount(total_spent, raw_cost_v)
         USER_PENDING[uid] = {
             "type": "voice",
             "data": data,
             "cost": fish_cost,
             "chat_id": update.effective_chat.id,
             "file_bytes": None,
+            "premium_charged": False,
         }
         kb = provider_keyboard("voice", uid, fish_cost)
         if is_trial_account(uid):

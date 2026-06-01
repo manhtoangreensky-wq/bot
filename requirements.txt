@@ -8,3 +8,4 @@ openai
 pydantic
 python-multipart
 Pillow
+pytest
