@@ -15362,6 +15362,56 @@ async def fetch_google_news_trends(niche, platform="", limit=5):
             items.append({"title": title, "url": link, "source": source_name, "summary": summary})
     return items
 
+def fallback_operator_trends(niche, platform="", affiliate=None, limit=5):
+    topic = (niche or "affiliate").strip()
+    platform = (platform or "tiktok").strip().lower()
+    product = ""
+    network = ""
+    if affiliate:
+        try:
+            _aid, network, product, *_rest = affiliate
+        except Exception:
+            product = ""
+    product_text = product or topic
+    templates = [
+        (
+            f"3 sai lầm khi chọn {product_text}",
+            "Hook vấn đề -> checklist ngắn -> gợi ý link affiliate minh bạch trong caption/comment.",
+        ),
+        (
+            f"{product_text}: ai nên dùng và ai không nên dùng?",
+            "Review fit/not-fit, không cam kết quá mức, CTA mềm sang link liên quan.",
+        ),
+        (
+            f"So sánh nhanh lựa chọn {topic}",
+            "So sánh 2-3 phương án, đặt nhiều link affiliate liên quan để tăng cơ hội ra đơn.",
+        ),
+        (
+            f"Một tình huống đời thường cần {product_text}",
+            "Kể chuyện ngắn, demo vấn đề trước/sau, chèn sản phẩm như một lựa chọn.",
+        ),
+        (
+            f"Checklist tiết kiệm thời gian với {topic}",
+            "Listicle dễ lưu lại, CTA xem caption/comment ghim.",
+        ),
+        (
+            f"Trend {platform}: biến {topic} thành video affiliate không lộ mặt",
+            "Hook theo trend, giữ bản quyền an toàn, sản xuất dạng 9:16 ngắn.",
+        ),
+    ]
+    items = []
+    for idx, (title, summary) in enumerate(templates[: max(1, int(limit or 5))], start=1):
+        items.append({
+            "title": title,
+            "url": f"internal://fallback-trend/{quote(topic)}/{idx}",
+            "source": "TOAN_DAAS_FALLBACK",
+            "summary": (
+                f"{summary} Network={network or '-'}; platform={platform}. "
+                "Dùng khi nguồn trend ngoài không có dữ liệu, vẫn phải qua review/approve gate."
+            ),
+        })
+    return items
+
 async def create_operator_auto_jobs(owner_id, niche, platform_filter="", channel_filter="all", campaign_id=0, affiliate_id=0, limit=5):
     if campaign_id and not get_campaign(campaign_id, owner_id):
         return [], "Không tìm thấy campaign."
@@ -15381,12 +15431,16 @@ async def create_operator_auto_jobs(owner_id, niche, platform_filter="", channel
     if not channels:
         return [], "Chưa có channel active phù hợp. Tạo bằng /channel_add."
 
-    search_platform = platform_filter or (channels[0][1] if channels else "tiktok")
-    trends = await fetch_google_news_trends(niche, search_platform, limit=limit)
-    if not trends:
-        return [], "Không tìm thấy trend để tạo job."
-
     affiliate = get_affiliate_link(affiliate_id, owner_id) if affiliate_id else None
+    search_platform = platform_filter or (channels[0][1] if channels else "tiktok")
+    try:
+        trends = await fetch_google_news_trends(niche, search_platform, limit=limit)
+    except Exception as exc:
+        logger.warning(f"Trend fetch failed, using fallback topics: niche={niche} platform={search_platform} error={exc}")
+        trends = []
+    if not trends:
+        trends = fallback_operator_trends(niche, search_platform, affiliate=affiliate, limit=limit)
+
     related_affiliates = list_related_affiliate_links(owner_id, affiliate_id=affiliate_id, niche=niche, limit=8) if affiliate_id else []
     related_note = format_related_affiliate_links(related_affiliates, max_items=6)
     primary_channel = channels[0] if channels else None
@@ -15578,7 +15632,20 @@ def active_platforms_for_launch(owner_id, platform=""):
     active.sort(key=lambda item: preferred.index(item) if item in preferred else len(preferred))
     return active or ["tiktok", "facebook", "onlyfans"]
 
-async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all", affiliate_id=0, campaign_id=0, limit=3, build=True, duration=45, variants=5):
+async def make_video_pipeline(
+    owner_id,
+    topic,
+    platform="tiktok",
+    channel="all",
+    affiliate_id=0,
+    campaign_id=0,
+    limit=3,
+    build=True,
+    duration=45,
+    variants=5,
+    autorun=False,
+    autorun_max_tasks=24,
+):
     topic = (topic or "").strip()
     if not topic:
         return False, "missing_topic", {}
@@ -15667,15 +15734,25 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
                         })
             else:
                 failed.append({"job_id": item["job_id"], "error": bundle.get("error", "build lỗi") if isinstance(bundle, dict) else "build lỗi"})
+    job_ids_for_work = [item["job_id"] for item in (built or created_jobs)]
+    autorun_result = None
+    if build and autorun and job_ids_for_work:
+        autorun_result = await operator_worker_autorun_data(
+            owner_id,
+            job_ids=job_ids_for_work,
+            limit=min(len(job_ids_for_work), 8),
+            max_tasks=autorun_max_tasks,
+            execute=True,
+        )
     worker_next = operator_worker_next_summary(
         owner_id,
-        [item["job_id"] for item in (built or created_jobs)],
-        limit=min(len(built or created_jobs), 5),
+        job_ids_for_work,
+        limit=min(len(job_ids_for_work), 5),
     )
     video_work_orders = operator_video_work_orders_data(
         owner_id,
-        [item["job_id"] for item in (built or created_jobs)],
-        limit=min(len(built or created_jobs), 8) or 1,
+        job_ids_for_work,
+        limit=min(len(job_ids_for_work), 8) or 1,
     )
 
     affiliate_payload = None
@@ -15724,8 +15801,18 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
         "failed_builds": failed,
         "publish_packs": publish_packs,
         "distribution_packs": distribution_packs,
+        "autorun": autorun_result,
         "worker_next": worker_next,
         "video_work_orders": video_work_orders,
+        "automation_next": {
+            "worker_autorun": (
+                "/worker_autorun jobs="
+                + ",".join(str(job_id) for job_id in job_ids_for_work[:8])
+                + " execute=1"
+            ) if job_ids_for_work else "/worker_autorun execute=1",
+            "review": "/review_video job=<JOB_ID> send=1",
+            "approve": "/approve_publish job=<JOB_ID> queue=1 mode=manual",
+        },
     }
 
 async def operator_launch_pipeline(
@@ -15740,6 +15827,8 @@ async def operator_launch_pipeline(
     duration=45,
     variants=5,
     bootstrap=True,
+    autorun=False,
+    autorun_max_tasks=24,
 ):
     topic = (topic or "").strip()
     if not topic:
@@ -15773,6 +15862,8 @@ async def operator_launch_pipeline(
         build=build,
         duration=duration,
         variants=variants,
+        autorun=autorun,
+        autorun_max_tasks=autorun_max_tasks,
     )
     after = operator_audit_data(owner_id)
     if not ok:
@@ -17438,6 +17529,8 @@ class OperatorMakeVideoRequest(BaseModel):
     build: bool = True
     duration: int = Field(default=45, ge=15, le=120)
     variants: int = Field(default=5, ge=3, le=8)
+    autorun: bool = False
+    autorun_max_tasks: int = Field(default=24, ge=1, le=40)
     notify_admin: bool = True
 
 class OperatorLaunchRequest(BaseModel):
@@ -17451,6 +17544,8 @@ class OperatorLaunchRequest(BaseModel):
     duration: int = Field(default=45, ge=15, le=120)
     variants: int = Field(default=5, ge=3, le=8)
     bootstrap: bool = True
+    autorun: bool = False
+    autorun_max_tasks: int = Field(default=24, ge=1, le=40)
     notify_admin: bool = True
 
 class OperatorFilmSeriesRequest(BaseModel):
@@ -19840,7 +19935,8 @@ def brain_command_preview(plan):
             f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
             f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
             f"limit={max(1, min(int(plan.get('limit') or 3), 8))} build={int(plan.get('build') or 1)} "
-            f"duration={int(plan.get('duration') or 45)}"
+            f"duration={int(plan.get('duration') or 45)} "
+            f"run={int(bool(plan.get('autorun') or plan.get('run') or plan.get('execute')))}"
         )
     if intent == "operator_auto":
         return (
@@ -20634,6 +20730,8 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
             duration=int(plan.get("duration") or 45),
             variants=max(3, min(int(plan.get("variants") or 5), 8)),
             bootstrap=True,
+            autorun=bool(plan.get("autorun") or plan.get("run") or plan.get("execute")),
+            autorun_max_tasks=max(1, min(int(plan.get("max_tasks") or 24), 40)),
         )
         return {"executed": ok, "intent": intent, "reason": reason, "data": result}
     if intent == "film_series":
@@ -20668,6 +20766,8 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
             build=bool(plan.get("build", 1)),
             duration=int(plan.get("duration") or 45),
             variants=max(3, min(int(plan.get("variants") or 5), 8)),
+            autorun=bool(plan.get("autorun") or plan.get("run") or plan.get("execute")),
+            autorun_max_tasks=max(1, min(int(plan.get("max_tasks") or 24), 40)),
         )
         return {"executed": ok, "intent": intent, "reason": reason, "data": result}
     if intent == "compose_video":
@@ -22115,6 +22215,8 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         limit = 3
     build = (data.get("build") or data.get("autobuild") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    autorun = truthy_value(data.get("autorun") or data.get("run") or data.get("execute"), False)
+    autorun_max_tasks = max(1, min(safe_int(data.get("max_tasks") or data.get("max"), 24), 40))
     try:
         duration = max(15, min(int(data.get("duration") or data.get("sec") or 45), 120))
     except ValueError:
@@ -22137,6 +22239,8 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             build=build,
             duration=duration,
             variants=variants,
+            autorun=autorun,
+            autorun_max_tasks=autorun_max_tasks,
         )
     except Exception as e:
         await alert_admin(context, "Make Video", f"{str(e)} | topic={topic} platform={platform}")
@@ -22150,6 +22254,7 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     built_jobs = result.get("built_jobs") or []
     packs = result.get("publish_packs") or []
     worker_next = result.get("worker_next") or []
+    autorun_result = result.get("autorun") or {}
     lines = [
         "🎬 <b>MAKE VIDEO PIPELINE</b>",
         f"• Chủ đề: <b>{html.escape(topic)}</b>",
@@ -22191,6 +22296,18 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Task: <code>#{next_task.get('id') or '-'}</code> / <code>{html.escape(next_task.get('task_type') or '-')}</code> / tool=<code>{html.escape(next_task.get('tool') or '-')}</code>",
             f"• Handoff: <code>/task_handoff id={next_task.get('id') or '<TASK_ID>'}</code>",
         ])
+    if autorun_result:
+        reviewable_jobs = operator_review_job_ids_from_result(
+            update.effective_user.id,
+            {"autorun": autorun_result, "created_jobs": created_jobs},
+            limit=3,
+        )
+        lines.extend([
+            "",
+            "<b>Autorun:</b>",
+            f"• Completed: <b>{autorun_result.get('completed_count') or 0}</b> | Preview: <b>{autorun_result.get('preview_count') or 0}</b> | Pending external: <b>{len(autorun_result.get('pending_external') or [])}</b>",
+            f"• Review ready: <code>{html.escape(','.join(str(jid) for jid in reviewable_jobs) or '-')}</code>",
+        ])
     video_orders = (result.get("video_work_orders") or {}).get("orders") or []
     if video_orders:
         first_order = video_orders[0]
@@ -22208,8 +22325,26 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("\n<b>Build lỗi:</b>")
         for item in result["failed_builds"][:5]:
             lines.append(f"• job #{item.get('job_id')}: {html.escape(item.get('error') or '-')}")
-    lines.append("\nChốt đăng: <code>/review_gate job=&lt;JOB_ID&gt;</code> → <code>/approve_publish job=&lt;JOB_ID&gt; queue=1</code>")
+    lines.append(
+        "\n<b>Lệnh tiếp:</b>\n"
+        f"<code>{html.escape((result.get('automation_next') or {}).get('worker_autorun') or '/worker_autorun execute=1')}</code>\n"
+        "<code>/review_gate job=&lt;JOB_ID&gt;</code> → <code>/approve_publish job=&lt;JOB_ID&gt; queue=1</code>"
+    )
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    if autorun_result:
+        review_report = await send_operator_review_packets(
+            context,
+            update.effective_chat.id,
+            update.effective_user.id,
+            {"autorun": autorun_result, "created_jobs": created_jobs},
+            limit=3,
+        )
+        if review_report.get("errors"):
+            await update.message.reply_text(
+                "⚠️ Một số review packet gửi lỗi: "
+                + html.escape(str(review_report.get("errors")[:3])),
+                parse_mode="HTML",
+            )
 
 async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -22233,6 +22368,8 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
     variants = max(3, min(safe_int(data.get("variants") or data.get("n"), 5), 8))
     build = (data.get("build") or data.get("autobuild") or "1").lower() not in {"0", "false", "no", "off", "khong"}
     bootstrap = (data.get("bootstrap") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    autorun = truthy_value(data.get("autorun") or data.get("run") or data.get("execute"), False)
+    autorun_max_tasks = max(1, min(safe_int(data.get("max_tasks") or data.get("max"), 24), 40))
     msg = await update.message.reply_text("🚀 Operator Launch đang kiểm tra setup, bootstrap nếu thiếu và tạo pipeline video...")
     try:
         ok, reason, result = await operator_launch_pipeline(
@@ -22247,6 +22384,8 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
             duration=duration,
             variants=variants,
             bootstrap=bootstrap,
+            autorun=autorun,
+            autorun_max_tasks=autorun_max_tasks,
         )
     except Exception as e:
         await alert_admin(context, "Operator Launch", f"{str(e)} | topic={topic} platform={platform}")
@@ -22267,6 +22406,7 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
     first_job_id = launch_next.get("first_job_id") or (created_jobs[0]["job_id"] if created_jobs else 0)
     affiliate = result.get("affiliate") or {}
     campaign = result.get("campaign") or {}
+    autorun_result = result.get("autorun") or {}
     lines = [
         "🚀 <b>OPERATOR LAUNCH COMPLETE</b>",
         f"• Chủ đề: <b>{html.escape(topic)}</b>",
@@ -22301,6 +22441,18 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"• Job <code>#{item.get('job_id')}</code> | task <code>#{task.get('id') or '-'}</code> / <code>{html.escape(task.get('task_type') or '-')}</code> / tool=<code>{html.escape(task.get('tool') or '-')}</code>",
             f"• Handoff: <code>/task_handoff id={task.get('id') or '<TASK_ID>'}</code>",
         ])
+    if autorun_result:
+        reviewable_jobs = operator_review_job_ids_from_result(
+            update.effective_user.id,
+            {"autorun": autorun_result, "created_jobs": created_jobs},
+            limit=3,
+        )
+        lines.extend([
+            "",
+            "<b>Autorun:</b>",
+            f"• Completed: <b>{autorun_result.get('completed_count') or 0}</b> | Preview: <b>{autorun_result.get('preview_count') or 0}</b> | Pending external: <b>{len(autorun_result.get('pending_external') or [])}</b>",
+            f"• Review ready: <code>{html.escape(','.join(str(jid) for jid in reviewable_jobs) or '-')}</code>",
+        ])
     if first_job_id:
         tasks_cmd = telegram_next.get("tasks") or f"/tasks job={first_job_id}"
         video_brief_cmd = telegram_next.get("video_brief") or f"/video_brief job={first_job_id}"
@@ -22311,6 +22463,7 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
         lines.extend([
             "",
             "<b>Điều hành tiếp:</b>",
+            f"• Autorun: <code>{html.escape((result.get('automation_next') or {}).get('worker_autorun') or '/worker_autorun execute=1')}</code>",
             f"• Tasks: <code>{html.escape(tasks_cmd)}</code>",
             f"• Video brief: <code>{html.escape(video_brief_cmd)}</code>",
             f"• Distribution: <code>{html.escape(distribution_cmd)}</code>",
@@ -22320,6 +22473,20 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
         ])
     lines.append("\nAPI cho Claude/n8n: <code>POST /api/operator/launch</code>")
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    if autorun_result:
+        review_report = await send_operator_review_packets(
+            context,
+            update.effective_chat.id,
+            update.effective_user.id,
+            {"autorun": autorun_result, "created_jobs": created_jobs},
+            limit=3,
+        )
+        if review_report.get("errors"):
+            await update.message.reply_text(
+                "⚠️ Một số review packet gửi lỗi: "
+                + html.escape(str(review_report.get("errors")[:3])),
+                parse_mode="HTML",
+            )
 
 async def cmd_produce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -30213,6 +30380,8 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
         build=payload.build,
         duration=payload.duration,
         variants=payload.variants,
+        autorun=payload.autorun,
+        autorun_max_tasks=payload.autorun_max_tasks,
         bootstrap=payload.bootstrap,
     )
     if not ok:
@@ -30222,6 +30391,8 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
             launch_next = result.get("launch_next") or {}
             telegram = launch_next.get("telegram") or {}
             video_orders = (result.get("video_work_orders") or {}).get("orders") or []
+            autorun = result.get("autorun") or {}
+            reviewable_jobs = operator_review_job_ids_from_result(ADMIN_ID, {"autorun": autorun, "created_jobs": result.get("created_jobs") or []}, limit=3) if autorun else []
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
@@ -30230,11 +30401,22 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
                     f"• Target: <code>{html.escape(','.join(result.get('target_platforms') or []) or payload.platform)}</code>\n"
                     f"• Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
                     f"• Video briefs: <b>{len(video_orders)}</b>\n"
+                    f"• Autorun: <b>{'ON' if autorun else 'OFF'}</b>"
+                    + (f" | Completed: <b>{autorun.get('completed_count') or 0}</b> | Review: <code>{html.escape(','.join(str(jid) for jid in reviewable_jobs) or '-')}</code>" if autorun else "")
+                    + "\n"
                     f"• First job: <code>#{launch_next.get('first_job_id') or '-'}</code>\n"
                     f"• Next: <code>{html.escape(telegram.get('video_brief') or '/video_brief job=<JOB_ID>')}</code>"
                 ),
                 parse_mode="HTML",
             )
+            if autorun and reviewable_jobs:
+                await send_operator_review_packets(
+                    type("ApiReviewContext", (), {"bot": tg_app.bot})(),
+                    int(ADMIN_ID),
+                    ADMIN_ID,
+                    {"autorun": autorun, "created_jobs": result.get("created_jobs") or []},
+                    limit=3,
+                )
         except Exception as e:
             logger.error(f"Operator launch notify error: {e}")
     return {
@@ -31070,6 +31252,8 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
         build=payload.build,
         duration=payload.duration,
         variants=payload.variants,
+        autorun=payload.autorun,
+        autorun_max_tasks=payload.autorun_max_tasks,
     )
     if not ok:
         raise HTTPException(status_code=400, detail=reason)
@@ -31077,6 +31261,8 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
         try:
             affiliate = result.get("affiliate") or {}
             video_orders = (result.get("video_work_orders") or {}).get("orders") or []
+            autorun = result.get("autorun") or {}
+            reviewable_jobs = operator_review_job_ids_from_result(ADMIN_ID, {"autorun": autorun, "created_jobs": result.get("created_jobs") or []}, limit=3) if autorun else []
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
@@ -31087,10 +31273,21 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
                     f"• Affiliate: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product') or '')}\n"
                     f"• Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
                     f"• Video briefs: <b>{len(video_orders)}</b>\n"
+                    f"• Autorun: <b>{'ON' if autorun else 'OFF'}</b>"
+                    + (f" | Completed: <b>{autorun.get('completed_count') or 0}</b> | Review: <code>{html.escape(','.join(str(jid) for jid in reviewable_jobs) or '-')}</code>" if autorun else "")
+                    + "\n"
                     "• Next: <code>/video_brief job=&lt;JOB_ID&gt;</code> → <code>/review_gate</code> → <code>/approve_publish</code>"
                 ),
                 parse_mode="HTML"
             )
+            if autorun and reviewable_jobs:
+                await send_operator_review_packets(
+                    type("ApiReviewContext", (), {"bot": tg_app.bot})(),
+                    int(ADMIN_ID),
+                    ADMIN_ID,
+                    {"autorun": autorun, "created_jobs": result.get("created_jobs") or []},
+                    limit=3,
+                )
         except Exception as e:
             logger.error(f"Operator make-video notify error: {e}")
     return {
