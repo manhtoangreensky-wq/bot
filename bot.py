@@ -2545,6 +2545,7 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/tasks/<TASK_ID>/upload"),
         ("POST", "/api/operator/jobs/<JOB_ID>/assets/upload"),
         ("GET", "/api/operator/assets/<ASSET_ID>/file"),
+        ("GET", "/api/operator/jobs/<JOB_ID>/review-video"),
         ("GET", "/api/operator/publish/<QUEUE_ID>/handoff"),
         ("POST", "/api/operator/publish/<QUEUE_ID>/auto"),
         ("POST", "/api/operator/publish/<QUEUE_ID>/complete"),
@@ -2597,6 +2598,7 @@ def operator_smoke_test_data(owner_id):
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
         "affiliate_import_in_spec": "/api/operator/affiliates/import" in spec_text and "/api/operator/affiliates/import" in n8n_text,
+        "review_video_in_spec": "/api/operator/jobs/<JOB_ID>/review-video" in spec_text and "/api/operator/jobs/" in n8n_text and "/review-video" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
@@ -2743,6 +2745,7 @@ def operator_worker_spec_data():
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
+            {"step": 8.2, "name": "review_video", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/review-video"},
             {"step": 9, "name": "affiliate_bundle", "method": "GET", "url": "/api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>"},
             {"step": 10, "name": "publisher_status", "method": "GET", "url": "/api/operator/publisher/status"},
             {"step": 11, "name": "publisher_run", "method": "POST", "url": "/api/operator/publisher/run"},
@@ -3402,6 +3405,13 @@ def operator_n8n_template_data():
                 "note": "Lấy caption, disclosure, link chính, link liên quan/comment ghim và checklist.",
             },
             {
+                "node": "Video Review Gate",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/jobs/<JOB_ID>/review-video",
+                "note": "Gói kiểm duyệt cuối: final asset, caption, affiliate links, missing checks và lệnh approve kế tiếp.",
+            },
+            {
                 "node": "Approve Publish",
                 "type": "http_request",
                 "method": "POST",
@@ -3857,6 +3867,20 @@ def operator_n8n_workflow_json_data():
                 "parameters": {
                     "method": "GET",
                     "url": f"{base_url_expr}/api/operator/jobs/{{{{$json.queue.job_id}}}}/publish-pack",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "review-video-gate",
+                "name": "Review Video Gate",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [820, -300],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{{{$json.queue.job_id}}}}/review-video",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -12649,6 +12673,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tải asset nội bộ: <code>GET {html.escape(base_url)}/api/operator/assets/&lt;ASSET_ID&gt;/file</code>",
         f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
+        f"• Review video gate: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/review-video</code>",
         f"• Duyệt publish: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/approve</code>",
         f"• Lấy hàng đợi đăng: <code>GET {html.escape(base_url)}/api/operator/publish/next</code>",
         f"• Publisher handoff: <code>GET {html.escape(base_url)}/api/operator/publish/&lt;QUEUE_ID&gt;/handoff</code>",
@@ -17097,6 +17122,46 @@ async def api_operator_job_publish_pack(job_id: int, request: Request):
             "complete_url": "/api/operator/publish/<QUEUE_ID>/complete",
             "performance_url": "/api/operator/performance",
         },
+    }
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/review-video")
+async def api_operator_job_review_video(job_id: int, request: Request):
+    verify_operator_api_token(request)
+    summary = build_video_review_summary(ADMIN_ID, job_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Job not found")
+    final_asset = summary.get("final_asset")
+    final_asset_payload = None
+    if final_asset:
+        aid, _owner_id, row_job_id, asset_type, url, file_id, note, local_path, content_type, filename, created_at = final_asset
+        final_asset_payload = {
+            "id": aid,
+            "job_id": row_job_id,
+            "asset_type": asset_type,
+            "url": url,
+            "file_id": file_id,
+            "download_url": operator_asset_url(aid),
+            "note": note,
+            "local_path_available": bool(local_path),
+            "content_type": content_type,
+            "filename": filename,
+            "created_at": created_at,
+        }
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "job": summary.get("job"),
+        "readiness": {
+            "level": (summary.get("readiness") or {}).get("level", "UNKNOWN"),
+            "next_action": (summary.get("readiness") or {}).get("next_action", ""),
+            "publish_gate": (summary.get("readiness") or {}).get("publish_gate", {}),
+        },
+        "missing": summary.get("missing") or [],
+        "final_asset": final_asset_payload,
+        "publish_pack": summary.get("publish_pack") or {},
+        "commands": summary.get("commands") or {},
+        "telegram_summary": format_video_review_summary(summary),
+        "rule": "Review-only endpoint. Do not publish until admin/review gate approves and compliance checks are clear.",
     }
 
 @fastapi_app.post("/api/operator/loop")
