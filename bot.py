@@ -5067,6 +5067,22 @@ def production_readiness_data(owner_id, job_id):
         "publish_gate": publish_gate,
     }
 
+def apply_worker_output_job_state(owner_id, job_id, task_id=0, task_type="", task_status="", asset_type="", note=""):
+    status_l = (task_status or "").lower()
+    asset_type_l = (asset_type or "").lower()
+    task_type_l = (task_type or "").lower()
+    if status_l == "blocked":
+        update_production_job(job_id, owner_id, status="blocked", note=f"task_blocked:{task_id} {note or ''}".strip())
+    elif status_l in {"ready", "done"}:
+        if asset_type_l == "final_video" or task_type_l == "edit":
+            update_production_job(job_id, owner_id, stage="review", status="ready", note=f"final_video_ready task:{task_id} {note or ''}".strip())
+        elif task_type_l == "publish":
+            update_production_job(job_id, owner_id, stage="publish", status="ready", note=f"publish_task_ready:{task_id} {note or ''}".strip())
+        else:
+            update_production_job(job_id, owner_id, status="working", note=f"task_ready:{task_id} {task_type_l or '-'} {note or ''}".strip())
+    readiness = production_readiness_data(owner_id, job_id)
+    return readiness
+
 def approve_publish_job(owner_id, job_id, note="", queue=True, mode="manual", scheduled_at=""):
     readiness = production_readiness_data(owner_id, job_id)
     if not readiness:
@@ -6302,7 +6318,16 @@ def next_worker_task(owner_id, job_id=None, tool=""):
     candidates.sort(key=lambda row: (type_priority.get(row[3] or "", 9), row[5] or 0, row[0]))
     return get_production_task(owner_id, candidates[0][0])
 
-def update_production_task(owner_id, task_id, status=None, output_url=None, note=None):
+def default_asset_type_for_task(task_type):
+    return {
+        "proof_asset": "proof_asset",
+        "visual_scene": "raw_video",
+        "voice": "voice",
+        "edit": "final_video",
+        "publish": "source",
+    }.get((task_type or "").lower(), "source")
+
+def update_production_task(owner_id, task_id, status=None, output_url=None, note=None, asset_type=None, record_asset=True):
     updates = []
     params = []
     if status:
@@ -6327,15 +6352,9 @@ def update_production_task(owner_id, task_id, status=None, output_url=None, note
     row = c.fetchone()
     conn.commit()
     conn.close()
-    if changed and output_url and row:
-        asset_type = {
-            "proof_asset": "proof_asset",
-            "visual_scene": "raw_video",
-            "voice": "voice",
-            "edit": "final_video",
-            "publish": "source",
-        }.get(row[1], "source")
-        add_production_asset(owner_id, row[0], asset_type, output_url, "", f"task:{task_id} {note or ''}")
+    if changed and output_url and row and record_asset:
+        resolved_asset_type = (asset_type or "").strip().lower() or default_asset_type_for_task(row[1])
+        add_production_asset(owner_id, row[0], resolved_asset_type, output_url, "", f"task:{task_id} {note or ''}")
     return changed > 0, row
 
 def operator_task_execution_runbook(task_type: str = "", tool: str = "", prompt: str = "", job_id: int = 0):
@@ -15447,17 +15466,15 @@ async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not output_url and output_urls:
         output_url = output_urls[0]
     note = data.get("note")
-    changed, row = update_production_task(update.effective_user.id, task_id, status or None, output_url, note)
+    task_row = get_production_task(update.effective_user.id, task_id)
+    if not task_row:
+        return await update.message.reply_text("❌ Không tìm thấy task hoặc không có quyền.")
+    task_type_for_asset = task_row[3]
+    asset_type = data.get("asset_type") or data.get("type") or default_asset_type_for_task(task_type_for_asset)
+    changed, row = update_production_task(update.effective_user.id, task_id, status or None, output_url, note, asset_type=asset_type)
     if not changed:
         return await update.message.reply_text("❌ Không tìm thấy task hoặc không có gì để cập nhật.")
     job_id, task_type = row
-    asset_type = data.get("asset_type") or data.get("type") or {
-        "proof_asset": "proof_asset",
-        "visual_scene": "raw_video",
-        "voice": "voice",
-        "edit": "final_video",
-        "publish": "source",
-    }.get(task_type, "source")
     saved_extra = 0
     for extra_url in output_urls:
         if extra_url and extra_url != output_url:
@@ -15471,15 +15488,24 @@ async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             if ok:
                 saved_extra += 1
-    if status in {"ready", "done"}:
-        update_production_job(job_id, update.effective_user.id, status="working", note=f"task:{task_id} {task_type} {status}")
+    readiness = apply_worker_output_job_state(
+        update.effective_user.id,
+        job_id,
+        task_id=task_id,
+        task_type=task_type,
+        task_status=status,
+        asset_type=asset_type,
+        note=note or "telegram_task_set",
+    )
     await update.message.reply_text(
         f"✅ <b>Đã cập nhật task #{task_id}</b>\n"
         f"• Job: <code>#{job_id}</code>\n"
         f"• Type: <code>{html.escape(task_type or '-')}</code>\n"
         f"• Status: <b>{html.escape(status or 'giữ nguyên')}</b>\n"
         f"• Output: <code>{html.escape(output_url or 'giữ nguyên')}</code>\n"
-        f"• Extra assets: <b>{saved_extra}</b>",
+        f"• Extra assets: <b>{saved_extra}</b>\n"
+        f"• Readiness: <code>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</code>\n"
+        f"• Next: <code>{html.escape((readiness or {}).get('next_action', ''))}</code>",
         parse_mode="HTML"
     )
 
@@ -18303,17 +18329,11 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
         raise HTTPException(status_code=404, detail="Task not found")
     output_urls = [u.strip() for u in (payload.output_urls or []) if u and u.strip()]
     primary_output = payload.output_url or (output_urls[0] if output_urls else "")
-    changed, row = update_production_task(ADMIN_ID, task_id, status=status, output_url=primary_output, note=payload.note)
+    asset_type = (payload.asset_type or "").strip() or default_asset_type_for_task(task[3])
+    changed, row = update_production_task(ADMIN_ID, task_id, status=status, output_url=primary_output, note=payload.note, asset_type=asset_type)
     if not changed:
         raise HTTPException(status_code=400, detail="Task not updated")
     job_id, task_type = row
-    asset_type = (payload.asset_type or "").strip() or {
-        "proof_asset": "proof_asset",
-        "visual_scene": "raw_video",
-        "voice": "voice",
-        "edit": "final_video",
-        "publish": "source",
-    }.get(task_type, "source")
     saved_extra_assets = 0
     for extra_url in output_urls:
         if extra_url and extra_url != primary_output:
@@ -18327,12 +18347,16 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
             )
             if ok:
                 saved_extra_assets += 1
-    if status in {"ready", "done"}:
-        update_production_job(job_id, ADMIN_ID, status="working", note=f"api_task_complete:{task_id} {task_type} {status}")
-    if status == "blocked":
-        update_production_job(job_id, ADMIN_ID, status="blocked", note=f"api_task_blocked:{task_id} {payload.note}")
+    readiness = apply_worker_output_job_state(
+        ADMIN_ID,
+        job_id,
+        task_id=task_id,
+        task_type=task_type,
+        task_status=status,
+        asset_type=asset_type,
+        note=payload.note or "api_task_complete",
+    )
     updated_task = get_production_task(ADMIN_ID, task_id)
-    readiness = production_readiness_data(ADMIN_ID, job_id)
 
     if tg_app and ADMIN_ID:
         try:
@@ -18360,6 +18384,8 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
             "level": (readiness or {}).get("level", "UNKNOWN"),
             "next_action": (readiness or {}).get("next_action", ""),
         },
+        "review_url": f"/api/operator/jobs/{job_id}/review-video",
+        "approve_url": f"/api/operator/jobs/{job_id}/approve",
     }
 
 @fastapi_app.post("/api/operator/tasks/{task_id}/upload")
@@ -18385,13 +18411,7 @@ async def api_operator_upload_task_asset(
     ok, reason, saved = await save_operator_upload_file(file, job_id)
     if not ok:
         raise HTTPException(status_code=400, detail=reason)
-    resolved_asset_type = (asset_type or "").strip() or {
-        "proof_asset": "proof_asset",
-        "visual_scene": "raw_video",
-        "voice": "voice",
-        "edit": "final_video",
-        "publish": "source",
-    }.get(task_type, "source")
+    resolved_asset_type = (asset_type or "").strip() or default_asset_type_for_task(task_type)
     ok, asset_id = add_production_asset(
         ADMIN_ID,
         job_id,
@@ -18407,12 +18427,24 @@ async def api_operator_upload_task_asset(
         raise HTTPException(status_code=404, detail="Job not found")
     asset_url = operator_asset_url(asset_id)
     update_production_asset_url(ADMIN_ID, asset_id, asset_url)
-    update_production_task(ADMIN_ID, task_id, status=status, output_url=asset_url, note=note or f"uploaded asset #{asset_id}")
-    if status in {"ready", "done"}:
-        update_production_job(job_id, ADMIN_ID, status="working", asset_url=asset_url, note=f"api_task_upload:{task_id} asset:{asset_id}")
-    if status == "blocked":
-        update_production_job(job_id, ADMIN_ID, status="blocked", note=f"api_task_upload_blocked:{task_id} {note}")
-    readiness = production_readiness_data(ADMIN_ID, job_id)
+    update_production_task(
+        ADMIN_ID,
+        task_id,
+        status=status,
+        output_url=asset_url,
+        note=note or f"uploaded asset #{asset_id}",
+        asset_type=resolved_asset_type,
+        record_asset=False,
+    )
+    readiness = apply_worker_output_job_state(
+        ADMIN_ID,
+        job_id,
+        task_id=task_id,
+        task_type=task_type,
+        task_status=status,
+        asset_type=resolved_asset_type,
+        note=note or f"api_task_upload asset:{asset_id}",
+    )
     if tg_app and ADMIN_ID:
         try:
             await tg_app.bot.send_message(
@@ -18446,6 +18478,8 @@ async def api_operator_upload_task_asset(
             "level": (readiness or {}).get("level", "UNKNOWN"),
             "next_action": (readiness or {}).get("next_action", ""),
         },
+        "review_url": f"/api/operator/jobs/{job_id}/review-video",
+        "approve_url": f"/api/operator/jobs/{job_id}/approve",
     }
 
 @fastapi_app.post("/api/operator/jobs/{job_id}/assets/upload")
@@ -18478,7 +18512,11 @@ async def api_operator_upload_job_asset(
         raise HTTPException(status_code=404, detail="Job not found")
     asset_url = operator_asset_url(asset_id)
     update_production_asset_url(ADMIN_ID, asset_id, asset_url)
-    update_production_job(job_id, ADMIN_ID, asset_url=asset_url, note=f"api_job_upload asset:{asset_id} {note or ''}".strip())
+    if (asset_type or "").lower() == "final_video":
+        update_production_job(job_id, ADMIN_ID, stage="review", status="ready", asset_url=asset_url, note=f"api_job_upload_final asset:{asset_id} {note or ''}".strip())
+    else:
+        update_production_job(job_id, ADMIN_ID, asset_url=asset_url, note=f"api_job_upload asset:{asset_id} {note or ''}".strip())
+    readiness = production_readiness_data(ADMIN_ID, job_id)
     if tg_app and ADMIN_ID:
         try:
             await tg_app.bot.send_message(
@@ -18488,6 +18526,7 @@ async def api_operator_upload_job_asset(
                     f"• Job: <code>#{job_id}</code>\n"
                     f"• Asset: <code>#{asset_id}</code> | Type: <code>{html.escape(asset_type or 'source')}</code>\n"
                     f"• File: <code>{html.escape(saved['filename'])}</code> | {saved['size']:,} bytes\n"
+                    f"• Ready: <b>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</b>\n"
                     f"• Xem ngay: <code>/asset_send id={asset_id}</code>"
                 ),
                 parse_mode="HTML"
@@ -18506,6 +18545,12 @@ async def api_operator_upload_job_asset(
             "content_type": saved["content_type"],
             "size": saved["size"],
         },
+        "readiness": {
+            "level": (readiness or {}).get("level", "UNKNOWN"),
+            "next_action": (readiness or {}).get("next_action", ""),
+        },
+        "review_url": f"/api/operator/jobs/{job_id}/review-video",
+        "approve_url": f"/api/operator/jobs/{job_id}/approve",
     }
 
 @fastapi_app.get("/api/operator/assets/{asset_id}/file")
