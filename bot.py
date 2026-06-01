@@ -3068,8 +3068,8 @@ def operator_worker_spec_data():
                 "event_type": "view|click|order|lead|revenue|cost",
                 "value": 1,
                 "amount": 0,
-                "source": "tiktok|facebook|onlyfans|manual",
-                "note": "tracking detail",
+                "source": "tiktok_job_12_caption|tiktok_job_12_comment|tiktok_job_12_ads",
+                "note": "tracking detail; server lưu dạng src:<source>|<note>",
             },
         },
         "safety_rules": [
@@ -7086,6 +7086,16 @@ def growth_score(views=0, clicks=0, conversions=0, revenue=0, cost=0):
     score = min(100, int((ctr * 3) + (cvr * 5) + min(revenue / 10000, 40) + max(min(roi / 10, 20), 0)))
     return score, ctr, cvr, roi
 
+def normalize_tracking_source(source, fallback="manual"):
+    value = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", str(source or fallback or "manual").strip().lower())
+    value = re.sub(r"_+", "_", value).strip("_")
+    return (value or fallback or "manual")[:80]
+
+def format_tracking_note(source="", note=""):
+    source = normalize_tracking_source(source, "manual")
+    note = str(note or "").strip()
+    return f"src:{source}" + (f"|{note}" if note else "")
+
 def performance_source_from_note(note):
     note = str(note or "").strip()
     if not note:
@@ -9228,13 +9238,23 @@ def build_post_publish_handoff(owner_id, job_id, days=30):
     performance = job_performance_summary(owner_id, job_id)
     placement_plan = pack.get("placement_plan") or {}
     primary = pack.get("primary_affiliate") or {}
+    source_base = normalize_tracking_source(f"{platform or 'social'}_job_{job_id}", "social")
+    placement_sources = {
+        "caption": f"{source_base}_caption",
+        "pinned_comment": f"{source_base}_comment",
+        "status": f"{source_base}_status",
+        "bio": f"{source_base}_bio",
+        "manual": f"{source_base}_manual",
+        "ads": f"{source_base}_ads",
+    }
     commands = {
         "mark_published": f"/mark_published job={job_id} url=https://... views=0 clicks=0 note=...",
-        "view": f"/performance_add job={job_id} type=view value=<VIEWS> note=manual:view",
-        "click": f"/performance_add job={job_id} type=click value=<CLICKS> note=manual:click",
-        "order": f"/performance_add job={job_id} type=order value=<ORDERS> amount=<REVENUE> note=manual:order",
-        "revenue": f"/performance_add job={job_id} type=revenue value=1 amount=<REVENUE> note=manual:revenue",
-        "cost": f"/performance_add job={job_id} type=cost value=1 amount=<COST> note=manual:cost",
+        "view": f"/performance_add job={job_id} type=view value=<VIEWS> source={placement_sources['manual']} note=view",
+        "click_caption": f"/performance_add job={job_id} type=click value=<CLICKS> source={placement_sources['caption']} note=caption_click",
+        "click_comment": f"/performance_add job={job_id} type=click value=<CLICKS> source={placement_sources['pinned_comment']} note=comment_click",
+        "order": f"/performance_add job={job_id} type=order value=<ORDERS> amount=<REVENUE> source={placement_sources['manual']} note=order",
+        "revenue": f"/performance_add job={job_id} type=revenue value=1 amount=<REVENUE> source={placement_sources['manual']} note=revenue",
+        "cost": f"/performance_add job={job_id} type=cost value=1 amount=<COST> source={placement_sources['ads']} note=ads_cost",
         "tracking_report": f"/tracking_report days={max(1, min(int(days or 30), 180))} limit=20",
         "scale_plan": f"/scale_plan days={max(1, min(int(days or 30), 180))} platform={platform or 'tiktok'} limit=10",
         "affiliate_report": f"/affiliate_report days={max(1, min(int(days or 30), 180))} limit=20",
@@ -9245,10 +9265,31 @@ def build_post_publish_handoff(owner_id, job_id, days=30):
             "event_type": event_type,
             "value": "<VALUE>",
             "amount": "<AMOUNT>",
-            "source": f"{platform or 'social'}_{event_type}",
-            "note": "post_publish_tracking",
+            "source": placement_sources["manual"],
+            "note": f"{event_type}_post_publish_tracking",
         }
         for event_type in ["view", "click", "order", "revenue", "cost"]
+    }
+    tracking_event_pack = {
+        "source_base": source_base,
+        "placement_sources": placement_sources,
+        "event_matrix": [
+            {"event_type": "view", "source": placement_sources["manual"], "when": "Sau khi đăng hoặc cập nhật view tổng của bài/video."},
+            {"event_type": "click", "source": placement_sources["caption"], "when": "Khi đo click link ở caption/mô tả."},
+            {"event_type": "click", "source": placement_sources["pinned_comment"], "when": "Khi đo click link ở comment ghim."},
+            {"event_type": "click", "source": placement_sources["status"], "when": "Khi đo click từ status/post text."},
+            {"event_type": "lead", "source": placement_sources["manual"], "when": "Có đăng ký/form/app install/chuyển đổi chưa ra tiền."},
+            {"event_type": "order", "source": placement_sources["manual"], "when": "Có đơn hàng/conversion có thể gắn về job này."},
+            {"event_type": "revenue", "source": placement_sources["manual"], "when": "Có hoa hồng/doanh thu thực nhận hoặc dự kiến."},
+            {"event_type": "cost", "source": placement_sources["ads"], "when": "Có chi phí ads/tool/booking liên quan job này."},
+        ],
+        "api_examples": {
+            "caption_click": {"job_id": job_id, "event_type": "click", "value": 1, "amount": 0, "source": placement_sources["caption"], "note": "caption_click"},
+            "comment_click": {"job_id": job_id, "event_type": "click", "value": 1, "amount": 0, "source": placement_sources["pinned_comment"], "note": "pinned_comment_click"},
+            "order": {"job_id": job_id, "event_type": "order", "value": 1, "amount": "<REVENUE>", "source": placement_sources["manual"], "note": "order"},
+            "cost": {"job_id": job_id, "event_type": "cost", "value": 1, "amount": "<COST>", "source": placement_sources["ads"], "note": "ads_or_tool_cost"},
+        },
+        "rule": "Mỗi số liệu phải có source ổn định để tracking_report biết caption/comment/status/bio/ads nguồn nào hiệu quả.",
     }
     if performance["revenue"] > 0 or performance["conversions"] > 0:
         recommendation = "SCALE nếu compliance ổn: chạy /scale_plan rồi /scale_execute giới hạn nhỏ."
@@ -9283,6 +9324,7 @@ def build_post_publish_handoff(owner_id, job_id, days=30):
         "performance": performance,
         "commands": commands,
         "api_payloads": api_payloads,
+        "tracking_event_pack": tracking_event_pack,
         "recommendation": recommendation,
         "rule": "Sau đăng phải ghi publish_url, view, click, order/lead/revenue và cost nếu có; quyết định scale dựa trên dữ liệu, không đoán mò.",
     }
@@ -9292,6 +9334,8 @@ def format_post_publish_handoff(handoff):
     performance = handoff.get("performance") or {}
     commands = handoff.get("commands") or {}
     links = handoff.get("tracking_links") or {}
+    event_pack = handoff.get("tracking_event_pack") or {}
+    sources = event_pack.get("placement_sources") or {}
     lines = [
         f"📈 <b>POST-PUBLISH HANDOFF — JOB #{job.get('id')}</b>",
         f"• Platform/channel: <code>{html.escape(job.get('platform') or '-')}</code> / {html.escape(job.get('channel_name') or '-')}",
@@ -9314,9 +9358,16 @@ def format_post_publish_handoff(handoff):
         "<b>Ghi dữ liệu:</b>",
         f"• <code>{html.escape(commands.get('mark_published') or '')}</code>",
         f"• <code>{html.escape(commands.get('view') or '')}</code>",
-        f"• <code>{html.escape(commands.get('click') or '')}</code>",
+        f"• <code>{html.escape(commands.get('click_caption') or '')}</code>",
+        f"• <code>{html.escape(commands.get('click_comment') or '')}</code>",
         f"• <code>{html.escape(commands.get('order') or '')}</code>",
         f"• <code>{html.escape(commands.get('cost') or '')}</code>",
+        "",
+        "<b>Source chuẩn:</b>",
+        f"• caption=<code>{html.escape(sources.get('caption') or '-')}</code>",
+        f"• comment=<code>{html.escape(sources.get('pinned_comment') or '-')}</code>",
+        f"• status=<code>{html.escape(sources.get('status') or '-')}</code>",
+        f"• ads=<code>{html.escape(sources.get('ads') or '-')}</code>",
         "",
         f"<b>Đề xuất:</b> {html.escape(handoff.get('recommendation') or '-')}",
         f"• <code>{html.escape(commands.get('tracking_report') or '')}</code>",
@@ -14862,7 +14913,8 @@ async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE
         variant_id = int(data.get("variant") or data.get("variant_id") or 0)
     except ValueError:
         variant_id = 0
-    note = data.get("note") or ""
+    source = data.get("source") or data.get("src") or ""
+    note = format_tracking_note(source, data.get("note") or "") if source else (data.get("note") or "")
     ok, job = add_performance_event(update.effective_user.id, job_id, event_type, value, amount, note, variant_id)
     if not ok:
         return await update.message.reply_text("❌ Không tìm thấy production job hoặc creative variant.")
@@ -14909,11 +14961,12 @@ async def cmd_mark_published(update: Update, context: ContextTypes.DEFAULT_TYPE)
         note=note,
         publish_url=publish_url
     )
-    add_performance_event(update.effective_user.id, job_id, "publish", 1, 0, note)
+    source = data.get("source") or data.get("src") or note or "manual_publish"
+    add_performance_event(update.effective_user.id, job_id, "publish", 1, 0, format_tracking_note(source, "publish"))
     if views > 0:
-        add_performance_event(update.effective_user.id, job_id, "view", views, 0, "initial_views")
+        add_performance_event(update.effective_user.id, job_id, "view", views, 0, format_tracking_note(source, "initial_views"))
     if clicks > 0:
-        add_performance_event(update.effective_user.id, job_id, "click", clicks, 0, "initial_clicks")
+        add_performance_event(update.effective_user.id, job_id, "click", clicks, 0, format_tracking_note(source, "initial_clicks"))
     await update.message.reply_text(
         f"✅ <b>Đã ghi nhận job #{job_id} đã đăng</b>\n"
         f"• Publish URL: <code>{html.escape(publish_url or 'chưa nhập')}</code>\n"
@@ -19458,7 +19511,7 @@ async def api_operator_performance(payload: OperatorPerformanceRequest, request:
     allowed = {"view", "click", "order", "revenue", "lead", "publish", "cost"}
     if event_type not in allowed:
         raise HTTPException(status_code=400, detail=f"Invalid event_type. Allowed: {', '.join(sorted(allowed))}")
-    note = f"{payload.source}: {payload.note}".strip(": ")
+    note = format_tracking_note(payload.source or "api", payload.note)
     ok, job = add_performance_event(
         ADMIN_ID,
         payload.job_id,
