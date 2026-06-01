@@ -2604,6 +2604,92 @@ def format_related_affiliate_links(related, max_items=8):
         lines.append(f"#{aid} | {network or '-'} | {product_name or '-'} | {url or '-'} | {reason_text}")
     return "\n".join(lines)
 
+def build_affiliate_comment_pack(owner_id, job_id, max_comments=10, delay_seconds=30):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return None
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    max_comments = max(1, min(int(max_comments or 10), 10))
+    delay_seconds = max(10, min(int(delay_seconds or 30), 600))
+    _ok, _reason, bundle = build_affiliate_link_bundle(
+        owner_id,
+        affiliate_id=affiliate_id or 0,
+        job_id=jid,
+        brand=product_name or "",
+        niche=topic or product_name or "",
+        platform=platform or "social",
+        limit=max_comments,
+    )
+    all_links = (bundle or {}).get("all_links") or []
+    primary = (bundle or {}).get("primary") or {}
+    disclosure = "Có thể nhận hoa hồng affiliate nếu bạn mua/đăng ký qua link."
+    comments = []
+    templates = [
+        "Mình để link chính ở đây cho ai cần: {url}\n{disclosure}",
+        "Sản phẩm/dịch vụ liên quan trong video: {product}\n{url}",
+        "Ai muốn so sánh thêm lựa chọn tương tự thì xem link này: {url}",
+        "Link tham khảo cho {product}: {url}",
+        "Nếu link chính chưa hợp nhu cầu, đây là lựa chọn liên quan: {url}",
+        "Mình tách riêng link để mọi người dễ bấm và dễ đo hiệu quả: {url}",
+        "Gợi ý thêm cùng nhóm sản phẩm: {product}\n{url}",
+        "Danh sách link liên quan mình để dần ở comment để tránh caption quá dài: {url}",
+        "Ai cần xem sau thì lưu comment này: {product} - {url}",
+        "Link theo dõi hiệu quả nguồn comment: {url}",
+    ]
+    for idx, link in enumerate(all_links[:max_comments], start=1):
+        tracking = link.get("tracking") or {}
+        url = tracking.get("pinned_comment") or tracking.get("reply_comment") or link.get("recommended_url") or link.get("url") or ""
+        text = templates[(idx - 1) % len(templates)].format(
+            product=link.get("product") or product_name or "sản phẩm",
+            url=url,
+            disclosure=disclosure if idx == 1 else "",
+        ).strip()
+        source = normalize_tracking_source(f"{platform or 'social'}_job_{jid}_comment_{idx}", "comment")
+        comments.append({
+            "order": idx,
+            "role": link.get("role") or ("primary" if idx == 1 else "related"),
+            "affiliate_id": int(link.get("id") or 0),
+            "product": link.get("product") or "",
+            "network": link.get("network") or "",
+            "text": text,
+            "url": url,
+            "tracking_source": source,
+            "delay_seconds_after_previous": 0 if idx == 1 else delay_seconds,
+            "status": "draft",
+            "record_click_command": f"/performance_add job={jid} type=click value=<CLICKS> source={source} note=comment_{idx}",
+        })
+    caption_comment = ""
+    if primary:
+        primary_url = ((primary.get("tracking") or {}).get("caption") or primary.get("recommended_url") or primary.get("url") or "")
+        caption_comment = f"Link chính: {primary_url}\n{disclosure}".strip()
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "job_id": jid,
+        "platform": platform or "social",
+        "topic": topic or "",
+        "channel": {"id": channel_id, "name": channel_name, "account_label": account_label},
+        "publish_url": publish_url or "",
+        "primary_comment": caption_comment or (comments[0]["text"] if comments else ""),
+        "comments": comments,
+        "max_comments": max_comments,
+        "delay_seconds_between_comments": delay_seconds,
+        "affiliate_bundle": bundle or {},
+        "commands": {
+            "publish_pack": f"/publish_pack job={jid}",
+            "distribution_pack": f"/distribution_pack job={jid}",
+            "post_publish": f"/post_publish job={jid}",
+            "tracking_report": "/tracking_report days=30 limit=20",
+        },
+        "rule": (
+            "Không spam comment quá nhanh; đăng comment chính trước, các comment liên quan cách nhau delay_seconds. "
+            "Mỗi comment có tracking_source riêng để đo comment/link nào hiệu quả."
+        ),
+    }
+
 def fallback_affiliate_video_ideas(affiliate, platform="tiktok", limit=5):
     (
         aid, network, product_name, niche, url, commission_note, status,
@@ -3588,7 +3674,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "scene_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3642,6 +3728,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/jobs/<JOB_ID>/context"),
         ("GET", "/api/operator/jobs/<JOB_ID>/worker-pack"),
         ("GET", "/api/operator/jobs/<JOB_ID>/scene-pack"),
+        ("GET", "/api/operator/jobs/<JOB_ID>/comment-pack"),
         ("GET", "/api/operator/output-acceptance"),
         ("GET", "/api/operator/jobs/<JOB_ID>/output-acceptance"),
         ("POST", "/api/operator/jobs/<JOB_ID>/storyboard-grid/upload"),
@@ -3735,6 +3822,7 @@ def operator_smoke_test_data(owner_id):
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
         "scene_pack_in_spec": "/api/operator/jobs/<JOB_ID>/scene-pack" in spec_text,
+        "comment_pack_in_spec": "/api/operator/jobs/<JOB_ID>/comment-pack" in spec_text,
         "task_prompt_pack_in_spec": "/api/operator/tasks/<TASK_ID>/prompt-pack" in spec_text and "/prompt-pack" in n8n_text,
         "output_acceptance_in_spec": "/api/operator/output-acceptance" in spec_text and "/api/operator/output-acceptance" in n8n_text,
         "storyboard_crop_in_spec": "/api/operator/jobs/<JOB_ID>/storyboard-grid/upload" in spec_text,
@@ -3930,6 +4018,7 @@ def operator_worker_spec_data():
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
             {"step": 8.1, "name": "distribution_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/distribution-pack"},
+            {"step": 8.15, "name": "comment_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/comment-pack"},
             {"step": 8.2, "name": "review_video_decision", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/review-video"},
             {"step": 9, "name": "affiliate_bundle", "method": "GET", "url": "/api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>"},
             {"step": 10, "name": "publisher_status", "method": "GET", "url": "/api/operator/publisher/status"},
@@ -4072,6 +4161,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/affiliate-bundle?affiliate_id=3&job_id=12&platform=tiktok&limit=12",
                 "purpose": "Lấy link chính + link liên quan, mỗi placement có src tracking riêng cho caption/comment/status/bio.",
+            },
+            "comment_pack": {
+                "method": "GET",
+                "url": "/api/operator/jobs/<JOB_ID>/comment-pack?max_comments=10",
+                "purpose": "Tạo bộ comment affiliate có delay, source tracking và link liên quan để publisher/manual đăng sau video.",
             },
             "affiliate_import": {
                 "method": "POST",
@@ -13595,6 +13689,7 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
     pinned_comment = ((affiliate_bundle or {}).get("placement_plan") or {}).get("pinned_comment") or ""
     if not pinned_comment and primary_display_url:
         pinned_comment = f"Link chính: {primary_display_url}"
+    comment_pack = build_affiliate_comment_pack(owner_id, jid, max_comments=10, delay_seconds=30)
     checklist = [
         "Đã kiểm tra quyền hình ảnh/voice/nhạc.",
         "Đã ghi disclosure affiliate rõ ràng.",
@@ -13622,6 +13717,7 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
         "reference_examples": selected_references,
         "proof_assets_required": pattern.get("proof_assets_required") or [],
         "placement_plan": (affiliate_bundle or {}).get("placement_plan", {}),
+        "comment_pack": comment_pack,
         "caption": caption,
         "pinned_comment": pinned_comment,
         "hashtags": "#review #affiliate #muasamthongminh #AI",
@@ -13657,6 +13753,7 @@ def build_distribution_pack(owner_id, job_id):
             readiness, readiness_reason = channel_publish_readiness(readiness_row)
             publish_mode = readiness_row[5] or "manual"
     publish_pack = build_static_publish_pack(job, owner_id)
+    comment_pack = publish_pack.get("comment_pack") or build_affiliate_comment_pack(owner_id, job_id)
     review = build_video_review_summary(owner_id, job_id)
     post_publish = build_post_publish_handoff(owner_id, job_id, days=30)
     bundle = publish_pack.get("affiliate_bundle") or {}
@@ -13708,6 +13805,7 @@ def build_distribution_pack(owner_id, job_id):
             "primary_tracking": tracking.get("caption") or publish_pack.get("primary_affiliate", {}).get("tracking_url", ""),
         },
         "publish_pack": publish_pack,
+        "comment_pack": comment_pack,
         "placement_map": {
             "caption": tracking.get("caption") or publish_pack.get("primary_affiliate", {}).get("tracking_url", ""),
             "pinned_comment": placement.get("pinned_comment") or tracking.get("comment") or "",
@@ -13741,6 +13839,7 @@ def build_distribution_pack(owner_id, job_id):
                 "review_video": f"/review_video job={job_id} send=1",
                 "approve_publish": f"/approve_publish job={job_id} queue=1 mode=manual",
                 "publish_pack": f"/publish_pack job={job_id}",
+                "comment_pack": f"/comment_pack job={job_id} max=10 delay=30",
                 "post_publish": f"/post_publish job={job_id}",
                 "mark_published": f"/mark_published job={job_id} url=<PUBLISH_URL> views=0 clicks=0 note=manual",
                 "performance_view": f"/performance_add job={job_id} type=view value=1 source={source_prefix}_caption",
@@ -13752,6 +13851,7 @@ def build_distribution_pack(owner_id, job_id):
                 "approve_publish": f"/api/operator/jobs/{job_id}/approve",
                 "publish_pack": f"/api/operator/jobs/{job_id}/publish-pack",
                 "distribution_pack": f"/api/operator/jobs/{job_id}/distribution-pack",
+                "comment_pack": f"/api/operator/jobs/{job_id}/comment-pack",
                 "post_publish": f"/api/operator/jobs/{job_id}/post-publish",
                 "performance": "/api/operator/performance",
             },
@@ -20211,6 +20311,7 @@ def operator_category_keyboard(category):
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📈 Post publish", "postpublish"),
             ("🧭 Distribution pack", "distributionpack"),
+            ("💬 Comment pack", "commentpack"),
             ("📮 Publish queue", "publishqueue"),
             ("🤖 Publisher handoff", "publisherhandoff"), ("✅ Approve publish", "approvepublish"),
             ("▶️ Publisher run", "publisherrun"), ("📡 Publisher status", "publisherstatus"),
@@ -20366,6 +20467,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Pipeline pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/pipeline-pack</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
         f"• Distribution pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/distribution-pack</code>",
+        f"• Affiliate comment pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/comment-pack?max_comments=10</code>",
         f"• Review video gate: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/review-video</code>",
         f"• Duyệt publish: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/approve</code>",
         f"• Lấy hàng đợi đăng: <code>GET {html.escape(base_url)}/api/operator/publish/next</code>",
@@ -20651,6 +20753,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "postpublish": "/post_publish job=<JOB_ID> days=30\n/brain sau đăng job <JOB_ID> cần đo gì\nGET /api/operator/jobs/<JOB_ID>/post-publish",
         "distributionpack": "/distribution_pack job=<JOB_ID>\nGET /api/operator/jobs/<JOB_ID>/distribution-pack",
+        "commentpack": "/comment_pack job=<JOB_ID> max=10 delay=30\nGET /api/operator/jobs/<JOB_ID>/comment-pack?max_comments=10",
         "approvepublish": "/approve_publish job=<JOB_ID> queue=1 mode=manual note=duyet_ok\nPOST /api/operator/jobs/<JOB_ID>/approve",
         "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
@@ -21419,6 +21522,45 @@ async def cmd_distribution_pack(update: Update, context: ContextTypes.DEFAULT_TY
         f"• Doanh thu: <code>{html.escape(commands.get('performance_revenue') or '')}</code>",
         "",
         f"API: <code>/api/operator/jobs/{job_id}/distribution-pack</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_comment_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    job_id = safe_int(data.get("job") or data.get("id") or (context.args[0] if context.args else 0), 0)
+    max_comments = max(1, min(safe_int(data.get("max") or data.get("limit") or data.get("comments"), 10), 10))
+    delay = max(10, min(safe_int(data.get("delay") or data.get("delay_seconds"), 30), 600))
+    if not job_id:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/comment_pack job=&lt;JOB_ID&gt; max=10 delay=30</code>",
+            parse_mode="HTML"
+        )
+    pack = build_affiliate_comment_pack(update.effective_user.id, job_id, max_comments=max_comments, delay_seconds=delay)
+    if not pack:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    lines = [
+        f"💬 <b>AFFILIATE COMMENT PACK — JOB #{job_id}</b>",
+        f"• Platform: <code>{html.escape(pack.get('platform') or '-')}</code> | Comments: <b>{len(pack.get('comments') or [])}</b>",
+        f"• Delay: <b>{pack.get('delay_seconds_between_comments') or 30}s</b>",
+        f"• Rule: {html.escape(pack.get('rule') or '')}\n",
+    ]
+    if pack.get("primary_comment"):
+        lines.append("<b>Comment chính:</b>")
+        lines.append(f"<pre>{html_pre(pack.get('primary_comment') or '-', 900)}</pre>")
+    lines.append("<b>Comment liên quan:</b>")
+    for item in (pack.get("comments") or [])[:max_comments]:
+        lines.append(
+            f"• #{item.get('order')} | aff=<code>#{item.get('affiliate_id') or '-'}</code> | src=<code>{html.escape(item.get('tracking_source') or '-')}</code>\n"
+            f"<pre>{html_pre(item.get('text') or '-', 700)}</pre>"
+        )
+    commands = pack.get("commands") or {}
+    lines.extend([
+        "<b>Sau đăng:</b>",
+        f"• Post publish: <code>{html.escape(commands.get('post_publish') or '')}</code>",
+        f"• Tracking: <code>{html.escape(commands.get('tracking_report') or '')}</code>",
+        f"API: <code>/api/operator/jobs/{job_id}/comment-pack?max_comments={max_comments}</code>",
     ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -24597,6 +24739,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
     tg_app.add_handler(CommandHandler("distribution_pack", cmd_distribution_pack))
+    tg_app.add_handler(CommandHandler("comment_pack", cmd_comment_pack))
     tg_app.add_handler(CommandHandler("pipeline_pack", cmd_pipeline_pack))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
@@ -26488,6 +26631,19 @@ async def api_operator_job_publish_pack(job_id: int, request: Request):
 async def api_operator_job_distribution_pack(job_id: int, request: Request):
     verify_operator_api_token(request)
     pack = build_distribution_pack(ADMIN_ID, job_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return pack
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/comment-pack")
+async def api_operator_job_comment_pack(job_id: int, request: Request, max_comments: int = 10, delay_seconds: int = 30):
+    verify_operator_api_token(request)
+    pack = build_affiliate_comment_pack(
+        ADMIN_ID,
+        job_id,
+        max_comments=max(1, min(int(max_comments or 10), 10)),
+        delay_seconds=max(10, min(int(delay_seconds or 30), 600)),
+    )
     if not pack:
         raise HTTPException(status_code=404, detail="Job not found")
     return pack
