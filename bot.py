@@ -6369,6 +6369,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
             "Nếu thiếu setup, gọi /api/operator/bootstrap; không xóa dữ liệu cũ.",
             "Đọc /api/operator/channel-router để chọn đúng account/kênh trước khi tạo batch hoặc launch.",
             "Nếu admin đưa chủ đề/link affiliate, gọi /api/operator/launch hoặc /api/operator/make-video.",
+            "Nếu admin muốn phim AI dài tập/series nhiều tập, gọi /api/operator/film-series để tạo một job cho mỗi tập.",
             "Peek worker bằng /api/operator/worker-next, đọc /worker-pack cho job/task, rồi chỉ claim khi worker thật sự làm.",
             "Giao tool tạo script/ảnh/video/voice/edit; complete/upload output vào task tương ứng.",
             "Khi có final asset, đọc review-video và chỉ approve/queue nếu gate đạt.",
@@ -6378,7 +6379,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
         ],
         "action_schema": {
             "think": "Tóm tắt trạng thái và lý do chọn bước tiếp theo.",
-            "intent": "bootstrap|launch|make_video|worker_pack|claim_task|complete_task|review|approve|publish|track|scale|ask_admin",
+            "intent": "bootstrap|launch|film_series|make_video|worker_pack|claim_task|complete_task|review|approve|publish|track|scale|ask_admin",
             "api": {"method": "GET|POST", "url": "/api/operator/...", "body": {}},
             "telegram_fallback": "/operator_menu hoặc lệnh cụ thể cho admin",
             "safety_gate": "pass|needs_admin|blocked",
@@ -6407,6 +6408,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
             "mission": f"{base_url}/api/operator/mission",
             "bootstrap": f"{base_url}/api/operator/bootstrap",
             "launch": f"{base_url}/api/operator/launch",
+            "film_series": f"{base_url}/api/operator/film-series",
             "make_video": f"{base_url}/api/operator/make-video",
             "worker_next": f"{base_url}/api/operator/worker-next",
             "film_blueprint": f"{base_url}/api/operator/film-blueprint",
@@ -15439,7 +15441,7 @@ def parse_brain_performance_metrics(raw_text):
 def clean_operator_topic(text, default="công nghệ AI"):
     source = (text or "").replace("shoppe", "shopee")
     cleaned = re.sub(
-        r"\b(tạo|tao|làm|lam|video|clip|short|reel|trend|viral|mới nhất|moi nhat|cho|trên|tren|kênh|kenh|gắn|gan|link|affiliate|aff|campaign|camp|limit|job|build|luôn|luon|đăng|dang|bán hàng|ban hang|kiếm tiền|kiem tien|tìm|tim|rồi|roi|và|va|theo|để|de)\b",
+        r"\b(tạo|tao|làm|lam|video|clip|short|reel|phim|film|series|storyboard|cảnh|canh|tập|tap|chủ đề|chu de|dài|dai|trend|viral|mới nhất|moi nhat|cho|trên|tren|kênh|kenh|gắn|gan|link|affiliate|aff|campaign|camp|limit|job|build|luôn|luon|đăng|dang|bán hàng|ban hang|kiếm tiền|kiem tien|tìm|tim|rồi|roi|và|va|theo|để|de)\b",
         " ",
         source,
         flags=re.IGNORECASE,
@@ -15466,7 +15468,12 @@ def operator_brain_fallback(raw_text):
     if not task_id and any(word in lower for word in ["handoff", "kích hoạt", "kich hoat", "giao số", "giao so", "chạy số", "chay so"]):
         task_id = first_number_near(lower, ["số", "so", "id"], 0)
     limit = first_number_near(lower, ["video", "job", "trend"], 0) or int_from_text(lower, ["limit", "max"], 0) or 5
+    episode_direct = re.search(r"(\d+)\s*(?:tập|tap|episodes?|episode)\b", lower, re.IGNORECASE)
+    scene_direct = re.search(r"(\d+)\s*(?:cảnh|canh|scenes?|scene)\b", lower, re.IGNORECASE)
+    episodes = int(episode_direct.group(1)) if episode_direct else (int_from_text(lower, ["episodes", "episode", "tap", "tập"], 0) or first_number_near(lower, ["tập", "tap", "episodes", "episode"], 0) or 5)
+    scenes_per_episode = int(scene_direct.group(1)) if scene_direct else (int_from_text(lower, ["scenes", "scene", "canh", "cảnh"], 0) or first_number_near(lower, ["cảnh", "canh", "scenes", "scene"], 0) or 10)
     duration = int_from_text(lower, ["duration", "dai", "dài"], 45) or 45
+    series_duration = int_from_text(lower, ["duration", "dai", "dài"], 0) or first_number_near(lower, ["giây", "giay", "seconds"], 0) or 80
     build_requested = any(word in lower for word in ["build", "dựng", "dung", "xây", "xay", "tạo bundle", "tao bundle", "build luôn", "build luon"])
     days = int_from_text(lower, ["days", "ngày", "ngay"], 0) or first_number_near(lower, ["ngày", "ngay", "days"], 0) or 30
     reference_url = extract_supported_video_url(text)
@@ -15609,6 +15616,27 @@ def operator_brain_fallback(raw_text):
             "limit": max(3, min(limit, 20)),
             "days": max(1, min(days, 180)),
             "confidence": 86,
+        }
+
+    if any(word in lower for word in [
+        "film series", "series phim", "phim series", "phim dài tập", "phim dai tap",
+        "nhiều tập", "nhieu tap", "dài tập", "dai tap", "storyboard nhiều tập",
+        "storyboard nhieu tap", "kingcontent", "tạo phim ai", "tao phim ai"
+    ]):
+        topic = brain_data.get("topic") or brain_data.get("chu_de") or brain_data.get("chude") or clean_operator_topic(lower, "đạo lý gia đình")
+        topic = re.sub(r"^ai\s+", "", topic, flags=re.IGNORECASE).strip() or "đạo lý gia đình"
+        return {
+            "intent": "film_series",
+            "topic": topic,
+            "platform": platform,
+            "channel": brain_data.get("channel") or brain_data.get("kenh") or channel_id or "all",
+            "affiliate": affiliate_id,
+            "campaign": campaign_id,
+            "episodes": max(1, min(episodes, 8)),
+            "scenes_per_episode": max(3, min(scenes_per_episode, 12)),
+            "duration": max(30, min(series_duration, 180)),
+            "build": 1 if build_requested or any(word in lower for word in ["build", "dựng", "dung", "xây", "xay", "làm luôn", "lam luon"]) else 1,
+            "confidence": 88,
         }
 
     if any(word in lower for word in [
@@ -15945,7 +15973,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_next_run, goal_audit, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_next_run, goal_audit, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
@@ -15957,6 +15985,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_commander_pack: khi admin muốn prompt/gói điều khiển cho Claude Opus hoặc AI cấp cao điều phối toàn pipeline.\n"
         "- operator_contract: khi admin muốn hợp đồng điều khiển, ranh giới quyền, vòng đời vận hành giữa admin/Claude/n8n/worker/publisher.\n"
         "- campaign_preset: khi admin muốn dùng preset chiến dịch tech/ecom/finance/travel/onlyfans để tự gom affiliate, kênh và launch.\n"
+        "- film_series: khi admin muốn tạo phim AI/series nhiều tập/dài tập/storyboard nhiều cảnh theo blueprint KingContent; tạo nhiều production job rồi worker làm từng tập.\n"
         "- operator_launch: khi admin muốn một lệnh chạy từ đầu: bootstrap nếu thiếu, tạo pipeline video, trả next task/review.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
         "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
@@ -15990,7 +16019,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","preset":"tech","network":"","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"execute":0,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","preset":"tech","network":"","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"episodes":5,"scenes_per_episode":10,"duration":45,"build":1,"execute":0,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -16080,6 +16109,15 @@ def brain_command_preview(plan):
             f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
             f"limit={max(1, min(int(plan.get('limit') or 3), 8))} build={int(plan.get('build') or 1)} "
             f"duration={int(plan.get('duration') or 45)} bootstrap=1"
+        )
+    if intent == "film_series":
+        return (
+            f"/film_series topic={plan.get('topic') or plan.get('niche') or 'đạo lý gia đình'} "
+            f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
+            f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
+            f"episodes={max(1, min(int(plan.get('episodes') or 5), 8))} "
+            f"scenes={max(3, min(int(plan.get('scenes_per_episode') or plan.get('scenes') or 10), 12))} "
+            f"duration={max(30, min(int(plan.get('duration') or 80), 180))} build={int(plan.get('build') or 1)}"
         )
     if intent == "affiliate_scale":
         return (
@@ -16333,6 +16371,20 @@ async def run_brain_plan(update, context, plan):
                 "bootstrap=1",
             ]
             return await cmd_operator_launch(update, context)
+        if intent == "film_series":
+            context.args = [
+                f"topic={plan.get('topic') or plan.get('niche') or 'đạo lý gia đình'}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"channel={plan.get('channel') or 'all'}",
+                f"aff={int(plan.get('affiliate') or 0)}",
+                f"campaign={int(plan.get('campaign') or 0)}",
+                f"episodes={max(1, min(int(plan.get('episodes') or 5), 8))}",
+                f"scenes={max(3, min(int(plan.get('scenes_per_episode') or plan.get('scenes') or 10), 12))}",
+                f"duration={max(30, min(int(plan.get('duration') or 80), 180))}",
+                f"build={int(plan.get('build') or 1)}",
+                "bootstrap=1",
+            ]
+            return await cmd_film_series(update, context)
         if intent == "affiliate_scale":
             if not int(plan.get("affiliate") or 0):
                 return await update.message.reply_text(
@@ -16632,7 +16684,7 @@ def operator_command_plan_data(owner_id, command):
         "safety_note": plan.get("safety_note") or "Không bỏ qua review/approve gate; không tự publish khi chưa sẵn sàng.",
         "execute_allowed": (plan.get("intent") or "").lower() in {
             "command_center", "operator_next_run", "goal_audit", "pipeline_pack", "money_pack", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
-            "operator_director", "operator_execute", "operator_launch", "make_video",
+            "operator_director", "operator_execute", "operator_launch", "film_series", "make_video",
             "tracking_report", "scale_plan", "affiliate_report", "affiliate_decisions",
             "scale_execute", "publisher_capabilities", "platform_adapters",
         },
@@ -16715,6 +16767,24 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
             build=bool(plan.get("build", 1)),
             duration=int(plan.get("duration") or 45),
             variants=max(3, min(int(plan.get("variants") or 5), 8)),
+            bootstrap=True,
+        )
+        return {"executed": ok, "intent": intent, "reason": reason, "data": result}
+    if intent == "film_series":
+        ok, reason, result = await operator_film_series_pipeline(
+            owner_id,
+            plan.get("topic") or plan.get("niche") or "đạo lý gia đình",
+            platform=platform,
+            channel=plan.get("channel") or "all",
+            affiliate_id=int(plan.get("affiliate") or 0),
+            campaign_id=int(plan.get("campaign") or 0),
+            episodes=max(1, min(int(plan.get("episodes") or 5), 8)),
+            scenes_per_episode=max(3, min(int(plan.get("scenes_per_episode") or plan.get("scenes") or 10), 12)),
+            duration=max(30, min(int(plan.get("duration") or 80), 180)),
+            genre=plan.get("genre") or "drama cảm xúc",
+            audience=plan.get("audience") or "người lớn",
+            template=plan.get("template") or "dao_ly_trieu_views",
+            build=bool(plan.get("build", 1)),
             bootstrap=True,
         )
         return {"executed": ok, "intent": intent, "reason": reason, "data": result}
@@ -19980,9 +20050,10 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain đầu não nên làm gì tiếp theo</code>\n"
             "• <code>/brain đầu não chạy bước tiếp theo an toàn</code>\n"
             "• <code>/brain autopilot 3 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
-        "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
-        "• <code>/brain lưu link affiliate https://shorten.asia/abc (Tên sản phẩm)</code>\n"
-        "• <code>/brain học video này https://facebook.com/...</code>\n"
+            "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
+            "• <code>/brain tạo phim AI series 5 tập chủ đề đạo lý gia đình trên tiktok</code>\n"
+            "• <code>/brain lưu link affiliate https://shorten.asia/abc (Tên sản phẩm)</code>\n"
+            "• <code>/brain học video này https://facebook.com/...</code>\n"
             "• <code>/brain quét video tham khảo path=D:\\mybot\\TOANAAS\\video AI tham khảo</code>\n"
             "• <code>/brain duyệt job 12 để đăng</code>\n"
             "• <code>/brain chạy publisher tiktok</code>\n"
