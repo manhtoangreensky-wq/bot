@@ -840,6 +840,16 @@ def create_campaign(owner_id, name, niche, platforms, affiliate_url="", pay_url=
     conn.close()
     return campaign_id
 
+def find_campaign_by_name(owner_id, name):
+    target = (name or "").strip().lower()
+    if not target:
+        return None
+    for row in list_campaigns(owner_id, limit=200):
+        _cid, row_name, _niche, _platforms, _affiliate_url, status = row
+        if (row_name or "").strip().lower() == target and (status or "active").lower() == "active":
+            return row
+    return None
+
 def list_campaigns(owner_id, limit=8):
     conn = db_connect()
     c = conn.cursor()
@@ -964,6 +974,22 @@ def list_social_channels(owner_id, limit=30):
     rows = c.fetchall()
     conn.close()
     return rows
+
+def find_social_channel(owner_id, platform, channel_name, account_label=""):
+    platform_key = (platform or "").strip().lower()
+    name_key = (channel_name or "").strip().lower()
+    account_key = (account_label or "").strip().lower()
+    if not platform_key or not name_key:
+        return None
+    for row in list_social_channels(owner_id, limit=300):
+        cid, row_platform, row_name, row_account, *_rest = row
+        if (
+            (row_platform or "").strip().lower() == platform_key
+            and (row_name or "").strip().lower() == name_key
+            and (row_account or "").strip().lower() == account_key
+        ):
+            return row
+    return None
 
 def get_social_channel(channel_id, owner_id):
     conn = db_connect()
@@ -1652,6 +1678,126 @@ def seed_default_affiliate_links(owner_id):
         created.append((affiliate_id, item["network"], item["product_name"], url))
     return created, skipped
 
+DEFAULT_OPERATOR_CHANNELS = [
+    {
+        "platform": "tiktok",
+        "name": "TOAN DAAS Tech Affiliate",
+        "account": "tk1",
+        "focus": "AI tools, công nghệ, review sản phẩm, affiliate",
+        "audience": "creator, dân văn phòng, người muốn kiếm tiền online",
+        "slots": "2/day",
+        "notes": "Kênh manual mặc định để test pipeline TikTok trước khi bật API chính thức.",
+    },
+    {
+        "platform": "facebook",
+        "name": "TOAN DAAS Facebook Affiliate",
+        "account": "page1",
+        "focus": "AI automation, công nghệ, deal sản phẩm, tài chính minh bạch",
+        "audience": "người dùng Facebook, chủ shop nhỏ, creator",
+        "slots": "2/day",
+        "notes": "Kênh Page/Reels manual; chỉ bật API khi có Meta token/page_id hợp lệ.",
+    },
+    {
+        "platform": "onlyfans",
+        "name": "TOAN DAAS AI Model Studio",
+        "account": "of1",
+        "focus": "AI model hợp pháp, behind-the-scenes, affiliate lifestyle",
+        "audience": "fan trưởng thành 18+",
+        "slots": "1/day",
+        "notes": "Manual only. Chỉ dùng nhân vật AI tự tạo hoặc người thật có consent rõ ràng, đủ 18 tuổi.",
+    },
+]
+
+DEFAULT_OPERATOR_CAMPAIGNS = [
+    {
+        "name": "TOAN DAAS Tech Affiliate",
+        "niche": "công nghệ AI, thiết bị, app, affiliate dài hạn",
+        "platforms": "tiktok,facebook,onlyfans",
+    },
+    {
+        "name": "TOAN DAAS Finance Affiliate",
+        "niche": "thẻ ngân hàng, app tài chính, voucher, lead hợp pháp",
+        "platforms": "tiktok,facebook",
+    },
+    {
+        "name": "TOAN DAAS Travel Lifestyle",
+        "niche": "du lịch, vé máy bay, khách sạn, lifestyle affiliate",
+        "platforms": "tiktok,facebook",
+    },
+]
+
+def operator_bootstrap_data(owner_id, include_channels=True, include_campaigns=True, include_affiliates=True, include_references=True, reference_limit=200):
+    result = {
+        "created": {"channels": [], "campaigns": [], "affiliates": [], "references": []},
+        "skipped": {"channels": [], "campaigns": [], "affiliates": [], "references": []},
+        "errors": [],
+        "rule": "Bootstrap chỉ thêm cấu hình còn thiếu; không xóa, không ghi đè channel/campaign/link cũ.",
+    }
+    if include_channels:
+        for item in DEFAULT_OPERATOR_CHANNELS:
+            existing = find_social_channel(owner_id, item["platform"], item["name"], item.get("account", ""))
+            if existing:
+                result["skipped"]["channels"].append({"id": existing[0], "platform": existing[1], "name": existing[2], "reason": "exists"})
+                continue
+            channel_id = create_social_channel(
+                owner_id,
+                item["platform"],
+                item["name"],
+                item.get("account", ""),
+                item.get("focus", ""),
+                item.get("audience", ""),
+                item.get("slots", "2/day"),
+                item.get("notes", ""),
+                "manual",
+                "",
+                "",
+            )
+            result["created"]["channels"].append({"id": channel_id, "platform": item["platform"], "name": item["name"]})
+    if include_campaigns:
+        for item in DEFAULT_OPERATOR_CAMPAIGNS:
+            existing = find_campaign_by_name(owner_id, item["name"])
+            if existing:
+                result["skipped"]["campaigns"].append({"id": existing[0], "name": existing[1], "reason": "exists"})
+                continue
+            campaign_id = create_campaign(
+                owner_id,
+                item["name"],
+                item["niche"],
+                item["platforms"],
+                "",
+                "",
+            )
+            result["created"]["campaigns"].append({"id": campaign_id, "name": item["name"], "platforms": item["platforms"]})
+    if include_affiliates:
+        created, skipped = seed_default_affiliate_links(owner_id)
+        result["created"]["affiliates"] = [
+            {"id": aid, "network": network, "product": product, "url": url}
+            for aid, network, product, url in created
+        ]
+        result["skipped"]["affiliates"] = [
+            {"id": row[0], "network": row[1], "product": row[2], "reason": "exists"}
+            for row in skipped
+        ]
+    if include_references:
+        scan = scan_reference_video_folder(
+            owner_id,
+            REFERENCE_VIDEO_DIR,
+            platform="tiktok",
+            tags="reference,bootstrap,affiliate-video",
+            note="operator_bootstrap_reference_scan",
+            limit=reference_limit,
+        )
+        result["reference_scan"] = scan
+        result["created"]["references"] = scan.get("created", [])
+        result["skipped"]["references"] = [{"path": path, "reason": "exists"} for path in scan.get("skipped", [])]
+        result["errors"].extend(scan.get("errors", []))
+    status = operator_status_data(owner_id)
+    audit = operator_audit_data(owner_id)
+    result["counts_after"] = status["counts"]
+    result["audit_level_after"] = audit["level"]
+    result["next_command"] = audit["next_command"]
+    return result
+
 def list_affiliate_links(owner_id, limit=30):
     conn = db_connect()
     c = conn.cursor()
@@ -2305,9 +2451,9 @@ def operator_status_data(owner_id):
         readiness, reason = channel_publish_readiness(row)
         channel_readiness.append((row, readiness, reason))
     checks = [
-        ("channels", active_channels > 0, f"{active_channels} kênh active", "/channel_add platform=tiktok name=..."),
-        ("affiliates", active_affiliates > 0, f"{active_affiliates} affiliate active", "/affiliate_seed hoặc /affiliate_add"),
-        ("campaigns", active_campaigns > 0, f"{active_campaigns} campaign active", "/campaign_new name=... niche=..."),
+        ("channels", active_channels > 0, f"{active_channels} kênh active", "/operator_bootstrap hoặc /channel_add platform=tiktok name=..."),
+        ("affiliates", active_affiliates > 0, f"{active_affiliates} affiliate active", "/operator_bootstrap hoặc /affiliate_seed"),
+        ("campaigns", active_campaigns > 0, f"{active_campaigns} campaign active", "/operator_bootstrap hoặc /campaign_new name=... niche=..."),
         ("operator_api", bool(OPERATOR_API_TOKEN), "OPERATOR_API_TOKEN đã bật" if OPERATOR_API_TOKEN else "OPERATOR_API_TOKEN chưa set", "/operator_api"),
         ("publish_ready", any(r in {"manual_ready", "api_ready"} for _, r, _ in channel_readiness), "Có kênh sẵn sàng đăng" if channel_readiness else "Chưa có kênh", "/publish_readiness"),
     ]
@@ -2406,7 +2552,7 @@ def publisher_status_data(owner_id):
 
     blockers = []
     if not channel_rows:
-        blockers.append({"key": "no_channels", "detail": "Chưa có kênh đăng.", "next": "/channel_add platform=tiktok name=... mode=manual"})
+        blockers.append({"key": "no_channels", "detail": "Chưa có kênh đăng.", "next": "/operator_bootstrap hoặc /channel_add platform=tiktok name=... mode=manual"})
     for channel in channels:
         if channel["readiness"] in {"missing_token_env", "missing_secret", "missing_page_id", "blocked"}:
             blockers.append({
@@ -2484,9 +2630,9 @@ def operator_audit_data(owner_id):
         ("operator_api", api_ok, "OPERATOR_API_TOKEN và PUBLIC_BASE_URL đã sẵn sàng." if api_ok else "Thiếu OPERATOR_API_TOKEN hoặc PUBLIC_BASE_URL cho n8n/Claude.", "/operator_api"),
         ("ai_provider", ai_ok, "Có Gemini/OpenAI để tạo brief/prompt." if ai_ok else "Thiếu GEMINI_API_KEY hoặc OPENAI_API_KEY; bot dùng fallback template.", "Set GEMINI_API_KEY hoặc OPENAI_API_KEY trên Railway"),
         ("payos", payos_ok, "PayOS env đủ 3 khóa." if payos_ok else "Thiếu PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY.", "Kiểm tra biến PayOS trên Railway"),
-        ("affiliate_catalog", active_affiliates > 0, f"{active_affiliates} affiliate active.", "/affiliate_seed"),
-        ("channels", active_channels > 0, f"{active_channels} kênh active.", "/channel_add platform=tiktok name=... mode=manual"),
-        ("campaigns", active_campaigns > 0, f"{active_campaigns} campaign active.", "/campaign_new name=... niche=... platforms=tiktok"),
+        ("affiliate_catalog", active_affiliates > 0, f"{active_affiliates} affiliate active.", "/operator_bootstrap hoặc /affiliate_seed"),
+        ("channels", active_channels > 0, f"{active_channels} kênh active.", "/operator_bootstrap hoặc /channel_add platform=tiktok name=... mode=manual"),
+        ("campaigns", active_campaigns > 0, f"{active_campaigns} campaign active.", "/operator_bootstrap hoặc /campaign_new name=... niche=... platforms=tiktok"),
         ("publish_readiness", publish_ok, f"manual_ready={manual_ready}, api_ready={api_ready}.", "/publish_readiness"),
         ("production_pipeline", production_ok, f"jobs={total_jobs}, tasks={total_tasks}.", "/operator_execute"),
         ("performance_tracking", tracking_ok, f"performance_events={total_performance}.", "/performance_add job=<ID> type=view value=..."),
@@ -2523,7 +2669,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
         "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "worker_next", "operator_command", "operator_mission", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "worker_next", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -2535,6 +2681,7 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/reference-videos/scan"),
         ("GET", "/api/operator/n8n-workflow.json"),
         ("GET", "/api/operator/mission"),
+        ("POST", "/api/operator/bootstrap"),
         ("GET", "/api/operator/command-center"),
         ("POST", "/api/operator/make-video"),
         ("POST", "/api/operator/affiliates/import"),
@@ -2736,6 +2883,7 @@ def operator_worker_spec_data():
         ],
         "standard_loop": [
             {"step": 1, "name": "audit", "method": "GET", "url": "/api/operator/audit"},
+            {"step": 1.02, "name": "bootstrap_optional", "method": "POST", "url": "/api/operator/bootstrap"},
             {"step": 1.05, "name": "command_center", "method": "GET", "url": "/api/operator/command-center?days=30&platform=tiktok"},
             {"step": 1.06, "name": "mission_control", "method": "GET", "url": "/api/operator/mission?days=30&platform=tiktok&limit=8"},
             {"step": 1.1, "name": "read_worker_spec", "method": "GET", "url": "/api/operator/worker-spec"},
@@ -2760,6 +2908,12 @@ def operator_worker_spec_data():
             {"step": 13, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
         ],
         "payloads": {
+            "bootstrap_optional": {
+                "method": "POST",
+                "url": "/api/operator/bootstrap",
+                "purpose": "Khởi tạo nhanh channel/campaign/affiliate/reference còn thiếu. Chỉ thêm mới nếu chưa có, không xóa dữ liệu cũ.",
+                "body": {"channels": True, "campaigns": True, "affiliates": True, "references": True, "reference_limit": 200, "notify_admin": True},
+            },
             "command_center": {
                 "method": "GET",
                 "url": "/api/operator/command-center?days=30&platform=tiktok&limit=8",
@@ -3285,6 +3439,14 @@ def operator_n8n_template_data():
                 "note": "Snapshot tổng hợp cho Claude/n8n: next actions, worker-next, publisher, affiliate decisions và money.",
             },
             {
+                "node": "Bootstrap Optional",
+                "type": "http_request",
+                "method": "POST",
+                "url": f"{base_url}/api/operator/bootstrap",
+                "body": {"channels": True, "campaigns": True, "affiliates": True, "references": True, "reference_limit": 200, "notify_admin": True},
+                "note": "Chỉ chạy khi audit thiếu channel/campaign/affiliate/reference. Không xóa hoặc ghi đè dữ liệu cũ.",
+            },
+            {
                 "node": "Read Mission Control",
                 "type": "http_request",
                 "method": "GET",
@@ -3608,6 +3770,31 @@ def operator_n8n_workflow_json_data():
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "bootstrap-optional",
+                "name": "Bootstrap Optional",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, -820],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/bootstrap",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "bodyParameters": {
+                        "parameters": [
+                            {"name": "channels", "value": True},
+                            {"name": "campaigns", "value": True},
+                            {"name": "affiliates", "value": True},
+                            {"name": "references", "value": True},
+                            {"name": "reference_limit", "value": 200},
+                            {"name": "notify_admin", "value": True},
+                        ]
+                    },
+                    "options": {"timeout": 120000},
                 },
             },
             {
@@ -4059,10 +4246,11 @@ def operator_n8n_workflow_json_data():
             "Audit Operator": {"main": [[{"node": "Audit Ready?", "type": "main", "index": 0}]]},
             "Audit Ready?": {
                 "main": [
-                    [{"node": "Read Command Center", "type": "main", "index": 0}],
+                    [{"node": "Bootstrap Optional", "type": "main", "index": 0}],
                     [{"node": "Setup Required", "type": "main", "index": 0}],
                 ]
             },
+            "Bootstrap Optional": {"main": [[{"node": "Read Command Center", "type": "main", "index": 0}]]},
             "Read Command Center": {"main": [[{"node": "Read Mission Control", "type": "main", "index": 0}]]},
             "Read Mission Control": {"main": [[{"node": "Read Worker Spec", "type": "main", "index": 0}]]},
             "Read Worker Spec": {"main": [[{"node": "Read Toolchain", "type": "main", "index": 0}]]},
@@ -4264,6 +4452,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
         },
         "next_action": next_action,
         "execution_order": [
+            {"step": "bootstrap_if_missing", "telegram": "/operator_bootstrap", "api": "POST /api/operator/bootstrap"},
             {"step": "trend_or_topic", "telegram": "/make_video topic=<chu_de> platform=tiktok channel=all limit=3 build=1", "api": "POST /api/operator/make-video"},
             {"step": "worker_claim", "telegram": "/worker_next hoặc /next_task", "api": "GET /api/operator/worker-next rồi GET /api/operator/tasks/claim?include_context=1"},
             {"step": "tool_output", "telegram": "/task_set id=<TASK_ID> status=ready url=https://...", "api": "POST /api/operator/tasks/<TASK_ID>/complete hoặc /upload"},
@@ -4289,6 +4478,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
         "command_center": command_center,
         "worker_spec_urls": {
             "mission": f"{base_url}/api/operator/mission",
+            "bootstrap": f"{base_url}/api/operator/bootstrap",
             "worker_spec": f"{base_url}/api/operator/worker-spec",
             "toolchain": f"{base_url}/api/operator/toolchain",
             "command_center": f"{base_url}/api/operator/command-center",
@@ -9056,6 +9246,14 @@ class OperatorLoopRequest(BaseModel):
     auto_queue: bool = True
     notify_admin: bool = True
 
+class OperatorBootstrapRequest(BaseModel):
+    channels: bool = True
+    campaigns: bool = True
+    affiliates: bool = True
+    references: bool = True
+    reference_limit: int = Field(default=200, ge=1, le=1000)
+    notify_admin: bool = True
+
 class OperatorAffiliateScaleRequest(BaseModel):
     affiliate_id: int = Field(gt=0)
     niche: str = Field(default="", max_length=240)
@@ -12668,6 +12866,66 @@ async def cmd_operator_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     lines.append("\nLệnh nhanh: <code>/operator_menu</code> | <code>/affiliate_scale aff=&lt;ID&gt; build=1</code> | <code>/operator_loop</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_bootstrap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    include_channels = (data.get("channels") or data.get("kenh") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    include_campaigns = (data.get("campaigns") or data.get("camp") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    include_affiliates = (data.get("affiliates") or data.get("aff") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    include_references = (data.get("references") or data.get("ref") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    try:
+        reference_limit = max(1, min(int(data.get("reference_limit") or data.get("limit") or 200), 1000))
+    except ValueError:
+        reference_limit = 200
+    msg = await update.message.reply_text("🧰 Đang bootstrap operator: tạo cấu hình thiếu, seed affiliate và scan reference...")
+    try:
+        result = operator_bootstrap_data(
+            update.effective_user.id,
+            include_channels=include_channels,
+            include_campaigns=include_campaigns,
+            include_affiliates=include_affiliates,
+            include_references=include_references,
+            reference_limit=reference_limit,
+        )
+    except Exception as e:
+        await alert_admin(context, "Operator Bootstrap", str(e))
+        return await msg.edit_text("❌ Bootstrap lỗi. Đã báo admin.")
+    counts = result.get("counts_after") or {}
+    created = result.get("created") or {}
+    skipped = result.get("skipped") or {}
+    lines = [
+        "🧰 <b>OPERATOR BOOTSTRAP</b>",
+        f"• Channels tạo mới/bỏ qua: <b>{len(created.get('channels') or [])}</b>/<b>{len(skipped.get('channels') or [])}</b>",
+        f"• Campaigns tạo mới/bỏ qua: <b>{len(created.get('campaigns') or [])}</b>/<b>{len(skipped.get('campaigns') or [])}</b>",
+        f"• Affiliates tạo mới/bỏ qua: <b>{len(created.get('affiliates') or [])}</b>/<b>{len(skipped.get('affiliates') or [])}</b>",
+        f"• References tạo mới/bỏ qua: <b>{len(created.get('references') or [])}</b>/<b>{len(skipped.get('references') or [])}</b>",
+        f"• Sau bootstrap: channels=<b>{counts.get('active_channels', 0)}</b> affiliates=<b>{counts.get('active_affiliates', 0)}</b> campaigns=<b>{counts.get('active_campaigns', 0)}</b>",
+        f"• Audit level: <code>{html.escape(result.get('audit_level_after') or '-')}</code>",
+        "",
+        "<b>Kênh vừa tạo:</b>",
+    ]
+    if created.get("channels"):
+        for item in created["channels"][:6]:
+            lines.append(f"• #{item['id']} | <code>{html.escape(item['platform'])}</code> | {html.escape(item['name'])}")
+    else:
+        lines.append("• Không tạo mới, đã có sẵn hoặc bị tắt.")
+    if created.get("campaigns"):
+        lines.append("\n<b>Campaign vừa tạo:</b>")
+        for item in created["campaigns"][:6]:
+            lines.append(f"• #{item['id']} | {html.escape(item['name'])} | <code>{html.escape(item['platforms'])}</code>")
+    if result.get("errors"):
+        lines.append("\n<b>Lỗi/cảnh báo:</b>")
+        for err in result["errors"][:5]:
+            lines.append(f"• {html.escape(str(err))}")
+    lines.append(
+        "\nBước tiếp:\n"
+        f"<code>{html.escape(result.get('next_command') or '/operator_mission')}</code>\n"
+        "<code>/operator_mission</code>\n"
+        "<code>/make_video topic=công nghệ AI platform=tiktok channel=all limit=3 build=1</code>"
+    )
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_operator_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -12925,6 +13183,7 @@ def operator_category_keyboard(category):
     categories = {
         "cat_control": [
             ("🧠 Mission control", "mission"), ("🧠 Brain command", "brain"),
+            ("🧰 Bootstrap", "bootstrap"),
             ("🎬 Make video", "makevideo"),
             ("🚀 Autopilot batch", "autopilot"),
             ("🤖 Auto batch", "auto"), ("🔁 Operator loop", "loop"),
@@ -13049,6 +13308,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Director execute an toàn: <code>POST {html.escape(base_url)}/api/operator/director/run</code>",
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
+        f"• Mission control: <code>GET {html.escape(base_url)}/api/operator/mission</code>",
+        f"• Bootstrap thiếu setup: <code>POST {html.escape(base_url)}/api/operator/bootstrap</code>",
         f"• Toolchain paid/fallback: <code>GET {html.escape(base_url)}/api/operator/toolchain</code>",
         f"• Tool runtime readiness: <code>GET {html.escape(base_url)}/api/operator/tool-readiness</code>",
         f"• Báo lỗi/quota tool: <code>POST {html.escape(base_url)}/api/operator/tool-events</code>",
@@ -13093,6 +13354,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"limit":10,"auto_queue":true,"notify_admin":true}</pre>',
         "<b>Payload director-run mẫu:</b>",
         '<pre>{"days":30,"platform":"tiktok","limit":10,"execute":true,"build":true,"duration":45,"notify_admin":true}</pre>',
+        "<b>Payload bootstrap mẫu:</b>",
+        '<pre>{"channels":true,"campaigns":true,"affiliates":true,"references":true,"reference_limit":200,"notify_admin":true}</pre>',
         "<b>Payload make-video mẫu:</b>",
         '<pre>{"topic":"đồ công nghệ văn phòng","platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload affiliate-scale mẫu:</b>",
@@ -13308,6 +13571,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "n8nworkflow": "/operator_n8n_workflow\nGET /api/operator/n8n-workflow.json",
         "director": "/operator_director days=30 platform=tiktok limit=10",
         "mission": "/operator_mission days=30 platform=tiktok limit=8\nGET /api/operator/mission",
+        "bootstrap": "/operator_bootstrap\nPOST /api/operator/bootstrap",
         "execute": "/operator_execute days=30 platform=tiktok build=1 duration=45",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
         "makevideo": "/make_video topic=công nghệ AI platform=tiktok channel=all limit=3 build=1\nPOST /api/operator/make-video",
@@ -16540,6 +16804,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
+    tg_app.add_handler(CommandHandler("operator_bootstrap", cmd_operator_bootstrap))
     tg_app.add_handler(CommandHandler("operator_audit", cmd_operator_audit))
     tg_app.add_handler(CommandHandler("operator_smoke", cmd_operator_smoke))
     tg_app.add_handler(CommandHandler("operator_playbook", cmd_operator_playbook))
@@ -17250,6 +17515,36 @@ async def api_operator_mission(request: Request, days: int = 30, platform: str =
         "ok": True,
         **operator_mission_control_data(ADMIN_ID, days=days, platform=platform, limit=limit),
     }
+
+@fastapi_app.post("/api/operator/bootstrap")
+async def api_operator_bootstrap(payload: OperatorBootstrapRequest, request: Request):
+    verify_operator_api_token(request)
+    result = operator_bootstrap_data(
+        ADMIN_ID,
+        include_channels=payload.channels,
+        include_campaigns=payload.campaigns,
+        include_affiliates=payload.affiliates,
+        include_references=payload.references,
+        reference_limit=payload.reference_limit,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            created = result.get("created") or {}
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🧰 <b>OPERATOR API BOOTSTRAP</b>\n\n"
+                    f"• Channels: <b>{len(created.get('channels') or [])}</b>\n"
+                    f"• Campaigns: <b>{len(created.get('campaigns') or [])}</b>\n"
+                    f"• Affiliates: <b>{len(created.get('affiliates') or [])}</b>\n"
+                    f"• References: <b>{len(created.get('references') or [])}</b>\n"
+                    f"• Next: <code>{html.escape(result.get('next_command') or '/operator_mission')}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Operator bootstrap notify error: {e}")
+    return {"ok": True, **result}
 
 @fastapi_app.post("/api/operator/tasks/{task_id}/complete")
 async def api_operator_complete_task(task_id: int, payload: OperatorTaskCompleteRequest, request: Request):
