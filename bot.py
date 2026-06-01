@@ -2987,7 +2987,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "campaign_preset", "postback_setup", "operator_launch", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_pack", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3018,6 +3018,8 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/publisher/run"),
         ("GET", "/api/operator/worker-next"),
         ("GET", "/api/operator/tasks/claim"),
+        ("GET", "/api/operator/task-prompt"),
+        ("GET", "/api/operator/tasks/<TASK_ID>/prompt-pack"),
         ("POST", "/api/operator/tasks/<TASK_ID>/complete"),
         ("POST", "/api/operator/tasks/<TASK_ID>/upload"),
         ("POST", "/api/operator/jobs/<JOB_ID>/assets/upload"),
@@ -3106,6 +3108,7 @@ def operator_smoke_test_data(owner_id):
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
+        "task_prompt_pack_in_spec": "/api/operator/tasks/<TASK_ID>/prompt-pack" in spec_text and "/prompt-pack" in n8n_text,
         "output_acceptance_in_spec": "/api/operator/output-acceptance" in spec_text and "/api/operator/output-acceptance" in n8n_text,
         "pipeline_pack_in_spec": "/api/operator/jobs/<JOB_ID>/pipeline-pack" in spec_text and "/pipeline-pack" in n8n_text,
         "distribution_pack_in_spec": "/api/operator/jobs/<JOB_ID>/distribution-pack" in spec_text and "/distribution-pack" in n8n_text,
@@ -3268,6 +3271,7 @@ def operator_worker_spec_data():
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
             {"step": 4.5, "name": "peek_worker_next", "method": "GET", "url": "/api/operator/worker-next"},
             {"step": 4.6, "name": "worker_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/worker-pack"},
+            {"step": 4.62, "name": "task_prompt_pack", "method": "GET", "url": "/api/operator/tasks/<TASK_ID>/prompt-pack"},
             {"step": 4.7, "name": "pipeline_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/pipeline-pack"},
             {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1"},
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
@@ -3454,6 +3458,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/jobs/<JOB_ID>/worker-pack",
                 "purpose": "Một gói đầy đủ cho Claude/n8n/tool worker: job, task, context, prompt, reference learning, video factory blueprint, toolchain, publish pack và endpoint trả output.",
+            },
+            "task_prompt_pack": {
+                "method": "GET",
+                "url": "/api/operator/tasks/<TASK_ID>/prompt-pack",
+                "purpose": "Prompt thực thi copy được cho Claude/n8n/tool worker: role, task prompt, output bắt buộc, tiêu chí nghiệm thu, curl complete/blocked và upload contract.",
             },
             "pipeline_pack": {
                 "method": "GET",
@@ -4061,6 +4070,13 @@ def operator_n8n_template_data():
                 "method": "GET",
                 "url": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
                 "note": "Một gói đủ cho Claude/n8n/tool worker: task, prompt, reference learning, blueprint video, checklist, toolchain, publish/review endpoints.",
+            },
+            {
+                "node": "Read Task Prompt Pack",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/tasks/<TASK_ID>/prompt-pack",
+                "note": "Prompt copy được cho worker thật: role, prompt task, required output, acceptance criteria và curl submit/blocked.",
             },
             {
                 "node": "Read Pipeline Pack",
@@ -4741,6 +4757,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "read-task-prompt-pack",
+                "name": "Read Task Prompt Pack",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [420, -520],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/tasks/{{$json.task_id || '<TASK_ID>'}}/prompt-pack",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "read-pipeline-pack",
                 "name": "Read Pipeline Pack",
                 "type": "n8n-nodes-base.httpRequest",
@@ -5130,7 +5160,8 @@ def operator_n8n_workflow_json_data():
             "Director Run Safe Action": {"main": [[{"node": "Peek Worker Next", "type": "main", "index": 0}]]},
             "Peek Worker Next": {"main": [[{"node": "Read Pipeline Pack", "type": "main", "index": 0}]]},
             "Read Pipeline Pack": {"main": [[{"node": "Read Worker Pack", "type": "main", "index": 0}]]},
-            "Read Worker Pack": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
+            "Read Worker Pack": {"main": [[{"node": "Read Task Prompt Pack", "type": "main", "index": 0}]]},
+            "Read Task Prompt Pack": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
             "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
             "Complete Task": {"main": [[{"node": "Output Acceptance", "type": "main", "index": 0}]]},
             "Output Acceptance": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
@@ -7958,6 +7989,116 @@ def operator_task_contract(task_id, task_type: str = "", job_id: int = 0):
         "is_example": task_num == 0,
     }
 
+def operator_task_prompt_pack_data(owner_id, task_id=0, job_id=0, tool=""):
+    try:
+        task_id = int(task_id or 0)
+    except (TypeError, ValueError):
+        task_id = 0
+    try:
+        job_id = int(job_id or 0)
+    except (TypeError, ValueError):
+        job_id = 0
+    tool = (tool or "").strip().lower()
+    task = get_production_task(owner_id, task_id) if task_id else None
+    if not task:
+        task = next_worker_task(owner_id, job_id=job_id, tool=tool) if job_id else next_worker_task(owner_id, tool=tool)
+    if not task:
+        return None
+    tid, row_job_id, manifest_id, task_type, task_tool, scene_no, title, prompt, status, output_url, note, updated_at = task
+    job = get_production_job(row_job_id, owner_id)
+    if not job:
+        return None
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    serialized_task = serialize_operator_task(task)
+    runbook = operator_task_execution_runbook(task_type, task_tool, prompt, row_job_id)
+    contract = operator_task_contract(tid, task_type, row_job_id)
+    context_data = operator_job_context_data(owner_id, row_job_id)
+    publish_pack = (context_data or {}).get("publish_pack") or build_static_publish_pack(job, owner_id)
+    reference_learning = ((context_data or {}).get("reference_learning") or {})
+    job_payload = serialize_production_job(job)
+    affiliate_payload = (job_payload or {}).get("affiliate") or {}
+    default_asset = contract.get("complete_payload", {}).get("asset_type") or default_asset_type_for_task(task_type)
+    required_output = "\n".join(f"- {item}" for item in runbook.get("required_output", [])) or "- output_url hoặc file upload thật"
+    success_criteria = "\n".join(f"- {item}" for item in runbook.get("success_criteria", [])) or "- Output dùng được cho bước kế tiếp"
+    worker_steps = "\n".join(f"{idx}. {step}" for idx, step in enumerate(runbook.get("worker_steps", []), start=1)) or "1. Thực hiện prompt task.\n2. Upload/complete output."
+    prompt_text = (
+        "Bạn là AI/tool worker trong hệ thống TOAN DAAS. Chỉ thực hiện đúng task được giao, "
+        "không tự publish, không đổi affiliate link, không bịa output.\n\n"
+        f"JOB #{row_job_id}\n"
+        f"- Platform: {job_payload.get('platform') or '-'}\n"
+        f"- Topic: {job_payload.get('topic') or '-'}\n"
+        f"- Affiliate product: {affiliate_payload.get('product') or '-'}\n"
+        f"- Affiliate URL: {affiliate_payload.get('url') or '-'}\n\n"
+        f"TASK #{tid}\n"
+        f"- Type: {task_type or '-'}\n"
+        f"- Tool: {task_tool or '-'}\n"
+        f"- Scene: {scene_no or '-'}\n"
+        f"- Title: {title or '-'}\n"
+        f"- Expected asset_type: {default_asset}\n\n"
+        "PROMPT TASK:\n"
+        f"{prompt or '-'}\n\n"
+        "CÁCH LÀM:\n"
+        f"{worker_steps}\n\n"
+        "OUTPUT BẮT BUỘC:\n"
+        f"{required_output}\n\n"
+        "TIÊU CHÍ NGHIỆM THU:\n"
+        f"{success_criteria}\n\n"
+        "LUẬT CỨNG:\n"
+        "- Dùng tool tốt/có phí trước; lỗi/quota thì ghi tool event và fallback.\n"
+        "- Không copy nguyên video tham khảo, chỉ học hook/nhịp dựng/CTA.\n"
+        "- Không dùng người thật/giọng/ảnh thiếu consent; nội dung adult phải 18+ và hợp lệ nền tảng.\n"
+        "- Nếu chưa có file hoặc URL thật, trả status=blocked kèm lý do, không giả lập hoàn thành.\n\n"
+        "TRẢ KẾT QUẢ:\n"
+        f"- Nếu có URL public: POST {base_url}{contract['complete_url']} với JSON status=ready, output_url, asset_type={default_asset}, note.\n"
+        f"- Nếu có file local: POST multipart {base_url}{contract['upload_url']} field file/status/asset_type/note.\n"
+        f"- Sau khi trả kết quả: kiểm tra {base_url}{contract['acceptance_url']}."
+    )
+    curl_complete = (
+        f"curl -X POST {base_url}{contract['complete_url']} "
+        "-H \"Authorization: Bearer <OPERATOR_API_TOKEN>\" "
+        "-H \"Content-Type: application/json\" "
+        f"-d '{{\"status\":\"ready\",\"output_url\":\"https://.../asset.mp4\",\"asset_type\":\"{default_asset}\",\"note\":\"worker output\"}}'"
+    )
+    curl_blocked = (
+        f"curl -X POST {base_url}{contract['complete_url']} "
+        "-H \"Authorization: Bearer <OPERATOR_API_TOKEN>\" "
+        "-H \"Content-Type: application/json\" "
+        "-d '{\"status\":\"blocked\",\"output_url\":\"\",\"note\":\"tool=<TOOL> error=<ERROR> fallback=<FALLBACK_OR_NONE>\"}'"
+    )
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "base_url": base_url,
+        "job_id": int(row_job_id),
+        "task_id": int(tid),
+        "task": serialized_task,
+        "job": job_payload,
+        "prompt_text": prompt_text,
+        "runbook": runbook,
+        "contract": contract,
+        "reference_learning": reference_learning,
+        "publish_pack_preview": {
+            "caption": publish_pack.get("caption", ""),
+            "cta": publish_pack.get("cta", ""),
+            "disclosure": publish_pack.get("disclosure", ""),
+            "related_links": (publish_pack.get("related_links") or [])[:8],
+        },
+        "submit_examples": {
+            "complete_ready_json": contract.get("complete_payload"),
+            "upload_form": contract.get("upload_form"),
+            "curl_complete": curl_complete,
+            "curl_blocked": curl_blocked,
+        },
+        "telegram": {
+            "task_prompt": f"/task_prompt id={int(tid)}",
+            "task_handoff": f"/task_handoff id={int(tid)}",
+            "task_set_ready": f"/task_set id={int(tid)} status=ready url=https://...",
+            "output_acceptance": f"/output_acceptance task={int(tid)}",
+            "worker_pack": f"/worker_pack job={int(row_job_id)} task={int(tid)}",
+        },
+        "rule": "Prompt pack là bản giao việc có thể đưa cho Claude/n8n/tool worker; không chứa secret và bắt buộc trả output thật hoặc blocked note.",
+    }
+
 def serialize_operator_task(row):
     if not row:
         return None
@@ -8244,6 +8385,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
             "start_rule": "Đọc task.prompt, context.reference_learning, video_factory_blueprint, publish_pack, distribution_pack và toolchain trước khi gọi tool.",
             "complete_url": f"/api/operator/tasks/{int(task[0])}/complete" if task else "/api/operator/tasks/<TASK_ID>/complete",
             "upload_url": f"/api/operator/tasks/{int(task[0])}/upload" if task else "/api/operator/tasks/<TASK_ID>/upload",
+            "prompt_pack_url": f"/api/operator/tasks/{int(task[0])}/prompt-pack" if task else "/api/operator/tasks/<TASK_ID>/prompt-pack",
             "claim_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1",
             "job_context_url": f"/api/operator/jobs/{job_id}/context",
             "review_url": f"/api/operator/jobs/{job_id}/review-video",
@@ -17470,6 +17612,7 @@ def operator_category_keyboard(category):
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
             ("📦 Worker pack", "workerpack"),
+            ("🧾 Task prompt", "taskprompt"),
             ("🧪 Output acceptance", "outputacceptance"),
             ("🎥 Review video", "reviewvideo"), ("🗂 Assets", "assets"),
             ("📋 Job report", "report"),
@@ -17612,6 +17755,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
         f"• Claim task + context: <code>GET {html.escape(base_url)}/api/operator/tasks/claim?include_context=1</code>",
+        f"• Task prompt pack: <code>GET {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/prompt-pack</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
         f"• Upload file task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/upload</code>",
         f"• Nghiệm thu output: <code>GET {html.escape(base_url)}/api/operator/output-acceptance?job_id=&lt;JOB_ID&gt;</code>",
@@ -17917,6 +18061,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
         "nexttask": "/next_task\n/next_task job=<JOB_ID>",
         "workerpack": "/worker_pack job=<JOB_ID>\n/worker_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/worker-pack",
+        "taskprompt": "/task_prompt id=<TASK_ID>\n/task_prompt job=<JOB_ID>\nGET /api/operator/tasks/<TASK_ID>/prompt-pack",
         "outputacceptance": "/output_acceptance job=<JOB_ID>\n/output_acceptance task=<TASK_ID>\nGET /api/operator/output-acceptance?job_id=<JOB_ID>",
         "reviewvideo": "/review_video job=<JOB_ID> send=1\n/brain kiểm duyệt video job <JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>\n/asset_send id=<ASSET_ID>\n/asset_send job=<JOB_ID> type=final_video",
@@ -19153,6 +19298,39 @@ async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+async def cmd_task_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    task_id = safe_int(data.get("id") or data.get("task"), 0)
+    job_id = safe_int(data.get("job") or data.get("job_id"), 0)
+    tool = (data.get("tool") or "").strip().lower()
+    pack = operator_task_prompt_pack_data(update.effective_user.id, task_id=task_id, job_id=job_id, tool=tool)
+    if not pack:
+        return await update.message.reply_text(
+            "✅ Không có task prompt phù hợp. Dùng <code>/worker_next</code> hoặc tạo job bằng <code>/operator_launch topic=...</code>.",
+            parse_mode="HTML",
+        )
+    task = pack.get("task") or {}
+    runbook = pack.get("runbook") or {}
+    required = "\n".join("- " + str(x) for x in (runbook.get("required_output") or [])[:5]) or "-"
+    lines = [
+        "🧾 <b>TASK PROMPT PACK</b>",
+        f"• Job: <code>#{pack.get('job_id')}</code> | Task: <code>#{pack.get('task_id')}</code>",
+        f"• Type/tool: <code>{html.escape(task.get('task_type') or '-')}</code> / <code>{html.escape(task.get('tool') or '-')}</code>",
+        f"• API: <code>GET /api/operator/tasks/{pack.get('task_id')}/prompt-pack</code>",
+        "",
+        "<b>Prompt gửi cho worker:</b>",
+        f"<pre>{html_pre(pack.get('prompt_text') or '-', 2600)}</pre>",
+        "<b>Output bắt buộc:</b>",
+        f"<pre>{html_pre(required, 800)}</pre>",
+        "<b>Submit:</b>",
+        f"• Complete: <code>{html.escape((pack.get('contract') or {}).get('complete_url') or '')}</code>",
+        f"• Upload: <code>{html.escape((pack.get('contract') or {}).get('upload_url') or '')}</code>",
+        f"• Check: <code>{html.escape((pack.get('contract') or {}).get('acceptance_url') or '')}</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_worker_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -19181,6 +19359,7 @@ async def cmd_worker_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Worker contract:</b>",
         f"• Complete: <code>{html.escape(contract.get('complete_url') or '')}</code>",
         f"• Upload: <code>{html.escape(contract.get('upload_url') or '')}</code>",
+        f"• Prompt pack: <code>{html.escape(contract.get('prompt_pack_url') or '')}</code>",
         f"• Review: <code>{html.escape((contract.get('telegram') or {}).get('review_video') or '')}</code>",
         f"• Approve: <code>{html.escape((contract.get('telegram') or {}).get('approve_publish') or '')}</code>",
         "",
@@ -21555,6 +21734,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("next_task", cmd_next_task))
     tg_app.add_handler(CommandHandler("worker_next", cmd_worker_next))
     tg_app.add_handler(CommandHandler("worker_pack", cmd_worker_pack))
+    tg_app.add_handler(CommandHandler("task_prompt", cmd_task_prompt))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("output_acceptance", cmd_output_acceptance))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
@@ -22871,6 +23051,22 @@ async def api_operator_job_worker_pack(job_id: int, request: Request, task_id: i
     if not data:
         raise HTTPException(status_code=404, detail="Worker pack not found")
     return {"ok": True, **data}
+
+@fastapi_app.get("/api/operator/task-prompt")
+async def api_operator_task_prompt(request: Request, task_id: int = 0, job_id: int = 0, tool: str = ""):
+    verify_operator_api_token(request)
+    data = operator_task_prompt_pack_data(ADMIN_ID, task_id=task_id, job_id=job_id, tool=tool)
+    if not data:
+        raise HTTPException(status_code=404, detail="Task prompt pack not found")
+    return data
+
+@fastapi_app.get("/api/operator/tasks/{task_id}/prompt-pack")
+async def api_operator_task_prompt_pack(task_id: int, request: Request):
+    verify_operator_api_token(request)
+    data = operator_task_prompt_pack_data(ADMIN_ID, task_id=task_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Task prompt pack not found")
+    return data
 
 @fastapi_app.get("/api/operator/pipeline-pack")
 async def api_operator_pipeline_pack(request: Request, job_id: int = 0, days: int = 30, platform: str = "tiktok", limit: int = 8):
