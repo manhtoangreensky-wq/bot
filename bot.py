@@ -1056,6 +1056,100 @@ def channel_publish_readiness(row):
         return "manual_required", "OnlyFans không có API public ổn định; giữ manual hoặc tool chính thức được phép."
     return "api_ready", "Đã có cấu hình API cơ bản. Vẫn cần OAuth/quyền đăng chính thức của nền tảng."
 
+def _keyword_set(text):
+    normalized = re.sub(r"[^\w\s]+", " ", (text or "").lower(), flags=re.UNICODE)
+    stopwords = {
+        "và", "của", "cho", "the", "and", "or", "to", "of", "ai", "daas",
+        "affiliate", "video", "content", "review", "deal", "link", "sản", "phẩm",
+    }
+    return {word for word in normalized.split() if len(word) >= 3 and word not in stopwords}
+
+def operator_channel_router_data(owner_id, platform="", niche="", limit=20):
+    platform_key = (platform or "").strip().lower()
+    niche_text = (niche or "").strip()
+    limit = max(1, min(int(limit or 20), 50))
+    readiness_rows = {row[0]: row for row in list_social_publish_readiness(owner_id)}
+    niche_words = _keyword_set(niche_text)
+    rows = list_social_channels(owner_id, limit=300)
+    channels = []
+    counts = {"total": 0, "active": 0, "by_platform": {}, "api_ready": 0, "manual_ready": 0, "manual_required": 0}
+    for cid, row_platform, name, account, focus, audience, slots, status in rows:
+        row_platform_key = (row_platform or "").strip().lower()
+        if platform_key and row_platform_key != platform_key:
+            continue
+        counts["total"] += 1
+        counts["by_platform"][row_platform_key or "unknown"] = counts["by_platform"].get(row_platform_key or "unknown", 0) + 1
+        if (status or "").lower() == "active":
+            counts["active"] += 1
+        readiness_row = readiness_rows.get(cid)
+        readiness = "unknown"
+        reason = "Chưa có dữ liệu readiness."
+        publish_mode = "manual"
+        token_env = ""
+        page_id = ""
+        if readiness_row:
+            _, _, _, _, _, publish_mode, token_env, page_id = readiness_row
+            readiness, reason = channel_publish_readiness(readiness_row)
+        if readiness in counts:
+            counts[readiness] += 1
+        channel_words = _keyword_set(" ".join([str(focus or ""), str(audience or ""), str(name or "")]))
+        overlap = sorted(niche_words & channel_words)
+        score = 0
+        if (status or "").lower() == "active":
+            score += 50
+        if readiness == "api_ready":
+            score += 25
+        elif readiness in {"manual_ready", "manual_required"}:
+            score += 15
+        if platform_key and row_platform_key == platform_key:
+            score += 20
+        score += min(20, len(overlap) * 5)
+        score += min(10, slots_per_day(slots) * 2)
+        channels.append({
+            "id": cid,
+            "platform": row_platform,
+            "channel_name": name,
+            "account_label": account,
+            "topic_focus": focus,
+            "audience": audience,
+            "posting_slots": slots,
+            "slots_per_day": slots_per_day(slots),
+            "status": status,
+            "publish_mode": publish_mode or "manual",
+            "token_env": token_env,
+            "page_id": page_id,
+            "readiness": readiness,
+            "reason": reason,
+            "score": score,
+            "matched_keywords": overlap,
+            "can_manual_publish": readiness in {"manual_ready", "api_ready", "manual_required"},
+            "can_api_publish": readiness == "api_ready",
+            "use_for": f"channel={cid}",
+        })
+    channels.sort(key=lambda item: (item["score"], item["slots_per_day"], item["id"]), reverse=True)
+    recommended = channels[:limit]
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "input": {"platform": platform_key or "all", "niche": niche_text, "limit": limit},
+        "counts": counts,
+        "recommended": recommended,
+        "all_candidates": channels,
+        "commands": {
+            "telegram_router": f"/channel_router platform={platform_key or 'tiktok'} niche={niche_text or 'công nghệ AI'} limit={limit}",
+            "make_video_best": (
+                f"/make_video topic={niche_text or 'công nghệ AI'} platform={platform_key or 'tiktok'} "
+                f"channel={recommended[0]['id'] if recommended else '<CHANNEL_ID>'} limit=3 build=1"
+            ),
+            "operator_launch_best": (
+                f"/operator_launch topic={niche_text or 'công nghệ AI'} platform={platform_key or 'tiktok'} "
+                f"channel={recommended[0]['id'] if recommended else '<CHANNEL_ID>'} limit=3 build=1"
+            ),
+            "use_all_active": f"channel=all platform={platform_key or 'tiktok'}",
+        },
+        "rule": "Router chỉ đề xuất kênh. Auto publish chỉ được phép với api_ready và vẫn phải qua review/approve gate; manual_ready/manual_required thì gửi handoff cho admin hoặc publisher thủ công.",
+    }
+
 def create_affiliate_link(owner_id, network, product_name, niche="", url="", commission_note="", price_vnd=0, commission_rate=0, target_audience="", allowed_claims="", blocked_claims="", product_score=0) -> int:
     conn = db_connect()
     c = conn.cursor()
@@ -1689,6 +1783,15 @@ DEFAULT_OPERATOR_CHANNELS = [
         "notes": "Kênh manual mặc định để test pipeline TikTok trước khi bật API chính thức.",
     },
     {
+        "platform": "tiktok",
+        "name": "TOAN DAAS Tech Affiliate 2",
+        "account": "tk2",
+        "focus": "AI tools, app kiếm tiền, sản phẩm công nghệ, affiliate dài hạn",
+        "audience": "creator mới, dân văn phòng, người thích công nghệ thực dụng",
+        "slots": "2/day",
+        "notes": "Kênh TikTok phụ để test angle/hook khác với tk1; vẫn manual khi chưa có API chính thức.",
+    },
+    {
         "platform": "facebook",
         "name": "TOAN DAAS Facebook Affiliate",
         "account": "page1",
@@ -1698,6 +1801,15 @@ DEFAULT_OPERATOR_CHANNELS = [
         "notes": "Kênh Page/Reels manual; chỉ bật API khi có Meta token/page_id hợp lệ.",
     },
     {
+        "platform": "facebook",
+        "name": "TOAN DAAS Facebook Affiliate 2",
+        "account": "page2",
+        "focus": "Reels affiliate, deal công nghệ, tài chính minh bạch, mẹo dùng AI",
+        "audience": "người dùng Facebook, chủ shop nhỏ, nhân viên văn phòng",
+        "slots": "2/day",
+        "notes": "Page/Reels phụ để chia nội dung sản phẩm tương tự và test nhóm khách khác.",
+    },
+    {
         "platform": "onlyfans",
         "name": "TOAN DAAS AI Model Studio",
         "account": "of1",
@@ -1705,6 +1817,15 @@ DEFAULT_OPERATOR_CHANNELS = [
         "audience": "fan trưởng thành 18+",
         "slots": "1/day",
         "notes": "Manual only. Chỉ dùng nhân vật AI tự tạo hoặc người thật có consent rõ ràng, đủ 18 tuổi.",
+    },
+    {
+        "platform": "onlyfans",
+        "name": "TOAN DAAS AI Model Studio 2",
+        "account": "of2",
+        "focus": "AI model hợp pháp, lifestyle affiliate, behind-the-scenes, creator workflow",
+        "audience": "fan trưởng thành 18+ quan tâm AI model và lifestyle",
+        "slots": "1/day",
+        "notes": "Manual only. Không dùng người thật/ảnh người khác nếu thiếu consent; chỉ publish sau admin review.",
     },
 ]
 
@@ -2669,7 +2790,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_n8n_workflow",
         "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "worker_next", "worker_pack", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_pack", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -2686,6 +2807,7 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/launch"),
         ("GET", "/api/operator/command-center"),
         ("POST", "/api/operator/make-video"),
+        ("GET", "/api/operator/channel-router"),
         ("POST", "/api/operator/affiliates/import"),
         ("GET", "/api/operator/publisher/status"),
         ("POST", "/api/operator/publisher/run"),
@@ -2753,6 +2875,7 @@ def operator_smoke_test_data(owner_id):
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
         "mission_control_in_spec": "/api/operator/mission" in spec_text and "/api/operator/mission" in n8n_text,
         "launch_in_spec": "/api/operator/launch" in spec_text and "/api/operator/launch" in n8n_text,
+        "channel_router_in_spec": "/api/operator/channel-router" in spec_text and "/api/operator/channel-router" in n8n_text,
         "affiliate_import_in_spec": "/api/operator/affiliates/import" in spec_text and "/api/operator/affiliates/import" in n8n_text,
         "review_video_in_spec": "/api/operator/jobs/<JOB_ID>/review-video" in spec_text and "/api/operator/jobs/" in n8n_text and "/review-video" in n8n_text,
         "post_publish_in_spec": "/api/operator/jobs/<JOB_ID>/post-publish" in spec_text and "/api/operator/jobs/" in n8n_text and "/post-publish" in n8n_text,
@@ -2823,6 +2946,7 @@ def operator_worker_spec_data():
         "toolchain_url": f"{base_url}/api/operator/toolchain",
         "mission_control_url": f"{base_url}/api/operator/mission",
         "command_center_url": f"{base_url}/api/operator/command-center",
+        "channel_router_url": f"{base_url}/api/operator/channel-router",
         "video_patterns_url": f"{base_url}/api/operator/video-patterns",
         "reference_pack_url": f"{base_url}/api/operator/reference-pack",
         "reference_videos_url": f"{base_url}/api/operator/reference-videos",
@@ -2894,6 +3018,7 @@ def operator_worker_spec_data():
             {"step": 1.03, "name": "launch_optional", "method": "POST", "url": "/api/operator/launch"},
             {"step": 1.05, "name": "command_center", "method": "GET", "url": "/api/operator/command-center?days=30&platform=tiktok"},
             {"step": 1.06, "name": "mission_control", "method": "GET", "url": "/api/operator/mission?days=30&platform=tiktok&limit=8"},
+            {"step": 1.07, "name": "channel_router", "method": "GET", "url": "/api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10"},
             {"step": 1.08, "name": "commander_pack", "method": "GET", "url": "/api/operator/commander-pack?days=30&platform=tiktok"},
             {"step": 1.1, "name": "read_worker_spec", "method": "GET", "url": "/api/operator/worker-spec"},
             {"step": 1.2, "name": "read_video_patterns", "method": "GET", "url": "/api/operator/video-patterns"},
@@ -2939,6 +3064,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/mission?days=30&platform=tiktok&limit=8",
                 "purpose": "Một pack điều phối cho Claude/n8n/AI worker: mission, thứ tự chạy, tool fallback, reference videos, guardrails và endpoint.",
+            },
+            "channel_router": {
+                "method": "GET",
+                "url": "/api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10",
+                "purpose": "Chọn kênh/account phù hợp nhất theo platform, niche, slots/ngày và publish readiness trước khi tạo batch video.",
             },
             "commander_pack": {
                 "method": "GET",
@@ -3493,6 +3623,13 @@ def operator_n8n_template_data():
                 "note": "Mission pack một chỗ: mục tiêu, thứ tự chạy, tool/fallback, reference videos, guardrails và endpoint cho worker.",
             },
             {
+                "node": "Read Channel Router",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10",
+                "note": "Chọn account/kênh phù hợp theo niche, slots/ngày và readiness trước khi make-video/launch batch.",
+            },
+            {
                 "node": "Read Commander Pack",
                 "type": "http_request",
                 "method": "GET",
@@ -3886,6 +4023,20 @@ def operator_n8n_workflow_json_data():
                 "parameters": {
                     "method": "GET",
                     "url": f"{base_url_expr}/api/operator/mission?days=30&platform=tiktok&limit=8",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "read-channel-router",
+                "name": "Read Channel Router",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-300, -620],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -4360,7 +4511,8 @@ def operator_n8n_workflow_json_data():
             },
             "Bootstrap Optional": {"main": [[{"node": "Read Command Center", "type": "main", "index": 0}]]},
             "Read Command Center": {"main": [[{"node": "Read Mission Control", "type": "main", "index": 0}]]},
-            "Read Mission Control": {"main": [[{"node": "Read Commander Pack", "type": "main", "index": 0}]]},
+            "Read Mission Control": {"main": [[{"node": "Read Channel Router", "type": "main", "index": 0}]]},
+            "Read Channel Router": {"main": [[{"node": "Read Commander Pack", "type": "main", "index": 0}]]},
             "Read Commander Pack": {"main": [[{"node": "Read Worker Spec", "type": "main", "index": 0}]]},
             "Read Worker Spec": {"main": [[{"node": "Read Toolchain", "type": "main", "index": 0}]]},
             "Read Toolchain": {"main": [[{"node": "Read Video Patterns", "type": "main", "index": 0}]]},
@@ -4592,6 +4744,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
             "mission": f"{base_url}/api/operator/mission",
             "launch": f"{base_url}/api/operator/launch",
             "bootstrap": f"{base_url}/api/operator/bootstrap",
+            "channel_router": f"{base_url}/api/operator/channel-router",
             "worker_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
             "worker_spec": f"{base_url}/api/operator/worker-spec",
             "toolchain": f"{base_url}/api/operator/toolchain",
@@ -4623,6 +4776,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
         "operating_loop": [
             "Đọc /api/operator/audit và /api/operator/command-center để biết trạng thái.",
             "Nếu thiếu setup, gọi /api/operator/bootstrap; không xóa dữ liệu cũ.",
+            "Đọc /api/operator/channel-router để chọn đúng account/kênh trước khi tạo batch hoặc launch.",
             "Nếu admin đưa chủ đề/link affiliate, gọi /api/operator/launch hoặc /api/operator/make-video.",
             "Peek worker bằng /api/operator/worker-next, đọc /worker-pack cho job/task, rồi chỉ claim khi worker thật sự làm.",
             "Giao tool tạo script/ảnh/video/voice/edit; complete/upload output vào task tương ứng.",
@@ -4656,6 +4810,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
         "endpoint_map": {
             "audit": f"{base_url}/api/operator/audit",
             "command_center": f"{base_url}/api/operator/command-center",
+            "channel_router": f"{base_url}/api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10",
             "mission": f"{base_url}/api/operator/mission",
             "bootstrap": f"{base_url}/api/operator/bootstrap",
             "launch": f"{base_url}/api/operator/launch",
@@ -12159,6 +12314,52 @@ async def cmd_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_channel_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    platform = data.get("platform") or data.get("nen") or "tiktok"
+    niche = data.get("niche") or data.get("ngach") or data.get("topic") or "công nghệ AI"
+    try:
+        limit = max(3, min(int(data.get("limit") or data.get("n") or 10), 30))
+    except ValueError:
+        limit = 10
+    router = operator_channel_router_data(update.effective_user.id, platform=platform, niche=niche, limit=limit)
+    if not router["recommended"]:
+        return await update.message.reply_text(
+            "📭 Chưa có kênh phù hợp.\n"
+            "Tạo nhanh: <code>/operator_bootstrap</code> hoặc <code>/channel_add platform=tiktok name=TechVN account=tk1 focus=AI tools slots=2/day</code>",
+            parse_mode="HTML"
+        )
+    lines = [
+        "🧭 <b>CHANNEL ROUTER</b>",
+        f"• Platform: <code>{html.escape(router['input']['platform'])}</code>",
+        f"• Niche: {html.escape(router['input']['niche'])}",
+        f"• Active/candidate: <b>{router['counts']['active']}</b>/<b>{router['counts']['total']}</b>",
+        "",
+        "<b>Kênh đề xuất:</b>",
+    ]
+    for item in router["recommended"][:limit]:
+        icon = "✅" if item["readiness"] == "api_ready" else ("🟡" if item["can_manual_publish"] else "⚠️")
+        matches = ", ".join(item["matched_keywords"]) if item["matched_keywords"] else "-"
+        lines.append(
+            f"{icon} #{item['id']} | <code>{html.escape(item['platform'] or '-')}</code> | "
+            f"{html.escape(item['channel_name'] or '-')} / {html.escape(item['account_label'] or 'main')}\n"
+            f"  score=<b>{item['score']}</b> slots=<code>{html.escape(item['posting_slots'] or '-')}</code> "
+            f"readiness=<b>{html.escape(item['readiness'])}</b>\n"
+            f"  match: {html.escape(matches)}\n"
+            f"  dùng: <code>channel={item['id']}</code>"
+        )
+    lines.extend([
+        "",
+        "<b>Lệnh tiếp theo:</b>",
+        f"• <code>{html.escape(router['commands']['make_video_best'])}</code>",
+        f"• <code>{html.escape(router['commands']['operator_launch_best'])}</code>",
+        "",
+        "API: <code>GET /api/operator/channel-router?platform=tiktok&amp;niche=công nghệ AI&amp;limit=10</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_channel_publish_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -13990,6 +14191,7 @@ def operator_category_keyboard(category):
         ],
         "cat_schedule": [
             ("📡 Kênh", "channels"), ("➕ Thêm kênh", "channeladd"),
+            ("🧭 Router kênh", "channelrouter"),
             ("📅 Calendar", "calendar"), ("🗓 Lên lịch", "calendarplan"),
             ("🧪 Auto-post ready", "readiness"),
         ],
@@ -14111,6 +14313,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Loop cron: <code>POST {html.escape(base_url)}/api/operator/loop</code>",
         f"• Make video pipeline: <code>POST {html.escape(base_url)}/api/operator/make-video</code>",
         f"• Danh sách kênh: <code>GET {html.escape(base_url)}/api/operator/channels</code>",
+        f"• Router chọn kênh: <code>GET {html.escape(base_url)}/api/operator/channel-router?platform=tiktok&amp;niche=công nghệ AI</code>",
         f"• Danh sách campaign: <code>GET {html.escape(base_url)}/api/operator/campaigns</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
         f"• Bundle link affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-bundle?affiliate_id=1&amp;job_id=12</code>",
@@ -14369,6 +14572,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "build": "/operator_build job=<JOB_ID> n=5 duration=45",
         "channels": "/channels",
         "channeladd": "/channel_add platform=tiktok name=TechVN account=tk1 focus=AI tools audience=creator slots=2/day mode=manual",
+        "channelrouter": "/channel_router platform=tiktok niche=công nghệ AI limit=10\nGET /api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10",
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
         "rank": "/trend_rank\n/trend_rank 20",
@@ -17620,6 +17824,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("campaign_stats", cmd_campaign_stats))
     tg_app.add_handler(CommandHandler("channel_add", cmd_channel_add))
     tg_app.add_handler(CommandHandler("channels",    cmd_channels))
+    tg_app.add_handler(CommandHandler("channel_router", cmd_channel_router))
     tg_app.add_handler(CommandHandler("channel_publish_set", cmd_channel_publish_set))
     tg_app.add_handler(CommandHandler("publish_readiness", cmd_publish_readiness))
     tg_app.add_handler(CommandHandler("publisher_status", cmd_publisher_status))
@@ -19180,6 +19385,11 @@ async def api_operator_channels(request: Request, limit: int = 50):
             "status_url": "/api/operator/status",
         },
     }
+
+@fastapi_app.get("/api/operator/channel-router")
+async def api_operator_channel_router(request: Request, platform: str = "tiktok", niche: str = "công nghệ AI", limit: int = 20):
+    verify_operator_api_token(request)
+    return operator_channel_router_data(ADMIN_ID, platform=platform, niche=niche, limit=limit)
 
 @fastapi_app.get("/api/operator/campaigns")
 async def api_operator_campaigns(request: Request, limit: int = 30):
