@@ -2536,6 +2536,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/n8n-workflow.json"),
         ("GET", "/api/operator/command-center"),
         ("POST", "/api/operator/make-video"),
+        ("POST", "/api/operator/affiliates/import"),
         ("GET", "/api/operator/publisher/status"),
         ("POST", "/api/operator/publisher/run"),
         ("GET", "/api/operator/worker-next"),
@@ -2595,6 +2596,7 @@ def operator_smoke_test_data(owner_id):
         "reference_scan_in_spec": "/api/operator/reference-videos/scan" in spec_text and "/api/operator/reference-videos/scan" in n8n_text,
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
+        "affiliate_import_in_spec": "/api/operator/affiliates/import" in spec_text and "/api/operator/affiliates/import" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
@@ -2673,6 +2675,7 @@ def operator_worker_spec_data():
                 "allowed_actions": [
                     "POST /api/operator/make-video khi admin/Claude có topic và muốn tạo pipeline video kiếm tiền nhanh",
                     "POST /api/operator/director/run để scale/build hoặc queue publish manual an toàn",
+                    "POST /api/operator/affiliates/import khi admin gửi danh sách link affiliate mới",
                     "POST /api/operator/affiliate-scale khi đã chọn affiliate rõ ràng",
                     "Không tự đăng ra mạng xã hội nếu chưa qua publish pack/review gate",
                 ],
@@ -2784,6 +2787,17 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/affiliate-bundle?affiliate_id=3&job_id=12&platform=tiktok&limit=12",
                 "purpose": "Lấy link chính + link liên quan, mỗi placement có src tracking riêng cho caption/comment/status/bio.",
+            },
+            "affiliate_import": {
+                "method": "POST",
+                "url": "/api/operator/affiliates/import",
+                "body": {
+                    "text": "https://shorten.asia/abc (Tên sản phẩm), https://trackfin.asia/xyz (Brand)",
+                    "default_niche": "",
+                    "default_network": "",
+                    "notify_admin": True,
+                },
+                "purpose": "Import nhanh nhiều link affiliate từ danh sách admin paste; tự bỏ qua URL trùng.",
             },
             "make_video": {
                 "topic": "đồ công nghệ văn phòng",
@@ -3667,6 +3681,26 @@ def operator_n8n_workflow_json_data():
                         "={\"topic\":\"đồ công nghệ văn phòng\","
                         "\"platform\":\"tiktok\",\"channel\":\"all\","
                         "\"limit\":3,\"build\":true,\"duration\":45,\"notify_admin\":true}"
+                    ),
+                    "options": {"timeout": 120000},
+                },
+            },
+            {
+                "id": "affiliate-import-optional",
+                "name": "Affiliate Import Optional",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-220, -740],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/affiliates/import",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"text\":\"https://shorten.asia/abc (Tên sản phẩm)\","
+                        "\"default_niche\":\"\",\"default_network\":\"\",\"notify_admin\":true}"
                     ),
                     "options": {"timeout": 120000},
                 },
@@ -8676,6 +8710,12 @@ class OperatorAffiliateScaleRequest(BaseModel):
     variants: int = Field(default=5, ge=3, le=8)
     notify_admin: bool = True
 
+class OperatorAffiliateImportRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    default_niche: str = Field(default="", max_length=240)
+    default_network: str = Field(default="", max_length=120)
+    notify_admin: bool = True
+
 class OperatorMakeVideoRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=300)
     platform: str = Field(default="tiktok", max_length=40)
@@ -12582,6 +12622,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Reference videos: <code>GET {html.escape(base_url)}/api/operator/reference-videos?limit=40</code>",
         f"• Add reference: <code>POST {html.escape(base_url)}/api/operator/reference-videos</code>",
         f"• Scan reference folder: <code>POST {html.escape(base_url)}/api/operator/reference-videos/scan</code>",
+        f"• Bulk affiliate import: <code>POST {html.escape(base_url)}/api/operator/affiliates/import</code>",
         f"• n8n template: <code>GET {html.escape(base_url)}/api/operator/n8n-template</code>",
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
@@ -17273,6 +17314,52 @@ async def api_operator_affiliates(request: Request, limit: int = 50):
             ) in rows
         ],
         "rule": "Pick an active affiliate id, then call POST /api/operator/affiliate-scale. Keep affiliate claims compliant.",
+    }
+
+@fastapi_app.post("/api/operator/affiliates/import")
+async def api_operator_affiliate_import(payload: OperatorAffiliateImportRequest, request: Request):
+    verify_operator_api_token(request)
+    created, skipped, errors = import_affiliate_links_from_text(
+        ADMIN_ID,
+        payload.text,
+        default_niche=payload.default_niche,
+        default_network=payload.default_network,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "📥 <b>AFFILIATE IMPORT API</b>\n\n"
+                    f"• Created: <b>{len(created)}</b>\n"
+                    f"• Skipped duplicate: <b>{len(skipped)}</b>\n"
+                    f"• Errors: <b>{len(errors)}</b>\n"
+                    "Xem catalog: <code>/affiliates</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Affiliate import notify error: {e}")
+    return {
+        "ok": True,
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "error_count": len(errors),
+        "created": [
+            {"id": aid, "network": network, "product": product, "url": url, "niche": niche}
+            for aid, network, product, url, niche in created
+        ],
+        "skipped": [
+            {"id": aid, "network": network, "product": product, "url": url}
+            for aid, network, product, url in skipped
+        ],
+        "errors": errors,
+        "next": {
+            "list_url": "/api/operator/affiliates",
+            "bundle_url": "/api/operator/affiliate-bundle?brand=...&niche=...",
+            "scale_url": "/api/operator/affiliate-scale",
+        },
+        "rule": "Bulk import only saves links; production must still use affiliate disclosure and compliant claims.",
     }
 
 @fastapi_app.get("/api/operator/affiliate-bundle")
