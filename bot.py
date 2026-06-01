@@ -14486,6 +14486,7 @@ def format_publisher_handoff_summary(queue_id, handoff):
         lines.append(f"• {html.escape(step)}")
     lines.append(
         "\n<b>Sau khi đăng xong:</b>\n"
+        f"• <code>/publish_done queue={queue_id} url=https://... views=0 clicks=0 orders=0 revenue=0 cost=0</code>\n"
         f"• <code>/publish_queue_set id={queue_id} status=published url=https://...</code>\n"
         f"• <code>{html.escape(performance.get('views') or ('/performance_add job=%s type=view value=<VIEWS>' % (handoff.get('job_id') or '<JOB_ID>')))}</code>\n"
         f"• <code>{html.escape(performance.get('clicks') or ('/performance_add job=%s type=click value=<CLICKS>' % (handoff.get('job_id') or '<JOB_ID>')))}</code>"
@@ -15013,6 +15014,119 @@ def update_publish_queue_item(owner_id, queue_id, status=None, publish_url=None,
     conn.commit()
     conn.close()
     return changed > 0, row[0] if row else None
+
+def complete_publish_tracking(
+    owner_id,
+    job_id=0,
+    queue_id=0,
+    status="published",
+    publish_url="",
+    note="",
+    source="manual_publish_done",
+    views=0,
+    clicks=0,
+    leads=0,
+    orders=0,
+    revenue=0,
+    cost=0,
+    affiliate_id=0,
+):
+    status = (status or "published").lower().strip()
+    allowed = {"published", "blocked", "scheduled", "cancelled", "queued"}
+    if status not in allowed:
+        return False, "invalid_status", {}
+    queue_id = int(queue_id or 0)
+    job_id = int(job_id or 0)
+    queue_payload = None
+    if queue_id:
+        queue_row = get_publish_queue_item(owner_id, queue_id)
+        if not queue_row:
+            return False, "queue_not_found", {}
+        queue_payload = serialize_publish_queue_item(queue_row)
+        job_id = job_id or int((queue_payload or {}).get("job_id") or 0)
+    if not job_id:
+        return False, "missing_job_id", {}
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return False, "job_not_found", {}
+
+    source = normalize_tracking_source(source or "manual_publish_done", "manual_publish_done")
+    note = (note or "").strip()
+    changed_queue = False
+    if queue_id:
+        changed_queue, _ = update_publish_queue_item(
+            owner_id,
+            queue_id,
+            status=status,
+            publish_url=publish_url,
+            note=note or f"publish_done:{source}",
+        )
+
+    recorded_events = []
+
+    def record(event_type, value=1, amount=0, event_note=""):
+        value = int(value or 0)
+        amount = int(amount or 0)
+        if value <= 0 and amount <= 0:
+            return
+        detail_parts = []
+        if queue_id:
+            detail_parts.append(f"queue:{queue_id}")
+        if publish_url and event_type == "publish":
+            detail_parts.append(f"url:{publish_url[:220]}")
+        if event_note:
+            detail_parts.append(event_note)
+        if note:
+            detail_parts.append(note[:240])
+        ok, _job = add_performance_event(
+            owner_id,
+            job_id,
+            event_type,
+            value,
+            amount,
+            format_tracking_note(source, " | ".join(detail_parts)),
+            0,
+            affiliate_id_override=int(affiliate_id or 0),
+        )
+        if ok:
+            recorded_events.append({"type": event_type, "value": value, "amount": amount})
+
+    if status == "published":
+        update_production_job(
+            job_id,
+            owner_id,
+            stage="done",
+            status="published",
+            note=note or f"publish_done:{source}",
+            publish_url=publish_url,
+        )
+        record("publish", 1, 0, "published")
+        record("view", views, 0, "initial_views")
+        record("click", clicks, 0, "initial_clicks")
+        record("lead", leads, 0, "initial_leads")
+        record("order", orders, revenue, "initial_orders")
+        if int(revenue or 0) > 0 and int(orders or 0) <= 0:
+            record("revenue", 1, revenue, "initial_revenue")
+        record("cost", 1 if int(cost or 0) > 0 else 0, cost, "initial_cost")
+    elif status == "blocked":
+        update_production_job(job_id, owner_id, status="blocked", note=note or f"publish_queue:{queue_id or '-'} blocked")
+    elif status == "scheduled":
+        update_production_job(job_id, owner_id, stage="publish", status="queued", note=note or f"publish_queue:{queue_id or '-'} scheduled")
+    elif status in {"cancelled", "queued"}:
+        update_production_job(job_id, owner_id, stage="publish", status=status, note=note or f"publish_queue:{queue_id or '-'} {status}")
+
+    updated_queue = serialize_publish_queue_item(get_publish_queue_item(owner_id, queue_id)) if queue_id else None
+    updated_job = get_production_job(job_id, owner_id)
+    post_publish = build_post_publish_handoff(owner_id, job_id, days=30) if updated_job else None
+    return True, "ok", {
+        "queue_changed": changed_queue,
+        "queue": updated_queue,
+        "job_id": job_id,
+        "status": status,
+        "publish_url": publish_url,
+        "recorded_events": recorded_events,
+        "post_publish": post_publish,
+    }
 
 def facebook_page_video_permalink(page_id: str, video_id: str) -> str:
     if page_id and video_id:
@@ -16987,6 +17101,7 @@ def build_post_publish_handoff(owner_id, job_id, days=30):
     }
     commands = {
         "mark_published": f"/mark_published job={job_id} url=https://... views=0 clicks=0 note=...",
+        "publish_done": f"/publish_done job={job_id} url=https://... views=<VIEWS> clicks=<CLICKS> orders=<ORDERS> revenue=<VND> cost=<COST> source={placement_sources['manual']}",
         "view": f"/performance_add job={job_id} type=view value=<VIEWS> source={placement_sources['manual']} note=view",
         "click_caption": f"/performance_add job={job_id} type=click value=<CLICKS> source={placement_sources['caption']} note=caption_click",
         "click_comment": f"/performance_add job={job_id} type=click value=<CLICKS> source={placement_sources['pinned_comment']} note=comment_click",
@@ -17094,6 +17209,7 @@ def format_post_publish_handoff(handoff):
         f"• CTR={float(performance.get('ctr') or 0):.2f}% CVR={float(performance.get('cvr') or 0):.2f}% ROI={float(performance.get('roi') or 0):.1f}% score={performance.get('score', 0)}",
         "",
         "<b>Ghi dữ liệu:</b>",
+        f"• Gộp nhanh: <code>{html.escape(commands.get('publish_done') or '')}</code>",
         f"• <code>{html.escape(commands.get('mark_published') or '')}</code>",
         f"• <code>{html.escape(commands.get('view') or '')}</code>",
         f"• <code>{html.escape(commands.get('click_caption') or '')}</code>",
@@ -17482,8 +17598,14 @@ class OperatorPublishCompleteRequest(BaseModel):
     status: str = Field(default="published", max_length=30)
     publish_url: str = Field(default="", max_length=2000)
     note: str = Field(default="", max_length=1200)
+    source: str = Field(default="api_publish_complete", max_length=120)
     views: int = Field(default=0, ge=0)
     clicks: int = Field(default=0, ge=0)
+    leads: int = Field(default=0, ge=0)
+    orders: int = Field(default=0, ge=0)
+    revenue: int = Field(default=0, ge=0)
+    cost: int = Field(default=0, ge=0)
+    affiliate_id: int = Field(default=0, ge=0)
 
 class OperatorPublisherRunRequest(BaseModel):
     platform: str = Field(default="", max_length=40)
@@ -18642,6 +18764,7 @@ def build_start_message_text(user_id) -> str:
             "• /worker_intake claim=0/1 — Worker nhận task + prompt + toolchain + upload URL",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
+            "• /publish_done — Ghi URL bài đã đăng + view/click/đơn/doanh thu trong một lệnh",
             "• /dashboard — Dashboard quản trị hệ thống",
             "• /checkpayos &lt;mã_đơn&gt; — Kiểm tra lại đơn PayOS",
             "• /tools và /mmo — Kho công cụ/quy trình nội bộ Admin",
@@ -19470,6 +19593,16 @@ def operator_brain_fallback(raw_text):
             "mode": "api" if "api" in lower else "manual",
             "confidence": 82,
         }
+    if (queue_id or job_id) and any_url and any(word in lower for word in ["đã đăng", "da dang", "published", "mark", "xong", "hoàn tất", "hoan tat"]):
+        if performance_metrics:
+            return {
+                "intent": "publish_done",
+                "queue": queue_id,
+                "job": job_id,
+                "url": any_url,
+                "metrics": performance_metrics,
+                "confidence": 87,
+            }
     if queue_id and any_url and any(word in lower for word in ["đã đăng", "da dang", "published", "mark", "xong", "hoàn tất", "hoan tat"]):
         return {
             "intent": "publish_queue_set",
@@ -19803,7 +19936,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, head_brain, head_run, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, approve_ready, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, head_brain, head_run, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, publish_done, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, approve_ready, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- head_brain: khi admin muốn đầu não/cockpit tổng từ lệnh Telegram tới video, publish, affiliate, tiền và scale.\n"
@@ -19848,6 +19981,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- publisher_handoff: khi admin muốn lấy pack/handoff cho một queue cụ thể; cần queue ID.\n"
         "- publish_queue_set: khi admin gửi URL bài đã đăng và muốn đánh dấu queue là published; cần queue ID và url.\n"
         "- performance_add: khi admin nói job có bao nhiêu view/click/đơn/lead/doanh thu/chi phí; cần job ID và metrics.\n"
+        "- publish_done: khi admin nói queue/job đã đăng xong, có URL và có luôn view/click/đơn/doanh thu/chi phí; cần queue hoặc job, url và metrics nếu có.\n"
         "- tracking_report: khi admin hỏi funnel/source/caption/comment/link tracking nào hiệu quả.\n"
         "- scale_plan: khi admin hỏi nên scale link/video/job nào dựa trên số liệu.\n"
         "- scale_execute: khi admin yêu cầu chạy scale plan/tự scale an toàn.\n"
@@ -20069,6 +20203,19 @@ def brain_command_preview(plan):
         return (
             f"/publish_queue_set id={int(plan.get('queue') or 0)} "
             f"status={plan.get('status') or 'published'} url={plan.get('url') or 'https://...'} note=brain_mark_published"
+        )
+    if intent == "publish_done":
+        metrics = plan.get("metrics") or {}
+        return (
+            f"/publish_done queue={int(plan.get('queue') or 0)} job={int(plan.get('job') or 0)} "
+            f"url={plan.get('url') or 'https://...'} "
+            f"views={int((metrics.get('view') or {}).get('value') or 0) if isinstance(metrics, dict) else 0} "
+            f"clicks={int((metrics.get('click') or {}).get('value') or 0) if isinstance(metrics, dict) else 0} "
+            f"leads={int((metrics.get('lead') or {}).get('value') or 0) if isinstance(metrics, dict) else 0} "
+            f"orders={int((metrics.get('order') or {}).get('value') or 0) if isinstance(metrics, dict) else 0} "
+            f"revenue={int(((metrics.get('order') or {}).get('amount') or (metrics.get('revenue') or {}).get('amount') or 0)) if isinstance(metrics, dict) else 0} "
+            f"cost={int((metrics.get('cost') or {}).get('amount') or 0) if isinstance(metrics, dict) else 0} "
+            f"source=brain_publish_done"
         )
     if intent == "performance_add":
         metrics = plan.get("metrics") or {}
@@ -20465,6 +20612,31 @@ async def run_brain_plan(update, context, plan):
                 "note=brain_mark_published",
             ]
             return await cmd_publish_queue_set(update, context)
+        if intent == "publish_done":
+            metrics = plan.get("metrics") or {}
+            if not isinstance(metrics, dict):
+                metrics = {}
+            if not (int(plan.get("queue") or 0) or int(plan.get("job") or 0)) or not (plan.get("url") or ""):
+                return await update.message.reply_text(
+                    "⚠️ Cần queue/job và URL bài đã đăng. Ví dụ: <code>/brain queue 3 đã đăng https://... 500 view 20 click 1 đơn doanh thu 50000</code>",
+                    parse_mode="HTML",
+                )
+            order_metric = metrics.get("order") or {}
+            revenue_metric = metrics.get("revenue") or {}
+            context.args = [
+                f"queue={int(plan.get('queue') or 0)}",
+                f"job={int(plan.get('job') or 0)}",
+                f"url={plan.get('url')}",
+                f"views={int((metrics.get('view') or {}).get('value') or 0)}",
+                f"clicks={int((metrics.get('click') or {}).get('value') or 0)}",
+                f"leads={int((metrics.get('lead') or {}).get('value') or 0)}",
+                f"orders={int(order_metric.get('value') or 0)}",
+                f"revenue={int(order_metric.get('amount') or revenue_metric.get('amount') or 0)}",
+                f"cost={int((metrics.get('cost') or {}).get('amount') or 0)}",
+                "source=brain_publish_done",
+                "note=brain_publish_done",
+            ]
+            return await cmd_publish_done(update, context)
         if intent == "performance_add":
             job_id = int(plan.get("job") or 0)
             metrics = plan.get("metrics") or {}
@@ -25415,6 +25587,62 @@ async def cmd_mark_published(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode="HTML"
     )
 
+async def cmd_publish_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        queue_id = int(data.get("queue") or data.get("qid") or data.get("id") or 0)
+    except ValueError:
+        queue_id = 0
+    try:
+        job_id = int(data.get("job") or data.get("job_id") or (context.args[0] if context.args else 0) or 0)
+    except (TypeError, ValueError):
+        job_id = 0
+    if not queue_id and not job_id:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/publish_done queue=1 url=https://... views=1000 clicks=20 orders=1 revenue=50000 cost=0 source=tiktok_caption</code>\n"
+            "Có thể dùng <code>job=ID</code> nếu không có queue.",
+            parse_mode="HTML",
+        )
+    result = complete_publish_tracking(
+        update.effective_user.id,
+        job_id=job_id,
+        queue_id=queue_id,
+        status=data.get("status") or "published",
+        publish_url=data.get("url") or data.get("publish_url") or data.get("publish") or "",
+        note=data.get("note") or "manual_publish_done",
+        source=data.get("source") or data.get("src") or "manual_publish_done",
+        views=safe_int(data.get("views") or data.get("view"), 0),
+        clicks=safe_int(data.get("clicks") or data.get("click"), 0),
+        leads=safe_int(data.get("leads") or data.get("lead"), 0),
+        orders=safe_int(data.get("orders") or data.get("order") or data.get("don"), 0),
+        revenue=safe_int(data.get("revenue") or data.get("amount") or data.get("money") or data.get("vnd"), 0),
+        cost=safe_int(data.get("cost") or data.get("chiphi") or data.get("chi_phi"), 0),
+        affiliate_id=safe_int(data.get("aff") or data.get("affiliate") or data.get("affiliate_id"), 0),
+    )
+    ok, reason, info = result
+    if not ok:
+        return await update.message.reply_text(f"❌ Không ghi được publish_done: <code>{html.escape(reason)}</code>", parse_mode="HTML")
+    events = info.get("recorded_events") or []
+    event_text = "\n".join(
+        f"• {html.escape(e.get('type') or '-')}: value=<b>{int(e.get('value') or 0)}</b> amount=<b>{int(e.get('amount') or 0):,}đ</b>"
+        for e in events
+    ) or "• Chưa có metric mới."
+    pp = info.get("post_publish") or {}
+    recommendation = pp.get("recommendation") or "Chạy /tracking_report rồi /scale_plan khi đủ dữ liệu."
+    await update.message.reply_text(
+        f"✅ <b>PUBLISH DONE</b>\n\n"
+        f"• Queue: <code>#{queue_id or '-'}</code> | Job: <code>#{info.get('job_id') or job_id}</code>\n"
+        f"• Status: <b>{html.escape(info.get('status') or 'published')}</b>\n"
+        f"• URL: <code>{html.escape(info.get('publish_url') or data.get('url') or 'chưa nhập')}</code>\n\n"
+        f"<b>Đã ghi:</b>\n{event_text}\n\n"
+        f"<b>AI đề xuất:</b> {html.escape(recommendation)}\n"
+        f"• Xem funnel: <code>/tracking_report days=30</code>\n"
+        f"• Quyết định scale: <code>/affiliate_decisions days=30</code>",
+        parse_mode="HTML",
+    )
+
 async def cmd_post_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -29077,6 +29305,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("job_context", cmd_job_context))
     tg_app.add_handler(CommandHandler("job_ready", cmd_job_ready))
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
+    tg_app.add_handler(CommandHandler("publish_done", cmd_publish_done))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("money_pack", cmd_money_pack))
@@ -32101,29 +32330,29 @@ async def api_operator_publish_auto(queue_id: int, request: Request):
 @fastapi_app.post("/api/operator/publish/{queue_id}/complete")
 async def api_operator_publish_complete(queue_id: int, payload: OperatorPublishCompleteRequest, request: Request):
     verify_operator_api_token(request)
-    status = (payload.status or "published").lower()
-    allowed = {"published", "blocked", "scheduled", "cancelled", "queued"}
-    if status not in allowed:
-        raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {', '.join(sorted(allowed))}")
-    item = get_publish_queue_item(ADMIN_ID, queue_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Publish queue item not found")
-    changed, job_id = update_publish_queue_item(ADMIN_ID, queue_id, status=status, publish_url=payload.publish_url, note=payload.note)
-    if not changed:
-        raise HTTPException(status_code=400, detail="Publish queue not updated")
-    if status == "published":
-        update_production_job(job_id, ADMIN_ID, stage="done", status="published", note=payload.note or "api_publish_complete", publish_url=payload.publish_url)
-        add_performance_event(ADMIN_ID, job_id, "publish", 1, 0, payload.note or f"queue:{queue_id}")
-        if payload.views > 0:
-            add_performance_event(ADMIN_ID, job_id, "view", payload.views, 0, "api_initial_views")
-        if payload.clicks > 0:
-            add_performance_event(ADMIN_ID, job_id, "click", payload.clicks, 0, "api_initial_clicks")
-    elif status == "blocked":
-        update_production_job(job_id, ADMIN_ID, status="blocked", note=payload.note or f"publish_queue:{queue_id} blocked")
-    elif status == "scheduled":
-        update_production_job(job_id, ADMIN_ID, stage="publish", status="queued", note=payload.note or f"publish_queue:{queue_id} scheduled")
-
-    updated = get_publish_queue_item(ADMIN_ID, queue_id)
+    ok, reason, info = complete_publish_tracking(
+        ADMIN_ID,
+        queue_id=queue_id,
+        status=payload.status,
+        publish_url=payload.publish_url,
+        note=payload.note,
+        source=payload.source,
+        views=payload.views,
+        clicks=payload.clicks,
+        leads=payload.leads,
+        orders=payload.orders,
+        revenue=payload.revenue,
+        cost=payload.cost,
+        affiliate_id=payload.affiliate_id,
+    )
+    if not ok:
+        if reason == "queue_not_found":
+            raise HTTPException(status_code=404, detail="Publish queue item not found")
+        if reason == "invalid_status":
+            allowed = {"published", "blocked", "scheduled", "cancelled", "queued"}
+            raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {', '.join(sorted(allowed))}")
+        raise HTTPException(status_code=400, detail=reason)
+    job_id = int(info.get("job_id") or 0)
     if tg_app and ADMIN_ID:
         try:
             await tg_app.bot.send_message(
@@ -32131,9 +32360,10 @@ async def api_operator_publish_complete(queue_id: int, payload: OperatorPublishC
                 text=(
                     f"📡 <b>OPERATOR API PUBLISH UPDATE</b>\n\n"
                     f"• Queue: <code>#{queue_id}</code> | Job: <code>#{job_id}</code>\n"
-                    f"• Status: <b>{html.escape(status)}</b>\n"
+                    f"• Status: <b>{html.escape(info.get('status') or payload.status or 'published')}</b>\n"
                     f"• URL: <code>{html.escape(payload.publish_url or 'không có')}</code>\n"
-                    f"• Views/clicks: <b>{payload.views}</b>/<b>{payload.clicks}</b>\n"
+                    f"• Views/clicks/orders: <b>{payload.views}</b>/<b>{payload.clicks}</b>/<b>{payload.orders}</b>\n"
+                    f"• Revenue/cost: <b>{payload.revenue:,}đ</b>/<b>{payload.cost:,}đ</b>\n"
                     f"• Note: {html.escape(payload.note or '-')}"
                 ),
                 parse_mode="HTML"
@@ -32142,8 +32372,10 @@ async def api_operator_publish_complete(queue_id: int, payload: OperatorPublishC
             logger.error(f"Operator publish notify error: {e}")
     return {
         "ok": True,
-        "queue": serialize_publish_queue_item(updated),
+        "queue": info.get("queue"),
         "job_id": job_id,
+        "recorded_events": info.get("recorded_events") or [],
+        "post_publish": info.get("post_publish") or {},
     }
 
 @fastapi_app.post("/api/operator/performance")
