@@ -2397,7 +2397,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
         "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "affiliate_seed", "affiliate_scale",
-        "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "worker_next", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -2408,6 +2408,7 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/make-video"),
         ("GET", "/api/operator/publisher/status"),
         ("POST", "/api/operator/publisher/run"),
+        ("GET", "/api/operator/worker-next"),
         ("GET", "/api/operator/tasks/claim"),
         ("POST", "/api/operator/tasks/<TASK_ID>/complete"),
         ("POST", "/api/operator/tasks/<TASK_ID>/upload"),
@@ -2460,6 +2461,7 @@ def operator_smoke_test_data(owner_id):
         "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
         "video_patterns_in_spec": "/api/operator/video-patterns" in spec_text and "/api/operator/video-patterns" in n8n_text,
         "reference_pack_in_spec": "/api/operator/reference-pack" in spec_text and "/api/operator/reference-pack" in n8n_text,
+        "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
@@ -2552,9 +2554,10 @@ def operator_worker_spec_data():
             {
                 "role": "tool_worker",
                 "owner": "Kling/Runway/Fish/Edge/CapCut/FFmpeg/n8n",
-                "input": "GET /api/operator/tasks/claim?include_context=1",
+                "input": "GET /api/operator/worker-next để peek; GET /api/operator/tasks/claim?include_context=1 khi bắt đầu làm",
                 "submit": "POST /api/operator/tasks/<TASK_ID>/complete hoặc POST /api/operator/tasks/<TASK_ID>/upload",
                 "allowed_actions": [
+                    "Peek task trước bằng /api/operator/worker-next để không tự chuyển task sang working khi chỉ audit",
                     "Tạo voice, visual, edit, subtitle, final_video theo task",
                     "Trả output_url/output_urls, hoặc upload file thật qua endpoint /upload",
                     "Không tự thay đổi affiliate link hoặc claim chính sách",
@@ -2593,6 +2596,7 @@ def operator_worker_spec_data():
             {"step": 2, "name": "make_video_optional", "method": "POST", "url": "/api/operator/make-video"},
             {"step": 3, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
+            {"step": 4.5, "name": "peek_worker_next", "method": "GET", "url": "/api/operator/worker-next"},
             {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1"},
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
@@ -2661,6 +2665,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/tasks/claim?include_context=1&tool=kling",
                 "purpose": "Claim task và nhận luôn job_context để worker không phải ghép nhiều endpoint.",
+            },
+            "worker_next": {
+                "method": "GET",
+                "url": "/api/operator/worker-next?job_id=<JOB_ID>&tool=kling&limit=5",
+                "purpose": "Peek task kế tiếp cho worker mà không đổi trạng thái; dùng trước claim khi n8n/Claude chỉ đang audit/điều phối.",
             },
             "publish_complete": {
                 "status": "published",
@@ -3134,11 +3143,18 @@ def operator_n8n_template_data():
                 "note": "Chỉ chạy action an toàn: scale/build/queue manual; không auto publish ngoài MXH.",
             },
             {
+                "node": "Peek Worker Next",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/worker-next",
+                "note": "Peek task kế tiếp trước, không đổi trạng thái. Chỉ claim khi worker thật sự bắt đầu làm.",
+            },
+            {
                 "node": "Claim Production Task",
                 "type": "http_request",
                 "method": "GET",
-                "url": f"{base_url}/api/operator/tasks/next",
-                "when": "director result has no blocker or a task is pending",
+                "url": f"{base_url}/api/operator/tasks/claim?include_context=1",
+                "when": "Peek Worker Next trả next_task và worker sẵn sàng xử lý.",
             },
             {
                 "node": "AI/Tool Worker",
@@ -3448,6 +3464,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "peek-worker-next",
+                "name": "Peek Worker Next",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-80, -320],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/worker-next",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "claim-task",
                 "name": "Claim Next Task",
                 "type": "n8n-nodes-base.httpRequest",
@@ -3470,6 +3500,7 @@ def operator_n8n_workflow_json_data():
                 "parameters": {
                     "content": (
                         "Gắn node Claude/Gemini/Kling/Runway/Fish/Edge/CapCut tại đây.\n"
+                        "Dùng Peek Worker Next để xem task kế tiếp; chỉ dùng Claim Next Task khi worker thật sự bắt đầu làm.\n"
                         "Trước khi dựng output, đọc Worker Spec + Video Patterns + Reference Pack trong input workflow hoặc job_context.reference_learning.\n"
                         "Luật vận hành: dùng tool trả phí/chất lượng cao trước; hết quota/lỗi thì fallback tool rẻ/miễn phí và báo admin.\n"
                         "Học cấu trúc/hook/proof của video mẫu nhưng viết lại cho thương hiệu/link affiliate của mình, không copy y nguyên.\n"
@@ -3696,7 +3727,8 @@ def operator_n8n_workflow_json_data():
             "Read Toolchain": {"main": [[{"node": "Read Video Patterns", "type": "main", "index": 0}]]},
             "Read Video Patterns": {"main": [[{"node": "Read Reference Pack", "type": "main", "index": 0}]]},
             "Read Reference Pack": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
-            "Director Run Safe Action": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
+            "Director Run Safe Action": {"main": [[{"node": "Peek Worker Next", "type": "main", "index": 0}]]},
+            "Peek Worker Next": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
             "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
             "Complete Task": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
             "Publisher Status": {"main": [[{"node": "Publisher Run Safe Claim", "type": "main", "index": 0}]]},
