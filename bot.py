@@ -2902,7 +2902,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "campaign_preset", "postback_setup", "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "campaign_preset", "postback_setup", "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_pack", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -2911,6 +2911,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/runtime"),
         ("GET", "/api/operator/worker-spec"),
         ("GET", "/api/operator/commander-pack"),
+        ("GET", "/api/operator/control-contract"),
         ("GET", "/api/operator/video-patterns"),
         ("GET", "/api/operator/reference-pack"),
         ("GET", "/api/operator/reference-videos"),
@@ -3001,6 +3002,7 @@ def operator_smoke_test_data(owner_id):
         "reference_scan_in_spec": "/api/operator/reference-videos/scan" in spec_text and "/api/operator/reference-videos/scan" in n8n_text,
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
         "commander_pack_in_spec": "/api/operator/commander-pack" in spec_text and "/api/operator/commander-pack" in n8n_text,
+        "control_contract_in_spec": "/api/operator/control-contract" in spec_text and "/api/operator/control-contract" in n8n_text,
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
         "command_run_in_spec": "/api/operator/command/run" in spec_text and "/api/operator/command/run" in n8n_text,
         "mission_control_in_spec": "/api/operator/mission" in spec_text and "/api/operator/mission" in n8n_text,
@@ -3083,6 +3085,7 @@ def operator_worker_spec_data():
         "toolchain_url": f"{base_url}/api/operator/toolchain",
         "mission_control_url": f"{base_url}/api/operator/mission",
         "next_run_url": f"{base_url}/api/operator/next-run",
+        "control_contract_url": f"{base_url}/api/operator/control-contract",
         "command_center_url": f"{base_url}/api/operator/command-center",
         "command_run_url": f"{base_url}/api/operator/command/run",
         "campaign_preset_url": f"{base_url}/api/operator/campaign-preset",
@@ -3161,6 +3164,7 @@ def operator_worker_spec_data():
             {"step": 1.03, "name": "launch_optional", "method": "POST", "url": "/api/operator/launch"},
             {"step": 1.05, "name": "command_center", "method": "GET", "url": "/api/operator/command-center?days=30&platform=tiktok"},
             {"step": 1.052, "name": "next_run_card", "method": "GET", "url": "/api/operator/next-run?days=30&platform=tiktok"},
+            {"step": 1.054, "name": "control_contract", "method": "GET", "url": "/api/operator/control-contract?days=30&platform=tiktok"},
             {"step": 1.055, "name": "command_run_preview", "method": "POST", "url": "/api/operator/command/run"},
             {"step": 1.06, "name": "mission_control", "method": "GET", "url": "/api/operator/mission?days=30&platform=tiktok&limit=8"},
             {"step": 1.07, "name": "channel_router", "method": "GET", "url": "/api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10"},
@@ -3222,6 +3226,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/next-run?days=30&platform=tiktok&limit=8",
                 "purpose": "Một run card duy nhất cho admin/Claude/n8n: setup, launch, worker, publish hoặc scale. Gọi lại sau mỗi bước.",
+            },
+            "control_contract": {
+                "method": "GET",
+                "url": "/api/operator/control-contract?days=30&platform=tiktok&limit=8",
+                "purpose": "Hợp đồng trách nhiệm và vòng đời vận hành cho Admin Telegram, Claude/n8n commander, tool worker, publisher và growth analyst.",
             },
             "command_run": {
                 "method": "POST",
@@ -3806,6 +3815,13 @@ def operator_n8n_template_data():
                 "note": "Một quyết định vận hành duy nhất: setup, launch, worker, approve/publish hoặc scale. Gọi lại sau khi hoàn thành bước.",
             },
             {
+                "node": "Read Control Contract",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/control-contract?days=30&platform=tiktok&limit=8",
+                "note": "Hợp đồng trách nhiệm giữa admin, Claude/n8n, AI worker, publisher và tracking; đọc trước khi execute để không vượt quyền.",
+            },
+            {
                 "node": "Command Run Preview",
                 "type": "http_request",
                 "method": "POST",
@@ -4242,6 +4258,20 @@ def operator_n8n_workflow_json_data():
                 "parameters": {
                     "method": "GET",
                     "url": f"{base_url_expr}/api/operator/next-run?days=30&platform=tiktok&limit=8",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "control-contract",
+                "name": "Control Contract",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-20, -850],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/control-contract?days=30&platform=tiktok&limit=8",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -4940,7 +4970,9 @@ def operator_n8n_workflow_json_data():
                 ]
             },
             "Bootstrap Optional": {"main": [[{"node": "Read Command Center", "type": "main", "index": 0}]]},
-            "Read Command Center": {"main": [[{"node": "Command Run Preview", "type": "main", "index": 0}]]},
+            "Read Command Center": {"main": [[{"node": "Next Run Card", "type": "main", "index": 0}]]},
+            "Next Run Card": {"main": [[{"node": "Control Contract", "type": "main", "index": 0}]]},
+            "Control Contract": {"main": [[{"node": "Command Run Preview", "type": "main", "index": 0}]]},
             "Command Run Preview": {"main": [[{"node": "Read Mission Control", "type": "main", "index": 0}]]},
             "Read Mission Control": {"main": [[{"node": "Read Channel Router", "type": "main", "index": 0}]]},
             "Read Channel Router": {"main": [[{"node": "Read Commander Pack", "type": "main", "index": 0}]]},
@@ -5189,6 +5221,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
         "command_center": command_center,
         "worker_spec_urls": {
             "mission": f"{base_url}/api/operator/mission",
+            "control_contract": f"{base_url}/api/operator/control-contract",
             "launch": f"{base_url}/api/operator/launch",
             "bootstrap": f"{base_url}/api/operator/bootstrap",
             "channel_router": f"{base_url}/api/operator/channel-router",
@@ -5348,6 +5381,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
             "audit": f"{base_url}/api/operator/audit",
             "command_center": f"{base_url}/api/operator/command-center",
             "command_run": f"{base_url}/api/operator/command/run",
+            "control_contract": f"{base_url}/api/operator/control-contract",
             "channel_router": f"{base_url}/api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10",
             "mission": f"{base_url}/api/operator/mission",
             "bootstrap": f"{base_url}/api/operator/bootstrap",
@@ -5379,6 +5413,142 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
             "Affiliate/finance claim phải có disclosure và không hứa kết quả chắc chắn.",
             "Nếu API/tool lỗi, ghi tool event hoặc trả ask_admin với bước cụ thể, không giả lập đã hoàn thành.",
         ],
+    }
+
+def operator_control_contract_data(owner_id, days=30, platform="tiktok", limit=8):
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 8), 20))
+    platform = (platform or "tiktok").lower()
+    audit = operator_audit_data(owner_id)
+    next_run = operator_next_run_data(owner_id, days=days, platform=platform, limit=limit)
+    publisher = publisher_capability_pack_data(owner_id, platform=platform)
+    adapters = platform_adapter_plan_data(owner_id, platform=platform)
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "base_url": base_url,
+        "platform": platform,
+        "purpose": "Hợp đồng điều khiển giữa Admin Telegram, Claude/n8n commander, AI/tool worker, publisher và tracking.",
+        "command_hierarchy": [
+            {"rank": 1, "actor": "admin_telegram", "authority": "Ra mục tiêu, duyệt publish, xử lý tiền/secret, quyết định scale lớn."},
+            {"rank": 2, "actor": "ai_commander", "authority": "Đọc next-run/contract, lập plan, gọi API whitelist, giao việc cho worker, không tự vượt review gate."},
+            {"rank": 3, "actor": "tool_worker", "authority": "Tạo script/voice/image/video/edit theo worker pack; trả output thật qua complete/upload."},
+            {"rank": 4, "actor": "publisher", "authority": "Đăng bằng API chính thức hoặc manual handoff sau khi job đã review/approve."},
+            {"rank": 5, "actor": "growth_analyst", "authority": "Ghi view/click/lead/order/revenue/cost và đề xuất SCALE/FIX/TEST/PAUSE."},
+        ],
+        "single_source_of_truth": {
+            "telegram_first": "/operator_next_run",
+            "api_first": "/api/operator/control-contract",
+            "next_run": "/api/operator/next-run",
+            "mission": "/api/operator/mission",
+            "commander_pack": "/api/operator/commander-pack",
+            "worker_spec": "/api/operator/worker-spec",
+            "n8n_workflow": "/api/operator/n8n-workflow.json",
+        },
+        "state": {
+            "audit_level": audit.get("level"),
+            "audit_score": audit.get("score"),
+            "next_mode": next_run.get("mode"),
+            "next_title": next_run.get("title"),
+            "publisher_overall": publisher.get("overall"),
+            "adapter_overall": adapters.get("overall"),
+            "open_queue": len(publisher.get("open_queue") or []),
+        },
+        "lifecycle": [
+            {
+                "phase": "setup",
+                "owner": "admin_telegram + ai_commander",
+                "goal": "Đảm bảo token/env/kênh/link/campaign/reference sẵn sàng.",
+                "telegram": "/operator_audit rồi /operator_bootstrap nếu thiếu",
+                "api": "GET /api/operator/audit -> POST /api/operator/bootstrap",
+                "done_when": "audit không còn blocker cấu hình quan trọng.",
+            },
+            {
+                "phase": "ideation",
+                "owner": "ai_commander",
+                "goal": "Chọn chủ đề/trend/link affiliate/format video có khả năng kiếm tiền.",
+                "telegram": "/campaign_preset hoặc /operator_launch topic=<chu_de>",
+                "api": "GET /api/operator/channel-router + POST /api/operator/launch",
+                "done_when": "production_jobs và production_tasks được tạo.",
+            },
+            {
+                "phase": "production",
+                "owner": "tool_worker",
+                "goal": "Tạo script/voice/visual/raw video/final video bằng tool chất lượng cao trước, fallback khi hết quota.",
+                "telegram": "/worker_next -> /worker_pack job=<JOB_ID>",
+                "api": "GET /api/operator/worker-next -> GET /api/operator/jobs/<JOB_ID>/worker-pack -> POST /api/operator/tasks/<TASK_ID>/complete hoặc /upload",
+                "done_when": "task final_video hoặc asset cuối có output_url/file thật.",
+            },
+            {
+                "phase": "review",
+                "owner": "admin_telegram + ai_commander",
+                "goal": "Kiểm tra quyền hình ảnh/voice/nhạc, disclosure affiliate, claim tài chính và chất lượng video.",
+                "telegram": "/review_video job=<JOB_ID> send=1 rồi /approve_publish job=<JOB_ID> queue=1",
+                "api": "GET /api/operator/jobs/<JOB_ID>/review-video -> POST /api/operator/jobs/<JOB_ID>/approve",
+                "done_when": "publish_queue có item queued/manual hoặc api.",
+            },
+            {
+                "phase": "publish",
+                "owner": "publisher",
+                "goal": "Đăng lên Facebook/TikTok/YouTube/OnlyFans theo adapter hợp lệ; manual nếu API chưa sẵn sàng.",
+                "telegram": "/platform_adapters -> /publisher_handoff queue=<QUEUE_ID> hoặc /publisher_run",
+                "api": "GET /api/operator/platform-adapters -> POST /api/operator/publisher/run -> POST /api/operator/publish/<QUEUE_ID>/complete",
+                "done_when": "publish_url được ghi vào queue/job.",
+            },
+            {
+                "phase": "money_tracking",
+                "owner": "growth_analyst",
+                "goal": "Ghi nguồn tiền PayOS/ngân hàng/network affiliate và đo hiệu quả từng link/source.",
+                "telegram": "/post_publish job=<JOB_ID> rồi /performance_add ...",
+                "api": "GET /api/operator/jobs/<JOB_ID>/post-publish -> POST /api/operator/performance",
+                "done_when": "performance_events có view/click/lead/order/revenue/cost theo source.",
+            },
+            {
+                "phase": "scale",
+                "owner": "ai_commander + admin_telegram",
+                "goal": "Đẩy link/kênh/format hiệu quả, pause link yếu, tạo batch mới từ dữ liệu thật.",
+                "telegram": "/affiliate_decisions -> /scale_execute",
+                "api": "GET /api/operator/affiliate-decisions -> POST /api/operator/scale-plan/run",
+                "done_when": "batch mới được tạo dựa trên dữ liệu hiệu quả.",
+            },
+        ],
+        "message_contracts": {
+            "admin_order": {
+                "example": "/brain tạo 3 video công nghệ AI gắn affiliate Samsung lên TikTok, build luôn",
+                "required": ["topic hoặc preset", "platform", "limit", "build flag"],
+                "forbidden": ["secret", "token", "yêu cầu bypass review/policy"],
+            },
+            "commander_action": {
+                "example": {"intent": "launch", "api": {"method": "POST", "url": "/api/operator/launch"}, "safety_gate": "pass"},
+                "must_include": ["intent", "api hoặc telegram_fallback", "safety_gate", "notes"],
+            },
+            "worker_output": {
+                "example": {"status": "ready", "asset_type": "final_video", "output_url": "https://...", "note": "tool output"},
+                "must_include": ["status", "asset_type", "output_url hoặc upload file", "note"],
+            },
+            "publish_complete": {
+                "example": {"status": "published", "publish_url": "https://...", "views": 0, "clicks": 0, "note": "manual publish"},
+                "must_include": ["status", "publish_url", "note"],
+            },
+            "performance_event": {
+                "example": {"job_id": 12, "event_type": "revenue", "value": 1, "amount": 150000, "source": "tiktok_caption"},
+                "event_types": ["view", "click", "lead", "order", "revenue", "cost"],
+            },
+        },
+        "non_negotiable_gates": [
+            "Không publish nếu chưa có final asset thật.",
+            "Không auto publish nếu adapter/publisher không api_ready.",
+            "Không dùng ảnh/giọng người thật thiếu consent; nội dung người lớn phải 18+.",
+            "Không copy nguyên video/thương hiệu/claim từ nguồn tham khảo.",
+            "Không hứa lợi nhuận, duyệt vay/thẻ, hoặc kết quả tài chính chắc chắn.",
+            "Không đưa token/API key vào prompt, caption, note công khai hoặc database.",
+        ],
+        "next": {
+            "telegram": next_run.get("telegram_command") or "/operator_next_run",
+            "api": next_run.get("api") or {"method": "GET", "url": "/api/operator/next-run"},
+            "after_done": "/operator_next_run hoặc GET /api/operator/control-contract để lấy bước tiếp theo.",
+        },
     }
 
 def get_production_job(job_id, owner_id):
@@ -12616,6 +12786,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command_lines.extend([
             f"• /runtime — Kiểm tra bản đang chạy: <code>{APP_BUILD}</code>",
             "• /operator_menu — Menu nút theo thư mục: Trend, Affiliate, Sản xuất, Đăng bài, Doanh thu, API",
+            "• /operator_contract — Hợp đồng điều khiển cho Admin/Claude/n8n/worker",
             "• /campaign_preset — Preset chiến dịch: tech/ecom/finance/travel/onlyfans",
             "• /postback_setup — Cấu hình callback affiliate network vào bot",
             "• /brain &lt;lệnh&gt; — Ra lệnh tự nhiên cho AI Operator",
@@ -13155,6 +13326,17 @@ def operator_brain_fallback(raw_text):
             "days": max(1, min(days, 180)),
             "confidence": 85,
         }
+    if any(word in lower for word in [
+        "control contract", "hợp đồng điều khiển", "hop dong dieu khien", "contract điều khiển", "contract dieu khien",
+        "quyền điều khiển", "quyen dieu khien", "ranh giới ai", "ranh gioi ai", "ai nào làm gì", "ai nao lam gi"
+    ]):
+        return {
+            "intent": "operator_contract",
+            "platform": platform,
+            "limit": max(3, min(limit, 20)),
+            "days": max(1, min(days, 180)),
+            "confidence": 86,
+        }
 
     if any(word in lower for word in [
         "học cả thư mục", "hoc ca thu muc", "học hết video", "hoc het video",
@@ -13457,7 +13639,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_next_run, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, campaign_preset, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_next_run, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
@@ -13466,6 +13648,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- revenue_destinations: khi admin hỏi tiền về đâu, network nào trả tiền, cần ghi event/postback gì.\n"
         "- postback_setup: khi admin muốn cấu hình postback/callback affiliate network vào bot.\n"
         "- operator_commander_pack: khi admin muốn prompt/gói điều khiển cho Claude Opus hoặc AI cấp cao điều phối toàn pipeline.\n"
+        "- operator_contract: khi admin muốn hợp đồng điều khiển, ranh giới quyền, vòng đời vận hành giữa admin/Claude/n8n/worker/publisher.\n"
         "- campaign_preset: khi admin muốn dùng preset chiến dịch tech/ecom/finance/travel/onlyfans để tự gom affiliate, kênh và launch.\n"
         "- operator_launch: khi admin muốn một lệnh chạy từ đầu: bootstrap nếu thiếu, tạo pipeline video, trả next task/review.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
@@ -13552,6 +13735,11 @@ def brain_command_preview(plan):
     if intent == "operator_commander_pack":
         return (
             f"/operator_commander_pack days={max(1, min(int(plan.get('days') or 30), 180))} "
+            f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 8), 20))}"
+        )
+    if intent == "operator_contract":
+        return (
+            f"/operator_contract days={max(1, min(int(plan.get('days') or 30), 180))} "
             f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 8), 20))}"
         )
     if intent == "campaign_preset":
@@ -13777,6 +13965,13 @@ async def run_brain_plan(update, context, plan):
                 f"limit={max(3, min(int(plan.get('limit') or 8), 20))}",
             ]
             return await cmd_operator_commander_pack(update, context)
+        if intent == "operator_contract":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 8), 20))}",
+            ]
+            return await cmd_operator_contract(update, context)
         if intent == "campaign_preset":
             context.args = [
                 f"preset={plan.get('preset') or 'tech'}",
@@ -14117,7 +14312,7 @@ def operator_command_plan_data(owner_id, command):
         "confidence": int(plan.get("confidence") or 0),
         "safety_note": plan.get("safety_note") or "Không bỏ qua review/approve gate; không tự publish khi chưa sẵn sàng.",
         "execute_allowed": (plan.get("intent") or "").lower() in {
-            "command_center", "operator_next_run", "pipeline_pack", "money_pack", "revenue_destinations", "postback_setup", "operator_commander_pack", "campaign_preset",
+            "command_center", "operator_next_run", "pipeline_pack", "money_pack", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
             "operator_director", "operator_execute", "operator_launch", "make_video",
             "tracking_report", "scale_plan", "affiliate_report", "affiliate_decisions",
             "scale_execute", "publisher_capabilities", "platform_adapters",
@@ -14155,6 +14350,8 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
         }
     if intent == "operator_commander_pack":
         return {"executed": True, "intent": intent, "data": operator_commander_pack_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 20)))}
+    if intent == "operator_contract":
+        return {"executed": True, "intent": intent, "data": operator_control_contract_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 20)))}
     if intent == "campaign_preset":
         result = await operator_campaign_preset_data(
             owner_id,
@@ -16478,6 +16675,51 @@ async def cmd_operator_commander_pack(update: Update, context: ContextTypes.DEFA
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
+async def cmd_operator_contract(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or 30), 180))
+    except ValueError:
+        days = 30
+    try:
+        limit = max(3, min(int(data.get("limit") or 8), 20))
+    except ValueError:
+        limit = 8
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    contract = operator_control_contract_data(update.effective_user.id, days=days, platform=platform, limit=limit)
+    state = contract.get("state") or {}
+    next_step = contract.get("next") or {}
+    lines = [
+        "📜 <b>OPERATOR CONTROL CONTRACT</b>",
+        f"• Platform: <code>{html.escape(platform)}</code> | Days: <b>{days}</b>",
+        f"• Audit: <code>{html.escape(str(state.get('audit_level') or '-'))}</code> score=<b>{state.get('audit_score', 0)}</b>",
+        f"• Next: <b>{html.escape(str(state.get('next_mode') or '-'))}</b> — {html.escape(str(state.get('next_title') or '-'))}",
+        f"• Publisher: <code>{html.escape(str(state.get('publisher_overall') or '-'))}</code> | queue=<b>{state.get('open_queue', 0)}</b>",
+        "",
+        "<b>Quyền điều khiển:</b>",
+    ]
+    for item in contract.get("command_hierarchy") or []:
+        lines.append(f"• {item.get('rank')}. <code>{html.escape(item.get('actor') or '-')}</code>: {html.escape(item.get('authority') or '-')}")
+    lines.append("\n<b>Vòng đời chuẩn:</b>")
+    for item in (contract.get("lifecycle") or [])[:7]:
+        lines.append(
+            f"• <b>{html.escape(item.get('phase') or '-')}</b> | owner=<code>{html.escape(item.get('owner') or '-')}</code>\n"
+            f"  TG: <code>{html.escape(item.get('telegram') or '-')}</code>\n"
+            f"  API: <code>{html.escape(item.get('api') or '-')}</code>"
+        )
+    lines.append("\n<b>Cấm vượt gate:</b>")
+    for rule in (contract.get("non_negotiable_gates") or [])[:6]:
+        lines.append(f"• {html.escape(rule)}")
+    lines.append(
+        "\n<b>Bước tiếp theo:</b>\n"
+        f"• TG: <code>{html.escape(str(next_step.get('telegram') or '/operator_next_run'))}</code>\n"
+        f"• API: <code>{html.escape(str((next_step.get('api') or {}).get('url') or '/api/operator/next-run'))}</code>\n"
+        "API đầy đủ: <code>GET /api/operator/control-contract?days=30&amp;platform=tiktok</code>"
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -16508,7 +16750,7 @@ def operator_category_keyboard(category):
             ("🧠 Mission control", "mission"), ("🧠 Brain command", "brain"),
             ("🎯 Campaign preset", "campaignpreset"),
             ("🎛 Next run card", "nextrun"),
-            ("👑 Commander pack", "commanderpack"),
+            ("👑 Commander pack", "commanderpack"), ("📜 Control contract", "contract"),
             ("🚀 Launch", "launch"), ("🧰 Bootstrap", "bootstrap"),
             ("🎬 Make video", "makevideo"),
             ("🚀 Autopilot batch", "autopilot"),
@@ -16649,6 +16891,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• AI commander pack: <code>GET {html.escape(base_url)}/api/operator/commander-pack</code>",
         f"• Mission control: <code>GET {html.escape(base_url)}/api/operator/mission</code>",
+        f"• Control contract: <code>GET {html.escape(base_url)}/api/operator/control-contract?days=30&amp;platform=tiktok</code>",
         f"• Next run card: <code>GET {html.escape(base_url)}/api/operator/next-run</code>",
         f"• Bootstrap thiếu setup: <code>POST {html.escape(base_url)}/api/operator/bootstrap</code>",
         f"• Campaign preset: <code>POST {html.escape(base_url)}/api/operator/campaign-preset</code>",
@@ -16926,6 +17169,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "commandrun": "POST /api/operator/command/run\n{\"command\":\"tạo 3 video công nghệ AI cho TikTok\",\"execute\":false,\"safe_mode\":true}",
         "workerspec": "/operator_worker_spec\nGET /api/operator/worker-spec",
         "commanderpack": "/operator_commander_pack days=30 platform=tiktok\nGET /api/operator/commander-pack?days=30&platform=tiktok",
+        "contract": "/operator_contract days=30 platform=tiktok\nGET /api/operator/control-contract?days=30&platform=tiktok",
         "toolchain": "/operator_toolchain\n/operator_tool_readiness\nGET /api/operator/toolchain\nGET /api/operator/tool-readiness",
         "toolevents": "/operator_tool_events\n/operator_tool_events stage=voice tool=Fish type=quota fallback=Edge message=het_quota\nPOST /api/operator/tool-events",
         "n8ntemplate": "/operator_n8n_template\nGET /api/operator/n8n-template",
@@ -20543,6 +20787,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_worker_spec", cmd_operator_worker_spec))
     tg_app.add_handler(CommandHandler("operator_commander_pack", cmd_operator_commander_pack))
+    tg_app.add_handler(CommandHandler("operator_contract", cmd_operator_contract))
     tg_app.add_handler(CommandHandler("operator_toolchain", cmd_operator_toolchain))
     tg_app.add_handler(CommandHandler("operator_tool_readiness", cmd_operator_tool_readiness))
     tg_app.add_handler(CommandHandler("operator_tool_events", cmd_operator_tool_events))
@@ -20973,6 +21218,7 @@ async def api_operator_status(request: Request):
             "smoke_test": "/api/operator/smoke-test",
             "audit": "/api/operator/audit",
             "worker_spec": "/api/operator/worker-spec",
+            "control_contract": "/api/operator/control-contract",
             "toolchain": "/api/operator/toolchain",
             "tool_events": "/api/operator/tool-events",
             "reference_videos": "/api/operator/reference-videos",
@@ -21425,6 +21671,14 @@ async def api_operator_commander_pack(request: Request, days: int = 30, platform
         "ok": True,
         **operator_commander_pack_data(ADMIN_ID, days=days, platform=platform, limit=limit),
     }
+
+@fastapi_app.get("/api/operator/control-contract")
+async def api_operator_control_contract(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 8):
+    verify_operator_api_token(request)
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 8), 20))
+    platform = (platform or "tiktok").lower()
+    return operator_control_contract_data(ADMIN_ID, days=days, platform=platform, limit=limit)
 
 @fastapi_app.post("/api/operator/bootstrap")
 async def api_operator_bootstrap(payload: OperatorBootstrapRequest, request: Request):
