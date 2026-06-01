@@ -3746,6 +3746,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/jobs/<JOB_ID>/context"),
         ("GET", "/api/operator/jobs/<JOB_ID>/worker-pack"),
         ("GET", "/api/operator/jobs/<JOB_ID>/video-brief"),
+        ("GET", "/api/operator/video-work-orders"),
         ("GET", "/api/operator/jobs/<JOB_ID>/scene-pack"),
         ("GET", "/api/operator/jobs/<JOB_ID>/comment-pack"),
         ("GET", "/api/operator/output-acceptance"),
@@ -3844,6 +3845,7 @@ def operator_smoke_test_data(owner_id):
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
         "video_brief_in_spec": "/api/operator/jobs/<JOB_ID>/video-brief" in spec_text and "video-brief" in spec_text,
+        "video_work_orders_in_spec": "/api/operator/video-work-orders" in spec_text,
         "scene_pack_in_spec": "/api/operator/jobs/<JOB_ID>/scene-pack" in spec_text,
         "comment_pack_in_spec": "/api/operator/jobs/<JOB_ID>/comment-pack" in spec_text,
         "task_prompt_pack_in_spec": "/api/operator/tasks/<TASK_ID>/prompt-pack" in spec_text and "/prompt-pack" in n8n_text,
@@ -3941,6 +3943,7 @@ def operator_worker_spec_data():
         "postback_setup_url": f"{base_url}/api/operator/postback-setup",
         "platform_adapters_url": f"{base_url}/api/operator/platform-adapters",
         "worker_intake_url": f"{base_url}/api/operator/worker-intake",
+        "video_work_orders_url": f"{base_url}/api/operator/video-work-orders",
         "reference_learning_rule": reference_learning_pack_data()["rule"],
         "roles": [
             {
@@ -4037,6 +4040,7 @@ def operator_worker_spec_data():
             {"step": 4.55, "name": "worker_intake_preview", "method": "GET", "url": "/api/operator/worker-intake?claim=0&include_prompt=1"},
             {"step": 4.6, "name": "worker_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/worker-pack"},
             {"step": 4.605, "name": "video_brief", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/video-brief"},
+            {"step": 4.607, "name": "video_work_orders", "method": "GET", "url": "/api/operator/video-work-orders?job_ids=<JOB_ID>,<JOB_ID>"},
             {"step": 4.61, "name": "scene_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/scene-pack"},
             {"step": 4.62, "name": "task_prompt_pack", "method": "GET", "url": "/api/operator/tasks/<TASK_ID>/prompt-pack"},
             {"step": 4.7, "name": "pipeline_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/pipeline-pack"},
@@ -4304,6 +4308,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/jobs/<JOB_ID>/video-brief",
                 "purpose": "Brief ngắn cho AI worker tạo video thật: scene plan, prompt worker, affiliate caption/comment/tracking, submit endpoints và review gate.",
+            },
+            "video_work_orders": {
+                "method": "GET",
+                "url": "/api/operator/video-work-orders?job_ids=<JOB_ID>,<JOB_ID>",
+                "purpose": "Gom nhiều video_brief thành danh sách lệnh giao việc cho Claude/n8n/tool worker sau một batch launch/make-video/film-series.",
             },
             "worker_intake": {
                 "method": "GET|POST",
@@ -11106,6 +11115,76 @@ def operator_video_brief_data(owner_id, job_id=0, task_id=0, tool="", include_fu
         "rule": "Video brief là gói giao việc ngắn cho Claude/n8n/tool worker: tạo output thật, trả qua complete/upload, không tự publish khi chưa qua gate.",
     }
 
+def operator_video_work_orders_data(owner_id, job_ids=None, limit=8, tool=""):
+    limit = max(1, min(safe_int(limit, 8), 20))
+    normalized_ids = []
+    for value in (job_ids or []):
+        job_id = safe_int(value, 0)
+        if job_id > 0 and job_id not in normalized_ids:
+            normalized_ids.append(job_id)
+        if len(normalized_ids) >= limit:
+            break
+    if not normalized_ids:
+        focus_job_id, _source = select_operator_focus_job_id(owner_id, 0)
+        if focus_job_id:
+            normalized_ids.append(focus_job_id)
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    orders = []
+    for job_id in normalized_ids[:limit]:
+        brief = operator_video_brief_data(owner_id, job_id=job_id, tool=tool, include_full_context=False)
+        if not brief:
+            continue
+        manifest = brief.get("production_manifest") or {}
+        affiliate = brief.get("affiliate_distribution") or {}
+        primary = affiliate.get("primary") or {}
+        primary_tracking = ((primary.get("tracking") or {}).get("caption") if isinstance(primary, dict) else "") or ""
+        task = brief.get("task") or {}
+        submit = brief.get("submit_contract") or {}
+        next_urls = brief.get("next_urls") or {}
+        job = brief.get("job") or {}
+        orders.append({
+            "job_id": job_id,
+            "task_id": brief.get("task_id") or task.get("id") or 0,
+            "platform": job.get("platform"),
+            "topic": job.get("topic"),
+            "template": brief.get("template"),
+            "scene_count": manifest.get("scene_count") or 0,
+            "duration_sec": manifest.get("duration_sec"),
+            "worker_prompt": brief.get("ai_worker_prompt"),
+            "video_brief_url": f"{base_url}/api/operator/jobs/{job_id}/video-brief",
+            "worker_pack_url": next_urls.get("worker_pack") or f"{base_url}/api/operator/jobs/{job_id}/worker-pack",
+            "task_prompt_url": next_urls.get("task_prompt"),
+            "complete_url": submit.get("complete_url"),
+            "upload_url": submit.get("upload_url"),
+            "acceptance_url": submit.get("acceptance_url"),
+            "review_url": next_urls.get("review_video"),
+            "compose_video_url": next_urls.get("compose_video"),
+            "affiliate": {
+                "product": (primary.get("product") if isinstance(primary, dict) else "") or ((job.get("affiliate") or {}).get("product") if isinstance(job.get("affiliate"), dict) else ""),
+                "tracking_url": primary_tracking,
+                "caption": affiliate.get("caption"),
+                "pinned_comment": affiliate.get("pinned_comment"),
+                "related_count": len(affiliate.get("related_links") or []),
+            },
+            "telegram": {
+                "video_brief": f"/video_brief job={job_id}" + (f" task={brief.get('task_id')}" if brief.get("task_id") else ""),
+                "worker_pack": f"/worker_pack job={job_id}" + (f" task={brief.get('task_id')}" if brief.get("task_id") else ""),
+                "task_prompt": f"/task_prompt id={brief.get('task_id')}" if brief.get("task_id") else f"/tasks job={job_id}",
+                "compose_video": f"/compose_video job={job_id} voice=1",
+                "review_video": f"/review_video job={job_id} send=1",
+                "approve_publish": f"/approve_publish job={job_id} queue=1 mode=manual",
+            },
+            "quality_gates": brief.get("quality_gates") or [],
+        })
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "count": len(orders),
+        "job_ids": normalized_ids[:limit],
+        "orders": orders,
+        "rule": "Video work orders gom brief thực thi cho Claude/n8n/tool worker. Worker tạo output thật qua complete/upload, sau đó dừng ở review/approve gate.",
+    }
+
 def select_operator_focus_job_id(owner_id, job_id=0):
     try:
         job_id = int(job_id or 0)
@@ -13867,6 +13946,11 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
         [item["job_id"] for item in (built or created_jobs)],
         limit=min(len(built or created_jobs), 5),
     )
+    video_work_orders = operator_video_work_orders_data(
+        owner_id,
+        [item["job_id"] for item in (built or created_jobs)],
+        limit=min(len(built or created_jobs), 8) or 1,
+    )
 
     affiliate_payload = None
     if selected_affiliate:
@@ -13915,6 +13999,7 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
         "publish_packs": publish_packs,
         "distribution_packs": distribution_packs,
         "worker_next": worker_next,
+        "video_work_orders": video_work_orders,
     }
 
 async def operator_launch_pipeline(
@@ -13994,6 +14079,7 @@ async def operator_launch_pipeline(
             "telegram": {
                 "worker_next": f"/worker_next job={first_job_id}" if first_job_id else "/worker_next",
                 "tasks": f"/tasks job={first_job_id}" if first_job_id else "/tasks",
+                "video_brief": f"/video_brief job={first_job_id}" if first_job_id else "/video_brief job=<JOB_ID>",
                 "distribution": f"/distribution_pack job={first_job_id}" if first_job_id else "/distribution_pack job=<JOB_ID>",
                 "review": f"/review_video job={first_job_id} send=1" if first_job_id else "/review_video job=<JOB_ID> send=1",
                 "approve": f"/approve_publish job={first_job_id} queue=1 mode=manual" if first_job_id else "/approve_publish job=<JOB_ID> queue=1 mode=manual",
@@ -14002,6 +14088,11 @@ async def operator_launch_pipeline(
             "api": {
                 "worker_next": "/api/operator/worker-next",
                 "claim_task": "/api/operator/tasks/claim?include_context=1&include_prompt=1",
+                "video_brief": f"/api/operator/jobs/{first_job_id}/video-brief" if first_job_id else "/api/operator/jobs/<JOB_ID>/video-brief",
+                "video_work_orders": (
+                    "/api/operator/video-work-orders?job_ids="
+                    + ",".join(str(item.get("job_id")) for item in created_jobs[:8])
+                ) if created_jobs else "/api/operator/video-work-orders",
                 "distribution_pack": f"/api/operator/jobs/{first_job_id}/distribution-pack" if first_job_id else "/api/operator/jobs/<JOB_ID>/distribution-pack",
                 "review_video": f"/api/operator/jobs/{first_job_id}/review-video" if first_job_id else "/api/operator/jobs/<JOB_ID>/review-video",
                 "approve": f"/api/operator/jobs/{first_job_id}/approve" if first_job_id else "/api/operator/jobs/<JOB_ID>/approve",
@@ -14200,6 +14291,11 @@ async def operator_film_series_pipeline(
         limit=min(len(created_jobs), 8),
         include_prompt=True,
     )
+    video_work_orders = operator_video_work_orders_data(
+        owner_id,
+        [item["job_id"] for item in created_jobs],
+        limit=min(len(created_jobs), 8) or 1,
+    )
     campaign_name = ""
     if selected_campaign:
         campaign_name = selected_campaign[2] if len(selected_campaign) >= 8 else selected_campaign[1]
@@ -14226,6 +14322,7 @@ async def operator_film_series_pipeline(
         "failed_builds": failed_builds,
         "worker_next": worker_next,
         "work_orders": work_orders,
+        "video_work_orders": video_work_orders,
         "next": {
             "worker_intake": "/api/operator/worker-intake?claim=0&include_prompt=1",
             "claim_worker": "/api/operator/worker-intake?claim=1&include_prompt=1",
@@ -20044,6 +20141,16 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Task: <code>#{next_task.get('id') or '-'}</code> / <code>{html.escape(next_task.get('task_type') or '-')}</code> / tool=<code>{html.escape(next_task.get('tool') or '-')}</code>",
             f"• Handoff: <code>/task_handoff id={next_task.get('id') or '<TASK_ID>'}</code>",
         ])
+    video_orders = (result.get("video_work_orders") or {}).get("orders") or []
+    if video_orders:
+        first_order = video_orders[0]
+        lines.extend([
+            "",
+            "<b>Video brief cho worker:</b>",
+            f"• <code>{html.escape((first_order.get('telegram') or {}).get('video_brief') or f'/video_brief job={first_order.get('job_id')}')}</code>",
+            f"• Scenes: <b>{first_order.get('scene_count') or 0}</b> | Template: <code>{html.escape(first_order.get('template') or '-')}</code>",
+            f"• Batch API: <code>/api/operator/video-work-orders?job_ids={','.join(str(item.get('job_id')) for item in video_orders[:8])}</code>",
+        ])
     if result.get("failed_builds"):
         lines.append("\n<b>Build lỗi:</b>")
         for item in result["failed_builds"][:5]:
@@ -20146,6 +20253,7 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
             "",
             "<b>Điều hành tiếp:</b>",
             f"• Tasks: <code>{html.escape(telegram_next.get('tasks') or f'/tasks job={first_job_id}')}</code>",
+            f"• Video brief: <code>{html.escape(telegram_next.get('video_brief') or f'/video_brief job={first_job_id}')}</code>",
             f"• Distribution: <code>{html.escape(telegram_next.get('distribution') or f'/distribution_pack job={first_job_id}')}</code>",
             f"• Review video: <code>{html.escape(telegram_next.get('review') or f'/review_video job={first_job_id} send=1')}</code>",
             f"• Approve queue: <code>{html.escape(telegram_next.get('approve') or f'/approve_publish job={first_job_id} queue=1 mode=manual')}</code>",
@@ -21660,6 +21768,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Worker intake gộp việc: <code>GET/POST {html.escape(base_url)}/api/operator/worker-intake</code>",
         f"• Claim task + prompt/context: <code>GET {html.escape(base_url)}/api/operator/tasks/claim?include_context=1&amp;include_prompt=1</code>",
         f"• Video execution brief: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/video-brief</code>",
+        f"• Video work orders batch: <code>GET {html.escape(base_url)}/api/operator/video-work-orders?job_ids=1,2,3</code>",
         f"• Task prompt pack: <code>GET {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/prompt-pack</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
         f"• Upload file task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/upload</code>",
@@ -27391,6 +27500,7 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
         try:
             launch_next = result.get("launch_next") or {}
             telegram = launch_next.get("telegram") or {}
+            video_orders = (result.get("video_work_orders") or {}).get("orders") or []
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
@@ -27398,8 +27508,9 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
                     f"• Topic: <b>{html.escape(payload.topic)}</b>\n"
                     f"• Target: <code>{html.escape(','.join(result.get('target_platforms') or []) or payload.platform)}</code>\n"
                     f"• Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
+                    f"• Video briefs: <b>{len(video_orders)}</b>\n"
                     f"• First job: <code>#{launch_next.get('first_job_id') or '-'}</code>\n"
-                    f"• Next: <code>{html.escape(telegram.get('review') or '/review_video job=<JOB_ID> send=1')}</code>"
+                    f"• Next: <code>{html.escape(telegram.get('video_brief') or '/video_brief job=<JOB_ID>')}</code>"
                 ),
                 parse_mode="HTML",
             )
@@ -27933,6 +28044,21 @@ async def api_operator_video_brief(request: Request, job_id: int = 0, task_id: i
         raise HTTPException(status_code=404, detail="Video brief not found")
     return data
 
+@fastapi_app.get("/api/operator/video-work-orders")
+async def api_operator_video_work_orders(request: Request, job_ids: str = "", limit: int = 8, tool: str = ""):
+    verify_operator_api_token(request)
+    parsed_ids = []
+    for part in re.split(r"[,\s]+", job_ids or ""):
+        job_id = safe_int(part, 0)
+        if job_id > 0:
+            parsed_ids.append(job_id)
+    return operator_video_work_orders_data(
+        ADMIN_ID,
+        parsed_ids,
+        limit=max(1, min(int(limit or 8), 20)),
+        tool=tool,
+    )
+
 @fastapi_app.get("/api/operator/jobs/{job_id}/scene-pack")
 async def api_operator_job_scene_pack(job_id: int, request: Request, scene: int = 0, task_id: int = 0):
     verify_operator_api_token(request)
@@ -28160,6 +28286,7 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
     if payload.notify_admin and tg_app and ADMIN_ID:
         try:
             affiliate = result.get("affiliate") or {}
+            video_orders = (result.get("video_work_orders") or {}).get("orders") or []
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
@@ -28169,7 +28296,8 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
                     f"• Target: <code>{html.escape(','.join(result.get('target_platforms') or []) or payload.platform)}</code>\n"
                     f"• Affiliate: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product') or '')}\n"
                     f"• Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
-                    "• Next: <code>/tasks</code> → <code>/review_gate</code> → <code>/approve_publish</code>"
+                    f"• Video briefs: <b>{len(video_orders)}</b>\n"
+                    "• Next: <code>/video_brief job=&lt;JOB_ID&gt;</code> → <code>/review_gate</code> → <code>/approve_publish</code>"
                 ),
                 parse_mode="HTML"
             )
@@ -28182,6 +28310,8 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
             "tasks_url": "/api/operator/tasks/next",
             "worker_next_url": "/api/operator/worker-next",
             "claim_first_task_url": "/api/operator/tasks/claim?include_context=1&include_prompt=1",
+            "video_work_orders_url": "/api/operator/video-work-orders?job_ids=<JOB_ID>,<JOB_ID>",
+            "video_brief_url": "/api/operator/jobs/<JOB_ID>/video-brief",
             "ready_url": "/api/operator/jobs/<JOB_ID>/ready",
             "job_context_url": "/api/operator/jobs/<JOB_ID>/context",
             "publish_pack_url": "/api/operator/jobs/<JOB_ID>/publish-pack",
