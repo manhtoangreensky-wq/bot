@@ -2,6 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# FFmpeg dùng để ghép scene/voice thành final_video trong Operator composer
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Sao chép file cài đặt thư viện vào trước
 COPY requirements.txt .
 

@@ -23,6 +23,7 @@ import time
 import random
 import re
 import tempfile
+import shutil
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
@@ -3583,7 +3584,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "output_acceptance", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3638,6 +3639,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/jobs/<JOB_ID>/worker-pack"),
         ("GET", "/api/operator/output-acceptance"),
         ("GET", "/api/operator/jobs/<JOB_ID>/output-acceptance"),
+        ("POST", "/api/operator/jobs/<JOB_ID>/compose-video"),
         ("GET", "/api/operator/jobs/<JOB_ID>/pipeline-pack"),
         ("GET", "/api/operator/pipeline-pack"),
         ("GET", "/api/operator/jobs/<JOB_ID>/distribution-pack"),
@@ -3728,6 +3730,7 @@ def operator_smoke_test_data(owner_id):
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
         "task_prompt_pack_in_spec": "/api/operator/tasks/<TASK_ID>/prompt-pack" in spec_text and "/prompt-pack" in n8n_text,
         "output_acceptance_in_spec": "/api/operator/output-acceptance" in spec_text and "/api/operator/output-acceptance" in n8n_text,
+        "compose_video_in_spec": "/api/operator/jobs/<JOB_ID>/compose-video" in spec_text and "/compose-video" in n8n_text,
         "pipeline_pack_in_spec": "/api/operator/jobs/<JOB_ID>/pipeline-pack" in spec_text and "/pipeline-pack" in n8n_text,
         "distribution_pack_in_spec": "/api/operator/jobs/<JOB_ID>/distribution-pack" in spec_text and "/distribution-pack" in n8n_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
@@ -3913,6 +3916,7 @@ def operator_worker_spec_data():
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
             {"step": 6.2, "name": "output_acceptance", "method": "GET", "url": "/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>"},
+            {"step": 6.5, "name": "compose_video_optional", "method": "POST", "url": "/api/operator/jobs/<JOB_ID>/compose-video"},
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
             {"step": 8.1, "name": "distribution_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/distribution-pack"},
@@ -4116,6 +4120,12 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>",
                 "purpose": "Kiểm tra worker đã trả output thật đúng asset_type/status chưa trước khi review/publish.",
+            },
+            "compose_video": {
+                "method": "POST",
+                "url": "/api/operator/jobs/<JOB_ID>/compose-video",
+                "purpose": "Ghép các raw_video/scene_video local + voice thành final_video bằng FFmpeg để admin review; cần server có ffmpeg và scene files đã upload.",
+                "body": {"include_voice": True, "force": False, "notify_admin": True},
             },
             "task_claim": {
                 "method": "GET",
@@ -5686,6 +5696,23 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "compose-video-optional",
+                "name": "Compose Final Video Optional",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [420, 20],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{{{$json.job_id || 0}}}}/compose-video",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": "={\"include_voice\":true,\"force\":false,\"notify_admin\":true}",
+                    "options": {"timeout": 900000},
+                },
+            },
+            {
                 "id": "publisher-status",
                 "name": "Publisher Status",
                 "type": "n8n-nodes-base.httpRequest",
@@ -7086,6 +7113,167 @@ def latest_production_asset(owner_id, job_id, asset_type=""):
         if row_type_l in {"final_video", "raw_video", "voice", "audio", "thumbnail", "subtitle", "source"} or not asset_type:
             return get_production_asset(owner_id, aid)
     return None
+
+def list_production_asset_records(owner_id, job_id, asset_type="", limit=200):
+    conn = db_connect()
+    c = conn.cursor()
+    asset_type = (asset_type or "").lower().strip()
+    if asset_type:
+        c.execute(
+            """SELECT id, owner_id, job_id, asset_type, url, file_id, note, local_path, content_type, filename, created_at
+            FROM production_assets
+            WHERE owner_id=? AND job_id=? AND LOWER(COALESCE(asset_type,''))=?
+            ORDER BY id ASC LIMIT ?""",
+            (str(owner_id), int(job_id), asset_type, int(limit))
+        )
+    else:
+        c.execute(
+            """SELECT id, owner_id, job_id, asset_type, url, file_id, note, local_path, content_type, filename, created_at
+            FROM production_assets
+            WHERE owner_id=? AND job_id=?
+            ORDER BY id ASC LIMIT ?""",
+            (str(owner_id), int(job_id), int(limit))
+        )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def safe_asset_local_path(asset_row):
+    if not asset_row:
+        return ""
+    _aid, _owner_id, _job_id, _asset_type, _url, _file_id, _note, local_path, _content_type, _filename, _created_at = asset_row
+    if not local_path:
+        return ""
+    upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+    abs_path = os.path.abspath(local_path)
+    if os.path.commonpath([upload_root, abs_path]) != upload_root or not os.path.exists(abs_path):
+        return ""
+    return abs_path
+
+def asset_scene_sort_key(asset_row):
+    aid, _owner_id, _job_id, _asset_type, _url, _file_id, note, local_path, _content_type, filename, _created_at = asset_row
+    text = f"{note or ''} {filename or ''} {local_path or ''}"
+    match = re.search(r"(?:scene|sc|cảnh|canh)[_ :=-]*(\d+)", text, re.IGNORECASE)
+    return (int(match.group(1)) if match else int(aid or 0), int(aid or 0))
+
+async def compose_job_video_with_ffmpeg(owner_id, job_id, include_voice=True, force=False):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return False, "job_not_found", {}
+    if not force:
+        final_asset = latest_production_asset(owner_id, job_id, "final_video")
+        if final_asset:
+            aid, *_rest = final_asset
+            return True, "already_has_final_video", {
+                "asset_id": aid,
+                "asset_url": operator_asset_url(aid),
+                "review_url": f"/api/operator/jobs/{job_id}/review-video",
+            }
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return False, "ffmpeg_missing", {
+            "message": "Server chưa có ffmpeg. Dockerfile cần cài apt-get install -y ffmpeg rồi redeploy.",
+            "manual_next": f"/worker_pack job={job_id} tool=capcut",
+        }
+    video_types = {"raw_video", "scene_video", "video"}
+    video_rows = [
+        row for row in list_production_asset_records(owner_id, job_id, limit=300)
+        if (row[3] or "").lower() in video_types and safe_asset_local_path(row)
+    ]
+    video_rows.sort(key=asset_scene_sort_key)
+    video_paths = [safe_asset_local_path(row) for row in video_rows]
+    if not video_paths:
+        return False, "no_local_scene_videos", {
+            "message": "Chưa có scene/raw video local để ghép. Worker cần upload file qua /api/operator/tasks/<TASK_ID>/upload.",
+            "worker_intake": f"/api/operator/worker-intake?job_id={job_id}&claim=0&include_prompt=1",
+        }
+    voice_path = ""
+    if include_voice:
+        voice_candidates = [
+            row for row in list_production_asset_records(owner_id, job_id, limit=120)
+            if (row[3] or "").lower() in {"voice", "audio"} and safe_asset_local_path(row)
+        ]
+        if voice_candidates:
+            voice_path = safe_asset_local_path(voice_candidates[-1])
+    upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+    job_dir = os.path.abspath(os.path.join(upload_root, f"job_{int(job_id)}"))
+    if os.path.commonpath([upload_root, job_dir]) != upload_root:
+        return False, "invalid_compose_path", {}
+    os.makedirs(job_dir, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    concat_path = os.path.join(job_dir, f"compose_{stamp}.txt")
+    output_path = os.path.abspath(os.path.join(job_dir, f"final_{stamp}.mp4"))
+    if os.path.commonpath([upload_root, output_path]) != upload_root:
+        return False, "invalid_output_path", {}
+    with open(concat_path, "w", encoding="utf-8") as f:
+        for path in video_paths:
+            escaped = path.replace("\\", "/").replace("'", "'\\''")
+            f.write(f"file '{escaped}'\n")
+    vf = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1"
+    cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", concat_path]
+    if voice_path:
+        cmd += ["-i", voice_path, "-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+    cmd += ["-vf", vf, "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p"]
+    if voice_path:
+        cmd += ["-c:a", "aac", "-b:a", "128k"]
+    else:
+        cmd += ["-an"]
+    cmd += [output_path]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=900)
+    except asyncio.TimeoutError:
+        return False, "ffmpeg_timeout", {"scene_count": len(video_paths)}
+    except Exception as e:
+        return False, "ffmpeg_exception", {"error": str(e)}
+    if proc.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+        return False, "ffmpeg_failed", {
+            "returncode": proc.returncode,
+            "stderr": truncate_text((stderr or b"").decode("utf-8", errors="ignore"), 1600),
+        }
+    ok, asset_id = add_production_asset(
+        owner_id,
+        job_id,
+        "final_video",
+        "",
+        "",
+        f"ffmpeg_compose scenes={len(video_paths)} voice={'yes' if voice_path else 'no'}",
+        output_path,
+        "video/mp4",
+        os.path.basename(output_path),
+    )
+    if not ok:
+        return False, "asset_save_failed", {}
+    asset_url = operator_asset_url(asset_id)
+    update_production_asset_url(owner_id, asset_id, asset_url)
+    edit_tasks = [
+        row for row in list_production_tasks(owner_id, job_id, limit=120)
+        if (row[3] or "").lower() == "edit" and (row[7] or "").lower() not in {"ready", "done"}
+    ]
+    if edit_tasks:
+        update_production_task(
+            owner_id,
+            int(edit_tasks[0][0]),
+            status="ready",
+            output_url=asset_url,
+            note=f"ffmpeg_compose asset:{asset_id}",
+            asset_type="final_video",
+            record_asset=False,
+        )
+    update_production_job(job_id, owner_id, stage="review", status="ready", asset_url=asset_url, note=f"ffmpeg_compose final_video asset:{asset_id}")
+    return True, "ok", {
+        "asset_id": asset_id,
+        "asset_url": asset_url,
+        "local_path": output_path,
+        "scene_count": len(video_paths),
+        "voice_included": bool(voice_path),
+        "review_url": f"/api/operator/jobs/{job_id}/review-video",
+        "telegram_review": f"/review_video job={job_id} send=1",
+    }
 
 async def send_production_asset_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int, owner_id, asset_id: int):
     asset = get_production_asset(owner_id, asset_id)
@@ -9723,6 +9911,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
             "job_context_url": f"/api/operator/jobs/{job_id}/context",
             "review_url": f"/api/operator/jobs/{job_id}/review-video",
             "acceptance_url": f"/api/operator/output-acceptance?job_id={job_id}" + (f"&task_id={int(task[0])}" if task else ""),
+            "compose_video_url": f"/api/operator/jobs/{job_id}/compose-video",
             "distribution_pack_url": f"/api/operator/jobs/{job_id}/distribution-pack",
             "post_publish_url": f"/api/operator/jobs/{job_id}/post-publish",
             "telegram": {
@@ -9731,6 +9920,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
                 "job_context": f"/job_context job={job_id}",
                 "review_video": f"/review_video job={job_id} send=1",
                 "output_acceptance": f"/output_acceptance job={job_id}" + (f" task={int(task[0])}" if task else ""),
+                "compose_video": f"/compose_video job={job_id} voice=1",
                 "approve_publish": f"/approve_publish job={job_id} queue=1 mode=manual",
                 "post_publish": f"/post_publish job={job_id}",
             },
@@ -14165,6 +14355,11 @@ class OperatorFilmSeriesRequest(BaseModel):
     bootstrap: bool = True
     notify_admin: bool = True
 
+class OperatorComposeVideoRequest(BaseModel):
+    include_voice: bool = True
+    force: bool = False
+    notify_admin: bool = True
+
 class OperatorCampaignPresetRequest(BaseModel):
     preset: str = Field(default="tech", max_length=80)
     topic: str = Field(default="", max_length=300)
@@ -15843,6 +16038,17 @@ def operator_brain_fallback(raw_text):
             "confidence": 82,
         }
     if job_id and any(word in lower for word in [
+        "ghép video", "ghep video", "compose video", "compose final", "ghép final", "ghep final",
+        "tạo final video", "tao final video", "xuất final", "xuat final", "render final"
+    ]):
+        return {
+            "intent": "compose_video",
+            "job": job_id,
+            "include_voice": 0 if any(word in lower for word in ["không voice", "khong voice", "no voice"]) else 1,
+            "force": 1 if any(word in lower for word in ["force", "ghi đè", "ghi de", "làm lại", "lam lai"]) else 0,
+            "confidence": 84,
+        }
+    if job_id and any(word in lower for word in [
         "kiểm duyệt video", "kiem duyet video", "review video", "xem video", "duyệt video", "duyet video",
         "check video", "video review"
     ]):
@@ -16124,7 +16330,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_next_run, goal_audit, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_next_run, goal_audit, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
@@ -16149,6 +16355,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- worker_next: khi admin muốn xem worker/task tiếp theo mà chưa đổi trạng thái; có thể có job/tool.\n"
         "- next_task: khi admin muốn nhận/giao việc tiếp theo để bắt đầu làm; có thể có job/tool.\n"
         "- task_handoff: khi admin muốn xuất prompt/handoff một task cụ thể; cần task ID.\n"
+        "- compose_video: khi admin muốn ghép scene/raw video + voice thành final_video bằng FFmpeg; cần job ID.\n"
         "- review_video: khi admin muốn xem/kiểm duyệt final video, caption, affiliate links trước khi approve; cần job ID.\n"
         "- post_publish: khi admin muốn gói theo dõi sau đăng, ghi số liệu, tracking URL và scale next cho một job; cần job ID.\n"
         "- reference_add: khi admin gửi link/path video và nói học/lưu/tham khảo/mẫu để đưa vào reference catalog.\n"
@@ -16392,6 +16599,12 @@ def brain_command_preview(plan):
         return " ".join(parts)
     if intent == "task_handoff":
         return f"/task_handoff id={int(plan.get('task') or plan.get('id') or 0)}"
+    if intent == "compose_video":
+        return (
+            f"/compose_video job={int(plan.get('job') or 0)} "
+            f"voice={int(plan.get('include_voice') if plan.get('include_voice') is not None else 1)} "
+            f"force={int(plan.get('force') or 0)}"
+        )
     if intent == "review_video":
         return f"/review_video job={int(plan.get('job') or 0)} send={safe_int(plan.get('send') if plan.get('send') is not None else 1, 1)}"
     if intent == "post_publish":
@@ -16778,6 +16991,15 @@ async def run_brain_plan(update, context, plan):
                 return await update.message.reply_text("⚠️ Cần task ID. Ví dụ: <code>/brain handoff task 5</code>", parse_mode="HTML")
             context.args = [f"id={task_id}"]
             return await cmd_task_handoff(update, context)
+        if intent == "compose_video":
+            if not int(plan.get("job") or 0):
+                return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain ghép video job 12</code>", parse_mode="HTML")
+            context.args = [
+                f"job={int(plan.get('job') or 0)}",
+                f"voice={int(plan.get('include_voice') if plan.get('include_voice') is not None else 1)}",
+                f"force={int(plan.get('force') or 0)}",
+            ]
+            return await cmd_compose_video(update, context)
         if intent == "review_video":
             if not int(plan.get("job") or 0):
                 return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain kiểm duyệt video job 12</code>", parse_mode="HTML")
@@ -16835,7 +17057,7 @@ def operator_command_plan_data(owner_id, command):
         "safety_note": plan.get("safety_note") or "Không bỏ qua review/approve gate; không tự publish khi chưa sẵn sàng.",
         "execute_allowed": (plan.get("intent") or "").lower() in {
             "command_center", "operator_next_run", "goal_audit", "pipeline_pack", "money_pack", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
-            "operator_director", "operator_execute", "operator_launch", "film_series", "make_video",
+            "operator_director", "operator_execute", "operator_launch", "film_series", "make_video", "compose_video",
             "tracking_report", "scale_plan", "affiliate_report", "affiliate_decisions",
             "scale_execute", "publisher_capabilities", "platform_adapters",
         },
@@ -16951,6 +17173,14 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
             build=bool(plan.get("build", 1)),
             duration=int(plan.get("duration") or 45),
             variants=max(3, min(int(plan.get("variants") or 5), 8)),
+        )
+        return {"executed": ok, "intent": intent, "reason": reason, "data": result}
+    if intent == "compose_video":
+        ok, reason, result = await compose_job_video_with_ffmpeg(
+            owner_id,
+            int(plan.get("job") or 0),
+            include_voice=truthy_value(plan.get("include_voice"), True),
+            force=truthy_value(plan.get("force"), False),
         )
         return {"executed": ok, "intent": intent, "reason": reason, "data": result}
     if intent == "tracking_report":
@@ -19682,6 +19912,7 @@ def operator_category_keyboard(category):
             ("📦 Worker pack", "workerpack"),
             ("🧾 Task prompt", "taskprompt"),
             ("🧪 Output acceptance", "outputacceptance"),
+            ("🎞 Compose video", "composevideo"),
             ("🎥 Review video", "reviewvideo"), ("🗂 Assets", "assets"),
             ("📋 Job report", "report"),
             ("🧠 Job context", "jobcontext"), ("🚦 Job ready", "jobready"),
@@ -19839,6 +20070,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
         f"• Upload file task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/upload</code>",
         f"• Nghiệm thu output: <code>GET {html.escape(base_url)}/api/operator/output-acceptance?job_id=&lt;JOB_ID&gt;</code>",
+        f"• Ghép final video FFmpeg: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/compose-video</code>",
         f"• Upload asset job: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/assets/upload</code>",
         f"• Tải asset nội bộ: <code>GET {html.escape(base_url)}/api/operator/assets/&lt;ASSET_ID&gt;/file</code>",
         f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
@@ -20158,6 +20390,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "workerpack": "/worker_pack job=<JOB_ID>\n/worker_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/worker-pack",
         "taskprompt": "/task_prompt id=<TASK_ID>\n/task_prompt job=<JOB_ID>\nGET /api/operator/tasks/<TASK_ID>/prompt-pack",
         "outputacceptance": "/output_acceptance job=<JOB_ID>\n/output_acceptance task=<TASK_ID>\nGET /api/operator/output-acceptance?job_id=<JOB_ID>",
+        "composevideo": "/compose_video job=<JOB_ID> voice=1 force=0\nPOST /api/operator/jobs/<JOB_ID>/compose-video",
         "reviewvideo": "/review_video job=<JOB_ID> send=1\n/brain kiểm duyệt video job <JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>\n/asset_send id=<ASSET_ID>\n/asset_send job=<JOB_ID> type=final_video",
         "report": "/job_report <JOB_ID>",
@@ -20214,6 +20447,7 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain nên scale gì trên tiktok</code>\n"
             "• <code>/brain chạy scale plan tiktok limit 3</code>\n"
             "• <code>/brain build job 12 duration 45</code>\n"
+            "• <code>/brain ghép video job 12</code>\n"
             "• <code>/brain xem worker tiếp theo job 12</code>\n"
             "• <code>/brain giao việc tiếp theo job 12</code>\n"
             "• <code>/brain handoff task 5</code>\n"
@@ -21645,6 +21879,40 @@ async def cmd_output_acceptance(update: Update, context: ContextTypes.DEFAULT_TY
             lines.append(f"• {task_label}{html.escape(item.get('detail') or item.get('key') or '-')}\n  <code>{html.escape(item.get('next') or '-')}</code>")
     lines.append("\nAPI: <code>GET /api/operator/output-acceptance?job_id=&lt;JOB_ID&gt;</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_compose_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    job_id = safe_int(data.get("job") or data.get("job_id") or data.get("id"), 0)
+    if not job_id:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/compose_video job=&lt;JOB_ID&gt; voice=1 force=0</code>",
+            parse_mode="HTML"
+        )
+    msg = await update.message.reply_text("🎞 Đang ghép final video bằng FFmpeg...")
+    ok, reason, result = await compose_job_video_with_ffmpeg(
+        update.effective_user.id,
+        job_id,
+        include_voice=truthy_value(data.get("voice") or data.get("include_voice"), True),
+        force=truthy_value(data.get("force"), False),
+    )
+    if not ok:
+        return await msg.edit_text(
+            "❌ <b>COMPOSE VIDEO LỖI</b>\n\n"
+            f"• Reason: <code>{html.escape(reason)}</code>\n"
+            f"• Detail: <pre>{html_pre(json.dumps(result, ensure_ascii=False), 1200)}</pre>",
+            parse_mode="HTML"
+        )
+    await msg.edit_text(
+        "🎞 <b>FINAL VIDEO READY</b>\n\n"
+        f"• Job: <code>#{job_id}</code>\n"
+        f"• Asset: <code>#{result.get('asset_id')}</code>\n"
+        f"• Scenes: <b>{result.get('scene_count') or '-'}</b> | Voice: <b>{'YES' if result.get('voice_included') else 'NO'}</b>\n"
+        f"• Xem: <code>/asset_send id={result.get('asset_id')}</code>\n"
+        f"• Review: <code>/review_video job={job_id} send=1</code>",
+        parse_mode="HTML"
+    )
 
 async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -23983,6 +24251,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("task_prompt", cmd_task_prompt))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("output_acceptance", cmd_output_acceptance))
+    tg_app.add_handler(CommandHandler("compose_video", cmd_compose_video))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
     tg_app.add_handler(CommandHandler("distribution_pack", cmd_distribution_pack))
@@ -25661,6 +25930,34 @@ async def api_operator_job_output_acceptance(job_id: int, request: Request, task
     if not data.get("ok"):
         raise HTTPException(status_code=404, detail=data.get("reason") or "not_found")
     return data
+
+@fastapi_app.post("/api/operator/jobs/{job_id}/compose-video")
+async def api_operator_compose_video(job_id: int, payload: OperatorComposeVideoRequest, request: Request):
+    verify_operator_api_token(request)
+    ok, reason, result = await compose_job_video_with_ffmpeg(
+        ADMIN_ID,
+        job_id,
+        include_voice=payload.include_voice,
+        force=payload.force,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail={"reason": reason, **(result or {})})
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🎞 <b>COMPOSE FINAL VIDEO</b>\n\n"
+                    f"• Job: <code>#{job_id}</code>\n"
+                    f"• Asset: <code>#{result.get('asset_id')}</code>\n"
+                    f"• Scenes: <b>{result.get('scene_count') or '-'}</b> | Voice: <b>{'YES' if result.get('voice_included') else 'NO'}</b>\n"
+                    f"• Review: <code>/review_video job={job_id} send=1</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Compose video notify error: {e}")
+    return {"ok": True, "reason": reason, **result}
 
 @fastapi_app.get("/api/operator/jobs/{job_id}/context")
 async def api_operator_job_context(job_id: int, request: Request):
