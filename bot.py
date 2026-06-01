@@ -3689,7 +3689,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -21604,6 +21604,7 @@ def operator_category_keyboard(category):
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
             ("📥 Worker intake", "workerintake"),
             ("📦 Worker pack", "workerpack"), ("🎬 Video brief", "videobrief"),
+            ("🧾 Work orders", "videoworkorders"),
             ("🧾 Task prompt", "taskprompt"),
             ("🎬 Scene pack", "scenepack"),
             ("🧪 Output acceptance", "outputacceptance"),
@@ -22104,6 +22105,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "workerintake": "/worker_intake\n/worker_intake job=<JOB_ID> claim=1\nGET/POST /api/operator/worker-intake",
         "workerpack": "/worker_pack job=<JOB_ID>\n/worker_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/worker-pack",
         "videobrief": "/video_brief job=<JOB_ID>\n/video_brief task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/video-brief",
+        "videoworkorders": "/video_work_orders jobs=<JOB_ID>,<JOB_ID>\n/video_work_orders limit=8 tool=claude\nGET /api/operator/video-work-orders?job_ids=<JOB_ID>,<JOB_ID>",
         "taskprompt": "/task_prompt id=<TASK_ID>\n/task_prompt job=<JOB_ID>\nGET /api/operator/tasks/<TASK_ID>/prompt-pack",
         "scenepack": "/scene_pack job=<JOB_ID> scene=1\n/scene_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/scene-pack?scene=1",
         "outputacceptance": "/output_acceptance job=<JOB_ID>\n/output_acceptance task=<TASK_ID>\nGET /api/operator/output-acceptance?job_id=<JOB_ID>",
@@ -23665,6 +23667,72 @@ async def cmd_video_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         f"API: <code>GET /api/operator/jobs/{brief.get('job_id')}/video-brief</code>",
     ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_video_work_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw_args = " ".join(context.args)
+    data = parse_key_value_args(raw_args)
+    raw_jobs = data.get("jobs") or data.get("job_ids") or data.get("job") or data.get("id") or ""
+    job_ids = []
+    for token in re.split(r"[\s,;]+", raw_jobs):
+        job_id = safe_int(token, 0)
+        if job_id > 0 and job_id not in job_ids:
+            job_ids.append(job_id)
+    for token in context.args:
+        if "=" in token:
+            continue
+        job_id = safe_int(token.strip(",;"), 0)
+        if job_id > 0 and job_id not in job_ids:
+            job_ids.append(job_id)
+    limit = safe_int(data.get("limit") or data.get("n"), 8)
+    tool = (data.get("tool") or "").strip().lower()
+    bundle = operator_video_work_orders_data(
+        update.effective_user.id,
+        job_ids=job_ids,
+        limit=limit,
+        tool=tool,
+    )
+    orders = bundle.get("orders") or []
+    if not orders:
+        return await update.message.reply_text(
+            "✅ Chưa có video work order. Tạo job bằng <code>/operator_launch topic=...</code> hoặc <code>/make_video topic=...</code>.",
+            parse_mode="HTML",
+        )
+    api_jobs = ",".join(str(item.get("job_id")) for item in orders if item.get("job_id"))
+    lines = [
+        "🧾 <b>VIDEO WORK ORDERS</b>",
+        f"• Count: <b>{len(orders)}</b> | Jobs: <code>{html.escape(api_jobs or '-')}</code>",
+        f"• API: <code>GET /api/operator/video-work-orders?job_ids={html.escape(api_jobs or '<JOB_ID>,<JOB_ID>')}</code>",
+        "",
+        "<b>Danh sách giao việc:</b>",
+    ]
+    for item in orders[:10]:
+        telegram = item.get("telegram") or {}
+        submit_short = item.get("complete_url") or item.get("upload_url") or "-"
+        topic = item.get("topic") or "-"
+        lines.extend([
+            f"• Job <code>#{item.get('job_id')}</code> | Task <code>#{item.get('task_id') or '-'}</code> | "
+            f"<code>{html.escape(item.get('platform') or '-')}</code> | <code>{html.escape(item.get('template') or '-')}</code>",
+            f"  Topic: {html.escape(str(topic)[:180])}",
+            f"  Scenes: <b>{item.get('scene_count') or 0}</b> | Duration: <b>{item.get('duration_sec') or '-'}</b>s",
+            f"  Brief: <code>{html.escape(telegram.get('video_brief') or '')}</code>",
+            f"  Worker: <code>{html.escape(telegram.get('worker_pack') or '')}</code>",
+            f"  Submit: <code>{html.escape(str(submit_short)[:160])}</code>",
+        ])
+    first = orders[0]
+    if first.get("worker_prompt"):
+        lines.extend([
+            "",
+            "<b>Prompt worker mẫu của order đầu:</b>",
+            f"<pre>{html_pre(first.get('worker_prompt') or '-', 1800)}</pre>",
+        ])
+    lines.extend([
+        "",
+        "<b>Luồng bắt buộc:</b>",
+        "Worker tạo video thật → upload/complete → <code>/review_video job=&lt;JOB_ID&gt;</code> → <code>/approve_publish job=&lt;JOB_ID&gt;</code>.",
+    ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_output_acceptance(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -26114,6 +26182,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("worker_intake", cmd_worker_intake))
     tg_app.add_handler(CommandHandler("worker_pack", cmd_worker_pack))
     tg_app.add_handler(CommandHandler("video_brief", cmd_video_brief))
+    tg_app.add_handler(CommandHandler("video_work_orders", cmd_video_work_orders))
     tg_app.add_handler(CommandHandler("task_prompt", cmd_task_prompt))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("output_acceptance", cmd_output_acceptance))
