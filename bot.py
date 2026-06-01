@@ -2985,13 +2985,15 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "telegram_status", "campaign_preset", "postback_setup", "operator_launch", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
         ("GET", "/api/operator/goal-audit"),
+        ("GET", "/api/operator/dispatch"),
+        ("POST", "/api/operator/dispatch"),
         ("GET", "/runtime"),
         ("GET", "/api/operator/worker-spec"),
         ("GET", "/api/operator/commander-pack"),
@@ -3080,6 +3082,7 @@ def operator_smoke_test_data(owner_id):
     surface_checks = {
         "commands_documented": all(cmd for cmd in required_commands),
         "goal_audit_in_spec": "/api/operator/goal-audit" in spec_text and "/api/operator/goal-audit" in n8n_text,
+        "dispatch_in_spec": "/api/operator/dispatch" in spec_text and "/api/operator/dispatch" in n8n_text,
         "make_video_in_spec": "/api/operator/make-video" in spec_text and "/api/operator/make-video" in n8n_text,
         "publisher_run_in_spec": "/api/operator/publisher/run" in spec_text and "/api/operator/publisher/run" in n8n_text,
         "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
@@ -3176,6 +3179,7 @@ def operator_worker_spec_data():
         "toolchain_url": f"{base_url}/api/operator/toolchain",
         "goal_audit_url": f"{base_url}/api/operator/goal-audit",
         "mission_control_url": f"{base_url}/api/operator/mission",
+        "dispatch_url": f"{base_url}/api/operator/dispatch",
         "next_run_url": f"{base_url}/api/operator/next-run",
         "control_contract_url": f"{base_url}/api/operator/control-contract",
         "command_center_url": f"{base_url}/api/operator/command-center",
@@ -3257,6 +3261,7 @@ def operator_worker_spec_data():
             {"step": 1.03, "name": "launch_optional", "method": "POST", "url": "/api/operator/launch"},
             {"step": 1.05, "name": "command_center", "method": "GET", "url": "/api/operator/command-center?days=30&platform=tiktok"},
             {"step": 1.052, "name": "next_run_card", "method": "GET", "url": "/api/operator/next-run?days=30&platform=tiktok"},
+            {"step": 1.053, "name": "dispatch_preview", "method": "GET", "url": "/api/operator/dispatch?days=30&platform=tiktok&limit=8"},
             {"step": 1.054, "name": "control_contract", "method": "GET", "url": "/api/operator/control-contract?days=30&platform=tiktok"},
             {"step": 1.055, "name": "command_run_preview", "method": "POST", "url": "/api/operator/command/run"},
             {"step": 1.06, "name": "mission_control", "method": "GET", "url": "/api/operator/mission?days=30&platform=tiktok&limit=8"},
@@ -3326,6 +3331,12 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/next-run?days=30&platform=tiktok&limit=8",
                 "purpose": "Một run card duy nhất cho admin/Claude/n8n: setup, launch, worker, publish hoặc scale. Gọi lại sau mỗi bước.",
+            },
+            "dispatch": {
+                "method": "GET|POST",
+                "url": "/api/operator/dispatch?days=30&platform=tiktok&limit=8",
+                "purpose": "Dispatcher một bước cho Claude/n8n: preview bước kế tiếp hoặc execute claim_task an toàn để nhận prompt_pack; không tự review/publish.",
+                "body": {"execute": False, "claim_task": True, "include_context": True, "include_prompt": True, "notify_admin": True},
             },
             "control_contract": {
                 "method": "GET",
@@ -3932,6 +3943,13 @@ def operator_n8n_template_data():
                 "note": "Một quyết định vận hành duy nhất: setup, launch, worker, approve/publish hoặc scale. Gọi lại sau khi hoàn thành bước.",
             },
             {
+                "node": "Dispatch Preview",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/dispatch?days=30&platform=tiktok&limit=8",
+                "note": "Dispatcher một bước: cho biết có thể claim task an toàn hay phải dừng ở setup/review/publish gate.",
+            },
+            {
                 "node": "Read Control Contract",
                 "type": "http_request",
                 "method": "GET",
@@ -4403,6 +4421,20 @@ def operator_n8n_workflow_json_data():
                 "parameters": {
                     "method": "GET",
                     "url": f"{base_url_expr}/api/operator/next-run?days=30&platform=tiktok&limit=8",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "dispatch-preview",
+                "name": "Dispatch Preview",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-260, -1030],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/dispatch?days=30&platform=tiktok&limit=8",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -5145,7 +5177,8 @@ def operator_n8n_workflow_json_data():
             "Bootstrap Optional": {"main": [[{"node": "Goal Audit", "type": "main", "index": 0}]]},
             "Goal Audit": {"main": [[{"node": "Read Command Center", "type": "main", "index": 0}]]},
             "Read Command Center": {"main": [[{"node": "Next Run Card", "type": "main", "index": 0}]]},
-            "Next Run Card": {"main": [[{"node": "Control Contract", "type": "main", "index": 0}]]},
+            "Next Run Card": {"main": [[{"node": "Dispatch Preview", "type": "main", "index": 0}]]},
+            "Dispatch Preview": {"main": [[{"node": "Control Contract", "type": "main", "index": 0}]]},
             "Control Contract": {"main": [[{"node": "Command Run Preview", "type": "main", "index": 0}]]},
             "Command Run Preview": {"main": [[{"node": "Read Mission Control", "type": "main", "index": 0}]]},
             "Read Mission Control": {"main": [[{"node": "Read Channel Router", "type": "main", "index": 0}]]},
@@ -5971,6 +6004,104 @@ def operator_goal_audit_data(owner_id, days=30, platform="tiktok", limit=8):
         },
         "next_command": (hard_blockers or soft_blockers or [{"next": "/operator_next_run"}])[0]["next"],
         "rule": "Goal audit là điểm kiểm tra tổng mục tiêu; hard blocker phải xử lý trước, soft blocker cần live run/test thật trước khi coi là vận hành hoàn chỉnh.",
+    }
+
+def operator_dispatch_preview_data(owner_id, days=30, platform="tiktok", limit=8):
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 8), 20))
+    platform = (platform or "tiktok").lower()
+    next_run = operator_next_run_data(owner_id, days=days, platform=platform, limit=limit)
+    focus_job_id = int(((next_run.get("state") or {}).get("focus_job_id") or 0))
+    pipeline = operator_pipeline_pack_data(owner_id, job_id=focus_job_id, days=days, platform=platform, limit=limit) if focus_job_id else operator_pipeline_pack_data(owner_id, job_id=0, days=days, platform=platform, limit=limit)
+    worker_next = (pipeline.get("worker_next") or {}) if pipeline else {}
+    task = worker_next.get("next_task") or {}
+    mode = next_run.get("mode") or pipeline.get("pipeline_state") or "UNKNOWN"
+    action = {
+        "kind": "observe",
+        "safe_to_execute": False,
+        "reason": "Không có bước tự động an toàn rõ ràng.",
+        "api": next_run.get("api") or {},
+        "telegram": next_run.get("telegram_command") or "/operator_next_run",
+    }
+    if task.get("id"):
+        action = {
+            "kind": "claim_task",
+            "safe_to_execute": True,
+            "reason": "Có task queued/waiting; claim chỉ chuyển task sang working và trả prompt_pack, chưa publish.",
+            "task_id": int(task.get("id") or 0),
+            "job_id": int(task.get("job_id") or focus_job_id or 0),
+            "api": {"method": "GET", "url": f"/api/operator/tasks/claim?job_id={int(task.get('job_id') or focus_job_id or 0)}&include_context=1&include_prompt=1"},
+            "telegram": f"/task_prompt id={int(task.get('id') or 0)}",
+        }
+    elif mode in {"SETUP", "SETUP_REQUIRED"}:
+        action = {
+            "kind": "setup_required",
+            "safe_to_execute": False,
+            "reason": "Còn blocker cấu hình; cần admin/Railway/API key/kênh/link trước khi tự động chạy.",
+            "api": {"method": "GET", "url": "/api/operator/goal-audit"},
+            "telegram": "/goal_audit",
+        }
+    elif mode in {"NEEDS_ADMIN_APPROVAL", "READY_TO_QUEUE"}:
+        action = {
+            "kind": "needs_admin_review",
+            "safe_to_execute": False,
+            "reason": "Video/job cần review và approve của admin trước khi queue publish.",
+            "api": {"method": "GET", "url": f"/api/operator/jobs/{focus_job_id}/review-video"},
+            "telegram": f"/review_video job={focus_job_id} send=1",
+        }
+    elif mode in {"PUBLISH", "PUBLISHER_NEEDED", "READY_TO_PUBLISH"}:
+        action = {
+            "kind": "publish_handoff",
+            "safe_to_execute": False,
+            "reason": "Publish cần adapter/publisher gate; manual/API chính thức tùy platform.",
+            "api": {"method": "POST", "url": "/api/operator/publisher/run"},
+            "telegram": "/publisher_run platform=tiktok mode=api hoặc /publisher_handoff queue=<QUEUE_ID>",
+        }
+    elif mode in {"LAUNCH"}:
+        action = {
+            "kind": "launch_suggested",
+            "safe_to_execute": False,
+            "reason": "Chưa có job/task active; admin hoặc commander nên launch với topic cụ thể.",
+            "api": {"method": "POST", "url": "/api/operator/launch"},
+            "telegram": f"/operator_launch topic=công nghệ AI platform={platform} channel=all limit=3 build=1",
+        }
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "mode": mode,
+        "days": days,
+        "platform": platform,
+        "focus_job_id": focus_job_id,
+        "dispatch_action": action,
+        "next_run": next_run,
+        "pipeline": {
+            "state": pipeline.get("pipeline_state") if pipeline else "NONE",
+            "focus_job_id": pipeline.get("focus_job_id") if pipeline else 0,
+            "next_action": pipeline.get("next_action") if pipeline else {},
+            "worker_next": worker_next,
+        },
+        "rule": "Dispatcher chỉ tự claim task khi có queued/waiting task. Review, approve và publish vẫn cần gate riêng để không đăng nhầm.",
+    }
+
+def operator_dispatch_execute_data(owner_id, days=30, platform="tiktok", limit=8, claim_task=True, include_context=True, include_prompt=True):
+    preview = operator_dispatch_preview_data(owner_id, days=days, platform=platform, limit=limit)
+    action = preview.get("dispatch_action") or {}
+    result = {"executed": False, "kind": action.get("kind"), "message": action.get("reason") or "not_executed"}
+    if action.get("kind") == "claim_task" and action.get("safe_to_execute") and claim_task:
+        result = claim_operator_task_payload(
+            job_id=int(action.get("job_id") or 0),
+            tool="",
+            include_context=include_context,
+            include_prompt=include_prompt,
+        )
+        result["executed"] = bool(result.get("task"))
+        result["kind"] = "claim_task"
+    return {
+        "ok": True,
+        "executed": bool(result.get("executed")),
+        "preview": preview,
+        "result": result,
+        "after_done": "/api/operator/dispatch hoặc /operator_dispatch để lấy bước kế tiếp.",
     }
 
 def get_production_job(job_id, owner_id):
@@ -12629,6 +12760,16 @@ class OperatorCommandRunRequest(BaseModel):
     safe_mode: bool = True
     notify_admin: bool = True
 
+class OperatorDispatchRequest(BaseModel):
+    days: int = Field(default=30, ge=1, le=180)
+    platform: str = Field(default="tiktok", max_length=40)
+    limit: int = Field(default=8, ge=3, le=20)
+    execute: bool = False
+    claim_task: bool = True
+    include_context: bool = True
+    include_prompt: bool = True
+    notify_admin: bool = True
+
 class AgentGemini:
     @staticmethod
     def chat(prompt: str, text: str, uid, is_json: bool = False) -> str:
@@ -17364,6 +17505,50 @@ async def cmd_operator_next_run(update: Update, context: ContextTypes.DEFAULT_TY
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    days = max(1, min(safe_int(data.get("days") or data.get("ngay"), 30), 180))
+    limit = max(3, min(safe_int(data.get("limit"), 8), 20))
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    execute = truthy_value(data.get("execute") or data.get("run"), False)
+    claim_task = truthy_value(data.get("claim") or data.get("claim_task"), True)
+    if execute:
+        data_out = operator_dispatch_execute_data(
+            update.effective_user.id,
+            days=days,
+            platform=platform,
+            limit=limit,
+            claim_task=claim_task,
+            include_context=True,
+            include_prompt=True,
+        )
+    else:
+        data_out = operator_dispatch_preview_data(update.effective_user.id, days=days, platform=platform, limit=limit)
+    preview = data_out.get("preview") or data_out
+    action = preview.get("dispatch_action") or {}
+    result = data_out.get("result") or {}
+    lines = [
+        "🧭 <b>OPERATOR DISPATCH</b>",
+        f"• Mode: <code>{html.escape(preview.get('mode') or '-')}</code> | Platform: <code>{html.escape(platform)}</code>",
+        f"• Action: <code>{html.escape(action.get('kind') or '-')}</code> | Safe execute: <b>{'YES' if action.get('safe_to_execute') else 'NO'}</b>",
+        f"• Reason: {html.escape(action.get('reason') or '-')}",
+        f"• Telegram: <code>{html.escape(action.get('telegram') or '-')}</code>",
+        f"• API: <code>{html.escape(str((action.get('api') or {}).get('url') or '-'))}</code>",
+    ]
+    if execute:
+        lines.extend([
+            "",
+            f"<b>Executed:</b> {'YES' if data_out.get('executed') else 'NO'}",
+            f"• Result kind: <code>{html.escape(result.get('kind') or action.get('kind') or '-')}</code>",
+        ])
+        task = result.get("task") or {}
+        if task:
+            lines.append(f"• Claimed task: <code>#{task.get('id')}</code> | prompt_pack=<b>{'YES' if result.get('prompt_pack') else 'NO'}</b>")
+    lines.append("\nAPI: <code>GET/POST /api/operator/dispatch</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_operator_mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -17572,6 +17757,7 @@ def operator_category_keyboard(category):
             ("🎯 Goal audit", "goalaudit"),
             ("🎯 Campaign preset", "campaignpreset"),
             ("🎛 Next run card", "nextrun"),
+            ("🧭 Dispatch one step", "dispatch"),
             ("👑 Commander pack", "commanderpack"), ("📜 Control contract", "contract"),
             ("🚀 Launch", "launch"), ("🧰 Bootstrap", "bootstrap"),
             ("🎬 Make video", "makevideo"),
@@ -17719,6 +17905,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Mission control: <code>GET {html.escape(base_url)}/api/operator/mission</code>",
         f"• Control contract: <code>GET {html.escape(base_url)}/api/operator/control-contract?days=30&amp;platform=tiktok</code>",
         f"• Next run card: <code>GET {html.escape(base_url)}/api/operator/next-run</code>",
+        f"• One-step dispatcher: <code>GET/POST {html.escape(base_url)}/api/operator/dispatch</code>",
         f"• Bootstrap thiếu setup: <code>POST {html.escape(base_url)}/api/operator/bootstrap</code>",
         f"• Campaign preset: <code>POST {html.escape(base_url)}/api/operator/campaign-preset</code>",
         f"• Launch một lệnh: <code>POST {html.escape(base_url)}/api/operator/launch</code>",
@@ -17993,6 +18180,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "smoke": "/operator_smoke\nGET /api/operator/smoke-test",
         "today": "/operator_today",
         "nextrun": "/operator_next_run days=30 platform=tiktok\nGET /api/operator/next-run?days=30&platform=tiktok",
+        "dispatch": "/operator_dispatch days=30 platform=tiktok\n/operator_dispatch execute=1\nGET /api/operator/dispatch?days=30&platform=tiktok\nPOST /api/operator/dispatch",
         "playbook": "/operator_playbook",
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
@@ -21695,6 +21883,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_execute", cmd_operator_execute))
     tg_app.add_handler(CommandHandler("operator_today", cmd_operator_today))
     tg_app.add_handler(CommandHandler("operator_next_run", cmd_operator_next_run))
+    tg_app.add_handler(CommandHandler("operator_dispatch", cmd_operator_dispatch))
     tg_app.add_handler(CommandHandler("operator_command", cmd_operator_command))
     tg_app.add_handler(CommandHandler("operator_mission", cmd_operator_mission))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
@@ -22467,6 +22656,50 @@ async def api_operator_next_run(request: Request, days: int = 30, platform: str 
     limit = max(3, min(int(limit or 8), 20))
     platform = (platform or "tiktok").lower()
     return operator_next_run_data(ADMIN_ID, days=days, platform=platform, limit=limit)
+
+@fastapi_app.get("/api/operator/dispatch")
+async def api_operator_dispatch_preview(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 8):
+    verify_operator_api_token(request)
+    return operator_dispatch_preview_data(ADMIN_ID, days=days, platform=platform, limit=limit)
+
+@fastapi_app.post("/api/operator/dispatch")
+async def api_operator_dispatch(payload: OperatorDispatchRequest, request: Request):
+    verify_operator_api_token(request)
+    if payload.execute:
+        result = operator_dispatch_execute_data(
+            ADMIN_ID,
+            days=payload.days,
+            platform=payload.platform,
+            limit=payload.limit,
+            claim_task=payload.claim_task,
+            include_context=payload.include_context,
+            include_prompt=payload.include_prompt,
+        )
+    else:
+        result = {
+            "ok": True,
+            "executed": False,
+            "preview": operator_dispatch_preview_data(ADMIN_ID, days=payload.days, platform=payload.platform, limit=payload.limit),
+            "result": {"executed": False, "message": "execute=false"},
+        }
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            preview = result.get("preview") or {}
+            action = preview.get("dispatch_action") or {}
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🧭 <b>OPERATOR DISPATCH API</b>\n\n"
+                    f"• Execute: <b>{'YES' if result.get('executed') else 'NO'}</b>\n"
+                    f"• Action: <code>{html.escape(action.get('kind') or '-')}</code>\n"
+                    f"• Reason: {html.escape(action.get('reason') or '-')}\n"
+                    f"• Next: <code>{html.escape(action.get('telegram') or '/operator_dispatch')}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Operator dispatch notify error: {e}")
+    return result
 
 @fastapi_app.post("/api/operator/command/run")
 async def api_operator_command_run(payload: OperatorCommandRunRequest, request: Request):
