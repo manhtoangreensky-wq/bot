@@ -3215,7 +3215,7 @@ def operator_worker_spec_data():
             {
                 "role": "tool_worker",
                 "owner": "Kling/Runway/Fish/Edge/CapCut/FFmpeg/n8n",
-                "input": "GET /api/operator/worker-next để peek; GET /api/operator/tasks/claim?include_context=1 khi bắt đầu làm",
+                "input": "GET /api/operator/worker-next để peek; GET /api/operator/tasks/claim?include_context=1&include_prompt=1 khi bắt đầu làm",
                 "submit": "POST /api/operator/tasks/<TASK_ID>/complete hoặc POST /api/operator/tasks/<TASK_ID>/upload",
                 "allowed_actions": [
                     "Peek task trước bằng /api/operator/worker-next để không tự chuyển task sang working khi chỉ audit",
@@ -3273,7 +3273,7 @@ def operator_worker_spec_data():
             {"step": 4.6, "name": "worker_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/worker-pack"},
             {"step": 4.62, "name": "task_prompt_pack", "method": "GET", "url": "/api/operator/tasks/<TASK_ID>/prompt-pack"},
             {"step": 4.7, "name": "pipeline_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/pipeline-pack"},
-            {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1"},
+            {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1&include_prompt=1"},
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
             {"step": 6.2, "name": "output_acceptance", "method": "GET", "url": "/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>"},
@@ -3451,8 +3451,8 @@ def operator_worker_spec_data():
             },
             "task_claim": {
                 "method": "GET",
-                "url": "/api/operator/tasks/claim?include_context=1&tool=kling",
-                "purpose": "Claim task và nhận luôn job_context để worker không phải ghép nhiều endpoint.",
+                "url": "/api/operator/tasks/claim?include_context=1&include_prompt=1&tool=kling",
+                "purpose": "Claim task và nhận luôn prompt_pack + job_context để worker không phải ghép nhiều endpoint.",
             },
             "worker_pack": {
                 "method": "GET",
@@ -4089,8 +4089,8 @@ def operator_n8n_template_data():
                 "node": "Claim Production Task",
                 "type": "http_request",
                 "method": "GET",
-                "url": f"{base_url}/api/operator/tasks/claim?include_context=1",
-                "when": "Peek Worker Next trả next_task và worker sẵn sàng xử lý.",
+                "url": f"{base_url}/api/operator/tasks/claim?include_context=1&include_prompt=1",
+                "when": "Peek Worker Next trả next_task và worker sẵn sàng xử lý. Response claim đã có prompt_pack để chạy tool ngay.",
             },
             {
                 "node": "AI/Tool Worker",
@@ -4736,7 +4736,7 @@ def operator_n8n_workflow_json_data():
                 "position": [-80, -120],
                 "parameters": {
                     "method": "GET",
-                    "url": f"{base_url_expr}/api/operator/tasks/claim?include_context=1",
+                    "url": f"{base_url_expr}/api/operator/tasks/claim?include_context=1&include_prompt=1",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -5319,7 +5319,7 @@ def operator_command_center_data(owner_id, days=30, platform="tiktok", limit=8):
             "next_run": "/api/operator/next-run",
             "make_video": "/api/operator/make-video",
             "worker_next": "/api/operator/worker-next",
-            "claim_task": "/api/operator/tasks/claim?include_context=1",
+            "claim_task": "/api/operator/tasks/claim?include_context=1&include_prompt=1",
             "publisher_run": "/api/operator/publisher/run",
             "publisher_capabilities": "/api/operator/publisher/capabilities",
             "platform_adapters": "/api/operator/platform-adapters",
@@ -5372,7 +5372,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
             {"step": "launch_one_command", "telegram": "/operator_launch topic=<chu_de> platform=tiktok channel=all limit=3 build=1", "api": "POST /api/operator/launch"},
             {"step": "bootstrap_if_missing", "telegram": "/operator_bootstrap", "api": "POST /api/operator/bootstrap"},
             {"step": "trend_or_topic", "telegram": "/make_video topic=<chu_de> platform=tiktok channel=all limit=3 build=1", "api": "POST /api/operator/make-video"},
-            {"step": "worker_claim", "telegram": "/worker_next hoặc /next_task", "api": "GET /api/operator/worker-next rồi GET /api/operator/tasks/claim?include_context=1"},
+            {"step": "worker_claim", "telegram": "/worker_next hoặc /next_task", "api": "GET /api/operator/worker-next rồi GET /api/operator/tasks/claim?include_context=1&include_prompt=1"},
             {"step": "worker_pack", "telegram": "/worker_pack job=<JOB_ID>", "api": "GET /api/operator/jobs/<JOB_ID>/worker-pack"},
             {"step": "tool_output", "telegram": "/task_set id=<TASK_ID> status=ready url=https://...", "api": "POST /api/operator/tasks/<TASK_ID>/complete hoặc /upload"},
             {"step": "review", "telegram": "/review_video job=<JOB_ID> send=1 và /review_gate job=<JOB_ID>", "api": "GET /api/operator/jobs/<JOB_ID>/review-video"},
@@ -5566,7 +5566,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
             "worker_next": f"{base_url}/api/operator/worker-next",
             "worker_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
             "pipeline_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/pipeline-pack",
-            "task_claim": f"{base_url}/api/operator/tasks/claim?include_context=1",
+            "task_claim": f"{base_url}/api/operator/tasks/claim?include_context=1&include_prompt=1",
             "task_complete": f"{base_url}/api/operator/tasks/<TASK_ID>/complete",
             "task_upload": f"{base_url}/api/operator/tasks/<TASK_ID>/upload",
             "distribution_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/distribution-pack",
@@ -8167,7 +8167,7 @@ def operator_worker_next_summary(owner_id, job_ids=None, limit=5, tool=""):
             "next_task": serialize_operator_task(task),
             "job_context_url": f"/api/operator/jobs/{job_id}/context",
             "ready_url": f"/api/operator/jobs/{job_id}/ready",
-            "claim_task_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1",
+            "claim_task_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1&include_prompt=1",
         })
     return summaries
 
@@ -8386,7 +8386,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
             "complete_url": f"/api/operator/tasks/{int(task[0])}/complete" if task else "/api/operator/tasks/<TASK_ID>/complete",
             "upload_url": f"/api/operator/tasks/{int(task[0])}/upload" if task else "/api/operator/tasks/<TASK_ID>/upload",
             "prompt_pack_url": f"/api/operator/tasks/{int(task[0])}/prompt-pack" if task else "/api/operator/tasks/<TASK_ID>/prompt-pack",
-            "claim_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1",
+            "claim_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1&include_prompt=1",
             "job_context_url": f"/api/operator/jobs/{job_id}/context",
             "review_url": f"/api/operator/jobs/{job_id}/review-video",
             "acceptance_url": f"/api/operator/output-acceptance?job_id={job_id}" + (f"&task_id={int(task[0])}" if task else ""),
@@ -8471,7 +8471,7 @@ def operator_pipeline_pack_data(owner_id, job_id=0, days=30, platform="tiktok", 
         next_action = {
             "type": "WORK_TASK",
             "telegram": f"/task_handoff id={next_task.get('id')}",
-            "api": {"method": "GET", "url": f"/api/operator/tasks/claim?job_id={focus_job_id}&include_context=1"},
+            "api": {"method": "GET", "url": f"/api/operator/tasks/claim?job_id={focus_job_id}&include_context=1&include_prompt=1"},
             "worker_pack": f"/api/operator/jobs/{focus_job_id}/worker-pack",
         }
     elif readiness_level == "READY_TO_QUEUE" and (serialized_job or {}).get("status") != "approved":
@@ -11262,7 +11262,7 @@ async def operator_launch_pipeline(
             },
             "api": {
                 "worker_next": "/api/operator/worker-next",
-                "claim_task": "/api/operator/tasks/claim?include_context=1",
+                "claim_task": "/api/operator/tasks/claim?include_context=1&include_prompt=1",
                 "distribution_pack": f"/api/operator/jobs/{first_job_id}/distribution-pack" if first_job_id else "/api/operator/jobs/<JOB_ID>/distribution-pack",
                 "review_video": f"/api/operator/jobs/{first_job_id}/review-video" if first_job_id else "/api/operator/jobs/<JOB_ID>/review-video",
                 "approve": f"/api/operator/jobs/{first_job_id}/approve" if first_job_id else "/api/operator/jobs/<JOB_ID>/approve",
@@ -17754,7 +17754,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Quyết định scale affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-decisions</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
-        f"• Claim task + context: <code>GET {html.escape(base_url)}/api/operator/tasks/claim?include_context=1</code>",
+        f"• Claim task + prompt/context: <code>GET {html.escape(base_url)}/api/operator/tasks/claim?include_context=1&amp;include_prompt=1</code>",
         f"• Task prompt pack: <code>GET {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/prompt-pack</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
         f"• Upload file task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/upload</code>",
@@ -22070,32 +22070,42 @@ def verify_operator_file_token(request: Request):
     if not token or not hmac.compare_digest(str(token), OPERATOR_API_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid operator token")
 
-def claim_operator_task_payload(job_id=0, tool="", include_context=False):
+def claim_operator_task_payload(job_id=0, tool="", include_context=False, include_prompt=True):
     task = next_worker_task(ADMIN_ID, job_id=job_id or None, tool=tool)
     if not task:
         return {"ok": True, "task": None, "message": "no queued task"}
     update_production_task(ADMIN_ID, task[0], status="working", note=f"api_worker_claim tool={tool or task[4] or '-'}")
     task = get_production_task(ADMIN_ID, task[0])
+    prompt_pack = operator_task_prompt_pack_data(ADMIN_ID, task_id=task[0]) if include_prompt else None
+    task_contract = operator_task_contract(task[0], task[3], task[1])
     payload = {
         "ok": True,
         "task": serialize_operator_task(task),
         "submit_url": f"/api/operator/tasks/{task[0]}/complete",
         "upload_url": f"/api/operator/tasks/{task[0]}/upload",
-        "rule": "Submit output_url/output_urls or upload the real file when the external AI/tool finishes. Do not publish without review gate.",
+        "prompt_pack_url": f"/api/operator/tasks/{task[0]}/prompt-pack",
+        "acceptance_url": task_contract.get("acceptance_url"),
+        "complete_payload": task_contract.get("complete_payload"),
+        "upload_form": task_contract.get("upload_form"),
+        "rule": "Claim trả prompt_pack để worker làm ngay. Submit output_url/output_urls hoặc upload file thật khi tool xong; không publish nếu chưa qua review gate.",
     }
+    if include_prompt and prompt_pack:
+        payload["prompt_pack"] = prompt_pack
+        payload["prompt_text"] = prompt_pack.get("prompt_text", "")
+        payload["submit_examples"] = prompt_pack.get("submit_examples", {})
     if include_context:
         payload["job_context"] = operator_job_context_data(ADMIN_ID, task[1])
     return payload
 
 @fastapi_app.get("/api/operator/tasks/next")
-async def api_operator_next_task(request: Request, job_id: int = 0, tool: str = "", include_context: int = 0):
+async def api_operator_next_task(request: Request, job_id: int = 0, tool: str = "", include_context: int = 0, include_prompt: int = 1):
     verify_operator_api_token(request)
-    return claim_operator_task_payload(job_id=job_id, tool=tool, include_context=bool(include_context))
+    return claim_operator_task_payload(job_id=job_id, tool=tool, include_context=bool(include_context), include_prompt=bool(include_prompt))
 
 @fastapi_app.get("/api/operator/tasks/claim")
-async def api_operator_claim_task(request: Request, job_id: int = 0, tool: str = "", include_context: int = 1):
+async def api_operator_claim_task(request: Request, job_id: int = 0, tool: str = "", include_context: int = 1, include_prompt: int = 1):
     verify_operator_api_token(request)
-    return claim_operator_task_payload(job_id=job_id, tool=tool, include_context=bool(include_context))
+    return claim_operator_task_payload(job_id=job_id, tool=tool, include_context=bool(include_context), include_prompt=bool(include_prompt))
 
 @fastapi_app.get("/api/operator/worker-next")
 async def api_operator_worker_next(request: Request, job_id: int = 0, tool: str = "", limit: int = 5):
@@ -23278,7 +23288,7 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
         "next": {
             "tasks_url": "/api/operator/tasks/next",
             "worker_next_url": "/api/operator/worker-next",
-            "claim_first_task_url": "/api/operator/tasks/claim?include_context=1",
+            "claim_first_task_url": "/api/operator/tasks/claim?include_context=1&include_prompt=1",
             "ready_url": "/api/operator/jobs/<JOB_ID>/ready",
             "job_context_url": "/api/operator/jobs/<JOB_ID>/context",
             "publish_pack_url": "/api/operator/jobs/<JOB_ID>/publish-pack",
