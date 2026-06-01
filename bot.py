@@ -2931,7 +2931,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "campaign_preset", "postback_setup", "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_pack", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_pack", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -2967,6 +2967,8 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/assets/<ASSET_ID>/file"),
         ("GET", "/api/operator/jobs/<JOB_ID>/context"),
         ("GET", "/api/operator/jobs/<JOB_ID>/worker-pack"),
+        ("GET", "/api/operator/output-acceptance"),
+        ("GET", "/api/operator/jobs/<JOB_ID>/output-acceptance"),
         ("GET", "/api/operator/jobs/<JOB_ID>/pipeline-pack"),
         ("GET", "/api/operator/pipeline-pack"),
         ("GET", "/api/operator/jobs/<JOB_ID>/distribution-pack"),
@@ -3046,6 +3048,7 @@ def operator_smoke_test_data(owner_id):
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
+        "output_acceptance_in_spec": "/api/operator/output-acceptance" in spec_text and "/api/operator/output-acceptance" in n8n_text,
         "pipeline_pack_in_spec": "/api/operator/jobs/<JOB_ID>/pipeline-pack" in spec_text and "/pipeline-pack" in n8n_text,
         "distribution_pack_in_spec": "/api/operator/jobs/<JOB_ID>/distribution-pack" in spec_text and "/distribution-pack" in n8n_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
@@ -3209,6 +3212,7 @@ def operator_worker_spec_data():
             {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1"},
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
+            {"step": 6.2, "name": "output_acceptance", "method": "GET", "url": "/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>"},
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
             {"step": 8.1, "name": "distribution_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/distribution-pack"},
@@ -3370,6 +3374,11 @@ def operator_worker_spec_data():
                     "note": "tool output",
                 },
                 "purpose": "Dùng khi Kling/CapCut/Fish/FFmpeg tạo file thật nhưng chưa có public URL.",
+            },
+            "output_acceptance": {
+                "method": "GET",
+                "url": "/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>",
+                "purpose": "Kiểm tra worker đã trả output thật đúng asset_type/status chưa trước khi review/publish.",
             },
             "task_claim": {
                 "method": "GET",
@@ -4024,6 +4033,13 @@ def operator_n8n_template_data():
                 "method": "POST",
                 "url": f"{base_url}/api/operator/tasks/<TASK_ID>/complete",
                 "body": {"status": "ready", "output_url": "https://.../asset.mp4", "output_urls": ["https://.../scene-1.mp4"], "asset_type": "raw_video", "note": "tool output"},
+            },
+            {
+                "node": "Output Acceptance",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>",
+                "note": "Bắt buộc kiểm tra sau complete/upload: nếu NEEDS_WORKER_OUTPUT thì quay lại worker, chưa đưa sang review/publish.",
             },
             {
                 "node": "Upload Task File",
@@ -4714,6 +4730,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "output-acceptance",
+                "name": "Output Acceptance",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [420, -120],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/output-acceptance?job_id={{{{$json.job_id || 0}}}}&task_id={{{{$json.task.id || 0}}}}",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "publisher-status",
                 "name": "Publisher Status",
                 "type": "n8n-nodes-base.httpRequest",
@@ -5015,7 +5045,8 @@ def operator_n8n_workflow_json_data():
             "Read Pipeline Pack": {"main": [[{"node": "Read Worker Pack", "type": "main", "index": 0}]]},
             "Read Worker Pack": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
             "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
-            "Complete Task": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
+            "Complete Task": {"main": [[{"node": "Output Acceptance", "type": "main", "index": 0}]]},
+            "Output Acceptance": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
             "Publisher Status": {"main": [[{"node": "Publisher Capabilities", "type": "main", "index": 0}]]},
             "Publisher Capabilities": {"main": [[{"node": "Publisher Run Safe Claim", "type": "main", "index": 0}]]},
             "Publisher Run Safe Claim": {"main": [[{"node": "Get Publish Pack", "type": "main", "index": 0}]]},
@@ -5981,6 +6012,160 @@ def apply_worker_output_job_state(owner_id, job_id, task_id=0, task_type="", tas
             update_production_job(job_id, owner_id, status="working", note=f"task_ready:{task_id} {task_type_l or '-'} {note or ''}".strip())
     readiness = production_readiness_data(owner_id, job_id)
     return readiness
+
+def _asset_has_media(asset_row):
+    if not asset_row:
+        return False
+    if len(asset_row) >= 11:
+        _aid, _owner_id, _job_id, _asset_type, url, file_id, _note, local_path, _content_type, _filename, _created_at = asset_row
+        return bool(url or file_id or local_path)
+    if len(asset_row) >= 6:
+        _aid, _asset_type, url, file_id, _note, _created_at = asset_row
+        return bool(url or file_id)
+    return False
+
+def _output_media_kind(text=""):
+    value = (text or "").lower().split("?", 1)[0]
+    ext = os.path.splitext(value)[1]
+    if ext in {".mp4", ".mov", ".mkv", ".webm"}:
+        return "video"
+    if ext in {".mp3", ".wav", ".m4a", ".ogg"}:
+        return "audio"
+    if ext in {".png", ".jpg", ".jpeg", ".webp"}:
+        return "image"
+    if ext in {".srt", ".vtt", ".txt"}:
+        return "text"
+    return "unknown"
+
+def operator_task_output_acceptance(owner_id, task_row, assets=None):
+    if not task_row:
+        return None
+    tid, job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task_row
+    task_type_l = (task_type or "").lower()
+    status_l = (status or "queued").lower()
+    expected_asset = default_asset_type_for_task(task_type_l)
+    assets = assets if assets is not None else list_production_assets(owner_id, job_id, limit=80)
+    related_assets = []
+    for row in assets:
+        aid, asset_type, url, file_id, asset_note, created_at = row
+        note_l = (asset_note or "").lower()
+        type_l = (asset_type or "").lower()
+        if f"task:{tid}" in note_l or f"api_task:{tid}" in note_l or f"api_upload_task:{tid}" in note_l:
+            related_assets.append(row)
+        elif output_url and url == output_url:
+            related_assets.append(row)
+        elif type_l == expected_asset and _asset_has_media(row):
+            related_assets.append(row)
+    has_media = bool(output_url) or any(_asset_has_media(row) for row in related_assets)
+    media_kind = _output_media_kind(output_url)
+    if media_kind == "unknown" and related_assets:
+        media_kind = _output_media_kind((related_assets[0][2] or related_assets[0][3] or ""))
+
+    checks = []
+    checks.append({
+        "key": "status_terminal",
+        "ok": status_l in {"ready", "done", "blocked"},
+        "detail": "Task đã có trạng thái kết thúc hoặc blocked rõ ràng." if status_l in {"ready", "done", "blocked"} else "Task chưa có output cuối.",
+        "next": f"/task_handoff id={tid}",
+    })
+    if status_l == "blocked":
+        checks.append({
+            "key": "blocked_note",
+            "ok": bool(note),
+            "detail": "Blocked task có note lỗi/fallback." if note else "Blocked task cần note nêu lỗi, quota hoặc fallback đã thử.",
+            "next": f"/task_set id={tid} status=blocked note=<LY_DO>",
+        })
+    elif task_type_l in {"proof_asset", "visual_scene", "voice", "edit", "publish"}:
+        checks.append({
+            "key": "media_present",
+            "ok": has_media,
+            "detail": "Có output_url hoặc asset upload thật." if has_media else "Thiếu output_url/file upload thật.",
+            "next": f"/task_set id={tid} status=ready url=https://... hoặc upload /api/operator/tasks/{tid}/upload",
+        })
+    if task_type_l == "edit":
+        checks.append({
+            "key": "final_video_type",
+            "ok": expected_asset == "final_video" and (media_kind in {"video", "unknown"}) and has_media,
+            "detail": "Edit task trả final_video có media để review." if has_media else "Edit task phải trả final_video mp4/URL/file upload.",
+            "next": f"/task_set id={tid} status=ready type=final_video url=https://... hoặc /asset_add job={job_id} type=final_video url=https://...",
+        })
+    if task_type_l == "voice":
+        checks.append({
+            "key": "voice_media",
+            "ok": has_media and media_kind in {"audio", "unknown"},
+            "detail": "Voice task có audio output." if has_media else "Voice task cần mp3/wav hoặc file upload.",
+            "next": f"/task_set id={tid} status=ready type=voice url=https://...",
+        })
+    blocking = [item for item in checks if not item["ok"]]
+    accepted = not blocking and status_l in {"ready", "done"}
+    return {
+        "task_id": tid,
+        "job_id": job_id,
+        "task_type": task_type,
+        "tool": tool,
+        "expected_asset_type": expected_asset,
+        "status": status_l,
+        "output_url": output_url,
+        "media_kind": media_kind,
+        "related_assets": [
+            {"id": aid, "asset_type": asset_type, "url": url, "file_id": file_id, "note": asset_note, "created_at": created_at}
+            for aid, asset_type, url, file_id, asset_note, created_at in related_assets[:8]
+        ],
+        "accepted": accepted,
+        "checks": checks,
+        "blocking": blocking,
+        "next": (blocking[0]["next"] if blocking else f"/job_ready job={job_id}"),
+    }
+
+def operator_output_acceptance_data(owner_id, job_id=0, task_id=0):
+    task = get_production_task(owner_id, int(task_id)) if int(task_id or 0) else None
+    if task:
+        job_id = int(task[1] or 0)
+    job = get_production_job(int(job_id or 0), owner_id) if int(job_id or 0) else None
+    if not job:
+        return {"ok": False, "reason": "job_not_found", "job_id": int(job_id or 0), "task_id": int(task_id or 0)}
+    job_id = int(job[0])
+    assets = list_production_assets(owner_id, job_id, limit=100)
+    tasks = [task] if task else [get_production_task(owner_id, row[0]) for row in list_production_tasks(owner_id, job_id=job_id, limit=120)]
+    task_reports = [operator_task_output_acceptance(owner_id, row, assets=assets) for row in tasks if row]
+    readiness = production_readiness_data(owner_id, job_id)
+    final_asset = (readiness or {}).get("final_asset")
+    blocking = []
+    if not task_reports:
+        blocking.append({"key": "tasks", "detail": "Job chưa có task để worker thực hiện.", "next": f"/task_plan job={job_id}"})
+    for report in task_reports:
+        for item in report.get("blocking") or []:
+            blocking.append({"task_id": report.get("task_id"), **item})
+    requires_final_video = not task or (task and (task[3] or "").lower() == "edit")
+    if requires_final_video and not final_asset and not any((report.get("expected_asset_type") == "final_video" and report.get("accepted")) for report in task_reports):
+        blocking.append({"key": "final_video", "detail": "Chưa có final_video để review/publish.", "next": f"/worker_pack job={job_id}"})
+    accepted = not blocking
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "job": serialize_production_job(job),
+        "task_id": int(task_id or 0),
+        "accepted": accepted,
+        "level": "ACCEPTED_FOR_REVIEW" if accepted else "NEEDS_WORKER_OUTPUT",
+        "task_reports": task_reports,
+        "final_asset": {
+            "id": final_asset[0],
+            "asset_type": final_asset[1],
+            "url": final_asset[2],
+            "file_id": final_asset[3],
+            "note": final_asset[4],
+            "created_at": final_asset[5],
+        } if final_asset else None,
+        "blocking": blocking,
+        "next": (blocking[0]["next"] if blocking else f"/review_video job={job_id} send=1"),
+        "api": {
+            "complete_task": "/api/operator/tasks/<TASK_ID>/complete",
+            "upload_task": "/api/operator/tasks/<TASK_ID>/upload",
+            "review_video": f"/api/operator/jobs/{job_id}/review-video",
+            "job_ready": f"/api/operator/jobs/{job_id}/ready",
+        },
+        "rule": "Worker output chỉ được accepted khi status/output/asset khớp task. Không publish khi chưa có final_video review được.",
+    }
 
 def approve_publish_job(owner_id, job_id, note="", queue=True, mode="manual", scheduled_at=""):
     readiness = production_readiness_data(owner_id, job_id)
@@ -7404,6 +7589,7 @@ def operator_task_contract(task_id, task_type: str = "", job_id: int = 0):
     return {
         "complete_url": f"/api/operator/tasks/{task_ref}/complete",
         "upload_url": f"/api/operator/tasks/{task_ref}/upload",
+        "acceptance_url": f"/api/operator/output-acceptance?task_id={task_ref}",
         "complete_payload": {
             "status": "ready",
             "output_url": "https://.../asset.mp4",
@@ -7422,6 +7608,7 @@ def operator_task_contract(task_id, task_type: str = "", job_id: int = 0):
             "set_ready": f"/task_set id={task_ref} status=ready url=https://...",
             "send_latest_asset": f"/asset_send job={int(job_id)} type={default_asset_type}" if job_id else "",
             "job_ready": f"/job_ready job={int(job_id)}" if job_id else "",
+            "output_acceptance": f"/output_acceptance task={task_ref}" if task_num else "",
         },
         "after_success": [
             "Nếu tạo file local: upload multipart qua upload_url.",
@@ -7540,6 +7727,7 @@ def operator_job_context_data(owner_id, job_id):
     if not job:
         return None
     readiness = production_readiness_data(owner_id, job_id)
+    acceptance = operator_output_acceptance_data(owner_id, job_id=job_id)
     assets = list_production_assets(owner_id, job_id, limit=80)
     variants = list_creative_variants(owner_id, job_id, limit=20)
     manifests = list_production_manifests(owner_id, job_id, limit=5)
@@ -7578,6 +7766,14 @@ def operator_job_context_data(owner_id, job_id):
                 {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
                 for key, ok, detail, next_cmd in ((readiness or {}).get("checks") or [])
             ],
+        },
+        "output_acceptance": {
+            "level": acceptance.get("level"),
+            "accepted": acceptance.get("accepted"),
+            "blocking": acceptance.get("blocking", [])[:10],
+            "next": acceptance.get("next"),
+            "api": f"/api/operator/output-acceptance?job_id={job_id}",
+            "telegram": f"/output_acceptance job={job_id}",
         },
         "assets": [
             {
@@ -7676,6 +7872,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
     publish_pack = (context_data or {}).get("publish_pack") or build_static_publish_pack(job, owner_id)
     distribution_pack = (context_data or {}).get("distribution_pack") or build_distribution_pack(owner_id, job_id)
     readiness = production_readiness_data(owner_id, job_id)
+    acceptance = operator_output_acceptance_data(owner_id, job_id=job_id, task_id=int(task[0]) if task else 0)
     review_summary = build_video_review_summary(owner_id, job_id)
     post_publish = build_post_publish_handoff(owner_id, job_id, days=30)
     toolchain = operator_toolchain_data()
@@ -7702,6 +7899,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
             "next_action": (readiness or {}).get("next_action", ""),
             "publish_gate": (readiness or {}).get("publish_gate", {}),
         },
+        "output_acceptance": acceptance,
         "review_video": review_summary,
         "post_publish": post_publish,
         "toolchain": {
@@ -7716,6 +7914,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
             "claim_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1",
             "job_context_url": f"/api/operator/jobs/{job_id}/context",
             "review_url": f"/api/operator/jobs/{job_id}/review-video",
+            "acceptance_url": f"/api/operator/output-acceptance?job_id={job_id}" + (f"&task_id={int(task[0])}" if task else ""),
             "distribution_pack_url": f"/api/operator/jobs/{job_id}/distribution-pack",
             "post_publish_url": f"/api/operator/jobs/{job_id}/post-publish",
             "telegram": {
@@ -7723,6 +7922,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
                 "task_set_ready": f"/task_set id={int(task[0])} status=ready url=https://..." if task else "",
                 "job_context": f"/job_context job={job_id}",
                 "review_video": f"/review_video job={job_id} send=1",
+                "output_acceptance": f"/output_acceptance job={job_id}" + (f" task={int(task[0])}" if task else ""),
                 "approve_publish": f"/approve_publish job={job_id} queue=1 mode=manual",
                 "post_publish": f"/post_publish job={job_id}",
             },
@@ -16819,6 +17019,7 @@ def operator_category_keyboard(category):
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
             ("📦 Worker pack", "workerpack"),
+            ("🧪 Output acceptance", "outputacceptance"),
             ("🎥 Review video", "reviewvideo"), ("🗂 Assets", "assets"),
             ("📋 Job report", "report"),
             ("🧠 Job context", "jobcontext"), ("🚦 Job ready", "jobready"),
@@ -16961,6 +17162,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Claim task + context: <code>GET {html.escape(base_url)}/api/operator/tasks/claim?include_context=1</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
         f"• Upload file task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/upload</code>",
+        f"• Nghiệm thu output: <code>GET {html.escape(base_url)}/api/operator/output-acceptance?job_id=&lt;JOB_ID&gt;</code>",
         f"• Upload asset job: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/assets/upload</code>",
         f"• Tải asset nội bộ: <code>GET {html.escape(base_url)}/api/operator/assets/&lt;ASSET_ID&gt;/file</code>",
         f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
@@ -17261,6 +17463,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
         "nexttask": "/next_task\n/next_task job=<JOB_ID>",
         "workerpack": "/worker_pack job=<JOB_ID>\n/worker_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/worker-pack",
+        "outputacceptance": "/output_acceptance job=<JOB_ID>\n/output_acceptance task=<TASK_ID>\nGET /api/operator/output-acceptance?job_id=<JOB_ID>",
         "reviewvideo": "/review_video job=<JOB_ID> send=1\n/brain kiểm duyệt video job <JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>\n/asset_send id=<ASSET_ID>\n/asset_send job=<JOB_ID> type=final_video",
         "report": "/job_report <JOB_ID>",
@@ -18530,6 +18733,52 @@ async def cmd_worker_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Rule:</b> không copy video tham khảo, không publish trước review/approve, lỗi tool thì ghi tool event/fallback.",
         "API đầy đủ: <code>GET /api/operator/jobs/&lt;JOB_ID&gt;/worker-pack</code>",
     ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_output_acceptance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("job_id") or 0)
+        task_id = int(data.get("task") or data.get("task_id") or data.get("id") or 0)
+    except ValueError:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/output_acceptance job=&lt;JOB_ID&gt;</code> hoặc <code>/output_acceptance task=&lt;TASK_ID&gt;</code>",
+            parse_mode="HTML"
+        )
+    if not job_id and not task_id:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/output_acceptance job=&lt;JOB_ID&gt;</code> hoặc <code>/output_acceptance task=&lt;TASK_ID&gt;</code>",
+            parse_mode="HTML"
+        )
+    report = operator_output_acceptance_data(update.effective_user.id, job_id=job_id, task_id=task_id)
+    if not report.get("ok"):
+        return await update.message.reply_text(f"❌ {html.escape(report.get('reason') or 'not_found')}", parse_mode="HTML")
+    job = report.get("job") or {}
+    lines = [
+        "🧪 <b>OUTPUT ACCEPTANCE</b>",
+        f"• Job: <code>#{job.get('id')}</code> | Task filter: <code>{report.get('task_id') or 'all'}</code>",
+        f"• Level: <b>{html.escape(report.get('level') or '-')}</b> | Accepted: <b>{'YES' if report.get('accepted') else 'NO'}</b>",
+        f"• Topic: {html.escape(job.get('topic') or '-')}",
+        f"• Next: <code>{html.escape(report.get('next') or '-')}</code>",
+        "",
+        "<b>Task reports:</b>",
+    ]
+    for item in (report.get("task_reports") or [])[:12]:
+        lines.append(
+            f"• Task <code>#{item.get('task_id')}</code> / <code>{html.escape(item.get('task_type') or '-')}</code> "
+            f"→ <b>{'OK' if item.get('accepted') else 'NEED'}</b>\n"
+            f"  expected=<code>{html.escape(item.get('expected_asset_type') or '-')}</code> "
+            f"status=<code>{html.escape(item.get('status') or '-')}</code> output=<code>{html.escape(item.get('output_url') or '-')}</code>\n"
+            f"  next: <code>{html.escape(item.get('next') or '-')}</code>"
+        )
+    if report.get("blocking"):
+        lines.append("\n<b>Blocking:</b>")
+        for item in (report.get("blocking") or [])[:10]:
+            task_label = f"task #{item.get('task_id')} | " if item.get("task_id") else ""
+            lines.append(f"• {task_label}{html.escape(item.get('detail') or item.get('key') or '-')}\n  <code>{html.escape(item.get('next') or '-')}</code>")
+    lines.append("\nAPI: <code>GET /api/operator/output-acceptance?job_id=&lt;JOB_ID&gt;</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -20851,6 +21100,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("worker_next", cmd_worker_next))
     tg_app.add_handler(CommandHandler("worker_pack", cmd_worker_pack))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
+    tg_app.add_handler(CommandHandler("output_acceptance", cmd_output_acceptance))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
     tg_app.add_handler(CommandHandler("distribution_pack", cmd_distribution_pack))
@@ -21254,6 +21504,7 @@ async def api_operator_status(request: Request):
             "control_contract": "/api/operator/control-contract",
             "toolchain": "/api/operator/toolchain",
             "tool_events": "/api/operator/tool-events",
+            "output_acceptance": "/api/operator/output-acceptance",
             "reference_videos": "/api/operator/reference-videos",
             "n8n_template": "/api/operator/n8n-template",
             "n8n_workflow": "/api/operator/n8n-workflow.json",
@@ -21863,6 +22114,7 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
         note=payload.note or "api_task_complete",
     )
     updated_task = get_production_task(ADMIN_ID, task_id)
+    acceptance = operator_output_acceptance_data(ADMIN_ID, job_id=job_id, task_id=task_id)
 
     if tg_app and ADMIN_ID:
         try:
@@ -21874,7 +22126,8 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
                     f"• Type: <code>{html.escape(task_type or '-')}</code> | Status: <b>{html.escape(status)}</b>\n"
                     f"• Output: <code>{html.escape(primary_output or 'không có')}</code>\n"
                     f"• Extra assets: <b>{saved_extra_assets}</b>\n"
-                    f"• Ready: <b>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</b>"
+                    f"• Ready: <b>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</b>\n"
+                    f"• Acceptance: <b>{html.escape(acceptance.get('level') or 'UNKNOWN')}</b>"
                 ),
                 parse_mode="HTML"
             )
@@ -21890,6 +22143,7 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
             "level": (readiness or {}).get("level", "UNKNOWN"),
             "next_action": (readiness or {}).get("next_action", ""),
         },
+        "output_acceptance": acceptance,
         "review_url": f"/api/operator/jobs/{job_id}/review-video",
         "approve_url": f"/api/operator/jobs/{job_id}/approve",
     }
@@ -21951,6 +22205,7 @@ async def api_operator_upload_task_asset(
         asset_type=resolved_asset_type,
         note=note or f"api_task_upload asset:{asset_id}",
     )
+    acceptance = operator_output_acceptance_data(ADMIN_ID, job_id=job_id, task_id=task_id)
     if tg_app and ADMIN_ID:
         try:
             await tg_app.bot.send_message(
@@ -21961,6 +22216,7 @@ async def api_operator_upload_task_asset(
                     f"• Asset: <code>#{asset_id}</code> | Type: <code>{html.escape(resolved_asset_type)}</code>\n"
                     f"• File: <code>{html.escape(saved['filename'])}</code> | {saved['size']:,} bytes\n"
                     f"• Ready: <b>{html.escape((readiness or {}).get('level', 'UNKNOWN'))}</b>\n"
+                    f"• Acceptance: <b>{html.escape(acceptance.get('level') or 'UNKNOWN')}</b>\n"
                     f"• Xem ngay: <code>/asset_send id={asset_id}</code>"
                 ),
                 parse_mode="HTML"
@@ -21984,6 +22240,7 @@ async def api_operator_upload_task_asset(
             "level": (readiness or {}).get("level", "UNKNOWN"),
             "next_action": (readiness or {}).get("next_action", ""),
         },
+        "output_acceptance": acceptance,
         "review_url": f"/api/operator/jobs/{job_id}/review-video",
         "approve_url": f"/api/operator/jobs/{job_id}/approve",
     }
@@ -22097,6 +22354,22 @@ async def api_operator_job_ready(job_id: int, request: Request):
             for key, ok, detail, next_cmd in readiness["checks"]
         ],
     }
+
+@fastapi_app.get("/api/operator/output-acceptance")
+async def api_operator_output_acceptance(request: Request, job_id: int = 0, task_id: int = 0):
+    verify_operator_api_token(request)
+    data = operator_output_acceptance_data(ADMIN_ID, job_id=job_id, task_id=task_id)
+    if not data.get("ok"):
+        raise HTTPException(status_code=404, detail=data.get("reason") or "not_found")
+    return data
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/output-acceptance")
+async def api_operator_job_output_acceptance(job_id: int, request: Request, task_id: int = 0):
+    verify_operator_api_token(request)
+    data = operator_output_acceptance_data(ADMIN_ID, job_id=job_id, task_id=task_id)
+    if not data.get("ok"):
+        raise HTTPException(status_code=404, detail=data.get("reason") or "not_found")
+    return data
 
 @fastapi_app.get("/api/operator/jobs/{job_id}/context")
 async def api_operator_job_context(job_id: int, request: Request):
