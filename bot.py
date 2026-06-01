@@ -24,7 +24,7 @@ import random
 import re
 import tempfile
 import xml.etree.ElementTree as ET
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
@@ -1717,6 +1717,110 @@ def update_affiliate_profile(owner_id, affiliate_id, **fields):
     conn.close()
     return changed > 0
 
+def infer_affiliate_network_from_url(url):
+    host = urlparse(url or "").netloc.lower()
+    if "shopee" in host or "goeco.mobi" in host:
+        return "GoEco"
+    if "lazada" in host:
+        return "Lazada"
+    if "trackfin" in host:
+        return "TrackFin"
+    if "trackec" in host:
+        return "TrackEC"
+    if "trackecom" in host:
+        return "TrackEcom"
+    if "trackmobi" in host:
+        return "TrackMobi"
+    if "attracking" in host:
+        return "Attracking"
+    if "shorten" in host:
+        return "ShortenAsia"
+    if "goecom" in host:
+        return "GoEcom"
+    return host.replace("www.", "").split(".")[0].title() if host else "Affiliate"
+
+def infer_affiliate_niche(product_name, fallback=""):
+    text = (product_name or "").lower()
+    rules = [
+        (("bank", "vpbank", "vib", "mbbank", "bidv", "hdbank", "the", "vay", "loan", "finance", "bao hiem", "card"), "tai chinh ngan hang the vay bao hiem"),
+        (("shopee", "lazada", "aeon", "nguyen kim", "nguyễn kim", "media", "mediamart", "samsung", "cellphones", "shopdunk", "hoang ha", "hoàng hà", "dien thoai", "điện thoại", "computer"), "cong nghe san thuong mai dien tu dien may"),
+        (("travel", "klook", "ve may bay", "airlines", "vinwonders", "gotadi", "atadi", "bestprice", "du lich"), "du lich booking ve may bay khach san tour"),
+        (("adidas", "supersports", "juno", "vascara", "vera", "jockey", "bitis", "shondo", "fashion", "thoi trang"), "thoi trang giay dep lifestyle"),
+        (("con cung", "chickita", "mam", "nam ngu", "elmich", "gia dung", "me va be"), "hang tieu dung gia dinh me va be"),
+        (("zalo ads", "tiktok for business", "ads", "marketing"), "quang cao marketing ban hang"),
+    ]
+    for keys, niche in rules:
+        if any(key in text for key in keys):
+            return niche
+    return fallback or "affiliate tong hop"
+
+def parse_affiliate_import_items(raw_text, default_niche="", default_network=""):
+    items = []
+    seen = set()
+    for match in re.finditer(r"https?://[^\s,;]+", raw_text or "", flags=re.I):
+        url = match.group(0).rstrip(").,;!?\"'")
+        if url in seen:
+            continue
+        seen.add(url)
+        tail = (raw_text or "")[match.end(): match.end() + 180]
+        label_match = re.match(r"\s*\(([^)]+)\)", tail)
+        product = label_match.group(1).strip() if label_match else ""
+        if not product:
+            line_start = (raw_text or "").rfind("\n", 0, match.start()) + 1
+            line_end = (raw_text or "").find("\n", match.end())
+            if line_end < 0:
+                line_end = len(raw_text or "")
+            line = (raw_text or "")[line_start:line_end]
+            product = re.sub(r"https?://[^\s,;]+", " ", line, flags=re.I)
+            product = re.sub(r"[\(\)\[\]{}:,;]+", " ", product)
+            product = re.sub(r"\s+", " ", product).strip()
+        if not product:
+            slug = urlparse(url).path.strip("/").split("/")[-1] or urlparse(url).netloc
+            product = f"{infer_affiliate_network_from_url(url)} {slug}".strip()
+        network = default_network or infer_affiliate_network_from_url(url)
+        niche = infer_affiliate_niche(product, default_niche)
+        items.append({
+            "network": network,
+            "product_name": product[:160],
+            "niche": niche,
+            "url": url,
+            "commission_note": f"bulk_import | brand={product[:80]} | family={niche} | os=all",
+            "target_audience": niche,
+            "allowed_claims": DEFAULT_AFFILIATE_ALLOWED_CLAIMS,
+            "blocked_claims": DEFAULT_AFFILIATE_BLOCKED_CLAIMS,
+            "product_score": 72,
+        })
+    return items
+
+def import_affiliate_links_from_text(owner_id, raw_text, default_niche="", default_network=""):
+    created = []
+    skipped = []
+    errors = []
+    for item in parse_affiliate_import_items(raw_text, default_niche=default_niche, default_network=default_network):
+        existing = get_affiliate_by_url(owner_id, item["url"])
+        if existing:
+            skipped.append(existing)
+            continue
+        try:
+            affiliate_id = create_affiliate_link(
+                owner_id,
+                item["network"],
+                item["product_name"],
+                item["niche"],
+                item["url"],
+                item["commission_note"],
+                0,
+                0,
+                item["target_audience"],
+                item["allowed_claims"],
+                item["blocked_claims"],
+                item["product_score"],
+            )
+            created.append((affiliate_id, item["network"], item["product_name"], item["url"], item["niche"]))
+        except Exception as exc:
+            errors.append({"url": item["url"], "error": str(exc)})
+    return created, skipped, errors
+
 def affiliate_match_score(affiliate, niche="", trend_text="", platform=""):
     (
         aid, network, product_name, aff_niche, url, commission_note, status,
@@ -2418,7 +2522,7 @@ def operator_audit_data(owner_id):
 def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
-        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_scale",
+        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "worker_next", "operator_command", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
@@ -9836,6 +9940,16 @@ def operator_brain_fallback(raw_text):
             "confidence": 84,
         }
 
+    if any(word in lower for word in [
+        "lưu link affiliate", "luu link affiliate", "import affiliate", "nhập affiliate", "nhap affiliate",
+        "nạp link affiliate", "nap link affiliate", "thêm nhiều link", "them nhieu link"
+    ]) and any_url:
+        return {
+            "intent": "affiliate_import",
+            "topic": text,
+            "confidence": 83,
+        }
+
     if reference_url and any(word in lower for word in ["học", "hoc", "tham khảo", "tham khao", "reference", "mẫu", "mau", "lưu", "luu"]):
         title = re.sub(r"https?://[^\s<>\"]+", " ", text, flags=re.I)
         title = re.sub(r"\b(học|hoc|tham khảo|tham khao|reference|mẫu|mau|lưu|luu|video|này|nay|link)\b", " ", title, flags=re.I)
@@ -10072,7 +10186,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, reference_scan, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
@@ -10099,6 +10213,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- scale_execute: khi admin yêu cầu chạy scale plan/tự scale an toàn.\n"
         "- affiliate_report: khi admin hỏi báo cáo doanh thu affiliate/link affiliate.\n"
         "- affiliate_decisions: khi admin hỏi link nào nên scale/test/fix/pause.\n"
+        "- affiliate_import: khi admin paste nhiều link affiliate mới và muốn lưu vào catalog.\n"
         "- job_ready: khi admin muốn kiểm tra đủ điều kiện đăng.\n"
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
@@ -10227,6 +10342,8 @@ def brain_command_preview(plan):
             f"/affiliate_decisions days={max(1, min(int(plan.get('days') or 30), 180))} "
             f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 12), 30))}"
         )
+    if intent == "affiliate_import":
+        return f"/affiliate_import {plan.get('topic') or plan.get('raw') or '<PASTE_LINKS>'}"
     if intent == "operator":
         return (
             f"/operator topic={plan.get('topic') or plan.get('niche') or 'video affiliate'} "
@@ -10478,6 +10595,15 @@ async def run_brain_plan(update, context, plan):
                 f"limit={max(3, min(int(plan.get('limit') or 12), 30))}",
             ]
             return await cmd_affiliate_decisions(update, context)
+        if intent == "affiliate_import":
+            raw_links = plan.get("topic") or plan.get("raw") or ""
+            if not raw_links:
+                return await update.message.reply_text(
+                    "⚠️ Cần paste danh sách link. Ví dụ: <code>/brain lưu link affiliate https://... (Tên sản phẩm)</code>",
+                    parse_mode="HTML",
+                )
+            context.args = raw_links.split()
+            return await cmd_affiliate_import(update, context)
         if intent == "operator":
             if not int(plan.get("channel") or 0):
                 return await update.message.reply_text(
@@ -10922,6 +11048,47 @@ async def cmd_affiliate_seed(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if len(skipped) > 10:
             lines.append(f"• ... và {len(skipped) - 10} link khác.")
     lines.append("\nDùng <code>/affiliates</code> để xem ID, hoặc <code>/affiliate_match niche=...</code> để chọn link theo trend.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_affiliate_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args).strip()
+    if not raw:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp:\n"
+            "<code>/affiliate_import https://shorten.asia/abc (Tên sản phẩm), https://trackfin.asia/xyz (Brand)</code>\n\n"
+            "Tuỳ chọn đầu dòng: <code>niche=cong nghe network=GoEco ...</code>",
+            parse_mode="HTML",
+        )
+    data = parse_key_value_args(raw)
+    created, skipped, errors = import_affiliate_links_from_text(
+        update.effective_user.id,
+        raw,
+        default_niche=data.get("niche") or data.get("ngach") or "",
+        default_network=data.get("network") or data.get("net") or "",
+    )
+    lines = [
+        "📥 <b>BULK AFFILIATE IMPORT</b>",
+        f"• Tạo mới: <b>{len(created)}</b>",
+        f"• Trùng URL bỏ qua: <b>{len(skipped)}</b>",
+        f"• Lỗi: <b>{len(errors)}</b>",
+    ]
+    if created:
+        lines.append("\n<b>Link vừa tạo:</b>")
+        for affiliate_id, network, product, _url, niche in created[:20]:
+            lines.append(f"• #{affiliate_id} | <code>{html.escape(network or '-')}</code> | {html.escape(product or '-')} | {html.escape(niche or '-')}")
+        if len(created) > 20:
+            lines.append(f"• ... và {len(created) - 20} link khác")
+    if skipped:
+        lines.append("\n<b>Đã có sẵn:</b>")
+        for affiliate_id, network, product, _url in skipped[:10]:
+            lines.append(f"• #{affiliate_id} | <code>{html.escape(network or '-')}</code> | {html.escape(product or '-')}")
+    if errors:
+        lines.append("\n<b>Lỗi:</b>")
+        for item in errors[:5]:
+            lines.append(f"• <code>{html.escape(item.get('url') or '-')}</code>: {html.escape(item.get('error') or '-')}")
+    lines.append("\nDùng tiếp: <code>/affiliate_match niche=...</code> hoặc <code>/affiliate_related brand=...</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliates(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -12302,6 +12469,7 @@ def operator_category_keyboard(category):
         ],
         "cat_affiliate": [
             ("🔗 Import catalog", "affseed"), ("🛒 Danh sách link", "affiliates"),
+            ("📥 Bulk import", "affimport"),
             ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
             ("🚀 Scale thành video", "affscale"), ("💰 Báo cáo affiliate", "affreport"),
             ("🧠 Quyết định scale", "affdecisions"), ("🔎 Link liên quan", "affrelated"),
@@ -12674,7 +12842,8 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
         "rank": "/trend_rank\n/trend_rank 20",
-        "affseed": "/affiliate_seed\n/affiliates",
+        "affseed": "/affiliate_seed\n/affiliate_import https://shorten.asia/abc (Tên sản phẩm)\n/affiliates",
+        "affimport": "/affiliate_import https://shorten.asia/abc (Tên sản phẩm), https://trackfin.asia/xyz (Brand)\n/brain lưu link affiliate https://... (Tên sản phẩm)",
         "affiliates": "/affiliates",
         "affreport": "/affiliate_report days=30\n/affiliate_report days=90 limit=20",
         "affdecisions": "/affiliate_decisions days=30 platform=tiktok limit=12\n/affiliate_decisions days=7 min_views=200",
@@ -12747,8 +12916,9 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain đầu não nên làm gì tiếp theo</code>\n"
             "• <code>/brain đầu não chạy bước tiếp theo an toàn</code>\n"
             "• <code>/brain autopilot 3 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
-            "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
-            "• <code>/brain học video này https://facebook.com/...</code>\n"
+        "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
+        "• <code>/brain lưu link affiliate https://shorten.asia/abc (Tên sản phẩm)</code>\n"
+        "• <code>/brain học video này https://facebook.com/...</code>\n"
             "• <code>/brain quét video tham khảo path=D:\\mybot\\TOANAAS\\video AI tham khảo</code>\n"
             "• <code>/brain duyệt job 12 để đăng</code>\n"
             "• <code>/brain chạy publisher tiktok</code>\n"
@@ -15856,6 +16026,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("publisher_status", cmd_publisher_status))
     tg_app.add_handler(CommandHandler("affiliate_add", cmd_affiliate_add))
     tg_app.add_handler(CommandHandler("affiliate_seed", cmd_affiliate_seed))
+    tg_app.add_handler(CommandHandler("affiliate_import", cmd_affiliate_import))
     tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
     tg_app.add_handler(CommandHandler("affiliate_profile", cmd_affiliate_profile))
     tg_app.add_handler(CommandHandler("affiliate_match", cmd_affiliate_match))
