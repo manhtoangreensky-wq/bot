@@ -1861,6 +1861,98 @@ DEFAULT_OPERATOR_CAMPAIGNS = [
     },
 ]
 
+DEFAULT_CAMPAIGN_PRESETS = [
+    {
+        "key": "tech",
+        "name": "Tech Affiliate Engine",
+        "aliases": ["congnghe", "côngnghệ", "ai", "tool", "tools", "app"],
+        "niche": "công nghệ AI, điện thoại, máy tính, thiết bị, app, phần mềm, affiliate dài hạn",
+        "topic": "AI tools, điện thoại, laptop, app kiếm tiền, thiết bị công nghệ đáng mua",
+        "platforms": ["tiktok", "facebook"],
+        "campaign_name": "TOAN DAAS Tech Affiliate",
+        "angle": "review nhanh, so sánh lợi ích thực tế, demo vấn đề trước/sau, CTA chọn nhiều link sản phẩm liên quan",
+        "affiliate_query": "Shopee Lazada TikTok Samsung CellphoneS Điện Thoại Vui Hoàng Hà Mobile ShopDunk Nguyễn Kim MediaMart Bền Computer",
+        "compliance": "Không nói quá công dụng, không giả review nếu chưa test; ghi rõ có link affiliate khi đăng.",
+    },
+    {
+        "key": "ecom",
+        "name": "Ecommerce Deal Engine",
+        "aliases": ["shop", "deal", "shopee", "lazada", "tiktokshop", "sale"],
+        "niche": "sàn thương mại điện tử, deal, voucher, đồ gia dụng, thời trang, sản phẩm mua online",
+        "topic": "deal tốt, voucher, sản phẩm tiện ích đáng mua trên Shopee Lazada TikTok Shop",
+        "platforms": ["tiktok", "facebook"],
+        "campaign_name": "TOAN DAAS Tech Affiliate",
+        "angle": "top list nhiều lựa chọn, so sánh giá trị, gắn tất cả link sản phẩm liên quan vào caption/bình luận",
+        "affiliate_query": "Shopee Lazada TikTok Chickita Savani JUNO Vascara Adidas Supersports JOCKEY VERA Aeon",
+        "compliance": "Không dùng giá/khuyến mãi nếu chưa kiểm tra ngày đăng; tránh claim giảm giá cố định.",
+    },
+    {
+        "key": "finance",
+        "name": "Finance Lead Engine",
+        "aliases": ["bank", "nganhang", "ngân hàng", "the", "thẻ", "vay", "card"],
+        "niche": "ngân hàng, thẻ tín dụng, vay hợp pháp, app tài chính, bảo hiểm, lead tài chính",
+        "topic": "app ngân hàng, thẻ, vay hợp pháp, ưu đãi tài chính cá nhân cần biết",
+        "platforms": ["tiktok", "facebook"],
+        "campaign_name": "TOAN DAAS Finance Affiliate",
+        "angle": "giải thích điều kiện, checklist tự kiểm tra, so sánh lựa chọn theo nhu cầu, CTA minh bạch",
+        "affiliate_query": "VPBank MBBank BIDV VIB HDBank Liobank Cathay Lotte HomeCredit Tima Bảo Minh EVOCARD MSB",
+        "compliance": "Không cam kết duyệt hồ sơ, không cam kết lợi nhuận, nhắc người xem tự đọc điều khoản chính thức.",
+    },
+    {
+        "key": "travel",
+        "name": "Travel Lifestyle Engine",
+        "aliases": ["dulich", "du lịch", "ve", "vé", "hotel", "flight", "bay"],
+        "niche": "du lịch, vé máy bay, khách sạn, tour, trải nghiệm, SIM du lịch",
+        "topic": "vé máy bay, khách sạn, tour, lịch trình du lịch tiết kiệm và tiện lợi",
+        "platforms": ["tiktok", "facebook"],
+        "campaign_name": "TOAN DAAS Travel Lifestyle",
+        "angle": "lịch trình ngắn, mẹo tiết kiệm, so sánh nhiều lựa chọn vé/khách sạn/tour",
+        "affiliate_query": "Traveloka Vé máy bay BestPrice Vietnam Airlines VinWonders Klook Vé Giá rẻ Gotadi ATADI",
+        "compliance": "Không nói còn vé/giá nếu chưa kiểm tra; dùng CTA kiểm tra giá hiện tại qua link.",
+    },
+    {
+        "key": "onlyfans",
+        "name": "AI Model Compliance Engine",
+        "aliases": ["of", "model", "aimodel", "ai model", "influencer"],
+        "niche": "AI model hợp pháp, lifestyle, behind-the-scenes, affiliate creator tools, fan trưởng thành 18+",
+        "topic": "AI model hợp pháp, hậu trường tạo content, lifestyle affiliate và công cụ creator",
+        "platforms": ["onlyfans", "tiktok", "facebook"],
+        "campaign_name": "TOAN DAAS Tech Affiliate",
+        "angle": "behind-the-scenes, quy trình tạo nhân vật AI hợp pháp, lifestyle sản phẩm liên quan, manual review",
+        "affiliate_query": "creator tools lifestyle thời trang VERA JOCKEY Vascara Adidas Samsung TikTok For Business Zalo Ads",
+        "compliance": "Manual only cho OnlyFans; chỉ dùng nhân vật AI tự tạo hoặc người thật có consent rõ ràng, đủ 18 tuổi; không giả mạo.",
+    },
+]
+
+def normalize_preset_key(text):
+    return re.sub(r"[^a-z0-9]+", "", (text or "").strip().lower())
+
+def list_campaign_presets():
+    return DEFAULT_CAMPAIGN_PRESETS
+
+def get_campaign_preset(preset_key=""):
+    key = normalize_preset_key(preset_key or "tech")
+    for item in DEFAULT_CAMPAIGN_PRESETS:
+        keys = [item["key"], item["name"], *(item.get("aliases") or [])]
+        if key in {normalize_preset_key(value) for value in keys}:
+            return item
+    return DEFAULT_CAMPAIGN_PRESETS[0]
+
+def ensure_campaign_for_preset(owner_id, preset):
+    campaign_name = preset.get("campaign_name") or preset.get("name") or "TOAN DAAS Campaign"
+    existing = find_campaign_by_name(owner_id, campaign_name)
+    if existing:
+        return existing, False
+    campaign_id = create_campaign(
+        owner_id,
+        campaign_name,
+        preset.get("niche", ""),
+        ",".join(preset.get("platforms") or ["tiktok"]),
+        "",
+        "",
+    )
+    return get_campaign(campaign_id, owner_id), True
+
 def operator_bootstrap_data(owner_id, include_channels=True, include_campaigns=True, include_affiliates=True, include_references=True, reference_limit=200):
     result = {
         "created": {"channels": [], "campaigns": [], "affiliates": [], "references": []},
@@ -2802,7 +2894,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "campaign_preset", "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_pack", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -2820,6 +2912,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/mission"),
         ("GET", "/api/operator/next-run"),
         ("POST", "/api/operator/bootstrap"),
+        ("POST", "/api/operator/campaign-preset"),
         ("POST", "/api/operator/launch"),
         ("GET", "/api/operator/command-center"),
         ("POST", "/api/operator/command/run"),
@@ -2900,6 +2993,7 @@ def operator_smoke_test_data(owner_id):
         "command_run_in_spec": "/api/operator/command/run" in spec_text and "/api/operator/command/run" in n8n_text,
         "mission_control_in_spec": "/api/operator/mission" in spec_text and "/api/operator/mission" in n8n_text,
         "next_run_in_spec": "/api/operator/next-run" in spec_text and "/api/operator/next-run" in n8n_text,
+        "campaign_preset_in_spec": "/api/operator/campaign-preset" in spec_text and "/api/operator/campaign-preset" in n8n_text,
         "launch_in_spec": "/api/operator/launch" in spec_text and "/api/operator/launch" in n8n_text,
         "channel_router_in_spec": "/api/operator/channel-router" in spec_text and "/api/operator/channel-router" in n8n_text,
         "affiliate_import_in_spec": "/api/operator/affiliates/import" in spec_text and "/api/operator/affiliates/import" in n8n_text,
@@ -2978,6 +3072,7 @@ def operator_worker_spec_data():
         "next_run_url": f"{base_url}/api/operator/next-run",
         "command_center_url": f"{base_url}/api/operator/command-center",
         "command_run_url": f"{base_url}/api/operator/command/run",
+        "campaign_preset_url": f"{base_url}/api/operator/campaign-preset",
         "channel_router_url": f"{base_url}/api/operator/channel-router",
         "video_patterns_url": f"{base_url}/api/operator/video-patterns",
         "reference_pack_url": f"{base_url}/api/operator/reference-pack",
@@ -3047,6 +3142,7 @@ def operator_worker_spec_data():
         "standard_loop": [
             {"step": 1, "name": "audit", "method": "GET", "url": "/api/operator/audit"},
             {"step": 1.02, "name": "bootstrap_optional", "method": "POST", "url": "/api/operator/bootstrap"},
+            {"step": 1.025, "name": "campaign_preset_optional", "method": "POST", "url": "/api/operator/campaign-preset"},
             {"step": 1.03, "name": "launch_optional", "method": "POST", "url": "/api/operator/launch"},
             {"step": 1.05, "name": "command_center", "method": "GET", "url": "/api/operator/command-center?days=30&platform=tiktok"},
             {"step": 1.052, "name": "next_run_card", "method": "GET", "url": "/api/operator/next-run?days=30&platform=tiktok"},
@@ -3093,6 +3189,12 @@ def operator_worker_spec_data():
                 "url": "/api/operator/launch",
                 "purpose": "Một lệnh launch: tự bootstrap nếu thiếu setup, chọn affiliate/campaign, tìm trend, tạo job/task và trả next commands.",
                 "body": {"topic": "công nghệ AI", "platform": "tiktok", "channel": "all", "limit": 3, "build": True, "bootstrap": True, "duration": 45, "notify_admin": True},
+            },
+            "campaign_preset": {
+                "method": "POST",
+                "url": "/api/operator/campaign-preset",
+                "purpose": "Preset cấp giám đốc: tech/ecom/finance/travel/onlyfans → chọn niche, affiliate, kênh, campaign và có thể execute launch an toàn.",
+                "body": {"preset": "tech", "platform": "tiktok", "channel": "all", "limit": 3, "execute": False, "build": True, "duration": 45, "notify_admin": True},
             },
             "command_center": {
                 "method": "GET",
@@ -3903,6 +4005,14 @@ def operator_n8n_template_data():
                 "note": "Biết tiền về PayOS/ngân hàng/network nào và event nào phải ghi sau đăng để đo đúng.",
             },
             {
+                "node": "Campaign Preset",
+                "type": "http_request",
+                "method": "POST",
+                "url": f"{base_url}/api/operator/campaign-preset",
+                "body": {"preset": "tech", "platform": "tiktok", "channel": "all", "limit": 3, "execute": False, "build": True, "notify_admin": True},
+                "note": "Preset giám đốc gom niche, affiliate, kênh và lệnh launch. Bật execute=true khi admin muốn tạo job thật.",
+            },
+            {
                 "node": "Approve Publish",
                 "type": "http_request",
                 "method": "POST",
@@ -4161,6 +4271,33 @@ def operator_n8n_workflow_json_data():
                             {"name": "limit", "value": 3},
                             {"name": "build", "value": True},
                             {"name": "bootstrap", "value": True},
+                            {"name": "duration", "value": 45},
+                            {"name": "notify_admin", "value": True},
+                        ]
+                    },
+                    "options": {"timeout": 180000},
+                },
+            },
+            {
+                "id": "campaign-preset-optional",
+                "name": "Campaign Preset Optional",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-20, -820],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/campaign-preset",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "bodyParameters": {
+                        "parameters": [
+                            {"name": "preset", "value": "tech"},
+                            {"name": "platform", "value": "tiktok"},
+                            {"name": "channel", "value": "all"},
+                            {"name": "limit", "value": 3},
+                            {"name": "execute", "value": False},
+                            {"name": "build", "value": True},
                             {"name": "duration", "value": 45},
                             {"name": "notify_admin", "value": True},
                         ]
@@ -9886,6 +10023,159 @@ async def operator_launch_pipeline(
         },
     }
 
+async def operator_campaign_preset_data(
+    owner_id,
+    preset_key="tech",
+    topic="",
+    platform="",
+    channel="all",
+    limit=3,
+    build=True,
+    execute=False,
+    duration=45,
+    variants=5,
+    bootstrap=True,
+):
+    preset = get_campaign_preset(preset_key)
+    topic = (topic or preset.get("topic") or preset.get("niche") or "công nghệ AI").strip()
+    requested_platform = (platform or "").strip().lower()
+    if requested_platform and requested_platform not in {"all", "*"}:
+        platforms = [requested_platform]
+    else:
+        platforms = list(preset.get("platforms") or ["tiktok"])
+    platforms = platforms[:4]
+    limit = max(1, min(int(limit or 3), 8))
+    duration = max(15, min(int(duration or 45), 120))
+    variants = max(3, min(int(variants or 5), 8))
+
+    bootstrap_result = None
+    if bootstrap and execute:
+        bootstrap_result = operator_bootstrap_data(
+            owner_id,
+            include_channels=True,
+            include_campaigns=True,
+            include_affiliates=True,
+            include_references=False,
+        )
+    if execute:
+        campaign, campaign_created = ensure_campaign_for_preset(owner_id, preset)
+    else:
+        campaign = find_campaign_by_name(owner_id, preset.get("campaign_name") or preset.get("name") or "")
+        campaign_created = False
+    campaign_id = campaign[0] if campaign else 0
+    campaign_name = (
+        campaign[2] if campaign and len(campaign) >= 8
+        else (campaign[1] if campaign else (preset.get("campaign_name") or preset.get("name") or ""))
+    )
+
+    plan = []
+    executions = []
+    errors = []
+    for plat in platforms:
+        router = operator_channel_router_data(owner_id, platform=plat, niche=preset.get("niche", ""), limit=limit)
+        matches = list_affiliate_matches(
+            owner_id,
+            niche=preset.get("niche", ""),
+            trend_text=f"{topic} {preset.get('affiliate_query', '')}",
+            platform=plat,
+            limit=8,
+        )
+        affiliate_cards = []
+        for score, hits, blocked_hits, row in matches[:8]:
+            aid, network, product, niche, url, note, status, *_rest = row
+            affiliate_cards.append({
+                "id": aid,
+                "network": network,
+                "product": product,
+                "niche": niche,
+                "url": url,
+                "score": score,
+                "hits": hits,
+                "blocked_hits": blocked_hits,
+            })
+        selected_affiliate_id = affiliate_cards[0]["id"] if affiliate_cards else 0
+        recommended_channel = (router.get("recommended") or [{}])[0]
+        channel_arg = channel or "all"
+        launch_command = (
+            f"/operator_launch topic={topic} platform={plat} channel={channel_arg} "
+            f"aff={selected_affiliate_id or 0} camp={campaign_id or 0} limit={limit} "
+            f"build={1 if build else 0} duration={duration} variants={variants}"
+        )
+        plan_item = {
+            "platform": plat,
+            "topic": topic,
+            "campaign_id": campaign_id,
+            "campaign_created": campaign_created,
+            "selected_affiliate_id": selected_affiliate_id,
+            "top_affiliates": affiliate_cards,
+            "recommended_channel": recommended_channel,
+            "router_counts": router.get("counts") or {},
+            "launch_command": launch_command,
+            "content_angle": preset.get("angle", ""),
+            "compliance": preset.get("compliance", ""),
+            "tracking_rule": "Mỗi publish phải dùng tracking_url /r/<affiliate_id>, ghi views/click/order/revenue qua /performance_add hoặc postback.",
+        }
+        plan.append(plan_item)
+        if execute:
+            try:
+                ok, reason, result = await operator_launch_pipeline(
+                    owner_id,
+                    topic,
+                    platform=plat,
+                    channel=channel_arg,
+                    affiliate_id=selected_affiliate_id,
+                    campaign_id=campaign_id,
+                    limit=limit,
+                    build=build,
+                    duration=duration,
+                    variants=variants,
+                    bootstrap=False,
+                )
+                if ok:
+                    executions.append({
+                        "platform": plat,
+                        "created_jobs": result.get("created_jobs") or [],
+                        "built_jobs": result.get("built_jobs") or [],
+                        "first_job_id": ((result.get("launch_next") or {}).get("first_job_id") or 0),
+                        "launch_next": result.get("launch_next") or {},
+                    })
+                else:
+                    errors.append({"platform": plat, "reason": reason, "detail": result})
+            except Exception as e:
+                errors.append({"platform": plat, "reason": str(e)})
+
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "execute": bool(execute),
+        "preset": {
+            "key": preset.get("key"),
+            "name": preset.get("name"),
+            "niche": preset.get("niche"),
+            "topic": topic,
+            "platforms": platforms,
+            "angle": preset.get("angle"),
+            "affiliate_query": preset.get("affiliate_query"),
+            "compliance": preset.get("compliance"),
+        },
+        "campaign": {
+            "id": campaign_id,
+            "created": campaign_created,
+            "name": campaign_name,
+        },
+        "bootstrap": bootstrap_result,
+        "plan": plan,
+        "executions": executions,
+        "errors": errors,
+        "commands": {
+            "preview": f"/campaign_preset preset={preset.get('key')} platform={requested_platform or 'all'} limit={limit}",
+            "execute": f"/campaign_preset preset={preset.get('key')} platform={requested_platform or 'all'} limit={limit} execute=1 build={1 if build else 0}",
+            "money": "/money_pack",
+            "scale": "/scale_plan",
+        },
+        "rule": "Preset chỉ dành cho admin. Finance phải minh bạch điều kiện; OnlyFans manual-only và chỉ dùng nhân vật/consent hợp pháp 18+; mọi job vẫn qua review gate trước publish.",
+    }
+
 def build_production_prompt(slot):
     (
         slot_id, _, channel_id, campaign_id, affiliate_id, post_date, platform, topic, _, notes,
@@ -11053,6 +11343,19 @@ class OperatorLaunchRequest(BaseModel):
     bootstrap: bool = True
     notify_admin: bool = True
 
+class OperatorCampaignPresetRequest(BaseModel):
+    preset: str = Field(default="tech", max_length=80)
+    topic: str = Field(default="", max_length=300)
+    platform: str = Field(default="all", max_length=40)
+    channel: str = Field(default="all", max_length=40)
+    limit: int = Field(default=3, ge=1, le=8)
+    build: bool = True
+    execute: bool = False
+    duration: int = Field(default=45, ge=15, le=120)
+    variants: int = Field(default=5, ge=3, le=8)
+    bootstrap: bool = True
+    notify_admin: bool = True
+
 class OperatorDirectorRunRequest(BaseModel):
     days: int = Field(default=30, ge=1, le=180)
     platform: str = Field(default="tiktok", max_length=40)
@@ -11936,6 +12239,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command_lines.extend([
             f"• /runtime — Kiểm tra bản đang chạy: <code>{APP_BUILD}</code>",
             "• /operator_menu — Menu nút theo thư mục: Trend, Affiliate, Sản xuất, Đăng bài, Doanh thu, API",
+            "• /campaign_preset — Preset chiến dịch: tech/ecom/finance/travel/onlyfans",
             "• /brain &lt;lệnh&gt; — Ra lệnh tự nhiên cho AI Operator",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
@@ -12138,6 +12442,20 @@ def safe_int(value, default=0):
     except (TypeError, ValueError):
         return default
 
+def truthy_value(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "co", "có", "run", "execute", "chay", "chạy"}:
+        return True
+    if text in {"0", "false", "no", "off", "khong", "không"}:
+        return False
+    return default
+
 def extract_supported_video_url(text):
     urls = re.findall(r"https?://[^\s<>\"]+", text or "", flags=re.I)
     supported_hosts = (
@@ -12339,6 +12657,35 @@ def operator_brain_fallback(raw_text):
     reference_folder = next((group for group in (folder_match.groups() if folder_match else []) if group), "")
     reference_folder = reference_folder.strip(" '\"") if reference_folder else ""
     reference_folder = brain_data.get("path") or brain_data.get("folder") or brain_data.get("dir") or reference_folder
+
+    if any(word in lower for word in [
+        "campaign preset", "preset campaign", "preset chiến dịch", "preset chien dich",
+        "chiến dịch mẫu", "chien dich mau", "gói chiến dịch", "goi chien dich",
+        "tech affiliate", "finance affiliate", "travel affiliate", "ecom affiliate"
+    ]):
+        preset_key = brain_data.get("preset") or brain_data.get("loai") or ""
+        if not preset_key:
+            if any(word in lower for word in ["finance", "bank", "ngân hàng", "ngan hang", "thẻ", "the", "vay"]):
+                preset_key = "finance"
+            elif any(word in lower for word in ["travel", "du lịch", "du lich", "vé", "ve", "hotel", "bay"]):
+                preset_key = "travel"
+            elif any(word in lower for word in ["ecom", "shop", "deal", "shopee", "lazada"]):
+                preset_key = "ecom"
+            elif any(word in lower for word in ["onlyfans", "onlyfan", "ai model", "model"]):
+                preset_key = "onlyfans"
+            else:
+                preset_key = "tech"
+        return {
+            "intent": "campaign_preset",
+            "preset": preset_key,
+            "topic": brain_data.get("topic") or brain_data.get("chude") or "",
+            "platform": platform,
+            "channel": brain_data.get("channel") or brain_data.get("kenh") or "all",
+            "limit": max(1, min(limit, 8)),
+            "build": 1 if build_requested or any(word in lower for word in ["build", "dựng", "dung", "xây", "xay"]) else 0,
+            "execute": 1 if any(word in lower for word in ["execute", "run", "chạy", "chay", "làm luôn", "lam luon"]) else 0,
+            "confidence": 86,
+        }
 
     if any(word in lower for word in [
         "command center", "trung tâm điều hành", "trung tam dieu hanh", "tổng chỉ huy", "tong chi huy",
@@ -12699,7 +13046,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_next_run, pipeline_pack, money_pack, revenue_destinations, operator_commander_pack, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_next_run, pipeline_pack, money_pack, revenue_destinations, operator_commander_pack, campaign_preset, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
@@ -12707,6 +13054,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- money_pack: khi admin hỏi tiền về, doanh thu tổng, PayOS + affiliate, link/kênh/source nào tạo tiền và nên scale gì.\n"
         "- revenue_destinations: khi admin hỏi tiền về đâu, network nào trả tiền, cần ghi event/postback gì.\n"
         "- operator_commander_pack: khi admin muốn prompt/gói điều khiển cho Claude Opus hoặc AI cấp cao điều phối toàn pipeline.\n"
+        "- campaign_preset: khi admin muốn dùng preset chiến dịch tech/ecom/finance/travel/onlyfans để tự gom affiliate, kênh và launch.\n"
         "- operator_launch: khi admin muốn một lệnh chạy từ đầu: bootstrap nếu thiếu, tạo pipeline video, trả next task/review.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
         "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
@@ -12739,7 +13087,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","preset":"tech","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"execute":0,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -12785,6 +13133,14 @@ def brain_command_preview(plan):
         return (
             f"/operator_commander_pack days={max(1, min(int(plan.get('days') or 30), 180))} "
             f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 8), 20))}"
+        )
+    if intent == "campaign_preset":
+        return (
+            f"/campaign_preset preset={plan.get('preset') or 'tech'} "
+            f"platform={plan.get('platform') or 'all'} channel={plan.get('channel') or 'all'} "
+            f"limit={max(1, min(int(plan.get('limit') or 3), 8))} "
+            f"execute={int(plan.get('execute') or 0)} build={int(plan.get('build') or 1)} "
+            f"duration={int(plan.get('duration') or 45)}"
         )
     if intent == "operator_director":
         return (
@@ -12990,6 +13346,19 @@ async def run_brain_plan(update, context, plan):
                 f"limit={max(3, min(int(plan.get('limit') or 8), 20))}",
             ]
             return await cmd_operator_commander_pack(update, context)
+        if intent == "campaign_preset":
+            context.args = [
+                f"preset={plan.get('preset') or 'tech'}",
+                f"platform={plan.get('platform') or 'all'}",
+                f"channel={plan.get('channel') or 'all'}",
+                f"limit={max(1, min(int(plan.get('limit') or 3), 8))}",
+                f"execute={int(plan.get('execute') or 0)}",
+                f"build={int(plan.get('build') or 1)}",
+                f"duration={int(plan.get('duration') or 45)}",
+            ]
+            if plan.get("topic"):
+                context.args.append(f"topic={plan.get('topic')}")
+            return await cmd_campaign_preset(update, context)
         if intent == "operator_director":
             context.args = [
                 f"days={max(1, min(int(plan.get('days') or 30), 180))}",
@@ -13314,7 +13683,7 @@ def operator_command_plan_data(owner_id, command):
         "confidence": int(plan.get("confidence") or 0),
         "safety_note": plan.get("safety_note") or "Không bỏ qua review/approve gate; không tự publish khi chưa sẵn sàng.",
         "execute_allowed": (plan.get("intent") or "").lower() in {
-            "command_center", "operator_next_run", "pipeline_pack", "money_pack", "revenue_destinations", "operator_commander_pack",
+            "command_center", "operator_next_run", "pipeline_pack", "money_pack", "revenue_destinations", "operator_commander_pack", "campaign_preset",
             "operator_director", "operator_execute", "operator_launch", "make_video",
             "tracking_report", "scale_plan", "affiliate_report", "affiliate_decisions",
             "scale_execute", "publisher_capabilities",
@@ -13339,6 +13708,21 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
         return {"executed": True, "intent": intent, "data": revenue_destination_pack_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 30)))}
     if intent == "operator_commander_pack":
         return {"executed": True, "intent": intent, "data": operator_commander_pack_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 20)))}
+    if intent == "campaign_preset":
+        result = await operator_campaign_preset_data(
+            owner_id,
+            preset_key=plan.get("preset") or "tech",
+            topic=plan.get("topic") or "",
+            platform=platform if platform else "all",
+            channel=plan.get("channel") or "all",
+            limit=max(1, min(int(plan.get("limit") or 3), 8)),
+            build=truthy_value(plan.get("build"), True),
+            execute=truthy_value(plan.get("execute"), False),
+            duration=int(plan.get("duration") or 45),
+            variants=max(3, min(int(plan.get("variants") or 5), 8)),
+            bootstrap=True,
+        )
+        return {"executed": bool(result.get("execute")), "intent": intent, "data": result}
     if intent == "operator_director":
         return {"executed": True, "intent": intent, "data": operator_director_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 20)))}
     if intent == "operator_execute":
@@ -13473,6 +13857,91 @@ async def cmd_campaigns(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for cid, name, niche, platforms, affiliate_url, status in rows:
         lines.append(f"• #{cid} | <b>{name}</b> | {niche} | <code>{platforms}</code> | {status}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_campaign_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args).strip()
+    data = parse_key_value_args(raw)
+    if not raw:
+        lines = [
+            "🎯 <b>CAMPAIGN PRESETS</b>",
+            "",
+            "Dùng preset để gom nhanh: niche → link affiliate phù hợp → kênh đăng → lệnh launch.",
+            "",
+        ]
+        for item in list_campaign_presets():
+            lines.append(
+                f"• <code>{html.escape(item['key'])}</code> — <b>{html.escape(item['name'])}</b>\n"
+                f"  {html.escape(item['niche'])}"
+            )
+        lines.append(
+            "\nVí dụ:\n"
+            "<code>/campaign_preset preset=tech platform=tiktok limit=3</code>\n"
+            "<code>/campaign_preset preset=finance platform=facebook execute=1 build=1</code>"
+        )
+        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    preset = data.get("preset") or data.get("p") or data.get("loai") or raw.split()[0]
+    topic = data.get("topic") or data.get("chude") or data.get("niche") or ""
+    platform = (data.get("platform") or data.get("nen") or "all").lower()
+    channel = (data.get("channel") or data.get("kenh") or "all").lower()
+    limit = max(1, min(safe_int(data.get("limit") or data.get("max"), 3), 8))
+    duration = max(15, min(safe_int(data.get("duration") or data.get("sec"), 45), 120))
+    variants = max(3, min(safe_int(data.get("variants") or data.get("n"), 5), 8))
+    build = (data.get("build") or "1").lower() not in {"0", "false", "no", "off", "khong"}
+    execute = (data.get("execute") or data.get("run") or "0").lower() in {"1", "true", "yes", "on", "co", "có"}
+    msg = await update.message.reply_text(
+        "🎯 Đang dựng campaign preset..." + (" và chạy launch." if execute else " ở chế độ preview.")
+    )
+    result = await operator_campaign_preset_data(
+        update.effective_user.id,
+        preset_key=preset,
+        topic=topic,
+        platform=platform,
+        channel=channel,
+        limit=limit,
+        build=build,
+        execute=execute,
+        duration=duration,
+        variants=variants,
+        bootstrap=True,
+    )
+    preset_info = result.get("preset") or {}
+    campaign = result.get("campaign") or {}
+    lines = [
+        "🎯 <b>CAMPAIGN PRESET READY</b>",
+        f"• Preset: <b>{html.escape(preset_info.get('name') or '-')}</b> / <code>{html.escape(preset_info.get('key') or '-')}</code>",
+        f"• Topic: <b>{html.escape(preset_info.get('topic') or '-')}</b>",
+        f"• Campaign: <code>#{campaign.get('id') or '-'}</code> {html.escape(campaign.get('name') or '-')}",
+        f"• Mode: <b>{'EXECUTE' if execute else 'PREVIEW'}</b> | Build: <b>{'on' if build else 'off'}</b>",
+        f"• Compliance: {html.escape(preset_info.get('compliance') or '-')}",
+    ]
+    for item in (result.get("plan") or [])[:4]:
+        affiliates = item.get("top_affiliates") or []
+        top = affiliates[0] if affiliates else {}
+        channel_item = item.get("recommended_channel") or {}
+        lines.extend([
+            "",
+            f"<b>{html.escape(item.get('platform') or '-').upper()}</b>",
+            f"• Top affiliate: <code>#{top.get('id') or '-'}</code> {html.escape(top.get('product') or '-')} / {html.escape(top.get('network') or '-')}",
+            f"• Kênh gợi ý: <code>#{channel_item.get('id') or '-'}</code> {html.escape(channel_item.get('channel_name') or '-')}",
+            f"• Launch: <code>{html.escape(item.get('launch_command') or '-')}</code>",
+        ])
+    executions = result.get("executions") or []
+    if executions:
+        lines.append("\n<b>Đã chạy:</b>")
+        for item in executions[:4]:
+            lines.append(
+                f"• {html.escape(item.get('platform') or '-')} → jobs={len(item.get('created_jobs') or [])}, "
+                f"built={len(item.get('built_jobs') or [])}, first=<code>#{item.get('first_job_id') or '-'}</code>"
+            )
+    errors = result.get("errors") or []
+    if errors:
+        lines.append("\n<b>Lỗi:</b>")
+        for item in errors[:4]:
+            lines.append(f"• {html.escape(item.get('platform') or '-')} — {html.escape(str(item.get('reason') or '-'))}")
+    lines.append("\nAPI: <code>POST /api/operator/campaign-preset</code>")
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -15554,6 +16023,7 @@ def operator_category_keyboard(category):
     categories = {
         "cat_control": [
             ("🧠 Mission control", "mission"), ("🧠 Brain command", "brain"),
+            ("🎯 Campaign preset", "campaignpreset"),
             ("🎛 Next run card", "nextrun"),
             ("👑 Commander pack", "commanderpack"),
             ("🚀 Launch", "launch"), ("🧰 Bootstrap", "bootstrap"),
@@ -15573,6 +16043,7 @@ def operator_category_keyboard(category):
         ],
         "cat_affiliate": [
             ("🔗 Import catalog", "affseed"), ("🛒 Danh sách link", "affiliates"),
+            ("🎯 Campaign preset", "campaignpreset"),
             ("📥 Bulk import", "affimport"),
             ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
             ("🚀 Scale thành video", "affscale"), ("💰 Báo cáo affiliate", "affreport"),
@@ -15693,6 +16164,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Mission control: <code>GET {html.escape(base_url)}/api/operator/mission</code>",
         f"• Next run card: <code>GET {html.escape(base_url)}/api/operator/next-run</code>",
         f"• Bootstrap thiếu setup: <code>POST {html.escape(base_url)}/api/operator/bootstrap</code>",
+        f"• Campaign preset: <code>POST {html.escape(base_url)}/api/operator/campaign-preset</code>",
         f"• Launch một lệnh: <code>POST {html.escape(base_url)}/api/operator/launch</code>",
         f"• Toolchain paid/fallback: <code>GET {html.escape(base_url)}/api/operator/toolchain</code>",
         f"• Tool runtime readiness: <code>GET {html.escape(base_url)}/api/operator/tool-readiness</code>",
@@ -15749,6 +16221,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"channels":true,"campaigns":true,"affiliates":true,"references":true,"reference_limit":200,"notify_admin":true}</pre>',
         "<b>Payload launch mẫu:</b>",
         '<pre>{"topic":"công nghệ AI","platform":"tiktok","channel":"all","limit":3,"build":true,"bootstrap":true,"duration":45,"notify_admin":true}</pre>',
+        "<b>Payload campaign preset mẫu:</b>",
+        '<pre>{"preset":"tech","platform":"tiktok","limit":3,"execute":false,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload make-video mẫu:</b>",
         '<pre>{"topic":"đồ công nghệ văn phòng","platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload affiliate-scale mẫu:</b>",
@@ -15967,6 +16441,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "n8nworkflow": "/operator_n8n_workflow\nGET /api/operator/n8n-workflow.json",
         "director": "/operator_director days=30 platform=tiktok limit=10",
         "mission": "/operator_mission days=30 platform=tiktok limit=8\nGET /api/operator/mission",
+        "campaignpreset": "/campaign_preset\n/campaign_preset preset=tech platform=tiktok limit=3\n/campaign_preset preset=finance platform=facebook execute=1 build=1\nPOST /api/operator/campaign-preset",
         "launch": "/operator_launch topic=công nghệ AI platform=tiktok channel=all limit=3 build=1\nPOST /api/operator/launch",
         "bootstrap": "/operator_bootstrap\nPOST /api/operator/bootstrap",
         "execute": "/operator_execute days=30 platform=tiktok build=1 duration=45",
@@ -19453,6 +19928,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("mmo",         cmd_mmo))
     tg_app.add_handler(CommandHandler("campaign_new", cmd_campaign_new))
     tg_app.add_handler(CommandHandler("campaigns",   cmd_campaigns))
+    tg_app.add_handler(CommandHandler("campaign_preset", cmd_campaign_preset))
     tg_app.add_handler(CommandHandler("video_plan",  cmd_video_plan))
     tg_app.add_handler(CommandHandler("video_job",   cmd_video_job))
     tg_app.add_handler(CommandHandler("campaign_stats", cmd_campaign_stats))
@@ -20374,6 +20850,43 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
         **result,
         "rule": "Launch có thể bootstrap setup còn thiếu rồi tạo pipeline; vẫn cần worker output, review gate và approve trước publish.",
     }
+
+@fastapi_app.post("/api/operator/campaign-preset")
+async def api_operator_campaign_preset(payload: OperatorCampaignPresetRequest, request: Request):
+    verify_operator_api_token(request)
+    result = await operator_campaign_preset_data(
+        ADMIN_ID,
+        preset_key=payload.preset,
+        topic=payload.topic,
+        platform=payload.platform,
+        channel=payload.channel,
+        limit=payload.limit,
+        build=payload.build,
+        execute=payload.execute,
+        duration=payload.duration,
+        variants=payload.variants,
+        bootstrap=payload.bootstrap,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            preset = result.get("preset") or {}
+            executions = result.get("executions") or []
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🎯 <b>OPERATOR CAMPAIGN PRESET</b>\n\n"
+                    f"• Preset: <b>{html.escape(preset.get('name') or payload.preset)}</b>\n"
+                    f"• Topic: <b>{html.escape(preset.get('topic') or payload.topic or '-')}</b>\n"
+                    f"• Mode: <b>{'EXECUTE' if payload.execute else 'PREVIEW'}</b>\n"
+                    f"• Platforms: <code>{html.escape(','.join(preset.get('platforms') or []))}</code>\n"
+                    f"• Executions: <b>{len(executions)}</b>\n"
+                    f"• Next: <code>/campaign_preset preset={html.escape(preset.get('key') or payload.preset)} execute=1</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Operator campaign preset notify error: {e}")
+    return result
 
 @fastapi_app.post("/api/operator/tasks/{task_id}/complete")
 async def api_operator_complete_task(task_id: int, payload: OperatorTaskCompleteRequest, request: Request):
