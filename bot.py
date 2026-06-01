@@ -6192,6 +6192,40 @@ def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note=
     conn.close()
     return True, job
 
+def record_affiliate_click_event(owner_id, affiliate_id, job_id=0, source="redirect_affiliate", note=""):
+    affiliate = get_affiliate_link(affiliate_id, owner_id)
+    if not affiliate:
+        return False, "affiliate_not_found", {}
+    job_id = int(job_id or 0)
+    job = get_production_job(job_id, owner_id) if job_id else None
+    if job:
+        ok, _job = add_performance_event(
+            owner_id,
+            job_id,
+            "click",
+            1,
+            0,
+            note,
+            0,
+            affiliate_id_override=affiliate_id,
+        )
+        return (True, "recorded", {"job_id": job_id, "affiliate_id": affiliate_id}) if ok else (False, "job_not_found", {})
+    platform = "social"
+    if source:
+        platform = str(source).split("_", 1)[0][:40] or "social"
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO performance_events
+        (owner_id, job_id, variant_id, channel_id, affiliate_id, platform, event_type, value, amount, note, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (str(owner_id), 0, 0, 0, int(affiliate_id), platform, "click", 1, 0, note, now_text())
+    )
+    event_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return True, "recorded_without_job", {"event_id": event_id, "job_id": 0, "affiliate_id": affiliate_id}
+
 def record_affiliate_postback(owner_id, job_id=0, affiliate_id=0, event_type="order", value=1, amount=0, source="affiliate_postback", order_id="", note=""):
     event_type = (event_type or "order").lower()
     if event_type not in {"order", "revenue", "lead"}:
@@ -16480,8 +16514,13 @@ async def affiliate_redirect(affiliate_id: int, request: Request, job: int = 0, 
     referer = request.headers.get("referer") or ""
     if referer:
         note_parts.append(f"ref:{referer[:160]}")
-    if job:
-        add_performance_event(ADMIN_ID, job, "click", 1, 0, " | ".join(note_parts), affiliate_id_override=aid)
+    record_affiliate_click_event(
+        ADMIN_ID,
+        aid,
+        job_id=job,
+        source=src or "redirect_affiliate",
+        note=" | ".join(note_parts),
+    )
     return RedirectResponse(url=url, status_code=302)
 
 @fastapi_app.post("/api/affiliate/postback")
