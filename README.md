@@ -97,8 +97,8 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/operator_toolchain`: xem registry công cụ theo stage, tool chính có phí/chất lượng cao, fallback ít phí/miễn phí, env còn thiếu và protocol khi lỗi/quota.
 - `/operator_tool_readiness`: kiểm tra runtime thật của các tool quan trọng; cảnh báo public Cobalt, thiếu key AI/voice/image/payment/operator trước khi bật full auto.
 - `/operator_tool_events`: xem hoặc ghi sự cố tool/quota/fallback; ví dụ `stage=voice tool=Fish type=quota fallback=Edge message=het_quota`.
-- `/operator_n8n_template`: xuất template workflow n8n an toàn: Cron, audit, make-video/director-run, task worker, publisher status/run/handoff và performance tracker.
-- `/operator_n8n_workflow`: lấy URL JSON workflow có thể import vào n8n, mặc định inactive và giữ publisher-run/review gate trước khi đăng thật.
+- `/operator_n8n_template`: xuất template workflow n8n an toàn: Cron, audit, worker spec, toolchain, video patterns, reference pack, make-video/director-run, task worker, publisher status/run/handoff và performance tracker.
+- `/operator_n8n_workflow`: lấy URL JSON workflow có thể import vào n8n, mặc định inactive, đọc video patterns/reference pack trước khi giao task và giữ publisher-run/review gate trước khi đăng thật.
 - `/operator_director days=30 platform=tiktok limit=10`: trả đúng một next action ưu tiên cho admin/Claude/n8n, kèm Telegram command hoặc API endpoint/payload cần gọi.
 - `/operator_execute days=30 platform=tiktok build=1 duration=45`: chạy action an toàn tiếp theo từ director, ví dụ scale affiliate thành job/bundle hoặc đưa job ready vào publish queue; không tự đăng bài thật.
 - `/operator_audit`: kiểm tra end-to-end hệ thống đầu não, gồm Telegram brain, API token, AI provider, PayOS, affiliate catalog, channel, publish readiness, production pipeline và performance tracking.
@@ -231,7 +231,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Publisher status là chốt vận hành cho auto-post: cron/n8n nên gọi trước khi claim queue để biết có kênh API-ready hay chỉ nên trả handoff cho admin đăng thủ công.
 - Publisher run là bước cron/n8n an toàn: claim một queue, kiểm tra final video/token/mode, trả handoff và chỉ cho API worker đăng khi kênh thật sự `api_ready`.
 - Publisher auto hiện chỉ mở cho Facebook Page qua Meta Graph API; TikTok/OnlyFans giữ manual/API worker riêng cho đến khi có OAuth/quyền đăng chính thức phù hợp.
-- Worker spec/n8n workflow đã có endpoint mới `/api/operator/make-video`, `/api/operator/publisher/status` và `/api/operator/publisher/run` để Claude/n8n chạy theo cùng một runbook với Telegram.
+- Worker spec/n8n workflow đã có endpoint `/api/operator/video-patterns`, `/api/operator/reference-pack`, `/api/operator/make-video`, `/api/operator/publisher/status` và `/api/operator/publisher/run` để Claude/n8n chạy theo cùng một runbook với Telegram và học từ video mẫu trước khi dựng nội dung mới.
 - Operator smoke test là chốt nhẹ trước khi bật automation: nếu fail ở env/file/db/surface thì xử lý trước, nếu chỉ warning ở audit/publisher thì vẫn có thể chạy manual nhưng chưa nên bật full auto.
 - Job ready check là admin-only, dùng như chốt cuối trước khi đưa video vào hàng đợi đăng; nếu thiếu asset/review/creative/manifest/task, bot trả về lệnh cần chạy tiếp.
 - Production assets là admin-only, dùng để lưu script, voice, raw video, subtitle, thumbnail, final video hoặc source link theo từng job trước khi review/publish.

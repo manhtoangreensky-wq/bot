@@ -2458,6 +2458,8 @@ def operator_smoke_test_data(owner_id):
         "make_video_in_spec": "/api/operator/make-video" in spec_text and "/api/operator/make-video" in n8n_text,
         "publisher_run_in_spec": "/api/operator/publisher/run" in spec_text and "/api/operator/publisher/run" in n8n_text,
         "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
+        "video_patterns_in_spec": "/api/operator/video-patterns" in spec_text and "/api/operator/video-patterns" in n8n_text,
+        "reference_pack_in_spec": "/api/operator/reference-pack" in spec_text and "/api/operator/reference-pack" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
@@ -2585,6 +2587,9 @@ def operator_worker_spec_data():
         ],
         "standard_loop": [
             {"step": 1, "name": "audit", "method": "GET", "url": "/api/operator/audit"},
+            {"step": 1.1, "name": "read_worker_spec", "method": "GET", "url": "/api/operator/worker-spec"},
+            {"step": 1.2, "name": "read_video_patterns", "method": "GET", "url": "/api/operator/video-patterns"},
+            {"step": 1.3, "name": "read_reference_pack", "method": "GET", "url": "/api/operator/reference-pack"},
             {"step": 2, "name": "make_video_optional", "method": "POST", "url": "/api/operator/make-video"},
             {"step": 3, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
@@ -2600,6 +2605,11 @@ def operator_worker_spec_data():
             {"step": 13, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
         ],
         "payloads": {
+            "reference_learning": {
+                "video_patterns": {"method": "GET", "url": "/api/operator/video-patterns"},
+                "reference_pack": {"method": "GET", "url": "/api/operator/reference-pack"},
+                "purpose": "Bắt buộc đọc trước khi dựng creative/task để học cấu trúc video mẫu, proof asset và luật không copy y nguyên.",
+            },
             "affiliate_bundle": {
                 "method": "GET",
                 "url": "/api/operator/affiliate-bundle?affiliate_id=3&job_id=12&platform=tiktok&limit=12",
@@ -3078,6 +3088,20 @@ def operator_n8n_template_data():
                 "note": "Cho worker biết tool chính/fallback, env còn thiếu và failure protocol.",
             },
             {
+                "node": "Read Video Patterns",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/video-patterns",
+                "note": "Đọc kho format video trước khi tạo creative/manifest/task.",
+            },
+            {
+                "node": "Read Reference Pack",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/reference-pack",
+                "note": "Đọc luật học từ video tham khảo: học cấu trúc/hook/proof, không copy y nguyên.",
+            },
+            {
                 "node": "Make Video Pipeline",
                 "type": "http_request",
                 "method": "POST",
@@ -3327,6 +3351,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "read-worker-spec",
+                "name": "Read Worker Spec",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, -520],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/worker-spec",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "read-toolchain",
                 "name": "Read Toolchain",
                 "type": "n8n-nodes-base.httpRequest",
@@ -3341,11 +3379,39 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "read-video-patterns",
+                "name": "Read Video Patterns",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, -80],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/video-patterns",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "read-reference-pack",
+                "name": "Read Reference Pack",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, 140],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/reference-pack",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "make-video-optional",
                 "name": "Make Video Optional Sample",
                 "type": "n8n-nodes-base.httpRequest",
                 "typeVersion": 4.2,
-                "position": [-500, -520],
+                "position": [-220, -520],
                 "parameters": {
                     "method": "POST",
                     "url": f"{base_url_expr}/api/operator/make-video",
@@ -3404,10 +3470,12 @@ def operator_n8n_workflow_json_data():
                 "parameters": {
                     "content": (
                         "Gắn node Claude/Gemini/Kling/Runway/Fish/Edge/CapCut tại đây.\n"
+                        "Trước khi dựng output, đọc Worker Spec + Video Patterns + Reference Pack trong input workflow hoặc job_context.reference_learning.\n"
                         "Luật vận hành: dùng tool trả phí/chất lượng cao trước; hết quota/lỗi thì fallback tool rẻ/miễn phí và báo admin.\n"
+                        "Học cấu trúc/hook/proof của video mẫu nhưng viết lại cho thương hiệu/link affiliate của mình, không copy y nguyên.\n"
                         "Output cần có: status, output_url hoặc output_urls, note. Không tự đổi affiliate link, không tự publish nếu chưa qua review."
                     ),
-                    "height": 260,
+                    "height": 320,
                     "width": 360,
                 },
             },
@@ -3620,11 +3688,14 @@ def operator_n8n_workflow_json_data():
             "Audit Operator": {"main": [[{"node": "Audit Ready?", "type": "main", "index": 0}]]},
             "Audit Ready?": {
                 "main": [
-                    [{"node": "Read Toolchain", "type": "main", "index": 0}],
+                    [{"node": "Read Worker Spec", "type": "main", "index": 0}],
                     [{"node": "Setup Required", "type": "main", "index": 0}],
                 ]
             },
-            "Read Toolchain": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
+            "Read Worker Spec": {"main": [[{"node": "Read Toolchain", "type": "main", "index": 0}]]},
+            "Read Toolchain": {"main": [[{"node": "Read Video Patterns", "type": "main", "index": 0}]]},
+            "Read Video Patterns": {"main": [[{"node": "Read Reference Pack", "type": "main", "index": 0}]]},
+            "Read Reference Pack": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
             "Director Run Safe Action": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
             "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
             "Complete Task": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
