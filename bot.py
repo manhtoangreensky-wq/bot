@@ -3687,7 +3687,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "telegram_status", "telegram_takeover", "customer_surface", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "head_brain", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "telegram_takeover", "customer_surface", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "head_brain", "head_run", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publish_cockpit", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "viral_remix", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -3695,6 +3695,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/audit"),
         ("GET", "/api/operator/goal-audit"),
         ("GET", "/api/operator/head-brain"),
+        ("POST", "/api/operator/head-run"),
         ("GET", "/api/operator/dispatch"),
         ("POST", "/api/operator/dispatch"),
         ("GET", "/api/operator/run-cycle"),
@@ -3812,6 +3813,7 @@ def operator_smoke_test_data(owner_id):
         "commands_documented": all(cmd for cmd in required_commands),
         "customer_start_surface_clean": bool(start_surface.get("ok") and start_surface.get("public_has_payment") and start_surface.get("admin_has_operator")),
         "head_brain_in_spec": "/api/operator/head-brain" in spec_text,
+        "head_run_in_spec": "/api/operator/head-run" in spec_text,
         "goal_audit_in_spec": "/api/operator/goal-audit" in spec_text and "/api/operator/goal-audit" in n8n_text,
         "dispatch_in_spec": "/api/operator/dispatch" in spec_text and "/api/operator/dispatch" in n8n_text,
         "run_cycle_in_spec": "/api/operator/run-cycle" in spec_text and "/api/operator/run-cycle" in n8n_text,
@@ -3933,6 +3935,7 @@ def operator_worker_spec_data():
         "film_series_url": f"{base_url}/api/operator/film-series",
         "video_brief_url": f"{base_url}/api/operator/video-brief",
         "head_brain_url": f"{base_url}/api/operator/head-brain",
+        "head_run_url": f"{base_url}/api/operator/head-run",
         "goal_audit_url": f"{base_url}/api/operator/goal-audit",
         "mission_control_url": f"{base_url}/api/operator/mission",
         "mission_inbox_url": f"{base_url}/api/operator/missions",
@@ -4025,6 +4028,7 @@ def operator_worker_spec_data():
         "standard_loop": [
             {"step": 1, "name": "audit", "method": "GET", "url": "/api/operator/audit"},
             {"step": 1.005, "name": "head_brain", "method": "GET", "url": "/api/operator/head-brain?days=30&platform=tiktok&limit=8"},
+            {"step": 1.006, "name": "head_run_preview", "method": "POST", "url": "/api/operator/head-run"},
             {"step": 1.01, "name": "goal_audit", "method": "GET", "url": "/api/operator/goal-audit?days=30&platform=tiktok&limit=8"},
             {"step": 1.02, "name": "bootstrap_optional", "method": "POST", "url": "/api/operator/bootstrap"},
             {"step": 1.025, "name": "campaign_preset_optional", "method": "POST", "url": "/api/operator/campaign-preset"},
@@ -4105,6 +4109,12 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/head-brain?days=30&platform=tiktok&limit=8",
                 "purpose": "Cockpit đầu não tổng: gom goal audit, next run, dispatch, publish, affiliate, money, toolchain và guardrails để Claude/n8n biết bước tiếp theo.",
+            },
+            "head_run": {
+                "method": "POST",
+                "url": "/api/operator/head-run",
+                "purpose": "Chạy một vòng đầu não an toàn. execute=false để preview; execute=true chỉ chạy safe action như launch/claim task/scale, gặp setup/review/publish gate thì dừng.",
+                "body": {"days": 1, "platform": "tiktok", "limit": 8, "topic": "công nghệ AI", "execute": False, "safe_mode": True, "max_steps": 1, "notify_admin": True},
             },
             "launch_pipeline": {
                 "method": "POST",
@@ -7815,6 +7825,76 @@ def operator_head_brain_cockpit_data(owner_id, days=30, platform="tiktok", limit
             "Mỗi bài phải có disclosure affiliate và tracking source riêng cho caption/comment/status/bio.",
         ],
         "rule": "Head brain cockpit là bảng điều khiển tổng, dùng cho admin Telegram và Claude/n8n đọc trước mỗi vòng chạy.",
+    }
+
+async def operator_head_brain_run_data(
+    owner_id,
+    days=1,
+    platform="tiktok",
+    limit=8,
+    topic="",
+    execute=False,
+    safe_mode=True,
+    max_steps=1,
+    include_context=True,
+    include_prompt=True,
+):
+    days = max(1, min(safe_int(days, 1), 30))
+    limit = max(3, min(safe_int(limit, 8), 20))
+    max_steps = max(1, min(safe_int(max_steps, 1), 5))
+    platform = (platform or "tiktok").lower()
+    topic = (topic or "").strip()
+    before = operator_head_brain_cockpit_data(owner_id, days=max(7, days), platform=platform, limit=limit)
+    cycle = await operator_daily_cycle_data(
+        owner_id,
+        days=days,
+        platform=platform,
+        limit=limit,
+        topic=topic,
+        max_steps=max_steps,
+        execute=execute,
+        safe_mode=safe_mode,
+        include_context=include_context,
+        include_prompt=include_prompt,
+    )
+    after = operator_head_brain_cockpit_data(owner_id, days=max(7, days), platform=platform, limit=limit)
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "mode": "EXECUTE" if execute else "PREVIEW",
+        "safe_mode": bool(safe_mode),
+        "platform": platform,
+        "topic": topic,
+        "max_steps": max_steps,
+        "before": {
+            "level": before.get("level"),
+            "decision": before.get("decision"),
+            "score": before.get("score"),
+            "admin_next": before.get("admin_next"),
+        },
+        "cycle": cycle,
+        "after": {
+            "level": after.get("level"),
+            "decision": after.get("decision"),
+            "score": after.get("score"),
+            "admin_next": after.get("admin_next"),
+        },
+        "executed_count": int(cycle.get("executed_count") or 0),
+        "claimed_tasks": cycle.get("claimed_tasks") or [],
+        "created_jobs": [
+            job
+            for step in (cycle.get("steps") or [])
+            for job in (((step.get("result") or {}).get("result") or {}).get("created_jobs") or [])
+        ],
+        "stop_reason": cycle.get("stop_reason"),
+        "next": {
+            "head_brain": f"/head_brain days=30 platform={platform} limit={limit}",
+            "preview": f"/head_run execute=0 platform={platform} max={max_steps}",
+            "execute": f"/head_run execute=1 platform={platform} max={max_steps}",
+            "worker": "/worker_intake claim=0 include_prompt=1",
+            "publish": f"/publish_cockpit platform={platform} limit={limit}",
+        },
+        "rule": "Head run chỉ dùng safe daily cycle. Nó có thể launch/claim task/scale khi safe; gặp setup/review/publish/manual gate thì dừng và trả lệnh cho admin.",
     }
 
 def operator_dispatch_preview_data(owner_id, days=30, platform="tiktok", limit=8):
@@ -16592,6 +16672,18 @@ class OperatorDailyCycleRequest(BaseModel):
     include_prompt: bool = True
     notify_admin: bool = True
 
+class OperatorHeadRunRequest(BaseModel):
+    days: int = Field(default=1, ge=1, le=30)
+    platform: str = Field(default="tiktok", max_length=40)
+    limit: int = Field(default=8, ge=3, le=20)
+    topic: str = Field(default="", max_length=300)
+    execute: bool = False
+    safe_mode: bool = True
+    max_steps: int = Field(default=1, ge=1, le=5)
+    include_context: bool = True
+    include_prompt: bool = True
+    notify_admin: bool = True
+
 class OperatorRunCycleRequest(BaseModel):
     days: int = Field(default=30, ge=1, le=180)
     platform: str = Field(default="tiktok", max_length=40)
@@ -18134,6 +18226,19 @@ def operator_brain_fallback(raw_text):
             "confidence": 84,
         }
     if any(word in lower for word in [
+        "chạy đầu não", "chay dau nao", "head run", "head-run", "run head brain",
+        "đầu não chạy", "dau nao chay", "chạy cockpit tổng", "chay cockpit tong"
+    ]):
+        return {
+            "intent": "head_run",
+            "platform": platform,
+            "limit": max(3, min(limit, 20)),
+            "days": max(1, min(days, 30)),
+            "execute": 1 if any(word in lower for word in ["execute", "run", "chạy thật", "chay that", "làm luôn", "lam luon"]) else 0,
+            "safe_mode": 1,
+            "confidence": 88,
+        }
+    if any(word in lower for word in [
         "head brain", "headbrain", "đầu não", "dau nao", "bộ não", "bo nao",
         "cockpit tổng", "cockpit tong", "bảng đầu não", "bang dau nao",
         "điều khiển tổng", "dieu khien tong", "từ lệnh tới tiền", "tu lenh toi tien"
@@ -18644,10 +18749,11 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, head_brain, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, head_brain, head_run, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- head_brain: khi admin muốn đầu não/cockpit tổng từ lệnh Telegram tới video, publish, affiliate, tiền và scale.\n"
+        "- head_run: khi admin muốn chạy đầu não một vòng an toàn; execute=0 preview, execute=1 chỉ chạy safe action và dừng ở gate.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
         "- operator_daily_pack: khi admin muốn bảng việc hôm nay/execution pack/rank việc để Claude/n8n làm trong ngày.\n"
         "- operator_daily_run: khi admin muốn preview/chạy một rank machine_action trong daily pack; giữ safe_mode để chặn setup/publish.\n"
@@ -18720,6 +18826,12 @@ def brain_command_preview(plan):
         return (
             f"/head_brain days={max(1, min(int(plan.get('days') or 30), 180))} "
             f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 8), 30))}"
+        )
+    if intent == "head_run":
+        return (
+            f"/head_run days={max(1, min(int(plan.get('days') or 1), 30))} "
+            f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 8), 20))} "
+            f"execute={int(plan.get('execute') or 0)} safe={int(plan.get('safe_mode') if plan.get('safe_mode') is not None else 1)}"
         )
     if intent == "operator_next_run":
         return (
@@ -18996,6 +19108,15 @@ async def run_brain_plan(update, context, plan):
                 f"limit={max(3, min(int(plan.get('limit') or 8), 30))}",
             ]
             return await cmd_head_brain(update, context)
+        if intent == "head_run":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 1), 30))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 8), 20))}",
+                f"execute={int(plan.get('execute') or 0)}",
+                f"safe={int(plan.get('safe_mode') if plan.get('safe_mode') is not None else 1)}",
+            ]
+            return await cmd_head_run(update, context)
         if intent == "operator_next_run":
             context.args = [
                 f"days={max(1, min(int(plan.get('days') or 30), 180))}",
@@ -19497,7 +19618,7 @@ def operator_command_plan_data(owner_id, command):
         "confidence": int(plan.get("confidence") or 0),
         "safety_note": plan.get("safety_note") or "Không bỏ qua review/approve gate; không tự publish khi chưa sẵn sàng.",
         "execute_allowed": (plan.get("intent") or "").lower() in {
-            "command_center", "head_brain", "operator_next_run", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "goal_audit", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
+            "command_center", "head_brain", "head_run", "operator_next_run", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "goal_audit", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
             "operator_director", "operator_execute", "operator_launch", "film_series", "make_video", "compose_video",
             "tracking_report", "scale_plan", "affiliate_report", "affiliate_decisions",
             "scale_execute", "publisher_capabilities", "platform_adapters",
@@ -19514,6 +19635,20 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
         return {"executed": True, "intent": intent, "data": operator_command_center_data(owner_id, days=days, platform=platform, limit=min(limit, 20))}
     if intent == "head_brain":
         return {"executed": True, "intent": intent, "data": operator_head_brain_cockpit_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 30)))}
+    if intent == "head_run":
+        data = await operator_head_brain_run_data(
+            owner_id,
+            days=max(1, min(days, 30)),
+            platform=platform,
+            limit=max(3, min(limit, 20)),
+            topic=plan.get("topic") or plan.get("niche") or "",
+            execute=truthy_value(plan.get("execute"), False),
+            safe_mode=truthy_value(plan.get("safe_mode"), True),
+            max_steps=max(1, min(int(plan.get("max_steps") or plan.get("max") or 1), 5)),
+            include_context=True,
+            include_prompt=True,
+        )
+        return {"executed": bool(data.get("executed_count")), "intent": intent, "data": data}
     if intent == "operator_next_run":
         return {"executed": True, "intent": intent, "data": operator_next_run_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 20)))}
     if intent == "goal_audit":
@@ -22610,6 +22745,69 @@ async def cmd_head_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    days = max(1, min(safe_int(data.get("days") or data.get("ngay"), 1), 30))
+    limit = max(3, min(safe_int(data.get("limit"), 8), 20))
+    max_steps = max(1, min(safe_int(data.get("max") or data.get("max_steps") or data.get("steps"), 1), 5))
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    topic = data.get("topic") or data.get("niche") or data.get("chude") or ""
+    execute = truthy_value(data.get("execute") or data.get("run"), False)
+    safe_mode = truthy_value(data.get("safe") or data.get("safe_mode"), True)
+    result = await operator_head_brain_run_data(
+        update.effective_user.id,
+        days=days,
+        platform=platform,
+        limit=limit,
+        topic=topic,
+        execute=execute,
+        safe_mode=safe_mode,
+        max_steps=max_steps,
+        include_context=True,
+        include_prompt=True,
+    )
+    before = result.get("before") or {}
+    after = result.get("after") or {}
+    cycle = result.get("cycle") or {}
+    lines = [
+        "▶️ <b>HEAD BRAIN RUN</b>",
+        f"• Mode: <b>{html.escape(result.get('mode') or '-')}</b> | Safe: <b>{'YES' if result.get('safe_mode') else 'NO'}</b>",
+        f"• Platform: <code>{html.escape(platform)}</code> | Steps: <b>{len(cycle.get('steps') or [])}</b>/<b>{max_steps}</b>",
+        f"• Before: <code>{html.escape(before.get('level') or '-')}</code> / <code>{html.escape(before.get('decision') or '-')}</code>",
+        f"• After: <code>{html.escape(after.get('level') or '-')}</code> / <code>{html.escape(after.get('decision') or '-')}</code>",
+        f"• Executed: <b>{result.get('executed_count', 0)}</b> | Stop: <code>{html.escape(result.get('stop_reason') or '-')}</code>",
+        "",
+        "<b>Các bước:</b>",
+    ]
+    for step in (cycle.get("steps") or [])[:5]:
+        action = step.get("machine_action") or step.get("action") or {}
+        step_result = step.get("result") or {}
+        lines.append(
+            f"• #{step.get('cycle_step') or step.get('step') or '-'} "
+            f"<code>{html.escape(step.get('lane') or (action.get('kind') or '-'))}</code> "
+            f"executed=<b>{'YES' if step.get('executed') else 'NO'}</b>\n"
+            f"  {html.escape(step.get('message') or step_result.get('message') or step.get('stop_reason') or action.get('reason') or '-')}"
+        )
+    if result.get("claimed_tasks"):
+        lines.append("\n<b>Task đã claim:</b>")
+        for task in result.get("claimed_tasks")[:5]:
+            lines.append(f"• task #{task.get('task_id')} | job #{task.get('job_id')} | {html.escape(task.get('task_type') or '-')}")
+    if result.get("created_jobs"):
+        lines.append("\n<b>Job tạo mới:</b>")
+        for job in result.get("created_jobs")[:5]:
+            lines.append(f"• job #{job.get('job_id')} | <code>{html.escape(job.get('platform') or '-')}</code> | {html.escape(job.get('title') or job.get('topic') or '-')}")
+    next_cmds = result.get("next") or {}
+    lines.append(
+        "\n<b>Lệnh tiếp:</b>\n"
+        f"• Head: <code>{html.escape(next_cmds.get('head_brain') or '/head_brain')}</code>\n"
+        f"• Worker: <code>{html.escape(next_cmds.get('worker') or '/worker_intake')}</code>\n"
+        f"• Publish: <code>{html.escape(next_cmds.get('publish') or '/publish_cockpit')}</code>\n"
+        "API: <code>POST /api/operator/head-run</code>"
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -22638,7 +22836,7 @@ def operator_category_keyboard(category):
     categories = {
         "cat_control": [
             ("🧠 Mission control", "mission"), ("🧠 Brain command", "brain"),
-            ("🧠 Head brain", "headbrain"),
+            ("🧠 Head brain", "headbrain"), ("▶️ Head run", "headrun"),
             ("🎯 Goal audit", "goalaudit"),
             ("🛡 Telegram takeover", "telegramtakeover"),
             ("🎯 Campaign preset", "campaignpreset"),
@@ -22810,6 +23008,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
         f"• Goal audit tổng mục tiêu: <code>GET {html.escape(base_url)}/api/operator/goal-audit?days=30&amp;platform=tiktok</code>",
         f"• Head brain cockpit: <code>GET {html.escape(base_url)}/api/operator/head-brain?days=30&amp;platform=tiktok&amp;limit=8</code>",
+        f"• Head run an toàn: <code>POST {html.escape(base_url)}/api/operator/head-run</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• Film blueprint: <code>GET {html.escape(base_url)}/api/operator/film-blueprint</code>",
         f"• Film project pack: <code>GET {html.escape(base_url)}/api/operator/film-project-pack?topic=dao_ly&amp;platform=tiktok</code>",
@@ -23126,6 +23325,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "missionrun": "/mission_run id=<MISSION_ID>\n/mission_run id=<MISSION_ID> execute=1 safe=1\nPOST /api/operator/missions/run",
         "missionworkorders": "/mission_workorders id=<MISSION_ID>\nGET /api/operator/missions/<MISSION_ID>/work-orders?include_prompt=1",
         "headbrain": "/head_brain days=30 platform=tiktok limit=8\nGET /api/operator/head-brain?days=30&platform=tiktok&limit=8",
+        "headrun": "/head_run execute=0 platform=tiktok max=1\n/head_run execute=1 platform=tiktok max=1\nPOST /api/operator/head-run",
         "audit": "/operator_audit",
         "goalaudit": "/goal_audit days=30 platform=tiktok\nGET /api/operator/goal-audit?days=30&platform=tiktok",
         "smoke": "/operator_smoke\nGET /api/operator/smoke-test",
@@ -27436,6 +27636,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_command", cmd_operator_command))
     tg_app.add_handler(CommandHandler("operator_mission", cmd_operator_mission))
     tg_app.add_handler(CommandHandler("head_brain", cmd_head_brain))
+    tg_app.add_handler(CommandHandler("head_run", cmd_head_run))
     tg_app.add_handler(CommandHandler("mission_add", cmd_mission_add))
     tg_app.add_handler(CommandHandler("missions", cmd_missions))
     tg_app.add_handler(CommandHandler("mission_claim", cmd_mission_claim))
@@ -28135,6 +28336,38 @@ async def api_operator_goal_audit(request: Request, days: int = 30, platform: st
 async def api_operator_head_brain(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 8):
     verify_operator_api_token(request)
     return operator_head_brain_cockpit_data(ADMIN_ID, days=days, platform=platform, limit=limit)
+
+@fastapi_app.post("/api/operator/head-run")
+async def api_operator_head_run(payload: OperatorHeadRunRequest, request: Request):
+    verify_operator_api_token(request)
+    result = await operator_head_brain_run_data(
+        ADMIN_ID,
+        days=payload.days,
+        platform=payload.platform,
+        limit=payload.limit,
+        topic=payload.topic,
+        execute=payload.execute,
+        safe_mode=payload.safe_mode,
+        max_steps=payload.max_steps,
+        include_context=payload.include_context,
+        include_prompt=payload.include_prompt,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "▶️ <b>HEAD BRAIN RUN API</b>\n\n"
+                    f"• Mode: <b>{html.escape(result.get('mode') or '-')}</b> | Safe: <b>{'YES' if result.get('safe_mode') else 'NO'}</b>\n"
+                    f"• Platform: <code>{html.escape(result.get('platform') or '-')}</code> | Steps: <b>{len((result.get('cycle') or {}).get('steps') or [])}</b>\n"
+                    f"• Executed: <b>{result.get('executed_count', 0)}</b> | Stop: <code>{html.escape(result.get('stop_reason') or '-')}</code>\n"
+                    f"• Next: <code>{html.escape(((result.get('next') or {}).get('head_brain') or '/head_brain'))}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Head brain run notify error: {e}")
+    return result
 
 @fastapi_app.get("/api/operator/worker-spec")
 async def api_operator_worker_spec(request: Request):
