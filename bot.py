@@ -9421,6 +9421,139 @@ def compact_arg_value(value):
         return value
     return value
 
+def parse_metric_number(raw_text, aliases, default=0):
+    text = (raw_text or "").lower()
+    alias_group = "|".join(re.escape(alias.lower()) for alias in aliases)
+    for alias_match in re.finditer(rf"\b(?:{alias_group})\b", text, re.IGNORECASE):
+        prefix = text[:alias_match.start()]
+        suffix = text[alias_match.end():]
+        before = re.search(r"(\d+(?:[.,]\d+)?)\s*$", prefix)
+        before_is_id = bool(re.search(r"\b(job|queue|id)\s*#?\s*\d+(?:[.,]\d+)?\s*$", prefix, re.IGNORECASE))
+        if before and not before_is_id:
+            try:
+                return int(float(before.group(1).replace(",", ".")))
+            except ValueError:
+                pass
+        after = re.search(r"^\s*(?:=|:)?\s*(\d+(?:[.,]\d+)?)", suffix)
+        if after:
+            try:
+                return int(float(after.group(1).replace(",", ".")))
+            except ValueError:
+                pass
+    return default
+
+def parse_money_amount_near(raw_text, aliases, default=0):
+    text = (raw_text or "").lower()
+    alias_group = "|".join(re.escape(alias.lower()) for alias in aliases)
+    number = r"(\d+(?:[.,]\d+)?)\s*(k|nghìn|nghin|tr|triệu|trieu|m|đ|vnd|vnđ)?"
+    patterns = [
+        rf"(?:{alias_group})\s*(?:=|:)?\s*{number}",
+        rf"{number}\s*(?:{alias_group})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        raw_value = match.group(1).replace(",", ".")
+        unit = (match.group(2) or "").lower()
+        try:
+            value = float(raw_value)
+        except ValueError:
+            continue
+        if unit in {"k", "nghìn", "nghin"}:
+            value *= 1000
+        elif unit in {"tr", "triệu", "trieu", "m"}:
+            value *= 1000000
+        return int(value)
+    return default
+
+def parse_count_metrics_sequence(raw_text):
+    alias_map = {
+        "view": "view",
+        "views": "view",
+        "lượt xem": "view",
+        "luot xem": "view",
+        "click": "click",
+        "clicks": "click",
+        "nhấp": "click",
+        "nhap": "click",
+        "đơn": "order",
+        "don": "order",
+        "order": "order",
+        "orders": "order",
+        "lead": "lead",
+        "leads": "lead",
+        "khách": "lead",
+        "khach": "lead",
+    }
+    text = (raw_text or "").lower()
+    text = re.sub(r"lượt\s+xem", "view", text)
+    text = re.sub(r"luot\s+xem", "view", text)
+    text = re.sub(r"đơn\s+hàng", "đơn", text)
+    text = re.sub(r"don\s+hang", "don", text)
+    tokens = re.findall(r"\d+(?:[.,]\d+)?|[a-zA-ZÀ-ỹ]+", text, re.IGNORECASE)
+    metrics = {}
+    pending_metric = None
+    last_number = None
+    last_number_is_id = False
+    previous_word = ""
+    for token in tokens:
+        normalized = token.lower()
+        if re.fullmatch(r"\d+(?:[.,]\d+)?", normalized):
+            try:
+                number = int(float(normalized.replace(",", ".")))
+            except ValueError:
+                previous_word = normalized
+                continue
+            if pending_metric and pending_metric not in metrics:
+                metrics[pending_metric] = number
+                pending_metric = None
+                last_number = None
+                last_number_is_id = False
+            else:
+                last_number = number
+                last_number_is_id = previous_word in {"job", "queue", "id"}
+            previous_word = normalized
+            continue
+        metric = alias_map.get(normalized)
+        if metric:
+            if last_number is not None and not last_number_is_id and metric not in metrics:
+                metrics[metric] = last_number
+                last_number = None
+                last_number_is_id = False
+                pending_metric = None
+            elif metric not in metrics:
+                pending_metric = metric
+            previous_word = normalized
+            continue
+        if normalized not in {"có", "co", "la", "là", "duoc", "được"}:
+            pending_metric = None if pending_metric and normalized in {"job", "queue", "id"} else pending_metric
+        previous_word = normalized
+    return metrics
+
+def parse_brain_performance_metrics(raw_text):
+    metrics = {}
+    counts = parse_count_metrics_sequence(raw_text)
+    views = counts.get("view", 0)
+    clicks = counts.get("click", 0)
+    orders = counts.get("order", 0)
+    leads = counts.get("lead", 0)
+    revenue = parse_money_amount_near(raw_text, ["doanh thu", "revenue", "hoa hồng", "hoa hong", "thu về", "thu ve", "tiền về", "tien ve"])
+    cost = parse_money_amount_near(raw_text, ["cost", "chi phí", "chi phi", "tốn", "ton", "ads", "quảng cáo", "quang cao"])
+    if views:
+        metrics["view"] = {"value": views, "amount": 0}
+    if clicks:
+        metrics["click"] = {"value": clicks, "amount": 0}
+    if orders:
+        metrics["order"] = {"value": orders, "amount": revenue}
+    elif revenue:
+        metrics["revenue"] = {"value": 1, "amount": revenue}
+    if leads:
+        metrics["lead"] = {"value": leads, "amount": 0}
+    if cost:
+        metrics["cost"] = {"value": 1, "amount": cost}
+    return metrics
+
 def operator_brain_fallback(raw_text):
     text = raw_text.strip()
     lower = text.lower()
@@ -9441,6 +9574,7 @@ def operator_brain_fallback(raw_text):
     any_url_match = re.search(r"https?://[^\s<>\"]+", text or "", flags=re.I)
     any_url = any_url_match.group(0).rstrip(").,!?;\"'") if any_url_match else ""
     queue_id = int_from_text(lower, ["queue", "hang doi", "hàng đợi"], 0)
+    performance_metrics = parse_brain_performance_metrics(text)
 
     if reference_url and any(word in lower for word in ["học", "hoc", "tham khảo", "tham khao", "reference", "mẫu", "mau", "lưu", "luu"]):
         title = re.sub(r"https?://[^\s<>\"]+", " ", text, flags=re.I)
@@ -9483,6 +9617,14 @@ def operator_brain_fallback(raw_text):
             "platform": platform,
             "mode": mode,
             "confidence": 78,
+        }
+    if job_id and performance_metrics and any(word in lower for word in ["view", "click", "đơn", "don", "order", "lead", "doanh thu", "revenue", "cost", "chi phí", "chi phi", "hoa hồng", "hoa hong"]):
+        return {
+            "intent": "performance_add",
+            "job": job_id,
+            "metrics": performance_metrics,
+            "confidence": 82,
+            "note": "brain_performance",
         }
 
     if any(word in lower for word in ["execute", "thực thi", "thuc thi", "chạy bước tiếp", "chay buoc tiep", "tự xử lý", "tu xu ly", "đầu não chạy", "dau nao chay"]):
@@ -9589,7 +9731,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
         "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
@@ -9604,11 +9746,12 @@ def parse_operator_brain(raw_text, owner_id):
         "- publisher_run: khi admin nói chạy publisher/đăng queue tiếp theo.\n"
         "- publisher_handoff: khi admin muốn lấy pack/handoff cho một queue cụ thể; cần queue ID.\n"
         "- publish_queue_set: khi admin gửi URL bài đã đăng và muốn đánh dấu queue là published; cần queue ID và url.\n"
+        "- performance_add: khi admin nói job có bao nhiêu view/click/đơn/lead/doanh thu/chi phí; cần job ID và metrics.\n"
         "- job_ready: khi admin muốn kiểm tra đủ điều kiện đăng.\n"
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","mode":"","status":"","pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","mode":"","status":"","metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -9688,6 +9831,19 @@ def brain_command_preview(plan):
             f"/publish_queue_set id={int(plan.get('queue') or 0)} "
             f"status={plan.get('status') or 'published'} url={plan.get('url') or 'https://...'} note=brain_mark_published"
         )
+    if intent == "performance_add":
+        metrics = plan.get("metrics") or {}
+        if isinstance(metrics, dict) and metrics:
+            parts = []
+            for event_type, payload in metrics.items():
+                if not isinstance(payload, dict):
+                    continue
+                parts.append(
+                    f"/performance_add job={int(plan.get('job') or 0)} type={event_type} "
+                    f"value={int(payload.get('value') or 0)} amount={int(payload.get('amount') or 0)} note=brain_performance"
+                )
+            return "\n".join(parts) if parts else "/performance"
+        return f"/performance_add job={int(plan.get('job') or 0)} type=view value=0 note=brain_performance"
     if intent == "operator":
         return (
             f"/operator topic={plan.get('topic') or plan.get('niche') or 'video affiliate'} "
@@ -9834,6 +9990,45 @@ async def run_brain_plan(update, context, plan):
                 "note=brain_mark_published",
             ]
             return await cmd_publish_queue_set(update, context)
+        if intent == "performance_add":
+            job_id = int(plan.get("job") or 0)
+            metrics = plan.get("metrics") or {}
+            if not job_id or not isinstance(metrics, dict) or not metrics:
+                return await update.message.reply_text(
+                    "⚠️ Cần job ID và số liệu. Ví dụ: <code>/brain job 12 có 5000 view 30 click 2 đơn doanh thu 150k</code>",
+                    parse_mode="HTML"
+                )
+            event_lines = []
+            for event_type, payload in metrics.items():
+                if not isinstance(payload, dict):
+                    continue
+                event_type = (event_type or "").lower()
+                if event_type not in {"view", "click", "order", "revenue", "lead", "cost"}:
+                    continue
+                value = int(payload.get("value") or 0)
+                amount = int(payload.get("amount") or 0)
+                if value <= 0 and amount <= 0:
+                    continue
+                ok, _job = add_performance_event(
+                    update.effective_user.id,
+                    job_id,
+                    event_type,
+                    value,
+                    amount,
+                    plan.get("note") or "brain_performance",
+                    int(plan.get("variant") or 0),
+                )
+                if ok:
+                    event_lines.append(f"• {event_type}: value={value} amount={amount:,}đ")
+                    if event_type in {"revenue", "order", "lead"} and amount > 0:
+                        update_production_job(job_id, update.effective_user.id, status="published")
+            if not event_lines:
+                return await update.message.reply_text("❌ Không ghi được performance. Kiểm tra job ID hoặc số liệu.")
+            return await update.message.reply_text(
+                f"✅ <b>Đã ghi performance cho job #{job_id}</b>\n" + "\n".join(event_lines) +
+                "\n\nXem funnel: <code>/tracking_report days=30</code> hoặc <code>/scale_plan</code>",
+                parse_mode="HTML"
+            )
         if intent == "operator":
             if not int(plan.get("channel") or 0):
                 return await update.message.reply_text(
@@ -12073,6 +12268,7 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain duyệt job 12 để đăng</code>\n"
             "• <code>/brain chạy publisher tiktok</code>\n"
             "• <code>/brain queue 3 đã đăng https://...</code>\n"
+            "• <code>/brain job 12 có 5000 view 30 click 2 đơn doanh thu 150k</code>\n"
             "• <code>/brain build job 12 duration 45</code>\n"
             "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
             "• <code>/brain báo cáo vận hành 7 ngày</code>",
@@ -12459,7 +12655,7 @@ async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode="HTML"
         )
     event_type = (data.get("type") or data.get("event") or "view").lower()
-    allowed = {"view", "click", "order", "revenue", "lead"}
+    allowed = {"view", "click", "order", "revenue", "lead", "cost"}
     if event_type not in allowed:
         return await update.message.reply_text(f"⚠️ type hợp lệ: <code>{', '.join(sorted(allowed))}</code>", parse_mode="HTML")
     try:
