@@ -2790,7 +2790,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_n8n_workflow",
         "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_pack", "distribution_pack", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_pack", "distribution_pack", "pipeline_pack", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -2819,6 +2819,8 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/assets/<ASSET_ID>/file"),
         ("GET", "/api/operator/jobs/<JOB_ID>/context"),
         ("GET", "/api/operator/jobs/<JOB_ID>/worker-pack"),
+        ("GET", "/api/operator/jobs/<JOB_ID>/pipeline-pack"),
+        ("GET", "/api/operator/pipeline-pack"),
         ("GET", "/api/operator/jobs/<JOB_ID>/distribution-pack"),
         ("GET", "/api/operator/jobs/<JOB_ID>/review-video"),
         ("GET", "/api/operator/jobs/<JOB_ID>/post-publish"),
@@ -2883,6 +2885,7 @@ def operator_smoke_test_data(owner_id):
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
+        "pipeline_pack_in_spec": "/api/operator/jobs/<JOB_ID>/pipeline-pack" in spec_text and "/pipeline-pack" in n8n_text,
         "distribution_pack_in_spec": "/api/operator/jobs/<JOB_ID>/distribution-pack" in spec_text and "/distribution-pack" in n8n_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
     }
@@ -3031,6 +3034,7 @@ def operator_worker_spec_data():
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
             {"step": 4.5, "name": "peek_worker_next", "method": "GET", "url": "/api/operator/worker-next"},
             {"step": 4.6, "name": "worker_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/worker-pack"},
+            {"step": 4.7, "name": "pipeline_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/pipeline-pack"},
             {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1"},
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
@@ -3173,6 +3177,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/jobs/<JOB_ID>/worker-pack",
                 "purpose": "Một gói đầy đủ cho Claude/n8n/tool worker: job, task, context, prompt, reference learning, video factory blueprint, toolchain, publish pack và endpoint trả output.",
+            },
+            "pipeline_pack": {
+                "method": "GET",
+                "url": "/api/operator/jobs/<JOB_ID>/pipeline-pack",
+                "purpose": "Bảng điều khiển một job: pipeline_state, next_action, worker/distribution/review/publish/tracking và chuỗi lệnh Telegram/API.",
             },
             "worker_next": {
                 "method": "GET",
@@ -3726,6 +3735,13 @@ def operator_n8n_template_data():
                 "note": "Một gói đủ cho Claude/n8n/tool worker: task, prompt, reference learning, blueprint video, checklist, toolchain, publish/review endpoints.",
             },
             {
+                "node": "Read Pipeline Pack",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/jobs/<JOB_ID>/pipeline-pack",
+                "note": "Một bảng điều khiển job cho Claude/n8n: state hiện tại, next_action, worker, distribution, review, publish và tracking.",
+            },
+            {
                 "node": "Claim Production Task",
                 "type": "http_request",
                 "method": "GET",
@@ -4265,6 +4281,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "read-pipeline-pack",
+                "name": "Read Pipeline Pack",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [180, -700],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{$json.job_id || '<JOB_ID>'}}/pipeline-pack",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "tool-worker-note",
                 "name": "Tool Worker Placeholder",
                 "type": "n8n-nodes-base.stickyNote",
@@ -4549,7 +4579,8 @@ def operator_n8n_workflow_json_data():
             "Read Reference Pack": {"main": [[{"node": "Read Reference Videos", "type": "main", "index": 0}]]},
             "Read Reference Videos": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
             "Director Run Safe Action": {"main": [[{"node": "Peek Worker Next", "type": "main", "index": 0}]]},
-            "Peek Worker Next": {"main": [[{"node": "Read Worker Pack", "type": "main", "index": 0}]]},
+            "Peek Worker Next": {"main": [[{"node": "Read Pipeline Pack", "type": "main", "index": 0}]]},
+            "Read Pipeline Pack": {"main": [[{"node": "Read Worker Pack", "type": "main", "index": 0}]]},
             "Read Worker Pack": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
             "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
             "Complete Task": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
@@ -4776,6 +4807,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
             "bootstrap": f"{base_url}/api/operator/bootstrap",
             "channel_router": f"{base_url}/api/operator/channel-router",
             "worker_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
+            "pipeline_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/pipeline-pack",
             "distribution_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/distribution-pack",
             "worker_spec": f"{base_url}/api/operator/worker-spec",
             "toolchain": f"{base_url}/api/operator/toolchain",
@@ -4848,6 +4880,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
             "make_video": f"{base_url}/api/operator/make-video",
             "worker_next": f"{base_url}/api/operator/worker-next",
             "worker_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
+            "pipeline_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/pipeline-pack",
             "task_claim": f"{base_url}/api/operator/tasks/claim?include_context=1",
             "task_complete": f"{base_url}/api/operator/tasks/<TASK_ID>/complete",
             "task_upload": f"{base_url}/api/operator/tasks/<TASK_ID>/upload",
@@ -7032,6 +7065,143 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
             "Không dùng người thật/giọng/ảnh thiếu consent; nội dung adult phải đủ 18+ và tuân thủ nền tảng.",
             "Affiliate claim phải minh bạch, không hứa kết quả chắc chắn về tài chính/sức khỏe/duyệt vay.",
         ],
+    }
+
+def select_operator_focus_job_id(owner_id, job_id=0):
+    try:
+        job_id = int(job_id or 0)
+    except (TypeError, ValueError):
+        job_id = 0
+    if job_id and get_production_job(job_id, owner_id):
+        return job_id, "explicit"
+    task = next_worker_task(owner_id)
+    if task:
+        return int(task[1]), "next_worker_task"
+    for row in list_publish_queue(owner_id, limit=20):
+        qid, row_job_id, platform, channel_name, mode, status, scheduled_at, publish_url, topic, updated_at = row
+        if (status or "").lower() in {"queued", "scheduled", "publishing", "blocked"} and row_job_id:
+            return int(row_job_id), "open_publish_queue"
+    for row in list_production_jobs(owner_id, limit=20):
+        row_job_id, stage, status, platform, topic, channel_name, product_name, updated_at = row
+        if (status or "").lower() not in {"published", "done", "cancelled"}:
+            return int(row_job_id), "open_job"
+    return 0, "none"
+
+def operator_pipeline_pack_data(owner_id, job_id=0, days=30, platform="tiktok", limit=8):
+    focus_job_id, source = select_operator_focus_job_id(owner_id, job_id)
+    command_center = operator_command_center_data(owner_id, days=days, platform=platform, limit=limit)
+    router = operator_channel_router_data(owner_id, platform=platform, niche="công nghệ AI affiliate", limit=limit)
+    if not focus_job_id:
+        return {
+            "ok": True,
+            "generated_at": now_text(),
+            "focus_job_id": 0,
+            "focus_source": source,
+            "command_center": command_center,
+            "channel_router": router,
+            "pipeline_state": "NO_ACTIVE_JOB",
+            "next_action": {
+                "type": "LAUNCH",
+                "telegram": router.get("commands", {}).get("operator_launch_best") or "/operator_launch topic=công nghệ AI platform=tiktok channel=all limit=3 build=1",
+                "api": {"method": "POST", "url": "/api/operator/launch"},
+            },
+            "rule": "Chưa có job active: hãy launch pipeline mới rồi đọc lại pipeline-pack theo job_id.",
+        }
+    job = get_production_job(focus_job_id, owner_id)
+    readiness = production_readiness_data(owner_id, focus_job_id)
+    worker_next = operator_worker_next_summary(owner_id, [focus_job_id], limit=1)
+    distribution = build_distribution_pack(owner_id, focus_job_id)
+    review = build_video_review_summary(owner_id, focus_job_id)
+    post_publish = build_post_publish_handoff(owner_id, focus_job_id, days=days)
+    publisher = publisher_status_data(owner_id)
+    serialized_job = serialize_production_job(job)
+    readiness_level = (readiness or {}).get("level", "UNKNOWN")
+    next_task = ((worker_next[0] if worker_next else {}).get("next_task") or {})
+    if next_task.get("id"):
+        pipeline_state = "WORKER_NEEDED"
+        next_action = {
+            "type": "WORK_TASK",
+            "telegram": f"/task_handoff id={next_task.get('id')}",
+            "api": {"method": "GET", "url": f"/api/operator/tasks/claim?job_id={focus_job_id}&include_context=1"},
+            "worker_pack": f"/api/operator/jobs/{focus_job_id}/worker-pack",
+        }
+    elif readiness_level == "READY_TO_QUEUE" and (serialized_job or {}).get("status") != "approved":
+        pipeline_state = "NEEDS_ADMIN_APPROVAL"
+        next_action = {
+            "type": "APPROVE",
+            "telegram": f"/review_video job={focus_job_id} send=1 rồi /approve_publish job={focus_job_id} queue=1 mode=manual",
+            "api": {"method": "GET", "url": f"/api/operator/jobs/{focus_job_id}/review-video"},
+            "approve_api": {"method": "POST", "url": f"/api/operator/jobs/{focus_job_id}/approve"},
+        }
+    elif readiness_level == "READY_TO_QUEUE":
+        pipeline_state = "QUEUE_PUBLISH"
+        next_action = {
+            "type": "QUEUE",
+            "telegram": f"/approve_publish job={focus_job_id} queue=1 mode=manual",
+            "api": {"method": "POST", "url": f"/api/operator/jobs/{focus_job_id}/approve"},
+        }
+    elif readiness_level == "READY_TO_PUBLISH" or (publisher.get("open_queue") or []):
+        pipeline_state = "PUBLISHER_NEEDED"
+        next_action = {
+            "type": "PUBLISH",
+            "telegram": "/publisher_run platform=tiktok mode=api hoặc /publisher_handoff queue=<QUEUE_ID>",
+            "api": {"method": "POST", "url": "/api/operator/publisher/run"},
+        }
+    elif (serialized_job or {}).get("publish_url"):
+        pipeline_state = "TRACK_AND_SCALE"
+        next_action = {
+            "type": "TRACK",
+            "telegram": f"/post_publish job={focus_job_id}",
+            "api": {"method": "GET", "url": f"/api/operator/jobs/{focus_job_id}/post-publish"},
+        }
+    else:
+        pipeline_state = readiness_level
+        next_action = {
+            "type": "CHECK_READY",
+            "telegram": f"/job_ready job={focus_job_id}",
+            "api": {"method": "GET", "url": f"/api/operator/jobs/{focus_job_id}/ready"},
+        }
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "focus_job_id": focus_job_id,
+        "focus_source": source,
+        "pipeline_state": pipeline_state,
+        "next_action": next_action,
+        "job": serialized_job,
+        "readiness": readiness,
+        "worker_next": worker_next[0] if worker_next else {},
+        "distribution_pack": distribution,
+        "review_video": review,
+        "post_publish": post_publish,
+        "publisher": {
+            "ready": publisher.get("ready"),
+            "api_ready": publisher.get("api_ready"),
+            "open_queue": publisher.get("open_queue"),
+            "blockers": publisher.get("blockers"),
+        },
+        "command_center": command_center,
+        "channel_router": router,
+        "api_sequence": [
+            f"GET /api/operator/jobs/{focus_job_id}/pipeline-pack",
+            f"GET /api/operator/jobs/{focus_job_id}/worker-pack",
+            f"GET /api/operator/jobs/{focus_job_id}/distribution-pack",
+            f"GET /api/operator/jobs/{focus_job_id}/review-video",
+            f"POST /api/operator/jobs/{focus_job_id}/approve",
+            "POST /api/operator/publisher/run",
+            f"GET /api/operator/jobs/{focus_job_id}/post-publish",
+            "POST /api/operator/performance",
+        ],
+        "telegram_sequence": [
+            f"/pipeline_pack job={focus_job_id}",
+            f"/worker_pack job={focus_job_id}",
+            f"/distribution_pack job={focus_job_id}",
+            f"/review_video job={focus_job_id} send=1",
+            f"/approve_publish job={focus_job_id} queue=1 mode=manual",
+            "/publisher_run platform=tiktok mode=api",
+            f"/post_publish job={focus_job_id}",
+        ],
+        "rule": "Pipeline pack là bảng điều khiển một job từ worker đến publish và tracking. AI commander chỉ thực hiện next_action hợp lệ; không bỏ qua review/approve gate.",
     }
 
 def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0, affiliate_id_override=0):
@@ -14374,6 +14544,7 @@ def operator_category_keyboard(category):
         "cat_production": [
             ("🎬 Make video", "makevideo"), ("⚡ Build bundle", "build"),
             ("🎛 Pipeline", "pipeline"),
+            ("🧠 Pipeline pack", "pipelinepack"),
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
             ("📦 Worker pack", "workerpack"),
@@ -14508,6 +14679,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tải asset nội bộ: <code>GET {html.escape(base_url)}/api/operator/assets/&lt;ASSET_ID&gt;/file</code>",
         f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
         f"• Worker pack cho AI/tool: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/worker-pack</code>",
+        f"• Pipeline pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/pipeline-pack</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
         f"• Distribution pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/distribution-pack</code>",
         f"• Review video gate: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/review-video</code>",
@@ -14766,6 +14938,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "affbundle": "/affiliate_bundle aff=<AFF_ID> job=<JOB_ID> platform=tiktok\nGET /api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>",
         "affprofile": "/affiliate_profile id=<AFF_ID> price=199000 rate=8 audience=creator allowed=... blocked=... score=70",
         "pipeline": "/pipeline\n/pipeline <JOB_ID>",
+        "pipelinepack": "/pipeline_pack job=<JOB_ID>\nGET /api/operator/jobs/<JOB_ID>/pipeline-pack\nGET /api/operator/pipeline-pack",
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "calendarplan": "/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
@@ -15440,6 +15613,61 @@ async def cmd_distribution_pack(update: Update, context: ContextTypes.DEFAULT_TY
         "",
         f"API: <code>/api/operator/jobs/{job_id}/distribution-pack</code>",
     ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_pipeline_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    job_id = safe_int(data.get("job") or data.get("id"), 0)
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or 30), 180))
+    except (TypeError, ValueError):
+        days = 30
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    pack = operator_pipeline_pack_data(update.effective_user.id, job_id=job_id, days=days, platform=platform, limit=8)
+    focus_job_id = int(pack.get("focus_job_id") or 0)
+    next_action = pack.get("next_action") or {}
+    lines = [
+        "🧠 <b>PIPELINE COMMAND PACK</b>",
+        f"• Focus job: <code>#{focus_job_id or '-'}</code> | source=<code>{html.escape(pack.get('focus_source') or '-')}</code>",
+        f"• State: <b>{html.escape(pack.get('pipeline_state') or '-')}</b>",
+        f"• Next type: <code>{html.escape(next_action.get('type') or '-')}</code>",
+        f"• Next Telegram: <code>{html.escape(next_action.get('telegram') or '-')}</code>",
+    ]
+    job = pack.get("job") or {}
+    if job:
+        lines.extend([
+            "",
+            "<b>Job:</b>",
+            f"• {html.escape(job.get('topic') or '-')} | <code>{html.escape(job.get('platform') or '-')}</code>",
+            f"• Stage/status: <code>{html.escape(job.get('stage') or '-')}</code>/<code>{html.escape(job.get('status') or '-')}</code>",
+            f"• Affiliate: {html.escape(((job.get('affiliate') or {}).get('product')) or '-')}",
+        ])
+    worker = pack.get("worker_next") or {}
+    task = worker.get("next_task") or {}
+    if task:
+        lines.extend([
+            "",
+            "<b>Worker:</b>",
+            f"• Task <code>#{task.get('id') or '-'}</code> / <code>{html.escape(task.get('task_type') or '-')}</code> / tool=<code>{html.escape(task.get('tool') or '-')}</code>",
+            f"• Claim: <code>{html.escape(worker.get('claim_task_url') or '-')}</code>",
+        ])
+    distribution = pack.get("distribution_pack") or {}
+    channel = distribution.get("channel") or {}
+    review = distribution.get("review_gate") or {}
+    if distribution:
+        lines.extend([
+            "",
+            "<b>Distribution:</b>",
+            f"• Kênh: <code>#{channel.get('id') or '-'}</code> {html.escape(channel.get('channel_name') or '-')} / {html.escape(channel.get('account_label') or 'main')}",
+            f"• Readiness: <code>{html.escape(channel.get('readiness') or '-')}</code>",
+            f"• Review: <code>{html.escape(review.get('decision') or '-')}</code>",
+        ])
+    lines.append("\n<b>Chuỗi lệnh:</b>")
+    for cmd in (pack.get("telegram_sequence") or [])[:8]:
+        lines.append(f"• <code>{html.escape(cmd)}</code>")
+    lines.append("\nAPI: <code>GET /api/operator/pipeline-pack</code> hoặc <code>GET /api/operator/jobs/&lt;JOB_ID&gt;/pipeline-pack</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -18130,6 +18358,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
     tg_app.add_handler(CommandHandler("distribution_pack", cmd_distribution_pack))
+    tg_app.add_handler(CommandHandler("pipeline_pack", cmd_pipeline_pack))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
@@ -19170,6 +19399,22 @@ async def api_operator_job_worker_pack(job_id: int, request: Request, task_id: i
     if not data:
         raise HTTPException(status_code=404, detail="Worker pack not found")
     return {"ok": True, **data}
+
+@fastapi_app.get("/api/operator/pipeline-pack")
+async def api_operator_pipeline_pack(request: Request, job_id: int = 0, days: int = 30, platform: str = "tiktok", limit: int = 8):
+    verify_operator_api_token(request)
+    days = max(1, min(int(days or 30), 180))
+    limit = max(1, min(int(limit or 8), 20))
+    platform = (platform or "tiktok").lower()
+    return operator_pipeline_pack_data(ADMIN_ID, job_id=job_id, days=days, platform=platform, limit=limit)
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/pipeline-pack")
+async def api_operator_job_pipeline_pack(job_id: int, request: Request, days: int = 30, platform: str = "tiktok", limit: int = 8):
+    verify_operator_api_token(request)
+    pack = operator_pipeline_pack_data(ADMIN_ID, job_id=job_id, days=days, platform=platform, limit=limit)
+    if not pack.get("focus_job_id"):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return pack
 
 @fastapi_app.post("/api/operator/jobs/{job_id}/approve")
 async def api_operator_approve_publish(job_id: int, payload: OperatorApprovePublishRequest, request: Request):
