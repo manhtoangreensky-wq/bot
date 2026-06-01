@@ -2790,7 +2790,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_n8n_workflow",
         "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_pack", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_pack", "distribution_pack", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -2819,6 +2819,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/assets/<ASSET_ID>/file"),
         ("GET", "/api/operator/jobs/<JOB_ID>/context"),
         ("GET", "/api/operator/jobs/<JOB_ID>/worker-pack"),
+        ("GET", "/api/operator/jobs/<JOB_ID>/distribution-pack"),
         ("GET", "/api/operator/jobs/<JOB_ID>/review-video"),
         ("GET", "/api/operator/jobs/<JOB_ID>/post-publish"),
         ("GET", "/api/operator/publish/<QUEUE_ID>/handoff"),
@@ -2882,6 +2883,7 @@ def operator_smoke_test_data(owner_id):
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
+        "distribution_pack_in_spec": "/api/operator/jobs/<JOB_ID>/distribution-pack" in spec_text and "/distribution-pack" in n8n_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
     }
     sections = {
@@ -3034,6 +3036,7 @@ def operator_worker_spec_data():
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
+            {"step": 8.1, "name": "distribution_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/distribution-pack"},
             {"step": 8.2, "name": "review_video_decision", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/review-video"},
             {"step": 9, "name": "affiliate_bundle", "method": "GET", "url": "/api/operator/affiliate-bundle?affiliate_id=<AFF_ID>&job_id=<JOB_ID>"},
             {"step": 10, "name": "publisher_status", "method": "GET", "url": "/api/operator/publisher/status"},
@@ -3180,6 +3183,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/jobs/<JOB_ID>/review-video",
                 "purpose": "Trả review_decision cho Claude/n8n: READY_FOR_ADMIN_APPROVAL, NEEDS_FIX hoặc BLOCKED_NO_VIDEO; không tự publish.",
+            },
+            "distribution_pack": {
+                "method": "GET",
+                "url": "/api/operator/jobs/<JOB_ID>/distribution-pack",
+                "purpose": "Hợp đồng đăng và đo hiệu quả: kênh, readiness, placement caption/comment/status/bio, review gate, source tracking và lệnh sau đăng.",
             },
             "publish_complete": {
                 "status": "published",
@@ -3776,6 +3784,13 @@ def operator_n8n_template_data():
                 "note": "Lấy caption, disclosure, link chính, link liên quan/comment ghim và checklist.",
             },
             {
+                "node": "Distribution Pack",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/jobs/<JOB_ID>/distribution-pack",
+                "note": "Gói giao cho AI/publisher: kênh đăng, vị trí link, review gate, source tracking và lệnh đo hiệu quả.",
+            },
+            {
                 "node": "Video Review Gate",
                 "type": "http_request",
                 "method": "GET",
@@ -4359,6 +4374,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "distribution-pack",
+                "name": "Get Distribution Pack",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [1040, -120],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{{{$json.queue.job_id}}}}/distribution-pack",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "review-video-gate",
                 "name": "Review Video Gate",
                 "type": "n8n-nodes-base.httpRequest",
@@ -4526,7 +4555,8 @@ def operator_n8n_workflow_json_data():
             "Complete Task": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
             "Publisher Status": {"main": [[{"node": "Publisher Run Safe Claim", "type": "main", "index": 0}]]},
             "Publisher Run Safe Claim": {"main": [[{"node": "Get Publish Pack", "type": "main", "index": 0}]]},
-            "Get Publish Pack": {"main": [[{"node": "Complete Publish", "type": "main", "index": 0}]]},
+            "Get Publish Pack": {"main": [[{"node": "Get Distribution Pack", "type": "main", "index": 0}]]},
+            "Get Distribution Pack": {"main": [[{"node": "Complete Publish", "type": "main", "index": 0}]]},
             "Complete Publish": {"main": [[{"node": "Record Performance Sample", "type": "main", "index": 0}]]},
         },
         "settings": {
@@ -4746,6 +4776,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
             "bootstrap": f"{base_url}/api/operator/bootstrap",
             "channel_router": f"{base_url}/api/operator/channel-router",
             "worker_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
+            "distribution_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/distribution-pack",
             "worker_spec": f"{base_url}/api/operator/worker-spec",
             "toolchain": f"{base_url}/api/operator/toolchain",
             "command_center": f"{base_url}/api/operator/command-center",
@@ -4820,6 +4851,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
             "task_claim": f"{base_url}/api/operator/tasks/claim?include_context=1",
             "task_complete": f"{base_url}/api/operator/tasks/<TASK_ID>/complete",
             "task_upload": f"{base_url}/api/operator/tasks/<TASK_ID>/upload",
+            "distribution_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/distribution-pack",
             "review_video": f"{base_url}/api/operator/jobs/<JOB_ID>/review-video",
             "approve_publish": f"{base_url}/api/operator/jobs/<JOB_ID>/approve",
             "publisher_run": f"{base_url}/api/operator/publisher/run",
@@ -6807,6 +6839,7 @@ def operator_job_context_data(owner_id, job_id):
     tasks = list_production_tasks(owner_id, job_id=job_id, limit=120)
     next_task = next_worker_task(owner_id, job_id=job_id)
     publish_pack = build_static_publish_pack(job, owner_id)
+    distribution_pack = build_distribution_pack(owner_id, job_id)
     selected_manifest = latest_production_manifest(owner_id, job_id)
     selected_references = select_reference_examples_for_job(owner_id, job, limit=3)
 
@@ -6876,6 +6909,7 @@ def operator_job_context_data(owner_id, job_id):
         "tasks": [serialize_operator_task(get_production_task(owner_id, row[0])) for row in tasks],
         "next_task": serialize_operator_task(next_task),
         "publish_pack": publish_pack,
+        "distribution_pack": distribution_pack,
         "reference_learning": {
             "pack_url": "/api/operator/reference-pack",
             "video_patterns_url": "/api/operator/video-patterns",
@@ -6899,6 +6933,7 @@ def operator_job_context_data(owner_id, job_id):
             "task_contract": operator_task_contract("<TASK_ID>"),
             "ready_url": f"/api/operator/jobs/{job_id}/ready",
             "publish_pack_url": f"/api/operator/jobs/{job_id}/publish-pack",
+            "distribution_pack_url": f"/api/operator/jobs/{job_id}/distribution-pack",
             "approve_url": f"/api/operator/jobs/{job_id}/approve",
             "performance_url": "/api/operator/performance",
             "telegram_review": {
@@ -6932,6 +6967,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
         task = next_worker_task(owner_id, job_id=job_id, tool=tool)
     task_payload = serialize_operator_task(task)
     publish_pack = (context_data or {}).get("publish_pack") or build_static_publish_pack(job, owner_id)
+    distribution_pack = (context_data or {}).get("distribution_pack") or build_distribution_pack(owner_id, job_id)
     readiness = production_readiness_data(owner_id, job_id)
     review_summary = build_video_review_summary(owner_id, job_id)
     post_publish = build_post_publish_handoff(owner_id, job_id, days=30)
@@ -6946,6 +6982,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
         "task": task_payload,
         "context": context_data,
         "publish_pack": publish_pack,
+        "distribution_pack": distribution_pack,
         "video_factory_blueprint": blueprint,
         "quality_gate_before_render": {
             "required_scores": blueprint["pre_render_scores"],
@@ -6966,12 +7003,13 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
             "chains": toolchain.get("chains", []),
         },
         "worker_contract": {
-            "start_rule": "Đọc task.prompt, context.reference_learning, video_factory_blueprint, publish_pack và toolchain trước khi gọi tool.",
+            "start_rule": "Đọc task.prompt, context.reference_learning, video_factory_blueprint, publish_pack, distribution_pack và toolchain trước khi gọi tool.",
             "complete_url": f"/api/operator/tasks/{int(task[0])}/complete" if task else "/api/operator/tasks/<TASK_ID>/complete",
             "upload_url": f"/api/operator/tasks/{int(task[0])}/upload" if task else "/api/operator/tasks/<TASK_ID>/upload",
             "claim_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1",
             "job_context_url": f"/api/operator/jobs/{job_id}/context",
             "review_url": f"/api/operator/jobs/{job_id}/review-video",
+            "distribution_pack_url": f"/api/operator/jobs/{job_id}/distribution-pack",
             "post_publish_url": f"/api/operator/jobs/{job_id}/post-publish",
             "telegram": {
                 "task_handoff": f"/task_handoff id={int(task[0])}" if task else "",
@@ -8813,6 +8851,7 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
     built = []
     failed = []
     publish_packs = []
+    distribution_packs = []
     if build:
         for item in created_jobs:
             ok, bundle = build_operator_job_bundle(owner_id, item["job_id"], count=variants, duration=duration)
@@ -8838,6 +8877,16 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
                         "placement_plan": pack.get("placement_plan", {}),
                         "disclosure": pack.get("disclosure", ""),
                     })
+                    distribution = build_distribution_pack(owner_id, item["job_id"])
+                    if distribution:
+                        distribution_packs.append({
+                            "job_id": item["job_id"],
+                            "channel": distribution.get("channel"),
+                            "placement_map": distribution.get("placement_map"),
+                            "review_gate": distribution.get("review_gate"),
+                            "tracking_plan": distribution.get("tracking_plan"),
+                            "commands": distribution.get("commands"),
+                        })
             else:
                 failed.append({"job_id": item["job_id"], "error": bundle.get("error", "build lỗi") if isinstance(bundle, dict) else "build lỗi"})
     worker_next = operator_worker_next_summary(
@@ -8887,6 +8936,7 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
         "built_jobs": built,
         "failed_builds": failed,
         "publish_packs": publish_packs,
+        "distribution_packs": distribution_packs,
         "worker_next": worker_next,
     }
 
@@ -8952,6 +9002,7 @@ async def operator_launch_pipeline(
     readiness = production_readiness_data(owner_id, first_job_id) if first_job_id else {}
     review_video = build_video_review_summary(owner_id, first_job_id) if first_job_id else {}
     post_publish = build_post_publish_handoff(owner_id, first_job_id, days=30) if first_job_id else {}
+    distribution_pack = build_distribution_pack(owner_id, first_job_id) if first_job_id else {}
     return True, "ok", {
         **result,
         "bootstrap": bootstrap_result,
@@ -8962,9 +9013,11 @@ async def operator_launch_pipeline(
             "readiness": readiness,
             "review_video": review_video,
             "post_publish": post_publish,
+            "distribution_pack": distribution_pack,
             "telegram": {
                 "worker_next": f"/worker_next job={first_job_id}" if first_job_id else "/worker_next",
                 "tasks": f"/tasks job={first_job_id}" if first_job_id else "/tasks",
+                "distribution": f"/distribution_pack job={first_job_id}" if first_job_id else "/distribution_pack job=<JOB_ID>",
                 "review": f"/review_video job={first_job_id} send=1" if first_job_id else "/review_video job=<JOB_ID> send=1",
                 "approve": f"/approve_publish job={first_job_id} queue=1 mode=manual" if first_job_id else "/approve_publish job=<JOB_ID> queue=1 mode=manual",
                 "post_publish": f"/post_publish job={first_job_id}" if first_job_id else "/post_publish job=<JOB_ID>",
@@ -8972,6 +9025,7 @@ async def operator_launch_pipeline(
             "api": {
                 "worker_next": "/api/operator/worker-next",
                 "claim_task": "/api/operator/tasks/claim?include_context=1",
+                "distribution_pack": f"/api/operator/jobs/{first_job_id}/distribution-pack" if first_job_id else "/api/operator/jobs/<JOB_ID>/distribution-pack",
                 "review_video": f"/api/operator/jobs/{first_job_id}/review-video" if first_job_id else "/api/operator/jobs/<JOB_ID>/review-video",
                 "approve": f"/api/operator/jobs/{first_job_id}/approve" if first_job_id else "/api/operator/jobs/<JOB_ID>/approve",
                 "publisher_run": "/api/operator/publisher/run",
@@ -9162,6 +9216,127 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
             "revenue": f"/performance_add job={jid} type=revenue value=1 amount=<REVENUE>",
             "cost": f"/performance_add job={jid} type=cost value=1 amount=<COST>",
         },
+    }
+
+def build_distribution_pack(owner_id, job_id):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return None
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    channel = get_social_channel(channel_id, owner_id) if channel_id else None
+    readiness = "unknown"
+    readiness_reason = "Không tìm thấy cấu hình kênh."
+    publish_mode = "manual"
+    if channel:
+        readiness_rows = {row[0]: row for row in list_social_publish_readiness(owner_id)}
+        readiness_row = readiness_rows.get(channel_id)
+        if readiness_row:
+            readiness, readiness_reason = channel_publish_readiness(readiness_row)
+            publish_mode = readiness_row[5] or "manual"
+    publish_pack = build_static_publish_pack(job, owner_id)
+    review = build_video_review_summary(owner_id, job_id)
+    post_publish = build_post_publish_handoff(owner_id, job_id, days=30)
+    bundle = publish_pack.get("affiliate_bundle") or {}
+    placement = publish_pack.get("placement_plan") or bundle.get("placement_plan") or {}
+    primary = bundle.get("primary") or {}
+    tracking = primary.get("tracking") or {}
+    source_prefix = f"{(platform or 'social').lower()}_job_{job_id}"
+    channel_payload = None
+    if channel:
+        cid, ch_platform, ch_name, ch_account, focus, audience, slots, ch_status = channel
+        channel_payload = {
+            "id": cid,
+            "platform": ch_platform,
+            "channel_name": ch_name,
+            "account_label": ch_account,
+            "topic_focus": focus,
+            "audience": audience,
+            "posting_slots": slots,
+            "status": ch_status,
+            "publish_mode": publish_mode,
+            "readiness": readiness,
+            "readiness_reason": readiness_reason,
+            "can_manual_publish": readiness in {"manual_ready", "api_ready", "manual_required"},
+            "can_api_publish": readiness == "api_ready",
+        }
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "job": {
+            "id": jid,
+            "calendar_id": calendar_id,
+            "campaign_id": campaign_id,
+            "channel_id": channel_id,
+            "affiliate_id": affiliate_id,
+            "platform": platform,
+            "topic": topic,
+            "stage": stage,
+            "status": status,
+            "has_final_asset": bool(asset_url),
+            "asset_url": asset_url,
+            "publish_url": publish_url,
+        },
+        "channel": channel_payload,
+        "affiliate": {
+            "id": affiliate_id,
+            "network": network,
+            "product_name": product_name,
+            "url": affiliate_url,
+            "primary_tracking": tracking.get("caption") or publish_pack.get("primary_affiliate", {}).get("tracking_url", ""),
+        },
+        "publish_pack": publish_pack,
+        "placement_map": {
+            "caption": tracking.get("caption") or publish_pack.get("primary_affiliate", {}).get("tracking_url", ""),
+            "pinned_comment": placement.get("pinned_comment") or tracking.get("comment") or "",
+            "status_or_story": tracking.get("status") or "",
+            "bio_or_profile": tracking.get("bio") or "",
+            "ads": tracking.get("ads") or "",
+            "related_links": publish_pack.get("related_links", [])[:8],
+            "disclosure": publish_pack.get("disclosure", ""),
+        },
+        "review_gate": {
+            "decision": ((review or {}).get("review_decision") or {}).get("decision", "REVIEW_REQUIRED"),
+            "can_auto_publish": bool(((review or {}).get("review_decision") or {}).get("can_auto_publish")),
+            "missing_checks": (review or {}).get("missing_checks") or (review or {}).get("missing") or [],
+            "next_command": (review or {}).get("next_command") or f"/review_video job={job_id} send=1",
+        },
+        "tracking_plan": {
+            "source_prefix": source_prefix,
+            "sources": {
+                "caption": f"{source_prefix}_caption",
+                "comment": f"{source_prefix}_comment",
+                "status": f"{source_prefix}_status",
+                "bio": f"{source_prefix}_bio",
+                "ads": f"{source_prefix}_ads",
+            },
+            "events": ["view", "click", "lead", "order", "revenue", "cost"],
+            "post_publish": (post_publish or {}).get("tracking_event_pack", {}),
+        },
+        "commands": {
+            "telegram": {
+                "worker_pack": f"/worker_pack job={job_id}",
+                "review_video": f"/review_video job={job_id} send=1",
+                "approve_publish": f"/approve_publish job={job_id} queue=1 mode=manual",
+                "publish_pack": f"/publish_pack job={job_id}",
+                "post_publish": f"/post_publish job={job_id}",
+                "mark_published": f"/mark_published job={job_id} url=<PUBLISH_URL> views=0 clicks=0 note=manual",
+                "performance_view": f"/performance_add job={job_id} type=view value=1 source={source_prefix}_caption",
+                "performance_revenue": f"/performance_add job={job_id} type=revenue value=1 amount=<VND> source={source_prefix}_caption",
+            },
+            "api": {
+                "worker_pack": f"/api/operator/jobs/{job_id}/worker-pack",
+                "review_video": f"/api/operator/jobs/{job_id}/review-video",
+                "approve_publish": f"/api/operator/jobs/{job_id}/approve",
+                "publish_pack": f"/api/operator/jobs/{job_id}/publish-pack",
+                "distribution_pack": f"/api/operator/jobs/{job_id}/distribution-pack",
+                "post_publish": f"/api/operator/jobs/{job_id}/post-publish",
+                "performance": "/api/operator/performance",
+            },
+        },
+        "rule": "Distribution pack là hợp đồng đăng và đo hiệu quả cho một job. Không auto publish nếu review_gate chưa APPROVE hoặc channel không api_ready; manual/API đều phải giữ disclosure affiliate.",
     }
 
 def build_video_review_summary(owner_id, job_id):
@@ -13474,6 +13649,7 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
             "",
             "<b>Điều hành tiếp:</b>",
             f"• Tasks: <code>{html.escape(telegram_next.get('tasks') or f'/tasks job={first_job_id}')}</code>",
+            f"• Distribution: <code>{html.escape(telegram_next.get('distribution') or f'/distribution_pack job={first_job_id}')}</code>",
             f"• Review video: <code>{html.escape(telegram_next.get('review') or f'/review_video job={first_job_id} send=1')}</code>",
             f"• Approve queue: <code>{html.escape(telegram_next.get('approve') or f'/approve_publish job={first_job_id} queue=1 mode=manual')}</code>",
             f"• Sau đăng: <code>{html.escape(telegram_next.get('post_publish') or f'/post_publish job={first_job_id}')}</code>",
@@ -14212,6 +14388,7 @@ def operator_category_keyboard(category):
         ],
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📈 Post publish", "postpublish"),
+            ("🧭 Distribution pack", "distributionpack"),
             ("📮 Publish queue", "publishqueue"),
             ("🤖 Publisher handoff", "publisherhandoff"), ("✅ Approve publish", "approvepublish"),
             ("▶️ Publisher run", "publisherrun"), ("📡 Publisher status", "publisherstatus"),
@@ -14332,6 +14509,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
         f"• Worker pack cho AI/tool: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/worker-pack</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
+        f"• Distribution pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/distribution-pack</code>",
         f"• Review video gate: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/review-video</code>",
         f"• Duyệt publish: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/approve</code>",
         f"• Lấy hàng đợi đăng: <code>GET {html.escape(base_url)}/api/operator/publish/next</code>",
@@ -14592,6 +14770,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "calendarplan": "/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "postpublish": "/post_publish job=<JOB_ID> days=30\n/brain sau đăng job <JOB_ID> cần đo gì\nGET /api/operator/jobs/<JOB_ID>/post-publish",
+        "distributionpack": "/distribution_pack job=<JOB_ID>\nGET /api/operator/jobs/<JOB_ID>/distribution-pack",
         "approvepublish": "/approve_publish job=<JOB_ID> queue=1 mode=manual note=duyet_ok\nPOST /api/operator/jobs/<JOB_ID>/approve",
         "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
@@ -15206,6 +15385,62 @@ async def cmd_post_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not handoff:
         return await update.message.reply_text("❌ Không tìm thấy production job.")
     await update.message.reply_text(format_post_publish_handoff(handoff), parse_mode="HTML")
+
+async def cmd_distribution_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/distribution_pack job=&lt;JOB_ID&gt;</code>",
+            parse_mode="HTML",
+        )
+    pack = build_distribution_pack(update.effective_user.id, job_id)
+    if not pack:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    job = pack.get("job") or {}
+    channel = pack.get("channel") or {}
+    affiliate = pack.get("affiliate") or {}
+    placement = pack.get("placement_map") or {}
+    review = pack.get("review_gate") or {}
+    tracking = pack.get("tracking_plan") or {}
+    commands = (pack.get("commands") or {}).get("telegram") or {}
+    lines = [
+        f"🧭 <b>DISTRIBUTION PACK — JOB #{job_id}</b>",
+        f"• Topic: {html.escape(job.get('topic') or '-')}",
+        f"• Platform: <code>{html.escape(job.get('platform') or '-')}</code>",
+        f"• Kênh: <code>#{channel.get('id') or '-'}</code> {html.escape(channel.get('channel_name') or '-')} / {html.escape(channel.get('account_label') or 'main')}",
+        f"• Readiness: <b>{html.escape(channel.get('readiness') or 'unknown')}</b> | {html.escape(channel.get('readiness_reason') or '-')}",
+        f"• Affiliate: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product_name') or '-')}",
+        "",
+        "<b>Đặt link:</b>",
+        f"• Caption: <code>{html.escape(placement.get('caption') or '-')}</code>",
+        f"• Comment ghim: <code>{html.escape(placement.get('pinned_comment') or '-')}</code>",
+        f"• Status/story: <code>{html.escape(placement.get('status_or_story') or '-')}</code>",
+        f"• Disclosure: {html.escape(placement.get('disclosure') or '-')}",
+        "",
+        "<b>Review gate:</b>",
+        f"• Decision: <code>{html.escape(review.get('decision') or 'REVIEW_REQUIRED')}</code>",
+        f"• Auto publish: <b>{'có' if review.get('can_auto_publish') else 'không'}</b>",
+        f"• Next: <code>{html.escape(review.get('next_command') or commands.get('review_video') or '')}</code>",
+        "",
+        "<b>Tracking source:</b>",
+    ]
+    for key, src in (tracking.get("sources") or {}).items():
+        lines.append(f"• {html.escape(key)}: <code>{html.escape(src)}</code>")
+    lines.extend([
+        "",
+        "<b>Lệnh điều hành:</b>",
+        f"• Worker: <code>{html.escape(commands.get('worker_pack') or '')}</code>",
+        f"• Approve: <code>{html.escape(commands.get('approve_publish') or '')}</code>",
+        f"• Sau đăng: <code>{html.escape(commands.get('mark_published') or '')}</code>",
+        f"• Doanh thu: <code>{html.escape(commands.get('performance_revenue') or '')}</code>",
+        "",
+        f"API: <code>/api/operator/jobs/{job_id}/distribution-pack</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -17894,6 +18129,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
+    tg_app.add_handler(CommandHandler("distribution_pack", cmd_distribution_pack))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
@@ -18991,6 +19227,14 @@ async def api_operator_job_publish_pack(job_id: int, request: Request):
             "performance_url": "/api/operator/performance",
         },
     }
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/distribution-pack")
+async def api_operator_job_distribution_pack(job_id: int, request: Request):
+    verify_operator_api_token(request)
+    pack = build_distribution_pack(ADMIN_ID, job_id)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return pack
 
 @fastapi_app.get("/api/operator/jobs/{job_id}/review-video")
 async def api_operator_job_review_video(job_id: int, request: Request):
