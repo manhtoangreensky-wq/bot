@@ -2985,7 +2985,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "telegram_status", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -2994,6 +2994,8 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/goal-audit"),
         ("GET", "/api/operator/dispatch"),
         ("POST", "/api/operator/dispatch"),
+        ("GET", "/api/operator/run-cycle"),
+        ("POST", "/api/operator/run-cycle"),
         ("GET", "/runtime"),
         ("GET", "/api/operator/worker-spec"),
         ("GET", "/api/operator/commander-pack"),
@@ -3083,6 +3085,7 @@ def operator_smoke_test_data(owner_id):
         "commands_documented": all(cmd for cmd in required_commands),
         "goal_audit_in_spec": "/api/operator/goal-audit" in spec_text and "/api/operator/goal-audit" in n8n_text,
         "dispatch_in_spec": "/api/operator/dispatch" in spec_text and "/api/operator/dispatch" in n8n_text,
+        "run_cycle_in_spec": "/api/operator/run-cycle" in spec_text and "/api/operator/run-cycle" in n8n_text,
         "make_video_in_spec": "/api/operator/make-video" in spec_text and "/api/operator/make-video" in n8n_text,
         "publisher_run_in_spec": "/api/operator/publisher/run" in spec_text and "/api/operator/publisher/run" in n8n_text,
         "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
@@ -3180,6 +3183,7 @@ def operator_worker_spec_data():
         "goal_audit_url": f"{base_url}/api/operator/goal-audit",
         "mission_control_url": f"{base_url}/api/operator/mission",
         "dispatch_url": f"{base_url}/api/operator/dispatch",
+        "run_cycle_url": f"{base_url}/api/operator/run-cycle",
         "next_run_url": f"{base_url}/api/operator/next-run",
         "control_contract_url": f"{base_url}/api/operator/control-contract",
         "command_center_url": f"{base_url}/api/operator/command-center",
@@ -3262,6 +3266,7 @@ def operator_worker_spec_data():
             {"step": 1.05, "name": "command_center", "method": "GET", "url": "/api/operator/command-center?days=30&platform=tiktok"},
             {"step": 1.052, "name": "next_run_card", "method": "GET", "url": "/api/operator/next-run?days=30&platform=tiktok"},
             {"step": 1.053, "name": "dispatch_preview", "method": "GET", "url": "/api/operator/dispatch?days=30&platform=tiktok&limit=8"},
+            {"step": 1.0535, "name": "run_cycle_preview", "method": "GET", "url": "/api/operator/run-cycle?days=30&platform=tiktok&limit=8&max_steps=3&execute=0"},
             {"step": 1.054, "name": "control_contract", "method": "GET", "url": "/api/operator/control-contract?days=30&platform=tiktok"},
             {"step": 1.055, "name": "command_run_preview", "method": "POST", "url": "/api/operator/command/run"},
             {"step": 1.06, "name": "mission_control", "method": "GET", "url": "/api/operator/mission?days=30&platform=tiktok&limit=8"},
@@ -3337,6 +3342,12 @@ def operator_worker_spec_data():
                 "url": "/api/operator/dispatch?days=30&platform=tiktok&limit=8",
                 "purpose": "Dispatcher một bước cho Claude/n8n: preview bước kế tiếp hoặc execute claim_task an toàn để nhận prompt_pack; không tự review/publish.",
                 "body": {"execute": False, "claim_task": True, "include_context": True, "include_prompt": True, "notify_admin": True},
+            },
+            "run_cycle": {
+                "method": "GET|POST",
+                "url": "/api/operator/run-cycle?days=30&platform=tiktok&limit=8&max_steps=3&execute=0",
+                "purpose": "Dispatcher nhiều bước an toàn: chỉ claim task safe_to_execute để lấy prompt_pack, gặp setup/review/publish gate thì dừng.",
+                "body": {"execute": False, "claim_task": True, "include_context": True, "include_prompt": True, "max_steps": 3, "notify_admin": True},
             },
             "control_contract": {
                 "method": "GET",
@@ -3950,6 +3961,13 @@ def operator_n8n_template_data():
                 "note": "Dispatcher một bước: cho biết có thể claim task an toàn hay phải dừng ở setup/review/publish gate.",
             },
             {
+                "node": "Run Cycle Preview",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/run-cycle?days=30&platform=tiktok&limit=8&max_steps=3&execute=0",
+                "note": "Preview vòng điều phối nhiều bước. Khi execute=1 chỉ claim task an toàn để lấy prompt pack, không review/publish.",
+            },
+            {
                 "node": "Read Control Contract",
                 "type": "http_request",
                 "method": "GET",
@@ -4441,11 +4459,25 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "run-cycle-preview",
+                "name": "Run Cycle Preview",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-20, -1030],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/run-cycle?days=30&platform=tiktok&limit=8&max_steps=3&execute=0",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "control-contract",
                 "name": "Control Contract",
                 "type": "n8n-nodes-base.httpRequest",
                 "typeVersion": 4.2,
-                "position": [-20, -850],
+                "position": [220, -850],
                 "parameters": {
                     "method": "GET",
                     "url": f"{base_url_expr}/api/operator/control-contract?days=30&platform=tiktok&limit=8",
@@ -5178,7 +5210,8 @@ def operator_n8n_workflow_json_data():
             "Goal Audit": {"main": [[{"node": "Read Command Center", "type": "main", "index": 0}]]},
             "Read Command Center": {"main": [[{"node": "Next Run Card", "type": "main", "index": 0}]]},
             "Next Run Card": {"main": [[{"node": "Dispatch Preview", "type": "main", "index": 0}]]},
-            "Dispatch Preview": {"main": [[{"node": "Control Contract", "type": "main", "index": 0}]]},
+            "Dispatch Preview": {"main": [[{"node": "Run Cycle Preview", "type": "main", "index": 0}]]},
+            "Run Cycle Preview": {"main": [[{"node": "Control Contract", "type": "main", "index": 0}]]},
             "Control Contract": {"main": [[{"node": "Command Run Preview", "type": "main", "index": 0}]]},
             "Command Run Preview": {"main": [[{"node": "Read Mission Control", "type": "main", "index": 0}]]},
             "Read Mission Control": {"main": [[{"node": "Read Channel Router", "type": "main", "index": 0}]]},
@@ -6102,6 +6135,83 @@ def operator_dispatch_execute_data(owner_id, days=30, platform="tiktok", limit=8
         "preview": preview,
         "result": result,
         "after_done": "/api/operator/dispatch hoặc /operator_dispatch để lấy bước kế tiếp.",
+    }
+
+def operator_run_cycle_data(owner_id, days=30, platform="tiktok", limit=8, max_steps=3, execute=False, claim_task=True, include_context=True, include_prompt=True):
+    days = max(1, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 8), 20))
+    max_steps = max(1, min(int(max_steps or 3), 10))
+    platform = (platform or "tiktok").lower()
+    steps = []
+    stop_reason = "max_steps_reached"
+    for index in range(1, max_steps + 1):
+        preview = operator_dispatch_preview_data(owner_id, days=days, platform=platform, limit=limit)
+        action = preview.get("dispatch_action") or {}
+        step = {
+            "step": index,
+            "mode": preview.get("mode"),
+            "action": action,
+            "executed": False,
+            "result": None,
+        }
+        if not action.get("safe_to_execute"):
+            stop_reason = f"gate:{action.get('kind') or 'not_safe'}"
+            steps.append(step)
+            break
+        if action.get("kind") != "claim_task":
+            stop_reason = f"unsupported_safe_action:{action.get('kind') or 'unknown'}"
+            steps.append(step)
+            break
+        if not execute or not claim_task:
+            stop_reason = "preview_only"
+            steps.append(step)
+            break
+        result = operator_dispatch_execute_data(
+            owner_id,
+            days=days,
+            platform=platform,
+            limit=limit,
+            claim_task=claim_task,
+            include_context=include_context,
+            include_prompt=include_prompt,
+        )
+        step["executed"] = bool(result.get("executed"))
+        step["result"] = result.get("result")
+        steps.append(step)
+        if not result.get("executed"):
+            stop_reason = "dispatch_not_executed"
+            break
+    claimed_tasks = []
+    for step in steps:
+        result = step.get("result") or {}
+        task = result.get("task") or {}
+        if task:
+            claimed_tasks.append({
+                "task_id": task.get("id"),
+                "job_id": task.get("job_id"),
+                "task_type": task.get("task_type"),
+                "tool": task.get("tool"),
+                "has_prompt_pack": bool(result.get("prompt_pack")),
+                "submit_url": result.get("submit_url"),
+                "upload_url": result.get("upload_url"),
+                "acceptance_url": result.get("acceptance_url"),
+            })
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "execute": bool(execute),
+        "platform": platform,
+        "days": days,
+        "max_steps": max_steps,
+        "steps": steps,
+        "claimed_tasks": claimed_tasks,
+        "stop_reason": stop_reason,
+        "next": {
+            "dispatch": "/api/operator/dispatch",
+            "run_cycle": "/api/operator/run-cycle",
+            "telegram": "/operator_cycle execute=1 max=3",
+        },
+        "rule": "Run cycle chỉ lặp các dispatch action safe_to_execute=claim_task. Nó không render giả, không approve và không publish; gặp gate là dừng.",
     }
 
 def get_production_job(job_id, owner_id):
@@ -12770,6 +12880,17 @@ class OperatorDispatchRequest(BaseModel):
     include_prompt: bool = True
     notify_admin: bool = True
 
+class OperatorRunCycleRequest(BaseModel):
+    days: int = Field(default=30, ge=1, le=180)
+    platform: str = Field(default="tiktok", max_length=40)
+    limit: int = Field(default=8, ge=3, le=20)
+    max_steps: int = Field(default=3, ge=1, le=10)
+    execute: bool = False
+    claim_task: bool = True
+    include_context: bool = True
+    include_prompt: bool = True
+    notify_admin: bool = True
+
 class AgentGemini:
     @staticmethod
     def chat(prompt: str, text: str, uid, is_json: bool = False) -> str:
@@ -17549,6 +17670,54 @@ async def cmd_operator_dispatch(update: Update, context: ContextTypes.DEFAULT_TY
     lines.append("\nAPI: <code>GET/POST /api/operator/dispatch</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    days = max(1, min(safe_int(data.get("days") or data.get("ngay"), 30), 180))
+    limit = max(3, min(safe_int(data.get("limit"), 8), 20))
+    max_steps = max(1, min(safe_int(data.get("max") or data.get("max_steps") or data.get("steps"), 3), 10))
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    execute = truthy_value(data.get("execute") or data.get("run"), False)
+    result = operator_run_cycle_data(
+        update.effective_user.id,
+        days=days,
+        platform=platform,
+        limit=limit,
+        max_steps=max_steps,
+        execute=execute,
+        claim_task=True,
+        include_context=True,
+        include_prompt=True,
+    )
+    lines = [
+        "🔁 <b>OPERATOR SAFE RUN CYCLE</b>",
+        f"• Mode: <b>{'EXECUTE' if execute else 'PREVIEW'}</b> | Platform: <code>{html.escape(platform)}</code>",
+        f"• Steps: <b>{len(result.get('steps') or [])}</b>/<b>{max_steps}</b> | Claimed: <b>{len(result.get('claimed_tasks') or [])}</b>",
+        f"• Stop: <code>{html.escape(result.get('stop_reason') or '-')}</code>",
+        "",
+        "<b>Các bước:</b>",
+    ]
+    for step in (result.get("steps") or [])[:8]:
+        action = step.get("action") or {}
+        step_result = step.get("result") or {}
+        task = step_result.get("task") or {}
+        line = (
+            f"• #{step.get('step')} <code>{html.escape(action.get('kind') or '-')}</code> "
+            f"| executed=<b>{'YES' if step.get('executed') else 'NO'}</b>"
+        )
+        if task:
+            line += f" | task=<code>#{task.get('id')}</code> prompt=<b>{'YES' if step_result.get('prompt_pack') else 'NO'}</b>"
+        lines.append(line)
+    lines.extend([
+        "",
+        "<b>Lệnh:</b>",
+        f"• Preview: <code>/operator_cycle max={max_steps}</code>",
+        f"• Claim an toàn: <code>/operator_cycle execute=1 max={max_steps}</code>",
+        "API: <code>GET/POST /api/operator/run-cycle</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_operator_mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -17758,6 +17927,7 @@ def operator_category_keyboard(category):
             ("🎯 Campaign preset", "campaignpreset"),
             ("🎛 Next run card", "nextrun"),
             ("🧭 Dispatch one step", "dispatch"),
+            ("🔁 Run cycle", "cycle"),
             ("👑 Commander pack", "commanderpack"), ("📜 Control contract", "contract"),
             ("🚀 Launch", "launch"), ("🧰 Bootstrap", "bootstrap"),
             ("🎬 Make video", "makevideo"),
@@ -17830,7 +18000,8 @@ def operator_category_keyboard(category):
             ("💳 Check PayOS", "checkpayos"),
         ],
         "cat_api": [
-            ("🔌 Operator API", "api"), ("🔁 Operator loop", "loop"),
+            ("🔌 Operator API", "api"), ("🔁 Run cycle", "cycle"),
+            ("🔁 Operator loop", "loop"),
             ("🧠 Command run", "commandrun"),
             ("🔁 Postback setup", "postbacksetup"),
             ("📜 Worker spec", "workerspec"), ("🧩 Platform adapters", "platformadapters"),
@@ -17906,6 +18077,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Control contract: <code>GET {html.escape(base_url)}/api/operator/control-contract?days=30&amp;platform=tiktok</code>",
         f"• Next run card: <code>GET {html.escape(base_url)}/api/operator/next-run</code>",
         f"• One-step dispatcher: <code>GET/POST {html.escape(base_url)}/api/operator/dispatch</code>",
+        f"• Safe run cycle: <code>GET/POST {html.escape(base_url)}/api/operator/run-cycle</code>",
         f"• Bootstrap thiếu setup: <code>POST {html.escape(base_url)}/api/operator/bootstrap</code>",
         f"• Campaign preset: <code>POST {html.escape(base_url)}/api/operator/campaign-preset</code>",
         f"• Launch một lệnh: <code>POST {html.escape(base_url)}/api/operator/launch</code>",
@@ -17970,6 +18142,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"topic":"công nghệ AI","platform":"tiktok","channel":"all","limit":3,"build":true,"bootstrap":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload campaign preset mẫu:</b>",
         '<pre>{"preset":"tech","platform":"tiktok","limit":3,"execute":false,"build":true,"duration":45,"notify_admin":true}</pre>',
+        "<b>Payload run-cycle mẫu:</b>",
+        '<pre>{"days":30,"platform":"tiktok","limit":8,"max_steps":3,"execute":false,"claim_task":true,"include_prompt":true,"notify_admin":true}</pre>',
         "<b>Payload make-video mẫu:</b>",
         '<pre>{"topic":"đồ công nghệ văn phòng","platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload affiliate-scale mẫu:</b>",
@@ -18181,6 +18355,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "today": "/operator_today",
         "nextrun": "/operator_next_run days=30 platform=tiktok\nGET /api/operator/next-run?days=30&platform=tiktok",
         "dispatch": "/operator_dispatch days=30 platform=tiktok\n/operator_dispatch execute=1\nGET /api/operator/dispatch?days=30&platform=tiktok\nPOST /api/operator/dispatch",
+        "cycle": "/operator_cycle max=3\n/operator_cycle execute=1 max=3\nGET /api/operator/run-cycle?days=30&platform=tiktok&max_steps=3&execute=0\nPOST /api/operator/run-cycle",
         "playbook": "/operator_playbook",
         "admin_dashboard": "/dashboard",
         "api": "/operator_api",
@@ -21884,6 +22059,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_today", cmd_operator_today))
     tg_app.add_handler(CommandHandler("operator_next_run", cmd_operator_next_run))
     tg_app.add_handler(CommandHandler("operator_dispatch", cmd_operator_dispatch))
+    tg_app.add_handler(CommandHandler("operator_cycle", cmd_operator_cycle))
     tg_app.add_handler(CommandHandler("operator_command", cmd_operator_command))
     tg_app.add_handler(CommandHandler("operator_mission", cmd_operator_mission))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
@@ -22699,6 +22875,59 @@ async def api_operator_dispatch(payload: OperatorDispatchRequest, request: Reque
             )
         except Exception as e:
             logger.error(f"Operator dispatch notify error: {e}")
+    return result
+
+@fastapi_app.get("/api/operator/run-cycle")
+async def api_operator_run_cycle_preview(
+    request: Request,
+    days: int = 30,
+    platform: str = "tiktok",
+    limit: int = 8,
+    max_steps: int = 3,
+    execute: int = 0,
+):
+    verify_operator_api_token(request)
+    return operator_run_cycle_data(
+        ADMIN_ID,
+        days=days,
+        platform=platform,
+        limit=limit,
+        max_steps=max_steps,
+        execute=bool(execute),
+        claim_task=True,
+        include_context=True,
+        include_prompt=True,
+    )
+
+@fastapi_app.post("/api/operator/run-cycle")
+async def api_operator_run_cycle(payload: OperatorRunCycleRequest, request: Request):
+    verify_operator_api_token(request)
+    result = operator_run_cycle_data(
+        ADMIN_ID,
+        days=payload.days,
+        platform=payload.platform,
+        limit=payload.limit,
+        max_steps=payload.max_steps,
+        execute=payload.execute,
+        claim_task=payload.claim_task,
+        include_context=payload.include_context,
+        include_prompt=payload.include_prompt,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🔁 <b>OPERATOR RUN CYCLE API</b>\n\n"
+                    f"• Execute: <b>{'YES' if result.get('execute') else 'NO'}</b>\n"
+                    f"• Steps: <b>{len(result.get('steps') or [])}</b> | Claimed: <b>{len(result.get('claimed_tasks') or [])}</b>\n"
+                    f"• Stop: <code>{html.escape(result.get('stop_reason') or '-')}</code>\n"
+                    "• Next: <code>/operator_cycle execute=1 max=3</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Operator run cycle notify error: {e}")
     return result
 
 @fastapi_app.post("/api/operator/command/run")
