@@ -3691,7 +3691,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "customer_surface", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "head_brain", "head_run", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publish_cockpit", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "viral_remix", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_intake", "worker_autorun", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_intake", "worker_autorun", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "approve_ready", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -9214,6 +9214,65 @@ def approve_publish_job(owner_id, job_id, note="", queue=True, mode="manual", sc
         if not ok:
             return False, str(result), {"approved": True, "queued": False}
     return True, "approved", {"approved": True, "queued": queued, "queue_id": queue_id}
+
+def approve_ready_jobs(owner_id, limit=3, mode="manual", scheduled_at="", note="admin_batch_approve_ready"):
+    limit = max(1, min(int(limit or 3), 10))
+    mode = (mode or "manual").lower()
+    if mode not in {"manual", "api"}:
+        return False, "invalid_mode", {"approved": [], "skipped": []}
+    approved = []
+    skipped = []
+    for jid, stage, status, platform, topic, channel_name, product_name, updated_at in list_production_jobs(owner_id, limit=max(limit * 4, 20)):
+        if len(approved) >= limit:
+            break
+        if (status or "").lower() in {"published", "done", "cancelled"}:
+            continue
+        summary = build_video_review_summary(owner_id, jid)
+        decision = (summary or {}).get("review_decision") or {}
+        if decision.get("decision") != "READY_FOR_ADMIN_APPROVAL":
+            skipped.append({
+                "job_id": jid,
+                "topic": topic,
+                "platform": platform,
+                "reason": decision.get("decision") or "not_ready",
+                "next": decision.get("next_telegram") or ((summary or {}).get("commands") or {}).get("fix_next") or "",
+            })
+            continue
+        ok, reason, info = approve_publish_job(
+            owner_id,
+            jid,
+            note=note,
+            queue=True,
+            mode=mode,
+            scheduled_at=scheduled_at,
+        )
+        if ok:
+            approved.append({
+                "job_id": jid,
+                "queue_id": info.get("queue_id") or 0,
+                "topic": topic,
+                "platform": platform,
+                "channel_name": channel_name,
+                "product_name": product_name,
+                "mode": mode,
+            })
+        else:
+            skipped.append({
+                "job_id": jid,
+                "topic": topic,
+                "platform": platform,
+                "reason": reason,
+                "next": (info or {}).get("next_action", ""),
+                "missing": (info or {}).get("missing", []),
+            })
+    return True, "ok", {
+        "approved": approved,
+        "skipped": skipped,
+        "limit": limit,
+        "mode": mode,
+        "scheduled_at": scheduled_at,
+        "rule": "Chỉ batch approve các job có review_decision READY_FOR_ADMIN_APPROVAL; vẫn cần admin gọi lệnh này.",
+    }
 
 def create_creative_variant(owner_id, job_id, variant_label, hook="", script_angle="", caption="", cta="", hashtags="", creative_score=0, note=""):
     job = get_production_job(job_id, owner_id)
@@ -17439,6 +17498,14 @@ class OperatorApprovePublishRequest(BaseModel):
     note: str = Field(default="", max_length=1200)
     notify_admin: bool = True
 
+class OperatorApproveReadyRequest(BaseModel):
+    limit: int = Field(default=3, ge=1, le=10)
+    mode: str = Field(default="manual", max_length=20)
+    scheduled_at: str = Field(default="", max_length=80)
+    note: str = Field(default="api_batch_approve_ready", max_length=1200)
+    send_handoff: bool = True
+    notify_admin: bool = True
+
 class OperatorPerformanceRequest(BaseModel):
     job_id: int = Field(gt=0)
     event_type: str = Field(default="click", max_length=40)
@@ -19393,6 +19460,16 @@ def operator_brain_fallback(raw_text):
             "platform": platform,
             "confidence": 82,
         }
+    if any(word in lower for word in [
+        "approve ready", "duyệt hết", "duyet het", "duyệt hàng loạt", "duyet hang loat",
+        "duyệt các job", "duyet cac job", "chốt hết job", "chot het job"
+    ]):
+        return {
+            "intent": "approve_ready",
+            "limit": max(1, min(int_from_text(lower, ["limit", "max"], 0) or limit or 3, 10)),
+            "mode": "api" if "api" in lower else "manual",
+            "confidence": 82,
+        }
     if queue_id and any_url and any(word in lower for word in ["đã đăng", "da dang", "published", "mark", "xong", "hoàn tất", "hoan tat"]):
         return {
             "intent": "publish_queue_set",
@@ -19726,7 +19803,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, head_brain, head_run, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, head_brain, head_run, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, approve_ready, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- head_brain: khi admin muốn đầu não/cockpit tổng từ lệnh Telegram tới video, publish, affiliate, tiền và scale.\n"
@@ -19764,6 +19841,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- reference_add: khi admin gửi link/path video và nói học/lưu/tham khảo/mẫu để đưa vào reference catalog.\n"
         "- reference_scan: khi admin muốn quét/import/học cả thư mục video tham khảo.\n"
         "- approve_publish: khi admin nói duyệt/chốt job để đưa vào hàng đợi đăng; cần job ID.\n"
+        "- approve_ready: khi admin muốn duyệt hàng loạt các job đã READY_FOR_ADMIN_APPROVAL sau khi đã xem review packet.\n"
         "- publisher_capabilities: khi admin hỏi nền tảng nào auto được/manual, token cần có, năng lực đăng bài hiện tại.\n"
         "- platform_adapters: khi admin hỏi adapter nền tảng, nền tảng nào auto/manual, official API, route publish an toàn hoặc env nào thiếu.\n"
         "- publisher_run: khi admin nói chạy publisher/đăng queue tiếp theo.\n"
@@ -19970,6 +20048,11 @@ def brain_command_preview(plan):
         return (
             f"/approve_publish job={int(plan.get('job') or 0)} queue=1 "
             f"mode={plan.get('mode') or 'manual'} note=brain_approve"
+        )
+    if intent == "approve_ready":
+        return (
+            f"/approve_ready limit={max(1, min(int(plan.get('limit') or 3), 10))} "
+            f"mode={plan.get('mode') or 'manual'} handoff=1"
         )
     if intent == "publisher_run":
         return (
@@ -20343,6 +20426,14 @@ async def run_brain_plan(update, context, plan):
                 "note=brain_approve",
             ]
             return await cmd_approve_publish(update, context)
+        if intent == "approve_ready":
+            context.args = [
+                f"limit={max(1, min(int(plan.get('limit') or 3), 10))}",
+                f"mode={plan.get('mode') or 'manual'}",
+                "handoff=1",
+                "note=brain_batch_approve_ready",
+            ]
+            return await cmd_approve_ready(update, context)
         if intent == "publisher_run":
             context.args = [
                 f"platform={plan.get('platform') or 'tiktok'}",
@@ -24478,6 +24569,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "commentpack": "/comment_pack job=<JOB_ID> max=10 delay=30\nGET /api/operator/jobs/<JOB_ID>/comment-pack?max_comments=10",
         "publishcockpit": "/publish_cockpit platform=tiktok limit=10\n/publish_cockpit platform=all limit=20\nGET /api/operator/publish-cockpit?platform=tiktok",
         "approvepublish": "/approve_publish job=<JOB_ID> queue=1 mode=manual note=duyet_ok\nPOST /api/operator/jobs/<JOB_ID>/approve",
+        "approveready": "/approve_ready limit=3 mode=manual handoff=1\nPOST /api/operator/approve-ready",
         "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
         "publishqueue": "/publish_queue\n/publisher_handoff queue=<QUEUE_ID>\n/publisher_auto_check queue=<QUEUE_ID>\n/publisher_auto queue=<QUEUE_ID>\n/publish_queue_set id=<QUEUE_ID> status=published url=https://...",
@@ -25589,6 +25681,64 @@ async def cmd_approve_publish(update: Update, context: ContextTypes.DEFAULT_TYPE
                 + html.escape(str(report.get("errors")[:2])),
                 parse_mode="HTML",
             )
+
+async def cmd_approve_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    limit = max(1, min(safe_int(data.get("limit") or data.get("max"), 3), 10))
+    mode = (data.get("mode") or "manual").lower()
+    scheduled_at = data.get("schedule") or data.get("time") or ""
+    send_handoff = truthy_value(data.get("handoff") or data.get("send_handoff"), True)
+    ok, reason, result = approve_ready_jobs(
+        update.effective_user.id,
+        limit=limit,
+        mode=mode,
+        scheduled_at=scheduled_at,
+        note=data.get("note") or "admin_batch_approve_ready",
+    )
+    if not ok:
+        return await update.message.reply_text(f"❌ Approve ready lỗi: <code>{html.escape(reason)}</code>", parse_mode="HTML")
+    approved = result.get("approved") or []
+    skipped = result.get("skipped") or []
+    lines = [
+        "✅ <b>BATCH APPROVE READY</b>",
+        f"• Approved: <b>{len(approved)}</b> | Skipped: <b>{len(skipped)}</b> | Mode: <code>{html.escape(mode)}</code>",
+    ]
+    if approved:
+        lines.append("\n<b>Đã queue:</b>")
+        for item in approved[:10]:
+            lines.append(
+                f"• job <code>#{item.get('job_id')}</code> → queue <code>#{item.get('queue_id') or '-'}</code> | "
+                f"{html.escape(item.get('platform') or '-')}\n"
+                f"  Handoff: <code>/publisher_handoff queue={item.get('queue_id') or '<QUEUE_ID>'}</code>"
+            )
+    if skipped:
+        lines.append("\n<b>Bỏ qua:</b>")
+        for item in skipped[:8]:
+            lines.append(
+                f"• job <code>#{item.get('job_id')}</code> | <code>{html.escape(item.get('reason') or '-')}</code>"
+                + (f" | Next: <code>{html.escape(item.get('next') or '')}</code>" if item.get("next") else "")
+            )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    if send_handoff:
+        for item in approved[:3]:
+            queue_id = safe_int(item.get("queue_id"), 0)
+            if not queue_id:
+                continue
+            report = await send_publisher_handoff_packet(
+                context,
+                update.effective_chat.id,
+                update.effective_user.id,
+                queue_id,
+                send_media=True,
+            )
+            if report.get("errors"):
+                await update.message.reply_text(
+                    f"⚠️ Handoff queue #{queue_id} gửi file lỗi: "
+                    + html.escape(str(report.get("errors")[:2])),
+                    parse_mode="HTML",
+                )
 
 async def cmd_asset_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -28911,6 +29061,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("pipeline_pack", cmd_pipeline_pack))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
+    tg_app.add_handler(CommandHandler("approve_ready", cmd_approve_ready))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
     tg_app.add_handler(CommandHandler("publish_cockpit", cmd_publish_cockpit))
     tg_app.add_handler(CommandHandler("publisher_handoff", cmd_publisher_handoff))
@@ -31104,6 +31255,50 @@ async def api_operator_approve_publish(job_id: int, payload: OperatorApprovePubl
             response["publisher_handoff"] = build_publisher_handoff(queue_payload)
             response["handoff_url"] = f"/api/operator/publish/{int(info.get('queue_id'))}/handoff"
     return response
+
+@fastapi_app.post("/api/operator/approve-ready")
+async def api_operator_approve_ready(payload: OperatorApproveReadyRequest, request: Request):
+    verify_operator_api_token(request)
+    ok, reason, result = approve_ready_jobs(
+        ADMIN_ID,
+        limit=payload.limit,
+        mode=payload.mode,
+        scheduled_at=payload.scheduled_at,
+        note=payload.note or "api_batch_approve_ready",
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail={"reason": reason, **(result or {})})
+    approved = result.get("approved") or []
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            lines = [
+                "✅ <b>API BATCH APPROVE READY</b>",
+                f"• Approved: <b>{len(approved)}</b> | Skipped: <b>{len(result.get('skipped') or [])}</b>",
+            ]
+            for item in approved[:8]:
+                lines.append(
+                    f"• job <code>#{item.get('job_id')}</code> → queue <code>#{item.get('queue_id') or '-'}</code> | "
+                    f"<code>/publisher_handoff queue={item.get('queue_id') or '<QUEUE_ID>'}</code>"
+                )
+            await tg_app.bot.send_message(chat_id=ADMIN_ID, text="\n".join(lines), parse_mode="HTML")
+            if payload.send_handoff:
+                for item in approved[:3]:
+                    queue_id = safe_int(item.get("queue_id"), 0)
+                    if not queue_id:
+                        continue
+                    item_row = get_publish_queue_item(ADMIN_ID, queue_id)
+                    if item_row:
+                        await tg_app.bot.send_message(
+                            chat_id=ADMIN_ID,
+                            text=format_publisher_handoff_summary(
+                                queue_id,
+                                build_publisher_handoff(serialize_publish_queue_item(item_row)),
+                            ),
+                            parse_mode="HTML",
+                        )
+        except Exception as e:
+            logger.error(f"Approve-ready notify error: {e}")
+    return {"ok": True, **result}
 
 @fastapi_app.get("/api/operator/jobs/{job_id}/publish-pack")
 async def api_operator_job_publish_pack(job_id: int, request: Request):
