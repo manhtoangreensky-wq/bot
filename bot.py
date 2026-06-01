@@ -4034,6 +4034,7 @@ def production_readiness_data(owner_id, job_id):
     def tasks_done(task_rows):
         return bool(task_rows) and all((row[7] or "").lower() in {"ready", "done"} for row in task_rows)
 
+    proof_tasks = tasks_by_type("proof_asset")
     visual_tasks = tasks_by_type("visual_scene")
     voice_tasks = tasks_by_type("voice")
     edit_tasks = tasks_by_type("edit")
@@ -4052,6 +4053,7 @@ def production_readiness_data(owner_id, job_id):
         ("creative_selected", bool(selected_variant), "Đã chọn creative variant thắng.", f"/creative_test job={job_id} n=5 rồi /creative_select id=<VARIANT_ID>"),
         ("manifest", bool(manifests), "Có production manifest.", f"/manifest job={job_id} duration=45"),
         ("tasks", bool(active_tasks), "Đã tách task sản xuất.", f"/task_plan job={job_id}"),
+        ("proof_assets", not proof_tasks or tasks_done(proof_tasks) or final_ok, "Proof asset/screenshot/workflow đã sẵn sàng hoặc đã có final video.", f"/next_task job={job_id}"),
         ("visuals", tasks_done(visual_tasks) or bool(raw_assets) or final_ok, "Visual scene đã có output hoặc final video.", f"/next_task job={job_id}"),
         ("voice", tasks_done(voice_tasks) or bool(voice_asset) or final_ok, "Voice/audio đã có output hoặc final video.", f"/next_task job={job_id}"),
         ("edit_final", final_ok or tasks_done(edit_tasks), "Có final video hoặc edit task đã ready.", f"/next_task job={job_id}"),
@@ -4324,6 +4326,33 @@ VIDEO_PATTERN_BANK = {
         ],
         "cta_style": "Lưu bài hoặc inbox để nhận checklist/bản đầy đủ.",
     },
+    "mentor_prompt_demo": {
+        "name": "Mentor prompt demo",
+        "best_for": ["AI video", "prompt tutorial", "course funnel", "tool demo", "creator education"],
+        "hook_formula": "AI visual bắt mắt -> host/mentor giải thích prompt -> demo tool -> output -> social proof -> CTA",
+        "duration_range": "45-90s",
+        "scene_goals": ["ai_visual_hook", "mentor_context", "prompt_screen", "tool_demo", "output_result", "social_proof", "cta"],
+        "proof_assets_required": [
+            "Prompt/screen tool thật hoặc prompt mẫu tự tạo.",
+            "Output video/hình AI do hệ thống tạo, không copy nguyên của người khác.",
+            "Proof uy tín hợp lệ: dashboard, lớp/workshop của mình, testimonial có quyền dùng hoặc ghi rõ demo.",
+        ],
+        "cta_style": "Comment/inbox để nhận prompt hoặc xem link công cụ trong comment ghim.",
+    },
+    "viral_prompt_affiliate": {
+        "name": "Viral prompt affiliate",
+        "best_for": ["affiliate content", "viral AI video", "prompt pack", "creator funnel", "tool affiliate"],
+        "hook_formula": "Ví dụ đang viral -> bóc prompt bằng GPT -> tạo lại bằng tool -> gắn affiliate/tool/link -> dashboard proof",
+        "duration_range": "60-150s",
+        "scene_goals": ["viral_example_hook", "why_it_works", "gpt_prompt_extract", "tool_generation", "output_result", "affiliate_bridge", "performance_proof", "cta"],
+        "proof_assets_required": [
+            "Ví dụ viral chỉ dùng làm tham khảo format, không copy nguyên video/nhân vật/giọng.",
+            "Prompt tự viết lại bằng ngôn ngữ riêng của TOAN DAAS.",
+            "Output do hệ thống tự tạo bằng tool hợp lệ.",
+            "Dashboard/page/performance proof thật hoặc ghi rõ demo.",
+        ],
+        "cta_style": "Comment ghim chứa link tool/sản phẩm liên quan và disclosure affiliate.",
+    },
 }
 
 def select_video_pattern(job, duration=45):
@@ -4336,6 +4365,10 @@ def select_video_pattern(job, duration=45):
         key = "caption_bait_short"
     elif any(word in text for word in ["webinar", "lớp học", "khoa hoc", "khóa học", "bai giang", "bài giảng"]):
         key = "webinar_cutdown"
+    elif any(word in text for word in ["viral", "affiliate", "gắn link", "gan link", "kiếm tiền", "kiem tien"]) and any(word in text for word in ["prompt", "gpt", "chatgpt", "ai video", "tạo video", "tao video"]):
+        key = "viral_prompt_affiliate"
+    elif any(word in text for word in ["prompt", "mẫu prompt", "mau prompt", "tạo video ai", "tao video ai", "ai video", "mentor"]):
+        key = "mentor_prompt_demo"
     elif any(word in text for word in ["bot", "agent", "automation", "tự động", "tu dong", "dashboard", "workflow", "hệ thống", "he thong", "ai operator"]):
         key = "proof_first_demo"
     elif any(word in text for word in ["app", "setup", "cài", "cai", "hướng dẫn", "huong dan", "đăng ký", "dang ky", "mở thẻ", "mo the"]):
@@ -4811,11 +4844,12 @@ def next_production_task(owner_id, job_id=None):
     if not rows:
         return None
     type_priority = {
-        "visual_scene": 0,
-        "voice": 1,
-        "edit": 2,
-        "review": 3,
-        "publish": 4,
+        "proof_asset": 0,
+        "visual_scene": 1,
+        "voice": 2,
+        "edit": 3,
+        "review": 4,
+        "publish": 5,
     }
     status_priority = {
         "blocked": 0,
@@ -4847,7 +4881,7 @@ def next_worker_task(owner_id, job_id=None, tool=""):
         candidates.append(row)
     if not candidates:
         return None
-    type_priority = {"visual_scene": 0, "voice": 1, "edit": 2, "review": 3, "publish": 4}
+    type_priority = {"proof_asset": 0, "visual_scene": 1, "voice": 2, "edit": 3, "review": 4, "publish": 5}
     candidates.sort(key=lambda row: (type_priority.get(row[3] or "", 9), row[5] or 0, row[0]))
     return get_production_task(owner_id, candidates[0][0])
 
@@ -4878,6 +4912,7 @@ def update_production_task(owner_id, task_id, status=None, output_url=None, note
     conn.close()
     if changed and output_url and row:
         asset_type = {
+            "proof_asset": "proof_asset",
             "visual_scene": "raw_video",
             "voice": "voice",
             "edit": "final_video",
@@ -4893,6 +4928,7 @@ def operator_task_contract(task_id, task_type: str = "", job_id: int = 0):
     except (TypeError, ValueError):
         task_num = 0
     default_asset_type = {
+        "proof_asset": "proof_asset",
         "visual_scene": "raw_video",
         "voice": "voice",
         "edit": "final_video",
@@ -4925,6 +4961,7 @@ def operator_task_contract(task_id, task_type: str = "", job_id: int = 0):
             "Nếu tạo file local: upload multipart qua upload_url.",
             "Nếu tool trả URL public: POST complete_url với output_url/output_urls.",
             "Bot tự lưu asset, báo admin và cập nhật readiness.",
+            "Proof asset phải có screenshot/workflow/checklist thật hoặc ghi rõ là mockup/demo.",
             "Khi final_video đã có: admin dùng /asset_send để kiểm duyệt trong Telegram rồi /approve_publish.",
         ],
         "after_failure": [
@@ -7723,6 +7760,39 @@ class AgentVoice:
 
 class AgentDownloader:
     MAX_TELEGRAM_DOWNLOAD_BYTES = 48 * 1024 * 1024
+    BLOCKED_DOWNLOADER_MARKERS = [
+        "t.me/a_tools",
+        "telegram.me/a_tools",
+        "join our channel",
+        "must join our channel",
+        "view channel",
+        "a_tools x",
+        "a-tools x",
+    ]
+
+    @staticmethod
+    def _is_suspicious_downloader_result(data, media_url: str = ""):
+        blob = f"{media_url}\n{json.dumps(data, ensure_ascii=False)[:2000]}".lower()
+        return any(marker in blob for marker in AgentDownloader.BLOCKED_DOWNLOADER_MARKERS)
+
+    @staticmethod
+    async def _hide_suspicious_downloader_result(msg, user_id, cost, data, media_url="", chat_id=None):
+        if user_id and cost > 0:
+            add_credit(user_id, cost, "download_refund", "", "Downloader trả quảng cáo/join channel ngoài")
+        admin_detail = ""
+        if str(user_id or chat_id or "") == ADMIN_ID:
+            detail = json.dumps(
+                {"media_url": media_url, "response": data},
+                ensure_ascii=False,
+            )[:1200]
+            admin_detail = f"\n\n⚠️ Admin debug:\n<pre>{html_pre(detail, 1200)}</pre>"
+        await msg.edit_text(
+            "❌ Dịch vụ tải video trả về nguồn không hợp lệ nên bot đã chặn để không hiện quảng cáo/kênh lạ cho khách.\n"
+            f"✅ Đã hoàn lại <b>{cost}</b> Xu.\n\n"
+            "Admin nên self-host Cobalt riêng và set <code>COBALT_API_URL</code> để tải ổn định."
+            + admin_detail,
+            parse_mode="HTML"
+        )
 
     @staticmethod
     async def _send_media_url_or_file(context: ContextTypes.DEFAULT_TYPE, chat_id: int, media_url: str, caption: str, filename: str = ""):
@@ -7827,6 +7897,9 @@ class AgentDownloader:
                 video_item = next((item for item in picker if item.get("type") == "video" and item.get("url")), None)
                 media_url = (video_item or (picker[0] if picker else {})).get("url", "")
                 filename = (video_item or (picker[0] if picker else {})).get("filename", filename)
+            if AgentDownloader._is_suspicious_downloader_result(data, media_url):
+                await AgentDownloader._hide_suspicious_downloader_result(msg, user_id, cost, data, media_url, chat_id)
+                return
             if res.status_code == 200 and status in {"tunnel", "redirect", "stream", "success", "picker"} and media_url:
                 caption = f"🎬 Đã làm sạch! (-{cost} Xu)" + (f"\n<code>{html.escape(filename)}</code>" if filename else "")
                 sent, send_reason = await AgentDownloader._send_media_url_or_file(
@@ -11830,6 +11903,7 @@ async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ Không tìm thấy task hoặc không có gì để cập nhật.")
     job_id, task_type = row
     asset_type = data.get("asset_type") or data.get("type") or {
+        "proof_asset": "proof_asset",
         "visual_scene": "raw_video",
         "voice": "voice",
         "edit": "final_video",
@@ -14450,6 +14524,7 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
         raise HTTPException(status_code=400, detail="Task not updated")
     job_id, task_type = row
     asset_type = (payload.asset_type or "").strip() or {
+        "proof_asset": "proof_asset",
         "visual_scene": "raw_video",
         "voice": "voice",
         "edit": "final_video",
@@ -14527,6 +14602,7 @@ async def api_operator_upload_task_asset(
     if not ok:
         raise HTTPException(status_code=400, detail=reason)
     resolved_asset_type = (asset_type or "").strip() or {
+        "proof_asset": "proof_asset",
         "visual_scene": "raw_video",
         "voice": "voice",
         "edit": "final_video",

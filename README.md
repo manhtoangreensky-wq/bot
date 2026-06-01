@@ -116,11 +116,12 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/creative_variants <JOB_ID>`: xem các biến thể creative của job.
 - `/creative_select id=<VARIANT_ID>`: chọn biến thể creative để đưa vào stage script/sản xuất.
 - `/creative_report job=<ID>`: so sánh performance theo biến thể creative đã gắn khi ghi dữ liệu.
-- `/video_patterns`: xem kho format video chính thức học từ video mẫu, gồm proof-first demo, screen tutorial, avatar explainer, caption bait short và webinar cutdown; bot tự gắn pattern vào creative/manifest/task/publish pack.
+- `/video_patterns`: xem kho format video chính thức học từ video mẫu, gồm proof-first demo, screen tutorial, avatar explainer, caption bait short, webinar cutdown, mentor prompt demo và viral prompt affiliate; bot tự gắn pattern vào creative/manifest/task/publish pack.
 - `/manifest job=<ID> duration=45 variant=<VARIANT_ID>`: tạo production manifest JSON gồm scene, prompt video, voice, edit, publish và compliance cho AI/tool thực thi.
 - `/manifests <JOB_ID>`: xem các production manifest đã tạo cho job.
 - `/manifest_handoff job=<ID> tool=kling|runway|fish|capcut|ffmpeg|publish|review`: xuất prompt riêng từ manifest cho từng AI/tool thực thi.
 - `/task_plan job=<ID>`: tách manifest mới nhất thành các task scene/voice/edit/review/publish.
+- Manifest có `proof_assets_required` sẽ sinh thêm task `proof_asset`; job chưa qua proof asset sẽ chưa đạt readiness để approve/publish, trừ khi đã có final video.
 - `/tasks job=<ID>`: xem hàng việc sản xuất chi tiết theo job.
 - `/next_task job=<ID>`: lấy task ưu tiên tiếp theo và tự chuyển sang `working` để giao cho AI/tool.
 - `/task_handoff id=<TASK_ID>`: xuất prompt giao riêng một task cho AI/tool.
