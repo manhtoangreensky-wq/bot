@@ -9576,6 +9576,18 @@ def operator_brain_fallback(raw_text):
     queue_id = int_from_text(lower, ["queue", "hang doi", "hàng đợi"], 0)
     performance_metrics = parse_brain_performance_metrics(text)
 
+    if any(word in lower for word in [
+        "command center", "trung tâm điều hành", "trung tam dieu hanh", "tổng chỉ huy", "tong chi huy",
+        "hôm nay làm gì", "hom nay lam gi", "bàn điều khiển", "ban dieu khien", "điều phối tổng", "dieu phoi tong"
+    ]):
+        return {
+            "intent": "command_center",
+            "platform": platform,
+            "limit": max(3, min(limit, 20)),
+            "days": max(1, min(days, 180)),
+            "confidence": 84,
+        }
+
     if reference_url and any(word in lower for word in ["học", "hoc", "tham khảo", "tham khao", "reference", "mẫu", "mau", "lưu", "luu"]):
         title = re.sub(r"https?://[^\s<>\"]+", " ", text, flags=re.I)
         title = re.sub(r"\b(học|hoc|tham khảo|tham khao|reference|mẫu|mau|lưu|luu|video|này|nay|link)\b", " ", title, flags=re.I)
@@ -9771,8 +9783,9 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
+        "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
         "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
         "- affiliate_scale: khi admin muốn scale/đẩy một link affiliate cụ thể thành nhiều video theo trend; cần affiliate/aff ID.\n"
@@ -9810,6 +9823,11 @@ def parse_operator_brain(raw_text, owner_id):
 
 def brain_command_preview(plan):
     intent = (plan.get("intent") or "help").lower()
+    if intent == "command_center":
+        return (
+            f"/operator_command days={max(1, min(int(plan.get('days') or 30), 180))} "
+            f"platform={plan.get('platform') or 'tiktok'}"
+        )
     if intent == "operator_director":
         return (
             f"/operator_director days={max(1, min(int(plan.get('days') or 30), 180))} "
@@ -9937,6 +9955,12 @@ async def run_brain_plan(update, context, plan):
     intent = (plan.get("intent") or "help").lower()
     old_args = list(getattr(context, "args", []) or [])
     try:
+        if intent == "command_center":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+            ]
+            return await cmd_operator_command(update, context)
         if intent == "operator_director":
             context.args = [
                 f"days={max(1, min(int(plan.get('days') or 30), 180))}",
@@ -12360,6 +12384,8 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🧠 <b>AI BRAIN</b>\n\n"
             "Gõ lệnh tự nhiên để bot tự định tuyến vào AI Operator.\n\n"
             "Ví dụ:\n"
+            "• <code>/brain hôm nay làm gì</code>\n"
+            "• <code>/brain command center tiktok 30 ngày</code>\n"
             "• <code>/brain đầu não nên làm gì tiếp theo</code>\n"
             "• <code>/brain đầu não chạy bước tiếp theo an toàn</code>\n"
             "• <code>/brain autopilot 3 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
