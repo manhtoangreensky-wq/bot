@@ -7,3 +7,4 @@ google-genai
 openai
 pydantic
 python-multipart
+Pillow

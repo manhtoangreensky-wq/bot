@@ -42,6 +42,10 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes
 )
+try:
+    from PIL import Image
+except Exception:
+    Image = None
 
 # ─── LOGGING ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -3584,7 +3588,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "output_acceptance", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3639,6 +3643,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/jobs/<JOB_ID>/worker-pack"),
         ("GET", "/api/operator/output-acceptance"),
         ("GET", "/api/operator/jobs/<JOB_ID>/output-acceptance"),
+        ("POST", "/api/operator/jobs/<JOB_ID>/storyboard-grid/upload"),
         ("POST", "/api/operator/jobs/<JOB_ID>/compose-video"),
         ("GET", "/api/operator/jobs/<JOB_ID>/pipeline-pack"),
         ("GET", "/api/operator/pipeline-pack"),
@@ -3730,6 +3735,7 @@ def operator_smoke_test_data(owner_id):
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
         "task_prompt_pack_in_spec": "/api/operator/tasks/<TASK_ID>/prompt-pack" in spec_text and "/prompt-pack" in n8n_text,
         "output_acceptance_in_spec": "/api/operator/output-acceptance" in spec_text and "/api/operator/output-acceptance" in n8n_text,
+        "storyboard_crop_in_spec": "/api/operator/jobs/<JOB_ID>/storyboard-grid/upload" in spec_text,
         "compose_video_in_spec": "/api/operator/jobs/<JOB_ID>/compose-video" in spec_text and "/compose-video" in n8n_text,
         "pipeline_pack_in_spec": "/api/operator/jobs/<JOB_ID>/pipeline-pack" in spec_text and "/pipeline-pack" in n8n_text,
         "distribution_pack_in_spec": "/api/operator/jobs/<JOB_ID>/distribution-pack" in spec_text and "/distribution-pack" in n8n_text,
@@ -3916,6 +3922,7 @@ def operator_worker_spec_data():
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
             {"step": 6.2, "name": "output_acceptance", "method": "GET", "url": "/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>"},
+            {"step": 6.3, "name": "crop_storyboard_grid_optional", "method": "POST", "url": "/api/operator/jobs/<JOB_ID>/storyboard-grid/upload"},
             {"step": 6.5, "name": "compose_video_optional", "method": "POST", "url": "/api/operator/jobs/<JOB_ID>/compose-video"},
             {"step": 7, "name": "check_ready", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/ready"},
             {"step": 8, "name": "publish_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/publish-pack"},
@@ -4120,6 +4127,12 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>",
                 "purpose": "Kiểm tra worker đã trả output thật đúng asset_type/status chưa trước khi review/publish.",
+            },
+            "storyboard_grid_upload": {
+                "method": "POST",
+                "url": "/api/operator/jobs/<JOB_ID>/storyboard-grid/upload",
+                "purpose": "Upload ảnh storyboard lưới 2x5 rồi bot tự cắt thành scene_image assets để đưa sang image-to-video.",
+                "form": {"file": "<storyboard_grid.png|jpg>", "episode": 1, "rows": 2, "cols": 5, "start_scene": 1, "trim_percent": 0.0, "notify_admin": True},
             },
             "compose_video": {
                 "method": "POST",
@@ -7370,7 +7383,7 @@ async def save_operator_upload_file(upload: UploadFile, job_id: int) -> tuple[bo
     content_type = upload.content_type or "application/octet-stream"
     upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
     job_dir = os.path.abspath(os.path.join(upload_root, f"job_{int(job_id)}"))
-    if not job_dir.startswith(upload_root):
+    if os.path.commonpath([upload_root, job_dir]) != upload_root:
         return False, "invalid_upload_path", {}
     os.makedirs(job_dir, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -7406,6 +7419,101 @@ async def save_operator_upload_file(upload: UploadFile, job_id: int) -> tuple[bo
         }
     finally:
         await upload.close()
+
+def crop_storyboard_grid_to_assets(owner_id, job_id, image_path, episode=1, rows=2, cols=5, start_scene=1, trim_percent=0.0, note=""):
+    if Image is None:
+        return False, "pillow_missing", {"message": "Server chưa có Pillow. requirements.txt cần có Pillow rồi redeploy."}
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return False, "job_not_found", {}
+    upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+    abs_path = os.path.abspath(image_path)
+    if os.path.commonpath([upload_root, abs_path]) != upload_root or not os.path.exists(abs_path):
+        return False, "invalid_storyboard_path", {}
+    rows = max(1, min(int(rows or 2), 6))
+    cols = max(1, min(int(cols or 5), 8))
+    episode = max(1, int(episode or 1))
+    start_scene = max(1, int(start_scene or 1))
+    trim_percent = max(0.0, min(float(trim_percent or 0.0), 0.18))
+    job_dir = os.path.abspath(os.path.join(upload_root, f"job_{int(job_id)}", "storyboard_scenes"))
+    if os.path.commonpath([upload_root, job_dir]) != upload_root:
+        return False, "invalid_crop_path", {}
+    os.makedirs(job_dir, exist_ok=True)
+    scene_assets = []
+    try:
+        with Image.open(abs_path) as img:
+            img = img.convert("RGB")
+            width, height = img.size
+            cell_w = width / cols
+            cell_h = height / rows
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            for r in range(rows):
+                for c in range(cols):
+                    scene_no = start_scene + (r * cols) + c
+                    x0 = int(round(c * cell_w))
+                    y0 = int(round(r * cell_h))
+                    x1 = int(round((c + 1) * cell_w))
+                    y1 = int(round((r + 1) * cell_h))
+                    trim_x = int((x1 - x0) * trim_percent)
+                    trim_y = int((y1 - y0) * trim_percent)
+                    crop_box = (x0 + trim_x, y0 + trim_y, x1 - trim_x, y1 - trim_y)
+                    scene_img = img.crop(crop_box)
+                    filename = f"ep{episode:02d}_scene{scene_no:02d}_{stamp}.jpg"
+                    scene_path = os.path.abspath(os.path.join(job_dir, filename))
+                    if os.path.commonpath([upload_root, scene_path]) != upload_root:
+                        return False, "invalid_scene_path", {}
+                    scene_img.save(scene_path, "JPEG", quality=94, optimize=True)
+                    metadata = {
+                        "source": "storyboard_grid_crop",
+                        "episode": episode,
+                        "scene": scene_no,
+                        "row": r + 1,
+                        "column": c + 1,
+                        "x": crop_box[0],
+                        "y": crop_box[1],
+                        "width": crop_box[2] - crop_box[0],
+                        "height": crop_box[3] - crop_box[1],
+                    }
+                    ok, asset_id = add_production_asset(
+                        owner_id,
+                        job_id,
+                        "scene_image",
+                        "",
+                        "",
+                        f"storyboard_grid_crop {json.dumps(metadata, ensure_ascii=False)} {note or ''}".strip(),
+                        scene_path,
+                        "image/jpeg",
+                        filename,
+                    )
+                    if not ok:
+                        return False, "asset_save_failed", {"scene": scene_no}
+                    asset_url = operator_asset_url(asset_id)
+                    update_production_asset_url(owner_id, asset_id, asset_url)
+                    metadata.update({"asset_id": asset_id, "asset_url": asset_url, "filename": filename})
+                    scene_assets.append(metadata)
+    except Exception as e:
+        return False, "storyboard_crop_failed", {"error": str(e)}
+    update_production_job(
+        job_id,
+        owner_id,
+        stage="storyboard",
+        status="working",
+        note=f"storyboard_grid_cropped scenes={len(scene_assets)} episode={episode}",
+    )
+    return True, "ok", {
+        "job_id": int(job_id),
+        "episode": episode,
+        "rows": rows,
+        "cols": cols,
+        "scene_count": len(scene_assets),
+        "scenes": scene_assets,
+        "next": {
+            "worker_intake": f"/worker_intake job={job_id} claim=0",
+            "task_prompt": f"/task_prompt job={job_id}",
+            "compose_after_videos": f"/compose_video job={job_id} voice=1",
+        },
+        "rule": "scene_image assets là keyframe/storyboard riêng; worker dùng prompt pack để tạo raw_video tương ứng rồi compose final video.",
+    }
 
 def list_production_assets(owner_id, job_id, limit=20):
     conn = db_connect()
@@ -9911,6 +10019,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
             "job_context_url": f"/api/operator/jobs/{job_id}/context",
             "review_url": f"/api/operator/jobs/{job_id}/review-video",
             "acceptance_url": f"/api/operator/output-acceptance?job_id={job_id}" + (f"&task_id={int(task[0])}" if task else ""),
+            "storyboard_grid_upload_url": f"/api/operator/jobs/{job_id}/storyboard-grid/upload",
             "compose_video_url": f"/api/operator/jobs/{job_id}/compose-video",
             "distribution_pack_url": f"/api/operator/jobs/{job_id}/distribution-pack",
             "post_publish_url": f"/api/operator/jobs/{job_id}/post-publish",
@@ -9920,6 +10029,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
                 "job_context": f"/job_context job={job_id}",
                 "review_video": f"/review_video job={job_id} send=1",
                 "output_acceptance": f"/output_acceptance job={job_id}" + (f" task={int(task[0])}" if task else ""),
+                "storyboard_crop": "/storyboard_crop",
                 "compose_video": f"/compose_video job={job_id} voice=1",
                 "approve_publish": f"/approve_publish job={job_id} queue=1 mode=manual",
                 "post_publish": f"/post_publish job={job_id}",
@@ -15323,6 +15433,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /mission_workorders id=&lt;ID&gt; — Gói giao việc video/job/task cho worker",
             "• /film_blueprint — Blueprint phim AI nhiều tập + affiliate comments",
             "• /film_series topic=... — Tạo series phim AI thành nhiều production job",
+            "• /storyboard_crop — Hướng dẫn upload/cắt storyboard 2x5 thành scene_image",
             "• /worker_intake claim=0/1 — Worker nhận task + prompt + toolchain + upload URL",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
@@ -19912,6 +20023,7 @@ def operator_category_keyboard(category):
             ("📦 Worker pack", "workerpack"),
             ("🧾 Task prompt", "taskprompt"),
             ("🧪 Output acceptance", "outputacceptance"),
+            ("🧩 Storyboard crop", "storyboardcrop"),
             ("🎞 Compose video", "composevideo"),
             ("🎥 Review video", "reviewvideo"), ("🗂 Assets", "assets"),
             ("📋 Job report", "report"),
@@ -20070,6 +20182,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
         f"• Upload file task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/upload</code>",
         f"• Nghiệm thu output: <code>GET {html.escape(base_url)}/api/operator/output-acceptance?job_id=&lt;JOB_ID&gt;</code>",
+        f"• Cắt storyboard 2x5 thành scene_image: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/storyboard-grid/upload</code>",
         f"• Ghép final video FFmpeg: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/compose-video</code>",
         f"• Upload asset job: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/assets/upload</code>",
         f"• Tải asset nội bộ: <code>GET {html.escape(base_url)}/api/operator/assets/&lt;ASSET_ID&gt;/file</code>",
@@ -20390,6 +20503,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "workerpack": "/worker_pack job=<JOB_ID>\n/worker_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/worker-pack",
         "taskprompt": "/task_prompt id=<TASK_ID>\n/task_prompt job=<JOB_ID>\nGET /api/operator/tasks/<TASK_ID>/prompt-pack",
         "outputacceptance": "/output_acceptance job=<JOB_ID>\n/output_acceptance task=<TASK_ID>\nGET /api/operator/output-acceptance?job_id=<JOB_ID>",
+        "storyboardcrop": "/storyboard_crop\nPOST /api/operator/jobs/<JOB_ID>/storyboard-grid/upload\nform: file, episode=1, rows=2, cols=5",
         "composevideo": "/compose_video job=<JOB_ID> voice=1 force=0\nPOST /api/operator/jobs/<JOB_ID>/compose-video",
         "reviewvideo": "/review_video job=<JOB_ID> send=1\n/brain kiểm duyệt video job <JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>\n/asset_send id=<ASSET_ID>\n/asset_send job=<JOB_ID> type=final_video",
@@ -21879,6 +21993,21 @@ async def cmd_output_acceptance(update: Update, context: ContextTypes.DEFAULT_TY
             lines.append(f"• {task_label}{html.escape(item.get('detail') or item.get('key') or '-')}\n  <code>{html.escape(item.get('next') or '-')}</code>")
     lines.append("\nAPI: <code>GET /api/operator/output-acceptance?job_id=&lt;JOB_ID&gt;</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_storyboard_crop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    base_url = (PUBLIC_BASE_URL or "").rstrip("/") or "https://<RAILWAY_DOMAIN>"
+    await update.message.reply_text(
+        "🧩 <b>STORYBOARD GRID CROP</b>\n\n"
+        "Dùng cho workflow KingContent: upload một ảnh storyboard lưới 2x5, bot tự cắt thành 10 asset <code>scene_image</code>.\n\n"
+        "API worker/Claude:\n"
+        f"<code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/storyboard-grid/upload</code>\n\n"
+        "Form-data:\n"
+        "<pre>file=&lt;storyboard_grid.png&gt;\nepisode=1\nrows=2\ncols=5\nstart_scene=1\ntrim_percent=0</pre>\n"
+        "Sau đó worker lấy prompt bằng <code>/task_prompt job=&lt;JOB_ID&gt;</code>, tạo raw video từng cảnh, rồi ghép bằng <code>/compose_video job=&lt;JOB_ID&gt;</code>.",
+        parse_mode="HTML"
+    )
 
 async def cmd_compose_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -24251,6 +24380,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("task_prompt", cmd_task_prompt))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("output_acceptance", cmd_output_acceptance))
+    tg_app.add_handler(CommandHandler("storyboard_crop", cmd_storyboard_crop))
     tg_app.add_handler(CommandHandler("compose_video", cmd_compose_video))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
@@ -25876,6 +26006,76 @@ async def api_operator_upload_job_asset(
         "approve_url": f"/api/operator/jobs/{job_id}/approve",
     }
 
+@fastapi_app.post("/api/operator/jobs/{job_id}/storyboard-grid/upload")
+async def api_operator_upload_storyboard_grid(
+    job_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    episode: int = Form(1),
+    rows: int = Form(2),
+    cols: int = Form(5),
+    start_scene: int = Form(1),
+    trim_percent: float = Form(0.0),
+    note: str = Form(""),
+    notify_admin: bool = Form(True),
+):
+    verify_operator_api_token(request)
+    if not get_production_job(job_id, ADMIN_ID):
+        raise HTTPException(status_code=404, detail="Job not found")
+    ok, reason, saved = await save_operator_upload_file(file, job_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+    ok, source_asset_id = add_production_asset(
+        ADMIN_ID,
+        job_id,
+        "storyboard_grid",
+        "",
+        "",
+        note or f"storyboard_grid_upload episode={episode} rows={rows} cols={cols}",
+        saved["local_path"],
+        saved["content_type"],
+        saved["filename"],
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail="source_asset_save_failed")
+    source_asset_url = operator_asset_url(source_asset_id)
+    update_production_asset_url(ADMIN_ID, source_asset_id, source_asset_url)
+    crop_ok, crop_reason, result = crop_storyboard_grid_to_assets(
+        ADMIN_ID,
+        job_id,
+        saved["local_path"],
+        episode=episode,
+        rows=rows,
+        cols=cols,
+        start_scene=start_scene,
+        trim_percent=trim_percent,
+        note=note,
+    )
+    if not crop_ok:
+        raise HTTPException(status_code=400, detail={"reason": crop_reason, **(result or {})})
+    result.update({
+        "source_asset_id": source_asset_id,
+        "source_asset_url": source_asset_url,
+        "source_filename": saved["filename"],
+    })
+    if notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🧩 <b>STORYBOARD ĐÃ CẮT SCENE</b>\n\n"
+                    f"• Job: <code>#{job_id}</code>\n"
+                    f"• Source asset: <code>#{source_asset_id}</code>\n"
+                    f"• Episode: <b>{episode}</b> | Grid: <b>{rows}x{cols}</b>\n"
+                    f"• Scene images: <b>{result.get('scene_count') or 0}</b>\n"
+                    f"• Next: <code>/worker_intake job={job_id} claim=0</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Storyboard crop notify error: {e}")
+    return {"ok": True, "reason": crop_reason, **result}
+
 @fastapi_app.get("/api/operator/assets/{asset_id}/file")
 async def api_operator_asset_file(asset_id: int, request: Request):
     verify_operator_file_token(request)
@@ -25889,7 +26089,7 @@ async def api_operator_asset_file(asset_id: int, request: Request):
         raise HTTPException(status_code=404, detail="Asset has no local file")
     upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
     abs_path = os.path.abspath(local_path)
-    if not abs_path.startswith(upload_root) or not os.path.exists(abs_path):
+    if os.path.commonpath([upload_root, abs_path]) != upload_root or not os.path.exists(abs_path):
         raise HTTPException(status_code=404, detail="Asset file missing")
     return FileResponse(
         abs_path,
