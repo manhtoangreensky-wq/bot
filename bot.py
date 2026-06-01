@@ -88,7 +88,7 @@ AFFILIATE_POSTBACK_TOKEN = _env("AFFILIATE_POSTBACK_TOKEN")
 OPERATOR_UPLOAD_DIR = _env("OPERATOR_UPLOAD_DIR", "operator_uploads")
 MAX_OPERATOR_UPLOAD_MB = int(_env("MAX_OPERATOR_UPLOAD_MB", "200") or "200")
 META_GRAPH_VERSION = _env("META_GRAPH_VERSION", "v24.0")
-REFERENCE_VIDEO_DIR = _env("REFERENCE_VIDEO_DIR", r"D:\mybot\TOANAAS\video AI tham khảo")
+REFERENCE_VIDEO_DIR = _env("REFERENCE_VIDEO_DIR", r"D:\mybot\video AI tham khảo")
 
 # ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -4954,7 +4954,7 @@ def reference_video_exists(owner_id, path_or_url):
     return exists
 
 def scan_reference_video_folder(owner_id, folder="", platform="", pattern_hint="", tags="", note="", limit=200):
-    folder = folder or REFERENCE_VIDEO_DIR or r"D:\mybot\TOANAAS\video AI tham khảo"
+    folder = folder or REFERENCE_VIDEO_DIR or r"D:\mybot\video AI tham khảo"
     result = {
         "folder": folder,
         "exists": os.path.isdir(folder),
@@ -5132,7 +5132,7 @@ def select_reference_examples_for_job(owner_id, job, limit=3):
     return selected
 
 def reference_video_inventory_data(limit=80, owner_id=None):
-    folder = REFERENCE_VIDEO_DIR or r"D:\mybot\TOANAAS\video AI tham khảo"
+    folder = REFERENCE_VIDEO_DIR or r"D:\mybot\video AI tham khảo"
     video_exts = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
     files = []
     exists = os.path.isdir(folder)
@@ -13179,8 +13179,8 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
         "referenceadd": "/reference_add url=https://... title=video_mau platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=hoc_hook_CTA\nPOST /api/operator/reference-videos",
-        "referencescan": "/reference_scan path=D:\\mybot\\TOANAAS\\video AI tham khảo platform=tiktok limit=200\n/brain quét video tham khảo path=D:\\mybot\\TOANAAS\\video AI tham khảo",
-        "brainreference": "/brain học video này https://facebook.com/...\n/brain lưu mẫu TikTok affiliate này https://tiktok.com/...\n/brain quét video tham khảo path=D:\\mybot\\TOANAAS\\video AI tham khảo",
+        "referencescan": "/reference_scan path=D:\\mybot\\video AI tham khảo platform=tiktok limit=200\n/brain quét video tham khảo path=D:\\mybot\\video AI tham khảo",
+        "brainreference": "/brain học video này https://facebook.com/...\n/brain lưu mẫu TikTok affiliate này https://tiktok.com/...\n/brain quét video tham khảo path=D:\\mybot\\video AI tham khảo",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
@@ -13517,7 +13517,7 @@ async def cmd_reference_videos(update: Update, context: ContextTypes.DEFAULT_TYP
             )
     lines.append(
         "\nRule: học hook/nhịp dựng/flow CTA, không copy nguyên video, mặt, giọng, text hoặc claim.\n"
-        "Import thư mục: <code>/reference_scan path=D:\\mybot\\TOANAAS\\video AI tham khảo</code>\n"
+        "Import thư mục: <code>/reference_scan path=D:\\mybot\\video AI tham khảo</code>\n"
         "API worker: <code>GET /api/operator/reference-videos?limit=40</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -13531,7 +13531,7 @@ async def cmd_reference_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ Cú pháp:\n"
             "<code>/reference_add url=https://... title=hook affiliate platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=học hook và CTA</code>\n\n"
             "Hoặc:\n"
-            "<code>/reference_add path=D:\\mybot\\TOANAAS\\video AI tham khảo\\video.mp4 title=video mẫu</code>",
+            "<code>/reference_add path=D:\\mybot\\video AI tham khảo\\video.mp4 title=video mẫu</code>",
             parse_mode="HTML",
         )
     data = parse_key_value_args(raw)
