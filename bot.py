@@ -7942,6 +7942,8 @@ async def operator_head_brain_run_data(
     execute=False,
     safe_mode=True,
     max_steps=1,
+    include_growth=True,
+    execute_growth=False,
     include_context=True,
     include_prompt=True,
 ):
@@ -7984,6 +7986,16 @@ async def operator_head_brain_run_data(
         limit=min(limit, 8),
         tool="",
     ) if cycle_job_ids else []
+    growth_loop = await operator_growth_loop_data(
+        owner_id,
+        days=max(7, days),
+        platform=platform,
+        limit=min(limit, 8),
+        execute=bool(execute and execute_growth),
+        build=True,
+        duration=45,
+        per_affiliate_limit=2,
+    ) if include_growth else {"ok": True, "skipped": True, "reason": "include_growth_false"}
     first_order = ((video_work_orders.get("orders") or [None])[0]) or {}
     order_job_ids = ",".join(str(jid) for jid in (video_work_orders.get("job_ids") or cycle_job_ids)[:8])
     video_orders_cmd = f"/video_work_orders jobs={order_job_ids} tool=claude" if order_job_ids else "/video_work_orders tool=claude"
@@ -8041,19 +8053,22 @@ async def operator_head_brain_run_data(
                 "upload/complete vào upload_url hoặc complete_url, sau đó dừng ở review_video/approve_publish để admin duyệt."
             ),
         },
+        "growth_loop": growth_loop,
         "stop_reason": cycle.get("stop_reason"),
         "next": {
             "head_brain": f"/head_brain days=30 platform={platform} limit={limit}",
             "preview": f"/head_run execute=0 platform={platform} max={max_steps}",
             "execute": f"/head_run execute=1 platform={platform} max={max_steps}",
+            "execute_with_growth": f"/head_run execute=1 growth=1 platform={platform} max={max_steps}",
             "worker": "/worker_intake claim=0 include_prompt=1",
             "worker_autorun": f"/worker_autorun jobs={order_job_ids} execute=1" if order_job_ids else "/worker_autorun execute=1",
             "video_work_orders": video_orders_cmd,
             "publish": f"/publish_cockpit platform={platform} limit={limit}",
+            "growth_loop": f"/growth_loop days={max(7, days)} platform={platform} limit={min(limit, 8)} execute={1 if execute_growth else 0}",
             "api_worker_autorun": "/api/operator/worker-autorun",
             "api_video_work_orders": video_orders_api,
         },
-        "rule": "Head run chỉ dùng safe daily cycle. Nó có thể launch/claim task/scale khi safe; gặp setup/review/publish/manual gate thì dừng và trả lệnh cho admin.",
+        "rule": "Head run dùng safe daily cycle và growth loop. Nó có thể launch/claim task/scale khi safe; gặp setup/review/publish/manual gate thì dừng và trả lệnh cho admin.",
     }
 
 def operator_dispatch_preview_data(owner_id, days=30, platform="tiktok", limit=8):
@@ -18063,6 +18078,8 @@ class OperatorHeadRunRequest(BaseModel):
     execute: bool = False
     safe_mode: bool = True
     max_steps: int = Field(default=1, ge=1, le=5)
+    growth: bool = True
+    growth_execute: bool = False
     include_context: bool = True
     include_prompt: bool = True
     notify_admin: bool = True
@@ -19627,6 +19644,7 @@ def operator_brain_fallback(raw_text):
             "limit": max(3, min(limit, 20)),
             "days": max(1, min(days, 30)),
             "execute": 1 if any(word in lower for word in ["execute", "run", "chạy thật", "chay that", "làm luôn", "lam luon"]) else 0,
+            "growth": 1 if any(word in lower for word in ["growth", "scale", "tăng trưởng", "tang truong", "đọc số liệu", "doc so lieu"]) else 0,
             "safe_mode": 1,
             "confidence": 88,
         }
@@ -20231,7 +20249,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan số liệu.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","preset":"tech","network":"","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"rank":1,"limit":3,"episodes":5,"scenes_per_episode":10,"duration":45,"build":1,"execute":0,"safe_mode":1,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","preset":"tech","network":"","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"rank":1,"limit":3,"episodes":5,"scenes_per_episode":10,"duration":45,"build":1,"execute":0,"growth":0,"safe_mode":1,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -20259,7 +20277,8 @@ def brain_command_preview(plan):
         return (
             f"/head_run days={max(1, min(int(plan.get('days') or 1), 30))} "
             f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 8), 20))} "
-            f"execute={int(plan.get('execute') or 0)} safe={int(plan.get('safe_mode') if plan.get('safe_mode') is not None else 1)}"
+            f"execute={int(plan.get('execute') or 0)} safe={int(plan.get('safe_mode') if plan.get('safe_mode') is not None else 1)} "
+            f"growth={int(plan.get('growth') or 0)}"
         )
     if intent == "operator_next_run":
         return (
@@ -20570,6 +20589,7 @@ async def run_brain_plan(update, context, plan):
                 f"limit={max(3, min(int(plan.get('limit') or 8), 20))}",
                 f"execute={int(plan.get('execute') or 0)}",
                 f"safe={int(plan.get('safe_mode') if plan.get('safe_mode') is not None else 1)}",
+                f"growth={int(plan.get('growth') or 0)}",
             ]
             return await cmd_head_run(update, context)
         if intent == "operator_next_run":
@@ -21141,6 +21161,8 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
             execute=truthy_value(plan.get("execute"), False),
             safe_mode=truthy_value(plan.get("safe_mode"), True),
             max_steps=max(1, min(int(plan.get("max_steps") or plan.get("max") or 1), 5)),
+            include_growth=True,
+            execute_growth=truthy_value(plan.get("execute"), False) and truthy_value(plan.get("growth"), False),
             include_context=True,
             include_prompt=True,
         )
@@ -24343,6 +24365,8 @@ async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     execute = truthy_value(data.get("execute") or data.get("run"), False)
     safe_mode = truthy_value(data.get("safe") or data.get("safe_mode"), True)
     send_review = truthy_value(data.get("review") or data.get("send_review"), True)
+    include_growth = truthy_value(data.get("include_growth") or data.get("growth"), True)
+    execute_growth = execute and truthy_value(data.get("growth"), False)
     result = await operator_head_brain_run_data(
         update.effective_user.id,
         days=days,
@@ -24352,6 +24376,8 @@ async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         execute=execute,
         safe_mode=safe_mode,
         max_steps=max_steps,
+        include_growth=include_growth,
+        execute_growth=execute_growth,
         include_context=True,
         include_prompt=True,
     )
@@ -24385,6 +24411,18 @@ async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("\n<b>Job tạo mới:</b>")
         for job in result.get("created_jobs")[:5]:
             lines.append(f"• job #{job.get('job_id')} | <code>{html.escape(job.get('platform') or '-')}</code> | {html.escape(job.get('title') or job.get('topic') or '-')}")
+    growth = result.get("growth_loop") or {}
+    selected_growth = growth.get("selected_action") or {}
+    if selected_growth:
+        growth_result = growth.get("result") or {}
+        lines.append("\n<b>Growth loop:</b>")
+        lines.append(
+            f"• Selected: <code>{html.escape(selected_growth.get('kind') or '-')}</code> | "
+            f"execute=<b>{'YES' if growth.get('execute') else 'preview'}</b>\n"
+            f"• Reason: {html.escape(selected_growth.get('reason') or '-')}\n"
+            f"• Next: <code>{html.escape(selected_growth.get('telegram') or '-')}</code>\n"
+            f"• Result: <code>{html.escape(growth_result.get('reason') or '-')}</code>"
+        )
     handoff = result.get("worker_handoff") or {}
     video_orders = (handoff.get("video_work_orders") or {}).get("orders") or []
     if video_orders:
@@ -24411,6 +24449,7 @@ async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Worker: <code>{html.escape(next_cmds.get('worker') or '/worker_intake')}</code>\n"
         f"• Orders: <code>{html.escape(next_cmds.get('video_work_orders') or '/video_work_orders')}</code>\n"
         f"• Publish: <code>{html.escape(next_cmds.get('publish') or '/publish_cockpit')}</code>\n"
+        f"• Growth: <code>{html.escape(next_cmds.get('growth_loop') or '/growth_loop')}</code>\n"
         "API: <code>POST /api/operator/head-run</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -30264,6 +30303,8 @@ async def api_operator_head_run(payload: OperatorHeadRunRequest, request: Reques
         execute=payload.execute,
         safe_mode=payload.safe_mode,
         max_steps=payload.max_steps,
+        include_growth=payload.growth,
+        execute_growth=bool(payload.execute and payload.growth_execute),
         include_context=payload.include_context,
         include_prompt=payload.include_prompt,
     )
@@ -30273,6 +30314,8 @@ async def api_operator_head_run(payload: OperatorHeadRunRequest, request: Reques
             video_orders = (handoff.get("video_work_orders") or {}).get("orders") or []
             next_cmds = result.get("next") or {}
             review_jobs = operator_review_job_ids_from_result(ADMIN_ID, result, limit=3)
+            growth = result.get("growth_loop") or {}
+            growth_selected = growth.get("selected_action") or {}
             review_line = (
                 "\n• Review ready: "
                 + ", ".join(f"<code>/review_video job={jid} send=1</code>" for jid in review_jobs)
@@ -30285,6 +30328,7 @@ async def api_operator_head_run(payload: OperatorHeadRunRequest, request: Reques
                     f"• Platform: <code>{html.escape(result.get('platform') or '-')}</code> | Steps: <b>{len((result.get('cycle') or {}).get('steps') or [])}</b>\n"
                     f"• Executed: <b>{result.get('executed_count', 0)}</b> | Stop: <code>{html.escape(result.get('stop_reason') or '-')}</code>\n"
                     f"• Work-orders: <b>{len(video_orders)}</b>\n"
+                    f"• Growth: <code>{html.escape(growth_selected.get('kind') or '-')}</code> | <code>{html.escape((growth.get('result') or {}).get('reason') or '-')}</code>\n"
                     f"• Orders: <code>{html.escape(next_cmds.get('video_work_orders') or '/video_work_orders')}</code>\n"
                     f"• Next: <code>{html.escape(next_cmds.get('head_brain') or '/head_brain')}</code>"
                     f"{review_line}"
