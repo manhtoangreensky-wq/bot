@@ -12625,10 +12625,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /checkpayos &lt;mã_đơn&gt; — Kiểm tra lại đơn PayOS",
             "• /tools và /mmo — Kho công cụ/quy trình nội bộ Admin",
         ])
+    runtime_line = f"🧬 <b>Runtime:</b> <code>{APP_BUILD}</code>\n\n" if is_admin else ""
+    command_text = "\n".join(command_lines)
     text = (
         "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.2</b>\n\n"
         "Chào mừng! Hệ thống tính phí thông minh theo dung lượng thực tế.\n\n"
-        f"{f'🧬 <b>Runtime:</b> <code>{APP_BUILD}</code>\\n\\n' if is_admin else ''}"
+        f"{runtime_line}"
         "🛠️ <b>CÁCH SỬ DỤNG:</b>\n"
         "<b>1. Chat AI:</b> Nhắn tin bình thường (tính theo độ dài chữ).\n"
         "<b>2. Bóc băng Audio:</b> Gửi tin nhắn thoại 🎤 hoặc file .mp3/.m4a (tính theo MB).\n"
@@ -12636,7 +12638,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>4. Tách Nền Ảnh:</b> Gửi ảnh bất kỳ (tính theo MB).\n"
         "<b>5. Đọc Voice:</b> Nhập 'Đọc voice: (nội dung)' (tính theo ký tự).\n\n"
         "💡 <b>Lệnh hệ thống:</b>\n"
-        + "\n".join(command_lines)
+        f"{command_text}"
     )
     await update.message.reply_text(
         text, parse_mode="HTML",
