@@ -6576,44 +6576,86 @@ def operator_daily_execution_pack_data(owner_id, days=1, platform="tiktok", limi
         channel_niche = affiliate_decisions[0].get("niche") or affiliate_decisions[0].get("product") or ""
     channel_router = operator_channel_router_data(owner_id, platform=platform, niche=channel_niche or "công nghệ AI affiliate", limit=limit)
 
+    def _ranked_action(lane, title, why, telegram, api, done_when, machine_action):
+        return {
+            "rank": len(execution_queue) + 1,
+            "lane": lane,
+            "title": title,
+            "why": why,
+            "telegram": telegram,
+            "api": api,
+            "done_when": done_when,
+            "machine_action": machine_action,
+        }
+
     execution_queue = []
     for key, ok, detail, next_cmd in audit.get("checks", []):
         if not ok:
-            execution_queue.append({
-                "rank": len(execution_queue) + 1,
-                "lane": "setup",
-                "title": f"Sửa cấu hình: {key}",
-                "why": detail,
-                "telegram": next_cmd,
-                "api": "/api/operator/audit",
-                "done_when": "Audit không còn blocker này.",
-            })
+            execution_queue.append(_ranked_action(
+                "setup",
+                f"Sửa cấu hình: {key}",
+                detail,
+                next_cmd,
+                "/api/operator/audit",
+                "Audit không còn blocker này.",
+                {
+                    "safe_to_execute": False,
+                    "requires_admin": True,
+                    "method": "GET",
+                    "url": "/api/operator/audit",
+                    "body": {},
+                    "reason": "Setup/env/secret/kênh/link có thể cần admin hoặc cấu hình ngoài bot.",
+                    "after_success": "/operator_daily_pack",
+                },
+            ))
             break
 
     for item in worker_next[:limit]:
         task = item.get("next_task") or {}
         job_id = int(item.get("job_id") or task.get("job_id") or 0)
         if task:
-            execution_queue.append({
-                "rank": len(execution_queue) + 1,
-                "lane": "produce",
-                "title": f"Làm task {task.get('task_type') or '-'} cho job #{job_id or '-'}",
-                "why": task.get("title") or "Có task worker đang chờ.",
-                "telegram": f"/worker_pack job={job_id or '<JOB_ID>'}",
-                "api": f"/api/operator/jobs/{job_id or '<JOB_ID>'}/worker-pack",
-                "done_when": "Task complete/upload xong và job có asset/prompt/output thật.",
-            })
+            task_id = int(task.get("id") or 0)
+            execution_queue.append(_ranked_action(
+                "produce",
+                f"Làm task {task.get('task_type') or '-'} cho job #{job_id or '-'}",
+                task.get("title") or "Có task worker đang chờ.",
+                f"/worker_pack job={job_id or '<JOB_ID>'}",
+                f"/api/operator/jobs/{job_id or '<JOB_ID>'}/worker-pack",
+                "Task complete/upload xong và job có asset/prompt/output thật.",
+                {
+                    "safe_to_execute": bool(job_id),
+                    "requires_admin": False,
+                    "method": "GET",
+                    "url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1&include_prompt=1" if job_id else "/api/operator/worker-next",
+                    "body": {},
+                    "claim_task_id_hint": task_id,
+                    "submit_ready_url": f"/api/operator/tasks/{task_id or '<TASK_ID>'}/complete",
+                    "upload_url": f"/api/operator/tasks/{task_id or '<TASK_ID>'}/upload",
+                    "expected_output": "output_url hoặc file upload thật; nếu tool lỗi/quota thì status=blocked và ghi tool event.",
+                    "after_success": f"/api/operator/jobs/{job_id}/ready" if job_id else "/api/operator/daily-pack",
+                },
+            ))
 
     for item in open_queue_handoffs[:limit]:
-        execution_queue.append({
-            "rank": len(execution_queue) + 1,
-            "lane": "publish",
-            "title": f"Đăng queue #{item['queue_id']} / job #{item['job_id']}",
-            "why": f"Final video ready={item['final_video_ready']}, comments={item['comment_count']}.",
-            "telegram": item["telegram"],
-            "api": item["api"],
-            "done_when": item["after_publish"],
-        })
+        execution_queue.append(_ranked_action(
+            "publish",
+            f"Đăng queue #{item['queue_id']} / job #{item['job_id']}",
+            f"Final video ready={item['final_video_ready']}, comments={item['comment_count']}.",
+            item["telegram"],
+            item["api"],
+            item["after_publish"],
+            {
+                "safe_to_execute": False,
+                "requires_admin": True,
+                "method": "GET",
+                "url": item["api"],
+                "body": {},
+                "complete_url": f"/api/operator/publish/{item['queue_id']}/complete",
+                "complete_body_template": {"status": "published", "publish_url": "https://...", "views": 0, "clicks": 0, "note": "manual_or_official_publish"},
+                "reason": "Publish cần review/consent/platform check; chỉ auto khi publisher_run quyết định api_ready.",
+                "after_success": f"/api/operator/jobs/{item['job_id']}/post-publish",
+            },
+        ))
 
     for item in affiliate_decisions[:limit]:
         action = item.get("action") or ""
@@ -6621,26 +6663,59 @@ def operator_daily_execution_pack_data(owner_id, days=1, platform="tiktok", limi
             continue
         aid = item.get("id") or item.get("affiliate_id") or 0
         niche = item.get("niche") or item.get("product") or topic or "công nghệ AI"
-        execution_queue.append({
-            "rank": len(execution_queue) + 1,
-            "lane": "affiliate_growth",
-            "title": f"{action} affiliate #{aid} - {item.get('product') or '-'}",
-            "why": item.get("reason") or f"score={item.get('score')}",
-            "telegram": item.get("command") or f"/affiliate_scale aff={aid} platform={platform} channel=all limit=3 build=1",
-            "api": "/api/operator/affiliate-scale",
-            "done_when": "Tạo job mới, đăng, rồi ghi view/click/revenue theo source.",
-        })
+        execution_queue.append(_ranked_action(
+            "affiliate_growth",
+            f"{action} affiliate #{aid} - {item.get('product') or '-'}",
+            item.get("reason") or f"score={item.get('score')}",
+            item.get("command") or f"/affiliate_scale aff={aid} platform={platform} channel=all limit=3 build=1",
+            "/api/operator/affiliate-scale",
+            "Tạo job mới, đăng, rồi ghi view/click/revenue theo source.",
+            {
+                "safe_to_execute": action in {"SCALE", "TEST_MORE"} and bool(aid),
+                "requires_admin": action in {"FIX_CTA", "FIX_OFFER"},
+                "method": "POST",
+                "url": "/api/operator/affiliate-scale",
+                "body": {
+                    "affiliate_id": int(aid or 0),
+                    "platform": platform,
+                    "channel": "all",
+                    "limit": 3,
+                    "build": True,
+                    "duration": 45,
+                    "notify_admin": True,
+                },
+                "expected_output": "production_jobs/tasks mới cho affiliate, sau đó worker xử lý produce/review/publish.",
+                "after_success": "/api/operator/daily-pack",
+            },
+        ))
 
     if not execution_queue:
-        execution_queue.append({
-            "rank": 1,
-            "lane": "launch",
-            "title": "Tạo batch video affiliate mới",
-            "why": "Không có task/queue/action rõ ràng trong ngày.",
-            "telegram": f"/operator_launch topic={topic or 'công nghệ AI'} platform={platform} channel=all limit=3 build=1",
-            "api": "/api/operator/launch",
-            "done_when": "Có production_jobs + tasks để worker sản xuất.",
-        })
+        execution_queue.append(_ranked_action(
+            "launch",
+            "Tạo batch video affiliate mới",
+            "Không có task/queue/action rõ ràng trong ngày.",
+            f"/operator_launch topic={topic or 'công nghệ AI'} platform={platform} channel=all limit=3 build=1",
+            "/api/operator/launch",
+            "Có production_jobs + tasks để worker sản xuất.",
+            {
+                "safe_to_execute": True,
+                "requires_admin": False,
+                "method": "POST",
+                "url": "/api/operator/launch",
+                "body": {
+                    "topic": topic or "công nghệ AI",
+                    "platform": platform,
+                    "channel": "all",
+                    "limit": 3,
+                    "build": True,
+                    "bootstrap": True,
+                    "duration": 45,
+                    "notify_admin": True,
+                },
+                "expected_output": "production_jobs/tasks mới, chưa publish tự động.",
+                "after_success": "/api/operator/daily-pack",
+            },
+        ))
 
     top_links = []
     for item in (money.get("top_affiliates") or [])[:limit]:
@@ -6677,6 +6752,7 @@ def operator_daily_execution_pack_data(owner_id, days=1, platform="tiktok", limi
             "bot_payment_revenue": (money.get("summary") or {}).get("bot_payment_revenue", 0),
         },
         "execution_queue": execution_queue[:limit],
+        "next_machine_action": (execution_queue[0].get("machine_action") if execution_queue else {}),
         "open_queue_handoffs": open_queue_handoffs,
         "worker_next": worker_next[:limit],
         "affiliate_decisions": affiliate_decisions[:limit],
@@ -19754,10 +19830,13 @@ async def cmd_operator_daily_pack(update: Update, context: ContextTypes.DEFAULT_
         "<b>Việc hôm nay theo thứ tự:</b>",
     ]
     for item in (pack.get("execution_queue") or [])[:limit]:
+        action = item.get("machine_action") or {}
         lines.append(
             f"{item.get('rank')}. <code>{html.escape(item.get('lane') or '-')}</code> — {html.escape(item.get('title') or '-')}\n"
             f"   why: {html.escape(item.get('why') or '-')}\n"
-            f"   TG: <code>{html.escape(item.get('telegram') or '-')}</code>"
+            f"   TG: <code>{html.escape(item.get('telegram') or '-')}</code>\n"
+            f"   API: <code>{html.escape(action.get('method') or 'GET')} {html.escape(action.get('url') or item.get('api') or '-')}</code> | "
+            f"safe=<b>{'YES' if action.get('safe_to_execute') else 'NO'}</b>"
         )
     top_links = pack.get("top_affiliate_links") or []
     if top_links:
