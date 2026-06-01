@@ -53,6 +53,32 @@ logger = logging.getLogger("TOAN_DAAS")
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
 
+def normalize_public_base_url(value: str = "") -> str:
+    value = (value or "").strip().rstrip("/")
+    if not value:
+        return ""
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    return "https://" + value
+
+def detect_public_base_url() -> tuple[str, str]:
+    candidates = [
+        "PUBLIC_BASE_URL",
+        "WEBHOOK_BASE_URL",
+        "BOT_PUBLIC_URL",
+        "RAILWAY_PUBLIC_DOMAIN",
+        "RAILWAY_STATIC_URL",
+        "RAILWAY_PUBLIC_URL",
+        "RAILWAY_SERVICE_DOMAIN",
+        "RAILWAY_PROJECT_DOMAIN",
+        "RENDER_EXTERNAL_URL",
+    ]
+    for key in candidates:
+        value = normalize_public_base_url(_env(key))
+        if value:
+            return value, key
+    return "", ""
+
 TELEGRAM_TOKEN      = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
 ADMIN_ID            = _env("ADMIN_ID", "7126457028")
 APP_VERSION         = "TOAN DAAS V15.2"
@@ -69,6 +95,7 @@ APP_DEPLOY_ID       = (
     or _env("DEPLOYMENT_ID")
     or ""
 )[:12]
+PUBLIC_BASE_URL, PUBLIC_BASE_URL_SOURCE = detect_public_base_url()
 
 # AI Providers
 GEMINI_API_KEY      = _env("GEMINI_API_KEY")
@@ -95,8 +122,8 @@ COBALT_API_URL      = _env("COBALT_API_URL", "https://api.cobalt.tools")
 COBALT_API_KEY      = _env("COBALT_API_KEY")
 PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "Httdhtoan")
-PUBLIC_BASE_URL     = _env("PUBLIC_BASE_URL")
-TELEGRAM_UPDATE_MODE = _env("TELEGRAM_UPDATE_MODE", "webhook" if PUBLIC_BASE_URL else "polling").lower()
+TELEGRAM_UPDATE_MODE_RAW = _env("TELEGRAM_UPDATE_MODE")
+TELEGRAM_UPDATE_MODE = (TELEGRAM_UPDATE_MODE_RAW or ("webhook" if PUBLIC_BASE_URL else "polling")).lower()
 TELEGRAM_WEBHOOK_SECRET = _env("TELEGRAM_WEBHOOK_SECRET")
 TELEGRAM_WEBHOOK_PATH = _env(
     "TELEGRAM_WEBHOOK_PATH",
@@ -12839,7 +12866,9 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "bot_username_env": BOT_USERNAME,
         "bot_info": bot_info,
         "public_base_url": PUBLIC_BASE_URL or "-",
+        "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "-",
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
+        "telegram_update_mode_raw": TELEGRAM_UPDATE_MODE_RAW or "-",
         "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
         "telegram_webhook_url": (PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH) if PUBLIC_BASE_URL else "-",
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
@@ -12848,7 +12877,8 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🧬 <b>TOAN DAAS RUNTIME</b>\n\n"
         f"<pre>{html_pre(json.dumps(payload, ensure_ascii=False, indent=2), 1900)}</pre>\n\n"
         "Nếu Telegram vẫn hiện A_TOOLS X khi <code>/runtime</code> không trả về bản này, "
-        "đang có deployment/process cũ dùng cùng TELEGRAM_TOKEN.",
+        "đang có deployment/process cũ dùng cùng TELEGRAM_TOKEN. Nếu runtime đang polling và webhook là '-', "
+        "Railway cần PUBLIC_BASE_URL hoặc RAILWAY_PUBLIC_DOMAIN để bot tự chiếm webhook.",
         parse_mode="HTML"
     )
 
@@ -20883,6 +20913,8 @@ async def lifespan(app: FastAPI):
     await tg_app.start()
     active_update_mode = TELEGRAM_UPDATE_MODE
     webhook_url = ""
+    if active_update_mode == "polling" and PUBLIC_BASE_URL and not TELEGRAM_UPDATE_MODE_RAW:
+        active_update_mode = "webhook"
     if active_update_mode == "webhook" and PUBLIC_BASE_URL:
         webhook_url = PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH
         webhook_kwargs = {
@@ -20911,6 +20943,7 @@ async def lifespan(app: FastAPI):
                     f"• Build: <code>{APP_BUILD}</code>\n"
                     f"• Deploy: <code>{APP_DEPLOY_ID or '-'}</code>\n"
                     f"• Update mode: <code>{html.escape(active_update_mode)}</code>\n"
+                    f"• Public URL source: <code>{html.escape(PUBLIC_BASE_URL_SOURCE or '-')}</code>\n"
                     f"• Webhook: <code>{html.escape(webhook_url or '-')}</code>\n"
                     "• Lệnh kiểm tra: /runtime"
                 ),
