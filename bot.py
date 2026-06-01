@@ -9438,6 +9438,9 @@ def operator_brain_fallback(raw_text):
     build_requested = any(word in lower for word in ["build", "dựng", "dung", "xây", "xay", "tạo bundle", "tao bundle", "build luôn", "build luon"])
     days = int_from_text(lower, ["days", "ngày", "ngay"], 30) or 30
     reference_url = extract_supported_video_url(text)
+    any_url_match = re.search(r"https?://[^\s<>\"]+", text or "", flags=re.I)
+    any_url = any_url_match.group(0).rstrip(").,!?;\"'") if any_url_match else ""
+    queue_id = int_from_text(lower, ["queue", "hang doi", "hàng đợi"], 0)
 
     if reference_url and any(word in lower for word in ["học", "hoc", "tham khảo", "tham khao", "reference", "mẫu", "mau", "lưu", "luu"]):
         title = re.sub(r"https?://[^\s<>\"]+", " ", text, flags=re.I)
@@ -9449,6 +9452,37 @@ def operator_brain_fallback(raw_text):
             "url": reference_url,
             "platform": platform,
             "confidence": 82,
+        }
+    if queue_id and any_url and any(word in lower for word in ["đã đăng", "da dang", "published", "mark", "xong", "hoàn tất", "hoan tat"]):
+        return {
+            "intent": "publish_queue_set",
+            "queue": queue_id,
+            "url": any_url,
+            "status": "published",
+            "confidence": 84,
+        }
+    if job_id and any(word in lower for word in ["duyệt", "duyet", "approve", "chốt đăng", "chot dang", "cho đăng", "cho dang", "vào hàng đợi", "vao hang doi"]):
+        mode = "api" if "api" in lower or "auto" in lower else "manual"
+        return {
+            "intent": "approve_publish",
+            "job": job_id,
+            "mode": mode,
+            "queue": 1,
+            "confidence": 83,
+        }
+    if queue_id and any(word in lower for word in ["handoff", "giao đăng", "giao dang", "hướng dẫn đăng", "huong dan dang", "lấy pack", "lay pack"]):
+        return {
+            "intent": "publisher_handoff",
+            "queue": queue_id,
+            "confidence": 80,
+        }
+    if any(word in lower for word in ["publisher", "chạy đăng", "chay dang", "đăng queue", "dang queue", "đăng bài tiếp", "dang bai tiep"]):
+        mode = "api" if "api" in lower or "auto" in lower else ""
+        return {
+            "intent": "publisher_run",
+            "platform": platform,
+            "mode": mode,
+            "confidence": 78,
         }
 
     if any(word in lower for word in ["execute", "thực thi", "thuc thi", "chạy bước tiếp", "chay buoc tiep", "tự xử lý", "tu xu ly", "đầu não chạy", "dau nao chay"]):
@@ -9555,7 +9589,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, reference_add, help.\n\n"
+        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
         "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
@@ -9566,11 +9600,15 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator: khi admin nêu một topic cụ thể và có channel để tạo một job.\n"
         "- operator_build: khi admin muốn dựng tiếp một job đã có thành creative/manifest/task.\n"
         "- reference_add: khi admin gửi link/path video và nói học/lưu/tham khảo/mẫu để đưa vào reference catalog.\n"
+        "- approve_publish: khi admin nói duyệt/chốt job để đưa vào hàng đợi đăng; cần job ID.\n"
+        "- publisher_run: khi admin nói chạy publisher/đăng queue tiếp theo.\n"
+        "- publisher_handoff: khi admin muốn lấy pack/handoff cho một queue cụ thể; cần queue ID.\n"
+        "- publish_queue_set: khi admin gửi URL bài đã đăng và muốn đánh dấu queue là published; cần queue ID và url.\n"
         "- job_ready: khi admin muốn kiểm tra đủ điều kiện đăng.\n"
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","mode":"","status":"","pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -9632,6 +9670,23 @@ def brain_command_preview(plan):
             f"platform={plan.get('platform') or 'tiktok'} "
             f"pattern={plan.get('pattern_hint') or plan.get('pattern') or ''} "
             f"tags={plan.get('tags') or 'reference'}"
+        )
+    if intent == "approve_publish":
+        return (
+            f"/approve_publish job={int(plan.get('job') or 0)} queue=1 "
+            f"mode={plan.get('mode') or 'manual'} note=brain_approve"
+        )
+    if intent == "publisher_run":
+        return (
+            f"/publisher_run platform={plan.get('platform') or 'tiktok'} "
+            f"mode={plan.get('mode') or ''} claim=1"
+        )
+    if intent == "publisher_handoff":
+        return f"/publisher_handoff queue={int(plan.get('queue') or 0)}"
+    if intent == "publish_queue_set":
+        return (
+            f"/publish_queue_set id={int(plan.get('queue') or 0)} "
+            f"status={plan.get('status') or 'published'} url={plan.get('url') or 'https://...'} note=brain_mark_published"
         )
     if intent == "operator":
         return (
@@ -9744,6 +9799,41 @@ async def run_brain_plan(update, context, plan):
                 "note=brain_reference_add",
             ]
             return await cmd_reference_add(update, context)
+        if intent == "approve_publish":
+            if not int(plan.get("job") or 0):
+                return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain duyệt job 12 để đăng</code>", parse_mode="HTML")
+            context.args = [
+                f"job={int(plan.get('job') or 0)}",
+                "queue=1",
+                f"mode={plan.get('mode') or 'manual'}",
+                "note=brain_approve",
+            ]
+            return await cmd_approve_publish(update, context)
+        if intent == "publisher_run":
+            context.args = [
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"mode={plan.get('mode') or ''}",
+                "claim=1",
+            ]
+            return await cmd_publisher_run(update, context)
+        if intent == "publisher_handoff":
+            if not int(plan.get("queue") or 0):
+                return await update.message.reply_text("⚠️ Cần queue ID. Ví dụ: <code>/brain lấy handoff queue 3</code>", parse_mode="HTML")
+            context.args = [f"queue={int(plan.get('queue') or 0)}"]
+            return await cmd_publisher_handoff(update, context)
+        if intent == "publish_queue_set":
+            if not int(plan.get("queue") or 0) or not (plan.get("url") or ""):
+                return await update.message.reply_text(
+                    "⚠️ Cần queue ID và URL bài đã đăng. Ví dụ: <code>/brain queue 3 đã đăng https://...</code>",
+                    parse_mode="HTML"
+                )
+            context.args = [
+                f"id={int(plan.get('queue') or 0)}",
+                f"status={plan.get('status') or 'published'}",
+                f"url={plan.get('url')}",
+                "note=brain_mark_published",
+            ]
+            return await cmd_publish_queue_set(update, context)
         if intent == "operator":
             if not int(plan.get("channel") or 0):
                 return await update.message.reply_text(
@@ -11980,6 +12070,9 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain autopilot 3 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain học video này https://facebook.com/...</code>\n"
+            "• <code>/brain duyệt job 12 để đăng</code>\n"
+            "• <code>/brain chạy publisher tiktok</code>\n"
+            "• <code>/brain queue 3 đã đăng https://...</code>\n"
             "• <code>/brain build job 12 duration 45</code>\n"
             "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
             "• <code>/brain báo cáo vận hành 7 ngày</code>",
