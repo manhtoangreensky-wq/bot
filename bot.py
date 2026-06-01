@@ -3474,7 +3474,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -3493,6 +3493,7 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/telegram/takeover"),
         ("GET", "/runtime"),
         ("GET", "/api/operator/worker-spec"),
+        ("GET", "/api/operator/film-blueprint"),
         ("GET", "/api/operator/commander-pack"),
         ("GET", "/api/operator/control-contract"),
         ("GET", "/api/operator/video-patterns"),
@@ -3594,6 +3595,7 @@ def operator_smoke_test_data(owner_id):
         "reference_videos_in_spec": "/api/operator/reference-videos" in spec_text and "/api/operator/reference-videos" in n8n_text,
         "reference_scan_in_spec": "/api/operator/reference-videos/scan" in spec_text and "/api/operator/reference-videos/scan" in n8n_text,
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
+        "film_blueprint_in_spec": "/api/operator/film-blueprint" in spec_text and "/api/operator/film-blueprint" in n8n_text,
         "commander_pack_in_spec": "/api/operator/commander-pack" in spec_text and "/api/operator/commander-pack" in n8n_text,
         "control_contract_in_spec": "/api/operator/control-contract" in spec_text and "/api/operator/control-contract" in n8n_text,
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
@@ -3678,6 +3680,7 @@ def operator_worker_spec_data():
             "chuẩn bị publish pack, đăng có kiểm soát và ghi performance."
         ),
         "toolchain_url": f"{base_url}/api/operator/toolchain",
+        "film_blueprint_url": f"{base_url}/api/operator/film-blueprint",
         "goal_audit_url": f"{base_url}/api/operator/goal-audit",
         "mission_control_url": f"{base_url}/api/operator/mission",
         "mission_inbox_url": f"{base_url}/api/operator/missions",
@@ -3779,6 +3782,7 @@ def operator_worker_spec_data():
             {"step": 1.07, "name": "channel_router", "method": "GET", "url": "/api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10"},
             {"step": 1.08, "name": "commander_pack", "method": "GET", "url": "/api/operator/commander-pack?days=30&platform=tiktok"},
             {"step": 1.1, "name": "read_worker_spec", "method": "GET", "url": "/api/operator/worker-spec"},
+            {"step": 1.15, "name": "read_film_blueprint", "method": "GET", "url": "/api/operator/film-blueprint"},
             {"step": 1.2, "name": "read_video_patterns", "method": "GET", "url": "/api/operator/video-patterns"},
             {"step": 1.3, "name": "read_reference_pack", "method": "GET", "url": "/api/operator/reference-pack"},
             {"step": 1.35, "name": "read_reference_videos", "method": "GET", "url": "/api/operator/reference-videos?limit=40"},
@@ -3879,6 +3883,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/mission?days=30&platform=tiktok&limit=8",
                 "purpose": "Một pack điều phối cho Claude/n8n/AI worker: mission, thứ tự chạy, tool fallback, reference videos, guardrails và endpoint.",
+            },
+            "film_blueprint": {
+                "method": "GET",
+                "url": "/api/operator/film-blueprint",
+                "purpose": "Runbook KingContent nội bộ: tạo series phim AI nhiều tập, character bible, storyboard 2x5, voice profile, composer và auto comment affiliate.",
             },
             "channel_router": {
                 "method": "GET",
@@ -5217,6 +5226,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "read-film-blueprint",
+                "name": "Read Film Blueprint",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, -410],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/film-blueprint",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "read-toolchain",
                 "name": "Read Toolchain",
                 "type": "n8n-nodes-base.httpRequest",
@@ -5795,7 +5818,8 @@ def operator_n8n_workflow_json_data():
             "Read Mission Control": {"main": [[{"node": "Read Channel Router", "type": "main", "index": 0}]]},
             "Read Channel Router": {"main": [[{"node": "Read Commander Pack", "type": "main", "index": 0}]]},
             "Read Commander Pack": {"main": [[{"node": "Read Worker Spec", "type": "main", "index": 0}]]},
-            "Read Worker Spec": {"main": [[{"node": "Read Toolchain", "type": "main", "index": 0}]]},
+            "Read Worker Spec": {"main": [[{"node": "Read Film Blueprint", "type": "main", "index": 0}]]},
+            "Read Film Blueprint": {"main": [[{"node": "Read Toolchain", "type": "main", "index": 0}]]},
             "Read Toolchain": {"main": [[{"node": "Platform Adapters", "type": "main", "index": 0}]]},
             "Platform Adapters": {"main": [[{"node": "Read Video Patterns", "type": "main", "index": 0}]]},
             "Read Video Patterns": {"main": [[{"node": "Read Reference Pack", "type": "main", "index": 0}]]},
@@ -6058,6 +6082,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
             "pipeline_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/pipeline-pack",
             "distribution_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/distribution-pack",
             "worker_spec": f"{base_url}/api/operator/worker-spec",
+            "film_blueprint": f"{base_url}/api/operator/film-blueprint",
             "toolchain": f"{base_url}/api/operator/toolchain",
             "command_center": f"{base_url}/api/operator/command-center",
             "next_run": f"{base_url}/api/operator/next-run",
@@ -6216,6 +6241,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
             "launch": f"{base_url}/api/operator/launch",
             "make_video": f"{base_url}/api/operator/make-video",
             "worker_next": f"{base_url}/api/operator/worker-next",
+            "film_blueprint": f"{base_url}/api/operator/film-blueprint",
             "worker_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
             "pipeline_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/pipeline-pack",
             "task_claim": f"{base_url}/api/operator/tasks/claim?include_context=1&include_prompt=1",
@@ -8018,6 +8044,163 @@ def reference_learning_pack_data():
         "rule": "Biến ý tưởng của thị trường thành format riêng của TOAN DAAS; chỉ copy cấu trúc tư duy, không copy tài sản/nội dung nhận diện.",
     }
 
+def ai_film_series_blueprint_data():
+    return {
+        "source": "noi_dung_kingcontent_tao_phim_ai_affiliate_cho_codex.md",
+        "name": "TOAN AAS AI Film Affiliate Series Blueprint",
+        "mission": (
+            "Chủ đề -> series 3-5 tập -> character bible -> storyboard 8-10 cảnh/tập -> prompt ảnh/video -> "
+            "render từng cảnh -> ghép tập hoàn chỉnh -> publish reels/shorts -> auto comment affiliate -> tracking doanh thu."
+        ),
+        "default_project_input": {
+            "topic": "Người ăn xin trước nhà hàng hóa ra là cha ruột của giám đốc",
+            "genre": "drama cảm xúc",
+            "target_audience": "người lớn, dân văn phòng, phụ nữ 25-45",
+            "episodes": 5,
+            "scenes_per_episode": 10,
+            "scene_duration_seconds": 8,
+            "video_duration_per_episode": 80,
+            "platform": "facebook_reels",
+            "aspect_ratio": "9:16",
+            "language": "vi-VN",
+            "tone": "cảm động, kịch tính, đạo lý",
+            "content_safety": True,
+        },
+        "series_structure": {
+            "episode_count": "3-5 tập để test retention và dễ sản xuất hàng loạt",
+            "episode_duration": "60-80 giây",
+            "scene_count": "8-10 cảnh",
+            "scene_duration": "6-8 giây/cảnh",
+            "episode_arc": [
+                "Cảnh 1: hook mạnh trong 1-3 giây đầu.",
+                "Cảnh 2-3: bối cảnh và nhân vật.",
+                "Cảnh 4-6: xung đột, hiểu lầm hoặc điểm đau.",
+                "Cảnh 7-8: cao trào.",
+                "Cảnh 9: hé lộ một phần sự thật hoặc giải pháp.",
+                "Cảnh 10: cliffhanger hoặc CTA mềm sang tập/link.",
+            ],
+        },
+        "character_bible_contract": {
+            "required": True,
+            "rule": "Mỗi nhân vật phải có fixed_description và negative_prompt; mọi image_prompt/video_prompt phải tự chèn mô tả cố định này.",
+            "schema": {
+                "char_id": "char_01",
+                "name": "Minh",
+                "role": "giám đốc trẻ",
+                "fixed_description": "Vietnamese male, 32 years old, black business suit, short neat hair, sharp face, serious expression",
+                "negative_prompt": "different face, different age, cartoon, distorted body, extra fingers, text, watermark",
+                "reference_image_id": "optional_reference_image",
+            },
+        },
+        "storyboard_json_contract": {
+            "series_title": "Tên series",
+            "series_logline": "Một câu móc tò mò cho toàn bộ series",
+            "main_characters": ["character_bible objects"],
+            "episodes": [
+                {
+                    "episode_number": 1,
+                    "title": "Tập 1",
+                    "duration_seconds": 80,
+                    "scenes": [
+                        {
+                            "scene_number": 1,
+                            "duration_seconds": 8,
+                            "hook": True,
+                            "visual_description": "bối cảnh/hình ảnh",
+                            "action": "hành động",
+                            "emotion": "cảm xúc",
+                            "voice_over": "lời kể hoặc thoại",
+                            "caption": "caption ngắn",
+                            "image_prompt": "prompt ảnh không chữ/logo/watermark",
+                            "video_prompt": "prompt video có camera/action/light/mood/duration",
+                        }
+                    ],
+                }
+            ],
+        },
+        "storyboard_grid": {
+            "supported_mode": ["json_to_single_scene_images", "upload_2x5_grid_then_crop"],
+            "crop_contract": "crop_storyboard_grid(image, rows=2, cols=5) -> 10 scene images",
+            "crop_metadata": ["episode_number", "scene_number", "row", "column", "x", "y", "width", "height"],
+            "rule": "Nếu dùng ảnh lưới, cắt thành ảnh cảnh riêng và mapping với storyboard JSON trước khi render video.",
+        },
+        "scene_prompt_analyzer_contract": {
+            "input": ["scene_image", "scene_metadata", "character_bible", "style", "emotion", "audience", "aspect_ratio", "duration"],
+            "output": ["video_prompt", "voice_over", "caption", "negative_prompt", "camera_movement", "emotion_direction", "continuity_note"],
+            "rule": "AI được phân tích ảnh cảnh để viết prompt chuyển động, nhưng vẫn phải giữ character bible và không thêm text trong ảnh.",
+        },
+        "film_styles": [
+            "phim kể chuyện cảm xúc", "phim tài liệu", "quảng cáo sản phẩm", "hài hước", "đạo lý cuộc sống",
+            "lịch sử", "giáo dục trẻ em", "chill lifestyle", "kinh dị nhẹ", "review/KOL",
+        ],
+        "emotion_options": ["nhẹ nhàng", "kịch tính", "buồn", "ấm áp", "truyền cảm hứng", "bí ẩn", "hài hước", "cao trào", "day dứt"],
+        "audience_options": ["trẻ em", "người lớn", "dân văn phòng", "phụ nữ 25-45", "người kinh doanh online", "người quan tâm sức khỏe", "người thích phim đạo lý", "người thích nội dung gia đình"],
+        "voice_profile_contract": {
+            "rule": "Một series dùng một voice profile cố định; có thể override theo nhân vật ở phiên bản sau.",
+            "schema": {"gender": "female", "tone": "ấm áp", "age_style": "trưởng thành", "speed": "medium", "emotion": "cảm xúc, chậm rãi", "language": "vi-VN"},
+            "options": ["nam mạnh mẽ", "nam trầm ấm", "nam uyên bác", "nữ nhẹ nhàng", "nữ cảm xúc", "nữ trẻ trung", "giọng kể chuyện đạo lý", "giọng quảng cáo năng lượng cao"],
+        },
+        "episode_composer_pipeline": [
+            "scene_01.mp4 + ... + scene_10.mp4",
+            "add_voiceover",
+            "add_background_music",
+            "add_subtitles",
+            "add_logo_or_watermark_optional",
+            "export episode_final.mp4",
+            "mark ready_to_publish",
+        ],
+        "template_library": [
+            {"id": "dao_ly_trieu_views", "fit_affiliate": ["sách", "đồ gia dụng", "sức khỏe người lớn tuổi"], "hook": "nghịch cảnh/xung đột gia đình/bài học nhân quả"},
+            {"id": "chill_bo_pho_ve_rung", "fit_affiliate": ["camping", "đồ gia dụng", "làm vườn", "thực phẩm sạch"], "hook": "bỏ phố, chữa lành, đời sống chậm"},
+            {"id": "fashion_ad", "fit_affiliate": ["quần áo", "túi", "giày", "phụ kiện"], "hook": "mặc đẹp hơn, che khuyết điểm, hợp đi làm"},
+            {"id": "history_story", "fit_affiliate": ["sách", "khóa học", "đồ sưu tầm"], "hook": "sự kiện/nhân vật lịch sử ít ai biết"},
+            {"id": "process_howto", "fit_affiliate": ["dụng cụ", "nguyên liệu", "đồ công nghệ"], "hook": "các bước tạo ra một kết quả hữu ích"},
+            {"id": "children_education", "fit_affiliate": ["sách thiếu nhi", "đồ chơi giáo dục", "app học tập"], "hook": "bài học đơn giản, hình ảnh tươi sáng"},
+        ],
+        "viral_remix_modes": {
+            "recommended": "prompt_structure_only",
+            "modes": [
+                {"id": "reference_image_only", "public_posting": "caution", "note": "Chỉ lấy frame làm tham khảo, cần quyền/consent nếu có người thật."},
+                {"id": "prompt_structure_only", "public_posting": "recommended", "note": "Phân tích hook/nhịp/scene rồi tạo nhân vật, bối cảnh, thoại mới."},
+                {"id": "reference_image_and_prompt", "public_posting": "internal_test_only", "note": "Dễ giống bản gốc; không khuyến khích đăng công khai."},
+            ],
+            "copyright_guard": {
+                "allow_exact_clone": False,
+                "allow_reference_structure": True,
+                "require_new_characters": True,
+                "require_new_dialogue": True,
+                "require_new_setting": True,
+                "warn_if_similarity_score_above": 0.75,
+            },
+        },
+        "affiliate_comment_manager": {
+            "max_comments": 10,
+            "delay_seconds_between_comments": 30,
+            "retry_limit": 3,
+            "comment_templates": [
+                "Ai cần sản phẩm giống trong video thì mình để ở đây nhé: {link}",
+                "Mình tổng hợp danh sách đồ hữu ích trong câu chuyện này ở đây: {link}",
+                "Sản phẩm đang được nhiều người hỏi: {link}",
+                "Link tham khảo cho ai cần: {link}",
+            ],
+            "rule": "Không spam quá nhanh, không comment link vi phạm chính sách, lưu trạng thái posted/failed/retry.",
+        },
+        "worker_prompt_template": (
+            "Bạn là đạo diễn phim ngắn AI affiliate cho TOAN AAS. Tạo series {episodes} tập, mỗi tập {scenes_per_episode} cảnh, "
+            "có hook đầu tập, cliffhanger cuối tập, character bible cố định, storyboard JSON, prompt ảnh/video từng cảnh, voice profile, "
+            "caption, affiliate placement và guardrail bản quyền. Không reup/copy nguyên video; chỉ học cấu trúc."
+        ),
+        "mvp_tasks": [
+            "Tạo project phim từ topic/genre/audience/platform.",
+            "Sinh series JSON và character bible.",
+            "Upload/crop storyboard 2x5.",
+            "Sinh prompt video từng scene.",
+            "Mock/render scene video, ghép tập bằng FFmpeg.",
+            "Quản lý affiliate comments và publish handoff.",
+            "Theo dõi view/click/order/revenue để scale.",
+        ],
+    }
+
 def ai_video_factory_blueprint_data():
     return {
         "source": "phan_tich_video_ai_tao_video_tu_dong_va_prompt_codex.md",
@@ -8059,6 +8242,7 @@ def ai_video_factory_blueprint_data():
             "Tạo nhiều biến thể hook A/B/C để test view/click trước khi scale.",
         ],
         "approval_states": ["draft", "generated", "ready_for_review", "approved", "rendering", "rendered", "scheduled", "published", "failed"],
+        "series_film_blueprint": ai_film_series_blueprint_data(),
         "json_output_contract": {
             "video_id": "<job_id>",
             "channel": "platform/account",
@@ -14371,6 +14555,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /mission_add objective=... — Gửi mission cấp cao cho Claude/n8n",
             "• /mission_run id=&lt;ID&gt; execute=1 — Chạy mission qua executor an toàn",
             "• /mission_workorders id=&lt;ID&gt; — Gói giao việc video/job/task cho worker",
+            "• /film_blueprint — Blueprint phim AI nhiều tập + affiliate comments",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
             "• /dashboard — Dashboard quản trị hệ thống",
@@ -18848,6 +19033,7 @@ def operator_category_keyboard(category):
         "cat_production": [
             ("🎬 Make video", "makevideo"), ("⚡ Build bundle", "build"),
             ("🎛 Pipeline", "pipeline"),
+            ("🎬 Film blueprint", "filmblueprint"),
             ("🧠 Pipeline pack", "pipelinepack"),
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
@@ -18958,6 +19144,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
         f"• Goal audit tổng mục tiêu: <code>GET {html.escape(base_url)}/api/operator/goal-audit?days=30&amp;platform=tiktok</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
+        f"• Film blueprint: <code>GET {html.escape(base_url)}/api/operator/film-blueprint</code>",
         f"• AI commander pack: <code>GET {html.escape(base_url)}/api/operator/commander-pack</code>",
         f"• Mission control: <code>GET {html.escape(base_url)}/api/operator/mission</code>",
         f"• Control contract: <code>GET {html.escape(base_url)}/api/operator/control-contract?days=30&amp;platform=tiktok</code>",
@@ -19312,6 +19499,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "videopatterns": "/video_patterns\nGET /api/operator/video-patterns",
+        "filmblueprint": "/film_blueprint\nGET /api/operator/film-blueprint",
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
         "referenceadd": "/reference_add url=https://... title=video_mau platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=hoc_hook_CTA\nPOST /api/operator/reference-videos",
@@ -19595,6 +19783,36 @@ async def cmd_video_patterns(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "\nCác pattern này tự được gắn vào <code>/creative_test</code>, <code>/manifest</code>, "
         "<code>/task_plan</code>, <code>/publish_pack</code> và API make-video."
     )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_film_blueprint(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = ai_film_series_blueprint_data()
+    project = data.get("default_project_input") or {}
+    structure = data.get("series_structure") or {}
+    lines = [
+        "🎬 <b>AI FILM AFFILIATE BLUEPRINT</b>",
+        f"• Source: <code>{html.escape(data.get('source') or '-')}</code>",
+        f"• Mission: {html.escape(data.get('mission') or '-')}",
+        "",
+        "<b>Project mặc định:</b>",
+        f"• Episodes: <b>{project.get('episodes')}</b> | Scenes/tập: <b>{project.get('scenes_per_episode')}</b> | Duration/tập: <b>{project.get('video_duration_per_episode')}s</b>",
+        f"• Platform: <code>{html.escape(project.get('platform') or '-')}</code> | Ratio: <code>{html.escape(project.get('aspect_ratio') or '-')}</code>",
+        f"• Arc: <code>{html.escape(structure.get('episode_duration') or '-')}</code>, <code>{html.escape(structure.get('scene_count') or '-')}</code>",
+        "",
+        "<b>Template nên dùng:</b>",
+    ]
+    for item in (data.get("template_library") or [])[:6]:
+        lines.append(
+            f"• <code>{html.escape(item.get('id') or '-')}</code> — {html.escape(item.get('hook') or '-')}"
+        )
+    lines.extend([
+        "",
+        "<b>Lệnh/API:</b>",
+        "<code>/mission_add title=Phim AI affiliate platform=tiktok priority=9 objective=Tạo series 5 tập theo blueprint phim AI, gắn link affiliate phù hợp, review trước đăng.</code>",
+        "<code>GET /api/operator/film-blueprint</code>",
+    ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
@@ -22994,6 +23212,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("creative_select", cmd_creative_select))
     tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
     tg_app.add_handler(CommandHandler("video_patterns", cmd_video_patterns))
+    tg_app.add_handler(CommandHandler("film_blueprint", cmd_film_blueprint))
     tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
     tg_app.add_handler(CommandHandler("reference_videos", cmd_reference_videos))
     tg_app.add_handler(CommandHandler("reference_add", cmd_reference_add))
@@ -23591,6 +23810,15 @@ async def api_operator_video_patterns(request: Request):
         "ok": True,
         "patterns": video_pattern_bank_data(),
         "selection_rule": "Bot tự chọn theo topic/platform/duration; worker có thể đọc để dựng đúng format, proof và CTA.",
+    }
+
+@fastapi_app.get("/api/operator/film-blueprint")
+async def api_operator_film_blueprint(request: Request):
+    verify_operator_api_token(request)
+    return {
+        "ok": True,
+        "blueprint": ai_film_series_blueprint_data(),
+        "rule": "Dùng blueprint này cho series phim AI affiliate nhiều tập; không reup/copy nguyên video, chỉ học cấu trúc.",
     }
 
 @fastapi_app.get("/api/operator/reference-pack")
