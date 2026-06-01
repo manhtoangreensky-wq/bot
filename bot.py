@@ -6744,8 +6744,84 @@ def operator_daily_execution_pack_data(owner_id, days=1, platform="tiktok", limi
         }
 
     execution_queue = []
+    counts = audit.get("counts") or {}
+    try:
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute(
+            "SELECT COUNT(*) FROM reference_videos WHERE owner_id=? AND COALESCE(status,'active')='active'",
+            (str(owner_id),),
+        )
+        active_references = int(c.fetchone()[0] or 0)
+        conn.close()
+    except Exception:
+        active_references = 0
+    bootstrap_needs = {
+        "channels": int(counts.get("active_channels") or 0) <= 0,
+        "campaigns": int(counts.get("active_campaigns") or 0) <= 0,
+        "affiliates": int(counts.get("active_affiliates") or 0) <= 0,
+        "references": active_references <= 0,
+    }
+    if any(bootstrap_needs.values()):
+        missing_labels = []
+        if bootstrap_needs["channels"]:
+            missing_labels.append("kênh")
+        if bootstrap_needs["campaigns"]:
+            missing_labels.append("campaign")
+        if bootstrap_needs["affiliates"]:
+            missing_labels.append("affiliate")
+        if bootstrap_needs["references"]:
+            missing_labels.append("reference video")
+        execution_queue.append(_ranked_action(
+            "setup_bootstrap",
+            "Bootstrap dữ liệu nền còn thiếu",
+            "Thiếu " + ", ".join(missing_labels) + ". Bot chỉ thêm dữ liệu mặc định còn thiếu, không xóa hoặc ghi đè dữ liệu cũ.",
+            (
+                "/operator_bootstrap "
+                f"channels={int(bootstrap_needs['channels'])} "
+                f"campaigns={int(bootstrap_needs['campaigns'])} "
+                f"affiliates={int(bootstrap_needs['affiliates'])} "
+                f"refs={int(bootstrap_needs['references'])}"
+            ),
+            "/api/operator/bootstrap",
+            "Có đủ dữ liệu nền để tạo job, giao worker và chuẩn bị publish.",
+            {
+                "safe_to_execute": True,
+                "requires_admin": False,
+                "method": "POST",
+                "url": "/api/operator/bootstrap",
+                "body": {
+                    "channels": bootstrap_needs["channels"],
+                    "campaigns": bootstrap_needs["campaigns"],
+                    "affiliates": bootstrap_needs["affiliates"],
+                    "references": bootstrap_needs["references"],
+                    "reference_limit": 200,
+                    "notify_admin": True,
+                },
+                "reason": "Setup này chỉ tạo dữ liệu nền còn thiếu; secret/env vẫn phải do admin cấu hình.",
+                "expected_output": "Seed channel/campaign/affiliate/reference nếu thiếu; dữ liệu cũ được giữ nguyên.",
+                "after_success": "/api/operator/daily-pack",
+            },
+        ))
+    hard_setup_keys = {"operator_api", "publish_readiness"}
+    soft_runtime_keys = {
+        "ai_provider",
+        "payos",
+        "affiliate_catalog",
+        "channels",
+        "campaigns",
+        "production_pipeline",
+        "performance_tracking",
+    }
+    setup_warnings = []
     for key, ok, detail, next_cmd in audit.get("checks", []):
         if not ok:
+            if key in soft_runtime_keys:
+                setup_warnings.append({"key": key, "detail": detail, "next": next_cmd})
+                continue
+            if key not in hard_setup_keys:
+                setup_warnings.append({"key": key, "detail": detail, "next": next_cmd})
+                continue
             execution_queue.append(_ranked_action(
                 "setup",
                 f"Sửa cấu hình: {key}",
@@ -6908,6 +6984,7 @@ def operator_daily_execution_pack_data(owner_id, days=1, platform="tiktok", limi
         },
         "execution_queue": execution_queue[:limit],
         "next_machine_action": (execution_queue[0].get("machine_action") if execution_queue else {}),
+        "setup_warnings": setup_warnings,
         "open_queue_handoffs": open_queue_handoffs,
         "worker_next": worker_next[:limit],
         "affiliate_decisions": affiliate_decisions[:limit],
@@ -6918,7 +6995,7 @@ def operator_daily_execution_pack_data(owner_id, days=1, platform="tiktok", limi
             "commands": channel_router.get("commands", {}),
         },
         "commander_prompt": (
-            "Đọc execution_queue theo rank. Mỗi lần chỉ xử lý một lane: setup, produce, publish, track hoặc affiliate_growth. "
+            "Đọc execution_queue theo rank. Mỗi lần chỉ xử lý một lane: setup_bootstrap, setup, produce, publish, track hoặc affiliate_growth. "
             "Không tự publish nếu chưa có approve/review. Sau publish phải complete queue và ghi performance. "
             "Nếu tool trả phí lỗi/quota, fallback tool rẻ/miễn phí và báo admin."
         ),
@@ -7011,6 +7088,22 @@ async def execute_daily_machine_action(
         return result
 
     body = action.get("body") or {}
+    if lane == "setup_bootstrap":
+        bootstrap = operator_bootstrap_data(
+            owner_id,
+            include_channels=truthy_value(body.get("channels"), True),
+            include_campaigns=truthy_value(body.get("campaigns"), True),
+            include_affiliates=truthy_value(body.get("affiliates"), True),
+            include_references=truthy_value(body.get("references"), True),
+            reference_limit=max(1, min(safe_int(body.get("reference_limit"), 200), 500)),
+        )
+        result.update({
+            "executed": True,
+            "kind": "setup_bootstrap",
+            "result": bootstrap,
+        })
+        return result
+
     if lane == "produce":
         job_id = _machine_action_job_id(action)
         claim = claim_operator_task_payload(
