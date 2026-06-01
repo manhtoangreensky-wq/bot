@@ -88,6 +88,7 @@ AFFILIATE_POSTBACK_TOKEN = _env("AFFILIATE_POSTBACK_TOKEN")
 OPERATOR_UPLOAD_DIR = _env("OPERATOR_UPLOAD_DIR", "operator_uploads")
 MAX_OPERATOR_UPLOAD_MB = int(_env("MAX_OPERATOR_UPLOAD_MB", "200") or "200")
 META_GRAPH_VERSION = _env("META_GRAPH_VERSION", "v24.0")
+REFERENCE_VIDEO_DIR = _env("REFERENCE_VIDEO_DIR", r"D:\mybot\TOANAAS\video AI tham khảo")
 
 # ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -2396,7 +2397,7 @@ def operator_audit_data(owner_id):
 def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
-        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "affiliate_seed", "affiliate_scale",
+        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "affiliate_seed", "affiliate_scale",
         "worker_next", "operator_command", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
@@ -2404,6 +2405,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/worker-spec"),
         ("GET", "/api/operator/video-patterns"),
         ("GET", "/api/operator/reference-pack"),
+        ("GET", "/api/operator/reference-videos"),
         ("GET", "/api/operator/n8n-workflow.json"),
         ("GET", "/api/operator/command-center"),
         ("POST", "/api/operator/make-video"),
@@ -2462,6 +2464,7 @@ def operator_smoke_test_data(owner_id):
         "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
         "video_patterns_in_spec": "/api/operator/video-patterns" in spec_text and "/api/operator/video-patterns" in n8n_text,
         "reference_pack_in_spec": "/api/operator/reference-pack" in spec_text and "/api/operator/reference-pack" in n8n_text,
+        "reference_videos_in_spec": "/api/operator/reference-videos" in spec_text and "/api/operator/reference-videos" in n8n_text,
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
@@ -2531,6 +2534,7 @@ def operator_worker_spec_data():
         "command_center_url": f"{base_url}/api/operator/command-center",
         "video_patterns_url": f"{base_url}/api/operator/video-patterns",
         "reference_pack_url": f"{base_url}/api/operator/reference-pack",
+        "reference_videos_url": f"{base_url}/api/operator/reference-videos",
         "reference_learning_rule": reference_learning_pack_data()["rule"],
         "roles": [
             {
@@ -2597,6 +2601,7 @@ def operator_worker_spec_data():
             {"step": 1.1, "name": "read_worker_spec", "method": "GET", "url": "/api/operator/worker-spec"},
             {"step": 1.2, "name": "read_video_patterns", "method": "GET", "url": "/api/operator/video-patterns"},
             {"step": 1.3, "name": "read_reference_pack", "method": "GET", "url": "/api/operator/reference-pack"},
+            {"step": 1.35, "name": "read_reference_videos", "method": "GET", "url": "/api/operator/reference-videos?limit=40"},
             {"step": 2, "name": "make_video_optional", "method": "POST", "url": "/api/operator/make-video"},
             {"step": 3, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
@@ -2621,6 +2626,7 @@ def operator_worker_spec_data():
             "reference_learning": {
                 "video_patterns": {"method": "GET", "url": "/api/operator/video-patterns"},
                 "reference_pack": {"method": "GET", "url": "/api/operator/reference-pack"},
+                "reference_videos": {"method": "GET", "url": "/api/operator/reference-videos?limit=40"},
                 "purpose": "Bắt buộc đọc trước khi dựng creative/task để học cấu trúc video mẫu, proof asset và luật không copy y nguyên.",
             },
             "affiliate_bundle": {
@@ -3127,6 +3133,13 @@ def operator_n8n_template_data():
                 "note": "Đọc luật học từ video tham khảo: học cấu trúc/hook/proof, không copy y nguyên.",
             },
             {
+                "node": "Read Reference Videos",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/reference-videos?limit=40",
+                "note": "Lấy inventory video tham khảo hiện có để Claude chọn 1-3 format gần nhất trước khi tạo output.",
+            },
+            {
                 "node": "Make Video Pipeline",
                 "type": "http_request",
                 "method": "POST",
@@ -3453,6 +3466,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "read-reference-videos",
+                "name": "Read Reference Videos",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, 360],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/reference-videos?limit=40",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "make-video-optional",
                 "name": "Make Video Optional Sample",
                 "type": "n8n-nodes-base.httpRequest",
@@ -3531,7 +3558,7 @@ def operator_n8n_workflow_json_data():
                     "content": (
                         "Gắn node Claude/Gemini/Kling/Runway/Fish/Edge/CapCut tại đây.\n"
                         "Dùng Peek Worker Next để xem task kế tiếp; chỉ dùng Claim Next Task khi worker thật sự bắt đầu làm.\n"
-                        "Trước khi dựng output, đọc Worker Spec + Video Patterns + Reference Pack trong input workflow hoặc job_context.reference_learning.\n"
+                        "Trước khi dựng output, đọc Worker Spec + Video Patterns + Reference Pack + Reference Videos trong input workflow hoặc job_context.reference_learning.\n"
                         "Luật vận hành: dùng tool trả phí/chất lượng cao trước; hết quota/lỗi thì fallback tool rẻ/miễn phí và báo admin.\n"
                         "Học cấu trúc/hook/proof của video mẫu nhưng viết lại cho thương hiệu/link affiliate của mình, không copy y nguyên.\n"
                         "Output cần có: status, output_url hoặc output_urls, note. Không tự đổi affiliate link, không tự publish nếu chưa qua review."
@@ -3757,7 +3784,8 @@ def operator_n8n_workflow_json_data():
             "Read Worker Spec": {"main": [[{"node": "Read Toolchain", "type": "main", "index": 0}]]},
             "Read Toolchain": {"main": [[{"node": "Read Video Patterns", "type": "main", "index": 0}]]},
             "Read Video Patterns": {"main": [[{"node": "Read Reference Pack", "type": "main", "index": 0}]]},
-            "Read Reference Pack": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
+            "Read Reference Pack": {"main": [[{"node": "Read Reference Videos", "type": "main", "index": 0}]]},
+            "Read Reference Videos": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
             "Director Run Safe Action": {"main": [[{"node": "Peek Worker Next", "type": "main", "index": 0}]]},
             "Peek Worker Next": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
             "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
@@ -4626,13 +4654,66 @@ def video_pattern_bank_data():
         for key, value in VIDEO_PATTERN_BANK.items()
     }
 
+def reference_video_inventory_data(limit=80):
+    folder = REFERENCE_VIDEO_DIR or r"D:\mybot\TOANAAS\video AI tham khảo"
+    video_exts = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
+    files = []
+    exists = os.path.isdir(folder)
+    if exists:
+        try:
+            for root, _, names in os.walk(folder):
+                for name in names:
+                    ext = os.path.splitext(name)[1].lower()
+                    if ext not in video_exts:
+                        continue
+                    path = os.path.join(root, name)
+                    try:
+                        stat = os.stat(path)
+                    except OSError:
+                        continue
+                    rel_path = os.path.relpath(path, folder)
+                    files.append({
+                        "name": name,
+                        "relative_path": rel_path,
+                        "size_mb": round(stat.st_size / 1024 / 1024, 2),
+                        "modified_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                        "learning_note": (
+                            "Dùng làm reference format: hook, nhịp dựng, flow CTA, proof placement. "
+                            "Không copy nguyên video/voice/face/text/claim."
+                        ),
+                    })
+        except OSError as exc:
+            return {
+                "folder": folder,
+                "exists": False,
+                "count": 0,
+                "files": [],
+                "error": str(exc),
+                "setup_hint": f"Tạo thư mục {folder} và đặt video tham khảo vào đó, hoặc set REFERENCE_VIDEO_DIR.",
+            }
+    files.sort(key=lambda item: item.get("modified_at") or "", reverse=True)
+    return {
+        "folder": folder,
+        "exists": exists,
+        "count": len(files),
+        "files": files[:max(1, int(limit or 80))],
+        "extensions": sorted(video_exts),
+        "setup_hint": "" if exists else f"Tạo thư mục {folder} và đặt video tham khảo vào đó, hoặc set REFERENCE_VIDEO_DIR.",
+        "worker_rule": (
+            "Trước khi viết prompt/dựng video, đọc danh sách reference để chọn 1-3 format gần nhất. "
+            "Chỉ học cấu trúc và nhịp dựng; output phải là nội dung/asset riêng của TOAN DAAS."
+        ),
+    }
+
 def reference_learning_pack_data():
     patterns = video_pattern_bank_data()
+    inventory = reference_video_inventory_data(limit=40)
     return {
         "name": "TOAN DAAS Reference Learning Pack",
         "source_summary": {
-            "reference_folder": "D:\\mybot\\TOANAAS\\video AI tham khảo",
-            "video_count_observed": 16,
+            "reference_folder": inventory.get("folder"),
+            "reference_folder_exists": inventory.get("exists"),
+            "video_count_observed": inventory.get("count"),
             "purpose": "Kho học format/hook/nhịp dựng từ video tham khảo; không phải kho asset để copy nguyên.",
             "common_structures": [
                 "viral visual hook -> prompt/tool demo -> output -> affiliate CTA",
@@ -4642,6 +4723,7 @@ def reference_learning_pack_data():
                 "webinar/long demo -> cutdown short -> checklist/caption",
             ],
         },
+        "reference_inventory": inventory,
         "patterns": patterns,
         "how_to_apply": [
             "Chọn pattern bằng select_video_pattern theo topic/platform/duration hoặc đọc video_pattern trong manifest.",
@@ -5550,6 +5632,7 @@ def operator_job_context_data(owner_id, job_id):
         "reference_learning": {
             "pack_url": "/api/operator/reference-pack",
             "video_patterns_url": "/api/operator/video-patterns",
+            "reference_videos_url": "/api/operator/reference-videos?limit=40",
             "rule": reference_learning_pack_data()["rule"],
         },
         "worker_runbook": {
@@ -11208,6 +11291,7 @@ def operator_category_keyboard(category):
             ("🛡 Review gate", "review"),
             ("🧪 Creative test", "creative"), ("🏁 Creative report", "creativereport"),
             ("🎞 Video patterns", "videopatterns"), ("📚 Reference pack", "referencepack"),
+            ("🗃 Reference videos", "referencevideos"),
         ],
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
@@ -11294,6 +11378,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Toolchain paid/fallback: <code>GET {html.escape(base_url)}/api/operator/toolchain</code>",
         f"• Tool runtime readiness: <code>GET {html.escape(base_url)}/api/operator/tool-readiness</code>",
         f"• Báo lỗi/quota tool: <code>POST {html.escape(base_url)}/api/operator/tool-events</code>",
+        f"• Reference videos: <code>GET {html.escape(base_url)}/api/operator/reference-videos?limit=40</code>",
         f"• n8n template: <code>GET {html.escape(base_url)}/api/operator/n8n-template</code>",
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
@@ -11579,6 +11664,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "videopatterns": "/video_patterns\nGET /api/operator/video-patterns",
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
+        "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
@@ -11857,6 +11943,39 @@ async def cmd_reference_pack(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lines.append(
         "\nAPI worker: <code>GET /api/operator/reference-pack</code>\n"
         "Pattern: <code>/video_patterns</code>"
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_reference_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        limit = int(data.get("limit") or data.get("n") or (context.args[0] if context.args else 20))
+    except (TypeError, ValueError):
+        limit = 20
+    inventory = reference_video_inventory_data(limit=limit)
+    lines = [
+        "🎞 <b>REFERENCE VIDEOS INVENTORY</b>",
+        f"• Folder: <code>{html.escape(inventory.get('folder') or '-')}</code>",
+        f"• Exists: <b>{'YES' if inventory.get('exists') else 'NO'}</b>",
+        f"• Videos: <b>{inventory.get('count') or 0}</b>",
+    ]
+    if inventory.get("setup_hint"):
+        lines.append(f"• Setup: {html.escape(inventory.get('setup_hint') or '')}")
+    files = inventory.get("files") or []
+    if files:
+        lines.append("\n<b>Video mới nhất:</b>")
+        for item in files[:min(limit, 20)]:
+            lines.append(
+                f"• <code>{html.escape(item.get('relative_path') or item.get('name') or '-')}</code> "
+                f"({item.get('size_mb') or 0} MB, {html.escape(item.get('modified_at') or '-')})"
+            )
+    else:
+        lines.append("\n📭 Chưa quét thấy file video tham khảo trong folder này.")
+    lines.append(
+        "\nRule: học hook/nhịp dựng/flow CTA, không copy nguyên video, mặt, giọng, text hoặc claim.\n"
+        "API worker: <code>GET /api/operator/reference-videos?limit=40</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -14592,6 +14711,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
     tg_app.add_handler(CommandHandler("video_patterns", cmd_video_patterns))
     tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
+    tg_app.add_handler(CommandHandler("reference_videos", cmd_reference_videos))
     tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
     tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
     tg_app.add_handler(CommandHandler("manifest_handoff", cmd_manifest_handoff))
@@ -14885,6 +15005,7 @@ async def api_operator_status(request: Request):
             "worker_spec": "/api/operator/worker-spec",
             "toolchain": "/api/operator/toolchain",
             "tool_events": "/api/operator/tool-events",
+            "reference_videos": "/api/operator/reference-videos",
             "n8n_template": "/api/operator/n8n-template",
             "n8n_workflow": "/api/operator/n8n-workflow.json",
             "director": "/api/operator/director",
@@ -14984,6 +15105,14 @@ async def api_operator_reference_pack(request: Request):
     return {
         "ok": True,
         "reference_pack": reference_learning_pack_data(),
+    }
+
+@fastapi_app.get("/api/operator/reference-videos")
+async def api_operator_reference_videos(request: Request, limit: int = 80):
+    verify_operator_api_token(request)
+    return {
+        "ok": True,
+        "inventory": reference_video_inventory_data(limit=limit),
     }
 
 @fastapi_app.get("/api/operator/tool-readiness")
