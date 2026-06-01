@@ -3687,13 +3687,14 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "telegram_status", "telegram_takeover", "customer_surface", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "telegram_takeover", "customer_surface", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "head_brain", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publish_cockpit", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "viral_remix", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
         ("GET", "/api/operator/goal-audit"),
+        ("GET", "/api/operator/head-brain"),
         ("GET", "/api/operator/dispatch"),
         ("POST", "/api/operator/dispatch"),
         ("GET", "/api/operator/run-cycle"),
@@ -3810,6 +3811,7 @@ def operator_smoke_test_data(owner_id):
     surface_checks = {
         "commands_documented": all(cmd for cmd in required_commands),
         "customer_start_surface_clean": bool(start_surface.get("ok") and start_surface.get("public_has_payment") and start_surface.get("admin_has_operator")),
+        "head_brain_in_spec": "/api/operator/head-brain" in spec_text,
         "goal_audit_in_spec": "/api/operator/goal-audit" in spec_text and "/api/operator/goal-audit" in n8n_text,
         "dispatch_in_spec": "/api/operator/dispatch" in spec_text and "/api/operator/dispatch" in n8n_text,
         "run_cycle_in_spec": "/api/operator/run-cycle" in spec_text and "/api/operator/run-cycle" in n8n_text,
@@ -3930,6 +3932,7 @@ def operator_worker_spec_data():
         "film_project_pack_url": f"{base_url}/api/operator/film-project-pack",
         "film_series_url": f"{base_url}/api/operator/film-series",
         "video_brief_url": f"{base_url}/api/operator/video-brief",
+        "head_brain_url": f"{base_url}/api/operator/head-brain",
         "goal_audit_url": f"{base_url}/api/operator/goal-audit",
         "mission_control_url": f"{base_url}/api/operator/mission",
         "mission_inbox_url": f"{base_url}/api/operator/missions",
@@ -4021,6 +4024,7 @@ def operator_worker_spec_data():
         ],
         "standard_loop": [
             {"step": 1, "name": "audit", "method": "GET", "url": "/api/operator/audit"},
+            {"step": 1.005, "name": "head_brain", "method": "GET", "url": "/api/operator/head-brain?days=30&platform=tiktok&limit=8"},
             {"step": 1.01, "name": "goal_audit", "method": "GET", "url": "/api/operator/goal-audit?days=30&platform=tiktok&limit=8"},
             {"step": 1.02, "name": "bootstrap_optional", "method": "POST", "url": "/api/operator/bootstrap"},
             {"step": 1.025, "name": "campaign_preset_optional", "method": "POST", "url": "/api/operator/campaign-preset"},
@@ -4096,6 +4100,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/goal-audit?days=30&platform=tiktok&limit=8",
                 "purpose": "Kiểm tra end-to-end mục tiêu TOAN DAAS: Telegram/admin, Claude/n8n, worker output thật, review, publish, affiliate, tracking tiền và scale.",
+            },
+            "head_brain": {
+                "method": "GET",
+                "url": "/api/operator/head-brain?days=30&platform=tiktok&limit=8",
+                "purpose": "Cockpit đầu não tổng: gom goal audit, next run, dispatch, publish, affiliate, money, toolchain và guardrails để Claude/n8n biết bước tiếp theo.",
             },
             "launch_pipeline": {
                 "method": "POST",
@@ -7656,6 +7665,156 @@ def operator_goal_audit_data(owner_id, days=30, platform="tiktok", limit=8):
         },
         "next_command": (hard_blockers or soft_blockers or [{"next": "/operator_next_run"}])[0]["next"],
         "rule": "Goal audit là điểm kiểm tra tổng mục tiêu; hard blocker phải xử lý trước, soft blocker cần live run/test thật trước khi coi là vận hành hoàn chỉnh.",
+    }
+
+def operator_head_brain_cockpit_data(owner_id, days=30, platform="tiktok", limit=8):
+    days = max(1, min(safe_int(days, 30), 180))
+    limit = max(3, min(safe_int(limit, 8), 30))
+    platform = (platform or "tiktok").lower()
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+
+    goal = operator_goal_audit_data(owner_id, days=days, platform=platform, limit=limit)
+    next_run = operator_next_run_data(owner_id, days=days, platform=platform, limit=min(limit, 20))
+    dispatch = operator_dispatch_preview_data(owner_id, days=days, platform=platform, limit=min(limit, 20))
+    command_center = operator_command_center_data(owner_id, days=days, platform=platform, limit=min(limit, 20))
+    publish = social_publish_cockpit_data(owner_id, platform=platform, limit=min(limit, 20))
+    affiliate = affiliate_campaign_cockpit_data(owner_id, days=days, platform=platform, limit=min(limit, 20))
+    money = operator_money_pack_data(owner_id, days=days, platform=platform, limit=min(limit, 20))
+    revenue = revenue_destination_pack_data(owner_id, days=days, platform=platform, limit=min(limit, 20))
+    toolchain = operator_toolchain_data()
+    references = reference_video_inventory_data(limit=min(limit, 20), owner_id=owner_id)
+
+    req_by_phase = {}
+    for item in goal.get("requirements") or []:
+        phase = item.get("phase") or "other"
+        req_by_phase.setdefault(phase, []).append(item)
+
+    def lane_state(phase, title, ready_when=None, command=None, api=None):
+        items = req_by_phase.get(phase, [])
+        ok = all(item.get("ok") for item in items) if items else bool(ready_when)
+        blockers = [item for item in items if not item.get("ok")]
+        return {
+            "phase": phase,
+            "title": title,
+            "ok": bool(ok),
+            "blockers": blockers,
+            "command": command or (blockers[0].get("next") if blockers else ""),
+            "api": api or "",
+        }
+
+    lanes = [
+        lane_state("control", "Admin Telegram + Claude/n8n API bridge", command="/runtime rồi /operator_api", api="/runtime"),
+        lane_state("ideation", "Trend, affiliate catalog, reference learning", command="/trend_search hoặc /viral_remix", api="/api/operator/viral-remix"),
+        lane_state("production", "Job/task/worker output thật", command="/worker_intake claim=0 include_prompt=1", api="/api/operator/worker-intake"),
+        lane_state("review", "Review gate trước publish", command="/review_video job=<JOB_ID> send=1", api="/api/operator/jobs/<JOB_ID>/review-video"),
+        lane_state("publish", "Publish handoff/API chính thức", command="/publish_cockpit platform=tiktok", api="/api/operator/publish-cockpit"),
+        lane_state("money_tracking", "PayOS/bank/affiliate performance tracking", command="/money_pack days=30", api="/api/operator/money-pack"),
+        lane_state("scale", "Scale link/kênh/source thắng", command="/affiliate_cockpit days=30", api="/api/operator/affiliate-cockpit"),
+    ]
+
+    next_card = next_run.get("operator_card") or {}
+    dispatch_action = (dispatch.get("dispatch_action") or dispatch.get("preview", {}).get("dispatch_action") or {})
+    cockpit_level = goal.get("level") or "UNKNOWN"
+    if goal.get("hard_blockers"):
+        decision = "FIX_HARD_BLOCKER"
+    elif publish.get("queue_actions"):
+        decision = "PUBLISH_OR_FIX_QUEUE"
+    elif dispatch_action.get("safe_to_execute"):
+        decision = "RUN_SAFE_DISPATCH"
+    elif (command_center.get("worker_next") or {}).get("next_task"):
+        decision = "WORKER_TASK_READY"
+    elif goal.get("soft_blockers"):
+        decision = "RUN_LIVE_TEST"
+    else:
+        decision = "OPERATE_AND_SCALE"
+
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "level": cockpit_level,
+        "decision": decision,
+        "score": goal.get("score", 0),
+        "platform": platform,
+        "days": days,
+        "base_url": base_url,
+        "mission": "Admin ra lệnh trên Telegram; Claude/n8n/AI worker tạo video affiliate, gửi output thật, admin review, publish qua handoff/API chính thức, rồi ghi tiền để scale.",
+        "admin_next": {
+            "command": goal.get("next_command") or next_run.get("telegram_command") or "/operator_next_run",
+            "reason": next_run.get("reason") or "Theo goal audit.",
+            "after_done": "/head_brain hoặc /operator_next_run để lấy bước tiếp theo.",
+        },
+        "claude_next": {
+            "read": f"{base_url}/api/operator/head-brain?days={days}&platform={platform}&limit={limit}",
+            "start": next_card.get("worker_starts") or (dispatch_action.get("api") or {}).get("url") or "/api/operator/next-run",
+            "safe_execute": bool(dispatch_action.get("safe_to_execute")),
+            "dispatch_action": dispatch_action,
+        },
+        "lanes": lanes,
+        "live_state": {
+            "goal": {
+                "level": goal.get("level"),
+                "hard_blockers": len(goal.get("hard_blockers") or []),
+                "soft_blockers": len(goal.get("soft_blockers") or []),
+                "counts": goal.get("counts") or {},
+            },
+            "next_run": {
+                "mode": next_run.get("mode"),
+                "title": next_run.get("title"),
+                "telegram": next_run.get("telegram_command"),
+                "api": next_run.get("api"),
+            },
+            "publish": {
+                "overall": publish.get("overall"),
+                "summary": publish.get("readiness_summary"),
+                "first_queue": (publish.get("queue_actions") or [None])[0],
+            },
+            "affiliate": {
+                "summary": affiliate.get("summary") or {},
+                "first_decision": (affiliate.get("affiliate_decisions") or affiliate.get("winners") or [None])[0],
+            },
+            "money": money.get("summary") or {},
+            "revenue": {
+                "destinations": revenue.get("destinations") or [],
+                "bank_ready": bool(MANUAL_BANK_ACCOUNT),
+                "payos_ready": bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY),
+            },
+            "references": {
+                "folder": references.get("folder"),
+                "filesystem_count": references.get("filesystem_count", len(references.get("files") or [])),
+                "catalog_count": references.get("catalog_count", len(references.get("catalog") or [])),
+            },
+        },
+        "tool_policy": {
+            "rule": "Ưu tiên tool chất lượng/có phí trước; lỗi/quota thì ghi tool event, fallback rẻ/miễn phí, báo admin và không xóa cấu hình cũ.",
+            "chains": toolchain.get("chains") or [],
+            "failure_protocol": toolchain.get("failure_protocol") or [],
+        },
+        "operator_commands": {
+            "start_batch": f"/operator_launch topic=<chủ_đề> platform={platform} channel=all limit=3 build=1 bootstrap=1",
+            "mission": "/mission_add title=... objective=... platform=tiktok priority=8",
+            "claim_worker": "/worker_intake claim=1 include_prompt=1",
+            "review": "/review_video job=<JOB_ID> send=1",
+            "approve": "/approve_publish job=<JOB_ID> queue=1 mode=manual",
+            "publish": f"/publish_cockpit platform={platform} limit={limit}",
+            "track": "/performance_add job=<JOB_ID> type=view value=1000 note=tiktok",
+            "scale": f"/affiliate_cockpit days={days} platform={platform} limit={limit}",
+        },
+        "api": {
+            "head_brain": f"{base_url}/api/operator/head-brain?days={days}&platform={platform}&limit={limit}",
+            "command_run": f"{base_url}/api/operator/command/run",
+            "dispatch": f"{base_url}/api/operator/dispatch?days={days}&platform={platform}&limit={limit}",
+            "worker_intake": f"{base_url}/api/operator/worker-intake?claim=0&include_prompt=1",
+            "publish_cockpit": f"{base_url}/api/operator/publish-cockpit?platform={platform}&limit={limit}",
+            "performance": f"{base_url}/api/operator/performance",
+        },
+        "guardrails": [
+            "Không tự publish nếu thiếu final_video, thiếu review gate hoặc admin chưa approve queue.",
+            "Auto publish chỉ dùng API chính thức và token hợp lệ; manual_required thì trả handoff cho admin/worker.",
+            "OnlyFans/AI influencer chỉ dùng nhân vật AI tự tạo hoặc người thật có consent rõ ràng, đủ 18 tuổi và quyền thương mại.",
+            "Không copy nguyên video tham khảo; chỉ học cấu trúc hook/nhịp dựng/proof/CTA.",
+            "Mỗi bài phải có disclosure affiliate và tracking source riêng cho caption/comment/status/bio.",
+        ],
+        "rule": "Head brain cockpit là bảng điều khiển tổng, dùng cho admin Telegram và Claude/n8n đọc trước mỗi vòng chạy.",
     }
 
 def operator_dispatch_preview_data(owner_id, days=30, platform="tiktok", limit=8):
@@ -17975,6 +18134,18 @@ def operator_brain_fallback(raw_text):
             "confidence": 84,
         }
     if any(word in lower for word in [
+        "head brain", "headbrain", "đầu não", "dau nao", "bộ não", "bo nao",
+        "cockpit tổng", "cockpit tong", "bảng đầu não", "bang dau nao",
+        "điều khiển tổng", "dieu khien tong", "từ lệnh tới tiền", "tu lenh toi tien"
+    ]):
+        return {
+            "intent": "head_brain",
+            "platform": platform,
+            "limit": max(3, min(limit, 30)),
+            "days": max(1, min(days, 180)),
+            "confidence": 88,
+        }
+    if any(word in lower for word in [
         "next run", "run card", "lệnh tiếp theo duy nhất", "lenh tiep theo duy nhat",
         "chạy bước nào", "chay buoc nao", "bước tiếp theo duy nhất", "buoc tiep theo duy nhat"
     ]):
@@ -18473,9 +18644,10 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, head_brain, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
+        "- head_brain: khi admin muốn đầu não/cockpit tổng từ lệnh Telegram tới video, publish, affiliate, tiền và scale.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
         "- operator_daily_pack: khi admin muốn bảng việc hôm nay/execution pack/rank việc để Claude/n8n làm trong ngày.\n"
         "- operator_daily_run: khi admin muốn preview/chạy một rank machine_action trong daily pack; giữ safe_mode để chặn setup/publish.\n"
@@ -18543,6 +18715,11 @@ def brain_command_preview(plan):
         return (
             f"/operator_command days={max(1, min(int(plan.get('days') or 30), 180))} "
             f"platform={plan.get('platform') or 'tiktok'}"
+        )
+    if intent == "head_brain":
+        return (
+            f"/head_brain days={max(1, min(int(plan.get('days') or 30), 180))} "
+            f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 8), 30))}"
         )
     if intent == "operator_next_run":
         return (
@@ -18812,6 +18989,13 @@ async def run_brain_plan(update, context, plan):
                 f"platform={plan.get('platform') or 'tiktok'}",
             ]
             return await cmd_operator_command(update, context)
+        if intent == "head_brain":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 8), 30))}",
+            ]
+            return await cmd_head_brain(update, context)
         if intent == "operator_next_run":
             context.args = [
                 f"days={max(1, min(int(plan.get('days') or 30), 180))}",
@@ -19313,7 +19497,7 @@ def operator_command_plan_data(owner_id, command):
         "confidence": int(plan.get("confidence") or 0),
         "safety_note": plan.get("safety_note") or "Không bỏ qua review/approve gate; không tự publish khi chưa sẵn sàng.",
         "execute_allowed": (plan.get("intent") or "").lower() in {
-            "command_center", "operator_next_run", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "goal_audit", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
+            "command_center", "head_brain", "operator_next_run", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "goal_audit", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
             "operator_director", "operator_execute", "operator_launch", "film_series", "make_video", "compose_video",
             "tracking_report", "scale_plan", "affiliate_report", "affiliate_decisions",
             "scale_execute", "publisher_capabilities", "platform_adapters",
@@ -19328,6 +19512,8 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
     limit = max(1, min(int(plan.get("limit") or 8), 30))
     if intent == "command_center":
         return {"executed": True, "intent": intent, "data": operator_command_center_data(owner_id, days=days, platform=platform, limit=min(limit, 20))}
+    if intent == "head_brain":
+        return {"executed": True, "intent": intent, "data": operator_head_brain_cockpit_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 30)))}
     if intent == "operator_next_run":
         return {"executed": True, "intent": intent, "data": operator_next_run_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 20)))}
     if intent == "goal_audit":
@@ -22370,6 +22556,60 @@ async def cmd_goal_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_head_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    days = max(1, min(safe_int(data.get("days") or data.get("ngay"), 30), 180))
+    limit = max(3, min(safe_int(data.get("limit"), 8), 30))
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    cockpit = operator_head_brain_cockpit_data(update.effective_user.id, days=days, platform=platform, limit=limit)
+    admin_next = cockpit.get("admin_next") or {}
+    claude_next = cockpit.get("claude_next") or {}
+    live = cockpit.get("live_state") or {}
+    publish = live.get("publish") or {}
+    money = live.get("money") or {}
+    lines = [
+        "🧠 <b>HEAD BRAIN COCKPIT</b>",
+        f"• Level: <code>{html.escape(cockpit.get('level') or '-')}</code> | Score: <b>{cockpit.get('score', 0)}%</b>",
+        f"• Decision: <b>{html.escape(cockpit.get('decision') or '-')}</b>",
+        f"• Mission: {html.escape(cockpit.get('mission') or '-')}",
+        "",
+        "<b>Admin làm ngay:</b>",
+        f"• <code>{html.escape(admin_next.get('command') or '/operator_next_run')}</code>",
+        f"• Lý do: {html.escape(admin_next.get('reason') or '-')}",
+        "",
+        "<b>Claude/n8n đọc và chạy:</b>",
+        f"• Read: <code>{html.escape(claude_next.get('read') or '-')}</code>",
+        f"• Start: <code>{html.escape(claude_next.get('start') or '-')}</code>",
+        f"• Safe execute: <b>{'YES' if claude_next.get('safe_execute') else 'NO'}</b>",
+        "",
+        "<b>Pipeline lanes:</b>",
+    ]
+    for lane in cockpit.get("lanes") or []:
+        icon = "✅" if lane.get("ok") else "⚠️"
+        lines.append(
+            f"{icon} <code>{html.escape(lane.get('phase') or '-')}</code> — {html.escape(lane.get('title') or '-')}\n"
+            f"  next: <code>{html.escape(lane.get('command') or '-')}</code>"
+        )
+    lines.extend([
+        "",
+        "<b>Trạng thái sống:</b>",
+        f"• Publish: <code>{html.escape(str(publish.get('overall') or '-'))}</code> | {html.escape(str(publish.get('summary') or {}))[:180]}",
+        f"• Money: <code>{html.escape(str(money))[:220]}</code>",
+        "",
+        "<b>Lệnh lõi:</b>",
+    ])
+    commands = cockpit.get("operator_commands") or {}
+    for key in ["start_batch", "claim_worker", "review", "approve", "publish", "track", "scale"]:
+        if commands.get(key):
+            lines.append(f"• {key}: <code>{html.escape(commands[key])}</code>")
+    lines.append(
+        "\nAPI: <code>GET /api/operator/head-brain?days=30&amp;platform=tiktok&amp;limit=8</code>\n"
+        "Rule: không tự publish ngoài review/approve gate; sau đăng bắt buộc ghi performance."
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -22398,6 +22638,7 @@ def operator_category_keyboard(category):
     categories = {
         "cat_control": [
             ("🧠 Mission control", "mission"), ("🧠 Brain command", "brain"),
+            ("🧠 Head brain", "headbrain"),
             ("🎯 Goal audit", "goalaudit"),
             ("🛡 Telegram takeover", "telegramtakeover"),
             ("🎯 Campaign preset", "campaignpreset"),
@@ -22568,6 +22809,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Director execute an toàn: <code>POST {html.escape(base_url)}/api/operator/director/run</code>",
         f"• Audit end-to-end: <code>GET {html.escape(base_url)}/api/operator/audit</code>",
         f"• Goal audit tổng mục tiêu: <code>GET {html.escape(base_url)}/api/operator/goal-audit?days=30&amp;platform=tiktok</code>",
+        f"• Head brain cockpit: <code>GET {html.escape(base_url)}/api/operator/head-brain?days=30&amp;platform=tiktok&amp;limit=8</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• Film blueprint: <code>GET {html.escape(base_url)}/api/operator/film-blueprint</code>",
         f"• Film project pack: <code>GET {html.escape(base_url)}/api/operator/film-project-pack?topic=dao_ly&amp;platform=tiktok</code>",
@@ -22883,6 +23125,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "missioninbox": "/missions\n/mission_add title=Chiến dịch AI tools platform=tiktok priority=8 objective=Tạo 5 video affiliate công nghệ AI, gắn link phù hợp, review trước đăng.\n/mission_claim worker=claude\nGET /api/operator/missions\nPOST /api/operator/missions/claim",
         "missionrun": "/mission_run id=<MISSION_ID>\n/mission_run id=<MISSION_ID> execute=1 safe=1\nPOST /api/operator/missions/run",
         "missionworkorders": "/mission_workorders id=<MISSION_ID>\nGET /api/operator/missions/<MISSION_ID>/work-orders?include_prompt=1",
+        "headbrain": "/head_brain days=30 platform=tiktok limit=8\nGET /api/operator/head-brain?days=30&platform=tiktok&limit=8",
         "audit": "/operator_audit",
         "goalaudit": "/goal_audit days=30 platform=tiktok\nGET /api/operator/goal-audit?days=30&platform=tiktok",
         "smoke": "/operator_smoke\nGET /api/operator/smoke-test",
@@ -27192,6 +27435,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_cycle", cmd_operator_cycle))
     tg_app.add_handler(CommandHandler("operator_command", cmd_operator_command))
     tg_app.add_handler(CommandHandler("operator_mission", cmd_operator_mission))
+    tg_app.add_handler(CommandHandler("head_brain", cmd_head_brain))
     tg_app.add_handler(CommandHandler("mission_add", cmd_mission_add))
     tg_app.add_handler(CommandHandler("missions", cmd_missions))
     tg_app.add_handler(CommandHandler("mission_claim", cmd_mission_claim))
@@ -27886,6 +28130,11 @@ async def api_operator_audit(request: Request):
 async def api_operator_goal_audit(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 8):
     verify_operator_api_token(request)
     return operator_goal_audit_data(ADMIN_ID, days=days, platform=platform, limit=limit)
+
+@fastapi_app.get("/api/operator/head-brain")
+async def api_operator_head_brain(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 8):
+    verify_operator_api_token(request)
+    return operator_head_brain_cockpit_data(ADMIN_ID, days=days, platform=platform, limit=limit)
 
 @fastapi_app.get("/api/operator/worker-spec")
 async def api_operator_worker_spec(request: Request):
