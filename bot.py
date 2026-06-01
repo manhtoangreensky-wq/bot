@@ -9566,6 +9566,9 @@ def operator_brain_fallback(raw_text):
     affiliate_id = int_from_text(lower, ["aff", "affiliate"], 0)
     campaign_id = int_from_text(lower, ["campaign", "camp", "chiến dịch", "chien dich"], 0)
     job_id = int_from_text(lower, ["job", "video job"], 0)
+    task_id = int_from_text(lower, ["task", "id"], 0) or first_number_near(lower, ["task", "việc", "viec"], 0)
+    if not task_id and any(word in lower for word in ["handoff", "kích hoạt", "kich hoat", "giao số", "giao so", "chạy số", "chay so"]):
+        task_id = first_number_near(lower, ["số", "so", "id"], 0)
     limit = first_number_near(lower, ["video", "job", "trend"], 0) or int_from_text(lower, ["limit", "max"], 0) or 5
     duration = int_from_text(lower, ["duration", "dai", "dài"], 45) or 45
     build_requested = any(word in lower for word in ["build", "dựng", "dung", "xây", "xay", "tạo bundle", "tao bundle", "build luôn", "build luon"])
@@ -9575,6 +9578,12 @@ def operator_brain_fallback(raw_text):
     any_url = any_url_match.group(0).rstrip(").,!?;\"'") if any_url_match else ""
     queue_id = int_from_text(lower, ["queue", "hang doi", "hàng đợi"], 0)
     performance_metrics = parse_brain_performance_metrics(text)
+    worker_tool = ""
+    for candidate in ["kling", "runway", "capcut", "fish", "fish audio", "edge", "edge tts", "gemini", "openai", "removebg", "cutout"]:
+        if candidate in lower:
+            worker_tool = candidate.replace(" ", "_")
+            break
+    worker_limit = int_from_text(lower, ["limit", "max"], 0) or first_number_near(lower, ["task"], 0) or 5
 
     if any(word in lower for word in [
         "command center", "trung tâm điều hành", "trung tam dieu hanh", "tổng chỉ huy", "tong chi huy",
@@ -9637,6 +9646,37 @@ def operator_brain_fallback(raw_text):
             "metrics": performance_metrics,
             "confidence": 82,
             "note": "brain_performance",
+        }
+    if task_id and any(word in lower for word in [
+        "handoff", "giao task", "giao việc", "giao viec", "xuất prompt", "xuat prompt",
+        "kích hoạt", "kich hoat", "chạy task", "chay task", "làm task", "lam task"
+    ]):
+        return {
+            "intent": "task_handoff",
+            "task": task_id,
+            "job": job_id,
+            "confidence": 82,
+        }
+    if any(word in lower for word in [
+        "giao việc tiếp", "giao viec tiep", "làm task tiếp", "lam task tiep",
+        "nhận task tiếp", "nhan task tiep", "claim task", "next task", "task tiếp", "task tiep"
+    ]):
+        return {
+            "intent": "next_task",
+            "job": job_id,
+            "tool": worker_tool,
+            "confidence": 80,
+        }
+    if any(word in lower for word in [
+        "worker tiếp", "worker tiep", "worker next", "xem worker", "peek worker",
+        "việc worker", "viec worker", "task worker", "xem task tiếp", "xem task tiep"
+    ]):
+        return {
+            "intent": "worker_next",
+            "job": job_id,
+            "tool": worker_tool,
+            "limit": max(1, min(worker_limit, 10)),
+            "confidence": 78,
         }
     if any(word in lower for word in ["chạy scale plan", "chay scale plan", "execute scale", "scale execute", "tự scale", "tu scale", "scale luôn", "scale luon"]):
         return {
@@ -9783,7 +9823,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
@@ -9794,6 +9834,9 @@ def parse_operator_brain(raw_text, owner_id):
         "- autopilot: khi admin muốn tìm trend, tạo job và build luôn creative/manifest/task trong một lệnh.\n"
         "- operator: khi admin nêu một topic cụ thể và có channel để tạo một job.\n"
         "- operator_build: khi admin muốn dựng tiếp một job đã có thành creative/manifest/task.\n"
+        "- worker_next: khi admin muốn xem worker/task tiếp theo mà chưa đổi trạng thái; có thể có job/tool.\n"
+        "- next_task: khi admin muốn nhận/giao việc tiếp theo để bắt đầu làm; có thể có job/tool.\n"
+        "- task_handoff: khi admin muốn xuất prompt/handoff một task cụ thể; cần task ID.\n"
         "- reference_add: khi admin gửi link/path video và nói học/lưu/tham khảo/mẫu để đưa vào reference catalog.\n"
         "- approve_publish: khi admin nói duyệt/chốt job để đưa vào hàng đợi đăng; cần job ID.\n"
         "- publisher_run: khi admin nói chạy publisher/đăng queue tiếp theo.\n"
@@ -9809,7 +9852,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","mode":"","status":"","metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","mode":"","status":"","tool":"","metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -9935,6 +9978,20 @@ def brain_command_preview(plan):
         )
     if intent == "operator_build":
         return f"/operator_build job={int(plan.get('job') or 0)} n={max(2, min(int(plan.get('limit') or 5), 8))} duration={int(plan.get('duration') or 45)}"
+    if intent == "worker_next":
+        return (
+            f"/worker_next job={int(plan.get('job') or 0)} "
+            f"tool={plan.get('tool') or ''} limit={max(1, min(int(plan.get('limit') or 5), 10))}"
+        )
+    if intent == "next_task":
+        parts = ["/next_task"]
+        if int(plan.get("job") or 0):
+            parts.append(f"job={int(plan.get('job') or 0)}")
+        if plan.get("tool"):
+            parts.append(f"tool={plan.get('tool')}")
+        return " ".join(parts)
+    if intent == "task_handoff":
+        return f"/task_handoff id={int(plan.get('task') or plan.get('id') or 0)}"
     if intent == "job_ready":
         return f"/job_ready job={int(plan.get('job') or 0)}"
     if intent == "operator_daily":
@@ -10175,6 +10232,26 @@ async def run_brain_plan(update, context, plan):
                 f"duration={int(plan.get('duration') or 45)}",
             ]
             return await cmd_operator_build(update, context)
+        if intent == "worker_next":
+            context.args = [
+                f"job={int(plan.get('job') or 0)}",
+                f"tool={plan.get('tool') or ''}",
+                f"limit={max(1, min(int(plan.get('limit') or 5), 10))}",
+            ]
+            return await cmd_worker_next(update, context)
+        if intent == "next_task":
+            context.args = []
+            if int(plan.get("job") or 0):
+                context.args.append(f"job={int(plan.get('job') or 0)}")
+            if plan.get("tool"):
+                context.args.append(f"tool={plan.get('tool')}")
+            return await cmd_next_task(update, context)
+        if intent == "task_handoff":
+            task_id = int(plan.get("task") or plan.get("id") or 0)
+            if not task_id:
+                return await update.message.reply_text("⚠️ Cần task ID. Ví dụ: <code>/brain handoff task 5</code>", parse_mode="HTML")
+            context.args = [f"id={task_id}"]
+            return await cmd_task_handoff(update, context)
         if intent == "job_ready":
             if not int(plan.get("job") or 0):
                 return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain kiểm tra job 12 đã ready chưa</code>", parse_mode="HTML")
@@ -12399,6 +12476,9 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain nên scale gì trên tiktok</code>\n"
             "• <code>/brain chạy scale plan tiktok limit 3</code>\n"
             "• <code>/brain build job 12 duration 45</code>\n"
+            "• <code>/brain xem worker tiếp theo job 12</code>\n"
+            "• <code>/brain giao việc tiếp theo job 12</code>\n"
+            "• <code>/brain handoff task 5</code>\n"
             "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
             "• <code>/brain báo cáo vận hành 7 ngày</code>",
             parse_mode="HTML"
@@ -13246,13 +13326,24 @@ async def cmd_next_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         job_id = int(data.get("job") or data.get("id") or (context.args[0] if context.args else 0))
     except ValueError:
         job_id = 0
-    task = next_production_task(update.effective_user.id, job_id=job_id or None)
+    tool_filter = (data.get("tool") or "").strip().lower()
+    full_task = None
+    if tool_filter:
+        full_task = next_worker_task(update.effective_user.id, job_id=job_id or None, tool=tool_filter)
+        if full_task:
+            tid, row_job_id, mid, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = full_task
+            task = (tid, row_job_id, mid, task_type, tool, scene_no, title, status, output_url, note, updated_at)
+        else:
+            task = None
+    else:
+        task = next_production_task(update.effective_user.id, job_id=job_id or None)
     if not task:
         if job_id:
-            return await update.message.reply_text(f"✅ Job #{job_id} không còn task cần xử lý hoặc chưa có task.")
+            suffix = f" cho tool <code>{html.escape(tool_filter)}</code>" if tool_filter else ""
+            return await update.message.reply_text(f"✅ Job #{job_id} không còn task cần xử lý{suffix} hoặc chưa có task.", parse_mode="HTML")
         return await update.message.reply_text("✅ Không có production task nào cần xử lý.")
     tid, row_job_id, mid, task_type, tool, scene_no, title, status, output_url, note, updated_at = task
-    full_task = get_production_task(update.effective_user.id, tid)
+    full_task = full_task or get_production_task(update.effective_user.id, tid)
     prompt = full_task[7] if full_task else ""
     runbook = operator_task_execution_runbook(task_type, tool, prompt, row_job_id)
     required_output = "\n".join("- " + str(x) for x in runbook.get("required_output", [])) or "-"
