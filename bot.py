@@ -9569,7 +9569,7 @@ def operator_brain_fallback(raw_text):
     limit = first_number_near(lower, ["video", "job", "trend"], 0) or int_from_text(lower, ["limit", "max"], 0) or 5
     duration = int_from_text(lower, ["duration", "dai", "dài"], 45) or 45
     build_requested = any(word in lower for word in ["build", "dựng", "dung", "xây", "xay", "tạo bundle", "tao bundle", "build luôn", "build luon"])
-    days = int_from_text(lower, ["days", "ngày", "ngay"], 30) or 30
+    days = int_from_text(lower, ["days", "ngày", "ngay"], 0) or first_number_near(lower, ["ngày", "ngay", "days"], 0) or 30
     reference_url = extract_supported_video_url(text)
     any_url_match = re.search(r"https?://[^\s<>\"]+", text or "", flags=re.I)
     any_url = any_url_match.group(0).rstrip(").,!?;\"'") if any_url_match else ""
@@ -9625,6 +9625,46 @@ def operator_brain_fallback(raw_text):
             "metrics": performance_metrics,
             "confidence": 82,
             "note": "brain_performance",
+        }
+    if any(word in lower for word in ["chạy scale plan", "chay scale plan", "execute scale", "scale execute", "tự scale", "tu scale", "scale luôn", "scale luon"]):
+        return {
+            "intent": "scale_execute",
+            "platform": platform,
+            "limit": max(1, min(limit, 10)),
+            "days": max(1, min(days, 180)),
+            "duration": duration,
+            "build": 1,
+            "confidence": 81,
+        }
+    if any(word in lower for word in ["nên scale", "nen scale", "scale plan", "kế hoạch scale", "ke hoach scale", "link nào hiệu quả", "link nao hieu qua", "đẩy mạnh link", "day manh link"]):
+        return {
+            "intent": "scale_plan",
+            "platform": platform,
+            "limit": max(3, min(limit, 30)),
+            "days": max(1, min(days, 180)),
+            "confidence": 78,
+        }
+    if any(word in lower for word in ["tracking", "funnel", "nguồn nào", "nguon nao", "source nào", "source nao", "caption nào", "caption nao", "comment nào", "comment nao"]):
+        return {
+            "intent": "tracking_report",
+            "limit": max(3, min(limit, 30)),
+            "days": max(1, min(days, 180)),
+            "confidence": 76,
+        }
+    if any(word in lower for word in ["affiliate report", "báo cáo affiliate", "bao cao affiliate", "link affiliate", "doanh thu affiliate"]):
+        return {
+            "intent": "affiliate_report",
+            "limit": max(3, min(limit, 30)),
+            "days": max(1, min(days, 180)),
+            "confidence": 74,
+        }
+    if any(word in lower for word in ["quyết định affiliate", "quyet dinh affiliate", "affiliate decisions", "link nào nên test", "link nao nen test", "link nào nên dừng", "link nao nen dung"]):
+        return {
+            "intent": "affiliate_decisions",
+            "platform": platform,
+            "limit": max(3, min(limit, 30)),
+            "days": max(1, min(days, 180)),
+            "confidence": 74,
         }
 
     if any(word in lower for word in ["execute", "thực thi", "thuc thi", "chạy bước tiếp", "chay buoc tiep", "tự xử lý", "tu xu ly", "đầu não chạy", "dau nao chay"]):
@@ -9731,7 +9771,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
         "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
@@ -9747,6 +9787,11 @@ def parse_operator_brain(raw_text, owner_id):
         "- publisher_handoff: khi admin muốn lấy pack/handoff cho một queue cụ thể; cần queue ID.\n"
         "- publish_queue_set: khi admin gửi URL bài đã đăng và muốn đánh dấu queue là published; cần queue ID và url.\n"
         "- performance_add: khi admin nói job có bao nhiêu view/click/đơn/lead/doanh thu/chi phí; cần job ID và metrics.\n"
+        "- tracking_report: khi admin hỏi funnel/source/caption/comment/link tracking nào hiệu quả.\n"
+        "- scale_plan: khi admin hỏi nên scale link/video/job nào dựa trên số liệu.\n"
+        "- scale_execute: khi admin yêu cầu chạy scale plan/tự scale an toàn.\n"
+        "- affiliate_report: khi admin hỏi báo cáo doanh thu affiliate/link affiliate.\n"
+        "- affiliate_decisions: khi admin hỏi link nào nên scale/test/fix/pause.\n"
         "- job_ready: khi admin muốn kiểm tra đủ điều kiện đăng.\n"
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
@@ -9844,6 +9889,26 @@ def brain_command_preview(plan):
                 )
             return "\n".join(parts) if parts else "/performance"
         return f"/performance_add job={int(plan.get('job') or 0)} type=view value=0 note=brain_performance"
+    if intent == "tracking_report":
+        return f"/tracking_report days={max(1, min(int(plan.get('days') or 30), 180))} limit={max(3, min(int(plan.get('limit') or 10), 30))}"
+    if intent == "scale_plan":
+        return (
+            f"/scale_plan days={max(1, min(int(plan.get('days') or 30), 180))} "
+            f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 10), 30))}"
+        )
+    if intent == "scale_execute":
+        return (
+            f"/scale_execute days={max(1, min(int(plan.get('days') or 30), 180))} "
+            f"platform={plan.get('platform') or 'tiktok'} limit={max(1, min(int(plan.get('limit') or 3), 10))} "
+            f"build={int(plan.get('build') or 1)} duration={int(plan.get('duration') or 45)}"
+        )
+    if intent == "affiliate_report":
+        return f"/affiliate_report days={max(1, min(int(plan.get('days') or 30), 180))} limit={max(3, min(int(plan.get('limit') or 15), 30))}"
+    if intent == "affiliate_decisions":
+        return (
+            f"/affiliate_decisions days={max(1, min(int(plan.get('days') or 30), 180))} "
+            f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 12), 30))}"
+        )
     if intent == "operator":
         return (
             f"/operator topic={plan.get('topic') or plan.get('niche') or 'video affiliate'} "
@@ -10029,6 +10094,41 @@ async def run_brain_plan(update, context, plan):
                 "\n\nXem funnel: <code>/tracking_report days=30</code> hoặc <code>/scale_plan</code>",
                 parse_mode="HTML"
             )
+        if intent == "tracking_report":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"limit={max(3, min(int(plan.get('limit') or 10), 30))}",
+            ]
+            return await cmd_tracking_report(update, context)
+        if intent == "scale_plan":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 10), 30))}",
+            ]
+            return await cmd_scale_plan(update, context)
+        if intent == "scale_execute":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(1, min(int(plan.get('limit') or 3), 10))}",
+                f"build={int(plan.get('build') or 1)}",
+                f"duration={int(plan.get('duration') or 45)}",
+            ]
+            return await cmd_scale_execute(update, context)
+        if intent == "affiliate_report":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"limit={max(3, min(int(plan.get('limit') or 15), 30))}",
+            ]
+            return await cmd_affiliate_report(update, context)
+        if intent == "affiliate_decisions":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 12), 30))}",
+            ]
+            return await cmd_affiliate_decisions(update, context)
         if intent == "operator":
             if not int(plan.get("channel") or 0):
                 return await update.message.reply_text(
@@ -12269,6 +12369,9 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain chạy publisher tiktok</code>\n"
             "• <code>/brain queue 3 đã đăng https://...</code>\n"
             "• <code>/brain job 12 có 5000 view 30 click 2 đơn doanh thu 150k</code>\n"
+            "• <code>/brain link nào hiệu quả 30 ngày</code>\n"
+            "• <code>/brain nên scale gì trên tiktok</code>\n"
+            "• <code>/brain chạy scale plan tiktok limit 3</code>\n"
             "• <code>/brain build job 12 duration 45</code>\n"
             "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
             "• <code>/brain báo cáo vận hành 7 ngày</code>",
