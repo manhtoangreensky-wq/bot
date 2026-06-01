@@ -2397,7 +2397,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
         "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "affiliate_seed", "affiliate_scale",
-        "worker_next", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "worker_next", "operator_command", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -2405,6 +2405,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/video-patterns"),
         ("GET", "/api/operator/reference-pack"),
         ("GET", "/api/operator/n8n-workflow.json"),
+        ("GET", "/api/operator/command-center"),
         ("POST", "/api/operator/make-video"),
         ("GET", "/api/operator/publisher/status"),
         ("POST", "/api/operator/publisher/run"),
@@ -3822,6 +3823,65 @@ def operator_today_data(owner_id):
         "next_task": next_task,
         "publish_rows": publish_rows,
         "actions": actions[:8],
+    }
+
+def operator_command_center_data(owner_id, days=30, platform="tiktok", limit=8):
+    today = operator_today_data(owner_id)
+    publisher = publisher_status_data(owner_id)
+    worker_next = operator_worker_next_summary(owner_id, limit=limit)
+    since, decisions, job_rows = affiliate_decision_data(owner_id, days=days, limit=limit, platform=platform)
+    event_totals, channel_totals, recent_events = performance_report_data(owner_id, limit=limit)
+    director = operator_director_data(owner_id, days=days, platform=platform, limit=limit)
+
+    money = {
+        "events": [
+            {"type": event_type, "value": int(value_sum or 0), "amount": int(amount_sum or 0), "count": int(count or 0)}
+            for event_type, value_sum, amount_sum, count in event_totals
+        ],
+        "channels": [
+            {"platform": row_platform, "channel": channel_name, "value": int(value_sum or 0), "amount": int(amount_sum or 0), "count": int(count or 0)}
+            for row_platform, channel_name, value_sum, amount_sum, count in channel_totals[:limit]
+        ],
+        "recent": [
+            {
+                "id": event_id,
+                "job_id": job_id,
+                "platform": row_platform,
+                "event_type": event_type,
+                "value": int(value or 0),
+                "amount": int(amount or 0),
+                "note": note,
+                "created_at": created_at,
+                "channel": channel_name,
+                "topic": topic,
+            }
+            for event_id, job_id, row_platform, event_type, value, amount, note, created_at, channel_name, topic in recent_events[:limit]
+        ],
+    }
+    return {
+        "generated_at": now_text(),
+        "ready_to_scale": today["status"]["ready_to_scale"],
+        "counts": today["status"]["counts"],
+        "actions": today["actions"],
+        "director_next": director.get("next_action"),
+        "worker_next": worker_next,
+        "publisher": {
+            "ready": publisher.get("ready"),
+            "api_ready": publisher.get("api_ready"),
+            "open_queue": publisher.get("open_queue"),
+            "blockers": publisher.get("blockers"),
+        },
+        "affiliate_decisions": decisions[:limit],
+        "money": money,
+        "next": {
+            "make_video": "/api/operator/make-video",
+            "worker_next": "/api/operator/worker-next",
+            "claim_task": "/api/operator/tasks/claim?include_context=1",
+            "publisher_run": "/api/operator/publisher/run",
+            "performance": "/api/operator/performance",
+            "telegram": "/operator_command",
+        },
+        "rule": "Command center là snapshot điều phối: đọc worker_next/publisher/affiliate_decisions rồi mới execute; không tự publish nếu chưa approved.",
     }
 
 def get_production_job(job_id, owner_id):
@@ -11012,6 +11072,49 @@ async def cmd_operator_today(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lines.append("\nMở checklist đầy đủ: <code>/operator_playbook</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        days = max(1, min(int(data.get("days") or 30), 180))
+    except ValueError:
+        days = 30
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    center = operator_command_center_data(update.effective_user.id, days=days, platform=platform, limit=5)
+    counts = center["counts"]
+    lines = [
+        "🧠 <b>OPERATOR COMMAND CENTER</b>",
+        f"• Ready to scale: <b>{'YES' if center['ready_to_scale'] else 'NO'}</b>",
+        f"• Jobs/tasks/publish: <b>{counts['open_jobs']}</b>/<b>{counts['open_tasks']}</b>/<b>{counts['open_publish']}</b>",
+        f"• Publisher: ready=<b>{'YES' if center['publisher']['ready'] else 'NO'}</b> api=<b>{'YES' if center['publisher']['api_ready'] else 'NO'}</b>",
+        "",
+        "<b>Next actions:</b>",
+    ]
+    for idx, action in enumerate(center["actions"][:5], 1):
+        lines.append(f"{idx}. <code>{html.escape(action['priority'])}</code> {html.escape(action['title'])}\n   <code>{html.escape(action['command'])}</code>")
+    if center["worker_next"]:
+        item = center["worker_next"][0]
+        task = item.get("next_task") or {}
+        lines.extend([
+            "",
+            "<b>Worker next:</b>",
+            f"• Job <code>#{item.get('job_id')}</code> | Task <code>#{task.get('id') or '-'}</code> / <code>{html.escape(task.get('task_type') or '-')}</code> / tool=<code>{html.escape(task.get('tool') or '-')}</code>",
+            f"• Claim: <code>{html.escape(item.get('claim_task_url') or '')}</code>",
+        ])
+    if center["affiliate_decisions"]:
+        lines.append("\n<b>Affiliate decisions:</b>")
+        for item in center["affiliate_decisions"][:3]:
+            lines.append(
+                f"• <code>{html.escape(item['action'])}</code> aff #{item['affiliate_id']} "
+                f"score={item['score']} rev={item['revenue']:,}đ\n"
+                f"  <code>{html.escape(item['command'])}</code>"
+            )
+    revenue_total = sum(row.get("amount", 0) for row in center["money"]["events"] if row.get("type") in {"revenue", "order", "lead"})
+    lines.append(f"\n<b>Money snapshot:</b> revenue/order/lead amount=<b>{revenue_total:,}đ</b>")
+    lines.append("\nAPI: <code>GET /api/operator/command-center</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -14435,6 +14538,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_director", cmd_operator_director))
     tg_app.add_handler(CommandHandler("operator_execute", cmd_operator_execute))
     tg_app.add_handler(CommandHandler("operator_today", cmd_operator_today))
+    tg_app.add_handler(CommandHandler("operator_command", cmd_operator_command))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_worker_spec", cmd_operator_worker_spec))
@@ -15023,6 +15127,17 @@ async def api_operator_today(request: Request):
             "tasks_url": "/api/operator/tasks/next",
             "telegram": "/operator_today",
         },
+    }
+
+@fastapi_app.get("/api/operator/command-center")
+async def api_operator_command_center(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 8):
+    verify_operator_api_token(request)
+    days = max(1, min(int(days or 30), 180))
+    limit = max(1, min(int(limit or 8), 20))
+    platform = (platform or "tiktok").lower()
+    return {
+        "ok": True,
+        **operator_command_center_data(ADMIN_ID, days=days, platform=platform, limit=limit),
     }
 
 @fastapi_app.post("/api/operator/tasks/{task_id}/complete")

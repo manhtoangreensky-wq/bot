@@ -105,6 +105,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/operator_smoke`: smoke test nhẹ không tạo job, kiểm tra env, DB, file logo/landing, API surface, worker spec, n8n workflow và publisher readiness.
 - `/operator_status`: kiểm tra hệ thống đã sẵn sàng scale chưa, gồm channel, affiliate, campaign, API token, publish readiness, queue, task và job blocked.
 - `/operator_today`: kế hoạch ưu tiên trong ngày, tự gom việc setup còn thiếu, job blocked, task kế tiếp, publish queue và affiliate nên scale.
+- `/operator_command days=30 platform=tiktok`: command center cho admin/Claude/n8n, gom next actions, worker-next, publisher, affiliate decisions và money snapshot.
 - `/operator_playbook`: checklist vận hành từ kiểm tra hệ thống, chọn affiliate, tạo video theo trend, giao task cho AI/tool, review, publish và đo doanh thu.
 - `/operator_daily days=1`: báo cáo vận hành theo ngày gồm job mới, publish queue, performance và việc cần xử lý.
 - `/trend_search niche=... platform=tiktok channel=<ID> aff=<ID> campaign=<ID>`: tìm trend mới từ nguồn RSS/news công khai, chấm điểm trend/affiliate/cạnh tranh và hiện nút tạo video trend vào pipeline.
@@ -164,6 +165,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /webhook/payos`: nhận webhook PayOS, kiểm tra chữ ký, mã đơn, số tiền, trạng thái và chống cộng xu trùng.
 - `POST /lead`: nhận lead từ landing page và gửi thông báo về admin Telegram.
 - `GET /api/operator/worker-next?job_id=<JOB_ID>&tool=fish`: peek task kế tiếp cho Claude/n8n/tool worker, không đổi trạng thái task.
+- `GET /api/operator/command-center?days=30&platform=tiktok`: command center máy đọc được, gom operator status, worker-next, publisher, affiliate decisions và money snapshot.
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id`, `tool`, `include_context=1`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
 - `GET /api/operator/tasks/claim?include_context=1`: alias claim task mới, trả luôn `job_context` để Claude/n8n/tool worker có đủ runbook trong một lần gọi.
 - `GET /api/operator/status`: worker ngoài kiểm tra readiness tổng thể trước khi tự động scale hoặc publish.
