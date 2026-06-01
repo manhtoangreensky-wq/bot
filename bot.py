@@ -96,6 +96,14 @@ COBALT_API_KEY      = _env("COBALT_API_KEY")
 PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "Httdhtoan")
 PUBLIC_BASE_URL     = _env("PUBLIC_BASE_URL")
+TELEGRAM_UPDATE_MODE = _env("TELEGRAM_UPDATE_MODE", "webhook" if PUBLIC_BASE_URL else "polling").lower()
+TELEGRAM_WEBHOOK_SECRET = _env("TELEGRAM_WEBHOOK_SECRET")
+TELEGRAM_WEBHOOK_PATH = _env(
+    "TELEGRAM_WEBHOOK_PATH",
+    f"/webhook/telegram/{hashlib.sha256(TELEGRAM_TOKEN.encode()).hexdigest()[:16]}" if TELEGRAM_TOKEN else "/webhook/telegram",
+)
+if not TELEGRAM_WEBHOOK_PATH.startswith("/"):
+    TELEGRAM_WEBHOOK_PATH = "/" + TELEGRAM_WEBHOOK_PATH
 LEAD_WEBHOOK_SECRET = _env("LEAD_WEBHOOK_SECRET")
 OPERATOR_API_TOKEN  = _env("OPERATOR_API_TOKEN")
 AFFILIATE_POSTBACK_TOKEN = _env("AFFILIATE_POSTBACK_TOKEN")
@@ -12490,6 +12498,9 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "bot_username_env": BOT_USERNAME,
         "bot_info": bot_info,
         "public_base_url": PUBLIC_BASE_URL or "-",
+        "telegram_update_mode": TELEGRAM_UPDATE_MODE,
+        "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
+        "telegram_webhook_url": (PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH) if PUBLIC_BASE_URL else "-",
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
     }
     await update.message.reply_text(
@@ -20216,10 +20227,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ─── FASTAPI + LIFESPAN ───────────────────────────────────────────────────────
 tg_app: Application = None
+tg_polling_task: asyncio.Task | None = None
+
+async def run_polling_guarded():
+    try:
+        await tg_app.updater.start_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+        )
+    except Exception as e:
+        logger.error(f"Telegram polling không chạy được: {e}")
+        if ADMIN_ID:
+            try:
+                await tg_app.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        "🚨 <b>TOAN DAAS POLLING BỊ CHẶN</b>\n\n"
+                        "Có thể đang có process/deployment khác dùng cùng <code>TELEGRAM_TOKEN</code> "
+                        "hoặc Railway chưa cấu hình <code>PUBLIC_BASE_URL</code> để bật webhook takeover.\n\n"
+                        f"• Build: <code>{APP_BUILD}</code>\n"
+                        f"• Mode: <code>{html.escape(TELEGRAM_UPDATE_MODE)}</code>\n"
+                        "• Cách xử lý: set <code>PUBLIC_BASE_URL</code> đúng domain Railway rồi redeploy."
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app
+    global tg_app, tg_polling_task
     init_db()
     if not TELEGRAM_TOKEN:
         logger.error("❌ TELEGRAM_TOKEN chưa được set!")
@@ -20372,13 +20409,28 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
 
     await tg_app.initialize()
-    try:
-        await tg_app.bot.delete_webhook(drop_pending_updates=False)
-    except Exception as e:
-        logger.warning(f"Không xóa được webhook cũ trước khi polling: {e}")
     await tg_app.start()
-    asyncio.create_task(tg_app.updater.start_polling(allowed_updates=Update.ALL_TYPES))
-    logger.info(f"🚀 TOAN DAAS ONLINE — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
+    active_update_mode = TELEGRAM_UPDATE_MODE
+    webhook_url = ""
+    if active_update_mode == "webhook" and PUBLIC_BASE_URL:
+        webhook_url = PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH
+        webhook_kwargs = {
+            "url": webhook_url,
+            "allowed_updates": Update.ALL_TYPES,
+            "drop_pending_updates": True,
+        }
+        if TELEGRAM_WEBHOOK_SECRET:
+            webhook_kwargs["secret_token"] = TELEGRAM_WEBHOOK_SECRET
+        await tg_app.bot.set_webhook(**webhook_kwargs)
+        logger.info(f"🚀 TOAN DAAS ONLINE WEBHOOK — build={APP_BUILD} webhook={webhook_url}")
+    else:
+        active_update_mode = "polling"
+        try:
+            await tg_app.bot.delete_webhook(drop_pending_updates=True)
+        except Exception as e:
+            logger.warning(f"Không xóa được webhook cũ trước khi polling: {e}")
+        tg_polling_task = asyncio.create_task(run_polling_guarded())
+        logger.info(f"🚀 TOAN DAAS ONLINE POLLING — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
     if ADMIN_ID:
         try:
             await tg_app.bot.send_message(
@@ -20387,6 +20439,8 @@ async def lifespan(app: FastAPI):
                     "🧬 <b>TOAN DAAS DEPLOYED</b>\n\n"
                     f"• Build: <code>{APP_BUILD}</code>\n"
                     f"• Deploy: <code>{APP_DEPLOY_ID or '-'}</code>\n"
+                    f"• Update mode: <code>{html.escape(active_update_mode)}</code>\n"
+                    f"• Webhook: <code>{html.escape(webhook_url or '-')}</code>\n"
                     "• Lệnh kiểm tra: /runtime"
                 ),
                 parse_mode="HTML"
@@ -20394,7 +20448,12 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Không gửi được thông báo deploy cho admin: {e}")
     yield
-    await tg_app.updater.stop()
+    if tg_polling_task:
+        try:
+            await tg_app.updater.stop()
+        except Exception:
+            pass
+        tg_polling_task.cancel()
     await tg_app.stop()
     await tg_app.shutdown()
     logger.info("🛑 Bot đã dừng an toàn.")
@@ -20409,6 +20468,7 @@ async def health():
         "service": f"{APP_VERSION} — Dynamic Billing Verified",
         "build": APP_BUILD,
         "deploy_id": APP_DEPLOY_ID or "",
+        "telegram_update_mode": TELEGRAM_UPDATE_MODE,
     }
 
 @fastapi_app.get("/runtime")
@@ -20420,8 +20480,24 @@ async def runtime_health():
         "deploy_id": APP_DEPLOY_ID or "",
         "bot_username_env": BOT_USERNAME,
         "public_base_url": PUBLIC_BASE_URL or "",
+        "telegram_update_mode": TELEGRAM_UPDATE_MODE,
+        "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
+        "telegram_webhook_url": (PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH) if PUBLIC_BASE_URL else "",
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
     }
+
+@fastapi_app.post(TELEGRAM_WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    if TELEGRAM_WEBHOOK_SECRET:
+        token = request.headers.get("x-telegram-bot-api-secret-token", "")
+        if not hmac.compare_digest(token, TELEGRAM_WEBHOOK_SECRET):
+            raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
+    if not tg_app:
+        raise HTTPException(status_code=503, detail="Telegram app is not ready")
+    payload = await request.json()
+    update = Update.de_json(payload, tg_app.bot)
+    await tg_app.process_update(update)
+    return {"ok": True}
 
 @fastapi_app.get("/landing")
 async def landing_page():
