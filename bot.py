@@ -21836,15 +21836,21 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"• Handoff: <code>/task_handoff id={task.get('id') or '<TASK_ID>'}</code>",
         ])
     if first_job_id:
+        tasks_cmd = telegram_next.get("tasks") or f"/tasks job={first_job_id}"
+        video_brief_cmd = telegram_next.get("video_brief") or f"/video_brief job={first_job_id}"
+        distribution_cmd = telegram_next.get("distribution") or f"/distribution_pack job={first_job_id}"
+        review_cmd = telegram_next.get("review") or f"/review_video job={first_job_id} send=1"
+        approve_cmd = telegram_next.get("approve") or f"/approve_publish job={first_job_id} queue=1 mode=manual"
+        post_publish_cmd = telegram_next.get("post_publish") or f"/post_publish job={first_job_id}"
         lines.extend([
             "",
             "<b>Điều hành tiếp:</b>",
-            f"• Tasks: <code>{html.escape(telegram_next.get('tasks') or f'/tasks job={first_job_id}')}</code>",
-            f"• Video brief: <code>{html.escape(telegram_next.get('video_brief') or f'/video_brief job={first_job_id}')}</code>",
-            f"• Distribution: <code>{html.escape(telegram_next.get('distribution') or f'/distribution_pack job={first_job_id}')}</code>",
-            f"• Review video: <code>{html.escape(telegram_next.get('review') or f'/review_video job={first_job_id} send=1')}</code>",
-            f"• Approve queue: <code>{html.escape(telegram_next.get('approve') or f'/approve_publish job={first_job_id} queue=1 mode=manual')}</code>",
-            f"• Sau đăng: <code>{html.escape(telegram_next.get('post_publish') or f'/post_publish job={first_job_id}')}</code>",
+            f"• Tasks: <code>{html.escape(tasks_cmd)}</code>",
+            f"• Video brief: <code>{html.escape(video_brief_cmd)}</code>",
+            f"• Distribution: <code>{html.escape(distribution_cmd)}</code>",
+            f"• Review video: <code>{html.escape(review_cmd)}</code>",
+            f"• Approve queue: <code>{html.escape(approve_cmd)}</code>",
+            f"• Sau đăng: <code>{html.escape(post_publish_cmd)}</code>",
         ])
     lines.append("\nAPI cho Claude/n8n: <code>POST /api/operator/launch</code>")
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
