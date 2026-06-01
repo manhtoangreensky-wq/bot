@@ -139,6 +139,62 @@ MAX_OPERATOR_UPLOAD_MB = int(_env("MAX_OPERATOR_UPLOAD_MB", "200") or "200")
 META_GRAPH_VERSION = _env("META_GRAPH_VERSION", "v24.0")
 REFERENCE_VIDEO_DIR = _env("REFERENCE_VIDEO_DIR", r"D:\mybot\video AI tham khảo")
 
+def expected_telegram_webhook_url() -> str:
+    return (PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH) if PUBLIC_BASE_URL else ""
+
+def serialize_telegram_webhook_info(info, expected_url: str = "") -> dict:
+    if not info:
+        return {"ok": False, "reason": "not_available"}
+    actual_url = getattr(info, "url", "") or ""
+    return {
+        "ok": True,
+        "url": actual_url,
+        "expected_url": expected_url or "",
+        "matches_expected": bool(expected_url and actual_url == expected_url),
+        "pending_update_count": int(getattr(info, "pending_update_count", 0) or 0),
+        "last_error_date": str(getattr(info, "last_error_date", "") or ""),
+        "last_error_message": getattr(info, "last_error_message", "") or "",
+        "max_connections": getattr(info, "max_connections", None),
+        "allowed_updates": getattr(info, "allowed_updates", None),
+        "ip_address": getattr(info, "ip_address", "") or "",
+    }
+
+def telegram_update_ownership_diagnosis(info_payload: dict, active_update_mode: str = "") -> dict:
+    actual_url = (info_payload or {}).get("url") or ""
+    expected_url = (info_payload or {}).get("expected_url") or expected_telegram_webhook_url()
+    mode = (active_update_mode or TELEGRAM_UPDATE_MODE or "").lower()
+    if mode == "webhook":
+        if not expected_url:
+            level = "SETUP_REQUIRED"
+            message = "Thiếu PUBLIC_BASE_URL nên bot không có URL webhook để chiếm Telegram updates."
+            next_action = "Set PUBLIC_BASE_URL=https://<railway-domain> và TELEGRAM_UPDATE_MODE=webhook trên Railway."
+        elif not actual_url:
+            level = "WEBHOOK_NOT_SET"
+            message = "Telegram chưa có webhook. Nếu service cũ polling cùng token, nó vẫn có thể trả lời trước."
+            next_action = "Redeploy Railway hoặc restart service để setWebhook; kiểm tra /runtime."
+        elif actual_url != expected_url:
+            level = "WEBHOOK_MISMATCH"
+            message = "Telegram webhook đang trỏ sang URL khác, có thể deployment cũ/service khác đang giữ token."
+            next_action = f"Restart đúng Railway service hoặc set webhook về {expected_url}; tắt service A_TOOLSX/cũ nếu còn chạy."
+        else:
+            level = "OWNED_BY_THIS_DEPLOY"
+            message = "Telegram webhook đang trỏ đúng deployment TOAN DAAS hiện tại."
+            next_action = "/start hoặc /goal_audit"
+    else:
+        level = "POLLING_MODE"
+        message = "Bot đang chạy polling; nếu có process cũ cùng token thì rất dễ tranh updates."
+        next_action = "Ưu tiên set PUBLIC_BASE_URL và TELEGRAM_UPDATE_MODE=webhook trên Railway."
+    return {
+        "level": level,
+        "message": message,
+        "next_action": next_action,
+        "mode": mode or "-",
+        "actual_url": actual_url or "-",
+        "expected_url": expected_url or "-",
+        "pending_update_count": (info_payload or {}).get("pending_update_count", 0),
+        "last_error_message": (info_payload or {}).get("last_error_message", ""),
+    }
+
 # ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -2929,7 +2985,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "campaign_preset", "postback_setup", "operator_launch", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "campaign_preset", "postback_setup", "operator_launch", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_pack", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -13327,6 +13383,8 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
     bot_info = {}
+    expected_webhook = expected_telegram_webhook_url()
+    webhook_info = {"ok": False, "reason": "not_checked"}
     try:
         me = await context.bot.get_me()
         bot_info = {
@@ -13336,6 +13394,14 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
     except Exception as e:
         bot_info = {"error": str(e)}
+    try:
+        webhook_info = serialize_telegram_webhook_info(
+            await context.bot.get_webhook_info(),
+            expected_webhook,
+        )
+    except Exception as e:
+        webhook_info = {"ok": False, "error": str(e), "expected_url": expected_webhook}
+    ownership = telegram_update_ownership_diagnosis(webhook_info)
     payload = {
         "app": APP_VERSION,
         "build": APP_BUILD,
@@ -13347,17 +13413,50 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
         "telegram_update_mode_raw": TELEGRAM_UPDATE_MODE_RAW or "-",
         "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
-        "telegram_webhook_url": (PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH) if PUBLIC_BASE_URL else "-",
+        "telegram_webhook_url": expected_webhook or "-",
+        "telegram_webhook_info": webhook_info,
+        "telegram_ownership": ownership,
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
     }
     await update.message.reply_text(
         "🧬 <b>TOAN DAAS RUNTIME</b>\n\n"
         f"<pre>{html_pre(json.dumps(payload, ensure_ascii=False, indent=2), 1900)}</pre>\n\n"
+        f"<b>Telegram ownership:</b> <code>{html.escape(ownership.get('level') or '-')}</code>\n"
+        f"• {html.escape(ownership.get('message') or '')}\n"
+        f"• Next: <code>{html.escape(ownership.get('next_action') or '')}</code>\n\n"
         "Nếu Telegram vẫn hiện A_TOOLS X khi <code>/runtime</code> không trả về bản này, "
         "đang có deployment/process cũ dùng cùng TELEGRAM_TOKEN. Nếu runtime đang polling và webhook là '-', "
         "Railway cần PUBLIC_BASE_URL hoặc RAILWAY_PUBLIC_DOMAIN để bot tự chiếm webhook.",
         parse_mode="HTML"
     )
+
+async def cmd_telegram_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    expected_webhook = expected_telegram_webhook_url()
+    try:
+        info = serialize_telegram_webhook_info(await context.bot.get_webhook_info(), expected_webhook)
+    except Exception as e:
+        info = {"ok": False, "error": str(e), "expected_url": expected_webhook}
+    diagnosis = telegram_update_ownership_diagnosis(info)
+    lines = [
+        "📡 <b>TELEGRAM UPDATE OWNERSHIP</b>",
+        f"• Level: <code>{html.escape(diagnosis.get('level') or '-')}</code>",
+        f"• Mode: <code>{html.escape(TELEGRAM_UPDATE_MODE)}</code> raw=<code>{html.escape(TELEGRAM_UPDATE_MODE_RAW or '-')}</code>",
+        f"• Expected webhook: <code>{html.escape(expected_webhook or '-')}</code>",
+        f"• Telegram webhook: <code>{html.escape(info.get('url') or '-')}</code>",
+        f"• Pending updates: <b>{int(info.get('pending_update_count') or 0)}</b>",
+    ]
+    if info.get("last_error_message"):
+        lines.append(f"• Last error: <code>{html.escape(info.get('last_error_message') or '')}</code>")
+    lines.extend([
+        "",
+        html.escape(diagnosis.get("message") or ""),
+        f"Next: <code>{html.escape(diagnosis.get('next_action') or '')}</code>",
+        "",
+        "Nếu <code>/start</code> vẫn ra A_TOOLSX nhưng dòng Telegram webhook ở đây đúng URL TOAN DAAS, hãy chụp lại <code>/runtime</code> và HTTP logs để kiểm tra update có vào endpoint không.",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -17340,7 +17439,8 @@ def operator_category_keyboard(category):
             ("🧯 Smoke test", "smoke"), ("🧪 Audit", "audit"),
             ("📌 Today plan", "today"),
             ("📘 Playbook", "playbook"),
-            ("🧭 System status", "status"), ("📊 Daily digest", "daily"),
+            ("🧭 System status", "status"), ("📡 Telegram owner", "telegramstatus"),
+            ("📊 Daily digest", "daily"),
             ("🧭 Dashboard", "dashboard"),
         ],
         "cat_trend": [
@@ -17743,6 +17843,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     snippets = {
         "dashboard": "/operator_dashboard",
         "status": "/operator_status",
+        "telegramstatus": "/telegram_status\n/runtime\nGET /runtime",
         "audit": "/operator_audit",
         "goalaudit": "/goal_audit days=30 platform=tiktok\nGET /api/operator/goal-audit?days=30&platform=tiktok",
         "smoke": "/operator_smoke\nGET /api/operator/smoke-test",
@@ -21368,6 +21469,7 @@ async def lifespan(app: FastAPI):
 
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
+    tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
@@ -21517,6 +21619,7 @@ async def lifespan(app: FastAPI):
     await tg_app.start()
     active_update_mode = TELEGRAM_UPDATE_MODE
     webhook_url = ""
+    webhook_info_payload = {"ok": False, "reason": "not_checked", "expected_url": expected_telegram_webhook_url()}
     if active_update_mode == "polling" and PUBLIC_BASE_URL and not TELEGRAM_UPDATE_MODE_RAW:
         active_update_mode = "webhook"
     if active_update_mode == "webhook" and PUBLIC_BASE_URL:
@@ -21529,6 +21632,10 @@ async def lifespan(app: FastAPI):
         if TELEGRAM_WEBHOOK_SECRET:
             webhook_kwargs["secret_token"] = TELEGRAM_WEBHOOK_SECRET
         await tg_app.bot.set_webhook(**webhook_kwargs)
+        try:
+            webhook_info_payload = serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), webhook_url)
+        except Exception as e:
+            webhook_info_payload = {"ok": False, "error": str(e), "expected_url": webhook_url}
         logger.info(f"🚀 TOAN DAAS ONLINE WEBHOOK — build={APP_BUILD} webhook={webhook_url}")
     else:
         active_update_mode = "polling"
@@ -21536,8 +21643,13 @@ async def lifespan(app: FastAPI):
             await tg_app.bot.delete_webhook(drop_pending_updates=True)
         except Exception as e:
             logger.warning(f"Không xóa được webhook cũ trước khi polling: {e}")
+        try:
+            webhook_info_payload = serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), expected_telegram_webhook_url())
+        except Exception as e:
+            webhook_info_payload = {"ok": False, "error": str(e), "expected_url": expected_telegram_webhook_url()}
         tg_polling_task = asyncio.create_task(run_polling_guarded())
         logger.info(f"🚀 TOAN DAAS ONLINE POLLING — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
+    ownership = telegram_update_ownership_diagnosis(webhook_info_payload, active_update_mode)
     if ADMIN_ID:
         try:
             await tg_app.bot.send_message(
@@ -21549,7 +21661,9 @@ async def lifespan(app: FastAPI):
                     f"• Update mode: <code>{html.escape(active_update_mode)}</code>\n"
                     f"• Public URL source: <code>{html.escape(PUBLIC_BASE_URL_SOURCE or '-')}</code>\n"
                     f"• Webhook: <code>{html.escape(webhook_url or '-')}</code>\n"
-                    "• Lệnh kiểm tra: /runtime"
+                    f"• Telegram owner: <code>{html.escape(ownership.get('level') or '-')}</code>\n"
+                    f"• Next: <code>{html.escape(ownership.get('next_action') or '/runtime')}</code>\n"
+                    "• Lệnh kiểm tra: /runtime hoặc /telegram_status"
                 ),
                 parse_mode="HTML"
             )
@@ -21581,6 +21695,14 @@ async def health():
 
 @fastapi_app.get("/runtime")
 async def runtime_health():
+    expected_webhook = expected_telegram_webhook_url()
+    webhook_info = {"ok": False, "reason": "telegram_app_not_ready", "expected_url": expected_webhook}
+    if tg_app:
+        try:
+            webhook_info = serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), expected_webhook)
+        except Exception as e:
+            webhook_info = {"ok": False, "error": str(e), "expected_url": expected_webhook}
+    ownership = telegram_update_ownership_diagnosis(webhook_info)
     return {
         "status": "ok",
         "service": APP_VERSION,
@@ -21588,9 +21710,13 @@ async def runtime_health():
         "deploy_id": APP_DEPLOY_ID or "",
         "bot_username_env": BOT_USERNAME,
         "public_base_url": PUBLIC_BASE_URL or "",
+        "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
+        "telegram_update_mode_raw": TELEGRAM_UPDATE_MODE_RAW or "",
         "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
-        "telegram_webhook_url": (PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH) if PUBLIC_BASE_URL else "",
+        "telegram_webhook_url": expected_webhook,
+        "telegram_webhook_info": webhook_info,
+        "telegram_ownership": ownership,
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
     }
 
