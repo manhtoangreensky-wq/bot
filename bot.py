@@ -4765,7 +4765,85 @@ def serialize_reference_video(row):
         ),
     }
 
-def reference_video_inventory_data(limit=80):
+def reference_match_score(ref, topic="", platform="", pattern_id="", product_name=""):
+    blob = " ".join(
+        str(ref.get(key) or "")
+        for key in ["title", "platform", "pattern_hint", "tags", "note", "path_or_url"]
+    ).lower()
+    query = f"{topic} {platform} {pattern_id} {product_name}".lower()
+    tokens = {
+        token
+        for token in re.split(r"[^0-9a-zA-ZÀ-ỹ]+", query)
+        if len(token) >= 3
+    }
+    score = 0
+    hits = []
+    for token in tokens:
+        if token and token in blob:
+            score += 6
+            hits.append(token)
+    if platform and (ref.get("platform") or "").lower() in {"", platform.lower()}:
+        score += 8
+    if pattern_id and pattern_id.lower() in (ref.get("pattern_hint") or "").lower():
+        score += 14
+    if ref.get("source_type") == "local_path":
+        score += 2
+    return score, hits
+
+def select_reference_examples_for_job(owner_id, job, limit=3):
+    if not job:
+        return []
+    (
+        _jid, _calendar_id, _campaign_id, _channel_id, _affiliate_id, platform, topic, _stage, _status,
+        note, brief, _asset_url, _publish_url, _channel_name, _account_label, network, product_name, _affiliate_url
+    ) = job
+    pattern = select_video_pattern(job, 45)
+    refs = []
+    inventory = reference_video_inventory_data(limit=80, owner_id=owner_id)
+    for item in inventory.get("catalog") or []:
+        score, hits = reference_match_score(
+            item,
+            topic=f"{topic or ''} {brief or ''} {note or ''}",
+            platform=platform or "",
+            pattern_id=pattern.get("id") or "",
+            product_name=f"{product_name or ''} {network or ''}",
+        )
+        item = dict(item)
+        item["match_score"] = score
+        item["match_hits"] = hits[:8]
+        refs.append(item)
+    for item in inventory.get("files") or []:
+        ref = {
+            "id": 0,
+            "title": item.get("name") or item.get("relative_path") or "reference file",
+            "path_or_url": item.get("relative_path") or item.get("name") or "",
+            "source_type": "filesystem",
+            "platform": "",
+            "pattern_hint": "",
+            "tags": "",
+            "note": item.get("learning_note") or "",
+            "created_at": item.get("modified_at") or "",
+        }
+        score, hits = reference_match_score(
+            ref,
+            topic=f"{topic or ''} {brief or ''} {note or ''}",
+            platform=platform or "",
+            pattern_id=pattern.get("id") or "",
+            product_name=f"{product_name or ''} {network or ''}",
+        )
+        ref["match_score"] = score
+        ref["match_hits"] = hits[:8]
+        refs.append(ref)
+    refs.sort(key=lambda item: (int(item.get("match_score") or 0), item.get("created_at") or ""), reverse=True)
+    selected = refs[:max(1, int(limit or 3))]
+    for item in selected:
+        item["apply_rule"] = (
+            "Học cấu trúc hook, nhịp cảnh, proof placement và CTA; viết lại bằng nội dung/asset TOAN DAAS, "
+            "không copy nguyên video/voice/face/text/claim."
+        )
+    return selected
+
+def reference_video_inventory_data(limit=80, owner_id=None):
     folder = REFERENCE_VIDEO_DIR or r"D:\mybot\TOANAAS\video AI tham khảo"
     video_exts = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
     files = []
@@ -4803,7 +4881,7 @@ def reference_video_inventory_data(limit=80):
                 "setup_hint": f"Tạo thư mục {folder} và đặt video tham khảo vào đó, hoặc set REFERENCE_VIDEO_DIR.",
             }
     files.sort(key=lambda item: item.get("modified_at") or "", reverse=True)
-    catalog_rows = list_reference_videos(ADMIN_ID, limit=limit)
+    catalog_rows = list_reference_videos(owner_id or ADMIN_ID, limit=limit)
     catalog = [serialize_reference_video(row) for row in catalog_rows]
     return {
         "folder": folder,
@@ -4883,6 +4961,14 @@ def build_manifest_prompt(job, variant=None, duration=45):
             f"Hashtags: {hashtags or '-'}"
         )
     pattern = select_video_pattern(job, duration)
+    references = select_reference_examples_for_job(ADMIN_ID, job, limit=3)
+    reference_lines = []
+    for ref in references:
+        reference_lines.append(
+            f"- {ref.get('title') or '-'} | source={ref.get('path_or_url') or '-'} | "
+            f"pattern={ref.get('pattern_hint') or '-'} | tags={ref.get('tags') or '-'}"
+        )
+    reference_text = "\n".join(reference_lines) if reference_lines else "Chưa có reference cụ thể; dùng video pattern bank."
     return (
         "Bạn là AI production director cho video ngắn affiliate. Hãy tạo PRODUCTION MANIFEST dạng JSON thuần, "
         "để Claude/Gemini/Runway/Kling/Fish/CapCut/FFmpeg có thể thực thi từng bước. "
@@ -4897,6 +4983,7 @@ def build_manifest_prompt(job, variant=None, duration=45):
         f"Operator note: {note or '-'}\n\n"
         f"Creative variant:\n{variant_text}\n\n"
         f"Video pattern bắt buộc áp dụng:\n{format_video_pattern_for_prompt(pattern)}\n\n"
+        f"Reference videos được phép học format, không copy asset:\n{reference_text}\n\n"
         f"Brief:\n{brief or 'Chưa có brief'}\n\n"
         "JSON schema bắt buộc:\n"
         "{\n"
@@ -4904,6 +4991,7 @@ def build_manifest_prompt(job, variant=None, duration=45):
         '  "duration_sec": 45,\n'
         '  "format": "9:16",\n'
         '  "video_pattern": {"id":"proof_first_demo","name":"...","hook_formula":"..."},\n'
+        '  "reference_examples_used": [{"title":"...","source":"...","learned_structure":"...","rewrite_rule":"..."}],\n'
         '  "proof_assets_required": ["..."],\n'
         '  "selected_variant_id": 0,\n'
         '  "voice": {"provider_primary":"Fish Audio HD","provider_fallback":"Edge TTS","style":"...","script":"..."},\n'
@@ -4934,6 +5022,7 @@ def fallback_production_manifest(job, variant=None, duration=45):
         cta = variant[6] or cta
         hashtags = variant[7] or hashtags
     pattern = select_video_pattern(job, duration)
+    references = select_reference_examples_for_job(ADMIN_ID, job, limit=3)
     goals = pattern.get("scene_goals") or ["hook", "problem", "demo", "benefit", "cta"]
     scene_count = max(3, min(6, len(goals)))
     scenes = []
@@ -4962,6 +5051,16 @@ def fallback_production_manifest(job, variant=None, duration=45):
             "hook_formula": pattern.get("hook_formula"),
             "cta_style": pattern.get("cta_style"),
         },
+        "reference_examples_used": [
+            {
+                "title": ref.get("title"),
+                "source": ref.get("path_or_url"),
+                "pattern_hint": ref.get("pattern_hint"),
+                "match_score": ref.get("match_score"),
+                "rewrite_rule": ref.get("apply_rule"),
+            }
+            for ref in references
+        ],
         "proof_assets_required": pattern.get("proof_assets_required") or [],
         "selected_variant_id": selected_variant_id,
         "voice": {
@@ -5004,6 +5103,7 @@ def parse_manifest_json(raw_text, job, variant=None, duration=45):
                 "hook_formula": pattern.get("hook_formula"),
                 "cta_style": pattern.get("cta_style"),
             })
+            parsed.setdefault("reference_examples_used", select_reference_examples_for_job(ADMIN_ID, job, limit=3))
             parsed.setdefault("proof_assets_required", pattern.get("proof_assets_required") or [])
             return parsed
     except Exception:
@@ -5678,6 +5778,7 @@ def operator_job_context_data(owner_id, job_id):
     next_task = next_worker_task(owner_id, job_id=job_id)
     publish_pack = build_static_publish_pack(job, owner_id)
     selected_manifest = latest_production_manifest(owner_id, job_id)
+    selected_references = select_reference_examples_for_job(owner_id, job, limit=3)
 
     def parse_manifest(row):
         if not row:
@@ -5749,6 +5850,7 @@ def operator_job_context_data(owner_id, job_id):
             "pack_url": "/api/operator/reference-pack",
             "video_patterns_url": "/api/operator/video-patterns",
             "reference_videos_url": "/api/operator/reference-videos?limit=40",
+            "selected_references": selected_references,
             "rule": reference_learning_pack_data()["rule"],
         },
         "worker_runbook": {
@@ -6728,6 +6830,7 @@ def serialize_publish_queue_item(row):
             "pinned_comment": static_pack.get("pinned_comment", ""),
             "related_links": static_pack.get("related_links", []),
             "affiliate_bundle": static_pack.get("affiliate_bundle", {}),
+            "reference_examples": static_pack.get("reference_examples", []),
             "placement_plan": static_pack.get("placement_plan", {}),
             "disclosure": static_pack.get("disclosure", ""),
             "checklist": static_pack.get("checklist", []),
@@ -6800,6 +6903,7 @@ def build_publisher_handoff(queue_payload):
             "pinned_comment": pinned_comment,
             "related_links": related_links,
             "affiliate_bundle": affiliate_bundle,
+            "reference_examples": pack.get("reference_examples", []),
             "placement_plan": placement_plan,
             "disclosure": pack.get("disclosure", ""),
         },
@@ -7746,6 +7850,7 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
         limit=8,
     )
     pattern = select_video_pattern(job, 45)
+    selected_references = select_reference_examples_for_job(owner_id, job, limit=3)
     related_links = affiliate_bundle.get("related_links", []) if affiliate_bundle else []
     primary_tracking_url = affiliate_tracking_url(affiliate_id, jid, f"{platform or 'social'}_primary") if affiliate_id else ""
     if affiliate_bundle and affiliate_bundle.get("primary"):
@@ -7785,6 +7890,7 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
         "related_links": related_links,
         "affiliate_bundle": affiliate_bundle,
         "video_pattern": pattern,
+        "reference_examples": selected_references,
         "proof_assets_required": pattern.get("proof_assets_required") or [],
         "placement_plan": (affiliate_bundle or {}).get("placement_plan", {}),
         "caption": caption,
@@ -12081,7 +12187,7 @@ async def cmd_reference_videos(update: Update, context: ContextTypes.DEFAULT_TYP
         limit = int(data.get("limit") or data.get("n") or (context.args[0] if context.args else 20))
     except (TypeError, ValueError):
         limit = 20
-    inventory = reference_video_inventory_data(limit=limit)
+    inventory = reference_video_inventory_data(limit=limit, owner_id=update.effective_user.id)
     lines = [
         "🎞 <b>REFERENCE VIDEOS INVENTORY</b>",
         f"• Folder: <code>{html.escape(inventory.get('folder') or '-')}</code>",
@@ -15280,7 +15386,7 @@ async def api_operator_reference_videos(request: Request, limit: int = 80):
     verify_operator_api_token(request)
     return {
         "ok": True,
-        "inventory": reference_video_inventory_data(limit=limit),
+        "inventory": reference_video_inventory_data(limit=limit, owner_id=ADMIN_ID),
     }
 
 @fastapi_app.post("/api/operator/reference-videos")
