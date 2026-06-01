@@ -2396,13 +2396,14 @@ def operator_audit_data(owner_id):
 def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
-        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "affiliate_seed", "affiliate_scale",
+        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "affiliate_seed", "affiliate_scale",
         "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
         ("GET", "/api/operator/worker-spec"),
         ("GET", "/api/operator/video-patterns"),
+        ("GET", "/api/operator/reference-pack"),
         ("GET", "/api/operator/n8n-workflow.json"),
         ("POST", "/api/operator/make-video"),
         ("GET", "/api/operator/publisher/status"),
@@ -2521,6 +2522,9 @@ def operator_worker_spec_data():
             "chuẩn bị publish pack, đăng có kiểm soát và ghi performance."
         ),
         "toolchain_url": f"{base_url}/api/operator/toolchain",
+        "video_patterns_url": f"{base_url}/api/operator/video-patterns",
+        "reference_pack_url": f"{base_url}/api/operator/reference-pack",
+        "reference_learning_rule": reference_learning_pack_data()["rule"],
         "roles": [
             {
                 "role": "director",
@@ -4415,6 +4419,48 @@ def video_pattern_bank_data():
         for key, value in VIDEO_PATTERN_BANK.items()
     }
 
+def reference_learning_pack_data():
+    patterns = video_pattern_bank_data()
+    return {
+        "name": "TOAN DAAS Reference Learning Pack",
+        "source_summary": {
+            "reference_folder": "D:\\mybot\\TOANAAS\\video AI tham khảo",
+            "video_count_observed": 16,
+            "purpose": "Kho học format/hook/nhịp dựng từ video tham khảo; không phải kho asset để copy nguyên.",
+            "common_structures": [
+                "viral visual hook -> prompt/tool demo -> output -> affiliate CTA",
+                "proof dashboard/workflow -> 3 bước hệ thống -> comment/bio link",
+                "talking-head founder/mentor -> trust -> offer -> CTA",
+                "screen tutorial -> thao tác -> result -> link liên quan",
+                "webinar/long demo -> cutdown short -> checklist/caption",
+            ],
+        },
+        "patterns": patterns,
+        "how_to_apply": [
+            "Chọn pattern bằng select_video_pattern theo topic/platform/duration hoặc đọc video_pattern trong manifest.",
+            "Tạo hook bằng công thức của pattern, nhưng viết lại bằng ngôn ngữ TOAN DAAS.",
+            "Dùng video tham khảo chỉ để học bố cục; không copy mặt, giọng, scene, text, tài liệu, dashboard hoặc claim của người khác.",
+            "Mỗi job có proof_assets_required; worker phải tạo hoặc upload proof_asset trước khi job đạt readiness.",
+            "Publish pack phải có disclosure affiliate, link chính, link liên quan và tracking theo caption/comment/status/bio.",
+            "Sau đăng phải ghi publish_url và performance để Growth Analyst quyết định scale/fix/pause.",
+        ],
+        "anti_copy_rules": [
+            "Không dùng lại nguyên video tham khảo làm output đăng bán.",
+            "Không clone người thật/voice/face nếu không có consent rõ ràng.",
+            "Không dùng screenshot doanh thu/dashboard của người khác để mạo nhận kết quả.",
+            "Không hứa thu nhập, phê duyệt vay/thẻ, hoặc kết quả tài chính chắc chắn.",
+            "Nếu dùng mockup/demo phải ghi rõ là demo hoặc minh họa.",
+        ],
+        "worker_outputs_expected": {
+            "creative": ["hook", "script_angle", "caption", "cta", "hashtags", "pattern_id", "proof_plan"],
+            "proof_asset": ["screenshot/mockup/workflow/checklist", "source note", "rights note"],
+            "visual_scene": ["raw video scenes generated from rewritten prompt"],
+            "edit": ["final_video", "subtitle", "cta overlay", "proof/affiliate placement"],
+            "publish": ["caption", "pinned comment", "related links", "tracking source", "disclosure"],
+        },
+        "rule": "Biến ý tưởng của thị trường thành format riêng của TOAN DAAS; chỉ copy cấu trúc tư duy, không copy tài sản/nội dung nhận diện.",
+    }
+
 def build_manifest_prompt(job, variant=None, duration=45):
     (
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
@@ -5131,8 +5177,14 @@ def operator_job_context_data(owner_id, job_id):
         "tasks": [serialize_operator_task(get_production_task(owner_id, row[0])) for row in tasks],
         "next_task": serialize_operator_task(next_task),
         "publish_pack": publish_pack,
+        "reference_learning": {
+            "pack_url": "/api/operator/reference-pack",
+            "video_patterns_url": "/api/operator/video-patterns",
+            "rule": reference_learning_pack_data()["rule"],
+        },
         "worker_runbook": {
             "sequence": [
+                "Đọc reference_learning để biết pattern và luật học video tham khảo trước khi dựng.",
                 "Nếu next_task có status queued/waiting: thực hiện đúng prompt/tool.",
                 "Nếu tool có public URL: POST /api/operator/tasks/<TASK_ID>/complete với output_url/output_urls.",
                 "Nếu tool tạo file local: POST multipart /api/operator/tasks/<TASK_ID>/upload.",
@@ -10694,7 +10746,7 @@ def operator_category_keyboard(category):
             ("🧠 Job context", "jobcontext"), ("🚦 Job ready", "jobready"),
             ("🛡 Review gate", "review"),
             ("🧪 Creative test", "creative"), ("🏁 Creative report", "creativereport"),
-            ("🎞 Video patterns", "videopatterns"),
+            ("🎞 Video patterns", "videopatterns"), ("📚 Reference pack", "referencepack"),
         ],
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
@@ -11065,6 +11117,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "creative": "/creative_test job=<JOB_ID> n=5\n/creative_variants <JOB_ID>\n/creative_select id=<VARIANT_ID>",
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "videopatterns": "/video_patterns\nGET /api/operator/video-patterns",
+        "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
@@ -11318,6 +11371,31 @@ async def cmd_video_patterns(update: Update, context: ContextTypes.DEFAULT_TYPE)
     lines.append(
         "\nCác pattern này tự được gắn vào <code>/creative_test</code>, <code>/manifest</code>, "
         "<code>/task_plan</code>, <code>/publish_pack</code> và API make-video."
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_reference_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    pack = reference_learning_pack_data()
+    source = pack.get("source_summary") or {}
+    lines = [
+        "📚 <b>REFERENCE LEARNING PACK</b>",
+        f"• Kho tham khảo: <code>{html.escape(source.get('reference_folder') or '-')}</code>",
+        f"• Số video đã học: <b>{source.get('video_count_observed') or 0}</b>",
+        f"• Rule: {html.escape(pack.get('rule') or '-')}",
+        "",
+        "<b>Cấu trúc thường dùng:</b>",
+    ]
+    for item in source.get("common_structures") or []:
+        lines.append(f"• {html.escape(item)}")
+    lines.append("\n<b>Không được copy:</b>")
+    for item in (pack.get("anti_copy_rules") or [])[:5]:
+        lines.append(f"• {html.escape(item)}")
+    lines.append(
+        "\nAPI worker: <code>GET /api/operator/reference-pack</code>\n"
+        "Pattern: <code>/video_patterns</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -13979,6 +14057,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("creative_select", cmd_creative_select))
     tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
     tg_app.add_handler(CommandHandler("video_patterns", cmd_video_patterns))
+    tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
     tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
     tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
     tg_app.add_handler(CommandHandler("manifest_handoff", cmd_manifest_handoff))
@@ -14345,6 +14424,14 @@ async def api_operator_video_patterns(request: Request):
         "ok": True,
         "patterns": video_pattern_bank_data(),
         "selection_rule": "Bot tự chọn theo topic/platform/duration; worker có thể đọc để dựng đúng format, proof và CTA.",
+    }
+
+@fastapi_app.get("/api/operator/reference-pack")
+async def api_operator_reference_pack(request: Request):
+    verify_operator_api_token(request)
+    return {
+        "ok": True,
+        "reference_pack": reference_learning_pack_data(),
     }
 
 @fastapi_app.get("/api/operator/tool-readiness")
