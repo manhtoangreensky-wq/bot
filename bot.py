@@ -3687,7 +3687,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "telegram_takeover", "customer_surface", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publish_cockpit", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "viral_remix", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -3803,11 +3803,13 @@ def operator_smoke_test_data(owner_id):
     publisher = publisher_status_data(owner_id)
     spec = operator_worker_spec_data()
     n8n = operator_n8n_workflow_json_data()
+    start_surface = customer_start_surface_audit_data()
     spec_text = json.dumps(spec, ensure_ascii=False)
     n8n_text = json.dumps(n8n, ensure_ascii=False)
     endpoint_text = " ".join(f"{method} {path}" for method, path in required_endpoints)
     surface_checks = {
         "commands_documented": all(cmd for cmd in required_commands),
+        "customer_start_surface_clean": bool(start_surface.get("ok") and start_surface.get("public_has_payment") and start_surface.get("admin_has_operator")),
         "goal_audit_in_spec": "/api/operator/goal-audit" in spec_text and "/api/operator/goal-audit" in n8n_text,
         "dispatch_in_spec": "/api/operator/dispatch" in spec_text and "/api/operator/dispatch" in n8n_text,
         "run_cycle_in_spec": "/api/operator/run-cycle" in spec_text and "/api/operator/run-cycle" in n8n_text,
@@ -17318,15 +17320,8 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    get_user(update.effective_user.id, update.effective_user.first_name)
-    is_admin = str(update.effective_user.id) == ADMIN_ID
-    if context.args and context.args[0].startswith("ref_"):
-        referrer = context.args[0].replace("ref_", "", 1)
-        if register_referral(update.effective_user.id, referrer):
-            await update.message.reply_text(
-                f"🎁 Đã ghi nhận mã giới thiệu. Người giới thiệu sẽ nhận {REFERRAL_BONUS_XU} Xu khi bạn nạp lần đầu."
-            )
+def build_start_message_text(user_id) -> str:
+    is_admin = str(user_id) == ADMIN_ID
     command_lines = [
         "• /profile — Xem Hạng VIP & Số dư",
         "• /naptien — Nạp thêm hạn mức",
@@ -17358,7 +17353,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
     runtime_line = f"🧬 <b>Runtime:</b> <code>{APP_BUILD}</code>\n\n" if is_admin else ""
     command_text = "\n".join(command_lines)
-    text = (
+    return (
         "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.2</b>\n\n"
         "Chào mừng! Hệ thống tính phí thông minh theo dung lượng thực tế.\n\n"
         f"{runtime_line}"
@@ -17371,6 +17366,50 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💡 <b>Lệnh hệ thống:</b>\n"
         f"{command_text}"
     )
+
+def customer_start_surface_audit_data():
+    public_text = build_start_message_text("__customer__")
+    admin_text = build_start_message_text(ADMIN_ID or "__admin__")
+    forbidden_public_markers = [
+        "/tools",
+        "/mmo",
+        "/operator_menu",
+        "/operator_contract",
+        "/brain",
+        "/mission_add",
+        "/telegram_takeover",
+        "/runtime",
+        "A_TOOLSX",
+        "A-TOOLS",
+        "A_TOOLS",
+        "join our channel",
+        "must join our channel",
+        "VIEW CHANNEL",
+    ]
+    public_lower = public_text.lower()
+    leaked_markers = [
+        marker for marker in forbidden_public_markers
+        if marker.lower() in public_lower
+    ]
+    return {
+        "ok": not leaked_markers,
+        "public_message_length": len(public_text),
+        "admin_message_length": len(admin_text),
+        "leaked_markers": leaked_markers,
+        "public_has_payment": "/naptien" in public_text and "/thucong" in public_text,
+        "admin_has_operator": "/operator_menu" in admin_text and "/brain" in admin_text,
+        "rule": "Khách chỉ thấy lệnh dịch vụ/nạp tiền/góp ý. Tools, MMO, operator và chẩn đoán webhook chỉ hiện cho ADMIN_ID.",
+    }
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    get_user(update.effective_user.id, update.effective_user.first_name)
+    if context.args and context.args[0].startswith("ref_"):
+        referrer = context.args[0].replace("ref_", "", 1)
+        if register_referral(update.effective_user.id, referrer):
+            await update.message.reply_text(
+                f"🎁 Đã ghi nhận mã giới thiệu. Người giới thiệu sẽ nhận {REFERRAL_BONUS_XU} Xu khi bạn nạp lần đầu."
+            )
+    text = build_start_message_text(update.effective_user.id)
     await update.message.reply_text(
         text, parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(
@@ -17378,6 +17417,26 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             resize_keyboard=True
         )
     )
+
+async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = customer_start_surface_audit_data()
+    leaked = data.get("leaked_markers") or []
+    lines = [
+        "🧪 <b>CUSTOMER SURFACE AUDIT</b>",
+        f"• OK: <b>{'YES' if data.get('ok') else 'NO'}</b>",
+        f"• Public length: <b>{data.get('public_message_length', 0)}</b>",
+        f"• Admin length: <b>{data.get('admin_message_length', 0)}</b>",
+        f"• Public có nạp tiền: <b>{'YES' if data.get('public_has_payment') else 'NO'}</b>",
+        f"• Admin có operator: <b>{'YES' if data.get('admin_has_operator') else 'NO'}</b>",
+        f"• Leak markers: <code>{html.escape(', '.join(leaked) or '-')}</code>",
+        "",
+        html.escape(data.get("rule") or ""),
+        "",
+        "Nếu Telegram vẫn hiện A-TOOLS khi audit OK, vấn đề nằm ở webhook/process cũ cùng TELEGRAM_TOKEN; chạy <code>/telegram_status</code> và <code>/telegram_takeover</code>.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -22449,6 +22508,7 @@ def operator_category_keyboard(category):
         "cat_internal": [
             ("🛠 Tools", "tools"), ("💼 MMO workflow", "mmo"),
             ("📘 Playbook", "playbook"), ("🤝 Handoff AI", "handoff"),
+            ("🧪 Customer surface", "customersurface"),
             ("📊 Campaign stats", "campaignstats"),
         ],
     }
@@ -22818,6 +22878,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "dashboard": "/operator_dashboard",
         "status": "/operator_status",
         "telegramstatus": "/telegram_status\n/runtime\nGET /runtime",
+        "customersurface": "/customer_surface\n/start bằng tài khoản khách phải không hiện /tools, /mmo, /operator_menu hoặc A-TOOLS",
         "telegramtakeover": "/telegram_takeover\nPOST /api/telegram/takeover",
         "missioninbox": "/missions\n/mission_add title=Chiến dịch AI tools platform=tiktok priority=8 objective=Tạo 5 video affiliate công nghệ AI, gắn link phù hợp, review trước đăng.\n/mission_claim worker=claude\nGET /api/operator/missions\nPOST /api/operator/missions/claim",
         "missionrun": "/mission_run id=<MISSION_ID>\n/mission_run id=<MISSION_ID> execute=1 safe=1\nPOST /api/operator/missions/run",
@@ -27074,6 +27135,7 @@ async def lifespan(app: FastAPI):
     tg_app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     tg_app.add_handler(CommandHandler("start",       cmd_start))
+    tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
