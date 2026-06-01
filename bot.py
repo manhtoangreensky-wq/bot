@@ -2418,7 +2418,7 @@ def operator_audit_data(owner_id):
 def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
-        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "affiliate_seed", "affiliate_scale",
+        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_scale",
         "worker_next", "operator_command", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
@@ -2428,6 +2428,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/reference-pack"),
         ("GET", "/api/operator/reference-videos"),
         ("POST", "/api/operator/reference-videos"),
+        ("POST", "/api/operator/reference-videos/scan"),
         ("GET", "/api/operator/n8n-workflow.json"),
         ("GET", "/api/operator/command-center"),
         ("POST", "/api/operator/make-video"),
@@ -2487,6 +2488,7 @@ def operator_smoke_test_data(owner_id):
         "video_patterns_in_spec": "/api/operator/video-patterns" in spec_text and "/api/operator/video-patterns" in n8n_text,
         "reference_pack_in_spec": "/api/operator/reference-pack" in spec_text and "/api/operator/reference-pack" in n8n_text,
         "reference_videos_in_spec": "/api/operator/reference-videos" in spec_text and "/api/operator/reference-videos" in n8n_text,
+        "reference_scan_in_spec": "/api/operator/reference-videos/scan" in spec_text and "/api/operator/reference-videos/scan" in n8n_text,
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
@@ -2557,6 +2559,7 @@ def operator_worker_spec_data():
         "video_patterns_url": f"{base_url}/api/operator/video-patterns",
         "reference_pack_url": f"{base_url}/api/operator/reference-pack",
         "reference_videos_url": f"{base_url}/api/operator/reference-videos",
+        "reference_scan_url": f"{base_url}/api/operator/reference-videos/scan",
         "reference_learning_rule": reference_learning_pack_data()["rule"],
         "roles": [
             {
@@ -2659,6 +2662,16 @@ def operator_worker_spec_data():
                         "pattern_hint": "viral_prompt_affiliate",
                         "tags": "ai,affiliate,hook",
                         "note": "học hook/CTA/proof placement",
+                    },
+                },
+                "scan_reference_folder": {
+                    "method": "POST",
+                    "url": "/api/operator/reference-videos/scan",
+                    "body": {
+                        "folder": REFERENCE_VIDEO_DIR,
+                        "platform": "tiktok",
+                        "limit": 200,
+                        "note": "import cả thư mục video tham khảo",
                     },
                 },
                 "purpose": "Bắt buộc đọc trước khi dựng creative/task để học cấu trúc video mẫu, proof asset và luật không copy y nguyên.",
@@ -3511,6 +3524,26 @@ def operator_n8n_workflow_json_data():
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "scan-reference-folder",
+                "name": "Scan Reference Folder Optional",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, 580],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/reference-videos/scan",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"folder\":\"" + REFERENCE_VIDEO_DIR.replace("\\", "\\\\") + "\","
+                        "\"platform\":\"tiktok\",\"limit\":200,\"notify_admin\":true}"
+                    ),
+                    "options": {"timeout": 120000},
                 },
             },
             {
@@ -4717,6 +4750,75 @@ def add_reference_video(owner_id, title, path_or_url, platform="", pattern_hint=
     finally:
         conn.close()
     return ref_id
+
+def reference_video_exists(owner_id, path_or_url):
+    if not path_or_url:
+        return False
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute(
+            "SELECT id FROM reference_videos WHERE owner_id=? AND path_or_url=? LIMIT 1",
+            (str(owner_id), path_or_url),
+        )
+        exists = bool(c.fetchone())
+    except sqlite3.OperationalError:
+        exists = False
+    conn.close()
+    return exists
+
+def scan_reference_video_folder(owner_id, folder="", platform="", pattern_hint="", tags="", note="", limit=200):
+    folder = folder or REFERENCE_VIDEO_DIR or r"D:\mybot\TOANAAS\video AI tham khảo"
+    result = {
+        "folder": folder,
+        "exists": os.path.isdir(folder),
+        "created": [],
+        "skipped": [],
+        "errors": [],
+        "limit": max(1, min(int(limit or 200), 1000)),
+        "rule": "Import vào catalog để học format/hook/nhịp dựng; không copy nguyên video.",
+    }
+    if not result["exists"]:
+        result["errors"].append(f"Folder không tồn tại: {folder}")
+        return result
+    video_exts = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
+    scanned = 0
+    try:
+        for root, _, names in os.walk(folder):
+            for name in names:
+                if scanned >= result["limit"]:
+                    break
+                ext = os.path.splitext(name)[1].lower()
+                if ext not in video_exts:
+                    continue
+                path = os.path.abspath(os.path.join(root, name))
+                scanned += 1
+                if reference_video_exists(owner_id, path):
+                    result["skipped"].append(path)
+                    continue
+                rel_title = os.path.splitext(os.path.relpath(path, folder))[0]
+                ref_id = add_reference_video(
+                    owner_id,
+                    title=rel_title,
+                    path_or_url=path,
+                    platform=platform,
+                    pattern_hint=pattern_hint,
+                    tags=tags or "reference,local-video",
+                    note=note or "imported_by_reference_scan",
+                )
+                if ref_id:
+                    result["created"].append({"id": ref_id, "path": path, "title": rel_title})
+                else:
+                    result["errors"].append(f"Không lưu được: {path}")
+            if scanned >= result["limit"]:
+                break
+    except OSError as exc:
+        result["errors"].append(str(exc))
+    result["scanned"] = scanned
+    result["created_count"] = len(result["created"])
+    result["skipped_count"] = len(result["skipped"])
+    result["error_count"] = len(result["errors"])
+    return result
 
 def list_reference_videos(owner_id, limit=40, platform="", status="active"):
     conn = db_connect()
@@ -8334,6 +8436,15 @@ class OperatorReferenceVideoRequest(BaseModel):
     note: str = Field(default="", max_length=1200)
     notify_admin: bool = True
 
+class OperatorReferenceScanRequest(BaseModel):
+    folder: str = Field(default="", max_length=2000)
+    platform: str = Field(default="", max_length=40)
+    pattern_hint: str = Field(default="", max_length=120)
+    tags: str = Field(default="reference,local-video", max_length=300)
+    note: str = Field(default="api_reference_scan", max_length=1200)
+    limit: int = Field(default=200, ge=1, le=1000)
+    notify_admin: bool = True
+
 class OperatorLoopRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=30)
     auto_queue: bool = True
@@ -9557,6 +9668,7 @@ def parse_brain_performance_metrics(raw_text):
 def operator_brain_fallback(raw_text):
     text = raw_text.strip()
     lower = text.lower()
+    brain_data = parse_key_value_args(text)
     platform = "tiktok"
     for candidate in ["tiktok", "facebook", "fb", "reels", "youtube", "shorts", "onlyfan", "onlyfans"]:
         if candidate in lower:
@@ -9584,6 +9696,10 @@ def operator_brain_fallback(raw_text):
             worker_tool = candidate.replace(" ", "_")
             break
     worker_limit = int_from_text(lower, ["limit", "max"], 0) or first_number_near(lower, ["task"], 0) or 5
+    folder_match = re.search(r"(?:folder|path|dir)\s*=\s*(.+)$|(?:thư mục|thu muc)\s*[:=]\s*(.+)$", text, re.IGNORECASE)
+    reference_folder = next((group for group in (folder_match.groups() if folder_match else []) if group), "")
+    reference_folder = reference_folder.strip(" '\"") if reference_folder else ""
+    reference_folder = brain_data.get("path") or brain_data.get("folder") or brain_data.get("dir") or reference_folder
 
     if any(word in lower for word in [
         "command center", "trung tâm điều hành", "trung tam dieu hanh", "tổng chỉ huy", "tong chi huy",
@@ -9594,6 +9710,19 @@ def operator_brain_fallback(raw_text):
             "platform": platform,
             "limit": max(3, min(limit, 20)),
             "days": max(1, min(days, 180)),
+            "confidence": 84,
+        }
+
+    if any(word in lower for word in [
+        "học cả thư mục", "hoc ca thu muc", "học hết video", "hoc het video",
+        "quét video tham khảo", "quet video tham khao", "scan reference", "import reference",
+        "nạp kho video", "nap kho video", "học kho video", "hoc kho video"
+    ]):
+        return {
+            "intent": "reference_scan",
+            "folder": reference_folder,
+            "platform": platform,
+            "limit": max(1, min(int_from_text(lower, ["limit", "max"], 0) or 200, 1000)),
             "confidence": 84,
         }
 
@@ -9823,7 +9952,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, reference_scan, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
@@ -9838,6 +9967,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- next_task: khi admin muốn nhận/giao việc tiếp theo để bắt đầu làm; có thể có job/tool.\n"
         "- task_handoff: khi admin muốn xuất prompt/handoff một task cụ thể; cần task ID.\n"
         "- reference_add: khi admin gửi link/path video và nói học/lưu/tham khảo/mẫu để đưa vào reference catalog.\n"
+        "- reference_scan: khi admin muốn quét/import/học cả thư mục video tham khảo.\n"
         "- approve_publish: khi admin nói duyệt/chốt job để đưa vào hàng đợi đăng; cần job ID.\n"
         "- publisher_run: khi admin nói chạy publisher/đăng queue tiếp theo.\n"
         "- publisher_handoff: khi admin muốn lấy pack/handoff cho một queue cụ thể; cần queue ID.\n"
@@ -9852,7 +9982,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","mode":"","status":"","tool":"","metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -9919,6 +10049,12 @@ def brain_command_preview(plan):
             f"platform={plan.get('platform') or 'tiktok'} "
             f"pattern={plan.get('pattern_hint') or plan.get('pattern') or ''} "
             f"tags={plan.get('tags') or 'reference'}"
+        )
+    if intent == "reference_scan":
+        folder = plan.get("folder") or plan.get("path") or REFERENCE_VIDEO_DIR
+        return (
+            f"/reference_scan path={folder} platform={plan.get('platform') or 'tiktok'} "
+            f"limit={max(1, min(int(plan.get('limit') or 200), 1000))}"
         )
     if intent == "approve_publish":
         return (
@@ -10101,6 +10237,15 @@ async def run_brain_plan(update, context, plan):
                 "note=brain_reference_add",
             ]
             return await cmd_reference_add(update, context)
+        if intent == "reference_scan":
+            folder = plan.get("folder") or plan.get("path") or REFERENCE_VIDEO_DIR
+            context.args = [
+                f"path={folder}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(1, min(int(plan.get('limit') or 200), 1000))}",
+                "note=brain_reference_scan",
+            ]
+            return await cmd_reference_scan(update, context)
         if intent == "approve_publish":
             if not int(plan.get("job") or 0):
                 return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain duyệt job 12 để đăng</code>", parse_mode="HTML")
@@ -12047,6 +12192,7 @@ def operator_category_keyboard(category):
             ("🧪 Creative test", "creative"), ("🏁 Creative report", "creativereport"),
             ("🎞 Video patterns", "videopatterns"), ("📚 Reference pack", "referencepack"),
             ("🗃 Reference videos", "referencevideos"), ("➕ Add reference", "referenceadd"),
+            ("📥 Scan references", "referencescan"),
         ],
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
@@ -12135,6 +12281,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Báo lỗi/quota tool: <code>POST {html.escape(base_url)}/api/operator/tool-events</code>",
         f"• Reference videos: <code>GET {html.escape(base_url)}/api/operator/reference-videos?limit=40</code>",
         f"• Add reference: <code>POST {html.escape(base_url)}/api/operator/reference-videos</code>",
+        f"• Scan reference folder: <code>POST {html.escape(base_url)}/api/operator/reference-videos/scan</code>",
         f"• n8n template: <code>GET {html.escape(base_url)}/api/operator/n8n-template</code>",
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
@@ -12422,7 +12569,8 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
         "referenceadd": "/reference_add url=https://... title=video_mau platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=hoc_hook_CTA\nPOST /api/operator/reference-videos",
-        "brainreference": "/brain học video này https://facebook.com/...\n/brain lưu mẫu TikTok affiliate này https://tiktok.com/...",
+        "referencescan": "/reference_scan path=D:\\mybot\\TOANAAS\\video AI tham khảo platform=tiktok limit=200\n/brain quét video tham khảo path=D:\\mybot\\TOANAAS\\video AI tham khảo",
+        "brainreference": "/brain học video này https://facebook.com/...\n/brain lưu mẫu TikTok affiliate này https://tiktok.com/...\n/brain quét video tham khảo path=D:\\mybot\\TOANAAS\\video AI tham khảo",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
@@ -12468,6 +12616,7 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain autopilot 3 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain học video này https://facebook.com/...</code>\n"
+            "• <code>/brain quét video tham khảo path=D:\\mybot\\TOANAAS\\video AI tham khảo</code>\n"
             "• <code>/brain duyệt job 12 để đăng</code>\n"
             "• <code>/brain chạy publisher tiktok</code>\n"
             "• <code>/brain queue 3 đã đăng https://...</code>\n"
@@ -12744,8 +12893,17 @@ async def cmd_reference_videos(update: Update, context: ContextTypes.DEFAULT_TYP
             )
     else:
         lines.append("\n📭 Chưa quét thấy file video tham khảo trong folder này.")
+    catalog = inventory.get("catalog") or []
+    if catalog:
+        lines.append("\n<b>Catalog đã lưu:</b>")
+        for item in catalog[:min(limit, 15)]:
+            lines.append(
+                f"• #{item.get('id')} | <code>{html.escape(item.get('title') or '-')}</code> | "
+                f"{html.escape(item.get('platform') or 'all')} | {html.escape(item.get('source_type') or '-')}"
+            )
     lines.append(
         "\nRule: học hook/nhịp dựng/flow CTA, không copy nguyên video, mặt, giọng, text hoặc claim.\n"
+        "Import thư mục: <code>/reference_scan path=D:\\mybot\\TOANAAS\\video AI tham khảo</code>\n"
         "API worker: <code>GET /api/operator/reference-videos?limit=40</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -12789,6 +12947,50 @@ async def cmd_reference_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Xem lại: <code>/reference_videos</code>",
         parse_mode="HTML",
     )
+
+async def cmd_reference_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        limit = max(1, min(int(data.get("limit") or data.get("n") or 200), 1000))
+    except (TypeError, ValueError):
+        limit = 200
+    folder = data.get("path") or data.get("folder") or data.get("dir") or REFERENCE_VIDEO_DIR
+    result = scan_reference_video_folder(
+        update.effective_user.id,
+        folder=folder,
+        platform=data.get("platform") or data.get("pf") or "",
+        pattern_hint=data.get("pattern") or data.get("pattern_hint") or "",
+        tags=data.get("tags") or "reference,local-video",
+        note=data.get("note") or data.get("notes") or "reference_scan",
+        limit=limit,
+    )
+    lines = [
+        "📥 <b>REFERENCE SCAN</b>",
+        f"• Folder: <code>{html.escape(result.get('folder') or '-')}</code>",
+        f"• Exists: <b>{'YES' if result.get('exists') else 'NO'}</b>",
+        f"• Scanned: <b>{result.get('scanned') or 0}</b>",
+        f"• Created: <b>{result.get('created_count') or 0}</b>",
+        f"• Skipped duplicate: <b>{result.get('skipped_count') or 0}</b>",
+        f"• Errors: <b>{result.get('error_count') or 0}</b>",
+    ]
+    created = result.get("created") or []
+    if created:
+        lines.append("\n<b>Mới import:</b>")
+        for item in created[:10]:
+            lines.append(f"• #{item.get('id')} | <code>{html.escape(item.get('title') or '-')}</code>")
+        if len(created) > 10:
+            lines.append(f"• ... và {len(created) - 10} video khác")
+    if result.get("errors"):
+        lines.append("\n<b>Lỗi/cần xử lý:</b>")
+        for err in (result.get("errors") or [])[:5]:
+            lines.append(f"• {html.escape(str(err))}")
+    lines.append(
+        "\nDùng tiếp: <code>/reference_videos</code> hoặc <code>/reference_pack</code>. "
+        "Worker sẽ chỉ học format/hook/nhịp dựng, không copy nguyên video."
+    )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -15535,6 +15737,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
     tg_app.add_handler(CommandHandler("reference_videos", cmd_reference_videos))
     tg_app.add_handler(CommandHandler("reference_add", cmd_reference_add))
+    tg_app.add_handler(CommandHandler("reference_scan", cmd_reference_scan))
     tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
     tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
     tg_app.add_handler(CommandHandler("manifest_handoff", cmd_manifest_handoff))
@@ -15973,6 +16176,41 @@ async def api_operator_reference_video_add(payload: OperatorReferenceVideoReques
         "id": ref_id,
         "reference_videos_url": "/api/operator/reference-videos",
         "rule": "Use as learning reference only; do not copy original media, person, voice, text or claims.",
+    }
+
+@fastapi_app.post("/api/operator/reference-videos/scan")
+async def api_operator_reference_video_scan(payload: OperatorReferenceScanRequest, request: Request):
+    verify_operator_api_token(request)
+    result = scan_reference_video_folder(
+        ADMIN_ID,
+        folder=payload.folder or REFERENCE_VIDEO_DIR,
+        platform=payload.platform,
+        pattern_hint=payload.pattern_hint,
+        tags=payload.tags,
+        note=payload.note,
+        limit=payload.limit,
+    )
+    if tg_app and ADMIN_ID and payload.notify_admin:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "📥 <b>REFERENCE FOLDER SCANNED</b>\n\n"
+                    f"• Folder: <code>{html.escape(result.get('folder') or '-')}</code>\n"
+                    f"• Exists: <b>{'YES' if result.get('exists') else 'NO'}</b>\n"
+                    f"• Created: <b>{result.get('created_count') or 0}</b>\n"
+                    f"• Skipped: <b>{result.get('skipped_count') or 0}</b>\n"
+                    f"• Errors: <b>{result.get('error_count') or 0}</b>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Reference scan notify error: {e}")
+    return {
+        "ok": bool(result.get("exists")),
+        "result": result,
+        "reference_videos_url": "/api/operator/reference-videos",
+        "rule": "Scan local video references for learning structure only; do not copy original media/person/voice/text/claims.",
     }
 
 @fastapi_app.get("/api/operator/tool-readiness")
