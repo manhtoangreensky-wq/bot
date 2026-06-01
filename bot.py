@@ -5292,14 +5292,25 @@ def serialize_operator_task(row):
         "job": job_payload,
     }
 
-def operator_worker_next_summary(owner_id, job_ids=None, limit=5):
-    job_ids = [int(jid) for jid in (job_ids or []) if int(jid or 0) > 0]
+def operator_worker_next_summary(owner_id, job_ids=None, limit=5, tool=""):
+    normalized_job_ids = []
+    for jid in (job_ids or []):
+        try:
+            jid_int = int(jid or 0)
+        except (TypeError, ValueError):
+            jid_int = 0
+        if jid_int > 0:
+            normalized_job_ids.append(jid_int)
+    if not normalized_job_ids:
+        task = next_worker_task(owner_id, tool=tool)
+        normalized_job_ids = [int(task[1])] if task else []
     summaries = []
-    for job_id in job_ids[:max(limit, 1)]:
-        task = next_worker_task(owner_id, job_id=job_id)
+    for job_id in normalized_job_ids[:max(limit, 1)]:
+        task = next_worker_task(owner_id, job_id=job_id, tool=tool)
         readiness = production_readiness_data(owner_id, job_id)
         summaries.append({
             "job_id": job_id,
+            "tool_filter": tool or "",
             "readiness": (readiness or {}).get("level", "UNKNOWN"),
             "next_action": (readiness or {}).get("next_action", ""),
             "publish_gate": (readiness or {}).get("publish_gate", {}),
@@ -12253,6 +12264,41 @@ async def cmd_next_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=kb
     )
 
+async def cmd_worker_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or 0)
+    except ValueError:
+        job_id = 0
+    tool = (data.get("tool") or "").strip().lower()
+    try:
+        limit = max(1, min(int(data.get("limit") or 5), 10))
+    except ValueError:
+        limit = 5
+    summaries = operator_worker_next_summary(
+        update.effective_user.id,
+        [job_id] if job_id else [],
+        limit=limit,
+        tool=tool,
+    )
+    if not summaries:
+        return await update.message.reply_text("✅ Không có task queued/waiting cho worker.")
+    lines = ["🧭 <b>WORKER NEXT PEEK</b>", "Không đổi trạng thái task; dùng /next_task hoặc API claim khi bắt đầu làm.\n"]
+    for item in summaries[:limit]:
+        task = item.get("next_task") or {}
+        runbook = task.get("execution_runbook") or {}
+        required = "; ".join(str(x) for x in (runbook.get("required_output") or [])[:3]) or "-"
+        lines.append(
+            f"• Job <code>#{item.get('job_id')}</code> | readiness=<code>{html.escape(item.get('readiness') or 'UNKNOWN')}</code>\n"
+            f"  Task: <code>#{task.get('id') or '-'}</code> / <code>{html.escape(task.get('task_type') or '-')}</code> / tool=<code>{html.escape(task.get('tool') or '-')}</code>\n"
+            f"  Output: {html.escape(required)}\n"
+            f"  Claim: <code>{html.escape(item.get('claim_task_url') or '')}</code>"
+        )
+    lines.append("\nAPI peek: <code>GET /api/operator/worker-next?job_id=&lt;JOB_ID&gt;&amp;tool=fish</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -14386,6 +14432,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("task_plan", cmd_task_plan))
     tg_app.add_handler(CommandHandler("tasks", cmd_tasks))
     tg_app.add_handler(CommandHandler("next_task", cmd_next_task))
+    tg_app.add_handler(CommandHandler("worker_next", cmd_worker_next))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
@@ -14605,6 +14652,23 @@ async def api_operator_next_task(request: Request, job_id: int = 0, tool: str = 
 async def api_operator_claim_task(request: Request, job_id: int = 0, tool: str = "", include_context: int = 1):
     verify_operator_api_token(request)
     return claim_operator_task_payload(job_id=job_id, tool=tool, include_context=bool(include_context))
+
+@fastapi_app.get("/api/operator/worker-next")
+async def api_operator_worker_next(request: Request, job_id: int = 0, tool: str = "", limit: int = 5):
+    verify_operator_api_token(request)
+    limit = max(1, min(int(limit or 5), 20))
+    summaries = operator_worker_next_summary(
+        ADMIN_ID,
+        [job_id] if job_id else [],
+        limit=limit,
+        tool=(tool or "").strip().lower(),
+    )
+    return {
+        "ok": True,
+        "count": len(summaries),
+        "items": summaries,
+        "claim_rule": "This endpoint is peek-only and does not mark tasks working. Use /api/operator/tasks/claim when a worker starts the task.",
+    }
 
 @fastapi_app.get("/api/operator/status")
 async def api_operator_status(request: Request):
@@ -15323,6 +15387,7 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
         **result,
         "next": {
             "tasks_url": "/api/operator/tasks/next",
+            "worker_next_url": "/api/operator/worker-next",
             "claim_first_task_url": "/api/operator/tasks/claim?include_context=1",
             "ready_url": "/api/operator/jobs/<JOB_ID>/ready",
             "job_context_url": "/api/operator/jobs/<JOB_ID>/context",
@@ -15429,6 +15494,7 @@ async def api_operator_affiliate_scale(payload: OperatorAffiliateScaleRequest, r
         "worker_next": worker_next,
         "next": {
             "tasks_url": "/api/operator/tasks/next",
+            "worker_next_url": "/api/operator/worker-next",
             "loop_url": "/api/operator/loop",
             "publish_url": "/api/operator/publish/next",
             "telegram_report": "/affiliate_report days=30",

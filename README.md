@@ -124,6 +124,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/task_plan job=<ID>`: tách manifest mới nhất thành các task scene/voice/edit/review/publish.
 - Manifest có `proof_assets_required` sẽ sinh thêm task `proof_asset`; job chưa qua proof asset sẽ chưa đạt readiness để approve/publish, trừ khi đã có final video.
 - `/tasks job=<ID>`: xem hàng việc sản xuất chi tiết theo job.
+- `/worker_next job=<ID> tool=fish`: xem trước task kế tiếp cho worker mà không đổi trạng thái, kèm output bắt buộc và URL claim.
 - `/next_task job=<ID>`: lấy task ưu tiên tiếp theo và tự chuyển sang `working` để giao cho AI/tool.
 - `/task_handoff id=<TASK_ID>`: xuất prompt giao riêng một task cho AI/tool.
 - `/task_set id=<TASK_ID> status=ready url=https://... note=...`: cập nhật task, tự lưu output thành asset nếu có URL.
@@ -162,6 +163,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `POST /api/affiliate/postback`: nhận conversion/order/lead/revenue từ n8n hoặc network affiliate, hỗ trợ `AFFILIATE_POSTBACK_TOKEN`.
 - `POST /webhook/payos`: nhận webhook PayOS, kiểm tra chữ ký, mã đơn, số tiền, trạng thái và chống cộng xu trùng.
 - `POST /lead`: nhận lead từ landing page và gửi thông báo về admin Telegram.
+- `GET /api/operator/worker-next?job_id=<JOB_ID>&tool=fish`: peek task kế tiếp cho Claude/n8n/tool worker, không đổi trạng thái task.
 - `GET /api/operator/tasks/next`: worker ngoài lấy task đang chờ, hỗ trợ query `job_id`, `tool`, `include_context=1`, cần `Authorization: Bearer OPERATOR_API_TOKEN`.
 - `GET /api/operator/tasks/claim?include_context=1`: alias claim task mới, trả luôn `job_context` để Claude/n8n/tool worker có đủ runbook trong một lần gọi.
 - `GET /api/operator/status`: worker ngoài kiểm tra readiness tổng thể trước khi tự động scale hoặc publish.
