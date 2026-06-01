@@ -4353,6 +4353,19 @@ VIDEO_PATTERN_BANK = {
         ],
         "cta_style": "Comment ghim chứa link tool/sản phẩm liên quan và disclosure affiliate.",
     },
+    "talking_head_offer": {
+        "name": "Talking-head offer",
+        "best_for": ["founder message", "trust building", "offer announcement", "community update", "direct sales"],
+        "hook_formula": "Nói thẳng vấn đề/cơ hội -> vì sao đáng tin -> offer rõ -> ai phù hợp -> CTA",
+        "duration_range": "30-70s",
+        "scene_goals": ["direct_hook", "credibility", "offer", "who_it_is_for", "next_step_cta"],
+        "proof_assets_required": [
+            "Người nói phải là chính chủ hoặc có consent rõ ràng.",
+            "Nếu dùng avatar AI thì phải tự tạo và không mạo danh người thật.",
+            "Offer/claim phải kiểm chứng được, không hứa thu nhập phi thực tế.",
+        ],
+        "cta_style": "Inbox/comment để nhận tư vấn hoặc xem link chính trong mô tả.",
+    },
 }
 
 def select_video_pattern(job, duration=45):
@@ -4369,6 +4382,8 @@ def select_video_pattern(job, duration=45):
         key = "viral_prompt_affiliate"
     elif any(word in text for word in ["prompt", "mẫu prompt", "mau prompt", "tạo video ai", "tao video ai", "ai video", "mentor"]):
         key = "mentor_prompt_demo"
+    elif any(word in text for word in ["nói trực diện", "noi truc dien", "talking head", "founder", "người sáng lập", "nguoi sang lap", "offer", "cơ hội", "co hoi"]):
+        key = "talking_head_offer"
     elif any(word in text for word in ["bot", "agent", "automation", "tự động", "tu dong", "dashboard", "workflow", "hệ thống", "he thong", "ai operator"]):
         key = "proof_first_demo"
     elif any(word in text for word in ["app", "setup", "cài", "cai", "hướng dẫn", "huong dan", "đăng ký", "dang ky", "mở thẻ", "mo the"]):

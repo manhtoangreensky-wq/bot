@@ -116,7 +116,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/creative_variants <JOB_ID>`: xem các biến thể creative của job.
 - `/creative_select id=<VARIANT_ID>`: chọn biến thể creative để đưa vào stage script/sản xuất.
 - `/creative_report job=<ID>`: so sánh performance theo biến thể creative đã gắn khi ghi dữ liệu.
-- `/video_patterns`: xem kho format video chính thức học từ video mẫu, gồm proof-first demo, screen tutorial, avatar explainer, caption bait short, webinar cutdown, mentor prompt demo và viral prompt affiliate; bot tự gắn pattern vào creative/manifest/task/publish pack.
+- `/video_patterns`: xem kho format video chính thức học từ video mẫu, gồm proof-first demo, screen tutorial, avatar explainer, caption bait short, webinar cutdown, mentor prompt demo, viral prompt affiliate và talking-head offer; bot tự gắn pattern vào creative/manifest/task/publish pack.
 - `/manifest job=<ID> duration=45 variant=<VARIANT_ID>`: tạo production manifest JSON gồm scene, prompt video, voice, edit, publish và compliance cho AI/tool thực thi.
 - `/manifests <JOB_ID>`: xem các production manifest đã tạo cho job.
 - `/manifest_handoff job=<ID> tool=kling|runway|fish|capcut|ffmpeg|publish|review`: xuất prompt riêng từ manifest cho từng AI/tool thực thi.
