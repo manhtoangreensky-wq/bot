@@ -5053,6 +5053,137 @@ def update_production_task(owner_id, task_id, status=None, output_url=None, note
         add_production_asset(owner_id, row[0], asset_type, output_url, "", f"task:{task_id} {note or ''}")
     return changed > 0, row
 
+def operator_task_execution_runbook(task_type: str = "", tool: str = "", prompt: str = "", job_id: int = 0):
+    task_type_l = (task_type or "").lower()
+    tool_l = (tool or "").lower()
+    base = {
+        "task_type": task_type_l or "unknown",
+        "tool": tool_l or tool or "",
+        "principles": [
+            "Dùng tool tốt/có phí trước khi đã cấu hình; nếu lỗi/quota/hết tiền thì ghi tool-event và dùng fallback.",
+            "Không tự thay affiliate link, caption claim hoặc publish nếu chưa qua review gate.",
+            "Không copy nguyên video mẫu; chỉ học cấu trúc hook, proof, nhịp dựng và CTA rồi viết lại cho thương hiệu/link của mình.",
+            "Nếu không tạo được output thật, trả status=blocked với note rõ lý do; không giả lập URL thành công.",
+        ],
+        "tool_event_url": "/api/operator/tool-events",
+        "failure_payload": {
+            "status": "blocked",
+            "output_url": "",
+            "note": "tool=<TOOL> error=<ERROR_OR_QUOTA> fallback=<FALLBACK_OR_NONE>",
+        },
+        "success_criteria": [],
+        "required_output": [],
+        "primary_tool": tool or "",
+        "fallback_tools": [],
+        "worker_steps": [],
+    }
+    if task_type_l == "proof_asset":
+        base.update({
+            "primary_tool": "Claude/Gemini/manual research",
+            "fallback_tools": ["admin upload", "manual screenshot", "public source summary"],
+            "required_output": ["proof_asset screenshot/source/checklist URL or uploaded file", "note explains whether real proof or demo/mockup"],
+            "success_criteria": [
+                "Proof liên quan trực tiếp tới trend/sản phẩm/video angle.",
+                "Không dùng tài sản có bản quyền/đăng nhập riêng tư nếu không có quyền.",
+            ],
+            "worker_steps": [
+                "Đọc prompt proof asset.",
+                "Tìm hoặc tạo bằng chứng hợp pháp: screenshot công khai, checklist, mockup dashboard hoặc nguồn trend.",
+                "Upload file thật qua /upload hoặc complete bằng output_url.",
+            ],
+        })
+    elif task_type_l == "visual_scene":
+        base.update({
+            "primary_tool": tool or "Kling/Runway",
+            "fallback_tools": ["CapCut template", "Canva/B-roll stock licensed", "static image + motion", "admin upload"],
+            "required_output": ["raw scene video 9:16", "duration follows prompt start/end", "no watermark if possible"],
+            "success_criteria": [
+                "Cảnh khớp visual_prompt và on-screen text.",
+                "Không dùng likeness/người thật/brand asset thiếu quyền.",
+                "Nếu dùng B-roll/screenshot phải có quyền hoặc nguồn công khai hợp lệ.",
+            ],
+            "worker_steps": [
+                "Copy visual_prompt vào tool video chính.",
+                "Tạo cảnh 9:16 riêng cho scene này.",
+                "Nếu tool chính lỗi/quota, POST tool-event rồi dựng fallback ngắn đủ dùng.",
+                "Upload file cảnh hoặc complete output_url.",
+            ],
+        })
+    elif task_type_l == "voice":
+        base.update({
+            "primary_tool": "Fish Audio HD",
+            "fallback_tools": ["Edge TTS", "manual voice upload"],
+            "required_output": ["mp3/wav voice-over", "Vietnamese clear pacing", "script exactly matches or improves readability without changing claim"],
+            "success_criteria": [
+                "Giọng rõ, không rè, không đọc sai claim tài chính/y tế.",
+                "Nếu Fish lỗi/quota, ghi tool-event và dùng Edge TTS.",
+            ],
+            "worker_steps": [
+                "Đọc script trong prompt.",
+                "Tạo voice bằng Fish Audio nếu có key/quota.",
+                "Fallback Edge TTS khi Fish lỗi/quota/hết tiền.",
+                "Upload audio hoặc complete output_url.",
+            ],
+        })
+    elif task_type_l == "edit":
+        base.update({
+            "primary_tool": "CapCut/FFmpeg",
+            "fallback_tools": ["FFmpeg local", "manual editor upload"],
+            "required_output": ["final_video mp4 9:16", "burned subtitles", "CTA overlay/disclosure", "scene + voice synced"],
+            "success_criteria": [
+                "Video cuối có đủ scene, voice/subtitle, CTA affiliate và không lỗi khung hình.",
+                "Final video phải xem được trong Telegram qua /asset_send trước khi approve.",
+            ],
+            "worker_steps": [
+                "Lấy raw_video/voice/subtitle assets trong job_context.",
+                "Dựng video 9:16 theo edit instructions.",
+                "Chèn disclosure affiliate và CTA không che nội dung chính.",
+                "Upload final_video qua /api/operator/tasks/<TASK_ID>/upload.",
+            ],
+        })
+    elif task_type_l == "review":
+        base.update({
+            "primary_tool": "Claude/Gemini/admin review",
+            "fallback_tools": ["manual compliance checklist"],
+            "required_output": ["review note", "APPROVE/FIX/BLOCK decision"],
+            "success_criteria": [
+                "Kiểm tra affiliate disclosure, claim cấm, consent/18+, bản quyền, link đúng.",
+                "Chỉ ready khi đã nêu rõ đạt hoặc cần sửa gì.",
+            ],
+            "worker_steps": [
+                "Đọc publish_pack, assets và checklist.",
+                "Trả quyết định review bằng complete note hoặc đánh blocked nếu cần sửa.",
+            ],
+        })
+    elif task_type_l == "publish":
+        base.update({
+            "primary_tool": "manual publisher/official API worker",
+            "fallback_tools": ["manual handoff"],
+            "required_output": ["publish_url or blocked note", "platform/account used", "initial views/clicks if available"],
+            "success_criteria": [
+                "Chỉ đăng khi job đã approve/publish queue hợp lệ.",
+                "Caption/status/comment chứa disclosure affiliate và link bundle đúng placement.",
+            ],
+            "worker_steps": [
+                "Lấy publish_pack và publisher_run/handoff.",
+                "Đăng bằng tay hoặc API chính thức nếu api_ready.",
+                "POST publish complete và ghi performance.",
+            ],
+        })
+    else:
+        base.update({
+            "fallback_tools": ["manual worker"],
+            "required_output": ["output_url or uploaded file", "clear note"],
+            "success_criteria": ["Output thật, dùng được cho bước kế tiếp."],
+            "worker_steps": ["Thực hiện prompt task.", "Upload/complete output hoặc blocked nếu lỗi."],
+        })
+    if prompt:
+        base["prompt_preview"] = truncate_text(prompt, 500)
+    if job_id:
+        base["job_context_url"] = f"/api/operator/jobs/{int(job_id)}/context"
+        base["job_ready_url"] = f"/api/operator/jobs/{int(job_id)}/ready"
+    return base
+
 def operator_task_contract(task_id, task_type: str = "", job_id: int = 0):
     task_ref = str(task_id or "<TASK_ID>")
     try:
@@ -5100,6 +5231,7 @@ def operator_task_contract(task_id, task_type: str = "", job_id: int = 0):
             "Nếu lỗi/quota: POST complete_url status=blocked kèm note rõ lý do.",
             "Nếu có fallback rẻ/miễn phí: báo /api/operator/tool-events rồi chạy fallback.",
         ],
+        "execution_runbook": operator_task_execution_runbook(task_type, job_id=job_id),
         "is_example": task_num == 0,
     }
 
@@ -5142,6 +5274,7 @@ def serialize_operator_task(row):
         "note": note,
         "updated_at": updated_at,
         "contract": operator_task_contract(task_id, task_type, job_id),
+        "execution_runbook": operator_task_execution_runbook(task_type, tool, prompt, job_id),
         "job": job_payload,
     }
 
@@ -12018,6 +12151,9 @@ async def cmd_next_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tid, row_job_id, mid, task_type, tool, scene_no, title, status, output_url, note, updated_at = task
     full_task = get_production_task(update.effective_user.id, tid)
     prompt = full_task[7] if full_task else ""
+    runbook = operator_task_execution_runbook(task_type, tool, prompt, row_job_id)
+    required_output = "\n".join("- " + str(x) for x in runbook.get("required_output", [])) or "-"
+    fallback_tools = ", ".join(str(x) for x in runbook.get("fallback_tools", [])) or "-"
     update_production_task(update.effective_user.id, tid, status="working", note=note or "next_task_selected")
     kb = InlineKeyboardMarkup([
         [
@@ -12033,6 +12169,8 @@ async def cmd_next_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Status: <b>working</b>\n"
         f"Title: {html.escape(title or '-')}\n\n"
         f"<pre>{html_pre(prompt or '-')}</pre>\n\n"
+        f"<b>Output bắt buộc:</b>\n<pre>{html_pre(required_output, 900)}</pre>\n"
+        f"<b>Fallback:</b> <code>{html.escape(fallback_tools)}</code>\n\n"
         f"Khi có output: <code>/task_set id={tid} status=ready url=https://...</code>",
         parse_mode="HTML",
         reply_markup=kb
@@ -12050,6 +12188,10 @@ async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not task:
         return await update.message.reply_text("❌ Không tìm thấy production task.")
     tid, job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
+    runbook = operator_task_execution_runbook(task_type, tool, prompt, job_id)
+    required_output = "\n".join("- " + str(x) for x in runbook.get("required_output", [])) or "-"
+    fallback_tools = ", ".join(str(x) for x in runbook.get("fallback_tools", [])) or "-"
+    worker_steps = "\n".join(f"{idx}. {step}" for idx, step in enumerate(runbook.get("worker_steps", []), start=1)) or "-"
     update_production_task(update.effective_user.id, task_id, status="working", note=note or "handoff_started")
     await update.message.reply_text(
         f"🤝 <b>TASK HANDOFF #{tid}</b>\n"
@@ -12057,6 +12199,10 @@ async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Type: <code>{html.escape(task_type or '-')}</code> | Tool: <b>{html.escape(tool or '-')}</b> | Scene: <b>{scene_no or '-'}</b>\n"
         f"Title: {html.escape(title or '-')}\n\n"
         f"<pre>{html_pre(prompt or '-')}</pre>\n\n"
+        f"<b>Cách làm:</b>\n<pre>{html_pre(worker_steps, 1000)}</pre>\n"
+        f"<b>Output bắt buộc:</b>\n<pre>{html_pre(required_output, 900)}</pre>\n"
+        f"<b>Fallback:</b> <code>{html.escape(fallback_tools)}</code>\n"
+        f"<b>Báo lỗi tool:</b> <code>/operator_tool_events stage={html.escape(task_type or 'task')} tool={html.escape(tool or '-')} type=quota fallback=... message=...</code>\n\n"
         f"Khi có output: <code>/task_set id={tid} status=ready url=https://...</code>",
         parse_mode="HTML"
     )
