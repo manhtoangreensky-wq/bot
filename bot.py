@@ -3009,6 +3009,113 @@ def operator_mission_work_orders_data(owner_id, mission_id=0, result_payload=Non
         "rule": "Work-order là gói giao việc cho Claude/n8n/tool worker: tạo file/video thật, trả output qua upload/complete, không tự publish khi chưa duyệt.",
     }
 
+def select_toolchain_for_task(task_type="", tool=""):
+    task_type = (task_type or "").strip().lower()
+    tool = (tool or "").strip().lower()
+    stage_alias = {
+        "proof_asset": "brain_and_script",
+        "visual_scene": "video_generation",
+        "voice": "voice",
+        "edit": "editing",
+        "publish": "publishing",
+        "review": "editing",
+    }
+    wanted_stage = stage_alias.get(task_type, task_type)
+    for chain in operator_toolchain_data().get("chains", []):
+        stage = (chain.get("stage") or "").lower()
+        names = [((chain.get("primary") or {}).get("name") or "").lower()]
+        names.extend(((fb.get("name") or "").lower()) for fb in (chain.get("fallbacks") or []))
+        if stage == wanted_stage or (tool and any(tool in name for name in names)):
+            return chain
+    return None
+
+def operator_worker_intake_data(owner_id, job_id=0, task_id=0, tool="", claim=False, include_prompt=True, include_context=True):
+    try:
+        job_id = int(job_id or 0)
+    except (TypeError, ValueError):
+        job_id = 0
+    try:
+        task_id = int(task_id or 0)
+    except (TypeError, ValueError):
+        task_id = 0
+    tool = (tool or "").strip().lower()
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    task = get_production_task(owner_id, task_id) if task_id else None
+    if not task:
+        task = next_worker_task(owner_id, job_id=job_id or None, tool=tool)
+    if not task:
+        return {
+            "ok": True,
+            "mode": "claim" if claim else "peek",
+            "task": None,
+            "message": "no queued task",
+            "next_run": operator_next_run_data(owner_id),
+            "mission_inbox": operator_mission_inbox_data(owner_id, limit=5),
+            "film_blueprint_url": f"{base_url}/api/operator/film-blueprint",
+            "rule": "Không có task queued/waiting. Hãy launch mission/video hoặc xử lý gate trong next_run.",
+        }
+    did_claim = False
+    if claim and (task[8] or "queued").lower() in {"queued", "waiting"}:
+        update_production_task(owner_id, task[0], status="working", note=f"worker_intake_claim tool={tool or task[4] or '-'}")
+        task = get_production_task(owner_id, task[0])
+        did_claim = True
+    tid, row_job_id, manifest_id, task_type, task_tool, scene_no, title, prompt, status, output_url, note, updated_at = task
+    job = get_production_job(row_job_id, owner_id)
+    prompt_pack = operator_task_prompt_pack_data(owner_id, task_id=tid) if include_prompt else None
+    worker_pack = operator_worker_pack_data(owner_id, job_id=row_job_id, task_id=tid, tool=tool) if include_context else None
+    task_contract = operator_task_contract(tid, task_type, row_job_id)
+    toolchain = select_toolchain_for_task(task_type, tool or task_tool)
+    film_blueprint = ai_film_series_blueprint_data()
+    work_orders = operator_mission_work_orders_data(
+        owner_id,
+        result_payload={"job_id": row_job_id},
+        limit=1,
+        include_prompt=include_prompt,
+    )
+    return {
+        "ok": True,
+        "mode": "claim" if claim else "peek",
+        "claimed": did_claim,
+        "job_id": int(row_job_id),
+        "task_id": int(tid),
+        "job": serialize_production_job(job),
+        "task": serialize_operator_task(task),
+        "prompt_pack": prompt_pack,
+        "prompt_text": (prompt_pack or {}).get("prompt_text", ""),
+        "worker_pack": worker_pack,
+        "work_order": ((work_orders.get("work_orders") or [None])[0]),
+        "toolchain": {
+            "selected": toolchain,
+            "policy": operator_toolchain_data().get("policy"),
+            "failure_protocol": operator_toolchain_data().get("failure_protocol"),
+        },
+        "film_blueprint": {
+            "url": f"{base_url}/api/operator/film-blueprint",
+            "mission": film_blueprint.get("mission"),
+            "series_structure": film_blueprint.get("series_structure"),
+            "character_bible_contract": film_blueprint.get("character_bible_contract"),
+            "storyboard_json_contract": film_blueprint.get("storyboard_json_contract"),
+            "template_library": film_blueprint.get("template_library"),
+            "affiliate_comment_manager": film_blueprint.get("affiliate_comment_manager"),
+            "viral_remix_modes": film_blueprint.get("viral_remix_modes"),
+        },
+        "submit": {
+            "complete_url": f"{base_url}{task_contract.get('complete_url')}",
+            "upload_url": f"{base_url}{task_contract.get('upload_url')}",
+            "acceptance_url": f"{base_url}{task_contract.get('acceptance_url')}",
+            "complete_payload": task_contract.get("complete_payload"),
+            "upload_form": task_contract.get("upload_form"),
+        },
+        "next": {
+            "peek": f"{base_url}/api/operator/worker-intake?job_id={int(row_job_id)}&claim=0",
+            "claim": f"{base_url}/api/operator/worker-intake?job_id={int(row_job_id)}&claim=1&include_prompt=1",
+            "task_prompt": f"{base_url}/api/operator/tasks/{int(tid)}/prompt-pack",
+            "job_context": f"{base_url}/api/operator/jobs/{int(row_job_id)}/context",
+            "review": f"{base_url}/api/operator/jobs/{int(row_job_id)}/review-video",
+        },
+        "rule": "Worker intake gom đủ task/prompt/toolchain/film blueprint. claim=0 chỉ xem; claim=1 mới chuyển task sang working. Không tự publish ngoài review/approve gate.",
+    }
+
 async def run_operator_mission_data(owner_id, mission_id=0, worker="claude", execute=False, safe_mode=True):
     row = get_operator_mission(owner_id, mission_id) if int(mission_id or 0) else claim_operator_mission(owner_id, worker=worker)
     if not row:
@@ -3476,7 +3583,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3517,6 +3624,8 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/platform-adapters"),
         ("POST", "/api/operator/publisher/run"),
         ("GET", "/api/operator/worker-next"),
+        ("GET", "/api/operator/worker-intake"),
+        ("POST", "/api/operator/worker-intake"),
         ("GET", "/api/operator/tasks/claim"),
         ("GET", "/api/operator/task-prompt"),
         ("GET", "/api/operator/tasks/<TASK_ID>/prompt-pack"),
@@ -3595,6 +3704,7 @@ def operator_smoke_test_data(owner_id):
         "reference_videos_in_spec": "/api/operator/reference-videos" in spec_text and "/api/operator/reference-videos" in n8n_text,
         "reference_scan_in_spec": "/api/operator/reference-videos/scan" in spec_text and "/api/operator/reference-videos/scan" in n8n_text,
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
+        "worker_intake_in_spec": "/api/operator/worker-intake" in spec_text and "/api/operator/worker-intake" in n8n_text,
         "film_blueprint_in_spec": "/api/operator/film-blueprint" in spec_text and "/api/operator/film-blueprint" in n8n_text,
         "commander_pack_in_spec": "/api/operator/commander-pack" in spec_text and "/api/operator/commander-pack" in n8n_text,
         "control_contract_in_spec": "/api/operator/control-contract" in spec_text and "/api/operator/control-contract" in n8n_text,
@@ -3701,6 +3811,7 @@ def operator_worker_spec_data():
         "reference_scan_url": f"{base_url}/api/operator/reference-videos/scan",
         "postback_setup_url": f"{base_url}/api/operator/postback-setup",
         "platform_adapters_url": f"{base_url}/api/operator/platform-adapters",
+        "worker_intake_url": f"{base_url}/api/operator/worker-intake",
         "reference_learning_rule": reference_learning_pack_data()["rule"],
         "roles": [
             {
@@ -3790,6 +3901,7 @@ def operator_worker_spec_data():
             {"step": 3, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
             {"step": 4.5, "name": "peek_worker_next", "method": "GET", "url": "/api/operator/worker-next"},
+            {"step": 4.55, "name": "worker_intake_preview", "method": "GET", "url": "/api/operator/worker-intake?claim=0&include_prompt=1"},
             {"step": 4.6, "name": "worker_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/worker-pack"},
             {"step": 4.62, "name": "task_prompt_pack", "method": "GET", "url": "/api/operator/tasks/<TASK_ID>/prompt-pack"},
             {"step": 4.7, "name": "pipeline_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/pipeline-pack"},
@@ -4004,6 +4116,12 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/jobs/<JOB_ID>/worker-pack",
                 "purpose": "Một gói đầy đủ cho Claude/n8n/tool worker: job, task, context, prompt, reference learning, video factory blueprint, toolchain, publish pack và endpoint trả output.",
+            },
+            "worker_intake": {
+                "method": "GET|POST",
+                "url": "/api/operator/worker-intake",
+                "purpose": "Một cổng nhận việc cho worker: claim=0 để preview, claim=1 để chuyển task sang working và nhận prompt/toolchain/film blueprint/upload URL.",
+                "body": {"job_id": 0, "task_id": 0, "tool": "kling", "claim": False, "include_prompt": True, "include_context": True, "notify_admin": False},
             },
             "task_prompt_pack": {
                 "method": "GET",
@@ -5391,6 +5509,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "worker-intake-preview",
+                "name": "Worker Intake Preview",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-80, -220],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/worker-intake?claim=0&include_prompt=1&include_context=1",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "claim-task",
                 "name": "Claim Next Task",
                 "type": "n8n-nodes-base.httpRequest",
@@ -5826,7 +5958,8 @@ def operator_n8n_workflow_json_data():
             "Read Reference Pack": {"main": [[{"node": "Read Reference Videos", "type": "main", "index": 0}]]},
             "Read Reference Videos": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
             "Director Run Safe Action": {"main": [[{"node": "Peek Worker Next", "type": "main", "index": 0}]]},
-            "Peek Worker Next": {"main": [[{"node": "Read Pipeline Pack", "type": "main", "index": 0}]]},
+            "Peek Worker Next": {"main": [[{"node": "Worker Intake Preview", "type": "main", "index": 0}]]},
+            "Worker Intake Preview": {"main": [[{"node": "Read Pipeline Pack", "type": "main", "index": 0}]]},
             "Read Pipeline Pack": {"main": [[{"node": "Read Worker Pack", "type": "main", "index": 0}]]},
             "Read Worker Pack": {"main": [[{"node": "Read Task Prompt Pack", "type": "main", "index": 0}]]},
             "Read Task Prompt Pack": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
@@ -6079,6 +6212,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
             "channel_router": f"{base_url}/api/operator/channel-router",
             "command_run": f"{base_url}/api/operator/command/run",
             "worker_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
+            "worker_intake": f"{base_url}/api/operator/worker-intake",
             "pipeline_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/pipeline-pack",
             "distribution_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/distribution-pack",
             "worker_spec": f"{base_url}/api/operator/worker-spec",
@@ -6242,6 +6376,7 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
             "make_video": f"{base_url}/api/operator/make-video",
             "worker_next": f"{base_url}/api/operator/worker-next",
             "film_blueprint": f"{base_url}/api/operator/film-blueprint",
+            "worker_intake": f"{base_url}/api/operator/worker-intake",
             "worker_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
             "pipeline_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/pipeline-pack",
             "task_claim": f"{base_url}/api/operator/tasks/claim?include_context=1&include_prompt=1",
@@ -13682,6 +13817,15 @@ class OperatorMissionRunRequest(BaseModel):
     include_work_orders: bool = True
     notify_admin: bool = True
 
+class OperatorWorkerIntakeRequest(BaseModel):
+    job_id: int = Field(default=0, ge=0)
+    task_id: int = Field(default=0, ge=0)
+    tool: str = Field(default="", max_length=80)
+    claim: bool = False
+    include_prompt: bool = True
+    include_context: bool = True
+    notify_admin: bool = False
+
 class OperatorMissionCompleteRequest(BaseModel):
     status: str = Field(default="done", max_length=40)
     result: dict = Field(default_factory=dict)
@@ -14556,6 +14700,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /mission_run id=&lt;ID&gt; execute=1 — Chạy mission qua executor an toàn",
             "• /mission_workorders id=&lt;ID&gt; — Gói giao việc video/job/task cho worker",
             "• /film_blueprint — Blueprint phim AI nhiều tập + affiliate comments",
+            "• /worker_intake claim=0/1 — Worker nhận task + prompt + toolchain + upload URL",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
             "• /dashboard — Dashboard quản trị hệ thống",
@@ -19037,6 +19182,7 @@ def operator_category_keyboard(category):
             ("🧠 Pipeline pack", "pipelinepack"),
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
+            ("📥 Worker intake", "workerintake"),
             ("📦 Worker pack", "workerpack"),
             ("🧾 Task prompt", "taskprompt"),
             ("🧪 Output acceptance", "outputacceptance"),
@@ -19190,6 +19336,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Quyết định scale affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-decisions</code>",
         f"• Scale affiliate: <code>POST {html.escape(base_url)}/api/operator/affiliate-scale</code>",
         f"• Lấy task: <code>GET {html.escape(base_url)}/api/operator/tasks/next</code>",
+        f"• Worker intake gộp việc: <code>GET/POST {html.escape(base_url)}/api/operator/worker-intake</code>",
         f"• Claim task + prompt/context: <code>GET {html.escape(base_url)}/api/operator/tasks/claim?include_context=1&amp;include_prompt=1</code>",
         f"• Task prompt pack: <code>GET {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/prompt-pack</code>",
         f"• Trả task: <code>POST {html.escape(base_url)}/api/operator/tasks/&lt;TASK_ID&gt;/complete</code>",
@@ -19509,6 +19656,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
         "nexttask": "/next_task\n/next_task job=<JOB_ID>",
+        "workerintake": "/worker_intake\n/worker_intake job=<JOB_ID> claim=1\nGET/POST /api/operator/worker-intake",
         "workerpack": "/worker_pack job=<JOB_ID>\n/worker_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/worker-pack",
         "taskprompt": "/task_prompt id=<TASK_ID>\n/task_prompt job=<JOB_ID>\nGET /api/operator/tasks/<TASK_ID>/prompt-pack",
         "outputacceptance": "/output_acceptance job=<JOB_ID>\n/output_acceptance task=<TASK_ID>\nGET /api/operator/output-acceptance?job_id=<JOB_ID>",
@@ -20744,6 +20892,56 @@ async def cmd_worker_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  Claim: <code>{html.escape(item.get('claim_task_url') or '')}</code>"
         )
     lines.append("\nAPI peek: <code>GET /api/operator/worker-next?job_id=&lt;JOB_ID&gt;&amp;tool=fish</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_worker_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    job_id = safe_int(data.get("job") or data.get("job_id"), 0)
+    task_id = safe_int(data.get("task") or data.get("id"), 0)
+    tool = (data.get("tool") or "").strip().lower()
+    claim = truthy_value(data.get("claim") or data.get("run"), False)
+    include_prompt = truthy_value(data.get("prompt") or data.get("include_prompt"), True)
+    include_context = truthy_value(data.get("context") or data.get("include_context"), True)
+    pack = operator_worker_intake_data(
+        update.effective_user.id,
+        job_id=job_id,
+        task_id=task_id,
+        tool=tool,
+        claim=claim,
+        include_prompt=include_prompt,
+        include_context=include_context,
+    )
+    if not pack.get("task"):
+        return await update.message.reply_text(
+            "✅ Không có task queued/waiting cho worker.\n"
+            f"Next: <code>{html.escape(((pack.get('next_run') or {}).get('telegram_command') or '/operator_next_run'))}</code>",
+            parse_mode="HTML",
+        )
+    task = pack.get("task") or {}
+    job = pack.get("job") or {}
+    submit = pack.get("submit") or {}
+    selected_tool = ((pack.get("toolchain") or {}).get("selected") or {})
+    primary = selected_tool.get("primary") or {}
+    fallbacks = ", ".join((fb.get("name") or "-") for fb in (selected_tool.get("fallbacks") or [])[:3]) or "-"
+    lines = [
+        "📥 <b>WORKER INTAKE</b>",
+        f"• Mode: <code>{html.escape(pack.get('mode') or '-')}</code> | Claimed: <b>{'YES' if pack.get('claimed') else 'NO'}</b>",
+        f"• Job: <code>#{pack.get('job_id')}</code> | {html.escape(job.get('platform') or '-')} | {html.escape(job.get('topic') or '-')}",
+        f"• Task: <code>#{pack.get('task_id')}</code> | <code>{html.escape(task.get('task_type') or '-')}</code> | tool=<code>{html.escape(task.get('tool') or '-')}</code>",
+        f"• Primary tool: <b>{html.escape(primary.get('name') or '-')}</b> | Fallback: <code>{html.escape(fallbacks)}</code>",
+        f"• Complete: <code>{html.escape(submit.get('complete_url') or '')}</code>",
+        f"• Upload: <code>{html.escape(submit.get('upload_url') or '')}</code>",
+        "",
+        "<b>Prompt tóm tắt:</b>",
+        f"<pre>{html_pre(pack.get('prompt_text') or (task.get('prompt') or '-'), 1800)}</pre>",
+        "<b>Lệnh tiếp:</b>",
+        f"<code>/task_set id={pack.get('task_id')} status=ready url=https://...</code>",
+        f"<code>/output_acceptance job={pack.get('job_id')} task={pack.get('task_id')}</code>",
+        f"<code>/review_video job={pack.get('job_id')} send=1</code>",
+        "API: <code>GET/POST /api/operator/worker-intake</code>",
+    ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -23224,6 +23422,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tasks", cmd_tasks))
     tg_app.add_handler(CommandHandler("next_task", cmd_next_task))
     tg_app.add_handler(CommandHandler("worker_next", cmd_worker_next))
+    tg_app.add_handler(CommandHandler("worker_intake", cmd_worker_intake))
     tg_app.add_handler(CommandHandler("worker_pack", cmd_worker_pack))
     tg_app.add_handler(CommandHandler("task_prompt", cmd_task_prompt))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
@@ -23634,6 +23833,55 @@ async def api_operator_next_task(request: Request, job_id: int = 0, tool: str = 
 async def api_operator_claim_task(request: Request, job_id: int = 0, tool: str = "", include_context: int = 1, include_prompt: int = 1):
     verify_operator_api_token(request)
     return claim_operator_task_payload(job_id=job_id, tool=tool, include_context=bool(include_context), include_prompt=bool(include_prompt))
+
+@fastapi_app.get("/api/operator/worker-intake")
+async def api_operator_worker_intake(
+    request: Request,
+    job_id: int = 0,
+    task_id: int = 0,
+    tool: str = "",
+    claim: bool = False,
+    include_prompt: bool = True,
+    include_context: bool = True,
+):
+    verify_operator_api_token(request)
+    return operator_worker_intake_data(
+        ADMIN_ID,
+        job_id=job_id,
+        task_id=task_id,
+        tool=tool,
+        claim=claim,
+        include_prompt=include_prompt,
+        include_context=include_context,
+    )
+
+@fastapi_app.post("/api/operator/worker-intake")
+async def api_operator_worker_intake_post(payload: OperatorWorkerIntakeRequest, request: Request):
+    verify_operator_api_token(request)
+    result = operator_worker_intake_data(
+        ADMIN_ID,
+        job_id=payload.job_id,
+        task_id=payload.task_id,
+        tool=payload.tool,
+        claim=payload.claim,
+        include_prompt=payload.include_prompt,
+        include_context=payload.include_context,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID and result.get("task"):
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "📥 <b>WORKER INTAKE API</b>\n\n"
+                    f"• Mode: <code>{html.escape(result.get('mode') or '-')}</code> | Claimed: <b>{'YES' if result.get('claimed') else 'NO'}</b>\n"
+                    f"• Job: <code>#{result.get('job_id')}</code> | Task: <code>#{result.get('task_id')}</code>\n"
+                    f"• Tool: <code>{html.escape(payload.tool or ((result.get('task') or {}).get('tool') or '-'))}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Worker intake notify error: {e}")
+    return result
 
 @fastapi_app.get("/api/operator/worker-next")
 async def api_operator_worker_next(request: Request, job_id: int = 0, tool: str = "", limit: int = 5):
