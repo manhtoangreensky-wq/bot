@@ -145,6 +145,7 @@ PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "Httdhtoan")
 TELEGRAM_UPDATE_MODE_RAW = _env("TELEGRAM_UPDATE_MODE")
 TELEGRAM_UPDATE_MODE = (TELEGRAM_UPDATE_MODE_RAW or ("webhook" if PUBLIC_BASE_URL else "polling")).lower()
+TELEGRAM_FORCE_POLLING = _env("TELEGRAM_FORCE_POLLING", "0").lower() in {"1", "true", "yes", "on"}
 TELEGRAM_WEBHOOK_SECRET = _env("TELEGRAM_WEBHOOK_SECRET")
 TELEGRAM_TAKEOVER_INTERVAL_SECONDS = max(0, int(_env("TELEGRAM_TAKEOVER_INTERVAL_SECONDS", "45") or "45"))
 TELEGRAM_WEBHOOK_PATH = _env(
@@ -160,6 +161,18 @@ OPERATOR_UPLOAD_DIR = _env("OPERATOR_UPLOAD_DIR", "operator_uploads")
 MAX_OPERATOR_UPLOAD_MB = int(_env("MAX_OPERATOR_UPLOAD_MB", "200") or "200")
 META_GRAPH_VERSION = _env("META_GRAPH_VERSION", "v24.0")
 REFERENCE_VIDEO_DIR = _env("REFERENCE_VIDEO_DIR", r"D:\mybot\video AI tham khảo")
+
+def is_railway_runtime() -> bool:
+    return any(
+        _env(key)
+        for key in (
+            "RAILWAY_ENVIRONMENT",
+            "RAILWAY_ENVIRONMENT_ID",
+            "RAILWAY_PROJECT_ID",
+            "RAILWAY_SERVICE_ID",
+            "RAILWAY_DEPLOYMENT_ID",
+        )
+    )
 
 def expected_telegram_webhook_url() -> str:
     return (PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH) if PUBLIC_BASE_URL else ""
@@ -11865,6 +11878,12 @@ def serialize_publish_queue_item(row):
     hashtags = selected_variant[7] if selected_variant else ""
     job = get_production_job(job_id, ADMIN_ID)
     static_pack = build_static_publish_pack(job, ADMIN_ID) if job else {}
+    comment_pack = static_pack.get("comment_pack") or build_affiliate_comment_pack(
+        ADMIN_ID,
+        job_id,
+        max_comments=10,
+        delay_seconds=30,
+    )
     return {
         "id": qid,
         "job_id": job_id,
@@ -11892,6 +11911,7 @@ def serialize_publish_queue_item(row):
             "product_name": product_name,
             "url": affiliate_url,
         },
+        "comment_pack": comment_pack,
         "publish_pack": {
             "caption": caption or static_pack.get("caption", ""),
             "cta": cta or static_pack.get("cta", ""),
@@ -11900,6 +11920,7 @@ def serialize_publish_queue_item(row):
             "pinned_comment": static_pack.get("pinned_comment", ""),
             "related_links": static_pack.get("related_links", []),
             "affiliate_bundle": static_pack.get("affiliate_bundle", {}),
+            "comment_pack": comment_pack,
             "reference_examples": static_pack.get("reference_examples", []),
             "placement_plan": static_pack.get("placement_plan", {}),
             "disclosure": static_pack.get("disclosure", ""),
@@ -11926,6 +11947,8 @@ def build_publisher_handoff(queue_payload):
     pinned_comment = pack.get("pinned_comment") or ""
     related_links = pack.get("related_links") or []
     affiliate_bundle = pack.get("affiliate_bundle") or {}
+    comment_pack = queue_payload.get("comment_pack") or pack.get("comment_pack") or {}
+    comment_items = comment_pack.get("comments") or []
     placement_plan = pack.get("placement_plan") or affiliate_bundle.get("placement_plan") or {}
     if platform in {"tiktok", "tiktokshop"}:
         api_plan = [
@@ -11973,15 +11996,29 @@ def build_publisher_handoff(queue_payload):
             "pinned_comment": pinned_comment,
             "related_links": related_links,
             "affiliate_bundle": affiliate_bundle,
+            "comment_pack": comment_pack,
             "reference_examples": pack.get("reference_examples", []),
             "placement_plan": placement_plan,
             "disclosure": pack.get("disclosure", ""),
+        },
+        "comment_plan": {
+            "primary_comment": comment_pack.get("primary_comment") or pinned_comment,
+            "comments": comment_items,
+            "count": len(comment_items),
+            "delay_seconds_between_comments": comment_pack.get("delay_seconds_between_comments", 30),
+            "post_publish": comment_pack.get("post_publish", {}),
+            "tracking_report": comment_pack.get("tracking_report", {}),
+            "rule": comment_pack.get(
+                "rule",
+                "Đăng comment liên quan vừa đủ, không spam; dùng tracking_source riêng để đo click/chuyển đổi.",
+            ),
         },
         "api_plan": api_plan,
         "manual_steps": [
             "Tải final video từ media.",
             "Đăng lên đúng account/channel.",
             "Dán caption, disclosure, CTA và link liên quan phù hợp.",
+            "Đăng comment chính và các comment phụ theo comment_plan, cách nhau đúng delay nếu nền tảng cho phép.",
             "Kiểm tra bài hiển thị công khai.",
             f"Gọi POST /api/operator/publish/{queue_payload.get('id')}/complete với publish_url thật.",
         ],
@@ -15771,6 +15808,8 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
         "telegram_update_mode_active": ACTIVE_TELEGRAM_UPDATE_MODE or "-",
         "telegram_update_mode_raw": TELEGRAM_UPDATE_MODE_RAW or "-",
+        "telegram_force_polling": TELEGRAM_FORCE_POLLING,
+        "railway_runtime_detected": is_railway_runtime(),
         "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
         "telegram_webhook_url": expected_webhook or "-",
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "-",
@@ -22701,6 +22740,8 @@ async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TY
     handoff = build_publisher_handoff(payload)
     copy = handoff.get("copy") or {}
     media = handoff.get("media") or {}
+    comment_plan = handoff.get("comment_plan") or {}
+    comment_items = comment_plan.get("comments") or []
     lines = [
         f"📮 <b>PUBLISHER HANDOFF — QUEUE #{queue_id}</b>",
         f"• Job: <code>#{handoff.get('job_id') or '-'}</code>",
@@ -22714,8 +22755,19 @@ async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TY
         f"<pre>{html_pre(copy.get('caption') or '-', 900)}</pre>",
         "<b>Comment ghim/link kèm:</b>",
         f"<pre>{html_pre(copy.get('pinned_comment') or '-', 900)}</pre>",
-        "<b>Plan đăng:</b>",
+        f"<b>Comment affiliate phụ:</b> <code>{len(comment_items)}</code> comment | delay <code>{int(comment_plan.get('delay_seconds_between_comments') or 30)}s</code>",
     ]
+    for item in comment_items[:5]:
+        lines.append(
+            f"• #{item.get('order')}: <code>{html.escape(item.get('tracking_source') or '-')}</code> "
+            f"{html.escape(item.get('product') or '-')}\n"
+            f"<pre>{html_pre(item.get('text') or item.get('url') or '-', 360)}</pre>"
+        )
+    if len(comment_items) > 5:
+        lines.append(f"• ... còn {len(comment_items) - 5} comment trong API/handoff JSON.")
+    lines.extend([
+        "<b>Plan đăng:</b>",
+    ])
     for step in handoff.get("api_plan") or []:
         lines.append(f"• {html.escape(step)}")
     lines.append(
@@ -24800,7 +24852,12 @@ async def lifespan(app: FastAPI):
     active_update_mode = TELEGRAM_UPDATE_MODE
     webhook_url = ""
     webhook_info_payload = {"ok": False, "reason": "not_checked", "expected_url": expected_telegram_webhook_url()}
-    if active_update_mode == "polling" and PUBLIC_BASE_URL and not TELEGRAM_UPDATE_MODE_RAW:
+    if (
+        active_update_mode == "polling"
+        and PUBLIC_BASE_URL
+        and not TELEGRAM_FORCE_POLLING
+        and (not TELEGRAM_UPDATE_MODE_RAW or is_railway_runtime())
+    ):
         active_update_mode = "webhook"
     if active_update_mode == "webhook" and PUBLIC_BASE_URL:
         takeover_result = await set_telegram_webhook_takeover(tg_app.bot, drop_pending_updates=True)
@@ -24838,6 +24895,7 @@ async def lifespan(app: FastAPI):
                     f"• Build: <code>{APP_BUILD}</code>\n"
                     f"• Deploy: <code>{APP_DEPLOY_ID or '-'}</code>\n"
                     f"• Update mode: <code>{html.escape(active_update_mode)}</code>\n"
+                    f"• Raw mode: <code>{html.escape(TELEGRAM_UPDATE_MODE_RAW or '-')}</code> | force polling: <code>{str(TELEGRAM_FORCE_POLLING).lower()}</code>\n"
                     f"• Public URL source: <code>{html.escape(PUBLIC_BASE_URL_SOURCE or '-')}</code>\n"
                     f"• Webhook: <code>{html.escape(webhook_url or '-')}</code>\n"
                     f"• Telegram owner: <code>{html.escape(ownership.get('level') or '-')}</code>\n"
@@ -24873,6 +24931,9 @@ async def health():
         "deploy_id": APP_DEPLOY_ID or "",
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
         "telegram_update_mode_active": ACTIVE_TELEGRAM_UPDATE_MODE or "",
+        "telegram_update_mode_raw": TELEGRAM_UPDATE_MODE_RAW or "",
+        "telegram_force_polling": TELEGRAM_FORCE_POLLING,
+        "railway_runtime_detected": is_railway_runtime(),
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "",
         "telegram_webhook_watchdog": ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG or "",
         "public_base_url": PUBLIC_BASE_URL or "",
