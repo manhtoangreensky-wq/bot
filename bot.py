@@ -3581,7 +3581,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -3601,6 +3601,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/runtime"),
         ("GET", "/api/operator/worker-spec"),
         ("GET", "/api/operator/film-blueprint"),
+        ("POST", "/api/operator/film-series"),
         ("GET", "/api/operator/commander-pack"),
         ("GET", "/api/operator/control-contract"),
         ("GET", "/api/operator/video-patterns"),
@@ -3706,6 +3707,7 @@ def operator_smoke_test_data(owner_id):
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
         "worker_intake_in_spec": "/api/operator/worker-intake" in spec_text and "/api/operator/worker-intake" in n8n_text,
         "film_blueprint_in_spec": "/api/operator/film-blueprint" in spec_text and "/api/operator/film-blueprint" in n8n_text,
+        "film_series_in_spec": "/api/operator/film-series" in spec_text and "/api/operator/film-series" in n8n_text,
         "commander_pack_in_spec": "/api/operator/commander-pack" in spec_text and "/api/operator/commander-pack" in n8n_text,
         "control_contract_in_spec": "/api/operator/control-contract" in spec_text and "/api/operator/control-contract" in n8n_text,
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
@@ -3791,6 +3793,7 @@ def operator_worker_spec_data():
         ),
         "toolchain_url": f"{base_url}/api/operator/toolchain",
         "film_blueprint_url": f"{base_url}/api/operator/film-blueprint",
+        "film_series_url": f"{base_url}/api/operator/film-series",
         "goal_audit_url": f"{base_url}/api/operator/goal-audit",
         "mission_control_url": f"{base_url}/api/operator/mission",
         "mission_inbox_url": f"{base_url}/api/operator/missions",
@@ -3894,6 +3897,7 @@ def operator_worker_spec_data():
             {"step": 1.08, "name": "commander_pack", "method": "GET", "url": "/api/operator/commander-pack?days=30&platform=tiktok"},
             {"step": 1.1, "name": "read_worker_spec", "method": "GET", "url": "/api/operator/worker-spec"},
             {"step": 1.15, "name": "read_film_blueprint", "method": "GET", "url": "/api/operator/film-blueprint"},
+            {"step": 1.16, "name": "film_series_optional", "method": "POST", "url": "/api/operator/film-series"},
             {"step": 1.2, "name": "read_video_patterns", "method": "GET", "url": "/api/operator/video-patterns"},
             {"step": 1.3, "name": "read_reference_pack", "method": "GET", "url": "/api/operator/reference-pack"},
             {"step": 1.35, "name": "read_reference_videos", "method": "GET", "url": "/api/operator/reference-videos?limit=40"},
@@ -4000,6 +4004,12 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/film-blueprint",
                 "purpose": "Runbook KingContent nội bộ: tạo series phim AI nhiều tập, character bible, storyboard 2x5, voice profile, composer và auto comment affiliate.",
+            },
+            "film_series": {
+                "method": "POST",
+                "url": "/api/operator/film-series",
+                "purpose": "Tạo nhiều production job theo từng tập phim AI affiliate; build task/manifest để worker lấy việc qua /worker-intake và dừng ở review gate.",
+                "body": {"topic": "đạo lý gia đình về lòng hiếu thảo", "platform": "tiktok", "channel": "all", "episodes": 5, "scenes_per_episode": 10, "duration": 80, "template": "dao_ly_trieu_views", "build": True, "bootstrap": True, "notify_admin": True},
             },
             "channel_router": {
                 "method": "GET",
@@ -5358,6 +5368,28 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "create-film-series-optional",
+                "name": "Create Film Series Optional",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-220, -410],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/film-series",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": (
+                        "={\"topic\":\"đạo lý gia đình về lòng hiếu thảo\","
+                        "\"platform\":\"tiktok\",\"channel\":\"all\","
+                        "\"episodes\":5,\"scenes_per_episode\":10,\"duration\":80,"
+                        "\"template\":\"dao_ly_trieu_views\",\"build\":true,\"bootstrap\":true,\"notify_admin\":true}"
+                    ),
+                    "options": {"timeout": 180000},
+                },
+            },
+            {
                 "id": "read-toolchain",
                 "name": "Read Toolchain",
                 "type": "n8n-nodes-base.httpRequest",
@@ -6179,6 +6211,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
         "next_action": next_action,
         "execution_order": [
             {"step": "launch_one_command", "telegram": "/operator_launch topic=<chu_de> platform=tiktok channel=all limit=3 build=1", "api": "POST /api/operator/launch"},
+            {"step": "film_series_when_needed", "telegram": "/film_series topic=<chu_de> episodes=5 scenes=10 platform=tiktok build=1", "api": "POST /api/operator/film-series"},
             {"step": "bootstrap_if_missing", "telegram": "/operator_bootstrap", "api": "POST /api/operator/bootstrap"},
             {"step": "trend_or_topic", "telegram": "/make_video topic=<chu_de> platform=tiktok channel=all limit=3 build=1", "api": "POST /api/operator/make-video"},
             {"step": "worker_claim", "telegram": "/worker_next hoặc /next_task", "api": "GET /api/operator/worker-next rồi GET /api/operator/tasks/claim?include_context=1&include_prompt=1"},
@@ -6208,6 +6241,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
             "mission": f"{base_url}/api/operator/mission",
             "control_contract": f"{base_url}/api/operator/control-contract",
             "launch": f"{base_url}/api/operator/launch",
+            "film_series": f"{base_url}/api/operator/film-series",
             "bootstrap": f"{base_url}/api/operator/bootstrap",
             "channel_router": f"{base_url}/api/operator/channel-router",
             "command_run": f"{base_url}/api/operator/command/run",
@@ -12418,6 +12452,230 @@ async def operator_launch_pipeline(
         },
     }
 
+async def operator_film_series_pipeline(
+    owner_id,
+    topic,
+    platform="tiktok",
+    channel="all",
+    affiliate_id=0,
+    campaign_id=0,
+    episodes=5,
+    scenes_per_episode=10,
+    duration=80,
+    genre="drama cảm xúc",
+    audience="người lớn",
+    template="dao_ly_trieu_views",
+    build=True,
+    bootstrap=True,
+):
+    topic = (topic or "").strip()
+    if not topic:
+        return False, "missing_topic", {}
+    platform = (platform or "tiktok").strip().lower()
+    channel = (channel or "all").strip().lower()
+    episodes = max(1, min(int(episodes or 5), 8))
+    scenes_per_episode = max(3, min(int(scenes_per_episode or 10), 12))
+    duration = max(30, min(int(duration or 80), 180))
+    genre = (genre or "drama cảm xúc").strip()
+    audience = (audience or "người lớn").strip()
+    template = (template or "dao_ly_trieu_views").strip()
+
+    if bootstrap:
+        counts = (operator_audit_data(owner_id).get("counts") or {})
+        if int(counts.get("active_channels") or 0) <= 0 or int(counts.get("active_affiliates") or 0) <= 0 or int(counts.get("active_campaigns") or 0) <= 0:
+            operator_bootstrap_data(
+                owner_id,
+                include_channels=True,
+                include_campaigns=True,
+                include_affiliates=True,
+                include_references=True,
+                reference_limit=200,
+            )
+
+    if channel == "all":
+        channels = list_social_channels(owner_id, limit=80)
+        if platform:
+            channels = [ch for ch in channels if (ch[1] or "").lower() == platform]
+    else:
+        try:
+            one_channel = get_social_channel(int(channel), owner_id)
+        except (TypeError, ValueError):
+            one_channel = None
+        channels = [one_channel] if one_channel else []
+    channels = [ch for ch in channels if ch and ch[7] == "active"]
+    if not channels:
+        return False, "no_active_channel", {"message": "Chưa có channel active phù hợp. Dùng /operator_bootstrap hoặc /channel_add."}
+    selected_channel = channels[0]
+
+    selected_affiliate = get_affiliate_link(affiliate_id, owner_id) if affiliate_id else None
+    affiliate_score = 0
+    affiliate_hits = 0
+    if affiliate_id and not selected_affiliate:
+        return False, "affiliate_not_found", {}
+    if not selected_affiliate:
+        matches = list_affiliate_matches(owner_id, niche=f"{topic} {genre} {template}", trend_text=topic, platform=platform, limit=5)
+        if matches:
+            affiliate_score, affiliate_hits, _blocked_hits, selected_affiliate = matches[0]
+            affiliate_id = selected_affiliate[0]
+
+    selected_campaign = get_campaign(campaign_id, owner_id) if campaign_id else None
+    campaign_score = 0
+    if campaign_id and not selected_campaign:
+        return False, "campaign_not_found", {}
+    if not selected_campaign:
+        selected_campaign, campaign_score = find_matching_campaign(owner_id, f"{topic} {genre} {template}", platform)
+        campaign_id = selected_campaign[0] if selected_campaign else 0
+
+    blueprint = ai_film_series_blueprint_data()
+    template_item = next((item for item in blueprint.get("template_library", []) if item.get("id") == template), None)
+    series_title = f"{topic[:80]} - Series AI Affiliate"
+    character_bible = {
+        "lead": {
+            "fixed_description": "Vietnamese main character, consistent face and outfit style across all episodes, realistic cinematic look",
+            "negative_prompt": "different face, different age, cartoon, distorted body, extra fingers, text, watermark",
+        },
+        "support": {
+            "fixed_description": "Vietnamese supporting character, consistent appearance, natural expression, realistic cinematic look",
+            "negative_prompt": "different face, inconsistent outfit, text, watermark, low quality",
+        },
+    }
+    if selected_affiliate:
+        (
+            aid, network, product, aff_niche, url, note, status,
+            price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
+        ) = selected_affiliate
+        affiliate_payload = {
+            "id": aid,
+            "network": network,
+            "product": product,
+            "niche": aff_niche,
+            "url": url,
+            "match_score": affiliate_score,
+            "match_hits": affiliate_hits,
+            "allowed_claims": allowed_claims,
+            "blocked_claims": blocked_claims,
+        }
+    else:
+        affiliate_payload = None
+
+    created_jobs = []
+    built_jobs = []
+    failed_builds = []
+    for ep in range(1, episodes + 1):
+        episode_title = f"Tập {ep}/{episodes}: {topic}"
+        cliffhanger = "Mở nút một phần và để lại câu hỏi cho tập sau." if ep < episodes else "Kết thúc bằng bài học/CTA mềm và gợi ý sản phẩm liên quan."
+        brief_obj = {
+            "type": "ai_film_series_episode",
+            "series_title": series_title,
+            "topic": topic,
+            "episode_number": ep,
+            "episode_count": episodes,
+            "episode_title": episode_title,
+            "genre": genre,
+            "target_audience": audience,
+            "template": template,
+            "template_hint": template_item,
+            "duration_seconds": duration,
+            "scenes_per_episode": scenes_per_episode,
+            "aspect_ratio": "9:16",
+            "character_bible": character_bible,
+            "episode_arc": (blueprint.get("series_structure") or {}).get("episode_arc"),
+            "cliffhanger_rule": cliffhanger,
+            "affiliate": affiliate_payload,
+            "voice_profile": (blueprint.get("voice_profile_contract") or {}).get("schema"),
+            "guardrails": (blueprint.get("viral_remix_modes") or {}).get("copyright_guard"),
+            "affiliate_comment_manager": blueprint.get("affiliate_comment_manager"),
+            "worker_prompt": (blueprint.get("worker_prompt_template") or "").format(
+                episodes=episodes,
+                scenes_per_episode=scenes_per_episode,
+            ),
+        }
+        cid, channel_platform, channel_name, account_label, focus, channel_audience, slots, status = selected_channel
+        slot_id = create_calendar_slot(
+            owner_id,
+            cid,
+            campaign_id,
+            affiliate_id,
+            (datetime.now().date() + timedelta(days=ep - 1)).isoformat(),
+            channel_platform or platform,
+            episode_title,
+            f"film_series template={template} episode={ep}/{episodes}",
+        )
+        job_id = create_production_job(
+            owner_id,
+            slot_id,
+            campaign_id,
+            cid,
+            affiliate_id,
+            channel_platform or platform,
+            episode_title,
+            json.dumps(brief_obj, ensure_ascii=False),
+            f"film_series | series={series_title} | template={template} | episode={ep}/{episodes}",
+        )
+        created_jobs.append({
+            "job_id": job_id,
+            "slot_id": slot_id,
+            "episode": ep,
+            "episode_title": episode_title,
+            "platform": channel_platform or platform,
+            "channel_name": channel_name,
+        })
+        if build:
+            ok, bundle = build_operator_job_bundle(owner_id, job_id, count=scenes_per_episode, duration=duration)
+            if ok:
+                built_jobs.append({
+                    "job_id": job_id,
+                    "episode": ep,
+                    "manifest_id": bundle.get("manifest_id"),
+                    "task_count": len(bundle.get("task_ids") or []),
+                    "variant_id": bundle.get("best_variant_id"),
+                    "readiness": (bundle.get("readiness") or {}).get("level", "UNKNOWN"),
+                })
+            else:
+                failed_builds.append({"job_id": job_id, "episode": ep, "error": bundle.get("error", "build lỗi") if isinstance(bundle, dict) else "build lỗi"})
+
+    worker_next = operator_worker_next_summary(owner_id, [item["job_id"] for item in created_jobs], limit=min(len(created_jobs), 8))
+    work_orders = operator_mission_work_orders_data(
+        owner_id,
+        result_payload={"created_jobs": created_jobs, "built_jobs": built_jobs},
+        limit=min(len(created_jobs), 8),
+        include_prompt=True,
+    )
+    campaign_name = ""
+    if selected_campaign:
+        campaign_name = selected_campaign[2] if len(selected_campaign) >= 8 else selected_campaign[1]
+    return True, "ok", {
+        "series": {
+            "title": series_title,
+            "topic": topic,
+            "genre": genre,
+            "audience": audience,
+            "template": template,
+            "episodes": episodes,
+            "scenes_per_episode": scenes_per_episode,
+            "duration_seconds": duration,
+            "character_bible": character_bible,
+        },
+        "affiliate": affiliate_payload,
+        "campaign": {
+            "id": campaign_id,
+            "match_score": campaign_score,
+            "name": campaign_name,
+        },
+        "created_jobs": created_jobs,
+        "built_jobs": built_jobs,
+        "failed_builds": failed_builds,
+        "worker_next": worker_next,
+        "work_orders": work_orders,
+        "next": {
+            "worker_intake": "/api/operator/worker-intake?claim=0&include_prompt=1",
+            "claim_worker": "/api/operator/worker-intake?claim=1&include_prompt=1",
+            "review": "/review_video job=<JOB_ID> send=1",
+            "approve": "/approve_publish job=<JOB_ID> queue=1 mode=manual",
+        },
+        "rule": "Film series tạo một job cho mỗi tập; worker tạo scene assets rồi dừng ở review/publish gate.",
+    }
+
 async def operator_campaign_preset_data(
     owner_id,
     preset_key="tech",
@@ -13738,6 +13996,22 @@ class OperatorLaunchRequest(BaseModel):
     bootstrap: bool = True
     notify_admin: bool = True
 
+class OperatorFilmSeriesRequest(BaseModel):
+    topic: str = Field(min_length=1, max_length=500)
+    platform: str = Field(default="tiktok", max_length=40)
+    channel: str = Field(default="all", max_length=80)
+    affiliate_id: int = Field(default=0, ge=0)
+    campaign_id: int = Field(default=0, ge=0)
+    episodes: int = Field(default=5, ge=1, le=8)
+    scenes_per_episode: int = Field(default=10, ge=3, le=12)
+    duration: int = Field(default=80, ge=30, le=180)
+    genre: str = Field(default="drama cảm xúc", max_length=120)
+    audience: str = Field(default="người lớn", max_length=160)
+    template: str = Field(default="dao_ly_trieu_views", max_length=120)
+    build: bool = True
+    bootstrap: bool = True
+    notify_admin: bool = True
+
 class OperatorCampaignPresetRequest(BaseModel):
     preset: str = Field(default="tech", max_length=80)
     topic: str = Field(default="", max_length=300)
@@ -14700,6 +14974,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /mission_run id=&lt;ID&gt; execute=1 — Chạy mission qua executor an toàn",
             "• /mission_workorders id=&lt;ID&gt; — Gói giao việc video/job/task cho worker",
             "• /film_blueprint — Blueprint phim AI nhiều tập + affiliate comments",
+            "• /film_series topic=... — Tạo series phim AI thành nhiều production job",
             "• /worker_intake claim=0/1 — Worker nhận task + prompt + toolchain + upload URL",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
@@ -19178,7 +19453,7 @@ def operator_category_keyboard(category):
         "cat_production": [
             ("🎬 Make video", "makevideo"), ("⚡ Build bundle", "build"),
             ("🎛 Pipeline", "pipeline"),
-            ("🎬 Film blueprint", "filmblueprint"),
+            ("🎬 Film blueprint", "filmblueprint"), ("🎞 Film series", "filmseries"),
             ("🧠 Pipeline pack", "pipelinepack"),
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
@@ -19291,6 +19566,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Goal audit tổng mục tiêu: <code>GET {html.escape(base_url)}/api/operator/goal-audit?days=30&amp;platform=tiktok</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• Film blueprint: <code>GET {html.escape(base_url)}/api/operator/film-blueprint</code>",
+        f"• Tạo film series/job nhiều tập: <code>POST {html.escape(base_url)}/api/operator/film-series</code>",
         f"• AI commander pack: <code>GET {html.escape(base_url)}/api/operator/commander-pack</code>",
         f"• Mission control: <code>GET {html.escape(base_url)}/api/operator/mission</code>",
         f"• Control contract: <code>GET {html.escape(base_url)}/api/operator/control-contract?days=30&amp;platform=tiktok</code>",
@@ -19647,6 +19923,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "videopatterns": "/video_patterns\nGET /api/operator/video-patterns",
         "filmblueprint": "/film_blueprint\nGET /api/operator/film-blueprint",
+        "filmseries": "/film_series topic=đạo lý gia đình episodes=5 scenes=10 platform=tiktok build=1\nPOST /api/operator/film-series",
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
         "referenceadd": "/reference_add url=https://... title=video_mau platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=hoc_hook_CTA\nPOST /api/operator/reference-videos",
@@ -19962,6 +20239,62 @@ async def cmd_film_blueprint(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "<code>GET /api/operator/film-blueprint</code>",
     ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_film_series(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    topic = data.get("topic") or data.get("chu_de") or data.get("niche") or " ".join(context.args)
+    if not topic:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/film_series topic=đạo lý gia đình episodes=5 scenes=10 platform=tiktok</code>",
+            parse_mode="HTML",
+        )
+    msg = await update.message.reply_text("🎬 Đang tạo AI film series và production tasks...")
+    ok, reason, result = await operator_film_series_pipeline(
+        update.effective_user.id,
+        topic=topic,
+        platform=data.get("platform") or data.get("nen") or "tiktok",
+        channel=data.get("channel") or data.get("kenh") or "all",
+        affiliate_id=safe_int(data.get("aff") or data.get("affiliate") or data.get("affiliate_id"), 0),
+        campaign_id=safe_int(data.get("campaign") or data.get("campaign_id"), 0),
+        episodes=safe_int(data.get("episodes") or data.get("tap"), 5),
+        scenes_per_episode=safe_int(data.get("scenes") or data.get("scenes_per_episode") or data.get("canh"), 10),
+        duration=safe_int(data.get("duration") or data.get("sec"), 80),
+        genre=data.get("genre") or data.get("the_loai") or "drama cảm xúc",
+        audience=data.get("audience") or data.get("khach") or "người lớn",
+        template=data.get("template") or data.get("mau") or "dao_ly_trieu_views",
+        build=truthy_value(data.get("build"), True),
+        bootstrap=truthy_value(data.get("bootstrap"), True),
+    )
+    if not ok:
+        return await msg.edit_text(f"❌ Film series lỗi: <code>{html.escape(reason)}</code>", parse_mode="HTML")
+    series = result.get("series") or {}
+    created = result.get("created_jobs") or []
+    built = result.get("built_jobs") or []
+    work_orders = result.get("work_orders") or {}
+    lines = [
+        "🎬 <b>AI FILM SERIES CREATED</b>",
+        f"• Series: <b>{html.escape(series.get('title') or '-')}</b>",
+        f"• Template: <code>{html.escape(series.get('template') or '-')}</code> | Episodes: <b>{series.get('episodes')}</b> | Scenes/tập: <b>{series.get('scenes_per_episode')}</b>",
+        f"• Jobs tạo: <b>{len(created)}</b> | Bundles build: <b>{len(built)}</b> | Work-orders: <b>{work_orders.get('count') or 0}</b>",
+        "",
+        "<b>Jobs:</b>",
+    ]
+    for item in created[:8]:
+        lines.append(
+            f"• Tập {item.get('episode')}: job <code>#{item.get('job_id')}</code> | {html.escape(item.get('episode_title') or '-')}\n"
+            f"  Worker: <code>/worker_intake job={item.get('job_id')} claim=0</code>"
+        )
+    lines.extend([
+        "",
+        "<b>Bước tiếp:</b>",
+        "<code>/worker_intake claim=0</code>",
+        "<code>/worker_intake job=&lt;JOB_ID&gt; claim=1</code>",
+        "<code>/review_video job=&lt;JOB_ID&gt; send=1</code>",
+        "API: <code>POST /api/operator/film-series</code>",
+    ])
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_reference_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -23411,6 +23744,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
     tg_app.add_handler(CommandHandler("video_patterns", cmd_video_patterns))
     tg_app.add_handler(CommandHandler("film_blueprint", cmd_film_blueprint))
+    tg_app.add_handler(CommandHandler("film_series", cmd_film_series))
     tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
     tg_app.add_handler(CommandHandler("reference_videos", cmd_reference_videos))
     tg_app.add_handler(CommandHandler("reference_add", cmd_reference_add))
@@ -24724,6 +25058,50 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
         "ok": True,
         **result,
         "rule": "Launch có thể bootstrap setup còn thiếu rồi tạo pipeline; vẫn cần worker output, review gate và approve trước publish.",
+    }
+
+@fastapi_app.post("/api/operator/film-series")
+async def api_operator_film_series(payload: OperatorFilmSeriesRequest, request: Request):
+    verify_operator_api_token(request)
+    ok, reason, result = await operator_film_series_pipeline(
+        ADMIN_ID,
+        topic=payload.topic,
+        platform=payload.platform,
+        channel=payload.channel,
+        affiliate_id=payload.affiliate_id,
+        campaign_id=payload.campaign_id,
+        episodes=payload.episodes,
+        scenes_per_episode=payload.scenes_per_episode,
+        duration=payload.duration,
+        genre=payload.genre,
+        audience=payload.audience,
+        template=payload.template,
+        build=payload.build,
+        bootstrap=payload.bootstrap,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail={"reason": reason, **(result or {})})
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            series = result.get("series") or {}
+            first_job = (result.get("created_jobs") or [{}])[0].get("job_id")
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🎞 <b>OPERATOR FILM SERIES</b>\n\n"
+                    f"• Topic: <b>{html.escape(series.get('topic') or payload.topic)}</b>\n"
+                    f"• Episodes: <b>{series.get('episodes') or payload.episodes}</b> | Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
+                    f"• First job: <code>#{first_job or '-'}</code>\n"
+                    f"• Next: <code>{'/worker_intake job=' + str(first_job) + ' claim=0' if first_job else '/worker_intake claim=0'}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Operator film series notify error: {e}")
+    return {
+        "ok": True,
+        **result,
+        "rule": "Film series tạo job/task nhiều tập; worker phải trả output thật rồi qua review gate trước khi publish.",
     }
 
 @fastapi_app.post("/api/operator/campaign-preset")
