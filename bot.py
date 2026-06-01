@@ -3689,7 +3689,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "customer_surface", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "head_brain", "head_run", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publish_cockpit", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "viral_remix", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_intake", "worker_autorun", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "affiliate_cockpit", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3741,6 +3741,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/worker-next"),
         ("GET", "/api/operator/worker-intake"),
         ("POST", "/api/operator/worker-intake"),
+        ("POST", "/api/operator/worker-autorun"),
         ("GET", "/api/operator/tasks/claim"),
         ("GET", "/api/operator/task-prompt"),
         ("GET", "/api/operator/tasks/<TASK_ID>/prompt-pack"),
@@ -3963,6 +3964,7 @@ def operator_worker_spec_data():
         "publish_cockpit_url": f"{base_url}/api/operator/publish-cockpit",
         "platform_adapters_url": f"{base_url}/api/operator/platform-adapters",
         "worker_intake_url": f"{base_url}/api/operator/worker-intake",
+        "worker_autorun_url": f"{base_url}/api/operator/worker-autorun",
         "video_work_orders_url": f"{base_url}/api/operator/video-work-orders",
         "reference_learning_rule": reference_learning_pack_data()["rule"],
         "roles": [
@@ -4062,6 +4064,7 @@ def operator_worker_spec_data():
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
             {"step": 4.5, "name": "peek_worker_next", "method": "GET", "url": "/api/operator/worker-next"},
             {"step": 4.55, "name": "worker_intake_preview", "method": "GET", "url": "/api/operator/worker-intake?claim=0&include_prompt=1"},
+            {"step": 4.56, "name": "worker_autorun_safe", "method": "POST", "url": "/api/operator/worker-autorun"},
             {"step": 4.6, "name": "worker_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/worker-pack"},
             {"step": 4.605, "name": "video_brief", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/video-brief"},
             {"step": 4.607, "name": "video_work_orders", "method": "GET", "url": "/api/operator/video-work-orders?job_ids=<JOB_ID>,<JOB_ID>"},
@@ -4355,6 +4358,12 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/jobs/<JOB_ID>/worker-pack",
                 "purpose": "Một gói đầy đủ cho Claude/n8n/tool worker: job, task, context, prompt, reference learning, video factory blueprint, toolchain, publish pack và endpoint trả output.",
+            },
+            "worker_autorun": {
+                "method": "POST",
+                "url": "/api/operator/worker-autorun",
+                "purpose": "Tự hoàn thành các task proof/review an toàn rồi trả lại work-orders còn cần tool/file thật; không giả lập video/audio.",
+                "body": {"job_ids": [1, 2, 3], "execute": False, "max_tasks": 8, "notify_admin": True},
             },
             "video_brief": {
                 "method": "GET",
@@ -7950,8 +7959,15 @@ async def operator_head_brain_run_data(
         include_context=include_context,
         include_prompt=include_prompt,
     )
-    after = operator_head_brain_cockpit_data(owner_id, days=max(7, days), platform=platform, limit=limit)
     cycle_job_ids = extract_operator_job_ids(cycle, limit=limit)
+    worker_autorun = operator_worker_autorun_data(
+        owner_id,
+        job_ids=cycle_job_ids,
+        limit=min(limit, 8),
+        max_tasks=min(max_steps * 4, 20),
+        execute=bool(execute and safe_mode),
+    ) if cycle_job_ids else {"ok": True, "execute": bool(execute), "completed": [], "pending_external": [], "next_video_work_orders": {"orders": []}}
+    after = operator_head_brain_cockpit_data(owner_id, days=max(7, days), platform=platform, limit=limit)
     video_work_orders = operator_video_work_orders_data(
         owner_id,
         job_ids=cycle_job_ids,
@@ -8000,12 +8016,14 @@ async def operator_head_brain_run_data(
             "admin_next": after.get("admin_next"),
         },
         "executed_count": int(cycle.get("executed_count") or 0),
+        "autorun_completed_count": int(worker_autorun.get("completed_count") or 0),
         "claimed_tasks": cycle.get("claimed_tasks") or [],
         "created_jobs": created_jobs,
         "worker_handoff": {
             "job_ids": cycle_job_ids,
             "worker_next": worker_next,
             "video_work_orders": video_work_orders,
+            "autorun": worker_autorun,
             "first_order": {
                 "job_id": first_order.get("job_id"),
                 "task_id": first_order.get("task_id"),
@@ -8025,8 +8043,10 @@ async def operator_head_brain_run_data(
             "preview": f"/head_run execute=0 platform={platform} max={max_steps}",
             "execute": f"/head_run execute=1 platform={platform} max={max_steps}",
             "worker": "/worker_intake claim=0 include_prompt=1",
+            "worker_autorun": f"/worker_autorun jobs={order_job_ids} execute=1" if order_job_ids else "/worker_autorun execute=1",
             "video_work_orders": video_orders_cmd,
             "publish": f"/publish_cockpit platform={platform} limit={limit}",
+            "api_worker_autorun": "/api/operator/worker-autorun",
             "api_video_work_orders": video_orders_api,
         },
         "rule": "Head run chỉ dùng safe daily cycle. Nó có thể launch/claim task/scale khi safe; gặp setup/review/publish/manual gate thì dừng và trả lệnh cho admin.",
@@ -11931,6 +11951,136 @@ def operator_video_work_orders_data(owner_id, job_ids=None, limit=8, tool=""):
         "job_ids": normalized_ids[:limit],
         "orders": orders,
         "rule": "Video work orders gom brief thực thi cho Claude/n8n/tool worker. Worker tạo output thật qua complete/upload, sau đó dừng ở review/approve gate.",
+    }
+
+def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_tasks=8, execute=False):
+    limit = max(1, min(safe_int(limit, 5), 20))
+    max_tasks = max(1, min(safe_int(max_tasks, 8), 40))
+    normalized_ids = []
+    for value in (job_ids or []):
+        job_id = safe_int(value, 0)
+        if job_id > 0 and job_id not in normalized_ids:
+            normalized_ids.append(job_id)
+        if len(normalized_ids) >= limit:
+            break
+    if not normalized_ids:
+        focus_job_id, _source = select_operator_focus_job_id(owner_id, 0)
+        if focus_job_id:
+            normalized_ids.append(focus_job_id)
+    completed = []
+    blocked = []
+    pending_external = []
+    safe_types = {"proof_asset", "review"}
+    processed = 0
+    for job_id in normalized_ids[:limit]:
+        while processed < max_tasks:
+            task = next_worker_task(owner_id, job_id=job_id)
+            if not task:
+                break
+            task_id, row_job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
+            task_type_l = (task_type or "").lower()
+            job = get_production_job(row_job_id, owner_id)
+            if not job:
+                blocked.append({"task_id": task_id, "job_id": row_job_id, "task_type": task_type, "reason": "job_not_found"})
+                break
+            (
+                jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, job_status,
+                operator_note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+            ) = job
+            if task_type_l not in safe_types:
+                pending_external.append({
+                    "task_id": int(task_id),
+                    "job_id": int(row_job_id),
+                    "task_type": task_type,
+                    "tool": tool,
+                    "scene_no": int(scene_no or 0),
+                    "title": title,
+                    "reason": "Cần tool/file thật; autorun không giả lập media.",
+                    "telegram": {
+                        "task_prompt": f"/task_prompt id={int(task_id)}",
+                        "worker_pack": f"/worker_pack job={int(row_job_id)} task={int(task_id)}",
+                    },
+                    "api": {
+                        "prompt_pack": f"/api/operator/tasks/{int(task_id)}/prompt-pack",
+                        "complete": f"/api/operator/tasks/{int(task_id)}/complete",
+                        "upload": f"/api/operator/tasks/{int(task_id)}/upload",
+                    },
+                })
+                break
+            if not execute:
+                completed.append({
+                    "preview": True,
+                    "task_id": int(task_id),
+                    "job_id": int(row_job_id),
+                    "task_type": task_type,
+                    "would_status": "ready",
+                    "output_url": affiliate_url if task_type_l == "proof_asset" else "",
+                    "note": "preview_safe_autorun",
+                })
+                processed += 1
+                break
+            if task_type_l == "proof_asset":
+                proof_url = affiliate_url or affiliate_tracking_url(affiliate_id, row_job_id, source=f"proof_task_{task_id}")
+                proof_note = (
+                    f"autorun_proof affiliate={network or '-'} product={product_name or '-'} "
+                    f"requirement={truncate_text(title or prompt or '', 160)}"
+                )
+                changed, row = update_production_task(
+                    owner_id,
+                    task_id,
+                    status="ready",
+                    output_url=proof_url,
+                    note=proof_note,
+                    asset_type="proof_asset",
+                    record_asset=True,
+                )
+            else:
+                proof_note = "autorun_review_text_gate: checklist đã ghi trong prompt; chờ final_video để admin review trước publish."
+                changed, row = update_production_task(
+                    owner_id,
+                    task_id,
+                    status="ready",
+                    output_url="",
+                    note=proof_note,
+                    asset_type="review_note",
+                    record_asset=False,
+                )
+            if changed and row:
+                readiness = apply_worker_output_job_state(
+                    owner_id,
+                    row[0],
+                    task_id=task_id,
+                    task_type=row[1],
+                    task_status="ready",
+                    asset_type="proof_asset" if task_type_l == "proof_asset" else "review_note",
+                    note=proof_note,
+                )
+                completed.append({
+                    "task_id": int(task_id),
+                    "job_id": int(row[0]),
+                    "task_type": row[1],
+                    "status": "ready",
+                    "output_url": proof_url if task_type_l == "proof_asset" else "",
+                    "readiness": (readiness or {}).get("level", "UNKNOWN"),
+                    "note": proof_note,
+                })
+            else:
+                blocked.append({"task_id": int(task_id), "job_id": int(row_job_id), "task_type": task_type, "reason": "task_not_updated"})
+                break
+            processed += 1
+    job_ids_for_orders = normalized_ids[:limit]
+    return {
+        "ok": True,
+        "execute": bool(execute),
+        "generated_at": now_text(),
+        "job_ids": job_ids_for_orders,
+        "completed": completed,
+        "blocked": blocked,
+        "pending_external": pending_external,
+        "completed_count": len([item for item in completed if not item.get("preview")]),
+        "preview_count": len([item for item in completed if item.get("preview")]),
+        "next_video_work_orders": operator_video_work_orders_data(owner_id, job_ids_for_orders, limit=min(limit, 8), tool="claude") if job_ids_for_orders else {"ok": True, "count": 0, "orders": []},
+        "rule": "Autorun chỉ hoàn thành proof/review text an toàn. Visual/voice/edit/publish cần tool thật hoặc admin gate; không fake media.",
     }
 
 def select_operator_focus_job_id(owner_id, job_id=0):
@@ -16817,6 +16967,13 @@ class OperatorHeadRunRequest(BaseModel):
     max_steps: int = Field(default=1, ge=1, le=5)
     include_context: bool = True
     include_prompt: bool = True
+    notify_admin: bool = True
+
+class OperatorWorkerAutorunRequest(BaseModel):
+    job_ids: list[int] = Field(default_factory=list)
+    limit: int = Field(default=5, ge=1, le=20)
+    max_tasks: int = Field(default=8, ge=1, le=40)
+    execute: bool = False
     notify_admin: bool = True
 
 class OperatorRunCycleRequest(BaseModel):
@@ -23040,6 +23197,7 @@ def operator_category_keyboard(category):
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
             ("📥 Worker intake", "workerintake"),
+            ("🤖 Worker autorun", "workerautorun"),
             ("📦 Worker pack", "workerpack"), ("🎬 Video brief", "videobrief"),
             ("🧾 Work orders", "videoworkorders"),
             ("🧾 Task prompt", "taskprompt"),
@@ -23556,6 +23714,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
         "nexttask": "/next_task\n/next_task job=<JOB_ID>",
         "workerintake": "/worker_intake\n/worker_intake job=<JOB_ID> claim=1\nGET/POST /api/operator/worker-intake",
+        "workerautorun": "/worker_autorun jobs=<JOB_ID>,<JOB_ID> execute=0\n/worker_autorun jobs=<JOB_ID>,<JOB_ID> execute=1\nPOST /api/operator/worker-autorun",
         "workerpack": "/worker_pack job=<JOB_ID>\n/worker_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/worker-pack",
         "videobrief": "/video_brief job=<JOB_ID>\n/video_brief task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/video-brief",
         "videoworkorders": "/video_work_orders jobs=<JOB_ID>,<JOB_ID>\n/video_work_orders limit=8 tool=claude\nGET /api/operator/video-work-orders?job_ids=<JOB_ID>,<JOB_ID>",
@@ -25049,6 +25208,56 @@ async def cmd_scene_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  upload: <code>{html.escape((item.get('submit') or {}).get('upload_url') or '-')}</code>"
         )
     lines.append("\nNext: <code>/worker_intake job=%s claim=1</code> | <code>/compose_video job=%s voice=1</code>" % (pack.get("job_id"), pack.get("job_id")))
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_worker_autorun(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw_args = " ".join(context.args)
+    data = parse_key_value_args(raw_args)
+    job_ids = []
+    raw_jobs = data.get("jobs") or data.get("job_ids") or data.get("job") or ""
+    for part in re.split(r"[,\s]+", raw_jobs):
+        job_id = safe_int(part, 0)
+        if job_id > 0 and job_id not in job_ids:
+            job_ids.append(job_id)
+    execute = truthy_value(data.get("execute") or data.get("run"), False)
+    limit = max(1, min(safe_int(data.get("limit"), 5), 20))
+    max_tasks = max(1, min(safe_int(data.get("max") or data.get("max_tasks"), 8), 40))
+    result = operator_worker_autorun_data(
+        update.effective_user.id,
+        job_ids=job_ids,
+        limit=limit,
+        max_tasks=max_tasks,
+        execute=execute,
+    )
+    orders = (result.get("next_video_work_orders") or {}).get("orders") or []
+    lines = [
+        "🤖 <b>WORKER AUTORUN</b>",
+        f"• Mode: <b>{'EXECUTE' if execute else 'PREVIEW'}</b>",
+        f"• Jobs: <code>{html.escape(','.join(str(x) for x in (result.get('job_ids') or [])) or '-')}</code>",
+        f"• Completed: <b>{result.get('completed_count') or 0}</b> | Preview: <b>{result.get('preview_count') or 0}</b>",
+        f"• Pending external: <b>{len(result.get('pending_external') or [])}</b>",
+    ]
+    completed_rows = result.get("completed") or []
+    if completed_rows:
+        lines.append("\n<b>Đã xử lý an toàn:</b>")
+        for item in completed_rows[:8]:
+            prefix = "preview " if item.get("preview") else ""
+            lines.append(f"• {prefix}task #{item.get('task_id')} | job #{item.get('job_id')} | <code>{html.escape(item.get('task_type') or '-')}</code>")
+    pending = result.get("pending_external") or []
+    if pending:
+        lines.append("\n<b>Cần tool/file thật:</b>")
+        for item in pending[:5]:
+            tg = item.get("telegram") or {}
+            lines.append(
+                f"• task #{item.get('task_id')} | <code>{html.escape(item.get('task_type') or '-')}</code> / "
+                f"<code>{html.escape(item.get('tool') or '-')}</code> | <code>{html.escape(tg.get('worker_pack') or '')}</code>"
+            )
+    if orders:
+        order_job_ids = ",".join(str(jid) for jid in (result.get("job_ids") or [])[:8])
+        lines.append(f"\n<b>Work-orders tiếp:</b> <code>/video_work_orders jobs={html.escape(order_job_ids)} tool=claude</code>")
+    lines.append("\nAPI: <code>POST /api/operator/worker-autorun</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_worker_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -27834,6 +28043,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("worker_next", cmd_worker_next))
     tg_app.add_handler(CommandHandler("scene_pack", cmd_scene_pack))
     tg_app.add_handler(CommandHandler("worker_intake", cmd_worker_intake))
+    tg_app.add_handler(CommandHandler("worker_autorun", cmd_worker_autorun))
     tg_app.add_handler(CommandHandler("worker_pack", cmd_worker_pack))
     tg_app.add_handler(CommandHandler("video_brief", cmd_video_brief))
     tg_app.add_handler(CommandHandler("video_work_orders", cmd_video_work_orders))
@@ -29878,6 +30088,35 @@ async def api_operator_video_work_orders(request: Request, job_ids: str = "", li
         limit=max(1, min(int(limit or 8), 20)),
         tool=tool,
     )
+
+@fastapi_app.post("/api/operator/worker-autorun")
+async def api_operator_worker_autorun(payload: OperatorWorkerAutorunRequest, request: Request):
+    verify_operator_api_token(request)
+    result = operator_worker_autorun_data(
+        ADMIN_ID,
+        job_ids=payload.job_ids,
+        limit=payload.limit,
+        max_tasks=payload.max_tasks,
+        execute=payload.execute,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            pending = result.get("pending_external") or []
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🤖 <b>WORKER AUTORUN API</b>\n\n"
+                    f"• Mode: <b>{'EXECUTE' if payload.execute else 'PREVIEW'}</b>\n"
+                    f"• Jobs: <code>{html.escape(','.join(str(x) for x in (result.get('job_ids') or [])) or '-')}</code>\n"
+                    f"• Completed: <b>{result.get('completed_count') or 0}</b>\n"
+                    f"• Pending external: <b>{len(pending)}</b>\n"
+                    "• Next: <code>/video_work_orders jobs=...</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Worker autorun notify error: {e}")
+    return result
 
 @fastapi_app.get("/api/operator/jobs/{job_id}/scene-pack")
 async def api_operator_job_scene_pack(job_id: int, request: Request, scene: int = 0, task_id: int = 0):
