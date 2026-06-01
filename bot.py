@@ -3685,7 +3685,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -3708,6 +3708,7 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/film-series"),
         ("GET", "/api/operator/commander-pack"),
         ("GET", "/api/operator/daily-pack"),
+        ("POST", "/api/operator/daily-run"),
         ("GET", "/api/operator/control-contract"),
         ("GET", "/api/operator/video-patterns"),
         ("GET", "/api/operator/reference-pack"),
@@ -3819,6 +3820,7 @@ def operator_smoke_test_data(owner_id):
         "film_series_in_spec": "/api/operator/film-series" in spec_text and "/api/operator/film-series" in n8n_text,
         "commander_pack_in_spec": "/api/operator/commander-pack" in spec_text and "/api/operator/commander-pack" in n8n_text,
         "daily_pack_in_spec": "/api/operator/daily-pack" in spec_text and "/api/operator/daily-pack" in n8n_text,
+        "daily_run_in_spec": "/api/operator/daily-run" in spec_text and "/api/operator/daily-run" in n8n_text,
         "control_contract_in_spec": "/api/operator/control-contract" in spec_text and "/api/operator/control-contract" in n8n_text,
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
         "command_run_in_spec": "/api/operator/command/run" in spec_text and "/api/operator/command/run" in n8n_text,
@@ -3918,6 +3920,7 @@ def operator_worker_spec_data():
         "run_cycle_url": f"{base_url}/api/operator/run-cycle",
         "next_run_url": f"{base_url}/api/operator/next-run",
         "daily_pack_url": f"{base_url}/api/operator/daily-pack",
+        "daily_run_url": f"{base_url}/api/operator/daily-run",
         "control_contract_url": f"{base_url}/api/operator/control-contract",
         "command_center_url": f"{base_url}/api/operator/command-center",
         "command_run_url": f"{base_url}/api/operator/command/run",
@@ -4000,6 +4003,7 @@ def operator_worker_spec_data():
             {"step": 1.05, "name": "command_center", "method": "GET", "url": "/api/operator/command-center?days=30&platform=tiktok"},
             {"step": 1.052, "name": "next_run_card", "method": "GET", "url": "/api/operator/next-run?days=30&platform=tiktok"},
             {"step": 1.0525, "name": "daily_execution_pack", "method": "GET", "url": "/api/operator/daily-pack?days=1&platform=tiktok&limit=8"},
+            {"step": 1.0527, "name": "daily_run_preview", "method": "POST", "url": "/api/operator/daily-run"},
             {"step": 1.053, "name": "dispatch_preview", "method": "GET", "url": "/api/operator/dispatch?days=30&platform=tiktok&limit=8"},
             {"step": 1.0535, "name": "run_cycle_preview", "method": "GET", "url": "/api/operator/run-cycle?days=30&platform=tiktok&limit=8&max_steps=3&execute=0"},
             {"step": 1.0537, "name": "mission_inbox", "method": "GET", "url": "/api/operator/missions?limit=10"},
@@ -4087,6 +4091,12 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/daily-pack?days=1&platform=tiktok&limit=8",
                 "purpose": "Bảng việc trong ngày cho công ty AI affiliate một người: rank việc setup/produce/publish/growth, queue handoff, link nên đẩy và metric cần ghi.",
+            },
+            "daily_run": {
+                "method": "POST",
+                "url": "/api/operator/daily-run",
+                "purpose": "Preview hoặc chạy một machine_action trong daily pack. Safe mode chỉ cho phép produce/launch/affiliate_growth đã safe_to_execute; publish/setup vẫn chặn chờ admin.",
+                "body": {"days": 1, "platform": "tiktok", "limit": 8, "rank": 1, "execute": False, "safe_mode": True, "include_prompt": True, "notify_admin": True},
             },
             "dispatch": {
                 "method": "GET|POST",
@@ -5273,6 +5283,23 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "daily-run-preview",
+                "name": "Daily Run Preview",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-20, -680],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/daily-run",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": "={\"days\":1,\"platform\":\"tiktok\",\"limit\":8,\"rank\":1,\"execute\":false,\"safe_mode\":true,\"include_prompt\":true,\"notify_admin\":false}",
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "dispatch-preview",
                 "name": "Dispatch Preview",
                 "type": "n8n-nodes-base.httpRequest",
@@ -6150,7 +6177,8 @@ def operator_n8n_workflow_json_data():
             "Goal Audit": {"main": [[{"node": "Read Command Center", "type": "main", "index": 0}]]},
             "Read Command Center": {"main": [[{"node": "Next Run Card", "type": "main", "index": 0}]]},
             "Next Run Card": {"main": [[{"node": "Daily Execution Pack", "type": "main", "index": 0}]]},
-            "Daily Execution Pack": {"main": [[{"node": "Dispatch Preview", "type": "main", "index": 0}]]},
+            "Daily Execution Pack": {"main": [[{"node": "Daily Run Preview", "type": "main", "index": 0}]]},
+            "Daily Run Preview": {"main": [[{"node": "Dispatch Preview", "type": "main", "index": 0}]]},
             "Dispatch Preview": {"main": [[{"node": "Run Cycle Preview", "type": "main", "index": 0}]]},
             "Run Cycle Preview": {"main": [[{"node": "Mission Inbox", "type": "main", "index": 0}]]},
             "Mission Inbox": {"main": [[{"node": "Mission Run Preview", "type": "main", "index": 0}]]},
@@ -6285,6 +6313,27 @@ def operator_command_center_data(owner_id, days=30, platform="tiktok", limit=8):
     money_pack = operator_money_pack_data(owner_id, days=days, platform=platform, limit=limit)
     mission_inbox = operator_mission_inbox_data(owner_id, limit=min(limit, 10))
 
+    recent_money_events = []
+    for row in recent_events[:limit]:
+        if len(row) >= 10:
+            event_id, job_id, row_platform, event_type, value, amount, note, created_at, channel_name, topic = row[:10]
+        else:
+            job_id, event_type, value, amount, row_platform, topic, note, created_at = row[:8]
+            event_id = 0
+            channel_name = ""
+        recent_money_events.append({
+            "id": event_id,
+            "job_id": job_id,
+            "platform": row_platform,
+            "event_type": event_type,
+            "value": int(value or 0),
+            "amount": int(amount or 0),
+            "note": note,
+            "created_at": created_at,
+            "channel": channel_name,
+            "topic": topic,
+        })
+
     money = {
         "events": [
             {"type": event_type, "value": int(value_sum or 0), "amount": int(amount_sum or 0), "count": int(count or 0)}
@@ -6294,21 +6343,7 @@ def operator_command_center_data(owner_id, days=30, platform="tiktok", limit=8):
             {"platform": row_platform, "channel": channel_name, "value": int(value_sum or 0), "amount": int(amount_sum or 0), "count": int(count or 0)}
             for row_platform, channel_name, value_sum, amount_sum, count in channel_totals[:limit]
         ],
-        "recent": [
-            {
-                "id": event_id,
-                "job_id": job_id,
-                "platform": row_platform,
-                "event_type": event_type,
-                "value": int(value or 0),
-                "amount": int(amount or 0),
-                "note": note,
-                "created_at": created_at,
-                "channel": channel_name,
-                "topic": topic,
-            }
-            for event_id, job_id, row_platform, event_type, value, amount, note, created_at, channel_name, topic in recent_events[:limit]
-        ],
+        "recent": recent_money_events,
     }
     return {
         "generated_at": now_text(),
@@ -6770,6 +6805,8 @@ def operator_daily_execution_pack_data(owner_id, days=1, platform="tiktok", limi
         "commands": {
             "telegram": {
                 "daily_pack": f"/operator_daily_pack days={days} platform={platform} limit={limit}",
+                "daily_run_preview": "/operator_daily_run rank=1 execute=0",
+                "daily_run_execute": "/operator_daily_run rank=1 execute=1",
                 "next_run": f"/operator_next_run days={decision_days} platform={platform} limit={limit}",
                 "director": f"/operator_director days={decision_days} platform={platform} limit={limit}",
                 "publish_queue": "/publish_queue",
@@ -6778,6 +6815,7 @@ def operator_daily_execution_pack_data(owner_id, days=1, platform="tiktok", limi
             },
             "api": {
                 "daily_pack": f"/api/operator/daily-pack?days={days}&platform={platform}&limit={limit}",
+                "daily_run": "/api/operator/daily-run",
                 "next_run": f"/api/operator/next-run?days={decision_days}&platform={platform}&limit={limit}",
                 "publisher_run": "/api/operator/publisher/run",
                 "performance": "/api/operator/performance",
@@ -6797,6 +6835,167 @@ def operator_daily_execution_pack_data(owner_id, days=1, platform="tiktok", limi
             "money": money,
         },
     }
+
+def _machine_action_job_id(action):
+    body = action.get("body") or {}
+    for key in ("job_id", "job"):
+        if body.get(key):
+            return safe_int(body.get(key), 0)
+    url = action.get("url") or ""
+    match = re.search(r"(?:[?&]job_id=|/jobs/)(\d+)", url)
+    return safe_int(match.group(1), 0) if match else 0
+
+async def execute_daily_machine_action(
+    owner_id,
+    days=1,
+    platform="tiktok",
+    limit=8,
+    topic="",
+    rank=1,
+    execute=False,
+    safe_mode=True,
+    include_context=True,
+    include_prompt=True,
+):
+    pack = operator_daily_execution_pack_data(owner_id, days=days, platform=platform, limit=limit, topic=topic)
+    queue = pack.get("execution_queue") or []
+    rank = max(1, min(safe_int(rank, 1), len(queue) or 1))
+    item = next((row for row in queue if safe_int(row.get("rank"), 0) == rank), queue[rank - 1] if queue else {})
+    action = item.get("machine_action") or {}
+    lane = item.get("lane") or ""
+    result = {
+        "ok": True,
+        "executed": False,
+        "would_execute": bool(action.get("safe_to_execute")) and not bool(action.get("requires_admin")),
+        "rank": rank,
+        "lane": lane,
+        "item": item,
+        "machine_action": action,
+        "pack_state": pack.get("state") or {},
+        "after_done": action.get("after_success") or "/api/operator/daily-pack",
+    }
+    if not action:
+        result.update({"ok": False, "reason": "no_machine_action"})
+        return result
+    if safe_mode and (not action.get("safe_to_execute") or action.get("requires_admin")):
+        result.update({
+            "blocked_by_safe_mode": True,
+            "message": action.get("reason") or "Action này cần admin/gate riêng, không chạy tự động.",
+        })
+        return result
+    if not execute:
+        result.update({"message": "preview_only"})
+        return result
+
+    body = action.get("body") or {}
+    if lane == "produce":
+        job_id = _machine_action_job_id(action)
+        claim = claim_operator_task_payload(
+            job_id=job_id,
+            tool="",
+            include_context=bool(include_context),
+            include_prompt=bool(include_prompt),
+        )
+        result.update({
+            "executed": bool(claim.get("task")),
+            "kind": "claim_task",
+            "result": claim,
+        })
+        return result
+
+    if lane == "affiliate_growth":
+        affiliate_id = safe_int(body.get("affiliate_id"), 0)
+        if not affiliate_id:
+            result.update({"ok": False, "reason": "missing_affiliate_id"})
+            return result
+        affiliate = get_affiliate_link(affiliate_id, owner_id)
+        if not affiliate:
+            result.update({"ok": False, "reason": "affiliate_not_found"})
+            return result
+        (
+            aid, network, product, affiliate_niche, url, note, status,
+            price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
+        ) = affiliate
+        scale_niche = body.get("niche") or affiliate_niche or product or topic or "affiliate"
+        campaign_id = safe_int(body.get("campaign_id"), 0)
+        matched_campaign = None
+        campaign_match_score = 0
+        if not campaign_id:
+            matched_campaign, campaign_match_score = find_matching_campaign(owner_id, scale_niche, body.get("platform") or platform)
+            if matched_campaign:
+                campaign_id = matched_campaign[0]
+        created_jobs, error = await create_operator_auto_jobs(
+            owner_id,
+            scale_niche,
+            (body.get("platform") or platform or "tiktok").lower(),
+            body.get("channel") or "all",
+            campaign_id,
+            affiliate_id,
+            max(1, min(safe_int(body.get("limit"), 3), 12)),
+        )
+        if error:
+            result.update({"ok": False, "reason": error})
+            return result
+        built = []
+        failed = []
+        if truthy_value(body.get("build"), False):
+            duration = max(15, min(safe_int(body.get("duration"), 45), 120))
+            variants = max(3, min(safe_int(body.get("variants"), 5), 8))
+            for job in created_jobs:
+                ok, bundle = build_operator_job_bundle(owner_id, job["job_id"], count=variants, duration=duration)
+                if ok:
+                    readiness = bundle.get("readiness") or {}
+                    built.append({
+                        **job,
+                        "manifest_id": bundle["manifest_id"],
+                        "task_count": len(bundle["task_ids"]),
+                        "variant_id": bundle["best_variant_id"],
+                        "readiness": readiness.get("level", "UNKNOWN") if isinstance(readiness, dict) else "UNKNOWN",
+                    })
+                else:
+                    failed.append({"job_id": job["job_id"], "error": bundle.get("error", "build lỗi")})
+        result.update({
+            "executed": True,
+            "kind": "affiliate_scale",
+            "result": {
+                "affiliate": {"id": aid, "network": network, "product": product, "niche": affiliate_niche, "url": url},
+                "scale_niche": scale_niche,
+                "campaign": {
+                    "id": campaign_id,
+                    "auto_matched": bool(matched_campaign),
+                    "match_score": campaign_match_score,
+                    "name": matched_campaign[1] if matched_campaign else "",
+                },
+                "created_jobs": created_jobs,
+                "built_jobs": built,
+                "failed_builds": failed,
+                "worker_next": operator_worker_next_summary(owner_id, [job["job_id"] for job in (built or created_jobs)], limit=5),
+            },
+        })
+        return result
+
+    if lane == "launch":
+        ok, reason, launch = await operator_launch_pipeline(
+            owner_id,
+            body.get("topic") or topic or "công nghệ AI",
+            platform=body.get("platform") or platform,
+            channel=body.get("channel") or "all",
+            affiliate_id=safe_int(body.get("affiliate_id"), 0),
+            campaign_id=safe_int(body.get("campaign_id"), 0),
+            limit=max(1, min(safe_int(body.get("limit"), 3), 8)),
+            build=truthy_value(body.get("build"), True),
+            duration=max(15, min(safe_int(body.get("duration"), 45), 120)),
+            variants=max(3, min(safe_int(body.get("variants"), 5), 8)),
+            bootstrap=truthy_value(body.get("bootstrap"), True),
+        )
+        result.update({"executed": bool(ok), "kind": "launch", "reason": reason, "result": launch})
+        return result
+
+    result.update({
+        "blocked_by_policy": True,
+        "message": f"Lane {lane or 'unknown'} chưa có executor tự động; dùng Telegram/API trong item.",
+    })
+    return result
 
 def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
     base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
@@ -15125,6 +15324,18 @@ class OperatorDispatchRequest(BaseModel):
     include_prompt: bool = True
     notify_admin: bool = True
 
+class OperatorDailyRunRequest(BaseModel):
+    days: int = Field(default=1, ge=1, le=30)
+    platform: str = Field(default="tiktok", max_length=40)
+    topic: str = Field(default="", max_length=240)
+    limit: int = Field(default=8, ge=3, le=20)
+    rank: int = Field(default=1, ge=1, le=20)
+    execute: bool = False
+    safe_mode: bool = True
+    include_context: bool = True
+    include_prompt: bool = True
+    notify_admin: bool = True
+
 class OperatorRunCycleRequest(BaseModel):
     days: int = Field(default=30, ge=1, le=180)
     platform: str = Field(default="tiktok", max_length=40)
@@ -16993,6 +17204,16 @@ def operator_brain_fallback(raw_text):
         }
     if any(word in lower for word in ["build", "dựng", "san xuat", "sản xuất", "manifest", "task"]):
         return {"intent": "operator_build", "job": job_id, "duration": duration, "limit": limit, "confidence": 70}
+    if any(word in lower for word in ["daily run", "chạy rank", "chay rank", "chạy việc hôm nay", "chay viec hom nay", "chạy daily", "chay daily"]):
+        return {
+            "intent": "operator_daily_run",
+            "days": int_from_text(lower, ["days", "ngày", "ngay"], 1) or 1,
+            "platform": platform,
+            "limit": limit,
+            "rank": int_from_text(lower, ["rank", "hạng", "hang"], 1) or 1,
+            "execute": 1 if any(word in lower for word in ["execute", "run", "chạy", "chay", "thực thi", "thuc thi"]) else 0,
+            "confidence": 74,
+        }
     if any(word in lower for word in ["daily pack", "execution pack", "việc hôm nay", "viec hom nay", "bảng việc", "bang viec", "kế hoạch hôm nay", "ke hoach hom nay"]):
         return {"intent": "operator_daily_pack", "days": int_from_text(lower, ["days", "ngày", "ngay"], 1) or 1, "platform": platform, "limit": limit, "confidence": 72}
     if any(word in lower for word in ["daily", "báo cáo ngày", "bao cao ngay", "tổng quan", "tong quan", "dashboard"]):
@@ -17054,11 +17275,12 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_next_run, operator_daily_pack, goal_audit, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_next_run, operator_daily_pack, operator_daily_run, goal_audit, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
         "- operator_daily_pack: khi admin muốn bảng việc hôm nay/execution pack/rank việc để Claude/n8n làm trong ngày.\n"
+        "- operator_daily_run: khi admin muốn preview/chạy một rank machine_action trong daily pack; giữ safe_mode để chặn setup/publish.\n"
         "- goal_audit: khi admin hỏi hệ thống đã đủ mục tiêu chưa, xong cấu trúc chưa, cần kiểm tra end-to-end từ lệnh tới tiền.\n"
         "- pipeline_pack: khi admin hỏi một job/pipeline đang ở bước nào, cần AI nào làm tiếp, next action, pipeline command pack.\n"
         "- money_pack: khi admin hỏi tiền về, doanh thu tổng, PayOS + affiliate, link/kênh/source nào tạo tiền và nên scale gì.\n"
@@ -17102,7 +17324,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan số liệu.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","preset":"tech","network":"","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"episodes":5,"scenes_per_episode":10,"duration":45,"build":1,"execute":0,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","preset":"tech","network":"","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"rank":1,"limit":3,"episodes":5,"scenes_per_episode":10,"duration":45,"build":1,"execute":0,"safe_mode":1,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -17129,6 +17351,12 @@ def brain_command_preview(plan):
     if intent == "operator_daily_pack":
         return (
             f"/operator_daily_pack days={max(1, min(int(plan.get('days') or 1), 30))} "
+            f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 8), 20))}"
+        )
+    if intent == "operator_daily_run":
+        return (
+            f"/operator_daily_run rank={max(1, min(int(plan.get('rank') or 1), 20))} "
+            f"execute={int(plan.get('execute') or 0)} "
             f"platform={plan.get('platform') or 'tiktok'} limit={max(3, min(int(plan.get('limit') or 8), 20))}"
         )
     if intent == "goal_audit":
@@ -17425,6 +17653,18 @@ async def run_brain_plan(update, context, plan):
             if plan.get("topic") or plan.get("niche"):
                 context.args.append(f"topic={plan.get('topic') or plan.get('niche')}")
             return await cmd_operator_daily_pack(update, context)
+        if intent == "operator_daily_run":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 1), 30))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 8), 20))}",
+                f"rank={max(1, min(int(plan.get('rank') or 1), 20))}",
+                f"execute={int(plan.get('execute') or 0)}",
+                f"safe={1 if truthy_value(plan.get('safe_mode'), True) else 0}",
+            ]
+            if plan.get("topic") or plan.get("niche"):
+                context.args.append(f"topic={plan.get('topic') or plan.get('niche')}")
+            return await cmd_operator_daily_run(update, context)
         if intent == "operator_contract":
             context.args = [
                 f"days={max(1, min(int(plan.get('days') or 30), 180))}",
@@ -17772,6 +18012,18 @@ async def run_brain_plan(update, context, plan):
             if plan.get("topic") or plan.get("niche"):
                 context.args.append(f"topic={plan.get('topic') or plan.get('niche')}")
             return await cmd_operator_daily_pack(update, context)
+        if intent == "operator_daily_run":
+            context.args = [
+                f"days={max(1, min(int(plan.get('days') or 1), 30))}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"limit={max(3, min(int(plan.get('limit') or 8), 20))}",
+                f"rank={max(1, min(int(plan.get('rank') or 1), 20))}",
+                f"execute={int(plan.get('execute') or 0)}",
+                f"safe={1 if truthy_value(plan.get('safe_mode'), True) else 0}",
+            ]
+            if plan.get("topic") or plan.get("niche"):
+                context.args.append(f"topic={plan.get('topic') or plan.get('niche')}")
+            return await cmd_operator_daily_run(update, context)
         if intent == "trend_search":
             context.args = [
                 f"niche={plan.get('niche') or 'công nghệ AI'}",
@@ -17804,7 +18056,7 @@ def operator_command_plan_data(owner_id, command):
         "confidence": int(plan.get("confidence") or 0),
         "safety_note": plan.get("safety_note") or "Không bỏ qua review/approve gate; không tự publish khi chưa sẵn sàng.",
         "execute_allowed": (plan.get("intent") or "").lower() in {
-            "command_center", "operator_next_run", "operator_daily_pack", "goal_audit", "pipeline_pack", "money_pack", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
+            "command_center", "operator_next_run", "operator_daily_pack", "operator_daily_run", "goal_audit", "pipeline_pack", "money_pack", "revenue_destinations", "postback_setup", "operator_commander_pack", "operator_contract", "campaign_preset",
             "operator_director", "operator_execute", "operator_launch", "film_series", "make_video", "compose_video",
             "tracking_report", "scale_plan", "affiliate_report", "affiliate_decisions",
             "scale_execute", "publisher_capabilities", "platform_adapters",
@@ -17846,6 +18098,20 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
         return {"executed": True, "intent": intent, "data": operator_commander_pack_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 20)))}
     if intent == "operator_daily_pack":
         return {"executed": True, "intent": intent, "data": operator_daily_execution_pack_data(owner_id, days=max(1, min(days, 30)), platform=platform, limit=max(3, min(limit, 20)), topic=plan.get("topic") or plan.get("niche") or "")}
+    if intent == "operator_daily_run":
+        data = await execute_daily_machine_action(
+            owner_id,
+            days=max(1, min(days, 30)),
+            platform=platform,
+            limit=max(3, min(limit, 20)),
+            topic=plan.get("topic") or plan.get("niche") or "",
+            rank=max(1, min(int(plan.get("rank") or 1), 20)),
+            execute=truthy_value(plan.get("execute"), False),
+            safe_mode=truthy_value(plan.get("safe_mode"), True),
+            include_context=True,
+            include_prompt=True,
+        )
+        return {"executed": bool(data.get("executed")), "intent": intent, "data": data}
     if intent == "operator_contract":
         return {"executed": True, "intent": intent, "data": operator_control_contract_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 20)))}
     if intent == "campaign_preset":
@@ -19854,6 +20120,68 @@ async def cmd_operator_daily_pack(update: Update, context: ContextTypes.DEFAULT_
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_operator_daily_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    days = max(1, min(safe_int(data.get("days") or data.get("ngay") or 1, 1), 30))
+    limit = max(3, min(safe_int(data.get("limit") or 8, 8), 20))
+    rank = max(1, min(safe_int(data.get("rank") or data.get("r") or (context.args[0] if context.args else 1), 1), 20))
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    topic = data.get("topic") or data.get("niche") or data.get("chu_de") or ""
+    execute = truthy_value(data.get("execute") or data.get("run") or data.get("chay"), False)
+    safe_mode = truthy_value(data.get("safe") or data.get("safe_mode"), True)
+    msg = await update.message.reply_text(
+        "▶️ Đang kiểm tra daily machine action..."
+        + (" chạy trong safe mode." if execute else " preview trước, chưa đổi dữ liệu.")
+    )
+    try:
+        result = await execute_daily_machine_action(
+            update.effective_user.id,
+            days=days,
+            platform=platform,
+            limit=limit,
+            topic=topic,
+            rank=rank,
+            execute=execute,
+            safe_mode=safe_mode,
+            include_context=True,
+            include_prompt=True,
+        )
+    except Exception as e:
+        await alert_admin(context, "Operator Daily Run", str(e))
+        return await msg.edit_text("❌ Daily run lỗi. Đã báo admin.")
+    item = result.get("item") or {}
+    action = result.get("machine_action") or {}
+    run_result = result.get("result") or {}
+    lines = [
+        "▶️ <b>DAILY MACHINE ACTION</b>",
+        f"• Rank: <b>{result.get('rank')}</b> | Lane: <code>{html.escape(result.get('lane') or '-')}</code>",
+        f"• Title: <b>{html.escape(item.get('title') or '-')}</b>",
+        f"• Safe: <b>{'YES' if action.get('safe_to_execute') else 'NO'}</b> | Admin gate: <b>{'YES' if action.get('requires_admin') else 'NO'}</b>",
+        f"• Execute: <b>{'YES' if execute else 'NO'}</b> | Executed: <b>{'YES' if result.get('executed') else 'NO'}</b>",
+    ]
+    if result.get("blocked_by_safe_mode") or result.get("blocked_by_policy"):
+        lines.append(f"• Blocked: {html.escape(result.get('message') or 'safe gate')}")
+    if result.get("reason"):
+        lines.append(f"• Reason: <code>{html.escape(str(result.get('reason')))}</code>")
+    if run_result.get("task"):
+        task = run_result.get("task") or {}
+        lines.append(f"• Claimed task: <code>#{task.get('id')}</code> | job <code>#{task.get('job_id')}</code>")
+    created_jobs = run_result.get("created_jobs") or []
+    built_jobs = run_result.get("built_jobs") or []
+    if created_jobs or built_jobs:
+        lines.append(f"• Jobs tạo/build: <b>{len(created_jobs)}</b>/<b>{len(built_jobs)}</b>")
+    lines.extend([
+        "",
+        f"TG action: <code>{html.escape(item.get('telegram') or '-')}</code>",
+        f"API action: <code>{html.escape(action.get('method') or 'GET')} {html.escape(action.get('url') or '-')}</code>",
+        f"Next: <code>{html.escape(result.get('after_done') or '/operator_daily_pack')}</code>",
+        "",
+        "Chạy thật: <code>/operator_daily_run rank=%s execute=1</code>" % result.get("rank"),
+    ])
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_operator_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -20673,7 +21001,7 @@ def operator_category_keyboard(category):
             ("▶️ Mission run", "missionrun"),
             ("📦 Mission orders", "missionworkorders"),
             ("🎛 Next run card", "nextrun"),
-            ("🧭 Daily execution", "dailypack"),
+            ("🧭 Daily execution", "dailypack"), ("▶️ Daily run", "dailyrun"),
             ("🧭 Dispatch one step", "dispatch"),
             ("🔁 Run cycle", "cycle"),
             ("👑 Commander pack", "commanderpack"), ("📜 Control contract", "contract"),
@@ -20756,6 +21084,7 @@ def operator_category_keyboard(category):
         "cat_api": [
             ("🔌 Operator API", "api"), ("🔁 Run cycle", "cycle"),
             ("🔁 Operator loop", "loop"),
+            ("▶️ Daily run", "dailyrun"),
             ("📦 Mission orders", "missionworkorders"),
             ("🧠 Command run", "commandrun"),
             ("🔁 Postback setup", "postbacksetup"),
@@ -20832,6 +21161,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tạo film series/job nhiều tập: <code>POST {html.escape(base_url)}/api/operator/film-series</code>",
         f"• AI commander pack: <code>GET {html.escape(base_url)}/api/operator/commander-pack</code>",
         f"• Daily execution pack: <code>GET {html.escape(base_url)}/api/operator/daily-pack?days=1&amp;platform=tiktok</code>",
+        f"• Daily run action: <code>POST {html.escape(base_url)}/api/operator/daily-run</code>",
         f"• Mission control: <code>GET {html.escape(base_url)}/api/operator/mission</code>",
         f"• Control contract: <code>GET {html.escape(base_url)}/api/operator/control-contract?days=30&amp;platform=tiktok</code>",
         f"• Next run card: <code>GET {html.escape(base_url)}/api/operator/next-run</code>",
@@ -20912,6 +21242,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"preset":"tech","platform":"tiktok","limit":3,"execute":false,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload run-cycle mẫu:</b>",
         '<pre>{"days":30,"platform":"tiktok","limit":8,"max_steps":3,"execute":false,"claim_task":true,"include_prompt":true,"notify_admin":true}</pre>',
+        "<b>Payload daily-run mẫu:</b>",
+        '<pre>{"days":1,"platform":"tiktok","limit":8,"rank":1,"execute":false,"safe_mode":true,"include_prompt":true,"notify_admin":true}</pre>',
         "<b>Payload mission mẫu:</b>",
         '<pre>{"title":"Chiến dịch AI tools","objective":"Tạo 5 video affiliate công nghệ AI, gắn link phù hợp, review trước đăng.","platform":"tiktok","priority":8,"notify_admin":true}</pre>',
         "<b>Payload mission-run mẫu:</b>",
@@ -21226,6 +21558,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "loop": "/operator_loop\n/operator_loop limit=10 queue=1",
         "daily": "/operator_daily\n/operator_daily days=7",
         "dailypack": "/operator_daily_pack days=1 platform=tiktok limit=8\nGET /api/operator/daily-pack?days=1&platform=tiktok&limit=8",
+        "dailyrun": "/operator_daily_run rank=1 execute=0\n/operator_daily_run rank=1 execute=1\nPOST /api/operator/daily-run",
         "tools": "/tools",
         "mmo": "/mmo",
         "campaignstats": "/campaign_stats",
@@ -25109,6 +25442,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
     tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
     tg_app.add_handler(CommandHandler("operator_daily_pack", cmd_operator_daily_pack))
+    tg_app.add_handler(CommandHandler("operator_daily_run", cmd_operator_daily_run))
     tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
     tg_app.add_handler(CommandHandler("operator_bootstrap", cmd_operator_bootstrap))
     tg_app.add_handler(CommandHandler("operator_audit", cmd_operator_audit))
@@ -26422,6 +26756,40 @@ async def api_operator_daily_pack(
         limit=max(3, min(int(limit or 8), 20)),
         topic=(topic or "")[:240],
     )
+
+@fastapi_app.post("/api/operator/daily-run")
+async def api_operator_daily_run(payload: OperatorDailyRunRequest, request: Request):
+    verify_operator_api_token(request)
+    result = await execute_daily_machine_action(
+        ADMIN_ID,
+        days=payload.days,
+        platform=payload.platform,
+        limit=payload.limit,
+        topic=payload.topic,
+        rank=payload.rank,
+        execute=payload.execute,
+        safe_mode=payload.safe_mode,
+        include_context=payload.include_context,
+        include_prompt=payload.include_prompt,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            item = result.get("item") or {}
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "▶️ <b>OPERATOR DAILY RUN API</b>\n\n"
+                    f"• Rank: <b>{result.get('rank')}</b> | Lane: <code>{html.escape(result.get('lane') or '-')}</code>\n"
+                    f"• Title: <b>{html.escape(item.get('title') or '-')}</b>\n"
+                    f"• Execute: <b>{'YES' if payload.execute else 'NO'}</b> | Executed: <b>{'YES' if result.get('executed') else 'NO'}</b>\n"
+                    f"• Gate: <code>{html.escape(result.get('message') or result.get('reason') or 'ok')}</code>\n"
+                    f"• Next: <code>{html.escape(result.get('after_done') or '/operator_daily_pack')}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Operator daily run notify error: {e}")
+    return result
 
 @fastapi_app.get("/api/operator/control-contract")
 async def api_operator_control_contract(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 8):
