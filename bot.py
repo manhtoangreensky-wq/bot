@@ -3687,7 +3687,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -3707,6 +3707,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/runtime"),
         ("GET", "/api/operator/worker-spec"),
         ("GET", "/api/operator/film-blueprint"),
+        ("GET", "/api/operator/film-project-pack"),
         ("POST", "/api/operator/film-series"),
         ("GET", "/api/operator/commander-pack"),
         ("GET", "/api/operator/daily-pack"),
@@ -3822,6 +3823,7 @@ def operator_smoke_test_data(owner_id):
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
         "worker_intake_in_spec": "/api/operator/worker-intake" in spec_text and "/api/operator/worker-intake" in n8n_text,
         "film_blueprint_in_spec": "/api/operator/film-blueprint" in spec_text and "/api/operator/film-blueprint" in n8n_text,
+        "film_project_pack_in_spec": "/api/operator/film-project-pack" in spec_text,
         "film_series_in_spec": "/api/operator/film-series" in spec_text and "/api/operator/film-series" in n8n_text,
         "commander_pack_in_spec": "/api/operator/commander-pack" in spec_text and "/api/operator/commander-pack" in n8n_text,
         "daily_pack_in_spec": "/api/operator/daily-pack" in spec_text and "/api/operator/daily-pack" in n8n_text,
@@ -3917,6 +3919,7 @@ def operator_worker_spec_data():
         ),
         "toolchain_url": f"{base_url}/api/operator/toolchain",
         "film_blueprint_url": f"{base_url}/api/operator/film-blueprint",
+        "film_project_pack_url": f"{base_url}/api/operator/film-project-pack",
         "film_series_url": f"{base_url}/api/operator/film-series",
         "video_brief_url": f"{base_url}/api/operator/video-brief",
         "goal_audit_url": f"{base_url}/api/operator/goal-audit",
@@ -4029,6 +4032,7 @@ def operator_worker_spec_data():
             {"step": 1.08, "name": "commander_pack", "method": "GET", "url": "/api/operator/commander-pack?days=30&platform=tiktok"},
             {"step": 1.1, "name": "read_worker_spec", "method": "GET", "url": "/api/operator/worker-spec"},
             {"step": 1.15, "name": "read_film_blueprint", "method": "GET", "url": "/api/operator/film-blueprint"},
+            {"step": 1.155, "name": "read_film_project_pack", "method": "GET", "url": "/api/operator/film-project-pack?topic=<TOPIC>&platform=tiktok"},
             {"step": 1.16, "name": "film_series_optional", "method": "POST", "url": "/api/operator/film-series"},
             {"step": 1.2, "name": "read_video_patterns", "method": "GET", "url": "/api/operator/video-patterns"},
             {"step": 1.3, "name": "read_reference_pack", "method": "GET", "url": "/api/operator/reference-pack"},
@@ -4159,6 +4163,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/film-blueprint",
                 "purpose": "Runbook KingContent nội bộ: tạo series phim AI nhiều tập, character bible, storyboard 2x5, voice profile, composer và auto comment affiliate.",
+            },
+            "film_project_pack": {
+                "method": "GET",
+                "url": "/api/operator/film-project-pack?topic=đạo lý gia đình&platform=tiktok&episodes=5&scenes=10",
+                "purpose": "Gói điều phối đầy đủ cho Claude/n8n/tool worker: module map, project contract, viral analyzer, product ad contract, execution flow, prompt worker và lệnh tiếp theo.",
             },
             "film_series": {
                 "method": "POST",
@@ -9551,6 +9560,137 @@ def ai_film_series_blueprint_data():
             "Quản lý affiliate comments và publish handoff.",
             "Theo dõi view/click/order/revenue để scale.",
         ],
+    }
+
+def ai_film_project_pack_data(
+    owner_id=ADMIN_ID,
+    topic="",
+    platform="tiktok",
+    episodes=5,
+    scenes_per_episode=10,
+    duration=80,
+    template="dao_ly_trieu_views",
+    mode="prompt_structure_only",
+):
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    blueprint = ai_film_series_blueprint_data()
+    topic = (topic or "đạo lý gia đình gắn sản phẩm affiliate phù hợp").strip()
+    platform = (platform or "tiktok").strip().lower()
+    episodes = max(1, min(safe_int(episodes, 5), 8))
+    scenes_per_episode = max(3, min(safe_int(scenes_per_episode, 10), 12))
+    duration = max(30, min(safe_int(duration, 80), 180))
+    template = (template or "dao_ly_trieu_views").strip()
+    mode = (mode or "prompt_structure_only").strip()
+    module_map = [
+        {"department": "Research", "owner": "Claude/Gemini", "job": "Tìm trend/reference, chọn hook, chọn affiliate fit", "api": "/api/operator/reference-pack + /api/operator/affiliate-bundle"},
+        {"department": "Script", "owner": "Claude Opus/Sonnet", "job": "Sinh series JSON 3-5 tập, hook/cliffhanger, voice-over, caption", "api": "/api/operator/film-blueprint"},
+        {"department": "Character Bible", "owner": "Claude/Image worker", "job": "Giữ nhân vật nhất quán bằng fixed_description/negative_prompt/reference", "api": "/api/operator/film-project-pack"},
+        {"department": "Storyboard", "owner": "Image worker", "job": "Tạo storyboard JSON hoặc ảnh lưới 2x5 rồi crop thành scene_image", "api": "/api/operator/jobs/<JOB_ID>/storyboard-grid/upload"},
+        {"department": "Scene Prompt", "owner": "Scene analyzer", "job": "Đọc scene image + metadata để tạo video_prompt, camera, emotion", "api": "/api/operator/jobs/<JOB_ID>/scene-pack"},
+        {"department": "Video Render", "owner": "Kling/Runway/CapCut worker", "job": "Render từng cảnh mp4, upload qua task endpoint", "api": "/api/operator/tasks/<TASK_ID>/upload"},
+        {"department": "Voice", "owner": "Fish Audio -> Edge fallback", "job": "Một voice profile cố định cho cả series, báo admin nếu hết quota", "api": "/api/operator/toolchain"},
+        {"department": "Composer", "owner": "FFmpeg/CapCut worker", "job": "Ghép cảnh + voice + nhạc + phụ đề + logo thành final_video", "api": "/api/operator/jobs/<JOB_ID>/compose-video"},
+        {"department": "Review", "owner": "Admin Telegram", "job": "Kiểm duyệt final video, chỉ approve khi đúng brand/compliance", "api": "/api/operator/jobs/<JOB_ID>/review-video"},
+        {"department": "Publisher", "owner": "Manual/API official publisher", "job": "Đăng TikTok/FB/Shorts/Reels; Facebook bật publish_as_reels khi có API", "api": "/api/operator/publisher/run"},
+        {"department": "Affiliate Comment", "owner": "Publisher/comment worker", "job": "Đăng tối đa 10 comment/link liên quan có delay và disclosure", "api": "/api/operator/jobs/<JOB_ID>/comment-pack"},
+        {"department": "Analytics", "owner": "Growth analyst", "job": "Ghi view/click/order/revenue/cost, chọn SCALE/FIX/TEST/PAUSE", "api": "/api/operator/performance"},
+    ]
+    project_contract = {
+        "topic": topic,
+        "genre": "drama cảm xúc | quảng cáo sản phẩm | chill lifestyle | lịch sử | giáo dục | review/KOL",
+        "target_audience": "người lớn, dân văn phòng, phụ nữ 25-45, creator, người mua online",
+        "episodes": episodes,
+        "scenes_per_episode": scenes_per_episode,
+        "scene_duration_seconds": max(4, int(duration / scenes_per_episode)),
+        "duration_per_episode": duration,
+        "platform": platform,
+        "aspect_ratio": "9:16",
+        "template": template,
+        "content_safety": True,
+        "affiliate_disclosure_required": True,
+        "review_gate_required": True,
+    }
+    execution_flow = [
+        {"step": 1, "name": "create_series_jobs", "telegram": f"/film_series topic={topic} platform={platform} episodes={episodes} scenes={scenes_per_episode} duration={duration} template={template} build=1", "api": "POST /api/operator/film-series"},
+        {"step": 2, "name": "get_batch_work_orders", "telegram": "/video_work_orders jobs=<JOB_ID>,<JOB_ID>", "api": "GET /api/operator/video-work-orders?job_ids=<JOB_ID>,<JOB_ID>"},
+        {"step": 3, "name": "make_storyboard_or_crop_grid", "telegram": "/storyboard_crop", "api": "POST /api/operator/jobs/<JOB_ID>/storyboard-grid/upload"},
+        {"step": 4, "name": "render_each_scene", "telegram": "/scene_pack job=<JOB_ID> scene=1", "api": "GET /api/operator/jobs/<JOB_ID>/scene-pack"},
+        {"step": 5, "name": "submit_scene_outputs", "telegram": "/task_set id=<TASK_ID> status=ready url=https://...", "api": "POST /api/operator/tasks/<TASK_ID>/upload"},
+        {"step": 6, "name": "compose_episode", "telegram": "/compose_video job=<JOB_ID> voice=1", "api": "POST /api/operator/jobs/<JOB_ID>/compose-video"},
+        {"step": 7, "name": "review_gate", "telegram": "/review_video job=<JOB_ID> send=1", "api": "GET /api/operator/jobs/<JOB_ID>/review-video"},
+        {"step": 8, "name": "publish_handoff", "telegram": "/approve_publish job=<JOB_ID> queue=1 mode=manual", "api": "POST /api/operator/jobs/<JOB_ID>/approve"},
+        {"step": 9, "name": "comment_affiliate", "telegram": "/comment_pack job=<JOB_ID> max=10 delay=30", "api": "GET /api/operator/jobs/<JOB_ID>/comment-pack"},
+        {"step": 10, "name": "track_and_scale", "telegram": "/performance_add job=<JOB_ID> type=click value=1 amount=0 source=...", "api": "POST /api/operator/performance"},
+    ]
+    viral_analyzer_contract = {
+        "purpose": "Học công thức video viral/reference rồi tạo video mới, không reup.",
+        "input": ["video_url hoặc uploaded_video", "platform", "niche", "affiliate_id optional"],
+        "analysis_output": ["duration", "topic", "hook", "scene_structure", "retention_function", "cta_or_affiliate_placement", "risk_note"],
+        "modes": blueprint.get("viral_remix_modes", {}).get("modes", []),
+        "recommended_mode": "prompt_structure_only",
+        "guard": blueprint.get("viral_remix_modes", {}).get("copyright_guard", {}),
+    }
+    product_ad_contract = {
+        "input": {
+            "product_image": "uploaded_product.jpg",
+            "model_image": "uploaded_ai_model_or_consented_model.jpg",
+            "product_name": "Tên sản phẩm affiliate",
+            "product_benefits": ["lợi ích 1", "lợi ích 2", "giá tốt"],
+            "scene_count": scenes_per_episode,
+            "aspect_ratio": "9:16",
+        },
+        "ad_types": ["TVC", "viral_content", "storytelling", "reviews/KOL", "copywriter", "creative_director"],
+        "output": ["hook", "scene_prompts", "voice_over", "caption", "affiliate_cta", "related_links", "review_checklist"],
+        "compliance": "Người mẫu AI tự tạo hoặc người thật có consent 18+, không dùng ảnh người khác để giả mạo.",
+    }
+    data_model_bridge = {
+        "current_tables_used": [
+            "campaigns", "affiliate_links", "social_channels", "production_jobs",
+            "production_tasks", "production_assets", "production_manifests",
+            "publish_queue", "performance_events", "reference_videos",
+        ],
+        "future_project_schema": ["projects", "characters", "episodes", "scenes", "video_jobs", "final_videos", "affiliate_comments"],
+        "rule": "MVP dùng bảng production_* hiện tại; khi cần SaaS/web app riêng mới tách projects/episodes/scenes đầy đủ.",
+    }
+    claude_prompt = (
+        "Bạn là Film Operator cho TOAN DAAS. Hãy tạo dự án phim AI affiliate theo contract này: "
+        f"topic='{topic}', platform='{platform}', episodes={episodes}, scenes_per_episode={scenes_per_episode}, duration={duration}s, template='{template}'. "
+        "Bắt buộc tạo character bible, storyboard JSON, image/video prompt từng cảnh, voice profile cố định, caption/comment affiliate, "
+        "và dừng ở review gate. Chỉ học cấu trúc video tham khảo, không copy nhân vật/lời thoại/hình ảnh/voice/watermark. "
+        "Nếu thiếu affiliate phù hợp, gọi affiliate bundle hoặc hỏi admin. Nếu tool trả lỗi/quota, ghi tool_event và dùng fallback đã định."
+    )
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "source": "noi_dung_kingcontent_tao_phim_ai_affiliate_cho_codex.md",
+        "base_url": base_url,
+        "project_contract": project_contract,
+        "module_map": module_map,
+        "execution_flow": execution_flow,
+        "storyboard_contract": blueprint.get("storyboard_json_contract"),
+        "character_bible_contract": blueprint.get("character_bible_contract"),
+        "voice_profile_contract": blueprint.get("voice_profile_contract"),
+        "template_library": blueprint.get("template_library"),
+        "viral_analyzer_contract": viral_analyzer_contract,
+        "product_ad_contract": product_ad_contract,
+        "affiliate_comment_manager": blueprint.get("affiliate_comment_manager"),
+        "data_model_bridge": data_model_bridge,
+        "claude_worker_prompt": claude_prompt,
+        "next_commands": {
+            "telegram": [
+                f"/film_series topic={topic} platform={platform} episodes={episodes} scenes={scenes_per_episode} duration={duration} template={template} build=1",
+                "/video_work_orders jobs=<JOB_ID>,<JOB_ID>",
+                "/worker_intake job=<JOB_ID> claim=1",
+                "/review_video job=<JOB_ID> send=1",
+                "/approve_publish job=<JOB_ID> queue=1 mode=manual",
+            ],
+            "api": [
+                f"{base_url}/api/operator/film-project-pack?topic={quote(topic)}&platform={platform}",
+                f"{base_url}/api/operator/film-series",
+                f"{base_url}/api/operator/video-work-orders?job_ids=<JOB_ID>,<JOB_ID>",
+            ],
+        },
+        "rule": "Film project pack là bản điều phối cho Claude/n8n/tool worker; không chứa secret, không tự publish, và không copy video tham khảo y nguyên.",
     }
 
 def ai_video_factory_blueprint_data():
@@ -21601,7 +21741,8 @@ def operator_category_keyboard(category):
         "cat_production": [
             ("🎬 Make video", "makevideo"), ("⚡ Build bundle", "build"),
             ("🎛 Pipeline", "pipeline"),
-            ("🎬 Film blueprint", "filmblueprint"), ("🎞 Film series", "filmseries"),
+            ("🎬 Film blueprint", "filmblueprint"), ("🎥 Project pack", "filmprojectpack"),
+            ("🎞 Film series", "filmseries"),
             ("🧠 Pipeline pack", "pipelinepack"),
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
@@ -21720,6 +21861,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Goal audit tổng mục tiêu: <code>GET {html.escape(base_url)}/api/operator/goal-audit?days=30&amp;platform=tiktok</code>",
         f"• Worker spec: <code>GET {html.escape(base_url)}/api/operator/worker-spec</code>",
         f"• Film blueprint: <code>GET {html.escape(base_url)}/api/operator/film-blueprint</code>",
+        f"• Film project pack: <code>GET {html.escape(base_url)}/api/operator/film-project-pack?topic=dao_ly&amp;platform=tiktok</code>",
         f"• Tạo film series/job nhiều tập: <code>POST {html.escape(base_url)}/api/operator/film-series</code>",
         f"• AI commander pack: <code>GET {html.escape(base_url)}/api/operator/commander-pack</code>",
         f"• Daily execution pack: <code>GET {html.escape(base_url)}/api/operator/daily-pack?days=1&amp;platform=tiktok</code>",
@@ -22095,6 +22237,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "creativereport": "/creative_report job=<JOB_ID>\n/performance_add job=<JOB_ID> variant=<VARIANT_ID> type=click value=1",
         "videopatterns": "/video_patterns\nGET /api/operator/video-patterns",
         "filmblueprint": "/film_blueprint\nGET /api/operator/film-blueprint",
+        "filmprojectpack": "/film_project_pack topic=đạo lý gia đình platform=tiktok episodes=5 scenes=10\nGET /api/operator/film-project-pack?topic=<TOPIC>&platform=tiktok",
         "filmseries": "/film_series topic=đạo lý gia đình episodes=5 scenes=10 platform=tiktok build=1\nPOST /api/operator/film-series",
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
@@ -22419,6 +22562,55 @@ async def cmd_film_blueprint(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "<b>Lệnh/API:</b>",
         "<code>/mission_add title=Phim AI affiliate platform=tiktok priority=9 objective=Tạo series 5 tập theo blueprint phim AI, gắn link affiliate phù hợp, review trước đăng.</code>",
         "<code>GET /api/operator/film-blueprint</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_film_project_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    topic = data.get("topic") or data.get("chu_de") or data.get("niche") or " ".join(
+        arg for arg in context.args if "=" not in arg
+    ).strip()
+    pack = ai_film_project_pack_data(
+        update.effective_user.id,
+        topic=topic,
+        platform=data.get("platform") or data.get("nen") or "tiktok",
+        episodes=safe_int(data.get("episodes") or data.get("tap"), 5),
+        scenes_per_episode=safe_int(data.get("scenes") or data.get("scenes_per_episode") or data.get("canh"), 10),
+        duration=safe_int(data.get("duration") or data.get("sec"), 80),
+        template=data.get("template") or data.get("mau") or "dao_ly_trieu_views",
+        mode=data.get("mode") or "prompt_structure_only",
+    )
+    contract = pack.get("project_contract") or {}
+    lines = [
+        "🎥 <b>AI FILM PROJECT PACK</b>",
+        f"• Topic: {html.escape(contract.get('topic') or '-')}",
+        f"• Platform: <code>{html.escape(contract.get('platform') or '-')}</code> | Template: <code>{html.escape(contract.get('template') or '-')}</code>",
+        f"• Episodes: <b>{contract.get('episodes')}</b> | Scenes/tập: <b>{contract.get('scenes_per_episode')}</b> | Duration/tập: <b>{contract.get('duration_per_episode')}</b>s",
+        "",
+        "<b>Bộ phận/worker:</b>",
+    ]
+    for item in (pack.get("module_map") or [])[:8]:
+        lines.append(
+            f"• <b>{html.escape(item.get('department') or '-')}</b>: {html.escape(item.get('job') or '-')}\n"
+            f"  <code>{html.escape(item.get('api') or '-')}</code>"
+        )
+    lines.extend([
+        "",
+        "<b>Luồng chạy:</b>",
+    ])
+    for step in (pack.get("execution_flow") or [])[:10]:
+        lines.append(
+            f"{step.get('step')}. {html.escape(step.get('name') or '-')}: "
+            f"<code>{html.escape(step.get('telegram') or step.get('api') or '-')}</code>"
+        )
+    lines.extend([
+        "",
+        "<b>Prompt cho Claude/n8n:</b>",
+        f"<pre>{html_pre(pack.get('claude_worker_prompt') or '-', 1600)}</pre>",
+        "<b>API JSON đầy đủ:</b>",
+        "<code>GET /api/operator/film-project-pack?topic=&lt;TOPIC&gt;&amp;platform=tiktok</code>",
     ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -26169,6 +26361,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
     tg_app.add_handler(CommandHandler("video_patterns", cmd_video_patterns))
     tg_app.add_handler(CommandHandler("film_blueprint", cmd_film_blueprint))
+    tg_app.add_handler(CommandHandler("film_project_pack", cmd_film_project_pack))
     tg_app.add_handler(CommandHandler("film_series", cmd_film_series))
     tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
     tg_app.add_handler(CommandHandler("reference_videos", cmd_reference_videos))
@@ -26849,6 +27042,29 @@ async def api_operator_film_blueprint(request: Request):
         "blueprint": ai_film_series_blueprint_data(),
         "rule": "Dùng blueprint này cho series phim AI affiliate nhiều tập; không reup/copy nguyên video, chỉ học cấu trúc.",
     }
+
+@fastapi_app.get("/api/operator/film-project-pack")
+async def api_operator_film_project_pack(
+    request: Request,
+    topic: str = "",
+    platform: str = "tiktok",
+    episodes: int = 5,
+    scenes: int = 10,
+    duration: int = 80,
+    template: str = "dao_ly_trieu_views",
+    mode: str = "prompt_structure_only",
+):
+    verify_operator_api_token(request)
+    return ai_film_project_pack_data(
+        ADMIN_ID,
+        topic=topic,
+        platform=platform,
+        episodes=episodes,
+        scenes_per_episode=scenes,
+        duration=duration,
+        template=template,
+        mode=mode,
+    )
 
 @fastapi_app.get("/api/operator/reference-pack")
 async def api_operator_reference_pack(request: Request):
