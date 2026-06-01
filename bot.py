@@ -3588,7 +3588,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_intake", "worker_pack", "task_prompt", "scene_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3641,6 +3641,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/assets/<ASSET_ID>/file"),
         ("GET", "/api/operator/jobs/<JOB_ID>/context"),
         ("GET", "/api/operator/jobs/<JOB_ID>/worker-pack"),
+        ("GET", "/api/operator/jobs/<JOB_ID>/scene-pack"),
         ("GET", "/api/operator/output-acceptance"),
         ("GET", "/api/operator/jobs/<JOB_ID>/output-acceptance"),
         ("POST", "/api/operator/jobs/<JOB_ID>/storyboard-grid/upload"),
@@ -3733,6 +3734,7 @@ def operator_smoke_test_data(owner_id):
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
+        "scene_pack_in_spec": "/api/operator/jobs/<JOB_ID>/scene-pack" in spec_text,
         "task_prompt_pack_in_spec": "/api/operator/tasks/<TASK_ID>/prompt-pack" in spec_text and "/prompt-pack" in n8n_text,
         "output_acceptance_in_spec": "/api/operator/output-acceptance" in spec_text and "/api/operator/output-acceptance" in n8n_text,
         "storyboard_crop_in_spec": "/api/operator/jobs/<JOB_ID>/storyboard-grid/upload" in spec_text,
@@ -3916,6 +3918,7 @@ def operator_worker_spec_data():
             {"step": 4.5, "name": "peek_worker_next", "method": "GET", "url": "/api/operator/worker-next"},
             {"step": 4.55, "name": "worker_intake_preview", "method": "GET", "url": "/api/operator/worker-intake?claim=0&include_prompt=1"},
             {"step": 4.6, "name": "worker_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/worker-pack"},
+            {"step": 4.61, "name": "scene_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/scene-pack"},
             {"step": 4.62, "name": "task_prompt_pack", "method": "GET", "url": "/api/operator/tasks/<TASK_ID>/prompt-pack"},
             {"step": 4.7, "name": "pipeline_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/pipeline-pack"},
             {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1&include_prompt=1"},
@@ -4026,6 +4029,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/channel-router?platform=tiktok&niche=công nghệ AI&limit=10",
                 "purpose": "Chọn kênh/account phù hợp nhất theo platform, niche, slots/ngày và publish readiness trước khi tạo batch video.",
+            },
+            "scene_pack": {
+                "method": "GET",
+                "url": "/api/operator/jobs/<JOB_ID>/scene-pack?scene=<SCENE_NO>",
+                "purpose": "Gói từng cảnh: scene_image từ storyboard crop, prompt manifest, visual task, upload URL và raw_video hiện có.",
             },
             "commander_pack": {
                 "method": "GET",
@@ -7169,6 +7177,148 @@ def asset_scene_sort_key(asset_row):
     match = re.search(r"(?:scene|sc|cảnh|canh)[_ :=-]*(\d+)", text, re.IGNORECASE)
     return (int(match.group(1)) if match else int(aid or 0), int(aid or 0))
 
+def scene_number_from_text(text, default=0):
+    text = str(text or "")
+    patterns = [
+        r'"scene"\s*:\s*(\d+)',
+        r"'scene'\s*:\s*(\d+)",
+        r"(?:scene|sc|cảnh|canh)[_ :=-]*(\d+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return int(default or 0)
+
+def scene_number_from_asset(asset_row, default=0):
+    if not asset_row:
+        return int(default or 0)
+    aid, _owner_id, _job_id, _asset_type, _url, _file_id, note, local_path, _content_type, filename, _created_at = asset_row
+    return scene_number_from_text(f"{note or ''} {filename or ''} {local_path or ''}", default=default or aid)
+
+def serialize_asset_record_for_worker(asset_row):
+    if not asset_row:
+        return None
+    aid, _owner_id, job_id, asset_type, url, file_id, note, local_path, content_type, filename, created_at = asset_row
+    download_url = operator_asset_url(aid)
+    return {
+        "id": int(aid),
+        "job_id": int(job_id or 0),
+        "asset_type": asset_type or "",
+        "url": url or "",
+        "download_url": download_url,
+        "file_id": file_id or "",
+        "filename": filename or "",
+        "content_type": content_type or "",
+        "note": note or "",
+        "created_at": created_at or "",
+        "local_file_available": bool(local_path and safe_asset_local_path(asset_row)),
+        "download_auth": "Authorization: Bearer <OPERATOR_API_TOKEN>",
+    }
+
+def latest_manifest_payload(owner_id, job_id):
+    manifest_row = latest_production_manifest(owner_id, job_id)
+    if not manifest_row:
+        return None, {}
+    try:
+        manifest = json.loads(manifest_row[4] or "{}")
+    except Exception:
+        manifest = {}
+    return manifest_row, manifest
+
+def operator_scene_pack_data(owner_id, job_id, scene=0, task_id=0):
+    try:
+        job_id = int(job_id or 0)
+    except (TypeError, ValueError):
+        job_id = 0
+    try:
+        scene = int(scene or 0)
+    except (TypeError, ValueError):
+        scene = 0
+    try:
+        task_id = int(task_id or 0)
+    except (TypeError, ValueError):
+        task_id = 0
+    task = get_production_task(owner_id, task_id) if task_id else None
+    if task:
+        job_id = int(task[1] or job_id or 0)
+        scene = int(task[5] or scene or 0)
+    job = get_production_job(job_id, owner_id) if job_id else None
+    if not job:
+        return None
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    manifest_row, manifest = latest_manifest_payload(owner_id, job_id)
+    manifest_scenes = manifest.get("scenes") or []
+    manifest_by_scene = {int(item.get("scene") or idx + 1): item for idx, item in enumerate(manifest_scenes)}
+    task_rows = [get_production_task(owner_id, row[0]) for row in list_production_tasks(owner_id, job_id=job_id, limit=240)]
+    visual_tasks = [row for row in task_rows if row and (row[3] or "").lower() == "visual_scene"]
+    visual_by_scene = {int(row[5] or 0): row for row in visual_tasks}
+    scene_images = [
+        row for row in list_production_asset_records(owner_id, job_id, asset_type="scene_image", limit=300)
+        if scene_number_from_asset(row, 0)
+    ]
+    raw_videos = [
+        row for row in list_production_asset_records(owner_id, job_id, limit=400)
+        if (row[3] or "").lower() in {"raw_video", "scene_video", "video"} and scene_number_from_asset(row, 0)
+    ]
+    images_by_scene = {}
+    raw_by_scene = {}
+    for row in sorted(scene_images, key=asset_scene_sort_key):
+        images_by_scene.setdefault(scene_number_from_asset(row, 0), []).append(row)
+    for row in sorted(raw_videos, key=asset_scene_sort_key):
+        raw_by_scene.setdefault(scene_number_from_asset(row, 0), []).append(row)
+    scene_numbers = set(manifest_by_scene) | set(visual_by_scene) | set(images_by_scene) | set(raw_by_scene)
+    if scene:
+        scene_numbers = {scene}
+    scene_items = []
+    for scene_no in sorted(n for n in scene_numbers if n):
+        scene_manifest = manifest_by_scene.get(scene_no) or {}
+        visual_task = visual_by_scene.get(scene_no)
+        latest_scene_image = (images_by_scene.get(scene_no) or [None])[-1]
+        latest_raw_video = (raw_by_scene.get(scene_no) or [None])[-1]
+        task_contract = operator_task_contract(visual_task[0], visual_task[3], job_id) if visual_task else {}
+        scene_items.append({
+            "scene": scene_no,
+            "manifest": scene_manifest,
+            "visual_task": serialize_operator_task(visual_task) if visual_task else None,
+            "scene_image": serialize_asset_record_for_worker(latest_scene_image),
+            "scene_images": [serialize_asset_record_for_worker(row) for row in images_by_scene.get(scene_no, [])],
+            "raw_video": serialize_asset_record_for_worker(latest_raw_video),
+            "raw_videos": [serialize_asset_record_for_worker(row) for row in raw_by_scene.get(scene_no, [])],
+            "worker_prompt": {
+                "image_prompt": scene_manifest.get("image_prompt") or "",
+                "video_prompt": scene_manifest.get("video_prompt") or scene_manifest.get("visual_prompt") or "",
+                "voice_line": scene_manifest.get("voice_line") or "",
+                "caption": scene_manifest.get("caption") or scene_manifest.get("on_screen_text") or "",
+                "duration": scene_manifest.get("duration_seconds") or "",
+                "asset_needed": scene_manifest.get("asset_needed") or "",
+            },
+            "submit": {
+                "complete_url": f"{base_url}{task_contract.get('complete_url', '/api/operator/tasks/<TASK_ID>/complete')}" if visual_task else "",
+                "upload_url": f"{base_url}{task_contract.get('upload_url', '/api/operator/tasks/<TASK_ID>/upload')}" if visual_task else "",
+                "asset_type": "raw_video",
+                "note": f"scene={scene_no} from scene_pack",
+            },
+        })
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "base_url": base_url,
+        "job": serialize_production_job(job),
+        "job_id": job_id,
+        "manifest_id": int(manifest_row[0]) if manifest_row else 0,
+        "scene_filter": scene,
+        "scene_count": len(scene_items),
+        "scenes": scene_items,
+        "next": {
+            "claim_visual_task": f"/worker_intake job={job_id} claim=1",
+            "task_prompt": f"/task_prompt job={job_id}",
+            "compose_when_raw_ready": f"/compose_video job={job_id} voice=1",
+            "review_after_compose": f"/review_video job={job_id} send=1",
+        },
+        "rule": "Scene pack nối storyboard image -> video prompt -> raw_video upload. Worker phải tạo video riêng cho từng cảnh, không copy video tham khảo.",
+    }
+
 async def compose_job_video_with_ffmpeg(owner_id, job_id, include_voice=True, force=False):
     job = get_production_job(job_id, owner_id)
     if not job:
@@ -9425,13 +9575,14 @@ def update_production_task(owner_id, task_id, status=None, output_url=None, note
     c = conn.cursor()
     c.execute(f"UPDATE production_tasks SET {', '.join(updates)} WHERE owner_id=? AND id=?", params)
     changed = c.rowcount
-    c.execute("SELECT job_id, task_type FROM production_tasks WHERE owner_id=? AND id=?", (str(owner_id), task_id))
+    c.execute("SELECT job_id, task_type, scene_no FROM production_tasks WHERE owner_id=? AND id=?", (str(owner_id), task_id))
     row = c.fetchone()
     conn.commit()
     conn.close()
     if changed and output_url and row and record_asset:
         resolved_asset_type = (asset_type or "").strip().lower() or default_asset_type_for_task(row[1])
-        add_production_asset(owner_id, row[0], resolved_asset_type, output_url, "", f"task:{task_id} {note or ''}")
+        scene_note = f" scene={int(row[2] or 0)}" if int(row[2] or 0) else ""
+        add_production_asset(owner_id, row[0], resolved_asset_type, output_url, "", f"task:{task_id}{scene_note} {note or ''}")
     return changed > 0, row
 
 def operator_task_execution_runbook(task_type: str = "", tool: str = "", prompt: str = "", job_id: int = 0):
@@ -9647,6 +9798,22 @@ def operator_task_prompt_pack_data(owner_id, task_id=0, job_id=0, tool=""):
     job_payload = serialize_production_job(job)
     affiliate_payload = (job_payload or {}).get("affiliate") or {}
     default_asset = contract.get("complete_payload", {}).get("asset_type") or default_asset_type_for_task(task_type)
+    scene_pack = operator_scene_pack_data(owner_id, row_job_id, scene=scene_no) if (task_type or "").lower() == "visual_scene" and scene_no else None
+    scene_item = (scene_pack.get("scenes") or [{}])[0] if scene_pack else {}
+    scene_image = scene_item.get("scene_image") or {}
+    scene_extra = ""
+    if scene_item:
+        worker_prompt = scene_item.get("worker_prompt") or {}
+        scene_extra = (
+            "\nSCENE PACK:\n"
+            f"- Scene image asset: #{scene_image.get('id') or '-'}\n"
+            f"- Scene image download: {scene_image.get('download_url') or '-'}\n"
+            f"- Download auth: {scene_image.get('download_auth') or 'Authorization: Bearer <OPERATOR_API_TOKEN>'}\n"
+            f"- Video prompt chuẩn hóa: {worker_prompt.get('video_prompt') or '-'}\n"
+            f"- Voice line: {worker_prompt.get('voice_line') or '-'}\n"
+            f"- Caption/on-screen: {worker_prompt.get('caption') or '-'}\n"
+            f"- Scene pack API: {base_url}/api/operator/jobs/{row_job_id}/scene-pack?scene={scene_no}\n"
+        )
     required_output = "\n".join(f"- {item}" for item in runbook.get("required_output", [])) or "- output_url hoặc file upload thật"
     success_criteria = "\n".join(f"- {item}" for item in runbook.get("success_criteria", [])) or "- Output dùng được cho bước kế tiếp"
     worker_steps = "\n".join(f"{idx}. {step}" for idx, step in enumerate(runbook.get("worker_steps", []), start=1)) or "1. Thực hiện prompt task.\n2. Upload/complete output."
@@ -9666,6 +9833,7 @@ def operator_task_prompt_pack_data(owner_id, task_id=0, job_id=0, tool=""):
         f"- Expected asset_type: {default_asset}\n\n"
         "PROMPT TASK:\n"
         f"{prompt or '-'}\n\n"
+        f"{scene_extra}\n"
         "CÁCH LÀM:\n"
         f"{worker_steps}\n\n"
         "OUTPUT BẮT BUỘC:\n"
@@ -9706,6 +9874,7 @@ def operator_task_prompt_pack_data(owner_id, task_id=0, job_id=0, tool=""):
         "runbook": runbook,
         "contract": contract,
         "reference_learning": reference_learning,
+        "scene_pack": scene_pack,
         "publish_pack_preview": {
             "caption": publish_pack.get("caption", ""),
             "cta": publish_pack.get("cta", ""),
@@ -9722,6 +9891,7 @@ def operator_task_prompt_pack_data(owner_id, task_id=0, job_id=0, tool=""):
             "task_prompt": f"/task_prompt id={int(tid)}",
             "task_handoff": f"/task_handoff id={int(tid)}",
             "task_set_ready": f"/task_set id={int(tid)} status=ready url=https://...",
+            "scene_pack": f"/scene_pack job={int(row_job_id)} scene={int(scene_no or 0)}" if int(scene_no or 0) else f"/scene_pack job={int(row_job_id)}",
             "output_acceptance": f"/output_acceptance task={int(tid)}",
             "worker_pack": f"/worker_pack job={int(row_job_id)} task={int(tid)}",
         },
@@ -10017,6 +10187,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
             "prompt_pack_url": f"/api/operator/tasks/{int(task[0])}/prompt-pack" if task else "/api/operator/tasks/<TASK_ID>/prompt-pack",
             "claim_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1&include_prompt=1",
             "job_context_url": f"/api/operator/jobs/{job_id}/context",
+            "scene_pack_url": f"/api/operator/jobs/{job_id}/scene-pack" + (f"?scene={int(task[5])}" if task and int(task[5] or 0) else ""),
             "review_url": f"/api/operator/jobs/{job_id}/review-video",
             "acceptance_url": f"/api/operator/output-acceptance?job_id={job_id}" + (f"&task_id={int(task[0])}" if task else ""),
             "storyboard_grid_upload_url": f"/api/operator/jobs/{job_id}/storyboard-grid/upload",
@@ -10027,6 +10198,7 @@ def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
                 "task_handoff": f"/task_handoff id={int(task[0])}" if task else "",
                 "task_set_ready": f"/task_set id={int(task[0])} status=ready url=https://..." if task else "",
                 "job_context": f"/job_context job={job_id}",
+                "scene_pack": f"/scene_pack job={job_id}" + (f" scene={int(task[5])}" if task and int(task[5] or 0) else ""),
                 "review_video": f"/review_video job={job_id} send=1",
                 "output_acceptance": f"/output_acceptance job={job_id}" + (f" task={int(task[0])}" if task else ""),
                 "storyboard_crop": "/storyboard_crop",
@@ -15434,6 +15606,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /film_blueprint — Blueprint phim AI nhiều tập + affiliate comments",
             "• /film_series topic=... — Tạo series phim AI thành nhiều production job",
             "• /storyboard_crop — Hướng dẫn upload/cắt storyboard 2x5 thành scene_image",
+            "• /scene_pack job=... scene=1 — Gói ảnh/prompt/upload cho từng cảnh",
             "• /worker_intake claim=0/1 — Worker nhận task + prompt + toolchain + upload URL",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
@@ -20022,6 +20195,7 @@ def operator_category_keyboard(category):
             ("📥 Worker intake", "workerintake"),
             ("📦 Worker pack", "workerpack"),
             ("🧾 Task prompt", "taskprompt"),
+            ("🎬 Scene pack", "scenepack"),
             ("🧪 Output acceptance", "outputacceptance"),
             ("🧩 Storyboard crop", "storyboardcrop"),
             ("🎞 Compose video", "composevideo"),
@@ -20188,6 +20362,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tải asset nội bộ: <code>GET {html.escape(base_url)}/api/operator/assets/&lt;ASSET_ID&gt;/file</code>",
         f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
         f"• Worker pack cho AI/tool: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/worker-pack</code>",
+        f"• Scene pack cho từng cảnh: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/scene-pack?scene=1</code>",
         f"• Pipeline pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/pipeline-pack</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
         f"• Distribution pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/distribution-pack</code>",
@@ -20502,6 +20677,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "workerintake": "/worker_intake\n/worker_intake job=<JOB_ID> claim=1\nGET/POST /api/operator/worker-intake",
         "workerpack": "/worker_pack job=<JOB_ID>\n/worker_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/worker-pack",
         "taskprompt": "/task_prompt id=<TASK_ID>\n/task_prompt job=<JOB_ID>\nGET /api/operator/tasks/<TASK_ID>/prompt-pack",
+        "scenepack": "/scene_pack job=<JOB_ID> scene=1\n/scene_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/scene-pack?scene=1",
         "outputacceptance": "/output_acceptance job=<JOB_ID>\n/output_acceptance task=<TASK_ID>\nGET /api/operator/output-acceptance?job_id=<JOB_ID>",
         "storyboardcrop": "/storyboard_crop\nPOST /api/operator/jobs/<JOB_ID>/storyboard-grid/upload\nform: file, episode=1, rows=2, cols=5",
         "composevideo": "/compose_video job=<JOB_ID> voice=1 force=0\nPOST /api/operator/jobs/<JOB_ID>/compose-video",
@@ -21797,6 +21973,41 @@ async def cmd_worker_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append("\nAPI peek: <code>GET /api/operator/worker-next?job_id=&lt;JOB_ID&gt;&amp;tool=fish</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_scene_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    job_id = safe_int(data.get("job") or data.get("job_id") or data.get("id"), 0)
+    task_id = safe_int(data.get("task") or data.get("task_id"), 0)
+    scene = safe_int(data.get("scene") or data.get("sc") or data.get("canh"), 0)
+    if not job_id and not task_id:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/scene_pack job=&lt;JOB_ID&gt; scene=1</code> hoặc <code>/scene_pack task=&lt;TASK_ID&gt;</code>",
+            parse_mode="HTML"
+        )
+    pack = operator_scene_pack_data(update.effective_user.id, job_id, scene=scene, task_id=task_id)
+    if not pack:
+        return await update.message.reply_text("❌ Không tìm thấy scene pack.")
+    lines = [
+        "🎬 <b>SCENE PRODUCTION PACK</b>",
+        f"• Job: <code>#{pack.get('job_id')}</code> | Manifest: <code>#{pack.get('manifest_id') or '-'}</code>",
+        f"• Scenes: <b>{pack.get('scene_count') or 0}</b>",
+        f"• API: <code>GET /api/operator/jobs/{pack.get('job_id')}/scene-pack</code>\n",
+    ]
+    for item in (pack.get("scenes") or [])[:8]:
+        scene_image = item.get("scene_image") or {}
+        raw_video = item.get("raw_video") or {}
+        visual_task = item.get("visual_task") or {}
+        worker_prompt = item.get("worker_prompt") or {}
+        lines.append(
+            f"• Scene <b>{item.get('scene')}</b> | task=<code>#{visual_task.get('id') or '-'}</code> | "
+            f"image=<code>#{scene_image.get('id') or '-'}</code> | raw=<code>#{raw_video.get('id') or '-'}</code>\n"
+            f"  prompt: {html.escape(truncate_text(worker_prompt.get('video_prompt') or '-', 220))}\n"
+            f"  upload: <code>{html.escape((item.get('submit') or {}).get('upload_url') or '-')}</code>"
+        )
+    lines.append("\nNext: <code>/worker_intake job=%s claim=1</code> | <code>/compose_video job=%s voice=1</code>" % (pack.get("job_id"), pack.get("job_id")))
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_worker_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -22074,7 +22285,7 @@ async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     changed, row = update_production_task(update.effective_user.id, task_id, status or None, output_url, note, asset_type=asset_type)
     if not changed:
         return await update.message.reply_text("❌ Không tìm thấy task hoặc không có gì để cập nhật.")
-    job_id, task_type = row
+    job_id, task_type, scene_no = row
     saved_extra = 0
     for extra_url in output_urls:
         if extra_url and extra_url != output_url:
@@ -22084,7 +22295,7 @@ async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 asset_type,
                 extra_url,
                 "",
-                f"task:{task_id} extra_output {note or ''}"
+                f"task:{task_id} scene={scene_no or 0} extra_output {note or ''}"
             )
             if ok:
                 saved_extra += 1
@@ -24375,6 +24586,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tasks", cmd_tasks))
     tg_app.add_handler(CommandHandler("next_task", cmd_next_task))
     tg_app.add_handler(CommandHandler("worker_next", cmd_worker_next))
+    tg_app.add_handler(CommandHandler("scene_pack", cmd_scene_pack))
     tg_app.add_handler(CommandHandler("worker_intake", cmd_worker_intake))
     tg_app.add_handler(CommandHandler("worker_pack", cmd_worker_pack))
     tg_app.add_handler(CommandHandler("task_prompt", cmd_task_prompt))
@@ -25780,7 +25992,7 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
     changed, row = update_production_task(ADMIN_ID, task_id, status=status, output_url=primary_output, note=payload.note, asset_type=asset_type)
     if not changed:
         raise HTTPException(status_code=400, detail="Task not updated")
-    job_id, task_type = row
+    job_id, task_type, scene_no = row
     saved_extra_assets = 0
     for extra_url in output_urls:
         if extra_url and extra_url != primary_output:
@@ -25790,7 +26002,7 @@ async def api_operator_complete_task(task_id: int, payload: OperatorTaskComplete
                 asset_type,
                 extra_url,
                 "",
-                f"api_task:{task_id} extra_output {payload.note or ''}"
+                f"api_task:{task_id} scene={scene_no or 0} extra_output {payload.note or ''}"
             )
             if ok:
                 saved_extra_assets += 1
@@ -25868,7 +26080,7 @@ async def api_operator_upload_task_asset(
         resolved_asset_type,
         "",
         "",
-        f"api_upload_task:{task_id} {note or ''}".strip(),
+        f"api_upload_task:{task_id} scene={scene_no or 0} {note or ''}".strip(),
         saved["local_path"],
         saved["content_type"],
         saved["filename"],
@@ -26174,6 +26386,14 @@ async def api_operator_job_worker_pack(job_id: int, request: Request, task_id: i
     if not data:
         raise HTTPException(status_code=404, detail="Worker pack not found")
     return {"ok": True, **data}
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/scene-pack")
+async def api_operator_job_scene_pack(job_id: int, request: Request, scene: int = 0, task_id: int = 0):
+    verify_operator_api_token(request)
+    data = operator_scene_pack_data(ADMIN_ID, job_id=job_id, scene=scene, task_id=task_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Scene pack not found")
+    return data
 
 @fastapi_app.get("/api/operator/task-prompt")
 async def api_operator_task_prompt(request: Request, task_id: int = 0, job_id: int = 0, tool: str = ""):
