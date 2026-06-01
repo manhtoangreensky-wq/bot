@@ -2419,7 +2419,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
         "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_scale",
-        "worker_next", "operator_command", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "worker_next", "operator_command", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -8011,6 +8011,116 @@ def build_static_publish_pack(job, owner_id=ADMIN_ID):
         },
     }
 
+def build_video_review_summary(owner_id, job_id):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return None
+    readiness = production_readiness_data(owner_id, job_id)
+    pack = build_static_publish_pack(job, owner_id)
+    assets = list_production_assets(owner_id, job_id, limit=80)
+    final_asset = latest_production_asset(owner_id, job_id, "final_video")
+    if not final_asset:
+        final_asset = latest_production_asset(owner_id, job_id, "raw_video")
+    (
+        jid, _calendar_id, _campaign_id, _channel_id, _affiliate_id, platform, topic, stage, status,
+        _note, _brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    missing = [
+        {"key": key, "detail": detail, "next": next_cmd}
+        for key, ok, detail, next_cmd in (readiness.get("checks", []) if readiness else [])
+        if not ok
+    ]
+    return {
+        "job": {
+            "id": jid,
+            "platform": platform,
+            "topic": topic,
+            "stage": stage,
+            "status": status,
+            "asset_url": asset_url,
+            "publish_url": publish_url,
+            "channel_name": channel_name,
+            "account_label": account_label,
+            "network": network,
+            "product_name": product_name,
+            "affiliate_url": affiliate_url,
+        },
+        "readiness": readiness,
+        "missing": missing,
+        "publish_pack": pack,
+        "assets": assets,
+        "final_asset": final_asset,
+        "commands": {
+            "send_video": f"/asset_send job={job_id} type=final_video",
+            "publish_pack": f"/publish_pack job={job_id}",
+            "approve_manual": f"/approve_publish job={job_id} queue=1 mode=manual note=review_video_ok",
+            "approve_api": f"/approve_publish job={job_id} queue=1 mode=api note=review_video_ok",
+            "mark_published": f"/mark_published job={job_id} url=https://... views=0 clicks=0 note=...",
+            "fix_next": missing[0].get("next") if missing else "",
+        },
+    }
+
+def format_video_review_summary(summary):
+    job = summary.get("job") or {}
+    pack = summary.get("publish_pack") or {}
+    readiness = summary.get("readiness") or {}
+    final_asset = summary.get("final_asset")
+    commands = summary.get("commands") or {}
+    level = readiness.get("level") or "UNKNOWN"
+    missing = summary.get("missing") or []
+    primary = pack.get("primary_affiliate") or {}
+    related = pack.get("related_links") or []
+    final_asset_text = "-"
+    if final_asset:
+        aid, _owner_id, _job_id, asset_type, url, file_id, note, local_path, content_type, filename, created_at = final_asset
+        final_asset_text = f"#{aid} / {asset_type or '-'} / {filename or url or file_id or local_path or '-'}"
+    lines = [
+        f"🎥 <b>VIDEO REVIEW — JOB #{job.get('id')}</b>",
+        f"• Readiness: <b>{html.escape(level)}</b>",
+        f"• Stage/status: <b>{html.escape(job.get('stage') or '-')}</b>/<b>{html.escape(job.get('status') or '-')}</b>",
+        f"• Platform: <code>{html.escape(job.get('platform') or '-')}</code>",
+        f"• Channel: {html.escape(job.get('channel_name') or '-')} / <code>{html.escape(job.get('account_label') or 'main')}</code>",
+        f"• Topic: {html.escape(job.get('topic') or '-')}",
+        f"• Final asset: <code>{html.escape(final_asset_text)}</code>",
+        "",
+        "<b>Affiliate chính:</b>",
+        f"• {html.escape(primary.get('network') or job.get('network') or '-')} / {html.escape(primary.get('product') or job.get('product_name') or '-')}",
+        f"• Link tracking/caption: <code>{html.escape(primary.get('tracking_url') or primary.get('url') or job.get('affiliate_url') or '-')}</code>",
+        "",
+        "<b>Caption:</b>",
+        f"<pre>{html_pre(pack.get('caption') or '-', 1200)}</pre>",
+        "<b>Comment ghim/link kèm:</b>",
+        f"<pre>{html_pre(pack.get('pinned_comment') or '-', 1000)}</pre>",
+    ]
+    if related:
+        lines.append("<b>Link liên quan nên kèm:</b>")
+        for item in related[:5]:
+            placement = item.get("placement") or {}
+            lines.append(
+                f"• {html.escape(item.get('product_name') or '-')} | "
+                f"<code>{html.escape(placement.get('caption') or item.get('url') or '-')}</code>"
+            )
+    lines.append("\n<b>Checklist trước đăng:</b>")
+    for item in (pack.get("checklist") or [])[:8]:
+        lines.append(f"• {html.escape(item)}")
+    if missing:
+        lines.append("\n<b>Đang thiếu:</b>")
+        for item in missing[:6]:
+            lines.append(
+                f"• <code>{html.escape(item.get('key') or '-')}</code>: {html.escape(item.get('detail') or '-')}\n"
+                f"  Next: <code>{html.escape(item.get('next') or '-')}</code>"
+            )
+    lines.append("\n<b>Lệnh tiếp theo:</b>")
+    lines.append(f"• Xem video: <code>{html.escape(commands.get('send_video') or '')}</code>")
+    lines.append(f"• Pack đầy đủ: <code>{html.escape(commands.get('publish_pack') or '')}</code>")
+    if level == "READY_TO_QUEUE":
+        lines.append(f"• Duyệt đăng tay: <code>{html.escape(commands.get('approve_manual') or '')}</code>")
+        lines.append(f"• Duyệt API chính thức: <code>{html.escape(commands.get('approve_api') or '')}</code>")
+    elif commands.get("fix_next"):
+        lines.append(f"• Sửa điểm thiếu: <code>{html.escape(commands.get('fix_next') or '')}</code>")
+    lines.append(f"• Sau đăng: <code>{html.escape(commands.get('mark_published') or '')}</code>")
+    return "\n".join(lines)
+
 def build_creative_test_prompt(job, count=5):
     (
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
@@ -9745,6 +9855,16 @@ def operator_brain_fallback(raw_text):
             "status": "published",
             "confidence": 84,
         }
+    if job_id and any(word in lower for word in [
+        "kiểm duyệt video", "kiem duyet video", "review video", "xem video", "duyệt video", "duyet video",
+        "check video", "video review"
+    ]):
+        return {
+            "intent": "review_video",
+            "job": job_id,
+            "send": 1,
+            "confidence": 84,
+        }
     if job_id and any(word in lower for word in ["duyệt", "duyet", "approve", "chốt đăng", "chot dang", "cho đăng", "cho dang", "vào hàng đợi", "vao hang doi"]):
         mode = "api" if "api" in lower or "auto" in lower else "manual"
         return {
@@ -9952,7 +10072,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, reference_scan, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, reference_add, reference_scan, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
@@ -9966,6 +10086,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- worker_next: khi admin muốn xem worker/task tiếp theo mà chưa đổi trạng thái; có thể có job/tool.\n"
         "- next_task: khi admin muốn nhận/giao việc tiếp theo để bắt đầu làm; có thể có job/tool.\n"
         "- task_handoff: khi admin muốn xuất prompt/handoff một task cụ thể; cần task ID.\n"
+        "- review_video: khi admin muốn xem/kiểm duyệt final video, caption, affiliate links trước khi approve; cần job ID.\n"
         "- reference_add: khi admin gửi link/path video và nói học/lưu/tham khảo/mẫu để đưa vào reference catalog.\n"
         "- reference_scan: khi admin muốn quét/import/học cả thư mục video tham khảo.\n"
         "- approve_publish: khi admin nói duyệt/chốt job để đưa vào hàng đợi đăng; cần job ID.\n"
@@ -9982,7 +10103,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -10128,6 +10249,8 @@ def brain_command_preview(plan):
         return " ".join(parts)
     if intent == "task_handoff":
         return f"/task_handoff id={int(plan.get('task') or plan.get('id') or 0)}"
+    if intent == "review_video":
+        return f"/review_video job={int(plan.get('job') or 0)} send={safe_int(plan.get('send') if plan.get('send') is not None else 1, 1)}"
     if intent == "job_ready":
         return f"/job_ready job={int(plan.get('job') or 0)}"
     if intent == "operator_daily":
@@ -10397,6 +10520,14 @@ async def run_brain_plan(update, context, plan):
                 return await update.message.reply_text("⚠️ Cần task ID. Ví dụ: <code>/brain handoff task 5</code>", parse_mode="HTML")
             context.args = [f"id={task_id}"]
             return await cmd_task_handoff(update, context)
+        if intent == "review_video":
+            if not int(plan.get("job") or 0):
+                return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain kiểm duyệt video job 12</code>", parse_mode="HTML")
+            context.args = [
+                f"job={int(plan.get('job') or 0)}",
+                f"send={safe_int(plan.get('send') if plan.get('send') is not None else 1, 1)}",
+            ]
+            return await cmd_review_video(update, context)
         if intent == "job_ready":
             if not int(plan.get("job") or 0):
                 return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain kiểm tra job 12 đã ready chưa</code>", parse_mode="HTML")
@@ -12186,7 +12317,8 @@ def operator_category_keyboard(category):
             ("🎛 Pipeline", "pipeline"),
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
-            ("🗂 Assets", "assets"), ("📋 Job report", "report"),
+            ("🎥 Review video", "reviewvideo"), ("🗂 Assets", "assets"),
+            ("📋 Job report", "report"),
             ("🧠 Job context", "jobcontext"), ("🚦 Job ready", "jobready"),
             ("🛡 Review gate", "review"),
             ("🧪 Creative test", "creative"), ("🏁 Creative report", "creativereport"),
@@ -12575,6 +12707,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
         "nexttask": "/next_task\n/next_task job=<JOB_ID>",
+        "reviewvideo": "/review_video job=<JOB_ID> send=1\n/brain kiểm duyệt video job <JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>\n/asset_send id=<ASSET_ID>\n/asset_send job=<JOB_ID> type=final_video",
         "report": "/job_report <JOB_ID>",
         "jobcontext": "/job_context job=<JOB_ID>\nGET /api/operator/jobs/<JOB_ID>/context",
@@ -12628,6 +12761,7 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain xem worker tiếp theo job 12</code>\n"
             "• <code>/brain giao việc tiếp theo job 12</code>\n"
             "• <code>/brain handoff task 5</code>\n"
+            "• <code>/brain kiểm duyệt video job 12</code>\n"
             "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
             "• <code>/brain báo cáo vận hành 7 ngày</code>",
             parse_mode="HTML"
@@ -13317,6 +13451,38 @@ async def cmd_asset_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Nếu asset là link nội bộ, hãy kiểm tra file còn nằm trong OPERATOR_UPLOAD_DIR.",
             parse_mode="HTML"
         )
+
+async def cmd_review_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/review_video job=&lt;JOB_ID&gt; send=1</code>",
+            parse_mode="HTML",
+        )
+    summary = build_video_review_summary(update.effective_user.id, job_id)
+    if not summary:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    should_send = str(data.get("send") or data.get("video") or "1").lower() not in {"0", "false", "no", "khong"}
+    final_asset = summary.get("final_asset")
+    if should_send and final_asset:
+        try:
+            await send_production_asset_to_chat(context, update.effective_chat.id, update.effective_user.id, final_asset[0])
+        except Exception as e:
+            logger.error(f"review_video send asset error: {e}")
+            await update.message.reply_text(
+                f"⚠️ Có asset nhưng gửi video lỗi: <code>{html.escape(str(e))}</code>",
+                parse_mode="HTML",
+            )
+    elif should_send:
+        await update.message.reply_text(
+            f"⚠️ Job #{job_id} chưa có final_video/raw_video để gửi. Dùng <code>/asset_add</code> hoặc <code>/task_set</code> trước.",
+            parse_mode="HTML",
+        )
+    await update.message.reply_text(format_video_review_summary(summary), parse_mode="HTML")
 
 async def cmd_manifest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -15758,6 +15924,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
     tg_app.add_handler(CommandHandler("assets", cmd_assets))
     tg_app.add_handler(CommandHandler("asset_send", cmd_asset_send))
+    tg_app.add_handler(CommandHandler("review_video", cmd_review_video))
     tg_app.add_handler(CommandHandler("job_report", cmd_job_report))
     tg_app.add_handler(CommandHandler("job_context", cmd_job_context))
     tg_app.add_handler(CommandHandler("job_ready", cmd_job_ready))
