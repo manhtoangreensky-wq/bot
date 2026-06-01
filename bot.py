@@ -9437,6 +9437,19 @@ def operator_brain_fallback(raw_text):
     duration = int_from_text(lower, ["duration", "dai", "dài"], 45) or 45
     build_requested = any(word in lower for word in ["build", "dựng", "dung", "xây", "xay", "tạo bundle", "tao bundle", "build luôn", "build luon"])
     days = int_from_text(lower, ["days", "ngày", "ngay"], 30) or 30
+    reference_url = extract_supported_video_url(text)
+
+    if reference_url and any(word in lower for word in ["học", "hoc", "tham khảo", "tham khao", "reference", "mẫu", "mau", "lưu", "luu"]):
+        title = re.sub(r"https?://[^\s<>\"]+", " ", text, flags=re.I)
+        title = re.sub(r"\b(học|hoc|tham khảo|tham khao|reference|mẫu|mau|lưu|luu|video|này|nay|link)\b", " ", title, flags=re.I)
+        title = re.sub(r"\s+", " ", title).strip(" :=#") or "reference video"
+        return {
+            "intent": "reference_add",
+            "topic": title,
+            "url": reference_url,
+            "platform": platform,
+            "confidence": 82,
+        }
 
     if any(word in lower for word in ["execute", "thực thi", "thuc thi", "chạy bước tiếp", "chay buoc tiep", "tự xử lý", "tu xu ly", "đầu não chạy", "dau nao chay"]):
         return {
@@ -9542,7 +9555,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, help.\n\n"
+        "Chỉ chọn một intent trong: operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, job_ready, operator_daily, trend_search, publish_queue, performance, reference_add, help.\n\n"
         "Quy tắc:\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
         "- operator_execute: khi admin yêu cầu đầu não tự chạy/thực thi bước tiếp theo an toàn.\n"
@@ -9552,11 +9565,12 @@ def parse_operator_brain(raw_text, owner_id):
         "- autopilot: khi admin muốn tìm trend, tạo job và build luôn creative/manifest/task trong một lệnh.\n"
         "- operator: khi admin nêu một topic cụ thể và có channel để tạo một job.\n"
         "- operator_build: khi admin muốn dựng tiếp một job đã có thành creative/manifest/task.\n"
+        "- reference_add: khi admin gửi link/path video và nói học/lưu/tham khảo/mẫu để đưa vào reference catalog.\n"
         "- job_ready: khi admin muốn kiểm tra đủ điều kiện đăng.\n"
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"limit":3,"duration":45,"build":1,"days":30,"topic":"","url":"","pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -9610,6 +9624,14 @@ def brain_command_preview(plan):
             f"platform={plan.get('platform') or 'tiktok'} channel={plan.get('channel') or 'all'} "
             f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
             f"limit={max(1, min(int(plan.get('limit') or 3), 8))} duration={int(plan.get('duration') or 45)}"
+        )
+    if intent == "reference_add":
+        return (
+            f"/reference_add url={plan.get('url') or plan.get('path_or_url') or '<URL_OR_PATH>'} "
+            f"title={plan.get('topic') or plan.get('title') or 'reference_video'} "
+            f"platform={plan.get('platform') or 'tiktok'} "
+            f"pattern={plan.get('pattern_hint') or plan.get('pattern') or ''} "
+            f"tags={plan.get('tags') or 'reference'}"
         )
     if intent == "operator":
         return (
@@ -9706,6 +9728,22 @@ async def run_brain_plan(update, context, plan):
                 f"duration={int(plan.get('duration') or 45)}",
             ]
             return await cmd_autopilot(update, context)
+        if intent == "reference_add":
+            source = plan.get("url") or plan.get("path_or_url") or plan.get("path") or ""
+            if not source:
+                return await update.message.reply_text(
+                    "⚠️ Lệnh lưu reference cần link hoặc path video. Ví dụ: <code>/brain học video này https://...</code>",
+                    parse_mode="HTML"
+                )
+            context.args = [
+                f"url={source}",
+                f"title={plan.get('topic') or plan.get('title') or 'reference_video'}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"pattern={plan.get('pattern_hint') or plan.get('pattern') or ''}",
+                f"tags={plan.get('tags') or 'reference'}",
+                "note=brain_reference_add",
+            ]
+            return await cmd_reference_add(update, context)
         if intent == "operator":
             if not int(plan.get("channel") or 0):
                 return await update.message.reply_text(
@@ -11898,6 +11936,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
         "referenceadd": "/reference_add url=https://... title=video_mau platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=hoc_hook_CTA\nPOST /api/operator/reference-videos",
+        "brainreference": "/brain học video này https://facebook.com/...\n/brain lưu mẫu TikTok affiliate này https://tiktok.com/...",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
@@ -11940,6 +11979,7 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain đầu não chạy bước tiếp theo an toàn</code>\n"
             "• <code>/brain autopilot 3 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
+            "• <code>/brain học video này https://facebook.com/...</code>\n"
             "• <code>/brain build job 12 duration 45</code>\n"
             "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
             "• <code>/brain báo cáo vận hành 7 ngày</code>",
