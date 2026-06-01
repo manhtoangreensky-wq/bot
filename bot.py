@@ -43,9 +43,11 @@ from telegram.ext import (
     CallbackQueryHandler, filters, ContextTypes
 )
 try:
-    from PIL import Image
+    from PIL import Image, ImageDraw, ImageFont
 except Exception:
     Image = None
+    ImageDraw = None
+    ImageFont = None
 
 # ─── LOGGING ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -4362,7 +4364,7 @@ def operator_worker_spec_data():
             "worker_autorun": {
                 "method": "POST",
                 "url": "/api/operator/worker-autorun",
-                "purpose": "Tự hoàn thành các task proof/review an toàn rồi trả lại work-orders còn cần tool/file thật; không giả lập video/audio.",
+                "purpose": "Tự hoàn thành proof, visual_scene fallback FFmpeg, voice và edit/compose an toàn rồi trả lại work-orders còn cần tool/file thật; publish vẫn qua admin gate.",
                 "body": {"job_ids": [1, 2, 3], "execute": False, "max_tasks": 8, "notify_admin": True},
             },
             "video_brief": {
@@ -7964,7 +7966,7 @@ async def operator_head_brain_run_data(
         owner_id,
         job_ids=cycle_job_ids,
         limit=min(limit, 8),
-        max_tasks=min(max_steps * 4, 20),
+        max_tasks=min(max(12, max_steps * max(limit, 1) * 10), 40),
         execute=bool(execute and safe_mode),
     ) if cycle_job_ids else {"ok": True, "execute": bool(execute), "completed": [], "pending_external": [], "next_video_work_orders": {"orders": []}}
     after = operator_head_brain_cockpit_data(owner_id, days=max(7, days), platform=platform, limit=limit)
@@ -11961,6 +11963,224 @@ def operator_voice_script_from_prompt(prompt=""):
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text[:4500]
 
+def first_labeled_line(text="", labels=None, default=""):
+    labels = labels or []
+    for line in str(text or "").splitlines():
+        clean = line.strip(" -•\t")
+        for label in labels:
+            if clean.lower().startswith(label.lower()):
+                value = clean[len(label):].strip(" :-")
+                if value:
+                    return value
+    return default
+
+def operator_visual_scene_text_pack(owner_id, task, job):
+    task_id, row_job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, job_status,
+        operator_note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    manifest_scene = {}
+    try:
+        _manifest_row, manifest = latest_manifest_payload(owner_id, row_job_id)
+    except Exception:
+        manifest = {}
+    for item in manifest.get("scenes") or []:
+        try:
+            if int(item.get("scene") or 0) == int(scene_no or 0):
+                manifest_scene = item
+                break
+        except Exception:
+            continue
+    headline = (
+        manifest_scene.get("on_screen_text")
+        or manifest_scene.get("caption")
+        or first_labeled_line(prompt, ["On-screen text", "Text", "Hook", "Caption"])
+        or title
+        or topic
+        or "TOAN DAAS Affiliate"
+    )
+    subline = (
+        manifest_scene.get("voice_line")
+        or first_labeled_line(prompt, ["Voice line", "Script", "CTA", "Visual prompt"])
+        or product_name
+        or network
+        or "Video AI + affiliate tracking"
+    )
+    footer = "Link gợi ý ở mô tả/bình luận"
+    if product_name or network:
+        footer = f"{network or 'Affiliate'} • {product_name or 'Sản phẩm liên quan'}"
+    return {
+        "topic": truncate_text(topic or product_name or "TOAN DAAS", 80),
+        "headline": truncate_text(headline, 130),
+        "subline": truncate_text(subline, 180),
+        "footer": truncate_text(footer, 100),
+        "scene_no": int(scene_no or 0),
+        "platform": platform or "social",
+    }
+
+def load_operator_font(size=48, bold=False):
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:\\Windows\\Fonts\\arialbd.ttf" if bold else "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\segoeuib.ttf" if bold else "C:\\Windows\\Fonts\\segoeui.ttf",
+    ]
+    for path in candidates:
+        try:
+            if path and os.path.exists(path):
+                return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+def draw_wrapped_text(draw, xy, text, font, fill, max_width, line_gap=10, max_lines=5, align="center"):
+    x, y = xy
+    words = str(text or "").split()
+    lines = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        width = draw.textbbox((0, 0), candidate, font=font)[2]
+        if current and width > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    if not lines:
+        lines = [""]
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = truncate_text(lines[-1], 42).rstrip(".") + "..."
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        line_w = bbox[2] - bbox[0]
+        line_h = bbox[3] - bbox[1]
+        draw_x = x
+        if align == "center":
+            draw_x = x + max(0, (max_width - line_w) // 2)
+        draw.text((draw_x, y), line, font=font, fill=fill)
+        y += line_h + line_gap
+    return y
+
+async def create_operator_visual_scene_fallback(owner_id, task, job, duration=6):
+    task_id, row_job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return False, {"reason": "ffmpeg_missing", "manual_next": f"/worker_pack job={int(row_job_id)} task={int(task_id)}"}
+    if Image is None:
+        return False, {"reason": "pillow_missing", "manual_next": f"/worker_pack job={int(row_job_id)} task={int(task_id)}"}
+    upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+    job_dir = os.path.abspath(os.path.join(upload_root, f"job_{int(row_job_id)}"))
+    if os.path.commonpath([upload_root, job_dir]) != upload_root:
+        return False, {"reason": "invalid_visual_path"}
+    os.makedirs(job_dir, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    png_path = os.path.abspath(os.path.join(job_dir, f"visual_scene_{int(scene_no or 0)}_task_{int(task_id)}_{stamp}.png"))
+    out_path = os.path.abspath(os.path.join(job_dir, f"visual_scene_{int(scene_no or 0)}_task_{int(task_id)}_{stamp}.mp4"))
+    if os.path.commonpath([upload_root, png_path]) != upload_root or os.path.commonpath([upload_root, out_path]) != upload_root:
+        return False, {"reason": "invalid_visual_output_path"}
+
+    pack = operator_visual_scene_text_pack(owner_id, task, job)
+    width, height = 1080, 1920
+    img = Image.new("RGB", (width, height), "#071611")
+    draw = ImageDraw.Draw(img)
+    for y in range(height):
+        ratio = y / max(1, height - 1)
+        r = int(8 + ratio * 10)
+        g = int(34 + ratio * 64)
+        b = int(28 + ratio * 42)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    draw.rounded_rectangle((70, 120, width - 70, height - 120), radius=42, fill=(246, 250, 247), outline=(32, 184, 123), width=4)
+    draw.rounded_rectangle((94, 144, width - 94, 306), radius=30, fill=(7, 64, 48))
+    draw.ellipse((width - 245, 190, width - 125, 310), fill=(30, 210, 135))
+    draw.text((126, 190), "TOAN DAAS", font=load_operator_font(58, True), fill=(238, 255, 247))
+    draw.text((126, 252), f"Scene {pack['scene_no'] or 1} • {pack['platform']}", font=load_operator_font(28, False), fill=(167, 245, 211))
+    draw_wrapped_text(draw, (126, 420), pack["topic"], load_operator_font(38, True), (9, 85, 62), width - 252, 10, 2, "center")
+    draw_wrapped_text(draw, (126, 650), pack["headline"], load_operator_font(68, True), (3, 47, 35), width - 252, 16, 4, "center")
+    draw.rounded_rectangle((150, 1120, width - 150, 1398), radius=28, fill=(226, 248, 238), outline=(155, 225, 190), width=2)
+    draw_wrapped_text(draw, (190, 1172), pack["subline"], load_operator_font(40, False), (19, 79, 61), width - 380, 12, 4, "center")
+    draw.rounded_rectangle((170, 1552, width - 170, 1668), radius=58, fill=(9, 145, 92))
+    draw_wrapped_text(draw, (210, 1587), "Xem link liên quan", load_operator_font(40, True), (246, 255, 250), width - 420, 8, 1, "center")
+    draw_wrapped_text(draw, (126, 1744), pack["footer"], load_operator_font(34, False), (7, 70, 52), width - 252, 10, 2, "center")
+    img.save(png_path, "PNG")
+
+    vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p"
+    cmd = [
+        ffmpeg, "-y", "-loop", "1", "-t", str(max(3, min(int(duration or 6), 15))),
+        "-i", png_path, "-vf", vf, "-r", "30", "-c:v", "libx264",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", out_path,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except asyncio.TimeoutError:
+        return False, {"reason": "ffmpeg_visual_timeout", "local_image": png_path}
+    except Exception as exc:
+        return False, {"reason": "ffmpeg_visual_exception", "error": str(exc), "local_image": png_path}
+    if proc.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) <= 0:
+        return False, {
+            "reason": "ffmpeg_visual_failed",
+            "returncode": proc.returncode,
+            "stderr": truncate_text((stderr or b"").decode("utf-8", errors="ignore"), 1200),
+            "local_image": png_path,
+        }
+    ok, asset_id = add_production_asset(
+        owner_id,
+        row_job_id,
+        "raw_video",
+        "",
+        "",
+        f"operator_visual_autorun scene={int(scene_no or 0)} task:{task_id} fallback=ffmpeg_card",
+        out_path,
+        "video/mp4",
+        os.path.basename(out_path),
+    )
+    if not ok:
+        return False, {"reason": "asset_save_failed", "local_path": out_path}
+    asset_url = operator_asset_url(asset_id)
+    update_production_asset_url(owner_id, asset_id, asset_url)
+    note_text = f"operator_visual_autorun ffmpeg_card asset:{asset_id} scene={int(scene_no or 0)}"
+    changed, row = update_production_task(
+        owner_id,
+        task_id,
+        status="ready",
+        output_url=asset_url,
+        note=note_text,
+        asset_type="raw_video",
+        record_asset=False,
+    )
+    if not changed or not row:
+        return False, {"reason": "task_update_failed", "asset_id": asset_id, "asset_url": asset_url}
+    readiness = apply_worker_output_job_state(
+        owner_id,
+        row[0],
+        task_id=task_id,
+        task_type=row[1],
+        task_status="ready",
+        asset_type="raw_video",
+        note=note_text,
+    )
+    return True, {
+        "task_id": int(task_id),
+        "job_id": int(row[0]),
+        "task_type": "visual_scene",
+        "status": "ready",
+        "asset_id": asset_id,
+        "asset_url": asset_url,
+        "local_path": out_path,
+        "scene_no": int(scene_no or 0),
+        "tool": "FFmpeg visual card",
+        "fallback_used": True,
+        "readiness": (readiness or {}).get("level", "UNKNOWN"),
+        "note": note_text,
+    }
+
 async def synthesize_operator_voice_task(owner_id, task, job):
     task_id, row_job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
     (
@@ -12088,7 +12308,7 @@ async def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_task
     completed = []
     blocked = []
     pending_external = []
-    safe_types = {"proof_asset", "voice"}
+    safe_types = {"proof_asset", "visual_scene", "voice", "edit"}
     processed = 0
     for job_id in normalized_ids[:limit]:
         rows = [
@@ -12139,7 +12359,12 @@ async def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_task
                     "job_id": int(row_job_id),
                     "task_type": task_type,
                     "would_status": "ready",
-                    "output_url": affiliate_url if task_type_l == "proof_asset" else "local_mp3_when_execute",
+                    "output_url": (
+                        affiliate_url if task_type_l == "proof_asset"
+                        else "local_mp4_when_execute" if task_type_l == "visual_scene"
+                        else "local_final_video_when_execute" if task_type_l == "edit"
+                        else "local_mp3_when_execute"
+                    ),
                     "note": "preview_safe_autorun",
                 })
                 processed += 1
@@ -12159,7 +12384,7 @@ async def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_task
                     asset_type="proof_asset",
                     record_asset=True,
                 )
-            else:
+            elif task_type_l == "voice":
                 ok_voice, voice_result = await synthesize_operator_voice_task(owner_id, task, job)
                 if ok_voice:
                     completed.append(voice_result)
@@ -12170,6 +12395,79 @@ async def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_task
                         "task_type": task_type,
                         "reason": voice_result.get("reason") or "voice_failed",
                         "error": voice_result.get("error") or voice_result.get("fish_error") or "",
+                    })
+                processed += 1
+                continue
+            elif task_type_l == "visual_scene":
+                ok_visual, visual_result = await create_operator_visual_scene_fallback(owner_id, task, job)
+                if ok_visual:
+                    completed.append(visual_result)
+                else:
+                    pending_external.append({
+                        "task_id": int(task_id),
+                        "job_id": int(row_job_id),
+                        "task_type": task_type,
+                        "tool": tool,
+                        "scene_no": int(scene_no or 0),
+                        "title": title,
+                        "reason": visual_result.get("reason") or "visual_fallback_failed",
+                        "manual_next": visual_result.get("manual_next") or f"/worker_pack job={int(row_job_id)} task={int(task_id)}",
+                        "error": visual_result.get("error") or visual_result.get("stderr") or "",
+                        "telegram": {
+                            "task_prompt": f"/task_prompt id={int(task_id)}",
+                            "worker_pack": f"/worker_pack job={int(row_job_id)} task={int(task_id)}",
+                        },
+                        "api": {
+                            "prompt_pack": f"/api/operator/tasks/{int(task_id)}/prompt-pack",
+                            "complete": f"/api/operator/tasks/{int(task_id)}/complete",
+                            "upload": f"/api/operator/tasks/{int(task_id)}/upload",
+                        },
+                    })
+                processed += 1
+                continue
+            elif task_type_l == "edit":
+                ok_compose, compose_status, compose_result = await compose_job_video_with_ffmpeg(
+                    owner_id,
+                    row_job_id,
+                    include_voice=True,
+                    force=False,
+                )
+                if ok_compose:
+                    completed.append({
+                        "task_id": int(task_id),
+                        "job_id": int(row_job_id),
+                        "task_type": "edit",
+                        "status": "ready",
+                        "asset_id": compose_result.get("asset_id"),
+                        "asset_url": compose_result.get("asset_url"),
+                        "local_path": compose_result.get("local_path"),
+                        "scene_count": compose_result.get("scene_count"),
+                        "voice_included": compose_result.get("voice_included"),
+                        "tool": "FFmpeg composer",
+                        "note": compose_status,
+                        "telegram_review": compose_result.get("telegram_review") or f"/review_video job={int(row_job_id)} send=1",
+                    })
+                else:
+                    pending_external.append({
+                        "task_id": int(task_id),
+                        "job_id": int(row_job_id),
+                        "task_type": task_type,
+                        "tool": tool,
+                        "scene_no": int(scene_no or 0),
+                        "title": title,
+                        "reason": compose_status,
+                        "message": compose_result.get("message") or "",
+                        "manual_next": compose_result.get("manual_next") or f"/worker_pack job={int(row_job_id)} task={int(task_id)}",
+                        "error": compose_result.get("error") or compose_result.get("stderr") or "",
+                        "telegram": {
+                            "compose_video": f"/compose_video job={int(row_job_id)} voice=1",
+                            "worker_pack": f"/worker_pack job={int(row_job_id)} task={int(task_id)}",
+                        },
+                        "api": {
+                            "compose": f"/api/operator/jobs/{int(row_job_id)}/compose-video",
+                            "complete": f"/api/operator/tasks/{int(task_id)}/complete",
+                            "upload": f"/api/operator/tasks/{int(task_id)}/upload",
+                        },
                     })
                 processed += 1
                 continue
@@ -12207,7 +12505,7 @@ async def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_task
         "completed_count": len([item for item in completed if not item.get("preview")]),
         "preview_count": len([item for item in completed if item.get("preview")]),
         "next_video_work_orders": operator_video_work_orders_data(owner_id, job_ids_for_orders, limit=min(limit, 8), tool="claude") if job_ids_for_orders else {"ok": True, "count": 0, "orders": []},
-        "rule": "Autorun chỉ hoàn thành proof và voice an toàn. Voice dùng Fish nếu có key, lỗi/quota thì fallback Edge TTS. Visual/edit/publish cần tool/file thật hoặc admin gate; không fake media.",
+        "rule": "Autorun hoàn thành proof, visual fallback, voice và edit/compose an toàn. Voice dùng Fish nếu có key, lỗi/quota thì fallback Edge TTS. Visual_scene tạo raw_video FFmpeg card khi có ffmpeg/Pillow; edit ghép final_video bằng FFmpeg khi đủ scene. Review/publish vẫn qua admin gate; không fake publish.",
     }
 
 def select_operator_focus_job_id(owner_id, job_id=0):
