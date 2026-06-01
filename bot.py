@@ -10785,7 +10785,7 @@ class AgentVoice:
 
 class AgentDownloader:
     MAX_TELEGRAM_DOWNLOAD_BYTES = 48 * 1024 * 1024
-    BLOCKED_DOWNLOADER_MARKERS = [
+    BLOCKED_EXTERNAL_PROMO_MARKERS = [
         "t.me/a_tools",
         "telegram.me/a_tools",
         "join our channel",
@@ -10806,7 +10806,11 @@ class AgentDownloader:
     @staticmethod
     def _is_suspicious_downloader_result(data, media_url: str = ""):
         blob = f"{media_url}\n{json.dumps(data, ensure_ascii=False)[:2000]}".lower()
-        return any(marker in blob for marker in AgentDownloader.BLOCKED_DOWNLOADER_MARKERS)
+        return any(marker in blob for marker in AgentDownloader.BLOCKED_EXTERNAL_PROMO_MARKERS)
+
+    @staticmethod
+    def _uses_public_cobalt(api_base: str) -> bool:
+        return (api_base or "").rstrip("/").lower() == "https://api.cobalt.tools"
 
     @staticmethod
     async def _hide_suspicious_downloader_result(msg, user_id, cost, data, media_url="", chat_id=None):
@@ -10903,6 +10907,24 @@ class AgentDownloader:
         )
         try:
             api_base = (COBALT_API_URL or "https://api.cobalt.tools").rstrip("/")
+            is_admin = AgentDownloader._is_admin_target(user_id, chat_id)
+            if AgentDownloader._uses_public_cobalt(api_base):
+                if user_id and cost > 0:
+                    add_credit(user_id, cost, "download_refund", "", "Public Cobalt bị tắt để tránh quảng cáo/join channel ngoài")
+                admin_hint = (
+                    "\n\n⚠️ Admin: public <code>api.cobalt.tools</code> thường trả bot protection hoặc kênh quảng cáo. "
+                    "Hãy self-host Cobalt trên Railway rồi set <code>COBALT_API_URL</code>."
+                    if is_admin else
+                    ""
+                )
+                await msg.edit_text(
+                    "❌ Tải video qua link đang tạm khóa để tránh hiện quảng cáo/kênh lạ cho khách.\n"
+                    + AgentDownloader._refund_line(cost)
+                    + "Bạn có thể gửi file video trực tiếp để bot xử lý tiếp."
+                    + admin_hint,
+                    parse_mode="HTML"
+                )
+                return
             headers = {"Accept": "application/json", "Content-Type": "application/json"}
             if COBALT_API_KEY:
                 headers["Authorization"] = f"Api-Key {COBALT_API_KEY}"
