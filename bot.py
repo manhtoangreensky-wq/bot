@@ -7951,6 +7951,33 @@ async def operator_head_brain_run_data(
         include_prompt=include_prompt,
     )
     after = operator_head_brain_cockpit_data(owner_id, days=max(7, days), platform=platform, limit=limit)
+    cycle_job_ids = extract_operator_job_ids(cycle, limit=limit)
+    video_work_orders = operator_video_work_orders_data(
+        owner_id,
+        job_ids=cycle_job_ids,
+        limit=min(limit, 8),
+        tool="claude",
+    ) if cycle_job_ids else {"ok": True, "count": 0, "job_ids": [], "orders": []}
+    worker_next = operator_worker_next_summary(
+        owner_id,
+        job_ids=cycle_job_ids,
+        limit=min(limit, 8),
+        tool="",
+    ) if cycle_job_ids else []
+    first_order = ((video_work_orders.get("orders") or [None])[0]) or {}
+    order_job_ids = ",".join(str(jid) for jid in (video_work_orders.get("job_ids") or cycle_job_ids)[:8])
+    video_orders_cmd = f"/video_work_orders jobs={order_job_ids} tool=claude" if order_job_ids else "/video_work_orders tool=claude"
+    video_orders_api = f"/api/operator/video-work-orders?job_ids={order_job_ids}&tool=claude" if order_job_ids else "/api/operator/video-work-orders?tool=claude"
+    created_jobs = []
+    for step in (cycle.get("steps") or []):
+        payloads = [step.get("result") or {}]
+        nested = (step.get("result") or {}).get("result")
+        if isinstance(nested, dict):
+            payloads.append(nested)
+        for payload in payloads:
+            for job in (payload.get("created_jobs") or []):
+                if isinstance(job, dict) and job.get("job_id") not in {item.get("job_id") for item in created_jobs}:
+                    created_jobs.append(job)
     return {
         "ok": True,
         "generated_at": now_text(),
@@ -7974,18 +8001,33 @@ async def operator_head_brain_run_data(
         },
         "executed_count": int(cycle.get("executed_count") or 0),
         "claimed_tasks": cycle.get("claimed_tasks") or [],
-        "created_jobs": [
-            job
-            for step in (cycle.get("steps") or [])
-            for job in (((step.get("result") or {}).get("result") or {}).get("created_jobs") or [])
-        ],
+        "created_jobs": created_jobs,
+        "worker_handoff": {
+            "job_ids": cycle_job_ids,
+            "worker_next": worker_next,
+            "video_work_orders": video_work_orders,
+            "first_order": {
+                "job_id": first_order.get("job_id"),
+                "task_id": first_order.get("task_id"),
+                "video_brief": (first_order.get("telegram") or {}).get("video_brief"),
+                "worker_pack": (first_order.get("telegram") or {}).get("worker_pack"),
+                "compose_video": (first_order.get("telegram") or {}).get("compose_video"),
+                "review_video": (first_order.get("telegram") or {}).get("review_video"),
+            } if first_order else {},
+            "claude_instruction": (
+                "Đọc video_work_orders.orders theo thứ tự. Với mỗi order: tạo video/output thật theo worker_prompt, "
+                "upload/complete vào upload_url hoặc complete_url, sau đó dừng ở review_video/approve_publish để admin duyệt."
+            ),
+        },
         "stop_reason": cycle.get("stop_reason"),
         "next": {
             "head_brain": f"/head_brain days=30 platform={platform} limit={limit}",
             "preview": f"/head_run execute=0 platform={platform} max={max_steps}",
             "execute": f"/head_run execute=1 platform={platform} max={max_steps}",
             "worker": "/worker_intake claim=0 include_prompt=1",
+            "video_work_orders": video_orders_cmd,
             "publish": f"/publish_cockpit platform={platform} limit={limit}",
+            "api_video_work_orders": video_orders_api,
         },
         "rule": "Head run chỉ dùng safe daily cycle. Nó có thể launch/claim task/scale khi safe; gặp setup/review/publish/manual gate thì dừng và trả lệnh cho admin.",
     }
@@ -22891,11 +22933,24 @@ async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("\n<b>Job tạo mới:</b>")
         for job in result.get("created_jobs")[:5]:
             lines.append(f"• job #{job.get('job_id')} | <code>{html.escape(job.get('platform') or '-')}</code> | {html.escape(job.get('title') or job.get('topic') or '-')}")
+    handoff = result.get("worker_handoff") or {}
+    video_orders = (handoff.get("video_work_orders") or {}).get("orders") or []
+    if video_orders:
+        first_order = video_orders[0]
+        first_order_tg = first_order.get("telegram") or {}
+        first_job_id = first_order.get("job_id")
+        first_brief_cmd = first_order_tg.get("video_brief") or f"/video_brief job={first_job_id}"
+        first_compose_cmd = first_order_tg.get("compose_video") or f"/compose_video job={first_job_id} voice=1"
+        lines.append("\n<b>Giao việc cho Claude/n8n:</b>")
+        lines.append(f"• Work-orders: <b>{len(video_orders)}</b> | <code>{html.escape((result.get('next') or {}).get('video_work_orders') or '/video_work_orders')}</code>")
+        lines.append(f"• First brief: <code>{html.escape(first_brief_cmd)}</code>")
+        lines.append(f"• First compose: <code>{html.escape(first_compose_cmd)}</code>")
     next_cmds = result.get("next") or {}
     lines.append(
         "\n<b>Lệnh tiếp:</b>\n"
         f"• Head: <code>{html.escape(next_cmds.get('head_brain') or '/head_brain')}</code>\n"
         f"• Worker: <code>{html.escape(next_cmds.get('worker') or '/worker_intake')}</code>\n"
+        f"• Orders: <code>{html.escape(next_cmds.get('video_work_orders') or '/video_work_orders')}</code>\n"
         f"• Publish: <code>{html.escape(next_cmds.get('publish') or '/publish_cockpit')}</code>\n"
         "API: <code>POST /api/operator/head-run</code>"
     )
@@ -28447,6 +28502,9 @@ async def api_operator_head_run(payload: OperatorHeadRunRequest, request: Reques
     )
     if payload.notify_admin and tg_app and ADMIN_ID:
         try:
+            handoff = result.get("worker_handoff") or {}
+            video_orders = (handoff.get("video_work_orders") or {}).get("orders") or []
+            next_cmds = result.get("next") or {}
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
@@ -28454,7 +28512,9 @@ async def api_operator_head_run(payload: OperatorHeadRunRequest, request: Reques
                     f"• Mode: <b>{html.escape(result.get('mode') or '-')}</b> | Safe: <b>{'YES' if result.get('safe_mode') else 'NO'}</b>\n"
                     f"• Platform: <code>{html.escape(result.get('platform') or '-')}</code> | Steps: <b>{len((result.get('cycle') or {}).get('steps') or [])}</b>\n"
                     f"• Executed: <b>{result.get('executed_count', 0)}</b> | Stop: <code>{html.escape(result.get('stop_reason') or '-')}</code>\n"
-                    f"• Next: <code>{html.escape(((result.get('next') or {}).get('head_brain') or '/head_brain'))}</code>"
+                    f"• Work-orders: <b>{len(video_orders)}</b>\n"
+                    f"• Orders: <code>{html.escape(next_cmds.get('video_work_orders') or '/video_work_orders')}</code>\n"
+                    f"• Next: <code>{html.escape(next_cmds.get('head_brain') or '/head_brain')}</code>"
                 ),
                 parse_mode="HTML",
             )
