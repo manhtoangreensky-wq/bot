@@ -14260,6 +14260,27 @@ def serialize_publish_queue_item(row):
         "rule": "Publish only approved/queued jobs. Keep affiliate disclosure and platform rules.",
     }
 
+def handoff_text(value, sep=" "):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        parts = []
+        for item in value:
+            text = handoff_text(item, sep=sep)
+            if text:
+                parts.append(text)
+        return sep.join(parts)
+    if isinstance(value, dict):
+        parts = []
+        for item in value.values():
+            text = handoff_text(item, sep=sep)
+            if text:
+                parts.append(text)
+        return sep.join(parts)
+    return str(value)
+
 def build_publisher_handoff(queue_payload):
     if not queue_payload:
         return {}
@@ -14269,12 +14290,12 @@ def build_publisher_handoff(queue_payload):
     final_video = queue_payload.get("final_video") or {}
     media_url = final_video.get("url") or queue_payload.get("asset_url") or ""
     caption_parts = [
-        pack.get("caption", ""),
-        pack.get("cta", ""),
-        pack.get("hashtags", ""),
+        handoff_text(pack.get("caption", "")),
+        handoff_text(pack.get("cta", "")),
+        handoff_text(pack.get("hashtags", "")),
     ]
     caption = "\n\n".join([part for part in caption_parts if part]).strip()
-    pinned_comment = pack.get("pinned_comment") or ""
+    pinned_comment = handoff_text(pack.get("pinned_comment") or "")
     related_links = pack.get("related_links") or []
     affiliate_bundle = pack.get("affiliate_bundle") or {}
     comment_pack = queue_payload.get("comment_pack") or pack.get("comment_pack") or {}
@@ -14362,6 +14383,79 @@ def build_publisher_handoff(queue_payload):
         "performance_next": (pack.get("performance_plan") or {}),
         "rule": "Không publish nếu thiếu final video, thiếu consent/quyền nội dung, hoặc review gate/publish queue chưa duyệt.",
     }
+
+def format_publisher_handoff_summary(queue_id, handoff):
+    copy = handoff.get("copy") or {}
+    media = handoff.get("media") or {}
+    comment_plan = handoff.get("comment_plan") or {}
+    comment_items = comment_plan.get("comments") or []
+    performance = handoff.get("performance_next") or {}
+    lines = [
+        f"📮 <b>PUBLISHER HANDOFF — QUEUE #{queue_id}</b>",
+        f"• Job: <code>#{handoff.get('job_id') or '-'}</code>",
+        f"• Platform/mode: <code>{html.escape(handoff.get('platform') or '-')}</code> / <code>{html.escape(handoff.get('mode') or '-')}</code>",
+        f"• Auto publish: <b>{'có thể' if handoff.get('can_auto_publish') else 'manual/API chưa đủ token'}</b>",
+        f"• Env cần có: <code>{html.escape(', '.join(handoff.get('required_env') or []) or '-')}</code>",
+        f"• Final video: <code>{html.escape(media.get('final_video_url') or media.get('telegram_file_id') or 'thiếu')}</code>",
+        f"• Gửi video: <code>{html.escape(media.get('telegram_send_command') or 'đã gửi nếu có asset')}</code>",
+        "",
+        "<b>Caption đăng bài:</b>",
+        f"<pre>{html_pre(copy.get('caption') or '-', 720)}</pre>",
+        "<b>Comment ghim/link affiliate:</b>",
+        f"<pre>{html_pre(copy.get('pinned_comment') or '-', 520)}</pre>",
+        f"<b>Comment phụ:</b> <code>{len(comment_items)}</code> comment | delay <code>{int(comment_plan.get('delay_seconds_between_comments') or 30)}s</code>",
+    ]
+    for item in comment_items[:3]:
+        lines.append(
+            f"• #{item.get('order')}: <code>{html.escape(item.get('tracking_source') or '-')}</code> "
+            f"{html.escape(item.get('product') or '-')}\n"
+            f"<pre>{html_pre(item.get('text') or item.get('url') or '-', 260)}</pre>"
+        )
+    if len(comment_items) > 3:
+        lines.append(f"• ... còn {len(comment_items) - 3} comment trong handoff/API.")
+    related = copy.get("related_links") or []
+    if related:
+        lines.append("<b>Link liên quan để tăng cửa ra đơn:</b>")
+        for item in related[:4]:
+            placement = item.get("placement") or {}
+            lines.append(
+                f"• {html.escape(item.get('product_name') or '-')} | "
+                f"<code>{html.escape(placement.get('caption') or item.get('url') or '-')}</code>"
+            )
+    lines.append("<b>Plan đăng:</b>")
+    for step in handoff.get("api_plan") or []:
+        lines.append(f"• {html.escape(step)}")
+    lines.append(
+        "\n<b>Sau khi đăng xong:</b>\n"
+        f"• <code>/publish_queue_set id={queue_id} status=published url=https://...</code>\n"
+        f"• <code>{html.escape(performance.get('views') or ('/performance_add job=%s type=view value=<VIEWS>' % (handoff.get('job_id') or '<JOB_ID>')))}</code>\n"
+        f"• <code>{html.escape(performance.get('clicks') or ('/performance_add job=%s type=click value=<CLICKS>' % (handoff.get('job_id') or '<JOB_ID>')))}</code>"
+    )
+    if handoff.get("can_auto_publish") and (handoff.get("platform") or "") in {"facebook", "fb", "meta", "reels"}:
+        lines.append(f"\nKiểm tra auto: <code>/publisher_auto_check queue={queue_id}</code>")
+        lines.append(f"Auto chính thức: <code>/publisher_auto queue={queue_id}</code>")
+    return "\n".join(lines)
+
+async def send_publisher_handoff_packet(context: ContextTypes.DEFAULT_TYPE, chat_id: int, owner_id, queue_id: int, send_media=True):
+    item = get_publish_queue_item(owner_id, queue_id)
+    if not item:
+        return {"ok": False, "reason": "queue_not_found"}
+    payload = serialize_publish_queue_item(item)
+    handoff = build_publisher_handoff(payload)
+    media = handoff.get("media") or {}
+    errors = []
+    if send_media and safe_int(media.get("asset_id"), 0):
+        try:
+            await send_production_asset_to_chat(context, chat_id, owner_id, int(media.get("asset_id")))
+        except Exception as exc:
+            errors.append(str(exc))
+            logger.error(f"publisher handoff media send error: queue={queue_id} error={exc}")
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=format_publisher_handoff_summary(queue_id, handoff),
+        parse_mode="HTML",
+    )
+    return {"ok": True, "queue_id": queue_id, "job_id": handoff.get("job_id"), "errors": errors}
 
 def publisher_run_payload(owner_id, platform="", mode="", auto_claim=True):
     item = next_publish_queue_item(owner_id, platform=platform, mode=mode)
@@ -25245,6 +25339,7 @@ async def cmd_approve_publish(update: Update, context: ContextTypes.DEFAULT_TYPE
         return await update.message.reply_text("⚠️ mode hợp lệ: <code>manual</code> hoặc <code>api</code>", parse_mode="HTML")
     note = data.get("note") or "admin_approved_publish"
     scheduled_at = data.get("schedule") or data.get("time") or ""
+    send_handoff = truthy_value(data.get("handoff") or data.get("send_handoff"), True)
     ok, reason, info = approve_publish_job(update.effective_user.id, job_id, note=note, queue=queue, mode=mode, scheduled_at=scheduled_at)
     if not ok:
         if reason == "not_ready":
@@ -25259,9 +25354,24 @@ async def cmd_approve_publish(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"• Queue: <b>{'có' if info.get('queued') else 'không'}</b>\n"
         f"• Queue ID: <code>{info.get('queue_id') or '-'}</code>\n"
         f"• Mode: <code>{html.escape(mode)}</code>\n\n"
-        f"Xem hàng đợi: <code>/publish_queue</code>",
+        f"Xem hàng đợi: <code>/publish_queue</code>\n"
+        f"Handoff: <code>/publisher_handoff queue={info.get('queue_id') or '<QUEUE_ID>'}</code>",
         parse_mode="HTML"
     )
+    if queue and send_handoff and info.get("queue_id"):
+        report = await send_publisher_handoff_packet(
+            context,
+            update.effective_chat.id,
+            update.effective_user.id,
+            int(info.get("queue_id")),
+            send_media=True,
+        )
+        if report.get("errors"):
+            await update.message.reply_text(
+                "⚠️ Handoff đã gửi nhưng video có lỗi gửi file: "
+                + html.escape(str(report.get("errors")[:2])),
+                parse_mode="HTML",
+            )
 
 async def cmd_asset_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -30721,13 +30831,32 @@ async def api_operator_approve_publish(job_id: int, payload: OperatorApprovePubl
                     f"• Job: <code>#{job_id}</code>\n"
                     f"• Queue: <b>{'có' if info.get('queued') else 'không'}</b> | ID: <code>{info.get('queue_id') or '-'}</code>\n"
                     f"• Mode: <code>{html.escape(mode)}</code>\n"
-                    f"• Note: {html.escape(payload.note or '-')}"
+                    f"• Note: {html.escape(payload.note or '-')}\n"
+                    f"• Handoff: <code>/publisher_handoff queue={info.get('queue_id') or '<QUEUE_ID>'}</code>"
                 ),
                 parse_mode="HTML"
             )
+            if info.get("queue_id"):
+                item = get_publish_queue_item(ADMIN_ID, int(info.get("queue_id")))
+                if item:
+                    await tg_app.bot.send_message(
+                        chat_id=ADMIN_ID,
+                        text=format_publisher_handoff_summary(
+                            int(info.get("queue_id")),
+                            build_publisher_handoff(serialize_publish_queue_item(item)),
+                        ),
+                        parse_mode="HTML",
+                    )
         except Exception as e:
             logger.error(f"Approve publish notify error: {e}")
-    return {"ok": True, "job_id": job_id, **info}
+    response = {"ok": True, "job_id": job_id, **info}
+    if info.get("queue_id"):
+        item = get_publish_queue_item(ADMIN_ID, int(info.get("queue_id")))
+        if item:
+            queue_payload = serialize_publish_queue_item(item)
+            response["publisher_handoff"] = build_publisher_handoff(queue_payload)
+            response["handoff_url"] = f"/api/operator/publish/{int(info.get('queue_id'))}/handoff"
+    return response
 
 @fastapi_app.get("/api/operator/jobs/{job_id}/publish-pack")
 async def api_operator_job_publish_pack(job_id: int, request: Request):
