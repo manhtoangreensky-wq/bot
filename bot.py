@@ -2851,6 +2851,67 @@ def operator_mission_inbox_data(owner_id, limit=10):
         "rule": "Mission inbox nhận lệnh cấp cao từ admin. Claude/n8n claim mission rồi tự gọi endpoint operator, nhưng publish vẫn phải qua gate duyệt.",
     }
 
+async def run_operator_mission_data(owner_id, mission_id=0, worker="claude", execute=False, safe_mode=True):
+    row = get_operator_mission(owner_id, mission_id) if int(mission_id or 0) else claim_operator_mission(owner_id, worker=worker)
+    if not row:
+        return {"ok": False, "reason": "mission_not_found_or_empty_queue"}
+    mission = serialize_operator_mission(row)
+    if mission["status"] == "queued":
+        claimed = claim_operator_mission(owner_id, worker=worker)
+        if claimed:
+            mission = serialize_operator_mission(claimed)
+    plan_data = operator_command_plan_data(owner_id, mission["objective"])
+    result = {
+        "executed": False,
+        "message": "execute=false",
+    }
+    final_status = mission["status"] if mission["status"] in {"working", "queued"} else mission["status"]
+    if execute:
+        if not plan_data.get("execute_allowed"):
+            result = {
+                "executed": False,
+                "blocked_by_policy": True,
+                "message": "Mission intent chưa được whitelist để execute tự động; cần admin/Claude chỉnh prompt hoặc dùng lệnh cụ thể.",
+            }
+            final_status = "blocked"
+        else:
+            result = await execute_operator_command_plan(owner_id, plan_data["plan"], safe_mode=safe_mode)
+            if result.get("blocked_by_safe_mode"):
+                final_status = "blocked"
+            elif result.get("executed"):
+                final_status = "done"
+            else:
+                final_status = "working"
+        complete_operator_mission(
+            owner_id,
+            mission["id"],
+            status=final_status,
+            result={
+                "worker": worker,
+                "safe_mode": bool(safe_mode),
+                "plan": plan_data.get("plan"),
+                "preview": plan_data.get("preview"),
+                "execution": result,
+            },
+            note=result.get("message") or result.get("reason") or "mission_run",
+        )
+        mission = serialize_operator_mission(get_operator_mission(owner_id, mission["id"]))
+    return {
+        "ok": True,
+        "execute": bool(execute),
+        "safe_mode": bool(safe_mode),
+        "mission": mission,
+        "plan": plan_data,
+        "result": result,
+        "next": {
+            "mission_inbox": "/api/operator/missions",
+            "run_cycle": "/api/operator/run-cycle",
+            "review_gate": "/api/operator/jobs/<JOB_ID>/review-video",
+            "publish_gate": "/api/operator/publisher/run",
+        },
+        "rule": "Mission runner chỉ execute các intent whitelist qua operator executor. Safe mode chặn publish tự động; review/publish vẫn là gate riêng.",
+    }
+
 def list_production_jobs(owner_id, limit=20):
     conn = db_connect()
     c = conn.cursor()
@@ -3232,7 +3293,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3244,6 +3305,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/missions"),
         ("POST", "/api/operator/missions"),
         ("POST", "/api/operator/missions/claim"),
+        ("POST", "/api/operator/missions/run"),
         ("POST", "/api/telegram/takeover"),
         ("GET", "/runtime"),
         ("GET", "/api/operator/worker-spec"),
@@ -3336,6 +3398,7 @@ def operator_smoke_test_data(owner_id):
         "dispatch_in_spec": "/api/operator/dispatch" in spec_text and "/api/operator/dispatch" in n8n_text,
         "run_cycle_in_spec": "/api/operator/run-cycle" in spec_text and "/api/operator/run-cycle" in n8n_text,
         "mission_inbox_in_spec": "/api/operator/missions" in spec_text and "/api/operator/missions" in n8n_text,
+        "mission_run_in_spec": "/api/operator/missions/run" in spec_text and "/api/operator/missions/run" in n8n_text,
         "make_video_in_spec": "/api/operator/make-video" in spec_text and "/api/operator/make-video" in n8n_text,
         "publisher_run_in_spec": "/api/operator/publisher/run" in spec_text and "/api/operator/publisher/run" in n8n_text,
         "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
@@ -3434,6 +3497,7 @@ def operator_worker_spec_data():
         "mission_control_url": f"{base_url}/api/operator/mission",
         "mission_inbox_url": f"{base_url}/api/operator/missions",
         "mission_claim_url": f"{base_url}/api/operator/missions/claim",
+        "mission_run_url": f"{base_url}/api/operator/missions/run",
         "dispatch_url": f"{base_url}/api/operator/dispatch",
         "run_cycle_url": f"{base_url}/api/operator/run-cycle",
         "next_run_url": f"{base_url}/api/operator/next-run",
@@ -3521,6 +3585,7 @@ def operator_worker_spec_data():
             {"step": 1.0535, "name": "run_cycle_preview", "method": "GET", "url": "/api/operator/run-cycle?days=30&platform=tiktok&limit=8&max_steps=3&execute=0"},
             {"step": 1.0537, "name": "mission_inbox", "method": "GET", "url": "/api/operator/missions?limit=10"},
             {"step": 1.0538, "name": "claim_mission_optional", "method": "POST", "url": "/api/operator/missions/claim"},
+            {"step": 1.0539, "name": "run_mission_optional", "method": "POST", "url": "/api/operator/missions/run"},
             {"step": 1.054, "name": "control_contract", "method": "GET", "url": "/api/operator/control-contract?days=30&platform=tiktok"},
             {"step": 1.055, "name": "command_run_preview", "method": "POST", "url": "/api/operator/command/run"},
             {"step": 1.06, "name": "mission_control", "method": "GET", "url": "/api/operator/mission?days=30&platform=tiktok&limit=8"},
@@ -3609,6 +3674,7 @@ def operator_worker_spec_data():
                 "purpose": "Hộp lệnh cấp cao từ admin Telegram cho Claude/n8n. Tạo mission, claim mission, lấy prompt điều phối và complete kết quả.",
                 "create_body": {"title": "Chiến dịch AI tools", "objective": "Tạo 5 video affiliate công nghệ AI, gắn link phù hợp, review trước đăng.", "platform": "tiktok", "priority": 8, "notify_admin": True},
                 "claim_body": {"worker": "claude", "include_prompt": True, "notify_admin": True},
+                "run_body": {"mission_id": 0, "worker": "claude", "execute": False, "safe_mode": True, "notify_admin": True},
             },
             "control_contract": {
                 "method": "GET",
@@ -4236,6 +4302,14 @@ def operator_n8n_template_data():
                 "note": "Đọc lệnh cấp cao admin gửi từ Telegram. Worker có thể POST /api/operator/missions/claim để nhận prompt điều phối.",
             },
             {
+                "node": "Mission Run Preview",
+                "type": "http_request",
+                "method": "POST",
+                "url": f"{base_url}/api/operator/missions/run",
+                "body": {"mission_id": 0, "worker": "claude", "execute": False, "safe_mode": True, "notify_admin": False},
+                "note": "Preview mission kế tiếp qua operator executor. Chỉ set execute=true khi muốn tạo job/task thật; publish vẫn bị gate.",
+            },
+            {
                 "node": "Read Control Contract",
                 "type": "http_request",
                 "method": "GET",
@@ -4755,11 +4829,28 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "mission-run-preview",
+                "name": "Mission Run Preview",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [460, -1030],
+                "parameters": {
+                    "method": "POST",
+                    "url": f"{base_url_expr}/api/operator/missions/run",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "sendBody": True,
+                    "specifyBody": "json",
+                    "jsonBody": "={\"mission_id\":0,\"worker\":\"n8n\",\"execute\":false,\"safe_mode\":true,\"notify_admin\":false}",
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "control-contract",
                 "name": "Control Contract",
                 "type": "n8n-nodes-base.httpRequest",
                 "typeVersion": 4.2,
-                "position": [460, -850],
+                "position": [700, -850],
                 "parameters": {
                     "method": "GET",
                     "url": f"{base_url_expr}/api/operator/control-contract?days=30&platform=tiktok&limit=8",
@@ -5494,7 +5585,8 @@ def operator_n8n_workflow_json_data():
             "Next Run Card": {"main": [[{"node": "Dispatch Preview", "type": "main", "index": 0}]]},
             "Dispatch Preview": {"main": [[{"node": "Run Cycle Preview", "type": "main", "index": 0}]]},
             "Run Cycle Preview": {"main": [[{"node": "Mission Inbox", "type": "main", "index": 0}]]},
-            "Mission Inbox": {"main": [[{"node": "Control Contract", "type": "main", "index": 0}]]},
+            "Mission Inbox": {"main": [[{"node": "Mission Run Preview", "type": "main", "index": 0}]]},
+            "Mission Run Preview": {"main": [[{"node": "Control Contract", "type": "main", "index": 0}]]},
             "Control Contract": {"main": [[{"node": "Command Run Preview", "type": "main", "index": 0}]]},
             "Command Run Preview": {"main": [[{"node": "Read Mission Control", "type": "main", "index": 0}]]},
             "Read Mission Control": {"main": [[{"node": "Read Channel Router", "type": "main", "index": 0}]]},
@@ -13195,6 +13287,13 @@ class OperatorMissionClaimRequest(BaseModel):
     include_prompt: bool = True
     notify_admin: bool = True
 
+class OperatorMissionRunRequest(BaseModel):
+    mission_id: int = Field(default=0, ge=0)
+    worker: str = Field(default="claude", max_length=120)
+    execute: bool = False
+    safe_mode: bool = True
+    notify_admin: bool = True
+
 class OperatorMissionCompleteRequest(BaseModel):
     status: str = Field(default="done", max_length=40)
     result: dict = Field(default_factory=dict)
@@ -14066,6 +14165,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /postback_setup — Cấu hình callback affiliate network vào bot",
             "• /brain &lt;lệnh&gt; — Ra lệnh tự nhiên cho AI Operator",
             "• /mission_add objective=... — Gửi mission cấp cao cho Claude/n8n",
+            "• /mission_run id=&lt;ID&gt; execute=1 — Chạy mission qua executor an toàn",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
             "• /dashboard — Dashboard quản trị hệ thống",
@@ -18019,6 +18119,50 @@ async def cmd_mission_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode="HTML",
     )
 
+async def cmd_mission_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    mission_id = safe_int(data.get("id") or data.get("mission") or (context.args[0] if context.args else ""), 0)
+    worker = data.get("worker") or data.get("ai") or "claude"
+    execute = truthy_value(data.get("execute") or data.get("run"), False)
+    safe_mode = truthy_value(data.get("safe") or data.get("safe_mode"), True)
+    result = await run_operator_mission_data(
+        update.effective_user.id,
+        mission_id=mission_id,
+        worker=worker,
+        execute=execute,
+        safe_mode=safe_mode,
+    )
+    if not result.get("ok"):
+        return await update.message.reply_text(f"❌ Mission run lỗi: <code>{html.escape(result.get('reason') or 'unknown')}</code>", parse_mode="HTML")
+    mission = result.get("mission") or {}
+    plan = (result.get("plan") or {}).get("plan") or {}
+    execution = result.get("result") or {}
+    lines = [
+        "▶️ <b>MISSION RUNNER</b>",
+        f"• Mission: <code>#{mission.get('id')}</code> | Status: <code>{html.escape(mission.get('status') or '-')}</code>",
+        f"• Execute: <b>{'YES' if execute else 'NO'}</b> | Safe mode: <b>{'YES' if safe_mode else 'NO'}</b>",
+        f"• Intent: <code>{html.escape(plan.get('intent') or '-')}</code> | Confidence: <b>{int(plan.get('confidence') or 0)}</b>",
+        f"• Executed: <b>{'YES' if execution.get('executed') else 'NO'}</b>",
+    ]
+    if execution.get("blocked_by_safe_mode") or execution.get("blocked_by_policy"):
+        lines.append(f"• Blocked: {html.escape(execution.get('message') or 'safe/policy gate')}")
+    if execution.get("reason"):
+        lines.append(f"• Reason: <code>{html.escape(str(execution.get('reason')))}</code>")
+    data_out = execution.get("data") or {}
+    created_jobs = data_out.get("created_jobs") or data_out.get("built_jobs") or []
+    if created_jobs:
+        lines.append(f"• Jobs/Bundles: <b>{len(created_jobs)}</b>")
+    lines.extend([
+        "",
+        "<b>Lệnh tiếp:</b>",
+        "<code>/operator_cycle execute=1 max=3</code>",
+        "<code>/tasks</code> → <code>/review_gate job=&lt;ID&gt;</code> → <code>/approve_publish job=&lt;ID&gt;</code>",
+        "API: <code>POST /api/operator/missions/run</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_mission_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -18374,6 +18518,7 @@ def operator_category_keyboard(category):
             ("🛡 Telegram takeover", "telegramtakeover"),
             ("🎯 Campaign preset", "campaignpreset"),
             ("📥 Mission inbox", "missioninbox"),
+            ("▶️ Mission run", "missionrun"),
             ("🎛 Next run card", "nextrun"),
             ("🧭 Dispatch one step", "dispatch"),
             ("🔁 Run cycle", "cycle"),
@@ -18530,6 +18675,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Safe run cycle: <code>GET/POST {html.escape(base_url)}/api/operator/run-cycle</code>",
         f"• Mission inbox: <code>GET/POST {html.escape(base_url)}/api/operator/missions</code>",
         f"• Claim mission: <code>POST {html.escape(base_url)}/api/operator/missions/claim</code>",
+        f"• Run mission: <code>POST {html.escape(base_url)}/api/operator/missions/run</code>",
         f"• Bootstrap thiếu setup: <code>POST {html.escape(base_url)}/api/operator/bootstrap</code>",
         f"• Campaign preset: <code>POST {html.escape(base_url)}/api/operator/campaign-preset</code>",
         f"• Launch một lệnh: <code>POST {html.escape(base_url)}/api/operator/launch</code>",
@@ -18598,6 +18744,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"days":30,"platform":"tiktok","limit":8,"max_steps":3,"execute":false,"claim_task":true,"include_prompt":true,"notify_admin":true}</pre>',
         "<b>Payload mission mẫu:</b>",
         '<pre>{"title":"Chiến dịch AI tools","objective":"Tạo 5 video affiliate công nghệ AI, gắn link phù hợp, review trước đăng.","platform":"tiktok","priority":8,"notify_admin":true}</pre>',
+        "<b>Payload mission-run mẫu:</b>",
+        '<pre>{"mission_id":0,"worker":"claude","execute":false,"safe_mode":true,"notify_admin":true}</pre>',
         "<b>Payload make-video mẫu:</b>",
         '<pre>{"topic":"đồ công nghệ văn phòng","platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload affiliate-scale mẫu:</b>",
@@ -18805,6 +18953,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "telegramstatus": "/telegram_status\n/runtime\nGET /runtime",
         "telegramtakeover": "/telegram_takeover\nPOST /api/telegram/takeover",
         "missioninbox": "/missions\n/mission_add title=Chiến dịch AI tools platform=tiktok priority=8 objective=Tạo 5 video affiliate công nghệ AI, gắn link phù hợp, review trước đăng.\n/mission_claim worker=claude\nGET /api/operator/missions\nPOST /api/operator/missions/claim",
+        "missionrun": "/mission_run id=<MISSION_ID>\n/mission_run id=<MISSION_ID> execute=1 safe=1\nPOST /api/operator/missions/run",
         "audit": "/operator_audit",
         "goalaudit": "/goal_audit days=30 platform=tiktok\nGET /api/operator/goal-audit?days=30&platform=tiktok",
         "smoke": "/operator_smoke\nGET /api/operator/smoke-test",
@@ -22523,6 +22672,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("missions", cmd_missions))
     tg_app.add_handler(CommandHandler("mission_claim", cmd_mission_claim))
     tg_app.add_handler(CommandHandler("mission_prompt", cmd_mission_prompt))
+    tg_app.add_handler(CommandHandler("mission_run", cmd_mission_run))
     tg_app.add_handler(CommandHandler("mission_complete", cmd_mission_complete))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
@@ -23623,6 +23773,37 @@ async def api_operator_mission_claim(payload: OperatorMissionClaimRequest, reque
     if not payload.include_prompt:
         pack.pop("prompt", None)
     return pack
+
+@fastapi_app.post("/api/operator/missions/run")
+async def api_operator_mission_run(payload: OperatorMissionRunRequest, request: Request):
+    verify_operator_api_token(request)
+    result = await run_operator_mission_data(
+        ADMIN_ID,
+        mission_id=payload.mission_id,
+        worker=payload.worker,
+        execute=payload.execute,
+        safe_mode=payload.safe_mode,
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            mission = result.get("mission") or {}
+            plan = (result.get("plan") or {}).get("plan") or {}
+            execution = result.get("result") or {}
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "▶️ <b>MISSION RUN API</b>\n\n"
+                    f"• Mission: <code>#{mission.get('id') or '-'}</code>\n"
+                    f"• Execute: <b>{'YES' if payload.execute else 'NO'}</b> | Status: <code>{html.escape(mission.get('status') or '-')}</code>\n"
+                    f"• Intent: <code>{html.escape(plan.get('intent') or '-')}</code>\n"
+                    f"• Executed: <b>{'YES' if execution.get('executed') else 'NO'}</b>\n"
+                    "• Next: <code>/operator_cycle execute=1 max=3</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Mission run notify error: {e}")
+    return result
 
 @fastapi_app.get("/api/operator/missions/{mission_id}/prompt-pack")
 async def api_operator_mission_prompt_pack(mission_id: int, request: Request):
