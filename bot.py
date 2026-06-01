@@ -7909,6 +7909,14 @@ class AgentDownloader:
     ]
 
     @staticmethod
+    def _is_admin_target(user_id=None, chat_id=None):
+        return str(user_id or chat_id or "") == ADMIN_ID
+
+    @staticmethod
+    def _refund_line(cost: int) -> str:
+        return f"✅ Đã hoàn lại <b>{cost}</b> Xu.\n" if int(cost or 0) > 0 else ""
+
+    @staticmethod
     def _is_suspicious_downloader_result(data, media_url: str = ""):
         blob = f"{media_url}\n{json.dumps(data, ensure_ascii=False)[:2000]}".lower()
         return any(marker in blob for marker in AgentDownloader.BLOCKED_DOWNLOADER_MARKERS)
@@ -7917,17 +7925,20 @@ class AgentDownloader:
     async def _hide_suspicious_downloader_result(msg, user_id, cost, data, media_url="", chat_id=None):
         if user_id and cost > 0:
             add_credit(user_id, cost, "download_refund", "", "Downloader trả quảng cáo/join channel ngoài")
+        is_admin = AgentDownloader._is_admin_target(user_id, chat_id)
         admin_detail = ""
-        if str(user_id or chat_id or "") == ADMIN_ID:
+        admin_note = ""
+        if is_admin:
             detail = json.dumps(
                 {"media_url": media_url, "response": data},
                 ensure_ascii=False,
             )[:1200]
             admin_detail = f"\n\n⚠️ Admin debug:\n<pre>{html_pre(detail, 1200)}</pre>"
+            admin_note = "\nAdmin nên self-host Cobalt riêng và set <code>COBALT_API_URL</code> để tải ổn định."
         await msg.edit_text(
-            "❌ Dịch vụ tải video trả về nguồn không hợp lệ nên bot đã chặn để không hiện quảng cáo/kênh lạ cho khách.\n"
-            f"✅ Đã hoàn lại <b>{cost}</b> Xu.\n\n"
-            "Admin nên self-host Cobalt riêng và set <code>COBALT_API_URL</code> để tải ổn định."
+            "❌ Dịch vụ tải video trả về nguồn không hợp lệ nên bot đã chặn để không hiện quảng cáo/kênh lạ.\n"
+            + AgentDownloader._refund_line(cost)
+            + ("Bạn có thể gửi file video trực tiếp để bot xử lý tiếp." if not is_admin else admin_note)
             + admin_detail,
             parse_mode="HTML"
         )
@@ -8051,8 +8062,8 @@ class AgentDownloader:
                     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Mở link tải video", url=media_url)]])
                     await msg.edit_text(
                         "⚠️ Đã lấy được link video nhưng Telegram không nhận được file trực tiếp.\n"
-                        f"✅ Đã hoàn lại <b>{cost}</b> Xu.\n"
-                        "Bạn có thể mở link bên dưới để tải thủ công, hoặc admin cần self-host Cobalt ổn định hơn.",
+                        + AgentDownloader._refund_line(cost)
+                        + "Bạn có thể mở link bên dưới để tải thủ công hoặc gửi file video trực tiếp.",
                         parse_mode="HTML",
                         reply_markup=kb
                     )
@@ -8061,26 +8072,37 @@ class AgentDownloader:
                     add_credit(user_id, cost, "download_refund", "", "Cobalt không trả media_url")
                 err = data.get("error") if isinstance(data, dict) else {}
                 err_code = err.get("code") if isinstance(err, dict) else ""
-                admin_hint = (
-                    "\n\n⚠️ Admin: public <code>api.cobalt.tools</code> có bot protection. "
-                    "Nên self-host Cobalt trên Railway rồi set <code>COBALT_API_URL</code>"
-                    + (" và <code>COBALT_API_KEY</code>." if not COBALT_API_KEY else ".")
-                )
-                if err_code:
-                    admin_hint += f"\nMã lỗi: <code>{html.escape(err_code)}</code>"
+                is_admin = AgentDownloader._is_admin_target(user_id, chat_id)
+                admin_hint = ""
+                if is_admin:
+                    admin_hint = (
+                        "\n\n⚠️ Admin: public <code>api.cobalt.tools</code> có bot protection. "
+                        "Nên self-host Cobalt trên Railway rồi set <code>COBALT_API_URL</code>"
+                        + (" và <code>COBALT_API_KEY</code>." if not COBALT_API_KEY else ".")
+                    )
+                    if err_code:
+                        admin_hint += f"\nMã lỗi: <code>{html.escape(err_code)}</code>"
                 await msg.edit_text(
                     "❌ Link không hỗ trợ, video riêng tư/cần đăng nhập, hoặc dịch vụ tải đang bảo trì.\n"
-                    f"✅ Đã hoàn lại <b>{cost}</b> Xu." + admin_hint,
+                    + AgentDownloader._refund_line(cost)
+                    + ("Bạn có thể gửi file video trực tiếp để bot xử lý tiếp." if not is_admin else "")
+                    + admin_hint,
                     parse_mode="HTML"
                 )
         except Exception as e:
             logger.error(f"Downloader error: {e}")
             if user_id and cost > 0:
                 add_credit(user_id, cost, "download_refund", "", "Exception trong downloader")
+            is_admin = AgentDownloader._is_admin_target(user_id, chat_id)
+            admin_hint = (
+                "\n\n⚠️ Admin: kiểm tra <code>COBALT_API_URL</code>, <code>COBALT_API_KEY</code> hoặc self-host Cobalt."
+                if is_admin else
+                "\n\nBạn có thể gửi file video trực tiếp để bot xử lý tiếp."
+            )
             await msg.edit_text(
                 "❌ Lỗi luồng tải video.\n"
-                f"✅ Đã hoàn lại <b>{cost}</b> Xu.\n\n"
-                "⚠️ Admin: kiểm tra <code>COBALT_API_URL</code>, <code>COBALT_API_KEY</code> hoặc self-host Cobalt.",
+                + AgentDownloader._refund_line(cost)
+                + admin_hint,
                 parse_mode="HTML"
             )
 
