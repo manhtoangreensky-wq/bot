@@ -373,6 +373,18 @@ def init_db():
         message TEXT,
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS reference_videos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        title TEXT,
+        path_or_url TEXT,
+        platform TEXT,
+        pattern_hint TEXT,
+        tags TEXT,
+        note TEXT,
+        status TEXT DEFAULT 'active',
+        created_at DATETIME
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS trend_candidates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -520,6 +532,15 @@ def init_db():
             ("task_id", "INTEGER DEFAULT 0"),
             ("fallback_tool", "TEXT"),
             ("message", "TEXT"),
+        ],
+        "reference_videos": [
+            ("title", "TEXT"),
+            ("path_or_url", "TEXT"),
+            ("platform", "TEXT"),
+            ("pattern_hint", "TEXT"),
+            ("tags", "TEXT"),
+            ("note", "TEXT"),
+            ("status", "TEXT DEFAULT 'active'"),
         ],
         "trend_candidates": [
             ("channel_id", "INTEGER DEFAULT 0"),
@@ -2397,7 +2418,7 @@ def operator_audit_data(owner_id):
 def operator_smoke_test_data(owner_id):
     required_commands = [
         "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
-        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "affiliate_seed", "affiliate_scale",
+        "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "affiliate_seed", "affiliate_scale",
         "worker_next", "operator_command", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
@@ -2406,6 +2427,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/video-patterns"),
         ("GET", "/api/operator/reference-pack"),
         ("GET", "/api/operator/reference-videos"),
+        ("POST", "/api/operator/reference-videos"),
         ("GET", "/api/operator/n8n-workflow.json"),
         ("GET", "/api/operator/command-center"),
         ("POST", "/api/operator/make-video"),
@@ -2442,7 +2464,7 @@ def operator_smoke_test_data(owner_id):
     table_names = [
         "users", "payos_orders", "affiliate_links", "social_channels", "campaigns",
         "production_jobs", "production_tasks", "publish_queue", "performance_events",
-        "tool_events",
+        "tool_events", "reference_videos",
     ]
     db_tables = {}
     for table in table_names:
@@ -2627,6 +2649,18 @@ def operator_worker_spec_data():
                 "video_patterns": {"method": "GET", "url": "/api/operator/video-patterns"},
                 "reference_pack": {"method": "GET", "url": "/api/operator/reference-pack"},
                 "reference_videos": {"method": "GET", "url": "/api/operator/reference-videos?limit=40"},
+                "add_reference_video": {
+                    "method": "POST",
+                    "url": "/api/operator/reference-videos",
+                    "body": {
+                        "title": "short label",
+                        "path_or_url": "https://... hoặc D:\\path\\video.mp4",
+                        "platform": "tiktok",
+                        "pattern_hint": "viral_prompt_affiliate",
+                        "tags": "ai,affiliate,hook",
+                        "note": "học hook/CTA/proof placement",
+                    },
+                },
                 "purpose": "Bắt buộc đọc trước khi dựng creative/task để học cấu trúc video mẫu, proof asset và luật không copy y nguyên.",
             },
             "affiliate_bundle": {
@@ -4654,6 +4688,83 @@ def video_pattern_bank_data():
         for key, value in VIDEO_PATTERN_BANK.items()
     }
 
+def add_reference_video(owner_id, title, path_or_url, platform="", pattern_hint="", tags="", note=""):
+    if not path_or_url:
+        return 0
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute(
+            """INSERT INTO reference_videos
+            (owner_id, title, path_or_url, platform, pattern_hint, tags, note, status, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                str(owner_id),
+                title or os.path.basename(path_or_url) or "reference video",
+                path_or_url,
+                (platform or "").lower(),
+                pattern_hint or "",
+                tags or "",
+                note or "",
+                "active",
+                now_text(),
+            ),
+        )
+        ref_id = c.lastrowid
+        conn.commit()
+    except sqlite3.OperationalError:
+        ref_id = 0
+    finally:
+        conn.close()
+    return ref_id
+
+def list_reference_videos(owner_id, limit=40, platform="", status="active"):
+    conn = db_connect()
+    c = conn.cursor()
+    clauses = ["owner_id=?"]
+    params = [str(owner_id)]
+    if status:
+        clauses.append("COALESCE(status,'active')=?")
+        params.append(status)
+    if platform:
+        clauses.append("(platform=? OR platform='')")
+        params.append((platform or "").lower())
+    try:
+        c.execute(
+            f"""SELECT id, title, path_or_url, platform, pattern_hint, tags, note, status, created_at
+            FROM reference_videos
+            WHERE {' AND '.join(clauses)}
+            ORDER BY id DESC LIMIT ?""",
+            params + [max(1, int(limit or 40))],
+        )
+        rows = c.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    return rows
+
+def serialize_reference_video(row):
+    if not row:
+        return None
+    ref_id, title, path_or_url, platform, pattern_hint, tags, note, status, created_at = row
+    source_type = "url" if re.match(r"^https?://", path_or_url or "", re.IGNORECASE) else "local_path"
+    return {
+        "id": ref_id,
+        "title": title,
+        "path_or_url": path_or_url,
+        "source_type": source_type,
+        "platform": platform,
+        "pattern_hint": pattern_hint,
+        "tags": tags,
+        "note": note,
+        "status": status,
+        "created_at": created_at,
+        "learning_note": (
+            "Reference được admin lưu để học format/hook/nhịp dựng. "
+            "Không copy nguyên video/voice/face/text/claim."
+        ),
+    }
+
 def reference_video_inventory_data(limit=80):
     folder = REFERENCE_VIDEO_DIR or r"D:\mybot\TOANAAS\video AI tham khảo"
     video_exts = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
@@ -4692,15 +4803,20 @@ def reference_video_inventory_data(limit=80):
                 "setup_hint": f"Tạo thư mục {folder} và đặt video tham khảo vào đó, hoặc set REFERENCE_VIDEO_DIR.",
             }
     files.sort(key=lambda item: item.get("modified_at") or "", reverse=True)
+    catalog_rows = list_reference_videos(ADMIN_ID, limit=limit)
+    catalog = [serialize_reference_video(row) for row in catalog_rows]
     return {
         "folder": folder,
         "exists": exists,
-        "count": len(files),
+        "count": len(files) + len(catalog),
+        "filesystem_count": len(files),
+        "catalog_count": len(catalog),
         "files": files[:max(1, int(limit or 80))],
+        "catalog": catalog,
         "extensions": sorted(video_exts),
         "setup_hint": "" if exists else f"Tạo thư mục {folder} và đặt video tham khảo vào đó, hoặc set REFERENCE_VIDEO_DIR.",
         "worker_rule": (
-            "Trước khi viết prompt/dựng video, đọc danh sách reference để chọn 1-3 format gần nhất. "
+            "Trước khi viết prompt/dựng video, đọc catalog/files reference để chọn 1-3 format gần nhất. "
             "Chỉ học cấu trúc và nhịp dựng; output phải là nội dung/asset riêng của TOAN DAAS."
         ),
     }
@@ -8103,6 +8219,15 @@ class OperatorToolEventRequest(BaseModel):
     message: str = Field(default="", max_length=1500)
     notify_admin: bool = True
 
+class OperatorReferenceVideoRequest(BaseModel):
+    title: str = Field(default="", max_length=240)
+    path_or_url: str = Field(min_length=1, max_length=2000)
+    platform: str = Field(default="", max_length=40)
+    pattern_hint: str = Field(default="", max_length=120)
+    tags: str = Field(default="", max_length=300)
+    note: str = Field(default="", max_length=1200)
+    notify_admin: bool = True
+
 class OperatorLoopRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=30)
     auto_queue: bool = True
@@ -11291,7 +11416,7 @@ def operator_category_keyboard(category):
             ("🛡 Review gate", "review"),
             ("🧪 Creative test", "creative"), ("🏁 Creative report", "creativereport"),
             ("🎞 Video patterns", "videopatterns"), ("📚 Reference pack", "referencepack"),
-            ("🗃 Reference videos", "referencevideos"),
+            ("🗃 Reference videos", "referencevideos"), ("➕ Add reference", "referenceadd"),
         ],
         "cat_publish": [
             ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
@@ -11379,6 +11504,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tool runtime readiness: <code>GET {html.escape(base_url)}/api/operator/tool-readiness</code>",
         f"• Báo lỗi/quota tool: <code>POST {html.escape(base_url)}/api/operator/tool-events</code>",
         f"• Reference videos: <code>GET {html.escape(base_url)}/api/operator/reference-videos?limit=40</code>",
+        f"• Add reference: <code>POST {html.escape(base_url)}/api/operator/reference-videos</code>",
         f"• n8n template: <code>GET {html.escape(base_url)}/api/operator/n8n-template</code>",
         f"• n8n import JSON: <code>GET {html.escape(base_url)}/api/operator/n8n-workflow.json</code>",
         f"• Trạng thái hệ thống: <code>GET {html.escape(base_url)}/api/operator/status</code>",
@@ -11665,6 +11791,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "videopatterns": "/video_patterns\nGET /api/operator/video-patterns",
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
+        "referenceadd": "/reference_add url=https://... title=video_mau platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=hoc_hook_CTA\nPOST /api/operator/reference-videos",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
@@ -11978,6 +12105,46 @@ async def cmd_reference_videos(update: Update, context: ContextTypes.DEFAULT_TYP
         "API worker: <code>GET /api/operator/reference-videos?limit=40</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_reference_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args).strip()
+    if not raw:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp:\n"
+            "<code>/reference_add url=https://... title=hook affiliate platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=học hook và CTA</code>\n\n"
+            "Hoặc:\n"
+            "<code>/reference_add path=D:\\mybot\\TOANAAS\\video AI tham khảo\\video.mp4 title=video mẫu</code>",
+            parse_mode="HTML",
+        )
+    data = parse_key_value_args(raw)
+    path_or_url = data.get("url") or data.get("path") or data.get("file") or extract_supported_video_url(raw)
+    if not path_or_url and "=" not in raw:
+        path_or_url = raw
+    if not path_or_url:
+        return await update.message.reply_text("❌ Thiếu <code>url=</code> hoặc <code>path=</code>.", parse_mode="HTML")
+    title = data.get("title") or os.path.basename(path_or_url.rstrip("\\/")) or "reference video"
+    ref_id = add_reference_video(
+        update.effective_user.id,
+        title=title,
+        path_or_url=path_or_url,
+        platform=data.get("platform") or data.get("pf") or "",
+        pattern_hint=data.get("pattern") or data.get("pattern_hint") or "",
+        tags=data.get("tags") or "",
+        note=data.get("note") or data.get("notes") or "",
+    )
+    if not ref_id:
+        return await update.message.reply_text("❌ Không lưu được reference video. Kiểm tra database/init_db.")
+    await update.message.reply_text(
+        "✅ <b>Đã lưu reference video</b>\n"
+        f"• ID: <code>#{ref_id}</code>\n"
+        f"• Title: {html.escape(title)}\n"
+        f"• Source: <code>{html.escape(path_or_url)}</code>\n"
+        f"• Pattern: <code>{html.escape(data.get('pattern') or data.get('pattern_hint') or '-')}</code>\n\n"
+        "Xem lại: <code>/reference_videos</code>",
+        parse_mode="HTML",
+    )
 
 
 async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -14712,6 +14879,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_patterns", cmd_video_patterns))
     tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
     tg_app.add_handler(CommandHandler("reference_videos", cmd_reference_videos))
+    tg_app.add_handler(CommandHandler("reference_add", cmd_reference_add))
     tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
     tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
     tg_app.add_handler(CommandHandler("manifest_handoff", cmd_manifest_handoff))
@@ -15113,6 +15281,43 @@ async def api_operator_reference_videos(request: Request, limit: int = 80):
     return {
         "ok": True,
         "inventory": reference_video_inventory_data(limit=limit),
+    }
+
+@fastapi_app.post("/api/operator/reference-videos")
+async def api_operator_reference_video_add(payload: OperatorReferenceVideoRequest, request: Request):
+    verify_operator_api_token(request)
+    ref_id = add_reference_video(
+        ADMIN_ID,
+        title=payload.title,
+        path_or_url=payload.path_or_url,
+        platform=payload.platform,
+        pattern_hint=payload.pattern_hint,
+        tags=payload.tags,
+        note=payload.note,
+    )
+    if not ref_id:
+        raise HTTPException(status_code=500, detail="Could not save reference video")
+    if tg_app and ADMIN_ID and payload.notify_admin:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "➕ <b>REFERENCE VIDEO ADDED</b>\n\n"
+                    f"• ID: <code>#{ref_id}</code>\n"
+                    f"• Title: {html.escape(payload.title or '-')}\n"
+                    f"• Platform: <code>{html.escape(payload.platform or '-')}</code>\n"
+                    f"• Pattern: <code>{html.escape(payload.pattern_hint or '-')}</code>\n"
+                    f"• Source: <code>{html.escape(payload.path_or_url)}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Reference video notify error: {e}")
+    return {
+        "ok": True,
+        "id": ref_id,
+        "reference_videos_url": "/api/operator/reference-videos",
+        "rule": "Use as learning reference only; do not copy original media, person, voice, text or claims.",
     }
 
 @fastapi_app.get("/api/operator/tool-readiness")
