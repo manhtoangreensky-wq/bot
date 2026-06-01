@@ -4140,6 +4140,19 @@ def production_readiness_data(owner_id, job_id):
 
     missing = [row for row in checks if not row[1]]
     core_missing = [row for row in missing if row[0] != "queue_or_published"]
+    approved_ok = (stage or "").lower() == "approved" and (status or "").lower() == "approved"
+    publish_gate = {
+        "can_approve": not core_missing,
+        "can_queue": not core_missing and approved_ok,
+        "approval_required": not approved_ok,
+        "has_final_video": final_ok,
+        "has_queue": bool(queue_open),
+        "blocking": [
+            {"key": key, "detail": detail, "next": next_cmd}
+            for key, _ok, detail, next_cmd in core_missing
+        ],
+        "rule": "Queue publish chỉ mở sau khi đủ core checklist và job đã được approve qua review gate.",
+    }
     if not core_missing and not queue_open and not publish_url and (status or "").lower() != "published":
         level = "READY_TO_QUEUE"
         next_action = f"/publish_pack job={job_id} rồi /approve_publish job={job_id} queue=1 mode=manual"
@@ -4164,6 +4177,7 @@ def production_readiness_data(owner_id, job_id):
         "selected_variant": selected_variant,
         "final_asset": final_asset,
         "blocked_tasks": blocked_tasks,
+        "publish_gate": publish_gate,
     }
 
 def approve_publish_job(owner_id, job_id, note="", queue=True, mode="manual", scheduled_at=""):
@@ -5339,6 +5353,7 @@ def operator_job_context_data(owner_id, job_id):
         "readiness": {
             "level": (readiness or {}).get("level", "UNKNOWN"),
             "next_action": (readiness or {}).get("next_action", ""),
+            "publish_gate": (readiness or {}).get("publish_gate", {}),
             "checks": [
                 {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
                 for key, ok, detail, next_cmd in ((readiness or {}).get("checks") or [])
@@ -6208,7 +6223,16 @@ def serialize_operator_loop_result(advanced, ready_publish, next_tasks, blocked)
 def create_publish_queue_item(owner_id, job_id, mode="manual", scheduled_at="", note=""):
     job = get_production_job(job_id, owner_id)
     if not job:
-        return False, None
+        return False, "job_not_found"
+    readiness = production_readiness_data(owner_id, job_id)
+    if not readiness:
+        return False, "job_not_found"
+    gate = readiness.get("publish_gate") or {}
+    if not gate.get("can_queue"):
+        if gate.get("blocking"):
+            first = gate["blocking"][0]
+            return False, f"not_ready:{first.get('key')}:{first.get('next')}"
+        return False, "needs_approval:/approve_publish job=%s queue=1 mode=manual" % job_id
     _, _, _, channel_id, _, platform, *_ = job
     conn = db_connect()
     c = conn.cursor()
@@ -11794,7 +11818,25 @@ async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     note = data.get("note") or ""
     ok, queue_id = create_publish_queue_item(update.effective_user.id, job_id, mode, scheduled_at, note)
     if not ok:
-        return await update.message.reply_text("❌ Không tìm thấy production job.")
+        reason = str(queue_id or "unknown")
+        if reason.startswith("needs_approval"):
+            return await update.message.reply_text(
+                f"⚠️ Job #{job_id} chưa qua chốt duyệt. Dùng:\n"
+                f"<code>/job_ready job={job_id}</code>\n"
+                f"<code>/approve_publish job={job_id} queue=1 mode={html.escape(mode)}</code>",
+                parse_mode="HTML"
+            )
+        if reason.startswith("not_ready:"):
+            parts = reason.split(":", 2)
+            key = parts[1] if len(parts) > 1 else "unknown"
+            next_cmd = parts[2] if len(parts) > 2 else f"/job_ready job={job_id}"
+            return await update.message.reply_text(
+                f"⚠️ Job #{job_id} chưa đủ điều kiện queue publish.\n"
+                f"• Thiếu: <code>{html.escape(key)}</code>\n"
+                f"• Next: <code>{html.escape(next_cmd)}</code>",
+                parse_mode="HTML"
+            )
+        return await update.message.reply_text(f"❌ Không queue được: <code>{html.escape(reason)}</code>", parse_mode="HTML")
     await update.message.reply_text(
         f"✅ <b>Đã đưa job #{job_id} vào hàng đợi đăng</b>\n"
         f"• Queue ID: <code>{queue_id}</code>\n"
@@ -12443,6 +12485,12 @@ async def cmd_job_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"• Manifest: <b>{len(data['manifests'])}</b> | Tasks: <b>{len(data['tasks'])}</b> | Blocked: <b>{len(data['blocked_tasks'])}</b>")
     lines.append(f"• Assets: <b>{len(data['assets'])}</b> | final video: <b>{'có' if data['final_asset'] or publish_url else 'chưa'}</b>")
     lines.append(f"• Publish queue: <b>{len(data['queue_items'])}</b> | publish URL: <code>{html.escape(publish_url or 'chưa có')}</code>")
+    gate = data.get("publish_gate") or {}
+    lines.append("\n<b>Publish gate:</b>")
+    lines.append(f"• Can approve: <b>{'có' if gate.get('can_approve') else 'chưa'}</b> | Can queue: <b>{'có' if gate.get('can_queue') else 'chưa'}</b> | Cần duyệt: <b>{'có' if gate.get('approval_required') else 'không'}</b>")
+    if gate.get("blocking"):
+        first = gate["blocking"][0]
+        lines.append(f"• Nghẽn đầu tiên: <code>{html.escape(first.get('key') or '-')}</code> → <code>{html.escape(first.get('next') or '-')}</code>")
     lines.append(f"\n<b>Lệnh nên chạy tiếp:</b>\n<code>{html.escape(data['next_action'])}</code>")
 
     kb_rows = []
@@ -15097,6 +15145,7 @@ async def api_operator_job_ready(job_id: int, request: Request):
         "job_id": job_id,
         "level": readiness["level"],
         "next_action": readiness["next_action"],
+        "publish_gate": readiness.get("publish_gate", {}),
         "checks": [
             {"key": key, "ok": ok, "detail": detail, "next": next_cmd}
             for key, ok, detail, next_cmd in readiness["checks"]

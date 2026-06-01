@@ -128,7 +128,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/task_handoff id=<TASK_ID>`: xuất prompt giao riêng một task cho AI/tool.
 - `/task_set id=<TASK_ID> status=ready url=https://... note=...`: cập nhật task, tự lưu output thành asset nếu có URL.
 - `/task_set id=<TASK_ID> status=ready urls=https://a.mp4,https://b.mp4 type=raw_video`: lưu nhiều output scene/audio/video cho cùng task.
-- `/queue_publish job=<ID> mode=manual|api schedule=... note=...`: đưa job đã duyệt vào hàng đợi đăng.
+- `/queue_publish job=<ID> mode=manual|api schedule=... note=...`: đưa job đã duyệt vào hàng đợi đăng; bot sẽ chặn nếu thiếu checklist hoặc chưa qua `/approve_publish`.
 - `/publish_queue`: xem hàng đợi đăng.
 - `/publisher_handoff queue=<QUEUE_ID>`: xuất runbook đăng bài theo nền tảng cho publisher worker hoặc đăng thủ công, gồm final video, caption, comment ghim, env token cần có và payload trả kết quả.
 - `/publisher_run platform=tiktok mode=api`: claim queue kế tiếp và trả quyết định `api_ready`, `manual_required` hoặc `blocked_missing_final_video` cho publisher worker/admin.
@@ -226,7 +226,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - Operator auto là admin-only, dùng để tạo hàng loạt production job từ trend mới cho các channel active; vẫn đi qua review gate/publish queue trước khi đăng.
 - Operator loop là admin-only, dùng để chạy một vòng điều phối an toàn: tự queue publish cho job đã ready, liệt kê task kế tiếp cho worker ngoài và chỉ ra job nào còn nghẽn. Có thể chạy bằng Telegram hoặc cron/n8n qua `POST /api/operator/loop`.
 - Review gate là admin-only, dùng làm chốt kiểm duyệt trước khi đăng; job đạt có thể chuyển sang `ready`, job rủi ro chuyển `blocked`.
-- Publish queue là admin-only, dùng để gom job đã duyệt vào hàng đợi đăng thủ công hoặc chuẩn bị sẵn điểm nối API/OAuth chính thức.
+- Publish queue là admin-only, dùng để gom job đã duyệt vào hàng đợi đăng thủ công hoặc chuẩn bị sẵn điểm nối API/OAuth chính thức. Mọi đường vào queue đều bị chặn nếu job chưa đủ core checklist hoặc chưa có trạng thái `approved`.
 - Publisher handoff là lớp nối giữa bot và publisher worker: bot không lưu secret nền tảng, chỉ trả tên biến môi trường/token cần có, nội dung cần đăng và endpoint để worker báo kết quả.
 - Publisher status là chốt vận hành cho auto-post: cron/n8n nên gọi trước khi claim queue để biết có kênh API-ready hay chỉ nên trả handoff cho admin đăng thủ công.
 - Publisher run là bước cron/n8n an toàn: claim một queue, kiểm tra final video/token/mode, trả handoff và chỉ cho API worker đăng khi kênh thật sự `api_ready`.
