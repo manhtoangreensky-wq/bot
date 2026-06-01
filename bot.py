@@ -5292,6 +5292,24 @@ def serialize_operator_task(row):
         "job": job_payload,
     }
 
+def operator_worker_next_summary(owner_id, job_ids=None, limit=5):
+    job_ids = [int(jid) for jid in (job_ids or []) if int(jid or 0) > 0]
+    summaries = []
+    for job_id in job_ids[:max(limit, 1)]:
+        task = next_worker_task(owner_id, job_id=job_id)
+        readiness = production_readiness_data(owner_id, job_id)
+        summaries.append({
+            "job_id": job_id,
+            "readiness": (readiness or {}).get("level", "UNKNOWN"),
+            "next_action": (readiness or {}).get("next_action", ""),
+            "publish_gate": (readiness or {}).get("publish_gate", {}),
+            "next_task": serialize_operator_task(task),
+            "job_context_url": f"/api/operator/jobs/{job_id}/context",
+            "ready_url": f"/api/operator/jobs/{job_id}/ready",
+            "claim_task_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1",
+        })
+    return summaries
+
 def serialize_production_job(job):
     if not job:
         return None
@@ -7221,6 +7239,11 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
                     })
             else:
                 failed.append({"job_id": item["job_id"], "error": bundle.get("error", "build lỗi") if isinstance(bundle, dict) else "build lỗi"})
+    worker_next = operator_worker_next_summary(
+        owner_id,
+        [item["job_id"] for item in (built or created_jobs)],
+        limit=min(len(built or created_jobs), 5),
+    )
 
     affiliate_payload = None
     if selected_affiliate:
@@ -7263,6 +7286,7 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
         "built_jobs": built,
         "failed_builds": failed,
         "publish_packs": publish_packs,
+        "worker_next": worker_next,
     }
 
 def build_production_prompt(slot):
@@ -10430,6 +10454,7 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     created_jobs = result.get("created_jobs") or []
     built_jobs = result.get("built_jobs") or []
     packs = result.get("publish_packs") or []
+    worker_next = result.get("worker_next") or []
     lines = [
         "🎬 <b>MAKE VIDEO PIPELINE</b>",
         f"• Chủ đề: <b>{html.escape(topic)}</b>",
@@ -10458,6 +10483,16 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>Publish pack đầu tiên:</b>",
             f"• Tracking URL: <code>{html.escape(first_pack.get('tracking_url') or 'cần PUBLIC_BASE_URL')}</code>",
             f"• Disclosure: {html.escape(first_pack.get('disclosure') or '-')}",
+        ])
+    if worker_next:
+        next_item = worker_next[0]
+        next_task = next_item.get("next_task") or {}
+        lines.extend([
+            "",
+            "<b>Worker next:</b>",
+            f"• Job: <code>#{next_item.get('job_id')}</code> | Readiness: <code>{html.escape(next_item.get('readiness') or 'UNKNOWN')}</code>",
+            f"• Task: <code>#{next_task.get('id') or '-'}</code> / <code>{html.escape(next_task.get('task_type') or '-')}</code> / tool=<code>{html.escape(next_task.get('tool') or '-')}</code>",
+            f"• Handoff: <code>/task_handoff id={next_task.get('id') or '<TASK_ID>'}</code>",
         ])
     if result.get("failed_builds"):
         lines.append("\n<b>Build lỗi:</b>")
@@ -15288,7 +15323,9 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
         **result,
         "next": {
             "tasks_url": "/api/operator/tasks/next",
+            "claim_first_task_url": "/api/operator/tasks/claim?include_context=1",
             "ready_url": "/api/operator/jobs/<JOB_ID>/ready",
+            "job_context_url": "/api/operator/jobs/<JOB_ID>/context",
             "publish_pack_url": "/api/operator/jobs/<JOB_ID>/publish-pack",
             "approve_url": "/api/operator/jobs/<JOB_ID>/approve",
             "publish_queue_url": "/api/operator/publish/next",
@@ -15334,15 +15371,21 @@ async def api_operator_affiliate_scale(payload: OperatorAffiliateScaleRequest, r
             ok, bundle = build_operator_job_bundle(ADMIN_ID, item["job_id"], count=payload.variants, duration=payload.duration)
             if ok:
                 readiness = bundle.get("readiness") or {}
-                built.append({
+                built_item = {
                     **item,
                     "manifest_id": bundle["manifest_id"],
                     "task_count": len(bundle["task_ids"]),
                     "variant_id": bundle["best_variant_id"],
                     "readiness": readiness.get("level", "UNKNOWN") if isinstance(readiness, dict) else "UNKNOWN",
-                })
+                }
+                built.append(built_item)
             else:
                 failed.append({"job_id": item["job_id"], "error": bundle.get("error", "build lỗi")})
+    worker_next = operator_worker_next_summary(
+        ADMIN_ID,
+        [item["job_id"] for item in (built or created_jobs)],
+        limit=min(len(built or created_jobs), 5),
+    )
     if payload.notify_admin and tg_app and ADMIN_ID:
         try:
             await tg_app.bot.send_message(
@@ -15383,6 +15426,7 @@ async def api_operator_affiliate_scale(payload: OperatorAffiliateScaleRequest, r
         "created_jobs": created_jobs,
         "built_jobs": built,
         "failed_builds": failed,
+        "worker_next": worker_next,
         "next": {
             "tasks_url": "/api/operator/tasks/next",
             "loop_url": "/api/operator/loop",
