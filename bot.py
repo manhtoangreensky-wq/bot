@@ -111,6 +111,7 @@ APP_DEPLOY_ID       = (
 PUBLIC_BASE_URL, PUBLIC_BASE_URL_SOURCE = detect_public_base_url()
 ACTIVE_TELEGRAM_UPDATE_MODE = ""
 ACTIVE_TELEGRAM_WEBHOOK_URL = ""
+ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG = ""
 
 # AI Providers
 GEMINI_API_KEY      = _env("GEMINI_API_KEY")
@@ -140,6 +141,7 @@ BOT_USERNAME        = _env("BOT_USERNAME", "Httdhtoan")
 TELEGRAM_UPDATE_MODE_RAW = _env("TELEGRAM_UPDATE_MODE")
 TELEGRAM_UPDATE_MODE = (TELEGRAM_UPDATE_MODE_RAW or ("webhook" if PUBLIC_BASE_URL else "polling")).lower()
 TELEGRAM_WEBHOOK_SECRET = _env("TELEGRAM_WEBHOOK_SECRET")
+TELEGRAM_TAKEOVER_INTERVAL_SECONDS = max(0, int(_env("TELEGRAM_TAKEOVER_INTERVAL_SECONDS", "45") or "45"))
 TELEGRAM_WEBHOOK_PATH = _env(
     "TELEGRAM_WEBHOOK_PATH",
     f"/webhook/telegram/{hashlib.sha256(TELEGRAM_TOKEN.encode()).hexdigest()[:16]}" if TELEGRAM_TOKEN else "/webhook/telegram",
@@ -237,6 +239,54 @@ async def set_telegram_webhook_takeover(bot, drop_pending_updates: bool = True) 
         "telegram_webhook_info": info_payload,
         "telegram_ownership": ownership,
     }
+
+async def telegram_webhook_watchdog():
+    """Keep Telegram updates pinned to this Railway deployment if another process reclaims the token."""
+    global ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG, ACTIVE_TELEGRAM_WEBHOOK_URL
+    if not tg_app or not PUBLIC_BASE_URL or TELEGRAM_TAKEOVER_INTERVAL_SECONDS <= 0:
+        return
+    ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG = "running"
+    notified_mismatch = False
+    while True:
+        try:
+            await asyncio.sleep(TELEGRAM_TAKEOVER_INTERVAL_SECONDS)
+            expected_url = expected_telegram_webhook_url()
+            info_payload = serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), expected_url)
+            if info_payload.get("matches_expected"):
+                ACTIVE_TELEGRAM_WEBHOOK_URL = expected_url
+                notified_mismatch = False
+                continue
+            takeover = await set_telegram_webhook_takeover(tg_app.bot, drop_pending_updates=False)
+            ACTIVE_TELEGRAM_WEBHOOK_URL = takeover.get("webhook_url") or expected_url
+            logger.warning(
+                "Telegram watchdog reclaimed webhook | old=%s | expected=%s | ok=%s",
+                info_payload.get("url") or "-",
+                expected_url or "-",
+                takeover.get("ok"),
+            )
+            if ADMIN_ID and not notified_mismatch:
+                notified_mismatch = True
+                try:
+                    await tg_app.bot.send_message(
+                        chat_id=ADMIN_ID,
+                        text=(
+                            "🛡 <b>TOAN DAAS WEBHOOK WATCHDOG</b>\n\n"
+                            "Bot vừa tự kéo Telegram update về đúng Railway TOAN DAAS.\n"
+                            f"• Webhook cũ: <code>{html.escape(info_payload.get('url') or '-')}</code>\n"
+                            f"• Webhook đúng: <code>{html.escape(expected_url or '-')}</code>\n"
+                            f"• Kết quả: <code>{html.escape(str(takeover.get('ok')))}</code>\n"
+                            "Nếu /start vẫn ra A_TOOLSX, còn một service khác đang dùng cùng TELEGRAM_TOKEN và liên tục giành lại."
+                        ),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
+            ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG = "stopped"
+            raise
+        except Exception as e:
+            ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG = f"error: {e}"
+            logger.warning(f"Telegram webhook watchdog error: {e}")
 
 # ─── AI CLIENTS ───────────────────────────────────────────────────────────────
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -14232,6 +14282,8 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
         "telegram_webhook_url": expected_webhook or "-",
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "-",
+        "telegram_webhook_watchdog": ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG or "-",
+        "telegram_takeover_interval_seconds": TELEGRAM_TAKEOVER_INTERVAL_SECONDS,
         "telegram_webhook_info": webhook_info,
         "telegram_ownership": ownership,
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
@@ -22612,6 +22664,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── FASTAPI + LIFESPAN ───────────────────────────────────────────────────────
 tg_app: Application = None
 tg_polling_task: asyncio.Task | None = None
+tg_webhook_watchdog_task: asyncio.Task | None = None
 
 async def run_polling_guarded():
     try:
@@ -22640,7 +22693,7 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL
     init_db()
     if not TELEGRAM_TOKEN:
         logger.error("❌ TELEGRAM_TOKEN chưa được set!")
@@ -22823,6 +22876,8 @@ async def lifespan(app: FastAPI):
             webhook_info_payload = {"ok": False, "error": str(e), "expected_url": webhook_url}
         ACTIVE_TELEGRAM_UPDATE_MODE = "webhook"
         ACTIVE_TELEGRAM_WEBHOOK_URL = webhook_url
+        if TELEGRAM_TAKEOVER_INTERVAL_SECONDS > 0:
+            tg_webhook_watchdog_task = asyncio.create_task(telegram_webhook_watchdog())
         logger.info(f"🚀 TOAN DAAS ONLINE WEBHOOK — build={APP_BUILD} webhook={webhook_url}")
     else:
         active_update_mode = "polling"
@@ -22865,6 +22920,8 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
         tg_polling_task.cancel()
+    if tg_webhook_watchdog_task:
+        tg_webhook_watchdog_task.cancel()
     await tg_app.stop()
     await tg_app.shutdown()
     logger.info("🛑 Bot đã dừng an toàn.")
@@ -22882,6 +22939,7 @@ async def health():
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
         "telegram_update_mode_active": ACTIVE_TELEGRAM_UPDATE_MODE or "",
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "",
+        "telegram_webhook_watchdog": ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG or "",
         "public_base_url": PUBLIC_BASE_URL or "",
         "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
     }
@@ -22910,6 +22968,8 @@ async def runtime_health():
         "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
         "telegram_webhook_url": expected_webhook,
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "",
+        "telegram_webhook_watchdog": ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG or "",
+        "telegram_takeover_interval_seconds": TELEGRAM_TAKEOVER_INTERVAL_SECONDS,
         "telegram_webhook_info": webhook_info,
         "telegram_ownership": ownership,
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
