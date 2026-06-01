@@ -8502,11 +8502,160 @@ def build_manifest_prompt(job, variant=None, duration=45):
         "}"
     )
 
+def parse_job_brief_object(brief_text):
+    try:
+        parsed = json.loads(brief_text or "{}")
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+def film_series_manifest_from_brief(job, variant=None, duration=80):
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
+        note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    brief_obj = parse_job_brief_object(brief)
+    if brief_obj.get("type") != "ai_film_series_episode":
+        return None
+    scene_count = max(3, min(int(brief_obj.get("scenes_per_episode") or 10), 12))
+    duration = max(30, min(int(brief_obj.get("duration_seconds") or duration or 80), 180))
+    segment = max(4, int(duration / scene_count))
+    episode_no = int(brief_obj.get("episode_number") or 1)
+    episode_total = int(brief_obj.get("episode_count") or 1)
+    episode_title = brief_obj.get("episode_title") or topic or f"Tập {episode_no}"
+    series_title = brief_obj.get("series_title") or topic or "AI Film Affiliate Series"
+    genre = brief_obj.get("genre") or "drama cảm xúc"
+    audience = brief_obj.get("target_audience") or "người lớn"
+    character_bible = brief_obj.get("character_bible") or {}
+    lead = ((character_bible.get("lead") or {}).get("fixed_description") or "Vietnamese main character, consistent face, cinematic realistic look")
+    support = ((character_bible.get("support") or {}).get("fixed_description") or "Vietnamese supporting character, consistent look, cinematic realistic look")
+    negative = "; ".join(filter(None, [
+        (character_bible.get("lead") or {}).get("negative_prompt"),
+        (character_bible.get("support") or {}).get("negative_prompt"),
+        "text, watermark, distorted anatomy, extra fingers, inconsistent face",
+    ]))
+    affiliate = brief_obj.get("affiliate") or {}
+    affiliate_name = affiliate.get("product") or product_name or "sản phẩm phù hợp"
+    affiliate_link = affiliate.get("url") or affiliate_url or "tracking link trong publish pack"
+    episode_arc = brief_obj.get("episode_arc") or [
+        "Hook mạnh, tạo tò mò ngay 1-3 giây đầu.",
+        "Giới thiệu bối cảnh và nhân vật chính.",
+        "Đặt vấn đề hoặc hiểu lầm.",
+        "Đẩy xung đột bằng hành động rõ.",
+        "Cho thấy cảm xúc nhân vật.",
+        "Tăng cao trào hoặc twist nhỏ.",
+        "Hé lộ một phần sự thật.",
+        "Gắn sản phẩm/link affiliate thật mềm theo ngữ cảnh.",
+        "Payoff cảm xúc hoặc bài học.",
+        "Cliffhanger kéo sang tập sau.",
+    ]
+    scenes = []
+    for idx in range(1, scene_count + 1):
+        goal = episode_arc[min(idx - 1, len(episode_arc) - 1)]
+        if idx == 1:
+            goal = "Hook mạnh: " + str(goal)
+        elif idx == scene_count:
+            goal = brief_obj.get("cliffhanger_rule") or "Cliffhanger kéo sang tập sau."
+        start = 0 if idx == 1 else min(duration - 1, (idx - 1) * segment)
+        end = duration if idx == scene_count else min(duration, idx * segment)
+        on_screen = (
+            f"Tập {episode_no}: chuyện gì xảy ra?"
+            if idx == 1 else
+            (f"Link gợi ý ở bình luận" if idx == scene_count else str(goal)[:48])
+        )
+        voice_line = (
+            f"{episode_title}. Không ai ngờ một lựa chọn nhỏ lại mở ra bí mật thay đổi tất cả."
+            if idx == 1 else
+            (f"Nếu bạn muốn thử giải pháp liên quan, xem link affiliate minh bạch ở phần bình luận hoặc mô tả." if idx == scene_count else f"Cảnh {idx}: {goal}")
+        )
+        visual_prompt = (
+            f"Vertical 9:16 Vietnamese cinematic {genre}, episode {episode_no}/{episode_total} of '{series_title}'. "
+            f"Scene {idx}: {goal}. Characters must stay consistent: lead={lead}; support={support}. "
+            f"Audience={audience}. Emotional realistic lighting, clear action, mobile-first framing, no copyrighted logo, no text in generated image/video. "
+            f"Negative prompt: {negative}."
+        )
+        scenes.append({
+            "scene": idx,
+            "start": start,
+            "end": end,
+            "goal": str(goal),
+            "visual_prompt": visual_prompt,
+            "image_prompt": visual_prompt + " Produce one clean storyboard keyframe.",
+            "video_prompt": (
+                f"Animate scene {idx} for {max(4, end - start)} seconds. Camera movement: slow push-in or subtle handheld drama. "
+                f"Action must match: {goal}. Keep same characters, same outfit, same face, realistic Vietnamese short film style."
+            ),
+            "video_tool": "kling",
+            "on_screen_text": on_screen,
+            "voice_line": voice_line,
+            "asset_needed": f"episode_{episode_no:02d}_scene_{idx:02d}.mp4",
+        })
+    hook = scenes[0]["voice_line"] if scenes else episode_title
+    caption = (
+        f"{episode_title}\n"
+        f"Đây là nội dung AI affiliate, link chỉ là gợi ý nếu phù hợp nhu cầu.\n"
+        f"Link liên quan: {affiliate_link}"
+    )
+    return {
+        "title": episode_title,
+        "series_title": series_title,
+        "episode_number": episode_no,
+        "episode_count": episode_total,
+        "duration_sec": duration,
+        "format": "9:16",
+        "video_pattern": {
+            "id": "ai_film_series_episode",
+            "name": "AI film series episode",
+            "hook_formula": "bí mật/xung đột cảm xúc trong 1-3 giây đầu, cliffhanger cuối tập",
+            "cta_style": "affiliate disclosure mềm, không phá mạch phim",
+        },
+        "character_bible": character_bible,
+        "reference_examples_used": [],
+        "proof_assets_required": [
+            "affiliate link đúng sản phẩm/ngách",
+            "caption có disclosure affiliate",
+            "nhân vật AI nhất quán và không mạo danh người thật",
+        ],
+        "selected_variant_id": variant[0] if variant else 0,
+        "voice": {
+            "provider_primary": "Fish Audio HD",
+            "provider_fallback": "Edge TTS",
+            "style": "giọng kể phim ngắn Việt Nam, cảm xúc nhưng rõ chữ, nhịp nhanh vừa",
+            "script": " ".join(scene["voice_line"] for scene in scenes),
+        },
+        "scenes": scenes,
+        "edit_instructions": {
+            "tool": "capcut|ffmpeg",
+            "music": "nhạc nền cinematic hợp lệ, âm lượng thấp",
+            "subtitle": "burn subtitle tiếng Việt, 2 dòng tối đa, không che mặt nhân vật",
+            "transitions": "cut theo nhịp cảm xúc, không lạm dụng hiệu ứng",
+            "cta_overlay": "Link gợi ý ở bình luận/mô tả - nội dung affiliate",
+        },
+        "publish": {
+            "caption": caption,
+            "hashtags": "#phimAI #AIvideo #affiliate #TOANDAAS",
+            "affiliate_placement": "caption/comment/status/bio theo distribution_pack",
+            "cta": "Xem link gợi ý nếu phù hợp nhu cầu.",
+        },
+        "compliance_checklist": [
+            "Không mạo danh người thật hoặc dùng ảnh/giọng người thật thiếu consent.",
+            "Không copy nguyên nội dung/video/voice/reference của người khác.",
+            "Không hứa kết quả tài chính/sức khỏe/chính sách chắc chắn.",
+            "Có disclosure affiliate trong caption/comment/status.",
+            "Final video phải được review trước khi approve publish.",
+        ],
+        "handoff_order": ["claude_storyboard", "kling_scene_video", "fish_voice", "capcut_edit", "review_gate", "publisher_handoff"],
+        "source_brief": brief_obj,
+    }
+
 def fallback_production_manifest(job, variant=None, duration=45):
     (
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
         note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
     ) = job
+    film_manifest = film_series_manifest_from_brief(job, variant, duration)
+    if film_manifest:
+        return film_manifest
     hook = topic or "video affiliate"
     caption = f"{topic or 'Nội dung mới'} - xem link gợi ý trong bio/mô tả."
     cta = "Xem link affiliate trong bio/mô tả nếu phù hợp nhu cầu."
@@ -8789,6 +8938,8 @@ def create_tasks_from_manifest(owner_id, manifest_row):
         prompt = (
             f"Scene {scene_no} ({scene.get('start','?')}-{scene.get('end','?')}s, {scene.get('goal','-')})\n"
             f"Visual prompt: {scene.get('visual_prompt','')}\n"
+            f"Image prompt: {scene.get('image_prompt','')}\n"
+            f"Video prompt: {scene.get('video_prompt','')}\n"
             f"On-screen text: {scene.get('on_screen_text','')}\n"
             f"Voice line: {scene.get('voice_line','')}\n"
             f"Asset needed: {scene.get('asset_needed','')}"
@@ -12623,7 +12774,7 @@ async def operator_film_series_pipeline(
             "channel_name": channel_name,
         })
         if build:
-            ok, bundle = build_operator_job_bundle(owner_id, job_id, count=scenes_per_episode, duration=duration)
+            ok, bundle = build_operator_job_bundle(owner_id, job_id, count=5, duration=duration)
             if ok:
                 built_jobs.append({
                     "job_id": job_id,
