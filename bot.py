@@ -7960,7 +7960,7 @@ async def operator_head_brain_run_data(
         include_prompt=include_prompt,
     )
     cycle_job_ids = extract_operator_job_ids(cycle, limit=limit)
-    worker_autorun = operator_worker_autorun_data(
+    worker_autorun = await operator_worker_autorun_data(
         owner_id,
         job_ids=cycle_job_ids,
         limit=min(limit, 8),
@@ -11953,7 +11953,125 @@ def operator_video_work_orders_data(owner_id, job_ids=None, limit=8, tool=""):
         "rule": "Video work orders gom brief thực thi cho Claude/n8n/tool worker. Worker tạo output thật qua complete/upload, sau đó dừng ở review/approve gate.",
     }
 
-def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_tasks=8, execute=False):
+def operator_voice_script_from_prompt(prompt=""):
+    text = prompt or ""
+    match = re.search(r"Script:\s*(.+)", text, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        text = match.group(1)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text[:4500]
+
+async def synthesize_operator_voice_task(owner_id, task, job):
+    task_id, row_job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
+    (
+        jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, job_status,
+        operator_note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    script = operator_voice_script_from_prompt(prompt)
+    if not script:
+        return False, {"reason": "empty_voice_script"}
+    upload_root = os.path.abspath(OPERATOR_UPLOAD_DIR or "operator_uploads")
+    job_dir = os.path.abspath(os.path.join(upload_root, f"job_{int(row_job_id)}"))
+    if os.path.commonpath([upload_root, job_dir]) != upload_root:
+        return False, {"reason": "invalid_voice_path"}
+    os.makedirs(job_dir, exist_ok=True)
+    out_path = os.path.abspath(os.path.join(job_dir, f"voice_task_{int(task_id)}.mp3"))
+    used_tool = ""
+    fallback_used = False
+    fish_error = ""
+    if FISH_AUDIO_KEY:
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(
+                    "https://api.fish.audio/v1/tts",
+                    headers={"Authorization": f"Bearer {FISH_AUDIO_KEY}", "Content-Type": "application/json"},
+                    json={"text": script, "reference_id": "7f0955e88846433e9ecb241357608bf8", "format": "mp3"},
+                    timeout=45.0,
+                )
+            if res.status_code == 200 and res.content:
+                with open(out_path, "wb") as f:
+                    f.write(res.content)
+                used_tool = "Fish Audio HD"
+            else:
+                fish_error = f"HTTP {res.status_code}"
+                record_tool_event(owner_id, "voice", "Fish Audio HD", "error", "warning", row_job_id, task_id, "Edge TTS", fish_error)
+        except Exception as exc:
+            fish_error = str(exc)
+            record_tool_event(owner_id, "voice", "Fish Audio HD", "error", "warning", row_job_id, task_id, "Edge TTS", fish_error)
+    if not used_tool:
+        try:
+            communicate = edge_tts.Communicate(script, "vi-VN-NamMinhNeural")
+            await communicate.save(out_path)
+            used_tool = "Edge TTS"
+            fallback_used = bool(fish_error or not FISH_AUDIO_KEY)
+            if fallback_used:
+                record_tool_event(
+                    owner_id,
+                    "voice",
+                    "Edge TTS",
+                    "fallback",
+                    "info",
+                    row_job_id,
+                    task_id,
+                    "",
+                    f"Fallback voice. Fish status: {fish_error or 'missing FISH_AUDIO_KEY'}",
+                )
+        except Exception as exc:
+            record_tool_event(owner_id, "voice", "Edge TTS", "error", "warning", row_job_id, task_id, "", str(exc))
+            return False, {"reason": "edge_tts_failed", "error": str(exc), "fish_error": fish_error}
+    if not os.path.exists(out_path) or os.path.getsize(out_path) <= 0:
+        return False, {"reason": "voice_file_missing", "tool": used_tool}
+    ok, asset_id = add_production_asset(
+        owner_id,
+        row_job_id,
+        "voice",
+        "",
+        "",
+        f"operator_voice_autorun task:{task_id} tool={used_tool} fallback={int(fallback_used)}",
+        out_path,
+        "audio/mpeg",
+        os.path.basename(out_path),
+    )
+    if not ok:
+        return False, {"reason": "asset_save_failed", "tool": used_tool}
+    asset_url = operator_asset_url(asset_id)
+    update_production_asset_url(owner_id, asset_id, asset_url)
+    note_text = f"operator_voice_autorun tool={used_tool} fallback={int(fallback_used)} asset:{asset_id}"
+    changed, row = update_production_task(
+        owner_id,
+        task_id,
+        status="ready",
+        output_url=asset_url,
+        note=note_text,
+        asset_type="voice",
+        record_asset=False,
+    )
+    if not changed or not row:
+        return False, {"reason": "task_update_failed", "asset_id": asset_id, "tool": used_tool}
+    readiness = apply_worker_output_job_state(
+        owner_id,
+        row[0],
+        task_id=task_id,
+        task_type=row[1],
+        task_status="ready",
+        asset_type="voice",
+        note=note_text,
+    )
+    return True, {
+        "task_id": int(task_id),
+        "job_id": int(row[0]),
+        "task_type": "voice",
+        "status": "ready",
+        "asset_id": asset_id,
+        "asset_url": asset_url,
+        "local_path": out_path,
+        "tool": used_tool,
+        "fallback_used": fallback_used,
+        "readiness": (readiness or {}).get("level", "UNKNOWN"),
+        "note": note_text,
+    }
+
+async def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_tasks=8, execute=False):
     limit = max(1, min(safe_int(limit, 5), 20))
     max_tasks = max(1, min(safe_int(max_tasks, 8), 40))
     normalized_ids = []
@@ -11970,43 +12088,50 @@ def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_tasks=8, e
     completed = []
     blocked = []
     pending_external = []
-    safe_types = {"proof_asset", "review"}
+    safe_types = {"proof_asset", "voice"}
     processed = 0
     for job_id in normalized_ids[:limit]:
-        while processed < max_tasks:
-            task = next_worker_task(owner_id, job_id=job_id)
+        rows = [
+            get_production_task(owner_id, row[0])
+            for row in list_production_tasks(owner_id, job_id=job_id, limit=240)
+            if (row[7] or "queued").lower() in {"queued", "waiting", "working"}
+        ]
+        for task in rows:
             if not task:
+                continue
+            if processed >= max_tasks:
                 break
             task_id, row_job_id, manifest_id, task_type, tool, scene_no, title, prompt, status, output_url, note, updated_at = task
             task_type_l = (task_type or "").lower()
             job = get_production_job(row_job_id, owner_id)
             if not job:
                 blocked.append({"task_id": task_id, "job_id": row_job_id, "task_type": task_type, "reason": "job_not_found"})
-                break
+                continue
             (
                 jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, job_status,
                 operator_note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
             ) = job
             if task_type_l not in safe_types:
-                pending_external.append({
-                    "task_id": int(task_id),
-                    "job_id": int(row_job_id),
-                    "task_type": task_type,
-                    "tool": tool,
-                    "scene_no": int(scene_no or 0),
-                    "title": title,
-                    "reason": "Cần tool/file thật; autorun không giả lập media.",
-                    "telegram": {
-                        "task_prompt": f"/task_prompt id={int(task_id)}",
-                        "worker_pack": f"/worker_pack job={int(row_job_id)} task={int(task_id)}",
-                    },
-                    "api": {
-                        "prompt_pack": f"/api/operator/tasks/{int(task_id)}/prompt-pack",
-                        "complete": f"/api/operator/tasks/{int(task_id)}/complete",
-                        "upload": f"/api/operator/tasks/{int(task_id)}/upload",
-                    },
-                })
-                break
+                if not any(item.get("task_id") == int(task_id) for item in pending_external):
+                    pending_external.append({
+                        "task_id": int(task_id),
+                        "job_id": int(row_job_id),
+                        "task_type": task_type,
+                        "tool": tool,
+                        "scene_no": int(scene_no or 0),
+                        "title": title,
+                        "reason": "Cần tool/file thật; autorun không giả lập media.",
+                        "telegram": {
+                            "task_prompt": f"/task_prompt id={int(task_id)}",
+                            "worker_pack": f"/worker_pack job={int(row_job_id)} task={int(task_id)}",
+                        },
+                        "api": {
+                            "prompt_pack": f"/api/operator/tasks/{int(task_id)}/prompt-pack",
+                            "complete": f"/api/operator/tasks/{int(task_id)}/complete",
+                            "upload": f"/api/operator/tasks/{int(task_id)}/upload",
+                        },
+                    })
+                continue
             if not execute:
                 completed.append({
                     "preview": True,
@@ -12014,11 +12139,11 @@ def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_tasks=8, e
                     "job_id": int(row_job_id),
                     "task_type": task_type,
                     "would_status": "ready",
-                    "output_url": affiliate_url if task_type_l == "proof_asset" else "",
+                    "output_url": affiliate_url if task_type_l == "proof_asset" else "local_mp3_when_execute",
                     "note": "preview_safe_autorun",
                 })
                 processed += 1
-                break
+                continue
             if task_type_l == "proof_asset":
                 proof_url = affiliate_url or affiliate_tracking_url(affiliate_id, row_job_id, source=f"proof_task_{task_id}")
                 proof_note = (
@@ -12035,16 +12160,19 @@ def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_tasks=8, e
                     record_asset=True,
                 )
             else:
-                proof_note = "autorun_review_text_gate: checklist đã ghi trong prompt; chờ final_video để admin review trước publish."
-                changed, row = update_production_task(
-                    owner_id,
-                    task_id,
-                    status="ready",
-                    output_url="",
-                    note=proof_note,
-                    asset_type="review_note",
-                    record_asset=False,
-                )
+                ok_voice, voice_result = await synthesize_operator_voice_task(owner_id, task, job)
+                if ok_voice:
+                    completed.append(voice_result)
+                else:
+                    blocked.append({
+                        "task_id": int(task_id),
+                        "job_id": int(row_job_id),
+                        "task_type": task_type,
+                        "reason": voice_result.get("reason") or "voice_failed",
+                        "error": voice_result.get("error") or voice_result.get("fish_error") or "",
+                    })
+                processed += 1
+                continue
             if changed and row:
                 readiness = apply_worker_output_job_state(
                     owner_id,
@@ -12060,13 +12188,12 @@ def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_tasks=8, e
                     "job_id": int(row[0]),
                     "task_type": row[1],
                     "status": "ready",
-                    "output_url": proof_url if task_type_l == "proof_asset" else "",
+                    "output_url": proof_url,
                     "readiness": (readiness or {}).get("level", "UNKNOWN"),
                     "note": proof_note,
                 })
             else:
                 blocked.append({"task_id": int(task_id), "job_id": int(row_job_id), "task_type": task_type, "reason": "task_not_updated"})
-                break
             processed += 1
     job_ids_for_orders = normalized_ids[:limit]
     return {
@@ -12080,7 +12207,7 @@ def operator_worker_autorun_data(owner_id, job_ids=None, limit=5, max_tasks=8, e
         "completed_count": len([item for item in completed if not item.get("preview")]),
         "preview_count": len([item for item in completed if item.get("preview")]),
         "next_video_work_orders": operator_video_work_orders_data(owner_id, job_ids_for_orders, limit=min(limit, 8), tool="claude") if job_ids_for_orders else {"ok": True, "count": 0, "orders": []},
-        "rule": "Autorun chỉ hoàn thành proof/review text an toàn. Visual/voice/edit/publish cần tool thật hoặc admin gate; không fake media.",
+        "rule": "Autorun chỉ hoàn thành proof và voice an toàn. Voice dùng Fish nếu có key, lỗi/quota thì fallback Edge TTS. Visual/edit/publish cần tool/file thật hoặc admin gate; không fake media.",
     }
 
 def select_operator_focus_job_id(owner_id, job_id=0):
@@ -25224,7 +25351,7 @@ async def cmd_worker_autorun(update: Update, context: ContextTypes.DEFAULT_TYPE)
     execute = truthy_value(data.get("execute") or data.get("run"), False)
     limit = max(1, min(safe_int(data.get("limit"), 5), 20))
     max_tasks = max(1, min(safe_int(data.get("max") or data.get("max_tasks"), 8), 40))
-    result = operator_worker_autorun_data(
+    result = await operator_worker_autorun_data(
         update.effective_user.id,
         job_ids=job_ids,
         limit=limit,
@@ -30092,7 +30219,7 @@ async def api_operator_video_work_orders(request: Request, job_ids: str = "", li
 @fastapi_app.post("/api/operator/worker-autorun")
 async def api_operator_worker_autorun(payload: OperatorWorkerAutorunRequest, request: Request):
     verify_operator_api_token(request)
-    result = operator_worker_autorun_data(
+    result = await operator_worker_autorun_data(
         ADMIN_ID,
         job_ids=payload.job_ids,
         limit=payload.limit,
