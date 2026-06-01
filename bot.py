@@ -16597,6 +16597,56 @@ def format_video_review_summary(summary):
     lines.append(f"• Sau đăng: <code>{html.escape(commands.get('mark_published') or '')}</code>")
     return "\n".join(lines)
 
+def operator_review_job_ids_from_result(owner_id, result, limit=3):
+    result = result or {}
+    autorun = result.get("autorun") or ((result.get("worker_handoff") or {}).get("autorun") or {})
+    candidates = []
+
+    def add_job_id(value):
+        job_id = safe_int(value, 0)
+        if job_id > 0 and job_id not in candidates:
+            candidates.append(job_id)
+
+    for item in (autorun.get("completed") or result.get("completed") or []):
+        task_type = (item.get("task_type") or "").lower()
+        if task_type in {"edit", "review", "final_video"} or item.get("telegram_review"):
+            add_job_id(item.get("job_id"))
+    for job_id in autorun.get("job_ids") or result.get("job_ids") or []:
+        add_job_id(job_id)
+    for item in result.get("created_jobs") or []:
+        add_job_id(item.get("job_id") or item.get("id"))
+
+    ready = []
+    for job_id in candidates:
+        summary = build_video_review_summary(owner_id, job_id)
+        if summary and summary.get("final_asset"):
+            ready.append(job_id)
+        if len(ready) >= limit:
+            break
+    return ready
+
+async def send_operator_review_packets(context: ContextTypes.DEFAULT_TYPE, chat_id: int, owner_id, result, limit=3):
+    sent = []
+    errors = []
+    for job_id in operator_review_job_ids_from_result(owner_id, result, limit=limit):
+        summary = build_video_review_summary(owner_id, job_id)
+        if not summary:
+            continue
+        final_asset = summary.get("final_asset")
+        try:
+            if final_asset:
+                await send_production_asset_to_chat(context, chat_id, owner_id, final_asset[0])
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=format_video_review_summary(summary),
+                parse_mode="HTML",
+            )
+            sent.append(job_id)
+        except Exception as exc:
+            errors.append({"job_id": job_id, "error": str(exc)})
+            logger.error(f"operator review packet send error: job={job_id} error={exc}")
+    return {"sent": sent, "errors": errors}
+
 def job_performance_summary(owner_id, job_id):
     conn = db_connect()
     c = conn.cursor()
@@ -23479,6 +23529,7 @@ async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     topic = data.get("topic") or data.get("niche") or data.get("chude") or ""
     execute = truthy_value(data.get("execute") or data.get("run"), False)
     safe_mode = truthy_value(data.get("safe") or data.get("safe_mode"), True)
+    send_review = truthy_value(data.get("review") or data.get("send_review"), True)
     result = await operator_head_brain_run_data(
         update.effective_user.id,
         days=days,
@@ -23533,6 +23584,13 @@ async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"• Work-orders: <b>{len(video_orders)}</b> | <code>{html.escape((result.get('next') or {}).get('video_work_orders') or '/video_work_orders')}</code>")
         lines.append(f"• First brief: <code>{html.escape(first_brief_cmd)}</code>")
         lines.append(f"• First compose: <code>{html.escape(first_compose_cmd)}</code>")
+    reviewable_jobs = operator_review_job_ids_from_result(update.effective_user.id, result, limit=3)
+    if execute and send_review and reviewable_jobs:
+        lines.append(
+            "\n<b>Video đã render cần duyệt:</b> "
+            + ", ".join(f"<code>#{jid}</code>" for jid in reviewable_jobs)
+            + "\nBot sẽ gửi video + caption/link affiliate ngay sau tin này."
+        )
     next_cmds = result.get("next") or {}
     lines.append(
         "\n<b>Lệnh tiếp:</b>\n"
@@ -23543,6 +23601,20 @@ async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "API: <code>POST /api/operator/head-run</code>"
     )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    if execute and send_review and reviewable_jobs:
+        review_report = await send_operator_review_packets(
+            context,
+            update.effective_chat.id,
+            update.effective_user.id,
+            result,
+            limit=3,
+        )
+        if review_report.get("errors"):
+            await update.message.reply_text(
+                "⚠️ Một số review packet gửi lỗi: "
+                + html.escape(str(review_report.get("errors")[:3])),
+                parse_mode="HTML",
+            )
 
 def operator_menu_keyboard():
     return InlineKeyboardMarkup([
@@ -25653,6 +25725,7 @@ async def cmd_worker_autorun(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if job_id > 0 and job_id not in job_ids:
             job_ids.append(job_id)
     execute = truthy_value(data.get("execute") or data.get("run"), False)
+    send_review = truthy_value(data.get("review") or data.get("send_review"), True)
     limit = max(1, min(safe_int(data.get("limit"), 5), 20))
     max_tasks = max(1, min(safe_int(data.get("max") or data.get("max_tasks"), 8), 40))
     result = await operator_worker_autorun_data(
@@ -25688,8 +25761,29 @@ async def cmd_worker_autorun(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if orders:
         order_job_ids = ",".join(str(jid) for jid in (result.get("job_ids") or [])[:8])
         lines.append(f"\n<b>Work-orders tiếp:</b> <code>/video_work_orders jobs={html.escape(order_job_ids)} tool=claude</code>")
+    reviewable_jobs = operator_review_job_ids_from_result(update.effective_user.id, result, limit=3)
+    if execute and send_review and reviewable_jobs:
+        lines.append(
+            "\n<b>Video đã render cần duyệt:</b> "
+            + ", ".join(f"<code>#{jid}</code>" for jid in reviewable_jobs)
+            + "\nBot sẽ gửi video + caption/link affiliate ngay sau tin này."
+        )
     lines.append("\nAPI: <code>POST /api/operator/worker-autorun</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    if execute and send_review and reviewable_jobs:
+        review_report = await send_operator_review_packets(
+            context,
+            update.effective_chat.id,
+            update.effective_user.id,
+            result,
+            limit=3,
+        )
+        if review_report.get("errors"):
+            await update.message.reply_text(
+                "⚠️ Một số review packet gửi lỗi: "
+                + html.escape(str(review_report.get("errors")[:3])),
+                parse_mode="HTML",
+            )
 
 async def cmd_worker_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -29146,6 +29240,11 @@ async def api_operator_head_run(payload: OperatorHeadRunRequest, request: Reques
             handoff = result.get("worker_handoff") or {}
             video_orders = (handoff.get("video_work_orders") or {}).get("orders") or []
             next_cmds = result.get("next") or {}
+            review_jobs = operator_review_job_ids_from_result(ADMIN_ID, result, limit=3)
+            review_line = (
+                "\n• Review ready: "
+                + ", ".join(f"<code>/review_video job={jid} send=1</code>" for jid in review_jobs)
+            ) if review_jobs else ""
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
@@ -29156,6 +29255,7 @@ async def api_operator_head_run(payload: OperatorHeadRunRequest, request: Reques
                     f"• Work-orders: <b>{len(video_orders)}</b>\n"
                     f"• Orders: <code>{html.escape(next_cmds.get('video_work_orders') or '/video_work_orders')}</code>\n"
                     f"• Next: <code>{html.escape(next_cmds.get('head_brain') or '/head_brain')}</code>"
+                    f"{review_line}"
                 ),
                 parse_mode="HTML",
             )
@@ -30533,6 +30633,11 @@ async def api_operator_worker_autorun(payload: OperatorWorkerAutorunRequest, req
     if payload.notify_admin and tg_app and ADMIN_ID:
         try:
             pending = result.get("pending_external") or []
+            review_jobs = operator_review_job_ids_from_result(ADMIN_ID, result, limit=3)
+            review_line = (
+                "\n• Review ready: "
+                + ", ".join(f"<code>/review_video job={jid} send=1</code>" for jid in review_jobs)
+            ) if review_jobs else ""
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
@@ -30542,6 +30647,7 @@ async def api_operator_worker_autorun(payload: OperatorWorkerAutorunRequest, req
                     f"• Completed: <b>{result.get('completed_count') or 0}</b>\n"
                     f"• Pending external: <b>{len(pending)}</b>\n"
                     "• Next: <code>/video_work_orders jobs=...</code>"
+                    f"{review_line}"
                 ),
                 parse_mode="HTML",
             )
