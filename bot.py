@@ -15843,6 +15843,8 @@ async def operator_film_series_pipeline(
     template="dao_ly_trieu_views",
     build=True,
     bootstrap=True,
+    autorun=False,
+    autorun_max_tasks=24,
 ):
     topic = (topic or "").strip()
     if not topic:
@@ -16010,7 +16012,18 @@ async def operator_film_series_pipeline(
             else:
                 failed_builds.append({"job_id": job_id, "episode": ep, "error": bundle.get("error", "build lỗi") if isinstance(bundle, dict) else "build lỗi"})
 
-    worker_next = operator_worker_next_summary(owner_id, [item["job_id"] for item in created_jobs], limit=min(len(created_jobs), 8))
+    created_job_ids = [item["job_id"] for item in created_jobs]
+    autorun_result = None
+    if build and autorun and created_job_ids:
+        autorun_result = await operator_worker_autorun_data(
+            owner_id,
+            job_ids=created_job_ids,
+            limit=min(len(created_job_ids), 8),
+            max_tasks=autorun_max_tasks,
+            execute=True,
+        )
+
+    worker_next = operator_worker_next_summary(owner_id, created_job_ids, limit=min(len(created_jobs), 8))
     work_orders = operator_mission_work_orders_data(
         owner_id,
         result_payload={"created_jobs": created_jobs, "built_jobs": built_jobs},
@@ -16049,9 +16062,15 @@ async def operator_film_series_pipeline(
         "worker_next": worker_next,
         "work_orders": work_orders,
         "video_work_orders": video_work_orders,
+        "autorun": autorun_result,
         "next": {
             "worker_intake": "/api/operator/worker-intake?claim=0&include_prompt=1",
             "claim_worker": "/api/operator/worker-intake?claim=1&include_prompt=1",
+            "worker_autorun": (
+                "/worker_autorun jobs="
+                + ",".join(str(item["job_id"]) for item in created_jobs[:8])
+                + " execute=1"
+            ) if created_jobs else "/worker_autorun execute=1",
             "review": "/review_video job=<JOB_ID> send=1",
             "approve": "/approve_publish job=<JOB_ID> queue=1 mode=manual",
         },
@@ -17448,6 +17467,8 @@ class OperatorFilmSeriesRequest(BaseModel):
     template: str = Field(default="dao_ly_trieu_views", max_length=120)
     build: bool = True
     bootstrap: bool = True
+    autorun: bool = False
+    autorun_max_tasks: int = Field(default=24, ge=1, le=40)
     notify_admin: bool = True
 
 class OperatorComposeVideoRequest(BaseModel):
@@ -19802,7 +19823,8 @@ def brain_command_preview(plan):
             f"aff={int(plan.get('affiliate') or 0)} campaign={int(plan.get('campaign') or 0)} "
             f"episodes={max(1, min(int(plan.get('episodes') or 5), 8))} "
             f"scenes={max(3, min(int(plan.get('scenes_per_episode') or plan.get('scenes') or 10), 12))} "
-            f"duration={max(30, min(int(plan.get('duration') or 80), 180))} build={int(plan.get('build') or 1)}"
+            f"duration={max(30, min(int(plan.get('duration') or 80), 180))} build={int(plan.get('build') or 1)} "
+            f"run={int(bool(plan.get('autorun') or plan.get('run') or plan.get('execute')))}"
         )
     if intent == "affiliate_scale":
         return (
@@ -20630,6 +20652,8 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
             template=plan.get("template") or "dao_ly_trieu_views",
             build=bool(plan.get("build", 1)),
             bootstrap=True,
+            autorun=bool(plan.get("autorun") or plan.get("run") or plan.get("execute")),
+            autorun_max_tasks=max(1, min(int(plan.get("max_tasks") or 24), 40)),
         )
         return {"executed": ok, "intent": intent, "reason": reason, "data": result}
     if intent == "make_video":
@@ -24300,7 +24324,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "videopatterns": "/video_patterns\nGET /api/operator/video-patterns",
         "filmblueprint": "/film_blueprint\nGET /api/operator/film-blueprint",
         "filmprojectpack": "/film_project_pack topic=đạo lý gia đình platform=tiktok episodes=5 scenes=10\nGET /api/operator/film-project-pack?topic=<TOPIC>&platform=tiktok",
-        "filmseries": "/film_series topic=đạo lý gia đình episodes=5 scenes=10 platform=tiktok build=1\nPOST /api/operator/film-series",
+        "filmseries": "/film_series topic=đạo lý gia đình episodes=5 scenes=10 platform=tiktok build=1 run=1\nPOST /api/operator/film-series",
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
         "referenceadd": "/reference_add url=https://... title=video_mau platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=hoc_hook_CTA\nPOST /api/operator/reference-videos",
@@ -24703,6 +24727,8 @@ async def cmd_film_series(update: Update, context: ContextTypes.DEFAULT_TYPE):
         template=data.get("template") or data.get("mau") or "dao_ly_trieu_views",
         build=truthy_value(data.get("build"), True),
         bootstrap=truthy_value(data.get("bootstrap"), True),
+        autorun=truthy_value(data.get("autorun") or data.get("run") or data.get("execute"), False),
+        autorun_max_tasks=max(1, min(safe_int(data.get("max_tasks") or data.get("max"), 24), 40)),
     )
     if not ok:
         return await msg.edit_text(f"❌ Film series lỗi: <code>{html.escape(reason)}</code>", parse_mode="HTML")
@@ -24710,6 +24736,7 @@ async def cmd_film_series(update: Update, context: ContextTypes.DEFAULT_TYPE):
     created = result.get("created_jobs") or []
     built = result.get("built_jobs") or []
     work_orders = result.get("work_orders") or {}
+    autorun = result.get("autorun") or {}
     lines = [
         "🎬 <b>AI FILM SERIES CREATED</b>",
         f"• Series: <b>{html.escape(series.get('title') or '-')}</b>",
@@ -24723,15 +24750,38 @@ async def cmd_film_series(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Tập {item.get('episode')}: job <code>#{item.get('job_id')}</code> | {html.escape(item.get('episode_title') or '-')}\n"
             f"  Worker: <code>/worker_intake job={item.get('job_id')} claim=0</code>"
         )
+    if autorun:
+        reviewable_jobs = operator_review_job_ids_from_result(update.effective_user.id, {"autorun": autorun, "created_jobs": created}, limit=3)
+        lines.extend([
+            "",
+            "<b>Autorun:</b>",
+            f"• Completed: <b>{autorun.get('completed_count') or 0}</b> | Preview: <b>{autorun.get('preview_count') or 0}</b> | Pending external: <b>{len(autorun.get('pending_external') or [])}</b>",
+            f"• Review ready: <code>{html.escape(','.join(str(jid) for jid in reviewable_jobs) or '-')}</code>",
+        ])
     lines.extend([
         "",
         "<b>Bước tiếp:</b>",
         "<code>/worker_intake claim=0</code>",
+        f"<code>{html.escape((result.get('next') or {}).get('worker_autorun') or '/worker_autorun execute=1')}</code>",
         "<code>/worker_intake job=&lt;JOB_ID&gt; claim=1</code>",
         "<code>/review_video job=&lt;JOB_ID&gt; send=1</code>",
         "API: <code>POST /api/operator/film-series</code>",
     ])
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
+    if autorun:
+        review_report = await send_operator_review_packets(
+            context,
+            update.effective_chat.id,
+            update.effective_user.id,
+            {"autorun": autorun, "created_jobs": created},
+            limit=3,
+        )
+        if review_report.get("errors"):
+            await update.message.reply_text(
+                "⚠️ Một số review packet gửi lỗi: "
+                + html.escape(str(review_report.get("errors")[:3])),
+                parse_mode="HTML",
+            )
 
 
 async def cmd_reference_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -30211,6 +30261,8 @@ async def api_operator_film_series(payload: OperatorFilmSeriesRequest, request: 
         template=payload.template,
         build=payload.build,
         bootstrap=payload.bootstrap,
+        autorun=payload.autorun,
+        autorun_max_tasks=payload.autorun_max_tasks,
     )
     if not ok:
         raise HTTPException(status_code=400, detail={"reason": reason, **(result or {})})
@@ -30218,17 +30270,30 @@ async def api_operator_film_series(payload: OperatorFilmSeriesRequest, request: 
         try:
             series = result.get("series") or {}
             first_job = (result.get("created_jobs") or [{}])[0].get("job_id")
+            autorun = result.get("autorun") or {}
+            reviewable_jobs = operator_review_job_ids_from_result(ADMIN_ID, {"autorun": autorun, "created_jobs": result.get("created_jobs") or []}, limit=3) if autorun else []
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
                     "🎞 <b>OPERATOR FILM SERIES</b>\n\n"
                     f"• Topic: <b>{html.escape(series.get('topic') or payload.topic)}</b>\n"
                     f"• Episodes: <b>{series.get('episodes') or payload.episodes}</b> | Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
+                    f"• Autorun: <b>{'ON' if autorun else 'OFF'}</b>"
+                    + (f" | Completed: <b>{autorun.get('completed_count') or 0}</b> | Review: <code>{html.escape(','.join(str(jid) for jid in reviewable_jobs) or '-')}</code>" if autorun else "")
+                    + "\n"
                     f"• First job: <code>#{first_job or '-'}</code>\n"
                     f"• Next: <code>{'/worker_intake job=' + str(first_job) + ' claim=0' if first_job else '/worker_intake claim=0'}</code>"
                 ),
                 parse_mode="HTML",
             )
+            if autorun and reviewable_jobs:
+                await send_operator_review_packets(
+                    type("ApiReviewContext", (), {"bot": tg_app.bot})(),
+                    int(ADMIN_ID),
+                    ADMIN_ID,
+                    {"autorun": autorun, "created_jobs": result.get("created_jobs") or []},
+                    limit=3,
+                )
         except Exception as e:
             logger.error(f"Operator film series notify error: {e}")
     return {
