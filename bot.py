@@ -1835,7 +1835,7 @@ def affiliate_tracking_url(affiliate_id, job_id=0, source=""):
     if job_id:
         query["job"] = int(job_id)
     if source:
-        query["src"] = str(source)[:80]
+        query["src"] = normalize_tracking_source(source)
     suffix = f"?{urlencode(query)}" if query else ""
     return f"{base_url}/r/{int(affiliate_id)}{suffix}"
 
@@ -6904,6 +6904,8 @@ def record_affiliate_postback(owner_id, job_id=0, affiliate_id=0, event_type="or
         event_type = "order"
     affiliate_id = int(affiliate_id or 0)
     job_id = int(job_id or 0)
+    if not job_id:
+        job_id = extract_job_id_from_tracking_source(source) or extract_job_id_from_tracking_source(note)
     if not job_id and affiliate_id:
         conn = db_connect()
         c = conn.cursor()
@@ -6918,20 +6920,20 @@ def record_affiliate_postback(owner_id, job_id=0, affiliate_id=0, event_type="or
         job_id = int(row[0]) if row else 0
     if not job_id:
         return False, "missing_job_id", {}
-    note_parts = [source or "affiliate_postback"]
+    detail_parts = []
     if affiliate_id:
-        note_parts.append(f"affiliate:{affiliate_id}")
+        detail_parts.append(f"affiliate:{affiliate_id}")
     if order_id:
-        note_parts.append(f"order:{order_id}")
+        detail_parts.append(f"order:{order_id}")
     if note:
-        note_parts.append(note)
+        detail_parts.append(note)
     ok, job = add_performance_event(
         owner_id,
         job_id,
         event_type,
         int(value or 1),
         int(amount or 0),
-        " | ".join(note_parts),
+        format_tracking_note(source or "affiliate_postback", " | ".join(detail_parts)),
         0,
         affiliate_id_override=affiliate_id,
     )
@@ -7095,6 +7097,10 @@ def format_tracking_note(source="", note=""):
     source = normalize_tracking_source(source, "manual")
     note = str(note or "").strip()
     return f"src:{source}" + (f"|{note}" if note else "")
+
+def extract_job_id_from_tracking_source(source):
+    match = re.search(r"(?:^|[_:-])job[_:-]?(\d+)(?:$|[_:-])", str(source or ""), re.IGNORECASE)
+    return int(match.group(1)) if match else 0
 
 def performance_source_from_note(note):
     note = str(note or "").strip()
@@ -17776,9 +17782,8 @@ async def affiliate_redirect(affiliate_id: int, request: Request, job: int = 0, 
         raise HTTPException(status_code=404, detail="Affiliate link is inactive")
     if not re.match(r"^https?://", url, re.IGNORECASE):
         raise HTTPException(status_code=400, detail="Affiliate URL must start with http:// or https://")
+    source = normalize_tracking_source(src or f"redirect_affiliate_{aid}", "redirect_affiliate")
     note_parts = [f"redirect_affiliate:{aid}", f"network:{network or '-'}", f"product:{product_name or '-'}"]
-    if src:
-        note_parts.append(f"src:{src[:80]}")
     referer = request.headers.get("referer") or ""
     if referer:
         note_parts.append(f"ref:{referer[:160]}")
@@ -17786,8 +17791,8 @@ async def affiliate_redirect(affiliate_id: int, request: Request, job: int = 0, 
         ADMIN_ID,
         aid,
         job_id=job,
-        source=src or "redirect_affiliate",
-        note=" | ".join(note_parts),
+        source=source,
+        note=format_tracking_note(source, " | ".join(note_parts)),
     )
     return RedirectResponse(url=url, status_code=302)
 
