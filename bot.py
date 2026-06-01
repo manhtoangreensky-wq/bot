@@ -2546,6 +2546,7 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/jobs/<JOB_ID>/assets/upload"),
         ("GET", "/api/operator/assets/<ASSET_ID>/file"),
         ("GET", "/api/operator/jobs/<JOB_ID>/review-video"),
+        ("GET", "/api/operator/jobs/<JOB_ID>/post-publish"),
         ("GET", "/api/operator/publish/<QUEUE_ID>/handoff"),
         ("POST", "/api/operator/publish/<QUEUE_ID>/auto"),
         ("POST", "/api/operator/publish/<QUEUE_ID>/complete"),
@@ -2599,6 +2600,7 @@ def operator_smoke_test_data(owner_id):
         "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
         "affiliate_import_in_spec": "/api/operator/affiliates/import" in spec_text and "/api/operator/affiliates/import" in n8n_text,
         "review_video_in_spec": "/api/operator/jobs/<JOB_ID>/review-video" in spec_text and "/api/operator/jobs/" in n8n_text and "/review-video" in n8n_text,
+        "post_publish_in_spec": "/api/operator/jobs/<JOB_ID>/post-publish" in spec_text and "/api/operator/jobs/" in n8n_text and "/post-publish" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
@@ -2750,6 +2752,7 @@ def operator_worker_spec_data():
             {"step": 10, "name": "publisher_status", "method": "GET", "url": "/api/operator/publisher/status"},
             {"step": 11, "name": "publisher_run", "method": "POST", "url": "/api/operator/publisher/run"},
             {"step": 12, "name": "submit_publish", "method": "POST", "url": "/api/operator/publish/<QUEUE_ID>/complete"},
+            {"step": 12.5, "name": "post_publish_handoff", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/post-publish"},
             {"step": 13, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
         ],
         "payloads": {
@@ -3412,6 +3415,13 @@ def operator_n8n_template_data():
                 "note": "Gói kiểm duyệt cuối: final asset, caption, affiliate links, missing checks và lệnh approve kế tiếp.",
             },
             {
+                "node": "Post Publish Handoff",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/jobs/<JOB_ID>/post-publish",
+                "note": "Sau khi đăng: lấy tracking links, API payload mẫu để ghi view/click/order/revenue/cost và scale next.",
+            },
+            {
                 "node": "Approve Publish",
                 "type": "http_request",
                 "method": "POST",
@@ -3881,6 +3891,20 @@ def operator_n8n_workflow_json_data():
                 "parameters": {
                     "method": "GET",
                     "url": f"{base_url_expr}/api/operator/jobs/{{{{$json.queue.job_id}}}}/review-video",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "post-publish-handoff",
+                "name": "Post Publish Handoff",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [1120, 120],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{{{$node[\"Publisher Run Safe Claim\"].json.queue.job_id}}}}/post-publish",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -8283,6 +8307,168 @@ def format_video_review_summary(summary):
     lines.append(f"• Sau đăng: <code>{html.escape(commands.get('mark_published') or '')}</code>")
     return "\n".join(lines)
 
+def job_performance_summary(owner_id, job_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT event_type, SUM(COALESCE(value,0)), SUM(COALESCE(amount,0)), COUNT(*)
+        FROM performance_events
+        WHERE owner_id=? AND job_id=?
+        GROUP BY event_type""",
+        (str(owner_id), int(job_id)),
+    )
+    totals = {
+        event_type: {"value": int(value or 0), "amount": int(amount or 0), "events": int(count or 0)}
+        for event_type, value, amount, count in c.fetchall()
+    }
+    c.execute(
+        """SELECT COALESCE(note,''), event_type, SUM(COALESCE(value,0)), SUM(COALESCE(amount,0)), COUNT(*)
+        FROM performance_events
+        WHERE owner_id=? AND job_id=?
+        GROUP BY COALESCE(note,''), event_type
+        ORDER BY MAX(id) DESC
+        LIMIT 30""",
+        (str(owner_id), int(job_id)),
+    )
+    by_source = []
+    for note, event_type, value, amount, count in c.fetchall():
+        by_source.append({
+            "source": performance_source_from_note(note),
+            "note": note,
+            "event_type": event_type,
+            "value": int(value or 0),
+            "amount": int(amount or 0),
+            "events": int(count or 0),
+        })
+    conn.close()
+    views = totals.get("view", {}).get("value", 0)
+    clicks = totals.get("click", {}).get("value", 0)
+    conversions = sum(totals.get(key, {}).get("value", 0) for key in ("order", "lead", "revenue"))
+    revenue = sum(totals.get(key, {}).get("amount", 0) for key in ("order", "lead", "revenue"))
+    cost = totals.get("cost", {}).get("amount", 0)
+    score, ctr, cvr, roi = growth_score(views, clicks, conversions, revenue, cost)
+    return {
+        "totals": totals,
+        "by_source": by_source,
+        "score": score,
+        "views": views,
+        "clicks": clicks,
+        "conversions": conversions,
+        "revenue": revenue,
+        "cost": cost,
+        "ctr": ctr,
+        "cvr": cvr,
+        "roi": roi,
+    }
+
+def build_post_publish_handoff(owner_id, job_id, days=30):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return None
+    (
+        jid, _calendar_id, _campaign_id, _channel_id, affiliate_id, platform, topic, stage, status,
+        _note, _brief, _asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
+    ) = job
+    pack = build_static_publish_pack(job, owner_id)
+    performance = job_performance_summary(owner_id, job_id)
+    placement_plan = pack.get("placement_plan") or {}
+    primary = pack.get("primary_affiliate") or {}
+    commands = {
+        "mark_published": f"/mark_published job={job_id} url=https://... views=0 clicks=0 note=...",
+        "view": f"/performance_add job={job_id} type=view value=<VIEWS> note=manual:view",
+        "click": f"/performance_add job={job_id} type=click value=<CLICKS> note=manual:click",
+        "order": f"/performance_add job={job_id} type=order value=<ORDERS> amount=<REVENUE> note=manual:order",
+        "revenue": f"/performance_add job={job_id} type=revenue value=1 amount=<REVENUE> note=manual:revenue",
+        "cost": f"/performance_add job={job_id} type=cost value=1 amount=<COST> note=manual:cost",
+        "tracking_report": f"/tracking_report days={max(1, min(int(days or 30), 180))} limit=20",
+        "scale_plan": f"/scale_plan days={max(1, min(int(days or 30), 180))} platform={platform or 'tiktok'} limit=10",
+        "affiliate_report": f"/affiliate_report days={max(1, min(int(days or 30), 180))} limit=20",
+    }
+    api_payloads = {
+        event_type: {
+            "job_id": job_id,
+            "event_type": event_type,
+            "value": "<VALUE>",
+            "amount": "<AMOUNT>",
+            "source": f"{platform or 'social'}_{event_type}",
+            "note": "post_publish_tracking",
+        }
+        for event_type in ["view", "click", "order", "revenue", "cost"]
+    }
+    if performance["revenue"] > 0 or performance["conversions"] > 0:
+        recommendation = "SCALE nếu compliance ổn: chạy /scale_plan rồi /scale_execute giới hạn nhỏ."
+    elif performance["clicks"] >= 20 and performance["conversions"] <= 0:
+        recommendation = "FIX_OFFER: giữ hook nếu CTR ổn, đổi CTA/comment ghim/link liên quan."
+    elif performance["views"] >= 200 and performance["clicks"] <= 0:
+        recommendation = "FIX_CTA: sửa 3 giây đầu, overlay CTA, caption và vị trí link."
+    else:
+        recommendation = "TEST_MORE: cần thêm view/click trước khi quyết định scale hoặc pause."
+    return {
+        "job": {
+            "id": jid,
+            "platform": platform,
+            "topic": topic,
+            "stage": stage,
+            "status": status,
+            "publish_url": publish_url,
+            "channel_name": channel_name,
+            "account_label": account_label,
+            "affiliate_id": affiliate_id,
+            "network": network,
+            "product_name": product_name,
+            "affiliate_url": affiliate_url,
+        },
+        "tracking_links": {
+            "primary": primary.get("tracking_url") or primary.get("url") or affiliate_url,
+            "caption": placement_plan.get("caption"),
+            "pinned_comment": placement_plan.get("pinned_comment"),
+            "status": placement_plan.get("status"),
+            "bio": placement_plan.get("bio"),
+        },
+        "performance": performance,
+        "commands": commands,
+        "api_payloads": api_payloads,
+        "recommendation": recommendation,
+        "rule": "Sau đăng phải ghi publish_url, view, click, order/lead/revenue và cost nếu có; quyết định scale dựa trên dữ liệu, không đoán mò.",
+    }
+
+def format_post_publish_handoff(handoff):
+    job = handoff.get("job") or {}
+    performance = handoff.get("performance") or {}
+    commands = handoff.get("commands") or {}
+    links = handoff.get("tracking_links") or {}
+    lines = [
+        f"📈 <b>POST-PUBLISH HANDOFF — JOB #{job.get('id')}</b>",
+        f"• Platform/channel: <code>{html.escape(job.get('platform') or '-')}</code> / {html.escape(job.get('channel_name') or '-')}",
+        f"• Topic: {html.escape(job.get('topic') or '-')}",
+        f"• Publish URL: <code>{html.escape(job.get('publish_url') or 'chưa ghi')}</code>",
+        f"• Affiliate: <code>#{job.get('affiliate_id') or '-'}</code> {html.escape(job.get('product_name') or '-')}",
+        "",
+        "<b>Tracking links cần dùng:</b>",
+    ]
+    for key in ["primary", "caption", "pinned_comment", "status", "bio"]:
+        if links.get(key):
+            lines.append(f"• {key}: <code>{html.escape(str(links.get(key)))}</code>")
+    lines.extend([
+        "",
+        "<b>Số liệu hiện có:</b>",
+        f"• view={performance.get('views', 0)} click={performance.get('clicks', 0)} conv={performance.get('conversions', 0)}",
+        f"• revenue={int(performance.get('revenue') or 0):,}đ cost={int(performance.get('cost') or 0):,}đ",
+        f"• CTR={float(performance.get('ctr') or 0):.2f}% CVR={float(performance.get('cvr') or 0):.2f}% ROI={float(performance.get('roi') or 0):.1f}% score={performance.get('score', 0)}",
+        "",
+        "<b>Ghi dữ liệu:</b>",
+        f"• <code>{html.escape(commands.get('mark_published') or '')}</code>",
+        f"• <code>{html.escape(commands.get('view') or '')}</code>",
+        f"• <code>{html.escape(commands.get('click') or '')}</code>",
+        f"• <code>{html.escape(commands.get('order') or '')}</code>",
+        f"• <code>{html.escape(commands.get('cost') or '')}</code>",
+        "",
+        f"<b>Đề xuất:</b> {html.escape(handoff.get('recommendation') or '-')}",
+        f"• <code>{html.escape(commands.get('tracking_report') or '')}</code>",
+        f"• <code>{html.escape(commands.get('scale_plan') or '')}</code>",
+    ])
+    return "\n".join(lines)
+
 def build_creative_test_prompt(job, count=5):
     (
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
@@ -10034,6 +10220,16 @@ def operator_brain_fallback(raw_text):
             "confidence": 84,
         }
     if job_id and any(word in lower for word in [
+        "sau đăng", "sau dang", "post publish", "post-publish", "theo dõi sau đăng", "theo doi sau dang",
+        "ghi số liệu", "ghi so lieu", "đo hiệu quả job", "do hieu qua job"
+    ]):
+        return {
+            "intent": "post_publish",
+            "job": job_id,
+            "days": max(1, min(days, 180)),
+            "confidence": 82,
+        }
+    if job_id and any(word in lower for word in [
         "kiểm duyệt video", "kiem duyet video", "review video", "xem video", "duyệt video", "duyet video",
         "check video", "video review"
     ]):
@@ -10250,7 +10446,7 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_director: khi admin hỏi đầu não nên làm gì, việc tiếp theo, next action.\n"
@@ -10265,6 +10461,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- next_task: khi admin muốn nhận/giao việc tiếp theo để bắt đầu làm; có thể có job/tool.\n"
         "- task_handoff: khi admin muốn xuất prompt/handoff một task cụ thể; cần task ID.\n"
         "- review_video: khi admin muốn xem/kiểm duyệt final video, caption, affiliate links trước khi approve; cần job ID.\n"
+        "- post_publish: khi admin muốn gói theo dõi sau đăng, ghi số liệu, tracking URL và scale next cho một job; cần job ID.\n"
         "- reference_add: khi admin gửi link/path video và nói học/lưu/tham khảo/mẫu để đưa vào reference catalog.\n"
         "- reference_scan: khi admin muốn quét/import/học cả thư mục video tham khảo.\n"
         "- approve_publish: khi admin nói duyệt/chốt job để đưa vào hàng đợi đăng; cần job ID.\n"
@@ -10432,6 +10629,8 @@ def brain_command_preview(plan):
         return f"/task_handoff id={int(plan.get('task') or plan.get('id') or 0)}"
     if intent == "review_video":
         return f"/review_video job={int(plan.get('job') or 0)} send={safe_int(plan.get('send') if plan.get('send') is not None else 1, 1)}"
+    if intent == "post_publish":
+        return f"/post_publish job={int(plan.get('job') or 0)} days={max(1, min(int(plan.get('days') or 30), 180))}"
     if intent == "job_ready":
         return f"/job_ready job={int(plan.get('job') or 0)}"
     if intent == "operator_daily":
@@ -10718,6 +10917,14 @@ async def run_brain_plan(update, context, plan):
                 f"send={safe_int(plan.get('send') if plan.get('send') is not None else 1, 1)}",
             ]
             return await cmd_review_video(update, context)
+        if intent == "post_publish":
+            if not int(plan.get("job") or 0):
+                return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain sau đăng job 12 cần đo gì</code>", parse_mode="HTML")
+            context.args = [
+                f"job={int(plan.get('job') or 0)}",
+                f"days={max(1, min(int(plan.get('days') or 30), 180))}",
+            ]
+            return await cmd_post_publish(update, context)
         if intent == "job_ready":
             if not int(plan.get("job") or 0):
                 return await update.message.reply_text("⚠️ Cần job ID. Ví dụ: <code>/brain kiểm tra job 12 đã ready chưa</code>", parse_mode="HTML")
@@ -12559,7 +12766,8 @@ def operator_category_keyboard(category):
             ("📥 Scan references", "referencescan"),
         ],
         "cat_publish": [
-            ("📦 Publish pack", "publish"), ("📮 Publish queue", "publishqueue"),
+            ("📦 Publish pack", "publish"), ("📈 Post publish", "postpublish"),
+            ("📮 Publish queue", "publishqueue"),
             ("🤖 Publisher handoff", "publisherhandoff"), ("✅ Approve publish", "approvepublish"),
             ("▶️ Publisher run", "publisherrun"), ("📡 Publisher status", "publisherstatus"),
             ("🧪 Publish readiness", "readiness"),
@@ -12923,6 +13131,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "calendar": "/calendar\n/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "calendarplan": "/calendar_plan days=7 channel=all campaign=<ID> aff=<ID> niche=công nghệ",
         "publish": "/publish_pack job=<JOB_ID>\n/queue_publish job=<JOB_ID> mode=manual\n/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
+        "postpublish": "/post_publish job=<JOB_ID> days=30\n/brain sau đăng job <JOB_ID> cần đo gì\nGET /api/operator/jobs/<JOB_ID>/post-publish",
         "approvepublish": "/approve_publish job=<JOB_ID> queue=1 mode=manual note=duyet_ok\nPOST /api/operator/jobs/<JOB_ID>/approve",
         "markpublished": "/mark_published job=<JOB_ID> url=https://... views=0 clicks=0 note=...",
         "readiness": "/publish_readiness\n/channel_publish_set id=<CHANNEL_ID> mode=api token_env=TIKTOK_ACCESS_TOKEN",
@@ -12998,6 +13207,7 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain giao việc tiếp theo job 12</code>\n"
             "• <code>/brain handoff task 5</code>\n"
             "• <code>/brain kiểm duyệt video job 12</code>\n"
+            "• <code>/brain sau đăng job 12 cần đo gì</code>\n"
             "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
             "• <code>/brain báo cáo vận hành 7 ngày</code>",
             parse_mode="HTML"
@@ -13512,6 +13722,26 @@ async def cmd_mark_published(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"Cập nhật doanh thu sau: <code>/performance_add job={job_id} type=revenue value=1 amount=...</code>",
         parse_mode="HTML"
     )
+
+async def cmd_post_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        job_id = int(data.get("job") or data.get("id") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/post_publish job=&lt;JOB_ID&gt; days=30</code>",
+            parse_mode="HTML",
+        )
+    try:
+        days = max(1, min(int(data.get("days") or data.get("ngay") or 30), 180))
+    except (TypeError, ValueError):
+        days = 30
+    handoff = build_post_publish_handoff(update.effective_user.id, job_id, days=days)
+    if not handoff:
+        return await update.message.reply_text("❌ Không tìm thấy production job.")
+    await update.message.reply_text(format_post_publish_handoff(handoff), parse_mode="HTML")
 
 async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -16150,6 +16380,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("worker_next", cmd_worker_next))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
+    tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
     tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
     tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
     tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
@@ -17162,6 +17393,22 @@ async def api_operator_job_review_video(job_id: int, request: Request):
         "commands": summary.get("commands") or {},
         "telegram_summary": format_video_review_summary(summary),
         "rule": "Review-only endpoint. Do not publish until admin/review gate approves and compliance checks are clear.",
+    }
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/post-publish")
+async def api_operator_job_post_publish(job_id: int, request: Request, days: int = 30):
+    verify_operator_api_token(request)
+    handoff = build_post_publish_handoff(ADMIN_ID, job_id, days=max(1, min(int(days or 30), 180)))
+    if not handoff:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "ok": True,
+        "job_id": job_id,
+        **handoff,
+        "telegram_summary": format_post_publish_handoff(handoff),
+        "performance_endpoint": "/api/operator/performance",
+        "tracking_report_url": f"/api/operator/tracking-report?days={max(1, min(int(days or 30), 180))}",
+        "scale_plan_url": f"/api/operator/scale-plan?days={max(1, min(int(days or 30), 180))}",
     }
 
 @fastapi_app.post("/api/operator/loop")
