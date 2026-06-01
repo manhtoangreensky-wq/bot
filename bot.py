@@ -13476,12 +13476,32 @@ async def execute_scale_plan_actions(owner_id, days=30, platform="tiktok", limit
             logger.error(f"Scale plan execute notify error: {e}")
     return {"plan": plan, "executed": executed, "skipped": skipped}
 
+def is_multi_platform_request(platform):
+    return (platform or "").strip().lower() in {"all", "*", "multi", "mxh", "social", "đa kênh", "da kenh"}
+
+def active_platforms_for_launch(owner_id, platform=""):
+    if not is_multi_platform_request(platform):
+        value = (platform or "tiktok").strip().lower()
+        return [value]
+    rows = list_social_channels(owner_id, limit=100)
+    preferred = ["tiktok", "facebook", "reels", "instagram", "youtube", "onlyfans"]
+    active = []
+    for _cid, row_platform, _name, _account, _focus, _audience, _slots, status in rows:
+        value = (row_platform or "").strip().lower()
+        if value and (status or "").lower() == "active" and value not in active:
+            active.append(value)
+    active.sort(key=lambda item: preferred.index(item) if item in preferred else len(preferred))
+    return active or ["tiktok", "facebook", "onlyfans"]
+
 async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all", affiliate_id=0, campaign_id=0, limit=3, build=True, duration=45, variants=5):
     topic = (topic or "").strip()
     if not topic:
         return False, "missing_topic", {}
-    platform = (platform or "tiktok").lower()
+    requested_platform = (platform or "tiktok").lower()
+    multi_platform = is_multi_platform_request(requested_platform)
+    platform_filter = "" if multi_platform else requested_platform
     channel = (channel or "all").lower()
+    target_platforms = active_platforms_for_launch(owner_id, requested_platform)
 
     selected_affiliate = get_affiliate_link(affiliate_id, owner_id) if affiliate_id else None
     affiliate_score = 0
@@ -13489,7 +13509,7 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
     if affiliate_id and not selected_affiliate:
         return False, "affiliate_not_found", {}
     if not selected_affiliate:
-        matches = list_affiliate_matches(owner_id, niche=topic, trend_text=topic, platform=platform, limit=5)
+        matches = list_affiliate_matches(owner_id, niche=topic, trend_text=topic, platform=(platform_filter or "multi"), limit=5)
         if matches:
             affiliate_score, affiliate_hits, _blocked, selected_affiliate = matches[0]
             affiliate_id = selected_affiliate[0]
@@ -13499,13 +13519,13 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
     if campaign_id and not selected_campaign:
         return False, "campaign_not_found", {}
     if not selected_campaign:
-        selected_campaign, campaign_score = find_matching_campaign(owner_id, topic, platform)
+        selected_campaign, campaign_score = find_matching_campaign(owner_id, topic, platform_filter or (target_platforms[0] if target_platforms else "tiktok"))
         campaign_id = selected_campaign[0] if selected_campaign else 0
 
     created_jobs, error = await create_operator_auto_jobs(
         owner_id,
         topic,
-        platform,
+        platform_filter,
         channel,
         campaign_id,
         affiliate_id,
@@ -13516,7 +13536,8 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
             "affiliate_id": affiliate_id,
             "campaign_id": campaign_id,
             "topic": topic,
-            "platform": platform,
+            "platform": requested_platform,
+            "target_platforms": target_platforms,
             "channel": channel,
         }
 
@@ -13600,7 +13621,11 @@ async def make_video_pipeline(owner_id, topic, platform="tiktok", channel="all",
 
     return True, "ok", {
         "topic": topic,
-        "platform": platform,
+        "platform": requested_platform,
+        "platform_filter": platform_filter,
+        "multi_platform": multi_platform,
+        "target_platforms": target_platforms,
+        "created_platforms": sorted({(item.get("platform") or "") for item in created_jobs if item.get("platform")}),
         "channel": channel,
         "affiliate": affiliate_payload,
         "campaign": campaign_payload,
@@ -16725,7 +16750,7 @@ def clean_operator_topic(text, default="công nghệ AI"):
         source,
         flags=re.IGNORECASE,
     )
-    cleaned = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels|instagram|ig|mxh|social|multi|all)\b", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\b\d+\b", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" :=#-,.")
     return cleaned or default
@@ -16735,10 +16760,19 @@ def operator_brain_fallback(raw_text):
     lower = text.lower()
     brain_data = parse_key_value_args(text)
     platform = "tiktok"
-    for candidate in ["tiktok", "facebook", "fb", "reels", "youtube", "shorts", "onlyfan", "onlyfans"]:
-        if candidate in lower:
-            platform = "facebook" if candidate in {"fb", "reels"} else ("youtube" if candidate == "shorts" else candidate)
-            break
+    if any(word in lower for word in ["đa kênh", "da kenh", "nhiều kênh", "nhieu kenh", "đa nền tảng", "da nen tang", "mxh", "mạng xã hội", "mang xa hoi", "multi platform", "platform=all", "nen=all", "nền=all"]):
+        platform = "all"
+    if platform != "all":
+        platform_mentions = []
+        for candidate in ["tiktok", "facebook", "fb", "reels", "youtube", "shorts", "onlyfan", "onlyfans"]:
+            if candidate in lower:
+                normalized = "facebook" if candidate in {"fb", "reels"} else ("youtube" if candidate == "shorts" else ("onlyfans" if candidate == "onlyfan" else candidate))
+                if normalized not in platform_mentions:
+                    platform_mentions.append(normalized)
+        if len(platform_mentions) > 1:
+            platform = "all"
+        elif platform_mentions:
+            platform = platform_mentions[0]
     channel_id = int_from_text(lower, ["channel", "kenh", "kênh"], 0)
     affiliate_id = int_from_text(lower, ["aff", "affiliate"], 0)
     campaign_id = int_from_text(lower, ["campaign", "camp", "chiến dịch", "chien dich"], 0)
@@ -19568,6 +19602,7 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not topic:
         return await update.message.reply_text(
             "⚠️ Cú pháp: <code>/make_video topic=đồ công nghệ văn phòng platform=tiktok channel=all limit=3 build=1</code>\n"
+            "Đa kênh: <code>/make_video topic=... platform=all channel=all limit=6 build=1</code>\n"
             "Có thể thêm <code>aff=&lt;ID&gt;</code> hoặc để bot tự chọn affiliate phù hợp.",
             parse_mode="HTML"
         )
@@ -19625,6 +19660,8 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎬 <b>MAKE VIDEO PIPELINE</b>",
         f"• Chủ đề: <b>{html.escape(topic)}</b>",
         f"• Platform/channel: <code>{html.escape(platform)}</code> / <code>{html.escape(channel)}</code>",
+        f"• Target platforms: <code>{html.escape(','.join(result.get('target_platforms') or []) or platform)}</code>",
+        f"• Created platforms: <code>{html.escape(','.join(result.get('created_platforms') or []) or '-')}</code>",
         f"• Affiliate chọn: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product') or 'chưa có')}"
         + (f" | score={affiliate.get('match_score')}" if affiliate.get("id") else ""),
         f"• Campaign: <code>#{campaign.get('id') or '-'}</code> {html.escape(campaign.get('name') or '')}",
@@ -19676,6 +19713,7 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not topic:
         return await update.message.reply_text(
             "⚠️ Cú pháp: <code>/operator_launch topic=công nghệ AI platform=tiktok channel=all limit=3 build=1</code>\n"
+            "Đa kênh: <code>/operator_launch topic=công nghệ AI platform=all channel=all limit=6 build=1</code>\n"
             "Lệnh này tự bootstrap nếu thiếu kênh/campaign/affiliate rồi tạo pipeline video.",
             parse_mode="HTML",
         )
@@ -19726,6 +19764,8 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
         "🚀 <b>OPERATOR LAUNCH COMPLETE</b>",
         f"• Chủ đề: <b>{html.escape(topic)}</b>",
         f"• Platform/channel: <code>{html.escape(platform)}</code> / <code>{html.escape(channel)}</code>",
+        f"• Target platforms: <code>{html.escape(','.join(result.get('target_platforms') or []) or platform)}</code>",
+        f"• Created platforms: <code>{html.escape(','.join(result.get('created_platforms') or []) or '-')}</code>",
         f"• Bootstrap: <b>{'đã chạy' if bootstrap_result else 'không cần/chưa bật'}</b>",
         f"• Affiliate: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product') or '-')}",
         f"• Campaign: <code>#{campaign.get('id') or '-'}</code> {html.escape(campaign.get('name') or '-')}",
@@ -21238,6 +21278,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"channels":true,"campaigns":true,"affiliates":true,"references":true,"reference_limit":200,"notify_admin":true}</pre>',
         "<b>Payload launch mẫu:</b>",
         '<pre>{"topic":"công nghệ AI","platform":"tiktok","channel":"all","limit":3,"build":true,"bootstrap":true,"duration":45,"notify_admin":true}</pre>',
+        "<b>Payload launch đa kênh mẫu:</b>",
+        '<pre>{"topic":"công nghệ AI","platform":"all","channel":"all","limit":6,"build":true,"bootstrap":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload campaign preset mẫu:</b>",
         '<pre>{"preset":"tech","platform":"tiktok","limit":3,"execute":false,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload run-cycle mẫu:</b>",
@@ -21250,6 +21292,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"mission_id":0,"worker":"claude","execute":false,"safe_mode":true,"include_work_orders":true,"notify_admin":true}</pre>',
         "<b>Payload make-video mẫu:</b>",
         '<pre>{"topic":"đồ công nghệ văn phòng","platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
+        "<b>Payload make-video đa kênh mẫu:</b>",
+        '<pre>{"topic":"đồ công nghệ văn phòng","platform":"all","channel":"all","limit":6,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload affiliate-scale mẫu:</b>",
         '<pre>{"affiliate_id":3,"platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload task complete mẫu:</b>",
@@ -21478,11 +21522,11 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "director": "/operator_director days=30 platform=tiktok limit=10",
         "mission": "/operator_mission days=30 platform=tiktok limit=8\nGET /api/operator/mission",
         "campaignpreset": "/campaign_preset\n/campaign_preset preset=tech platform=tiktok limit=3\n/campaign_preset preset=finance platform=facebook execute=1 build=1\nPOST /api/operator/campaign-preset",
-        "launch": "/operator_launch topic=công nghệ AI platform=tiktok channel=all limit=3 build=1\nPOST /api/operator/launch",
+        "launch": "/operator_launch topic=công nghệ AI platform=tiktok channel=all limit=3 build=1\n/operator_launch topic=công nghệ AI platform=all channel=all limit=6 build=1\nPOST /api/operator/launch",
         "bootstrap": "/operator_bootstrap\nPOST /api/operator/bootstrap",
         "execute": "/operator_execute days=30 platform=tiktok build=1 duration=45",
         "brain": "/brain tạo 5 video trend công nghệ AI cho tiktok aff=<AFF_ID> campaign=<ID>",
-        "makevideo": "/make_video topic=công nghệ AI platform=tiktok channel=all limit=3 build=1\nPOST /api/operator/make-video",
+        "makevideo": "/make_video topic=công nghệ AI platform=tiktok channel=all limit=3 build=1\n/make_video topic=công nghệ AI platform=all channel=all limit=6 build=1\nPOST /api/operator/make-video",
         "autopilot": "/autopilot niche=công nghệ AI platform=tiktok channel=all aff=<AFF_ID> campaign=<ID> limit=3 duration=45",
         "build": "/operator_build job=<JOB_ID> n=5 duration=45",
         "channels": "/channels",
@@ -26856,6 +26900,7 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
                 text=(
                     "🚀 <b>OPERATOR API LAUNCH</b>\n\n"
                     f"• Topic: <b>{html.escape(payload.topic)}</b>\n"
+                    f"• Target: <code>{html.escape(','.join(result.get('target_platforms') or []) or payload.platform)}</code>\n"
                     f"• Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
                     f"• First job: <code>#{launch_next.get('first_job_id') or '-'}</code>\n"
                     f"• Next: <code>{html.escape(telegram.get('review') or '/review_video job=<JOB_ID> send=1')}</code>"
@@ -27597,6 +27642,7 @@ async def api_operator_make_video(payload: OperatorMakeVideoRequest, request: Re
                     "🎬 <b>OPERATOR API MAKE VIDEO</b>\n\n"
                     f"• Topic: <b>{html.escape(payload.topic)}</b>\n"
                     f"• Platform/channel: <code>{html.escape(payload.platform)}</code> / <code>{html.escape(payload.channel)}</code>\n"
+                    f"• Target: <code>{html.escape(','.join(result.get('target_platforms') or []) or payload.platform)}</code>\n"
                     f"• Affiliate: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product') or '')}\n"
                     f"• Jobs: <b>{len(result.get('created_jobs') or [])}</b> | Built: <b>{len(result.get('built_jobs') or [])}</b>\n"
                     "• Next: <code>/tasks</code> → <code>/review_gate</code> → <code>/approve_publish</code>"
