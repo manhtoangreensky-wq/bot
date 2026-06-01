@@ -3688,7 +3688,7 @@ def operator_audit_data(owner_id):
 def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "film_blueprint", "film_project_pack", "film_series", "operator_worker_spec", "operator_commander_pack", "operator_daily_pack", "operator_daily_run", "operator_daily_cycle", "operator_contract", "operator_next_run", "operator_n8n_workflow",
-        "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
+        "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "viral_remix", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_intake", "worker_pack", "video_brief", "video_work_orders", "task_prompt", "scene_pack", "comment_pack", "output_acceptance", "storyboard_crop", "compose_video", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "mission_run", "mission_workorders", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
@@ -3716,6 +3716,7 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/control-contract"),
         ("GET", "/api/operator/video-patterns"),
         ("GET", "/api/operator/reference-pack"),
+        ("GET", "/api/operator/viral-remix"),
         ("GET", "/api/operator/reference-videos"),
         ("POST", "/api/operator/reference-videos"),
         ("POST", "/api/operator/reference-videos/scan"),
@@ -3818,6 +3819,7 @@ def operator_smoke_test_data(owner_id):
         "platform_adapters_in_spec": "/api/operator/platform-adapters" in spec_text and "/api/operator/platform-adapters" in n8n_text,
         "video_patterns_in_spec": "/api/operator/video-patterns" in spec_text and "/api/operator/video-patterns" in n8n_text,
         "reference_pack_in_spec": "/api/operator/reference-pack" in spec_text and "/api/operator/reference-pack" in n8n_text,
+        "viral_remix_in_spec": "/api/operator/viral-remix" in spec_text,
         "reference_videos_in_spec": "/api/operator/reference-videos" in spec_text and "/api/operator/reference-videos" in n8n_text,
         "reference_scan_in_spec": "/api/operator/reference-videos/scan" in spec_text and "/api/operator/reference-videos/scan" in n8n_text,
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
@@ -3943,6 +3945,7 @@ def operator_worker_spec_data():
         "reference_pack_url": f"{base_url}/api/operator/reference-pack",
         "reference_videos_url": f"{base_url}/api/operator/reference-videos",
         "reference_scan_url": f"{base_url}/api/operator/reference-videos/scan",
+        "viral_remix_url": f"{base_url}/api/operator/viral-remix",
         "postback_setup_url": f"{base_url}/api/operator/postback-setup",
         "platform_adapters_url": f"{base_url}/api/operator/platform-adapters",
         "worker_intake_url": f"{base_url}/api/operator/worker-intake",
@@ -4037,6 +4040,7 @@ def operator_worker_spec_data():
             {"step": 1.2, "name": "read_video_patterns", "method": "GET", "url": "/api/operator/video-patterns"},
             {"step": 1.3, "name": "read_reference_pack", "method": "GET", "url": "/api/operator/reference-pack"},
             {"step": 1.35, "name": "read_reference_videos", "method": "GET", "url": "/api/operator/reference-videos?limit=40"},
+            {"step": 1.37, "name": "viral_remix_pack_optional", "method": "GET", "url": "/api/operator/viral-remix?url=<URL>&topic=<TOPIC>&platform=tiktok"},
             {"step": 2, "name": "make_video_optional", "method": "POST", "url": "/api/operator/make-video"},
             {"step": 3, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
@@ -4217,6 +4221,11 @@ def operator_worker_spec_data():
                     },
                 },
                 "purpose": "Bắt buộc đọc trước khi dựng creative/task để học cấu trúc video mẫu, proof asset và luật không copy y nguyên.",
+            },
+            "viral_remix": {
+                "method": "GET",
+                "url": "/api/operator/viral-remix?url=<URL_OR_EMPTY>&ref_id=<REF_ID>&topic=công nghệ AI&platform=tiktok&mode=prompt_structure_only",
+                "purpose": "Phân tích một video/link/reference thành analysis contract + rewrite contract + scene blueprint + affiliate match để tạo bản mới, không reup.",
             },
             "affiliate_bundle": {
                 "method": "GET",
@@ -9215,6 +9224,23 @@ def serialize_reference_video(row):
         ),
     }
 
+def get_reference_video(owner_id, ref_id):
+    if not ref_id:
+        return None
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute(
+            """SELECT id, title, path_or_url, platform, pattern_hint, tags, note, status, created_at
+            FROM reference_videos WHERE owner_id=? AND id=? LIMIT 1""",
+            (str(owner_id), int(ref_id)),
+        )
+        row = c.fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    conn.close()
+    return serialize_reference_video(row)
+
 def reference_match_score(ref, topic="", platform="", pattern_id="", product_name=""):
     blob = " ".join(
         str(ref.get(key) or "")
@@ -9403,6 +9429,179 @@ def reference_learning_pack_data():
             "publish": ["caption", "pinned comment", "related links", "tracking source", "disclosure"],
         },
         "rule": "Biến ý tưởng của thị trường thành format riêng của TOAN DAAS; chỉ copy cấu trúc tư duy, không copy tài sản/nội dung nhận diện.",
+    }
+
+def _affiliate_match_summary(owner_id, niche="", trend_text="", platform="", affiliate_id=0, limit=6):
+    rows = []
+    if affiliate_id:
+        row = get_affiliate_link(int(affiliate_id), owner_id)
+        if row:
+            rows = [(100, 0, 0, row)]
+    if not rows:
+        rows = list_affiliate_matches(owner_id, niche=niche, trend_text=trend_text, platform=platform, limit=limit)
+    items = []
+    for score, hits, blocked_hits, row in rows[:limit]:
+        (
+            aid, network, product_name, aff_niche, url, commission_note, status,
+            price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
+        ) = row
+        items.append({
+            "id": aid,
+            "network": network,
+            "product_name": product_name,
+            "niche": aff_niche,
+            "url": url,
+            "tracking_url": affiliate_tracking_url(aid, 0, f"{platform or 'multi'}_viral_remix"),
+            "score": score,
+            "hits": hits,
+            "blocked_hits": blocked_hits,
+            "commission_note": commission_note,
+            "allowed_claims": allowed_claims,
+            "blocked_claims": blocked_claims,
+            "rule": "Dùng làm link gợi ý/affiliate disclosure; không phóng đại claim hoặc hứa kết quả.",
+        })
+    return items
+
+def viral_remix_pack_data(
+    owner_id=ADMIN_ID,
+    url="",
+    ref_id=0,
+    topic="",
+    niche="",
+    platform="tiktok",
+    mode="prompt_structure_only",
+    pattern="viral_prompt_affiliate",
+    affiliate_id=0,
+):
+    platform = (platform or "tiktok").strip().lower()
+    mode = (mode or "prompt_structure_only").strip()
+    pattern = (pattern or "viral_prompt_affiliate").strip()
+    topic = (topic or niche or "video viral affiliate").strip()
+    niche = (niche or topic).strip()
+    reference = get_reference_video(owner_id, safe_int(ref_id, 0))
+    if not reference and url:
+        reference = {
+            "id": 0,
+            "title": topic or "external viral reference",
+            "path_or_url": url,
+            "source_type": "url" if re.match(r"^https?://", url or "", re.IGNORECASE) else "local_path",
+            "platform": platform,
+            "pattern_hint": pattern,
+            "tags": "viral,reference,affiliate",
+            "note": "external_reference_not_persisted",
+            "learning_note": "Dùng để học cấu trúc; nếu link yêu cầu đăng nhập, admin nên upload video hoặc paste transcript.",
+        }
+    selected_refs = []
+    if reference:
+        selected_refs.append(reference)
+    else:
+        selected_refs = (reference_video_inventory_data(limit=5, owner_id=owner_id).get("catalog") or [])[:3]
+    patterns = video_pattern_bank_data()
+    selected_pattern = patterns.get(pattern) or patterns.get("viral_prompt_affiliate") or {}
+    affiliate_matches = _affiliate_match_summary(
+        owner_id,
+        niche=niche,
+        trend_text=f"{topic} {niche} {platform} {selected_pattern.get('name') or ''}",
+        platform=platform,
+        affiliate_id=affiliate_id,
+        limit=6,
+    )
+    primary_affiliate = affiliate_matches[0] if affiliate_matches else {}
+    analysis_contract = {
+        "input": {
+            "reference": reference or {},
+            "platform": platform,
+            "topic": topic,
+            "niche": niche,
+            "mode": mode,
+            "pattern": pattern,
+        },
+        "extract_fields": [
+            "duration_seconds",
+            "first_3_second_hook",
+            "main_problem_or_desire",
+            "scene_structure_with_timestamps",
+            "retention_function_per_scene",
+            "proof_or_demo_placement",
+            "cta_and_affiliate_placement",
+            "policy_or_copyright_risk",
+        ],
+        "fallback_when_link_locked": [
+            "Nếu Facebook/TikTok yêu cầu đăng nhập, không báo lỗi chung chung.",
+            "Yêu cầu admin upload file video hoặc paste transcript/caption.",
+            "Vẫn có thể tạo bản nháp từ title/note/niche và reference catalog gần nhất.",
+        ],
+    }
+    rewrite_contract = {
+        "mode": mode,
+        "recommended": mode == "prompt_structure_only",
+        "must_change": [
+            "nhân vật chính",
+            "bối cảnh",
+            "lời thoại/voice-over",
+            "text overlay",
+            "góc máy cụ thể nếu quá giống bản gốc",
+            "claim/offer/proof nếu không thuộc TOAN DAAS",
+        ],
+        "can_keep": [
+            "công thức hook",
+            "nhịp cảnh",
+            "vị trí proof/demo",
+            "logic CTA",
+            "dạng cảm xúc",
+        ],
+        "similarity_guard": {
+            "allow_exact_clone": False,
+            "allow_reference_structure": True,
+            "require_new_characters": True,
+            "require_new_dialogue": True,
+            "require_new_setting": True,
+            "warn_if_similarity_score_above": 0.75,
+        },
+    }
+    scene_blueprint = []
+    scene_goals = selected_pattern.get("scene_goals") or [
+        "hook", "problem", "context", "demo", "result", "affiliate_bridge", "cta"
+    ]
+    for idx, goal in enumerate(scene_goals[:10], start=1):
+        scene_blueprint.append({
+            "scene": idx,
+            "goal": goal,
+            "rewrite_instruction": (
+                f"Tạo cảnh mới cho goal '{goal}' bằng nhân vật/bối cảnh riêng của TOAN DAAS; "
+                "không dùng lại frame, voice, caption hoặc claim của reference."
+            ),
+            "output_needed": ["visual_description", "voice_over", "image_prompt", "video_prompt", "caption_or_overlay"],
+        })
+    production_next = {
+        "film_project_pack": f"/film_project_pack topic={topic} platform={platform} episodes=3 scenes=8 template=viral_prompt_affiliate",
+        "film_series": f"/film_series topic={topic} platform={platform} episodes=3 scenes=8 duration=60 template=viral_prompt_affiliate build=1",
+        "affiliate_match": f"/affiliate_match niche={niche} platform={platform} trend={topic}",
+        "reference_add": f"/reference_add url={url or '<URL_OR_PATH>'} title={topic} platform={platform} pattern={pattern} tags=viral,affiliate",
+        "work_orders": "/video_work_orders jobs=<JOB_ID>,<JOB_ID>",
+    }
+    worker_prompt = (
+        "Bạn là Viral Remix Operator cho TOAN DAAS. Phân tích reference để lấy cấu trúc hook/scene/CTA, "
+        f"nhưng tạo video mới cho topic '{topic}' trên {platform}. Mode={mode}. "
+        "Không reup, không copy lời thoại, không clone mặt/giọng/người thật, không giữ watermark. "
+        f"Affiliate chính gợi ý: {primary_affiliate.get('product_name') or 'chọn từ affiliate_matches'}; "
+        "chèn disclosure affiliate trong caption/comment. Output phải gồm analysis JSON, rewritten script, scene prompts, "
+        "affiliate placement, risk note, và next command để tạo production jobs."
+    )
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "name": "TOAN DAAS Viral Remix Pack",
+        "reference": reference or {},
+        "selected_references": selected_refs,
+        "pattern": selected_pattern,
+        "analysis_contract": analysis_contract,
+        "rewrite_contract": rewrite_contract,
+        "scene_blueprint": scene_blueprint,
+        "affiliate_matches": affiliate_matches,
+        "production_next": production_next,
+        "worker_prompt": worker_prompt,
+        "rule": "Chỉ học công thức viral; output phải là nội dung/asset mới, qua review gate trước khi publish.",
     }
 
 def ai_film_series_blueprint_data():
@@ -21720,6 +21919,7 @@ def operator_category_keyboard(category):
         ],
         "cat_trend": [
             ("🔥 Tìm trend", "trend"), ("🏆 Trend ranking", "rank"),
+            ("🎭 Viral remix", "viralremix"),
             ("🤖 Auto từ trend", "auto"), ("📈 Growth optimizer", "growth"),
         ],
         "cat_affiliate": [
@@ -21883,6 +22083,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tool runtime readiness: <code>GET {html.escape(base_url)}/api/operator/tool-readiness</code>",
         f"• Báo lỗi/quota tool: <code>POST {html.escape(base_url)}/api/operator/tool-events</code>",
         f"• Reference videos: <code>GET {html.escape(base_url)}/api/operator/reference-videos?limit=40</code>",
+        f"• Viral remix pack: <code>GET {html.escape(base_url)}/api/operator/viral-remix?url=&lt;URL&gt;&amp;topic=dao_ly</code>",
         f"• Add reference: <code>POST {html.escape(base_url)}/api/operator/reference-videos</code>",
         f"• Scan reference folder: <code>POST {html.escape(base_url)}/api/operator/reference-videos/scan</code>",
         f"• Bulk affiliate import: <code>POST {html.escape(base_url)}/api/operator/affiliates/import</code>",
@@ -22204,6 +22405,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "trend": "/trend_search niche=công nghệ AI platform=tiktok channel=<ID> aff=<ID> campaign=<ID>",
         "auto": "/operator_auto niche=công nghệ AI platform=tiktok channel=all aff=<ID> campaign=<ID> limit=5",
         "rank": "/trend_rank\n/trend_rank 20",
+        "viralremix": "/viral_remix url=https://... topic=công nghệ AI platform=tiktok save=1\n/viral_remix ref=<REF_ID> topic=đạo lý gia đình\nGET /api/operator/viral-remix?url=<URL>&topic=<TOPIC>",
         "affseed": "/affiliate_seed\n/affiliate_import https://shorten.asia/abc (Tên sản phẩm)\n/affiliates",
         "affimport": "/affiliate_import https://shorten.asia/abc (Tên sản phẩm), https://trackfin.asia/xyz (Brand)\n/brain lưu link affiliate https://... (Tên sản phẩm)",
         "affiliates": "/affiliates",
@@ -22776,6 +22978,75 @@ async def cmd_reference_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Xem lại: <code>/reference_videos</code>",
         parse_mode="HTML",
     )
+
+async def cmd_viral_remix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args).strip()
+    data = parse_key_value_args(raw)
+    url = data.get("url") or data.get("link") or extract_supported_video_url(raw)
+    ref_id = safe_int(data.get("ref") or data.get("ref_id") or data.get("id"), 0)
+    topic = data.get("topic") or data.get("chu_de") or data.get("niche") or ""
+    if not topic:
+        topic = " ".join(arg for arg in context.args if "=" not in arg and not re.match(r"^https?://", arg, re.I)).strip()
+    platform = data.get("platform") or data.get("pf") or data.get("nen") or "tiktok"
+    pattern = data.get("pattern") or data.get("pattern_hint") or "viral_prompt_affiliate"
+    if url and truthy_value(data.get("save"), False) and not reference_video_exists(update.effective_user.id, url):
+        ref_id = add_reference_video(
+            update.effective_user.id,
+            title=topic or os.path.basename(url.rstrip("\\/")) or "viral reference",
+            path_or_url=url,
+            platform=platform,
+            pattern_hint=pattern,
+            tags=data.get("tags") or "viral,affiliate,remix",
+            note=data.get("note") or "saved_from_viral_remix",
+        )
+    pack = viral_remix_pack_data(
+        update.effective_user.id,
+        url=url or "",
+        ref_id=ref_id,
+        topic=topic,
+        niche=data.get("niche") or topic,
+        platform=platform,
+        mode=data.get("mode") or "prompt_structure_only",
+        pattern=pattern,
+        affiliate_id=safe_int(data.get("aff") or data.get("affiliate") or data.get("affiliate_id"), 0),
+    )
+    ref = pack.get("reference") or {}
+    next_cmds = pack.get("production_next") or {}
+    lines = [
+        "🎭 <b>VIRAL REMIX PACK</b>",
+        f"• Source: <code>{html.escape(ref.get('path_or_url') or url or 'reference catalog')}</code>",
+        f"• Pattern: <code>{html.escape((pack.get('pattern') or {}).get('id') or pattern)}</code>",
+        f"• Rule: {html.escape(pack.get('rule') or '-')}",
+        "",
+        "<b>Cần phân tích:</b>",
+    ]
+    for item in ((pack.get("analysis_contract") or {}).get("extract_fields") or [])[:8]:
+        lines.append(f"• {html.escape(item)}")
+    lines.append("\n<b>Bắt buộc đổi mới:</b>")
+    for item in ((pack.get("rewrite_contract") or {}).get("must_change") or [])[:6]:
+        lines.append(f"• {html.escape(item)}")
+    affiliate_matches = pack.get("affiliate_matches") or []
+    if affiliate_matches:
+        lines.append("\n<b>Affiliate hợp nhất:</b>")
+        for item in affiliate_matches[:5]:
+            lines.append(
+                f"• #{item.get('id')} | <b>{html.escape(item.get('product_name') or '-')}</b> "
+                f"({html.escape(item.get('network') or '-')}) score={item.get('score')}"
+            )
+    lines.extend([
+        "",
+        "<b>Lệnh tiếp theo:</b>",
+        f"• <code>{html.escape(next_cmds.get('film_project_pack') or '')}</code>",
+        f"• <code>{html.escape(next_cmds.get('film_series') or '')}</code>",
+        f"• <code>{html.escape(next_cmds.get('work_orders') or '')}</code>",
+        "",
+        "<b>Prompt cho Claude/n8n:</b>",
+        f"<pre>{html_pre(pack.get('worker_prompt') or '-', 1600)}</pre>",
+        "API: <code>GET /api/operator/viral-remix?url=&lt;URL&gt;&amp;topic=&lt;TOPIC&gt;</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_reference_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -26366,6 +26637,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
     tg_app.add_handler(CommandHandler("reference_videos", cmd_reference_videos))
     tg_app.add_handler(CommandHandler("reference_add", cmd_reference_add))
+    tg_app.add_handler(CommandHandler("viral_remix", cmd_viral_remix))
     tg_app.add_handler(CommandHandler("reference_scan", cmd_reference_scan))
     tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
     tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
@@ -27073,6 +27345,31 @@ async def api_operator_reference_pack(request: Request):
         "ok": True,
         "reference_pack": reference_learning_pack_data(),
     }
+
+@fastapi_app.get("/api/operator/viral-remix")
+async def api_operator_viral_remix(
+    request: Request,
+    url: str = "",
+    ref_id: int = 0,
+    topic: str = "",
+    niche: str = "",
+    platform: str = "tiktok",
+    mode: str = "prompt_structure_only",
+    pattern: str = "viral_prompt_affiliate",
+    affiliate_id: int = 0,
+):
+    verify_operator_api_token(request)
+    return viral_remix_pack_data(
+        ADMIN_ID,
+        url=url,
+        ref_id=ref_id,
+        topic=topic,
+        niche=niche,
+        platform=platform,
+        mode=mode,
+        pattern=pattern,
+        affiliate_id=affiliate_id,
+    )
 
 @fastapi_app.get("/api/operator/reference-videos")
 async def api_operator_reference_videos(request: Request, limit: int = 80):
