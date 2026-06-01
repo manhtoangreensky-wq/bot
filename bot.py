@@ -2463,6 +2463,7 @@ def operator_smoke_test_data(owner_id):
         "video_patterns_in_spec": "/api/operator/video-patterns" in spec_text and "/api/operator/video-patterns" in n8n_text,
         "reference_pack_in_spec": "/api/operator/reference-pack" in spec_text and "/api/operator/reference-pack" in n8n_text,
         "worker_next_in_spec": "/api/operator/worker-next" in spec_text and "/api/operator/worker-next" in n8n_text,
+        "command_center_in_spec": "/api/operator/command-center" in spec_text and "/api/operator/command-center" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
@@ -2527,6 +2528,7 @@ def operator_worker_spec_data():
             "chuẩn bị publish pack, đăng có kiểm soát và ghi performance."
         ),
         "toolchain_url": f"{base_url}/api/operator/toolchain",
+        "command_center_url": f"{base_url}/api/operator/command-center",
         "video_patterns_url": f"{base_url}/api/operator/video-patterns",
         "reference_pack_url": f"{base_url}/api/operator/reference-pack",
         "reference_learning_rule": reference_learning_pack_data()["rule"],
@@ -2591,6 +2593,7 @@ def operator_worker_spec_data():
         ],
         "standard_loop": [
             {"step": 1, "name": "audit", "method": "GET", "url": "/api/operator/audit"},
+            {"step": 1.05, "name": "command_center", "method": "GET", "url": "/api/operator/command-center?days=30&platform=tiktok"},
             {"step": 1.1, "name": "read_worker_spec", "method": "GET", "url": "/api/operator/worker-spec"},
             {"step": 1.2, "name": "read_video_patterns", "method": "GET", "url": "/api/operator/video-patterns"},
             {"step": 1.3, "name": "read_reference_pack", "method": "GET", "url": "/api/operator/reference-pack"},
@@ -2610,6 +2613,11 @@ def operator_worker_spec_data():
             {"step": 13, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
         ],
         "payloads": {
+            "command_center": {
+                "method": "GET",
+                "url": "/api/operator/command-center?days=30&platform=tiktok&limit=8",
+                "purpose": "Snapshot đầu não: next actions, worker_next, publisher, affiliate decisions và money snapshot để chọn bước tiếp theo.",
+            },
             "reference_learning": {
                 "video_patterns": {"method": "GET", "url": "/api/operator/video-patterns"},
                 "reference_pack": {"method": "GET", "url": "/api/operator/reference-pack"},
@@ -3084,6 +3092,13 @@ def operator_n8n_template_data():
                 "continue_if": "ok=true",
             },
             {
+                "node": "Read Command Center",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/command-center?days=30&platform=tiktok&limit=8",
+                "note": "Snapshot tổng hợp cho Claude/n8n: next actions, worker-next, publisher, affiliate decisions và money.",
+            },
+            {
                 "node": "Read Worker Spec",
                 "type": "http_request",
                 "method": "GET",
@@ -3365,6 +3380,20 @@ def operator_n8n_workflow_json_data():
                         ],
                         "combinator": "and",
                     }
+                },
+            },
+            {
+                "id": "read-command-center",
+                "name": "Read Command Center",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [-500, -720],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/command-center?days=30&platform=tiktok&limit=8",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
                 },
             },
             {
@@ -3720,10 +3749,11 @@ def operator_n8n_workflow_json_data():
             "Audit Operator": {"main": [[{"node": "Audit Ready?", "type": "main", "index": 0}]]},
             "Audit Ready?": {
                 "main": [
-                    [{"node": "Read Worker Spec", "type": "main", "index": 0}],
+                    [{"node": "Read Command Center", "type": "main", "index": 0}],
                     [{"node": "Setup Required", "type": "main", "index": 0}],
                 ]
             },
+            "Read Command Center": {"main": [[{"node": "Read Worker Spec", "type": "main", "index": 0}]]},
             "Read Worker Spec": {"main": [[{"node": "Read Toolchain", "type": "main", "index": 0}]]},
             "Read Toolchain": {"main": [[{"node": "Read Video Patterns", "type": "main", "index": 0}]]},
             "Read Video Patterns": {"main": [[{"node": "Read Reference Pack", "type": "main", "index": 0}]]},
