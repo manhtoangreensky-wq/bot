@@ -14624,6 +14624,19 @@ def parse_brain_performance_metrics(raw_text):
         metrics["cost"] = {"value": 1, "amount": cost}
     return metrics
 
+def clean_operator_topic(text, default="công nghệ AI"):
+    source = (text or "").replace("shoppe", "shopee")
+    cleaned = re.sub(
+        r"\b(tạo|tao|làm|lam|video|clip|short|reel|trend|viral|mới nhất|moi nhat|cho|trên|tren|kênh|kenh|gắn|gan|link|affiliate|aff|campaign|camp|limit|job|build|luôn|luon|đăng|dang|bán hàng|ban hang|kiếm tiền|kiem tien|tìm|tim|rồi|roi|và|va|theo|để|de)\b",
+        " ",
+        source,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b\d+\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" :=#-,.")
+    return cleaned or default
+
 def operator_brain_fallback(raw_text):
     text = raw_text.strip()
     lower = text.lower()
@@ -14951,6 +14964,38 @@ def operator_brain_fallback(raw_text):
             "days": max(1, min(days, 180)),
             "confidence": 76,
         }
+    has_video_action = ("video" in lower or "clip" in lower or "reel" in lower) and any(word in lower for word in ["tạo", "tao", "làm", "lam", "dựng", "dung", "sản xuất", "san xuat"])
+    has_trend_action = any(word in lower for word in ["trend", "viral", "mới nhất", "moi nhat"])
+    if has_video_action and has_trend_action:
+        niche = clean_operator_topic(lower)
+        return {
+            "intent": "operator_launch",
+            "topic": niche,
+            "niche": niche,
+            "platform": platform,
+            "channel": channel_id or "all",
+            "affiliate": affiliate_id,
+            "campaign": campaign_id,
+            "limit": max(1, min(limit, 8)),
+            "duration": duration,
+            "build": 1,
+            "confidence": 86,
+        }
+    if has_video_action:
+        niche = clean_operator_topic(lower)
+        return {
+            "intent": "make_video",
+            "niche": niche,
+            "topic": niche,
+            "platform": platform,
+            "channel": channel_id or "all",
+            "affiliate": affiliate_id,
+            "campaign": campaign_id,
+            "limit": max(1, min(limit, 8)),
+            "duration": duration,
+            "build": 1,
+            "confidence": 82,
+        }
     if any(word in lower for word in ["affiliate report", "báo cáo affiliate", "bao cao affiliate", "link affiliate", "doanh thu affiliate"]):
         return {
             "intent": "affiliate_report",
@@ -14979,9 +15024,7 @@ def operator_brain_fallback(raw_text):
         }
 
     if any(word in lower for word in ["launch", "khởi chạy", "khoi chay", "chạy từ đầu", "chay tu dau", "một lệnh", "mot lenh", "tạo luôn pipeline", "tao luon pipeline"]):
-        niche = re.sub(r"\b(launch|khởi chạy|khoi chay|chạy từ đầu|chay tu dau|một lệnh|mot lenh|tạo|tao|làm|lam|video|pipeline|trend|cho|trên|tren|gắn|gan|link|affiliate|aff|campaign|camp|limit|job|build|luôn|luon)\b", " ", lower)
-        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
-        niche = re.sub(r"\s+", " ", niche).strip(" :=#") or "công nghệ AI"
+        niche = clean_operator_topic(lower)
         return {
             "intent": "operator_launch",
             "topic": niche,
@@ -15016,9 +15059,7 @@ def operator_brain_fallback(raw_text):
     if any(word in lower for word in ["ready", "sẵn sàng", "san sang", "đủ điều kiện", "du dieu kien"]):
         return {"intent": "job_ready", "job": job_id, "confidence": 70}
     if affiliate_id and any(word in lower for word in ["scale", "nhân rộng", "nhan rong", "đẩy link", "day link", "affiliate", "link này", "link nay"]):
-        niche = re.sub(r"\b(scale|nhân rộng|nhan rong|đẩy link|day link|affiliate|aff|link này|link nay|tạo|tao|làm|lam|video|trend|cho|trên|tren|kênh|kenh|campaign|camp|limit|job|build|luôn|luon)\b", " ", lower)
-        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
-        niche = re.sub(r"\s+", " ", niche).strip(" :=#")
+        niche = clean_operator_topic(lower, "")
         return {
             "intent": "affiliate_scale",
             "niche": niche,
@@ -15036,9 +15077,7 @@ def operator_brain_fallback(raw_text):
     if any(word in lower for word in ["daily", "báo cáo ngày", "bao cao ngay", "tổng quan", "tong quan", "dashboard"]):
         return {"intent": "operator_daily", "days": int_from_text(lower, ["days", "ngày", "ngay"], 1) or 1, "confidence": 65}
     if any(word in lower for word in ["autopilot", "tự chạy", "tu chay", "tự động hết", "tu dong het", "build luôn", "build luon"]):
-        niche = re.sub(r"\b(autopilot|tự chạy|tu chay|tự động hết|tu dong het|build luôn|build luon|tạo|tao|làm|lam|video|trend|cho|trên|tren|gắn|gan|link|affiliate|aff|campaign|camp|limit|job)\b", " ", lower)
-        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
-        niche = re.sub(r"\s+", " ", niche).strip(" :=#") or "công nghệ AI"
+        niche = clean_operator_topic(lower)
         return {
             "intent": "autopilot",
             "niche": niche,
@@ -15051,9 +15090,7 @@ def operator_brain_fallback(raw_text):
             "confidence": 75,
         }
     if "video" in lower and any(word in lower for word in ["tạo", "tao", "làm", "lam", "kiếm tiền", "kiem tien", "affiliate", "bán hàng", "ban hang"]):
-        niche = re.sub(r"\b(tạo|tao|làm|lam|video|trend|viral|mới nhất|moi nhat|cho|trên|tren|kênh|kenh|gắn|gan|link|affiliate|aff|campaign|camp|limit|job)\b", " ", lower)
-        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
-        niche = re.sub(r"\s+", " ", niche).strip(" :=#") or "công nghệ AI"
+        niche = clean_operator_topic(lower)
         return {
             "intent": "make_video",
             "niche": niche,
@@ -15068,9 +15105,7 @@ def operator_brain_fallback(raw_text):
             "confidence": 72,
         }
     if any(word in lower for word in ["trend", "viral", "mới nhất", "moi nhat"]):
-        niche = re.sub(r"\b(tạo|tao|làm|lam|video|trend|viral|mới nhất|moi nhat|cho|trên|tren|kênh|kenh|gắn|gan|link|affiliate|aff|campaign|camp|limit|job)\b", " ", lower)
-        niche = re.sub(r"\b(tiktok|facebook|fb|youtube|shorts|onlyfan|onlyfans|reels)\b", " ", niche)
-        niche = re.sub(r"\s+", " ", niche).strip(" :=#") or "công nghệ AI"
+        niche = clean_operator_topic(lower)
         return {
             "intent": "operator_auto",
             "niche": niche,
