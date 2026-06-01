@@ -2894,7 +2894,7 @@ def operator_audit_data(owner_id):
 
 def operator_smoke_test_data(owner_id):
     required_commands = [
-        "runtime", "campaign_preset", "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_next_run", "operator_n8n_workflow",
+        "runtime", "campaign_preset", "postback_setup", "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_commander_pack", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
         "channel_router", "worker_next", "worker_pack", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
@@ -2937,6 +2937,8 @@ def operator_smoke_test_data(owner_id):
         ("GET", "/api/operator/jobs/<JOB_ID>/post-publish"),
         ("GET", "/api/operator/money-pack"),
         ("GET", "/api/operator/revenue-destinations"),
+        ("GET", "/api/operator/postback-setup"),
+        ("GET", "/api/affiliate/postback"),
         ("GET", "/api/operator/publish/<QUEUE_ID>/handoff"),
         ("POST", "/api/operator/publish/<QUEUE_ID>/auto"),
         ("POST", "/api/operator/publish/<QUEUE_ID>/complete"),
@@ -3001,6 +3003,7 @@ def operator_smoke_test_data(owner_id):
         "post_publish_in_spec": "/api/operator/jobs/<JOB_ID>/post-publish" in spec_text and "/api/operator/jobs/" in n8n_text and "/post-publish" in n8n_text,
         "money_pack_in_spec": "/api/operator/money-pack" in spec_text and "/api/operator/money-pack" in n8n_text,
         "revenue_destinations_in_spec": "/api/operator/revenue-destinations" in spec_text and "/api/operator/revenue-destinations" in n8n_text,
+        "postback_setup_in_spec": "/api/operator/postback-setup" in spec_text and "/api/operator/postback-setup" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
         "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
@@ -3078,6 +3081,7 @@ def operator_worker_spec_data():
         "reference_pack_url": f"{base_url}/api/operator/reference-pack",
         "reference_videos_url": f"{base_url}/api/operator/reference-videos",
         "reference_scan_url": f"{base_url}/api/operator/reference-videos/scan",
+        "postback_setup_url": f"{base_url}/api/operator/postback-setup",
         "reference_learning_rule": reference_learning_pack_data()["rule"],
         "roles": [
             {
@@ -3175,6 +3179,7 @@ def operator_worker_spec_data():
             {"step": 12.5, "name": "post_publish_handoff", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/post-publish"},
             {"step": 12.7, "name": "money_pack", "method": "GET", "url": "/api/operator/money-pack?days=30&platform=tiktok&limit=10"},
             {"step": 12.8, "name": "revenue_destinations", "method": "GET", "url": "/api/operator/revenue-destinations?days=30&platform=tiktok&limit=10"},
+            {"step": 12.85, "name": "postback_setup", "method": "GET", "url": "/api/operator/postback-setup?network=trackfin&platform=tiktok"},
             {"step": 13, "name": "performance", "method": "POST", "url": "/api/operator/performance"},
         ],
         "payloads": {
@@ -3372,6 +3377,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/revenue-destinations?days=30&platform=tiktok&limit=10",
                 "purpose": "Chỉ rõ tiền về PayOS/ngân hàng/network nào, event nào cần ghi, và postback nào cần bật.",
+            },
+            "postback_setup": {
+                "method": "GET",
+                "url": "/api/operator/postback-setup?network=trackfin&platform=tiktok&limit=20",
+                "purpose": "Tạo template callback GET/POST cho affiliate network, mapping event lead/order/revenue và fallback /performance_add.",
             },
         },
         "safety_rules": [
@@ -4003,6 +4013,13 @@ def operator_n8n_template_data():
                 "method": "GET",
                 "url": f"{base_url}/api/operator/revenue-destinations?days=30&platform=tiktok&limit=10",
                 "note": "Biết tiền về PayOS/ngân hàng/network nào và event nào phải ghi sau đăng để đo đúng.",
+            },
+            {
+                "node": "Postback Setup",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/postback-setup?network=trackfin&platform=tiktok&limit=20",
+                "note": "Lấy template GET/POST callback cho affiliate network và fallback nhập tay nếu network không có postback.",
             },
             {
                 "node": "Campaign Preset",
@@ -4834,6 +4851,20 @@ def operator_n8n_workflow_json_data():
                 "parameters": {
                     "method": "GET",
                     "url": f"{base_url_expr}/api/operator/revenue-destinations?days=30&platform=tiktok&limit=10",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
+                "id": "postback-setup",
+                "name": "Postback Setup",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [2120, -120],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/postback-setup?network=trackfin&platform=tiktok&limit=20",
                     "sendHeaders": True,
                     "headerParameters": headers,
                     "options": {"timeout": 60000},
@@ -7710,6 +7741,174 @@ def record_affiliate_postback(owner_id, job_id=0, affiliate_id=0, event_type="or
         update_production_job(job_id, owner_id, status="published", note=f"affiliate_postback:{event_type} amount={amount}")
     return True, "recorded", {"job_id": job_id, "affiliate_id": affiliate_id, "event_type": event_type, "amount": int(amount or 0)}
 
+POSTBACK_NETWORK_GUIDES = [
+    {
+        "key": "goeco",
+        "hosts": ["goeco.mobi", "goecom.asia"],
+        "networks": ["GoEco", "GoEcom"],
+        "notes": "Dùng cho các link GoEco/GoEcom. Nếu dashboard có SubID/click_id, gắn job_<JOB_ID>_aff_<AFF_ID>_src_<SOURCE>.",
+    },
+    {
+        "key": "trackfin",
+        "hosts": ["trackfin.asia"],
+        "networks": ["TrackFin"],
+        "notes": "Nhóm tài chính/lead. Không ghi claim duyệt thẻ/vay chắc chắn; postback nên ghi lead/order/revenue khi network xác nhận.",
+    },
+    {
+        "key": "attracking",
+        "hosts": ["attracking.asia"],
+        "networks": ["Attracking"],
+        "notes": "Nhóm tracking tài chính/ecom. Ưu tiên event lead nếu payout theo đăng ký, order/revenue nếu payout theo hoa hồng.",
+    },
+    {
+        "key": "trackec",
+        "hosts": ["trackec.asia", "trackecom.asia"],
+        "networks": ["TrackEC", "TrackEcom"],
+        "notes": "Nhóm e-commerce. Ghi amount là hoa hồng hoặc doanh thu quy đổi mà network báo.",
+    },
+    {
+        "key": "trackmobi",
+        "hosts": ["trackmobi.asia"],
+        "networks": ["TrackMobi"],
+        "notes": "Nhóm app/mobile/travel. Nếu có Android/iOS riêng, giữ hai affiliate_id riêng để đo hiệu quả từng hệ điều hành.",
+    },
+    {
+        "key": "shorten",
+        "hosts": ["shorten.asia"],
+        "networks": ["ShortenAsia"],
+        "notes": "Link rút gọn thường ít macro hơn. Nếu không có postback, nhập số liệu bằng /performance_add sau khi xem dashboard.",
+    },
+]
+
+def postback_network_guide_for(network="", url=""):
+    net = (network or "").strip().lower()
+    host = urlparse(url or "").netloc.lower()
+    for guide in POSTBACK_NETWORK_GUIDES:
+        if any(item.lower() in net for item in guide["networks"]):
+            return guide
+        if any(item in host for item in guide["hosts"]):
+            return guide
+    return {
+        "key": normalize_tracking_source(network or host or "affiliate_network", "affiliate_network"),
+        "hosts": [host] if host else [],
+        "networks": [network or "Affiliate"],
+        "notes": "Network chưa có rule riêng. Dùng GET/POST postback generic hoặc nhập tay bằng /performance_add.",
+    }
+
+def affiliate_postback_setup_data(owner_id, network="", affiliate_id=0, job_id=0, platform="tiktok", limit=20):
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    endpoint = f"{base_url}/api/affiliate/postback"
+    platform = (platform or "tiktok").lower()
+    limit = max(3, min(int(limit or 20), 80))
+    rows = []
+    if affiliate_id:
+        row = get_affiliate_link(int(affiliate_id), owner_id)
+        if row:
+            rows = [row]
+    if not rows:
+        all_rows = list_affiliate_links(owner_id, limit=300)
+        network_filter = normalize_tracking_source(network, "")
+        for row in all_rows:
+            _aid, row_network, _product, _niche, row_url, *_ = row
+            guide = postback_network_guide_for(row_network, row_url)
+            haystack = " ".join([row_network or "", row_url or "", guide.get("key", "")]).lower()
+            if not network_filter or network_filter in normalize_tracking_source(haystack, ""):
+                rows.append(row)
+            if len(rows) >= limit:
+                break
+    grouped = {}
+    affiliate_cards = []
+    for row in rows[:limit]:
+        aid, row_network, product, niche, url, note, status, *_ = row
+        guide = postback_network_guide_for(row_network, url)
+        grouped.setdefault(guide["key"], {"guide": guide, "count": 0, "affiliates": []})
+        grouped[guide["key"]]["count"] += 1
+        source = normalize_tracking_source(f"{guide['key']}_job_{job_id or '<JOB_ID>'}_aff_{aid}_{platform}", "network_postback")
+        get_url = (
+            f"{endpoint}?token=<AFFILIATE_POSTBACK_TOKEN>&affiliate_id={aid}"
+            f"&job_id={job_id or '<JOB_ID>'}&event_type=order&value=1"
+            f"&amount=<COMMISSION_VND>&order_id=<ORDER_ID>&source={quote(source)}"
+        )
+        card = {
+            "affiliate_id": aid,
+            "network": row_network,
+            "product": product,
+            "niche": niche,
+            "status": status,
+            "network_key": guide["key"],
+            "original_url": url,
+            "tracking_click_url": affiliate_tracking_url(aid, job_id=job_id, source=f"{platform}_primary") or f"{base_url}/r/{aid}?job={job_id or '<JOB_ID>'}&src={platform}_primary",
+            "recommended_sub_id": f"job_{job_id or '<JOB_ID>'}_aff_{aid}_src_{platform}_primary",
+            "get_postback_template": get_url,
+            "post_json_sample": {
+                "affiliate_id": aid,
+                "job_id": job_id or "<JOB_ID>",
+                "event_type": "order",
+                "value": 1,
+                "amount": "<COMMISSION_VND>",
+                "order_id": "<ORDER_ID>",
+                "source": source,
+                "note": f"{guide['key']}_network_confirmed",
+                "token": "<AFFILIATE_POSTBACK_TOKEN>",
+            },
+            "manual_command": f"/performance_add job={job_id or '<JOB_ID>'} aff={aid} type=revenue value=1 amount=<VND> note={guide['key']}_manual",
+        }
+        grouped[guide["key"]]["affiliates"].append({"affiliate_id": aid, "product": product, "network": row_network})
+        affiliate_cards.append(card)
+    network_guides = []
+    for key, item in sorted(grouped.items(), key=lambda kv: kv[0]):
+        guide = item["guide"]
+        network_guides.append({
+            "key": key,
+            "hosts": guide.get("hosts", []),
+            "networks": guide.get("networks", []),
+            "affiliate_count": item["count"],
+            "sample_affiliates": item["affiliates"][:5],
+            "notes": guide.get("notes", ""),
+        })
+    return {
+        "ok": True,
+        "generated_at": now_text(),
+        "base_url": base_url,
+        "endpoint": endpoint,
+        "token_required": bool(AFFILIATE_POSTBACK_TOKEN),
+        "input": {"network": network or "all", "affiliate_id": int(affiliate_id or 0), "job_id": int(job_id or 0), "platform": platform, "limit": limit},
+        "event_mapping": {
+            "lead": "Đăng ký/app install/form submit được network xác nhận.",
+            "order": "Đơn hàng/conversion được network xác nhận.",
+            "revenue": "Hoa hồng hoặc payout đã có số tiền cụ thể.",
+            "cost": "Không bắn từ affiliate network; ghi bằng /performance_add khi có chi phí ads/tool.",
+        },
+        "macro_policy": [
+            "Mỗi network đặt tên macro khác nhau. Thay <COMMISSION_VND>, <ORDER_ID>, <JOB_ID> bằng macro thật trong dashboard.",
+            "Nếu network hỗ trợ SubID/click_id, dùng recommended_sub_id để bot suy ra job/affiliate/source.",
+            "Nếu network không hỗ trợ postback, tải report định kỳ rồi nhập /performance_add hoặc gọi POST /api/operator/performance.",
+        ],
+        "generic_get_template": (
+            f"{endpoint}?token=<AFFILIATE_POSTBACK_TOKEN>&affiliate_id=<AFF_ID>&job_id=<JOB_ID>"
+            "&event_type=order&value=1&amount=<COMMISSION_VND>&order_id=<ORDER_ID>&source=<NETWORK>_postback_job_<JOB_ID>"
+        ),
+        "generic_post_json": {
+            "affiliate_id": "<AFF_ID>",
+            "job_id": "<JOB_ID>",
+            "event_type": "order",
+            "value": 1,
+            "amount": "<COMMISSION_VND>",
+            "order_id": "<ORDER_ID>",
+            "source": "<NETWORK>_postback_job_<JOB_ID>",
+            "note": "network_confirmed",
+            "token": "<AFFILIATE_POSTBACK_TOKEN>",
+        },
+        "network_guides": network_guides,
+        "affiliates": affiliate_cards,
+        "commands": {
+            "telegram": f"/postback_setup network={network or 'all'} platform={platform} limit={limit}",
+            "tracking_report": "/tracking_report days=30 limit=20",
+            "affiliate_report": "/affiliate_report days=30 limit=20",
+        },
+        "rule": "Postback chỉ ghi nhận số liệu đã được network xác nhận. Không tự tạo doanh thu giả; nếu chưa có job_id thì hệ thống chỉ suy luận theo affiliate gần nhất khi đủ dữ liệu.",
+    }
+
 def performance_report_data(owner_id, limit=10):
     conn = db_connect()
     c = conn.cursor()
@@ -8334,12 +8533,14 @@ def revenue_destination_pack_data(owner_id, days=30, platform="tiktok", limit=10
                 "money_pack": f"/money_pack days={days} platform={platform} limit={limit}",
                 "tracking_report": f"/tracking_report days={days} limit={limit}",
                 "affiliate_report": f"/affiliate_report days={days} limit={limit}",
+                "postback_setup": f"/postback_setup platform={platform} limit={limit}",
                 "scale_plan": f"/scale_plan days={days} platform={platform} limit={limit}",
                 "next_run": f"/operator_next_run days={days} platform={platform}",
             },
             "api": {
                 "revenue_destinations": f"/api/operator/revenue-destinations?days={days}&platform={platform}&limit={limit}",
                 "money_pack": f"/api/operator/money-pack?days={days}&platform={platform}&limit={limit}",
+                "postback_setup": f"/api/operator/postback-setup?platform={platform}&limit={limit}",
                 "performance": "/api/operator/performance",
                 "affiliate_postback": "/api/affiliate/postback",
             },
@@ -12240,6 +12441,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• /runtime — Kiểm tra bản đang chạy: <code>{APP_BUILD}</code>",
             "• /operator_menu — Menu nút theo thư mục: Trend, Affiliate, Sản xuất, Đăng bài, Doanh thu, API",
             "• /campaign_preset — Preset chiến dịch: tech/ecom/finance/travel/onlyfans",
+            "• /postback_setup — Cấu hình callback affiliate network vào bot",
             "• /brain &lt;lệnh&gt; — Ra lệnh tự nhiên cho AI Operator",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
@@ -12744,6 +12946,24 @@ def operator_brain_fallback(raw_text):
             "confidence": 84,
         }
     if any(word in lower for word in [
+        "postback", "callback affiliate", "affiliate callback", "cấu hình callback", "cau hinh callback",
+        "cấu hình postback", "cau hinh postback", "network callback"
+    ]):
+        network = brain_data.get("network") or brain_data.get("net") or ""
+        for candidate in ["goeco", "goecom", "trackfin", "attracking", "trackec", "trackecom", "trackmobi", "shorten"]:
+            if candidate in lower:
+                network = candidate
+                break
+        return {
+            "intent": "postback_setup",
+            "network": network,
+            "platform": platform,
+            "affiliate": affiliate_id,
+            "job": job_id,
+            "limit": max(3, min(limit, 30)),
+            "confidence": 84,
+        }
+    if any(word in lower for word in [
         "commander pack", "ai commander", "claude pack", "prompt claude", "claude điều khiển", "claude dieu khien",
         "ai cấp cao", "ai cap cao", "gói điều khiển", "goi dieu khien", "system prompt điều khiển", "system prompt dieu khien"
     ]):
@@ -13046,13 +13266,14 @@ def parse_operator_brain(raw_text, owner_id):
     prompt = (
         "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
-        "Chỉ chọn một intent trong: command_center, operator_next_run, pipeline_pack, money_pack, revenue_destinations, operator_commander_pack, campaign_preset, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
+        "Chỉ chọn một intent trong: command_center, operator_next_run, pipeline_pack, money_pack, revenue_destinations, postback_setup, operator_commander_pack, campaign_preset, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, publisher_capabilities, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
         "- command_center: khi admin hỏi hôm nay làm gì, tổng chỉ huy, bàn điều khiển, command center, snapshot điều phối.\n"
         "- operator_next_run: khi admin muốn đúng một run card/lệnh tiếp theo duy nhất cho Claude/n8n/admin.\n"
         "- pipeline_pack: khi admin hỏi một job/pipeline đang ở bước nào, cần AI nào làm tiếp, next action, pipeline command pack.\n"
         "- money_pack: khi admin hỏi tiền về, doanh thu tổng, PayOS + affiliate, link/kênh/source nào tạo tiền và nên scale gì.\n"
         "- revenue_destinations: khi admin hỏi tiền về đâu, network nào trả tiền, cần ghi event/postback gì.\n"
+        "- postback_setup: khi admin muốn cấu hình postback/callback affiliate network vào bot.\n"
         "- operator_commander_pack: khi admin muốn prompt/gói điều khiển cho Claude Opus hoặc AI cấp cao điều phối toàn pipeline.\n"
         "- campaign_preset: khi admin muốn dùng preset chiến dịch tech/ecom/finance/travel/onlyfans để tự gom affiliate, kênh và launch.\n"
         "- operator_launch: khi admin muốn một lệnh chạy từ đầu: bootstrap nếu thiếu, tạo pipeline video, trả next task/review.\n"
@@ -13087,7 +13308,7 @@ def parse_operator_brain(raw_text, owner_id):
         "- operator_daily: khi admin muốn báo cáo/tổng quan.\n"
         "- Không tự động chọn nội dung vi phạm, mạo danh người thật, deepfake không consent, claim affiliate quá mức.\n\n"
         "Schema:\n"
-        '{"intent":"affiliate_scale","preset":"tech","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"execute":0,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
+        '{"intent":"affiliate_scale","preset":"tech","network":"","niche":"công nghệ AI","platform":"tiktok","channel":"all","affiliate":0,"campaign":0,"job":0,"task":0,"queue":0,"limit":3,"duration":45,"build":1,"execute":0,"days":30,"topic":"","url":"","folder":"","mode":"","status":"","tool":"","send":1,"metrics":{"view":{"value":0,"amount":0}},"pattern_hint":"","tags":"","confidence":0,"safety_note":""}'
     )
     try:
         raw = AgentGemini.chat(prompt, raw_text, owner_id, is_json=True)
@@ -13128,6 +13349,13 @@ def brain_command_preview(plan):
             f"/revenue_destinations days={max(1, min(int(plan.get('days') or 30), 180))} "
             f"platform={plan.get('platform') or 'tiktok'} "
             f"limit={max(3, min(int(plan.get('limit') or 10), 30))}"
+        )
+    if intent == "postback_setup":
+        return (
+            f"/postback_setup network={plan.get('network') or ''} "
+            f"platform={plan.get('platform') or 'tiktok'} "
+            f"aff={int(plan.get('affiliate') or 0)} job={int(plan.get('job') or 0)} "
+            f"limit={max(3, min(int(plan.get('limit') or 12), 30))}"
         )
     if intent == "operator_commander_pack":
         return (
@@ -13339,6 +13567,15 @@ async def run_brain_plan(update, context, plan):
                 f"limit={max(3, min(int(plan.get('limit') or 10), 30))}",
             ]
             return await cmd_revenue_destinations(update, context)
+        if intent == "postback_setup":
+            context.args = [
+                f"network={plan.get('network') or ''}",
+                f"platform={plan.get('platform') or 'tiktok'}",
+                f"aff={int(plan.get('affiliate') or 0)}",
+                f"job={int(plan.get('job') or 0)}",
+                f"limit={max(3, min(int(plan.get('limit') or 12), 30))}",
+            ]
+            return await cmd_postback_setup(update, context)
         if intent == "operator_commander_pack":
             context.args = [
                 f"days={max(1, min(int(plan.get('days') or 30), 180))}",
@@ -13683,7 +13920,7 @@ def operator_command_plan_data(owner_id, command):
         "confidence": int(plan.get("confidence") or 0),
         "safety_note": plan.get("safety_note") or "Không bỏ qua review/approve gate; không tự publish khi chưa sẵn sàng.",
         "execute_allowed": (plan.get("intent") or "").lower() in {
-            "command_center", "operator_next_run", "pipeline_pack", "money_pack", "revenue_destinations", "operator_commander_pack", "campaign_preset",
+            "command_center", "operator_next_run", "pipeline_pack", "money_pack", "revenue_destinations", "postback_setup", "operator_commander_pack", "campaign_preset",
             "operator_director", "operator_execute", "operator_launch", "make_video",
             "tracking_report", "scale_plan", "affiliate_report", "affiliate_decisions",
             "scale_execute", "publisher_capabilities",
@@ -13706,6 +13943,19 @@ async def execute_operator_command_plan(owner_id, plan, safe_mode=True):
         return {"executed": True, "intent": intent, "data": operator_money_pack_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 30)))}
     if intent == "revenue_destinations":
         return {"executed": True, "intent": intent, "data": revenue_destination_pack_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 30)))}
+    if intent == "postback_setup":
+        return {
+            "executed": True,
+            "intent": intent,
+            "data": affiliate_postback_setup_data(
+                owner_id,
+                network=plan.get("network") or "",
+                affiliate_id=int(plan.get("affiliate") or 0),
+                job_id=int(plan.get("job") or 0),
+                platform=platform,
+                limit=max(3, min(limit, 30)),
+            ),
+        }
     if intent == "operator_commander_pack":
         return {"executed": True, "intent": intent, "data": operator_commander_pack_data(owner_id, days=days, platform=platform, limit=max(3, min(limit, 20)))}
     if intent == "campaign_preset":
@@ -16047,6 +16297,7 @@ def operator_category_keyboard(category):
             ("📥 Bulk import", "affimport"),
             ("💡 Ý tưởng video", "affideas"), ("🎯 Match trend", "affmatch"),
             ("🚀 Scale thành video", "affscale"), ("💰 Báo cáo affiliate", "affreport"),
+            ("🔁 Postback setup", "postbacksetup"),
             ("🧠 Quyết định scale", "affdecisions"), ("🔎 Link liên quan", "affrelated"),
             ("🧺 Link bundle", "affbundle"), ("✏️ Cập nhật hồ sơ", "affprofile"),
         ],
@@ -16085,6 +16336,7 @@ def operator_category_keyboard(category):
         "cat_money": [
             ("💸 Money pack", "moneypack"), ("💰 Performance", "performance"), ("📈 Growth optimizer", "growth"),
             ("🏦 Revenue destinations", "revenuedestinations"),
+            ("🔁 Postback setup", "postbacksetup"),
             ("🔗 Báo cáo affiliate", "affreport"), ("📊 Tracking funnel", "trackingreport"),
             ("🎯 Scale plan", "scaleplan"), ("🚀 Execute scale", "scaleexecute"),
             ("📊 Daily digest", "daily"),
@@ -16094,6 +16346,7 @@ def operator_category_keyboard(category):
         "cat_api": [
             ("🔌 Operator API", "api"), ("🔁 Operator loop", "loop"),
             ("🧠 Command run", "commandrun"),
+            ("🔁 Postback setup", "postbacksetup"),
             ("📜 Worker spec", "workerspec"), ("🧰 Toolchain", "toolchain"),
             ("🧯 Tool events", "toolevents"), ("🧪 Auto-post ready", "readiness"),
             ("🧩 n8n template", "n8ntemplate"), ("📥 n8n import", "n8nworkflow"),
@@ -16189,6 +16442,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Bundle link affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-bundle?affiliate_id=1&amp;job_id=12</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
         f"• Tracking funnel: <code>GET {html.escape(base_url)}/api/operator/tracking-report</code>",
+        f"• Postback setup: <code>GET {html.escape(base_url)}/api/operator/postback-setup?network=trackfin&amp;platform=tiktok</code>",
         f"• Money pack: <code>GET {html.escape(base_url)}/api/operator/money-pack?days=30&amp;platform=tiktok</code>",
         f"• Revenue destinations: <code>GET {html.escape(base_url)}/api/operator/revenue-destinations?days=30&amp;platform=tiktok</code>",
         f"• Scale plan: <code>GET {html.escape(base_url)}/api/operator/scale-plan</code>",
@@ -16233,6 +16487,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>file=&lt;binary&gt;\nstatus=ready\nasset_type=final_video\nnote=capcut output</pre>',
         "<b>Payload performance mẫu:</b>",
         '<pre>{"job_id":12,"event_type":"revenue","value":1,"amount":150000,"source":"tiktok_affiliate","note":"order"}</pre>',
+        "<b>Affiliate postback GET mẫu:</b>",
+        f"<pre>{html.escape(base_url)}/api/affiliate/postback?token=&lt;AFFILIATE_POSTBACK_TOKEN&gt;&amp;affiliate_id=&lt;AFF_ID&gt;&amp;job_id=&lt;JOB_ID&gt;&amp;event_type=order&amp;amount=&lt;COMMISSION_VND&gt;&amp;order_id=&lt;ORDER_ID&gt;&amp;source=network_postback</pre>",
     ]
     if not OPERATOR_API_TOKEN:
         lines.append("\n⚠️ Chưa set <code>OPERATOR_API_TOKEN</code> trên server nên API bridge đang đóng.")
@@ -16459,6 +16715,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "affimport": "/affiliate_import https://shorten.asia/abc (Tên sản phẩm), https://trackfin.asia/xyz (Brand)\n/brain lưu link affiliate https://... (Tên sản phẩm)",
         "affiliates": "/affiliates",
         "affreport": "/affiliate_report days=30\n/affiliate_report days=90 limit=20",
+        "postbacksetup": "/postback_setup\n/postback_setup network=trackfin platform=tiktok limit=12\n/postback_setup aff=<AFF_ID> job=<JOB_ID>\nGET /api/operator/postback-setup?network=trackfin",
         "affdecisions": "/affiliate_decisions days=30 platform=tiktok limit=12\n/affiliate_decisions days=7 min_views=200",
         "affscale": "/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=5 campaign=<ID>\n/affiliate_scale aff=<AFF_ID> platform=tiktok channel=all limit=3 build=1 duration=45",
         "affideas": "/affiliate_ideas aff=<AFF_ID> platform=tiktok n=5 topic=trend đang nóng",
@@ -18366,6 +18623,7 @@ async def cmd_revenue_destinations(update: Update, context: ContextTypes.DEFAULT
         "<b>Lệnh tiếp:</b>",
         f"• Money: <code>{html.escape(commands.get('money_pack') or '')}</code>",
         f"• Tracking: <code>{html.escape(commands.get('tracking_report') or '')}</code>",
+        f"• Postback: <code>{html.escape(commands.get('postback_setup') or '')}</code>",
         f"• Scale: <code>{html.escape(commands.get('scale_plan') or '')}</code>",
         "",
         "API: <code>GET /api/operator/revenue-destinations</code>",
@@ -18424,6 +18682,57 @@ async def cmd_tracking_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         lines.append("• Chưa có job performance.")
     lines.append("\nAPI: <code>GET /api/operator/tracking-report?days=30</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_postback_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    network = data.get("network") or data.get("net") or data.get("mang") or ""
+    affiliate_id = safe_int(data.get("aff") or data.get("affiliate_id") or data.get("id"), 0)
+    job_id = safe_int(data.get("job") or data.get("job_id"), 0)
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    limit = max(3, min(safe_int(data.get("limit") or 12, 12), 30))
+    pack = affiliate_postback_setup_data(
+        update.effective_user.id,
+        network=network,
+        affiliate_id=affiliate_id,
+        job_id=job_id,
+        platform=platform,
+        limit=limit,
+    )
+    lines = [
+        "🔁 <b>AFFILIATE POSTBACK SETUP</b>",
+        f"• Endpoint: <code>{html.escape(pack.get('endpoint') or '-')}</code>",
+        f"• Token required: <b>{'có' if pack.get('token_required') else 'chưa bật'}</b>",
+        f"• Filter: network=<code>{html.escape(network or 'all')}</code> aff=<code>{affiliate_id or '-'}</code> job=<code>{job_id or '-'}</code>",
+        "",
+        "<b>Generic GET callback:</b>",
+        f"<pre>{html_pre(pack.get('generic_get_template') or '', 900)}</pre>",
+        "<b>Generic POST JSON:</b>",
+        f"<pre>{html_pre(json.dumps(pack.get('generic_post_json') or {}, ensure_ascii=False, indent=2), 900)}</pre>",
+    ]
+    guides = pack.get("network_guides") or []
+    if guides:
+        lines.append("<b>Network đang có trong kho:</b>")
+        for guide in guides[:8]:
+            lines.append(
+                f"• <code>{html.escape(guide.get('key') or '-')}</code> | links=<b>{guide.get('affiliate_count') or 0}</b> | hosts={html.escape(', '.join(guide.get('hosts') or []) or '-')}\n"
+                f"  {html.escape(guide.get('notes') or '-')}"
+            )
+    affiliates = pack.get("affiliates") or []
+    if affiliates:
+        lines.append("\n<b>Template theo link:</b>")
+        for item in affiliates[:6]:
+            lines.append(
+                f"• aff #{item.get('affiliate_id')} | {html.escape(item.get('product') or '-')} / <code>{html.escape(item.get('network_key') or '-')}</code>\n"
+                f"  click: <code>{html.escape(item.get('tracking_click_url') or '-')}</code>\n"
+                f"  GET: <code>{html.escape(item.get('get_postback_template') or '-')}</code>\n"
+                f"  tay: <code>{html.escape(item.get('manual_command') or '-')}</code>"
+            )
+    else:
+        lines.append("\n📭 Chưa tìm thấy affiliate phù hợp filter. Dùng /affiliate_seed hoặc /affiliate_import trước.")
+    lines.append("\nAPI: <code>GET /api/operator/postback-setup</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_scale_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -20029,6 +20338,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("money_pack", cmd_money_pack))
     tg_app.add_handler(CommandHandler("revenue_destinations", cmd_revenue_destinations))
     tg_app.add_handler(CommandHandler("tracking_report", cmd_tracking_report))
+    tg_app.add_handler(CommandHandler("postback_setup", cmd_postback_setup))
     tg_app.add_handler(CommandHandler("scale_plan", cmd_scale_plan))
     tg_app.add_handler(CommandHandler("scale_execute", cmd_scale_execute))
     tg_app.add_handler(CommandHandler("affiliate_report", cmd_affiliate_report))
@@ -20152,8 +20462,7 @@ async def affiliate_redirect(affiliate_id: int, request: Request, job: int = 0, 
     )
     return RedirectResponse(url=url, status_code=302)
 
-@fastapi_app.post("/api/affiliate/postback")
-async def affiliate_postback(payload: AffiliatePostbackRequest, request: Request):
+async def handle_affiliate_postback_payload(payload: AffiliatePostbackRequest, request: Request):
     token = payload.token or request.headers.get("x-affiliate-postback-token", "")
     if AFFILIATE_POSTBACK_TOKEN and not hmac.compare_digest(str(token), AFFILIATE_POSTBACK_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid affiliate postback token")
@@ -20187,6 +20496,36 @@ async def affiliate_postback(payload: AffiliatePostbackRequest, request: Request
         except Exception as e:
             logger.error(f"Affiliate postback notify error: {e}")
     return {"ok": True, **info}
+
+@fastapi_app.post("/api/affiliate/postback")
+async def affiliate_postback(payload: AffiliatePostbackRequest, request: Request):
+    return await handle_affiliate_postback_payload(payload, request)
+
+@fastapi_app.get("/api/affiliate/postback")
+async def affiliate_postback_get(
+    request: Request,
+    job_id: int = 0,
+    affiliate_id: int = 0,
+    event_type: str = "order",
+    value: int = 1,
+    amount: int = 0,
+    order_id: str = "",
+    source: str = "affiliate_postback_get",
+    note: str = "",
+    token: str = "",
+):
+    payload = AffiliatePostbackRequest(
+        job_id=job_id,
+        affiliate_id=affiliate_id,
+        event_type=event_type,
+        value=value,
+        amount=amount,
+        order_id=order_id,
+        source=source,
+        note=note,
+        token=token,
+    )
+    return await handle_affiliate_postback_payload(payload, request)
 
 @fastapi_app.post("/lead")
 async def create_lead(payload: LeadRequest, request: Request):
@@ -21771,6 +22110,25 @@ async def api_operator_tracking_report(request: Request, days: int = 30, limit: 
         "jobs": report["jobs"],
         "rule": "Scale sources/jobs with revenue or high conversion rate; fix CTA when views/clicks exist without conversions; pause when cost exceeds revenue.",
     }
+
+@fastapi_app.get("/api/operator/postback-setup")
+async def api_operator_postback_setup(
+    request: Request,
+    network: str = "",
+    affiliate_id: int = 0,
+    job_id: int = 0,
+    platform: str = "tiktok",
+    limit: int = 20,
+):
+    verify_operator_api_token(request)
+    return affiliate_postback_setup_data(
+        ADMIN_ID,
+        network=network,
+        affiliate_id=affiliate_id,
+        job_id=job_id,
+        platform=platform,
+        limit=limit,
+    )
 
 @fastapi_app.get("/api/operator/money-pack")
 async def api_operator_money_pack(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 10):
