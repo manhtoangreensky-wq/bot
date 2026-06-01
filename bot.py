@@ -2669,7 +2669,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "operator_launch", "make_video", "brain", "operator_audit", "operator_worker_spec", "operator_n8n_workflow",
         "publisher_status", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "worker_next", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "worker_next", "worker_pack", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -2694,6 +2694,8 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/tasks/<TASK_ID>/upload"),
         ("POST", "/api/operator/jobs/<JOB_ID>/assets/upload"),
         ("GET", "/api/operator/assets/<ASSET_ID>/file"),
+        ("GET", "/api/operator/jobs/<JOB_ID>/context"),
+        ("GET", "/api/operator/jobs/<JOB_ID>/worker-pack"),
         ("GET", "/api/operator/jobs/<JOB_ID>/review-video"),
         ("GET", "/api/operator/jobs/<JOB_ID>/post-publish"),
         ("GET", "/api/operator/publish/<QUEUE_ID>/handoff"),
@@ -2754,6 +2756,7 @@ def operator_smoke_test_data(owner_id):
         "post_publish_in_spec": "/api/operator/jobs/<JOB_ID>/post-publish" in spec_text and "/api/operator/jobs/" in n8n_text and "/post-publish" in n8n_text,
         "publish_complete_in_spec": "/api/operator/publish/" in spec_text and "/complete" in spec_text,
         "task_upload_in_spec": "/api/operator/tasks/<TASK_ID>/upload" in spec_text,
+        "worker_pack_in_spec": "/api/operator/jobs/<JOB_ID>/worker-pack" in spec_text and "/worker-pack" in n8n_text,
         "required_endpoints_listed": all(path.split("<")[0] in endpoint_text for _, path in required_endpoints),
     }
     sections = {
@@ -2897,6 +2900,7 @@ def operator_worker_spec_data():
             {"step": 3, "name": "director", "method": "GET", "url": "/api/operator/director?days=30&platform=tiktok"},
             {"step": 4, "name": "safe_execute", "method": "POST", "url": "/api/operator/director/run"},
             {"step": 4.5, "name": "peek_worker_next", "method": "GET", "url": "/api/operator/worker-next"},
+            {"step": 4.6, "name": "worker_pack", "method": "GET", "url": "/api/operator/jobs/<JOB_ID>/worker-pack"},
             {"step": 5, "name": "claim_task", "method": "GET", "url": "/api/operator/tasks/claim?include_context=1"},
             {"step": 6, "name": "submit_task", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/complete"},
             {"step": 6.1, "name": "upload_task_file", "method": "POST", "url": "/api/operator/tasks/<TASK_ID>/upload"},
@@ -3023,6 +3027,11 @@ def operator_worker_spec_data():
                 "method": "GET",
                 "url": "/api/operator/tasks/claim?include_context=1&tool=kling",
                 "purpose": "Claim task và nhận luôn job_context để worker không phải ghép nhiều endpoint.",
+            },
+            "worker_pack": {
+                "method": "GET",
+                "url": "/api/operator/jobs/<JOB_ID>/worker-pack",
+                "purpose": "Một gói đầy đủ cho Claude/n8n/tool worker: job, task, context, prompt, reference learning, video factory blueprint, toolchain, publish pack và endpoint trả output.",
             },
             "worker_next": {
                 "method": "GET",
@@ -3545,6 +3554,13 @@ def operator_n8n_template_data():
                 "note": "Peek task kế tiếp trước, không đổi trạng thái. Chỉ claim khi worker thật sự bắt đầu làm.",
             },
             {
+                "node": "Read Worker Pack",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
+                "note": "Một gói đủ cho Claude/n8n/tool worker: task, prompt, reference learning, blueprint video, checklist, toolchain, publish/review endpoints.",
+            },
+            {
                 "node": "Claim Production Task",
                 "type": "http_request",
                 "method": "GET",
@@ -4035,6 +4051,20 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "read-worker-pack",
+                "name": "Read Worker Pack",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [180, -520],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/jobs/{{$json.job_id || '<JOB_ID>'}}/worker-pack",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "tool-worker-note",
                 "name": "Tool Worker Placeholder",
                 "type": "n8n-nodes-base.stickyNote",
@@ -4044,7 +4074,7 @@ def operator_n8n_workflow_json_data():
                     "content": (
                         "Gắn node Claude/Gemini/Kling/Runway/Fish/Edge/CapCut tại đây.\n"
                         "Dùng Peek Worker Next để xem task kế tiếp; chỉ dùng Claim Next Task khi worker thật sự bắt đầu làm.\n"
-                        "Trước khi dựng output, đọc Worker Spec + Video Patterns + Reference Pack + Reference Videos trong input workflow hoặc job_context.reference_learning.\n"
+                        "Trước khi dựng output, đọc Worker Pack cho job/task hiện tại: prompt, reference learning, blueprint, checklist, toolchain và review endpoints.\n"
                         "Luật vận hành: dùng tool trả phí/chất lượng cao trước; hết quota/lỗi thì fallback tool rẻ/miễn phí và báo admin.\n"
                         "Học cấu trúc/hook/proof của video mẫu nhưng viết lại cho thương hiệu/link affiliate của mình, không copy y nguyên.\n"
                         "Output cần có: status, output_url hoặc output_urls, note. Không tự đổi affiliate link, không tự publish nếu chưa qua review."
@@ -4303,7 +4333,8 @@ def operator_n8n_workflow_json_data():
             "Read Reference Pack": {"main": [[{"node": "Read Reference Videos", "type": "main", "index": 0}]]},
             "Read Reference Videos": {"main": [[{"node": "Director Run Safe Action", "type": "main", "index": 0}]]},
             "Director Run Safe Action": {"main": [[{"node": "Peek Worker Next", "type": "main", "index": 0}]]},
-            "Peek Worker Next": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
+            "Peek Worker Next": {"main": [[{"node": "Read Worker Pack", "type": "main", "index": 0}]]},
+            "Read Worker Pack": {"main": [[{"node": "Claim Next Task", "type": "main", "index": 0}]]},
             "Claim Next Task": {"main": [[{"node": "Complete Task", "type": "main", "index": 0}]]},
             "Complete Task": {"main": [[{"node": "Publisher Status", "type": "main", "index": 0}]]},
             "Publisher Status": {"main": [[{"node": "Publisher Run Safe Claim", "type": "main", "index": 0}]]},
@@ -4500,6 +4531,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
             {"step": "bootstrap_if_missing", "telegram": "/operator_bootstrap", "api": "POST /api/operator/bootstrap"},
             {"step": "trend_or_topic", "telegram": "/make_video topic=<chu_de> platform=tiktok channel=all limit=3 build=1", "api": "POST /api/operator/make-video"},
             {"step": "worker_claim", "telegram": "/worker_next hoặc /next_task", "api": "GET /api/operator/worker-next rồi GET /api/operator/tasks/claim?include_context=1"},
+            {"step": "worker_pack", "telegram": "/worker_pack job=<JOB_ID>", "api": "GET /api/operator/jobs/<JOB_ID>/worker-pack"},
             {"step": "tool_output", "telegram": "/task_set id=<TASK_ID> status=ready url=https://...", "api": "POST /api/operator/tasks/<TASK_ID>/complete hoặc /upload"},
             {"step": "review", "telegram": "/review_video job=<JOB_ID> send=1 và /review_gate job=<JOB_ID>", "api": "GET /api/operator/jobs/<JOB_ID>/review-video"},
             {"step": "approve_queue", "telegram": "/approve_publish job=<JOB_ID> queue=1 mode=manual", "api": "POST /api/operator/jobs/<JOB_ID>/approve"},
@@ -4525,6 +4557,7 @@ def operator_mission_control_data(owner_id, days=30, platform="tiktok", limit=8)
             "mission": f"{base_url}/api/operator/mission",
             "launch": f"{base_url}/api/operator/launch",
             "bootstrap": f"{base_url}/api/operator/bootstrap",
+            "worker_pack": f"{base_url}/api/operator/jobs/<JOB_ID>/worker-pack",
             "worker_spec": f"{base_url}/api/operator/worker-spec",
             "toolchain": f"{base_url}/api/operator/toolchain",
             "command_center": f"{base_url}/api/operator/command-center",
@@ -5582,6 +5615,74 @@ def reference_learning_pack_data():
         "rule": "Biến ý tưởng của thị trường thành format riêng của TOAN DAAS; chỉ copy cấu trúc tư duy, không copy tài sản/nội dung nhận diện.",
     }
 
+def ai_video_factory_blueprint_data():
+    return {
+        "source": "phan_tich_video_ai_tao_video_tu_dong_va_prompt_codex.md",
+        "mission": "Ý tưởng -> trend/reference -> script -> scenes -> image prompts -> video prompts -> assets -> edit 9:16 -> caption/CTA -> review -> publish/export -> metrics -> scale.",
+        "micro_agents": [
+            {"name": "ResearchAgent", "output": "trend candidates, viral structure, hook angle, risk note"},
+            {"name": "ScriptAgent", "output": "15/30/60s script, hook, narration, CTA"},
+            {"name": "SceneAgent", "output": "scene list with duration, visual purpose, voiceover, text overlay"},
+            {"name": "ImagePromptAgent", "output": "9:16 image prompt per scene with subject/scene/action/style"},
+            {"name": "VideoPromptAgent", "output": "motion prompt per scene with camera, lighting, mood, duration, constraints"},
+            {"name": "AssetAgent", "output": "image/video/voice URLs or uploaded files via task complete/upload endpoint"},
+            {"name": "EditorAgent", "output": "final_video with subtitle, hook text, CTA, logo, safe music"},
+            {"name": "PublisherAgent", "output": "caption, hashtags, affiliate placement, manual/API publish handoff"},
+            {"name": "ReportAgent", "output": "view/click/order/revenue/cost metrics and scale/fix/test recommendation"},
+        ],
+        "money_templates": [
+            {"id": "affiliate_product_review_01", "flow": ["hook", "problem", "demo/proof", "benefits", "fit_not_fit", "affiliate_cta"], "best_for": "AI tools, gadgets, ecommerce, finance app with compliant claims"},
+            {"id": "hook_to_caption", "flow": ["big_text_hook", "curiosity_gap", "caption_listicle", "comment_or_bio_cta"], "best_for": "job online, lead magnet, affiliate lists, mini-course funnel"},
+            {"id": "before_after_transformation", "flow": ["before", "AI/tool process", "after", "proof", "cta"], "best_for": "AI image/video tools, product improvement, pet/animal transformation"},
+            {"id": "storytelling_affiliate", "flow": ["emotional_hook", "problem_story", "turning_point", "product_bridge", "soft_cta"], "best_for": "lifestyle, finance, travel, creator tools"},
+        ],
+        "video_prompt_quality_checklist": [
+            "Subject/chủ thể rõ",
+            "Scene/bối cảnh cụ thể",
+            "Action/hành động chính",
+            "Camera movement/góc máy",
+            "Lighting/ánh sáng",
+            "Mood/cảm xúc",
+            "Style/phong cách",
+            "Duration/thời lượng cảnh",
+            "Aspect ratio 9:16",
+            "Constraints: no watermark, no broken text, no distorted anatomy/face/hands",
+        ],
+        "pre_render_scores": ["hook_score", "viral_potential", "clarity", "affiliate_fit", "visual_feasibility", "copyright_risk", "platform_policy_risk"],
+        "reference_rules": [
+            "Không sao chép nguyên văn lời thoại, text overlay, watermark, nhân vật, voice, claim hoặc brand identity.",
+            "Chỉ học cấu trúc: hook, nhịp cắt, payoff, proof placement, CTA.",
+            "Tạo phiên bản mới: khác nhân vật, khác bối cảnh, khác câu chuyện, khác wording.",
+            "Tạo nhiều biến thể hook A/B/C để test view/click trước khi scale.",
+        ],
+        "approval_states": ["draft", "generated", "ready_for_review", "approved", "rendering", "rendered", "scheduled", "published", "failed"],
+        "json_output_contract": {
+            "video_id": "<job_id>",
+            "channel": "platform/account",
+            "niche": "topic/product niche",
+            "duration": 45,
+            "aspect_ratio": "9:16",
+            "hook": "...",
+            "script": "...",
+            "scenes": [
+                {
+                    "scene_id": 1,
+                    "duration": 4,
+                    "purpose": "hook",
+                    "visual_description": "...",
+                    "voiceover": "...",
+                    "text_overlay": "...",
+                    "image_prompt": "vertical 9:16...",
+                    "video_prompt": "camera/action/light/mood...",
+                }
+            ],
+            "caption": "... affiliate disclosure ...",
+            "hashtags": ["#ai", "#affiliate"],
+            "affiliate": {"product_name": "...", "tracking_link": "...", "cta": "..."},
+            "status": "ready_for_review",
+        },
+    }
+
 def build_manifest_prompt(job, variant=None, duration=45):
     (
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
@@ -6517,6 +6618,91 @@ def operator_job_context_data(owner_id, job_id):
             },
         },
         "rule": "Không tự publish hoặc sửa claim affiliate nếu chưa qua review/approve. Không dùng tài sản thiếu quyền/consent.",
+    }
+
+def operator_worker_pack_data(owner_id, job_id=0, task_id=0, tool=""):
+    task = None
+    if task_id:
+        task = get_production_task(owner_id, task_id)
+        if not task:
+            return None
+        job_id = int(task[1] or 0)
+    if not job_id:
+        next_task = next_worker_task(owner_id, tool=tool)
+        if not next_task:
+            return None
+        task = next_task
+        job_id = int(task[1] or 0)
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return None
+    context_data = operator_job_context_data(owner_id, job_id)
+    if not task:
+        task = next_worker_task(owner_id, job_id=job_id, tool=tool)
+    task_payload = serialize_operator_task(task)
+    publish_pack = (context_data or {}).get("publish_pack") or build_static_publish_pack(job, owner_id)
+    readiness = production_readiness_data(owner_id, job_id)
+    review_summary = build_video_review_summary(owner_id, job_id)
+    post_publish = build_post_publish_handoff(owner_id, job_id, days=30)
+    toolchain = operator_toolchain_data()
+    blueprint = ai_video_factory_blueprint_data()
+    return {
+        "generated_at": now_text(),
+        "job_id": job_id,
+        "task_id": int(task[0]) if task else 0,
+        "tool_filter": tool or "",
+        "job": serialize_production_job(job),
+        "task": task_payload,
+        "context": context_data,
+        "publish_pack": publish_pack,
+        "video_factory_blueprint": blueprint,
+        "quality_gate_before_render": {
+            "required_scores": blueprint["pre_render_scores"],
+            "minimum_rule": "Nếu hook_score/affiliate_fit/visual_feasibility thấp hoặc copyright_risk/platform_policy_risk cao thì rewrite trước khi gọi tool tốn phí.",
+            "prompt_checklist": blueprint["video_prompt_quality_checklist"],
+            "approval_states": blueprint["approval_states"],
+        },
+        "readiness": {
+            "level": (readiness or {}).get("level", "UNKNOWN"),
+            "next_action": (readiness or {}).get("next_action", ""),
+            "publish_gate": (readiness or {}).get("publish_gate", {}),
+        },
+        "review_video": review_summary,
+        "post_publish": post_publish,
+        "toolchain": {
+            "policy": toolchain.get("policy"),
+            "failure_protocol": toolchain.get("failure_protocol"),
+            "chains": toolchain.get("chains", []),
+        },
+        "worker_contract": {
+            "start_rule": "Đọc task.prompt, context.reference_learning, video_factory_blueprint, publish_pack và toolchain trước khi gọi tool.",
+            "complete_url": f"/api/operator/tasks/{int(task[0])}/complete" if task else "/api/operator/tasks/<TASK_ID>/complete",
+            "upload_url": f"/api/operator/tasks/{int(task[0])}/upload" if task else "/api/operator/tasks/<TASK_ID>/upload",
+            "claim_url": f"/api/operator/tasks/claim?job_id={job_id}&include_context=1",
+            "job_context_url": f"/api/operator/jobs/{job_id}/context",
+            "review_url": f"/api/operator/jobs/{job_id}/review-video",
+            "post_publish_url": f"/api/operator/jobs/{job_id}/post-publish",
+            "telegram": {
+                "task_handoff": f"/task_handoff id={int(task[0])}" if task else "",
+                "task_set_ready": f"/task_set id={int(task[0])} status=ready url=https://..." if task else "",
+                "job_context": f"/job_context job={job_id}",
+                "review_video": f"/review_video job={job_id} send=1",
+                "approve_publish": f"/approve_publish job={job_id} queue=1 mode=manual",
+                "post_publish": f"/post_publish job={job_id}",
+            },
+            "output_rule": (
+                "Nếu có file thì upload multipart. Nếu có URL public thì complete task bằng output_url/output_urls. "
+                "Nếu tool lỗi/quota, ghi tool event và mark task blocked hoặc fallback."
+            ),
+        },
+        "rules": [
+            "Không tự publish nếu review gate/approve chưa xong.",
+            "Không copy nguyên video tham khảo; chỉ học cấu trúc/hook/nhịp dựng/CTA.",
+            "Prompt video phải đủ subject, scene, action, camera, lighting, mood, style, duration, aspect_ratio và constraints.",
+            "Nếu worker tạo scenes/prompts, output phải theo json_output_contract trong video_factory_blueprint.",
+            "Không dùng người thật/giọng/ảnh thiếu consent; nội dung adult phải đủ 18+ và tuân thủ nền tảng.",
+            "Affiliate claim phải minh bạch, không hứa kết quả chắc chắn về tài chính/sức khỏe/duyệt vay.",
+        ],
     }
 
 def add_performance_event(owner_id, job_id, event_type, value=0, amount=0, note="", variant_id=0, affiliate_id_override=0):
@@ -13502,6 +13688,7 @@ def operator_category_keyboard(category):
             ("🎛 Pipeline", "pipeline"),
             ("🎬 Manifest", "manifest"), ("🤝 Manifest handoff", "manifesthandoff"),
             ("✅ Tasks", "tasks"), ("➡️ Next task", "nexttask"),
+            ("📦 Worker pack", "workerpack"),
             ("🎥 Review video", "reviewvideo"), ("🗂 Assets", "assets"),
             ("📋 Job report", "report"),
             ("🧠 Job context", "jobcontext"), ("🚦 Job ready", "jobready"),
@@ -13629,6 +13816,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Upload asset job: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/assets/upload</code>",
         f"• Tải asset nội bộ: <code>GET {html.escape(base_url)}/api/operator/assets/&lt;ASSET_ID&gt;/file</code>",
         f"• Job context/runbook: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/context</code>",
+        f"• Worker pack cho AI/tool: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/worker-pack</code>",
         f"• Lấy publish pack: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/publish-pack</code>",
         f"• Review video gate: <code>GET {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/review-video</code>",
         f"• Duyệt publish: <code>POST {html.escape(base_url)}/api/operator/jobs/&lt;JOB_ID&gt;/approve</code>",
@@ -13907,6 +14095,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "manifesthandoff": "/manifest_handoff job=<JOB_ID> tool=kling\n/manifest_handoff manifest=<MANIFEST_ID> tool=capcut",
         "tasks": "/task_plan job=<JOB_ID>\n/tasks job=<JOB_ID>\n/task_set id=<TASK_ID> status=ready url=https://...",
         "nexttask": "/next_task\n/next_task job=<JOB_ID>",
+        "workerpack": "/worker_pack job=<JOB_ID>\n/worker_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/worker-pack",
         "reviewvideo": "/review_video job=<JOB_ID> send=1\n/brain kiểm duyệt video job <JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>\n/asset_send id=<ASSET_ID>\n/asset_send job=<JOB_ID> type=final_video",
         "report": "/job_report <JOB_ID>",
@@ -15025,6 +15214,42 @@ async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Khi có output: <code>/task_set id={tid} status=ready url=https://...</code>",
         parse_mode="HTML"
     )
+
+async def cmd_worker_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    job_id = safe_int(data.get("job") or data.get("job_id"), 0)
+    task_id = safe_int(data.get("task") or data.get("id"), 0)
+    tool = (data.get("tool") or "").strip().lower()
+    pack = operator_worker_pack_data(update.effective_user.id, job_id=job_id, task_id=task_id, tool=tool)
+    if not pack:
+        return await update.message.reply_text(
+            "✅ Không có worker pack phù hợp. Tạo job bằng <code>/operator_launch topic=...</code> hoặc xem <code>/worker_next</code>.",
+            parse_mode="HTML",
+        )
+    task = pack.get("task") or {}
+    job = pack.get("job") or {}
+    readiness = pack.get("readiness") or {}
+    contract = pack.get("worker_contract") or {}
+    lines = [
+        "📦 <b>WORKER PACK</b>",
+        f"• Job: <code>#{pack.get('job_id')}</code> | {html.escape(job.get('platform') or '-')} | {html.escape(job.get('topic') or '-')}",
+        f"• Readiness: <code>{html.escape(readiness.get('level') or 'UNKNOWN')}</code>",
+        f"• Task: <code>#{task.get('id') or '-'}</code> / <code>{html.escape(task.get('task_type') or '-')}</code> / tool=<code>{html.escape(task.get('tool') or '-')}</code>",
+        "",
+        "<b>Prompt task:</b>",
+        f"<pre>{html_pre(task.get('prompt') or '-', 1400)}</pre>",
+        "<b>Worker contract:</b>",
+        f"• Complete: <code>{html.escape(contract.get('complete_url') or '')}</code>",
+        f"• Upload: <code>{html.escape(contract.get('upload_url') or '')}</code>",
+        f"• Review: <code>{html.escape((contract.get('telegram') or {}).get('review_video') or '')}</code>",
+        f"• Approve: <code>{html.escape((contract.get('telegram') or {}).get('approve_publish') or '')}</code>",
+        "",
+        "<b>Rule:</b> không copy video tham khảo, không publish trước review/approve, lỗi tool thì ghi tool event/fallback.",
+        "API đầy đủ: <code>GET /api/operator/jobs/&lt;JOB_ID&gt;/worker-pack</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -17137,6 +17362,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tasks", cmd_tasks))
     tg_app.add_handler(CommandHandler("next_task", cmd_next_task))
     tg_app.add_handler(CommandHandler("worker_next", cmd_worker_next))
+    tg_app.add_handler(CommandHandler("worker_pack", cmd_worker_pack))
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
@@ -18142,6 +18368,14 @@ async def api_operator_job_context(job_id: int, request: Request):
     data = operator_job_context_data(ADMIN_ID, job_id)
     if not data:
         raise HTTPException(status_code=404, detail="Job not found")
+    return {"ok": True, **data}
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/worker-pack")
+async def api_operator_job_worker_pack(job_id: int, request: Request, task_id: int = 0, tool: str = ""):
+    verify_operator_api_token(request)
+    data = operator_worker_pack_data(ADMIN_ID, job_id=job_id, task_id=task_id, tool=tool)
+    if not data:
+        raise HTTPException(status_code=404, detail="Worker pack not found")
     return {"ok": True, **data}
 
 @fastapi_app.post("/api/operator/jobs/{job_id}/approve")
