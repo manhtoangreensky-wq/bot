@@ -20144,12 +20144,15 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     video_orders = (result.get("video_work_orders") or {}).get("orders") or []
     if video_orders:
         first_order = video_orders[0]
+        first_order_telegram = first_order.get("telegram") or {}
+        first_order_brief_cmd = first_order_telegram.get("video_brief") or f"/video_brief job={first_order.get('job_id')}"
+        video_order_job_ids = ",".join(str(item.get("job_id")) for item in video_orders[:8])
         lines.extend([
             "",
             "<b>Video brief cho worker:</b>",
-            f"• <code>{html.escape((first_order.get('telegram') or {}).get('video_brief') or f'/video_brief job={first_order.get('job_id')}')}</code>",
+            f"• <code>{html.escape(first_order_brief_cmd)}</code>",
             f"• Scenes: <b>{first_order.get('scene_count') or 0}</b> | Template: <code>{html.escape(first_order.get('template') or '-')}</code>",
-            f"• Batch API: <code>/api/operator/video-work-orders?job_ids={','.join(str(item.get('job_id')) for item in video_orders[:8])}</code>",
+            f"• Batch API: <code>/api/operator/video-work-orders?job_ids={html.escape(video_order_job_ids)}</code>",
         ])
     if result.get("failed_builds"):
         lines.append("\n<b>Build lỗi:</b>")
