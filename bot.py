@@ -442,6 +442,20 @@ def init_db():
         created_at DATETIME,
         updated_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS operator_missions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id TEXT,
+        title TEXT,
+        objective TEXT,
+        platform TEXT DEFAULT 'tiktok',
+        priority INTEGER DEFAULT 5,
+        status TEXT DEFAULT 'queued',
+        assigned_to TEXT,
+        result_json TEXT,
+        note TEXT,
+        created_at DATETIME,
+        updated_at DATETIME
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS production_assets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -2649,6 +2663,194 @@ def create_production_job(owner_id, calendar_id, campaign_id, channel_id, affili
     conn.close()
     return job_id
 
+def create_operator_mission(owner_id, title, objective, platform="tiktok", priority=5, note="") -> int:
+    title = (title or "").strip()[:240] or "Operator mission"
+    objective = (objective or "").strip()
+    platform = (platform or "tiktok").strip().lower()[:40]
+    priority = max(1, min(int(priority or 5), 10))
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO operator_missions
+        (owner_id, title, objective, platform, priority, status, assigned_to, result_json, note, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (str(owner_id), title, objective, platform, priority, "queued", "", "", note, now_text(), now_text())
+    )
+    mission_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return mission_id
+
+def list_operator_missions(owner_id, status="", limit=10):
+    limit = max(1, min(int(limit or 10), 50))
+    conn = db_connect()
+    c = conn.cursor()
+    if status:
+        c.execute(
+            """SELECT id, title, objective, platform, priority, status, assigned_to, result_json, note, created_at, updated_at
+            FROM operator_missions WHERE owner_id=? AND status=?
+            ORDER BY priority DESC, id ASC LIMIT ?""",
+            (str(owner_id), status, limit)
+        )
+    else:
+        c.execute(
+            """SELECT id, title, objective, platform, priority, status, assigned_to, result_json, note, created_at, updated_at
+            FROM operator_missions WHERE owner_id=?
+            ORDER BY
+              CASE status WHEN 'working' THEN 0 WHEN 'queued' THEN 1 WHEN 'blocked' THEN 2 ELSE 3 END,
+              priority DESC, id DESC
+            LIMIT ?""",
+            (str(owner_id), limit)
+        )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_operator_mission(owner_id, mission_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, title, objective, platform, priority, status, assigned_to, result_json, note, created_at, updated_at
+        FROM operator_missions WHERE owner_id=? AND id=?""",
+        (str(owner_id), int(mission_id))
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def claim_operator_mission(owner_id, worker="claude"):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, title, objective, platform, priority, status, assigned_to, result_json, note, created_at, updated_at
+        FROM operator_missions
+        WHERE owner_id=? AND status='queued'
+        ORDER BY priority DESC, id ASC
+        LIMIT 1""",
+        (str(owner_id),)
+    )
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return None
+    mission_id = row[0]
+    c.execute(
+        "UPDATE operator_missions SET status='working', assigned_to=?, updated_at=? WHERE id=? AND owner_id=? AND status='queued'",
+        ((worker or "claude")[:120], now_text(), mission_id, str(owner_id))
+    )
+    conn.commit()
+    conn.close()
+    return get_operator_mission(owner_id, mission_id)
+
+def complete_operator_mission(owner_id, mission_id, status="done", result=None, note=""):
+    status = (status or "done").lower()
+    if status not in {"done", "blocked", "queued", "working", "cancelled"}:
+        status = "done"
+    result_json = json.dumps(result or {}, ensure_ascii=False)
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """UPDATE operator_missions
+        SET status=?, result_json=?, note=?, updated_at=?
+        WHERE id=? AND owner_id=?""",
+        (status, result_json, note or "", now_text(), int(mission_id), str(owner_id))
+    )
+    changed = c.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0
+
+def serialize_operator_mission(row):
+    if not row:
+        return None
+    mission_id, title, objective, platform, priority, status, assigned_to, result_json, note, created_at, updated_at = row
+    result = {}
+    if result_json:
+        try:
+            result = json.loads(result_json)
+        except Exception:
+            result = {"raw": result_json}
+    return {
+        "id": mission_id,
+        "title": title,
+        "objective": objective,
+        "platform": platform,
+        "priority": priority,
+        "status": status,
+        "assigned_to": assigned_to,
+        "result": result,
+        "note": note,
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
+
+def operator_mission_prompt_pack_data(owner_id, mission_id=0, claim=False, worker="claude"):
+    row = claim_operator_mission(owner_id, worker=worker) if claim else get_operator_mission(owner_id, mission_id)
+    if not row:
+        return None
+    mission = serialize_operator_mission(row)
+    base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
+    today = operator_today_data(owner_id)
+    publisher = publisher_status_data(owner_id)
+    prompt = (
+        "Bạn là AI Commander cho TOAN DAAS. Điều phối pipeline kiếm tiền affiliate hợp pháp.\n"
+        "Nhiệm vụ: đọc objective, chọn kênh/affiliate/trend phù hợp, tạo hoặc đề xuất production jobs, "
+        "giao task cho worker, dừng ở review/publish gate và luôn gắn tracking doanh thu.\n\n"
+        f"MISSION #{mission['id']}: {mission['title']}\n"
+        f"Platform: {mission['platform']} | Priority: {mission['priority']}\n"
+        f"Objective:\n{mission['objective']}\n\n"
+        "Output bắt buộc: JSON gồm plan, actions_taken, created_jobs, blocked_by, next_admin_command, next_api_call."
+    )
+    return {
+        "ok": True,
+        "mission": mission,
+        "prompt": prompt,
+        "context": {
+            "counts": (today.get("status") or {}).get("counts") or {},
+            "today_actions": today.get("actions") or [],
+            "publisher_ready": publisher.get("ready"),
+            "publisher_open_queue": publisher.get("open_queue"),
+        },
+        "endpoints": {
+            "command_run": f"{base_url}/api/operator/command/run",
+            "launch": f"{base_url}/api/operator/launch",
+            "make_video": f"{base_url}/api/operator/make-video",
+            "run_cycle": f"{base_url}/api/operator/run-cycle",
+            "complete_mission": f"{base_url}/api/operator/missions/{mission['id']}/complete",
+            "performance": f"{base_url}/api/operator/performance",
+        },
+        "guardrails": [
+            "Không tự publish nếu chưa qua review/approve gate.",
+            "Không copy nguyên nội dung brand nếu không có quyền; chỉ tham khảo và viết lại.",
+            "Tài chính/ngân hàng phải tránh cam kết duyệt vay, thu nhập hoặc lợi nhuận chắc chắn.",
+            "OnlyFans chỉ dùng nhân vật tự tạo hoặc người thật có consent 18+.",
+        ],
+    }
+
+def operator_mission_inbox_data(owner_id, limit=10):
+    rows = list_operator_missions(owner_id, limit=limit)
+    queued = [serialize_operator_mission(row) for row in rows]
+    next_pack = None
+    next_row = None
+    for row in rows:
+        if row[4] >= 1 and row[5] == "queued":
+            next_row = row
+            break
+    if next_row:
+        next_pack = operator_mission_prompt_pack_data(owner_id, mission_id=next_row[0], claim=False)
+    return {
+        "ok": True,
+        "missions": queued,
+        "next_prompt_pack": next_pack,
+        "commands": {
+            "add": "/mission_add title=... platform=tiktok priority=8 objective=...",
+            "list": "/missions",
+            "claim": "/mission_claim worker=claude",
+            "api_claim": "/api/operator/missions/claim",
+        },
+        "rule": "Mission inbox nhận lệnh cấp cao từ admin. Claude/n8n claim mission rồi tự gọi endpoint operator, nhưng publish vẫn phải qua gate duyệt.",
+    }
+
 def list_production_jobs(owner_id, limit=20):
     conn = db_connect()
     c = conn.cursor()
@@ -3030,7 +3232,7 @@ def operator_smoke_test_data(owner_id):
     required_commands = [
         "runtime", "telegram_status", "telegram_takeover", "campaign_preset", "postback_setup", "operator_launch", "operator_dispatch", "operator_cycle", "make_video", "brain", "operator_audit", "goal_audit", "operator_worker_spec", "operator_commander_pack", "operator_contract", "operator_next_run", "operator_n8n_workflow",
         "publisher_status", "publisher_capabilities", "platform_adapters", "publisher_run", "publisher_handoff", "video_patterns", "reference_pack", "reference_videos", "reference_add", "reference_scan", "affiliate_seed", "affiliate_import", "affiliate_scale",
-        "channel_router", "worker_next", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
+        "channel_router", "worker_next", "worker_pack", "task_prompt", "output_acceptance", "distribution_pack", "pipeline_pack", "money_pack", "revenue_destinations", "operator_command", "operator_mission", "mission_add", "missions", "mission_claim", "operator_bootstrap", "review_video", "review_gate", "approve_publish", "performance_add", "checkpayos",
     ]
     required_endpoints = [
         ("GET", "/api/operator/audit"),
@@ -3039,6 +3241,9 @@ def operator_smoke_test_data(owner_id):
         ("POST", "/api/operator/dispatch"),
         ("GET", "/api/operator/run-cycle"),
         ("POST", "/api/operator/run-cycle"),
+        ("GET", "/api/operator/missions"),
+        ("POST", "/api/operator/missions"),
+        ("POST", "/api/operator/missions/claim"),
         ("POST", "/api/telegram/takeover"),
         ("GET", "/runtime"),
         ("GET", "/api/operator/worker-spec"),
@@ -3110,7 +3315,7 @@ def operator_smoke_test_data(owner_id):
     table_names = [
         "users", "payos_orders", "affiliate_links", "social_channels", "campaigns",
         "production_jobs", "production_tasks", "publish_queue", "performance_events",
-        "tool_events", "reference_videos",
+        "tool_events", "reference_videos", "operator_missions",
     ]
     db_tables = {}
     for table in table_names:
@@ -3130,6 +3335,7 @@ def operator_smoke_test_data(owner_id):
         "goal_audit_in_spec": "/api/operator/goal-audit" in spec_text and "/api/operator/goal-audit" in n8n_text,
         "dispatch_in_spec": "/api/operator/dispatch" in spec_text and "/api/operator/dispatch" in n8n_text,
         "run_cycle_in_spec": "/api/operator/run-cycle" in spec_text and "/api/operator/run-cycle" in n8n_text,
+        "mission_inbox_in_spec": "/api/operator/missions" in spec_text and "/api/operator/missions" in n8n_text,
         "make_video_in_spec": "/api/operator/make-video" in spec_text and "/api/operator/make-video" in n8n_text,
         "publisher_run_in_spec": "/api/operator/publisher/run" in spec_text and "/api/operator/publisher/run" in n8n_text,
         "publisher_status_in_spec": "/api/operator/publisher/status" in spec_text and "/api/operator/publisher/status" in n8n_text,
@@ -3226,6 +3432,8 @@ def operator_worker_spec_data():
         "toolchain_url": f"{base_url}/api/operator/toolchain",
         "goal_audit_url": f"{base_url}/api/operator/goal-audit",
         "mission_control_url": f"{base_url}/api/operator/mission",
+        "mission_inbox_url": f"{base_url}/api/operator/missions",
+        "mission_claim_url": f"{base_url}/api/operator/missions/claim",
         "dispatch_url": f"{base_url}/api/operator/dispatch",
         "run_cycle_url": f"{base_url}/api/operator/run-cycle",
         "next_run_url": f"{base_url}/api/operator/next-run",
@@ -3311,6 +3519,8 @@ def operator_worker_spec_data():
             {"step": 1.052, "name": "next_run_card", "method": "GET", "url": "/api/operator/next-run?days=30&platform=tiktok"},
             {"step": 1.053, "name": "dispatch_preview", "method": "GET", "url": "/api/operator/dispatch?days=30&platform=tiktok&limit=8"},
             {"step": 1.0535, "name": "run_cycle_preview", "method": "GET", "url": "/api/operator/run-cycle?days=30&platform=tiktok&limit=8&max_steps=3&execute=0"},
+            {"step": 1.0537, "name": "mission_inbox", "method": "GET", "url": "/api/operator/missions?limit=10"},
+            {"step": 1.0538, "name": "claim_mission_optional", "method": "POST", "url": "/api/operator/missions/claim"},
             {"step": 1.054, "name": "control_contract", "method": "GET", "url": "/api/operator/control-contract?days=30&platform=tiktok"},
             {"step": 1.055, "name": "command_run_preview", "method": "POST", "url": "/api/operator/command/run"},
             {"step": 1.06, "name": "mission_control", "method": "GET", "url": "/api/operator/mission?days=30&platform=tiktok&limit=8"},
@@ -3392,6 +3602,13 @@ def operator_worker_spec_data():
                 "url": "/api/operator/run-cycle?days=30&platform=tiktok&limit=8&max_steps=3&execute=0",
                 "purpose": "Dispatcher nhiều bước an toàn: chỉ claim task safe_to_execute để lấy prompt_pack, gặp setup/review/publish gate thì dừng.",
                 "body": {"execute": False, "claim_task": True, "include_context": True, "include_prompt": True, "max_steps": 3, "notify_admin": True},
+            },
+            "mission_inbox": {
+                "method": "GET|POST",
+                "url": "/api/operator/missions",
+                "purpose": "Hộp lệnh cấp cao từ admin Telegram cho Claude/n8n. Tạo mission, claim mission, lấy prompt điều phối và complete kết quả.",
+                "create_body": {"title": "Chiến dịch AI tools", "objective": "Tạo 5 video affiliate công nghệ AI, gắn link phù hợp, review trước đăng.", "platform": "tiktok", "priority": 8, "notify_admin": True},
+                "claim_body": {"worker": "claude", "include_prompt": True, "notify_admin": True},
             },
             "control_contract": {
                 "method": "GET",
@@ -4012,6 +4229,13 @@ def operator_n8n_template_data():
                 "note": "Preview vòng điều phối nhiều bước. Khi execute=1 chỉ claim task an toàn để lấy prompt pack, không review/publish.",
             },
             {
+                "node": "Mission Inbox",
+                "type": "http_request",
+                "method": "GET",
+                "url": f"{base_url}/api/operator/missions?limit=10",
+                "note": "Đọc lệnh cấp cao admin gửi từ Telegram. Worker có thể POST /api/operator/missions/claim để nhận prompt điều phối.",
+            },
+            {
                 "node": "Read Control Contract",
                 "type": "http_request",
                 "method": "GET",
@@ -4517,11 +4741,25 @@ def operator_n8n_workflow_json_data():
                 },
             },
             {
+                "id": "mission-inbox",
+                "name": "Mission Inbox",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [220, -1030],
+                "parameters": {
+                    "method": "GET",
+                    "url": f"{base_url_expr}/api/operator/missions?limit=10",
+                    "sendHeaders": True,
+                    "headerParameters": headers,
+                    "options": {"timeout": 60000},
+                },
+            },
+            {
                 "id": "control-contract",
                 "name": "Control Contract",
                 "type": "n8n-nodes-base.httpRequest",
                 "typeVersion": 4.2,
-                "position": [220, -850],
+                "position": [460, -850],
                 "parameters": {
                     "method": "GET",
                     "url": f"{base_url_expr}/api/operator/control-contract?days=30&platform=tiktok&limit=8",
@@ -5255,7 +5493,8 @@ def operator_n8n_workflow_json_data():
             "Read Command Center": {"main": [[{"node": "Next Run Card", "type": "main", "index": 0}]]},
             "Next Run Card": {"main": [[{"node": "Dispatch Preview", "type": "main", "index": 0}]]},
             "Dispatch Preview": {"main": [[{"node": "Run Cycle Preview", "type": "main", "index": 0}]]},
-            "Run Cycle Preview": {"main": [[{"node": "Control Contract", "type": "main", "index": 0}]]},
+            "Run Cycle Preview": {"main": [[{"node": "Mission Inbox", "type": "main", "index": 0}]]},
+            "Mission Inbox": {"main": [[{"node": "Control Contract", "type": "main", "index": 0}]]},
             "Control Contract": {"main": [[{"node": "Command Run Preview", "type": "main", "index": 0}]]},
             "Command Run Preview": {"main": [[{"node": "Read Mission Control", "type": "main", "index": 0}]]},
             "Read Mission Control": {"main": [[{"node": "Read Channel Router", "type": "main", "index": 0}]]},
@@ -5381,6 +5620,7 @@ def operator_command_center_data(owner_id, days=30, platform="tiktok", limit=8):
     event_totals, channel_totals, recent_events = performance_report_data(owner_id, limit=limit)
     director = operator_director_data(owner_id, days=days, platform=platform, limit=limit)
     money_pack = operator_money_pack_data(owner_id, days=days, platform=platform, limit=limit)
+    mission_inbox = operator_mission_inbox_data(owner_id, limit=min(limit, 10))
 
     money = {
         "events": [
@@ -5413,6 +5653,11 @@ def operator_command_center_data(owner_id, days=30, platform="tiktok", limit=8):
         "counts": today["status"]["counts"],
         "actions": today["actions"],
         "director_next": director.get("next_action"),
+        "mission_inbox": {
+            "open": len([m for m in mission_inbox.get("missions", []) if m.get("status") in {"queued", "working"}]),
+            "next": (mission_inbox.get("next_prompt_pack") or {}).get("mission"),
+            "claim_url": "/api/operator/missions/claim",
+        },
         "worker_next": worker_next,
         "publisher": {
             "ready": publisher.get("ready"),
@@ -5427,6 +5672,8 @@ def operator_command_center_data(owner_id, days=30, platform="tiktok", limit=8):
         "money_pack_summary": money_pack.get("summary", {}),
         "next": {
             "next_run": "/api/operator/next-run",
+            "missions": "/api/operator/missions",
+            "claim_mission": "/api/operator/missions/claim",
             "make_video": "/api/operator/make-video",
             "worker_next": "/api/operator/worker-next",
             "claim_task": "/api/operator/tasks/claim?include_context=1&include_prompt=1",
@@ -12935,6 +13182,25 @@ class OperatorRunCycleRequest(BaseModel):
     include_prompt: bool = True
     notify_admin: bool = True
 
+class OperatorMissionCreateRequest(BaseModel):
+    title: str = Field(default="", max_length=240)
+    objective: str = Field(min_length=1, max_length=5000)
+    platform: str = Field(default="tiktok", max_length=40)
+    priority: int = Field(default=5, ge=1, le=10)
+    note: str = Field(default="", max_length=1200)
+    notify_admin: bool = True
+
+class OperatorMissionClaimRequest(BaseModel):
+    worker: str = Field(default="claude", max_length=120)
+    include_prompt: bool = True
+    notify_admin: bool = True
+
+class OperatorMissionCompleteRequest(BaseModel):
+    status: str = Field(default="done", max_length=40)
+    result: dict = Field(default_factory=dict)
+    note: str = Field(default="", max_length=2000)
+    notify_admin: bool = True
+
 class AgentGemini:
     @staticmethod
     def chat(prompt: str, text: str, uid, is_json: bool = False) -> str:
@@ -13799,6 +14065,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /campaign_preset — Preset chiến dịch: tech/ecom/finance/travel/onlyfans",
             "• /postback_setup — Cấu hình callback affiliate network vào bot",
             "• /brain &lt;lệnh&gt; — Ra lệnh tự nhiên cho AI Operator",
+            "• /mission_add objective=... — Gửi mission cấp cao cho Claude/n8n",
             "• /autopilot — Tìm trend, tạo job và build production bundle",
             "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
             "• /dashboard — Dashboard quản trị hệ thống",
@@ -17631,6 +17898,7 @@ async def cmd_operator_command(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Ready to scale: <b>{'YES' if center['ready_to_scale'] else 'NO'}</b>",
         f"• Jobs/tasks/publish: <b>{counts['open_jobs']}</b>/<b>{counts['open_tasks']}</b>/<b>{counts['open_publish']}</b>",
         f"• Publisher: ready=<b>{'YES' if center['publisher']['ready'] else 'NO'}</b> api=<b>{'YES' if center['publisher']['api_ready'] else 'NO'}</b>",
+        f"• Mission inbox: open=<b>{(center.get('mission_inbox') or {}).get('open', 0)}</b> | claim=<code>/mission_claim worker=claude</code>",
         "",
         "<b>Next actions:</b>",
     ]
@@ -17657,6 +17925,114 @@ async def cmd_operator_command(update: Update, context: ContextTypes.DEFAULT_TYP
     lines.append(f"\n<b>Money snapshot:</b> revenue/order/lead amount=<b>{revenue_total:,}đ</b>")
     lines.append("\nAPI: <code>GET /api/operator/command-center</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_mission_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args).strip()
+    if not raw:
+        return await update.message.reply_text(
+            "🧠 VD:\n"
+            "<code>/mission_add title=Chiến dịch AI tools platform=tiktok priority=8 objective=Tạo 5 video affiliate công nghệ AI tuần này, dùng link liên quan, review trước đăng.</code>",
+            parse_mode="HTML",
+        )
+    data = parse_key_value_args(raw)
+    objective = (data.get("objective") or data.get("muctieu") or data.get("mục_tiêu") or "").strip()
+    if not objective:
+        objective = raw
+    title = (data.get("title") or data.get("ten") or "").strip()
+    if not title:
+        title = " ".join(objective.split()[:10])
+    platform = (data.get("platform") or data.get("nen") or "tiktok").lower()
+    priority = max(1, min(safe_int(data.get("priority") or data.get("prio"), 5), 10))
+    note = data.get("note") or ""
+    mission_id = create_operator_mission(
+        update.effective_user.id,
+        title=title,
+        objective=objective,
+        platform=platform,
+        priority=priority,
+        note=note,
+    )
+    await update.message.reply_text(
+        "✅ <b>ĐÃ TẠO OPERATOR MISSION</b>\n\n"
+        f"• Mission: <code>#{mission_id}</code>\n"
+        f"• Title: <b>{html.escape(title)}</b>\n"
+        f"• Platform: <code>{html.escape(platform)}</code> | Priority: <b>{priority}</b>\n"
+        f"• Next: <code>/mission_claim worker=claude</code> hoặc <code>POST /api/operator/missions/claim</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    status = (data.get("status") or "").lower()
+    limit = max(1, min(safe_int(data.get("limit") or (context.args[0] if context.args else ""), 10), 30))
+    rows = list_operator_missions(update.effective_user.id, status=status, limit=limit)
+    lines = [
+        "📥 <b>OPERATOR MISSION INBOX</b>",
+        f"• Total shown: <b>{len(rows)}</b> | Filter: <code>{html.escape(status or 'all')}</code>",
+        "",
+    ]
+    if not rows:
+        lines.append("Chưa có mission. Tạo bằng <code>/mission_add objective=...</code>")
+    for row in rows:
+        item = serialize_operator_mission(row)
+        lines.append(
+            f"• <code>#{item['id']}</code> [{html.escape(item['status'])}] p={item['priority']} "
+            f"{html.escape(item['platform'] or '-')}: <b>{html.escape(item['title'] or '-')}</b>\n"
+            f"  <code>/mission_prompt id={item['id']}</code> | <code>/mission_complete id={item['id']} status=done note=...</code>"
+        )
+    lines.append("\nAPI: <code>GET /api/operator/missions</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_mission_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    worker = data.get("worker") or data.get("ai") or "claude"
+    pack = operator_mission_prompt_pack_data(update.effective_user.id, claim=True, worker=worker)
+    if not pack:
+        return await update.message.reply_text("📭 Không có mission queued để claim.")
+    mission = pack["mission"]
+    await update.message.reply_text(
+        "🤖 <b>MISSION CLAIMED</b>\n\n"
+        f"• Mission: <code>#{mission['id']}</code> | Worker: <code>{html.escape(worker)}</code>\n"
+        f"• Title: <b>{html.escape(mission['title'] or '-')}</b>\n"
+        f"• Complete: <code>/mission_complete id={mission['id']} status=done note=...</code>\n\n"
+        f"<pre>{html_pre(pack['prompt'], 2200)}</pre>",
+        parse_mode="HTML",
+    )
+
+async def cmd_mission_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    mission_id = safe_int(data.get("id") or data.get("mission") or (context.args[0] if context.args else ""), 0)
+    pack = operator_mission_prompt_pack_data(update.effective_user.id, mission_id=mission_id, claim=False)
+    if not pack:
+        return await update.message.reply_text("❌ Không tìm thấy mission.")
+    await update.message.reply_text(
+        f"🧾 <b>MISSION PROMPT PACK #{pack['mission']['id']}</b>\n\n"
+        f"<pre>{html_pre(pack['prompt'], 2600)}</pre>",
+        parse_mode="HTML",
+    )
+
+async def cmd_mission_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    mission_id = safe_int(data.get("id") or data.get("mission"), 0)
+    if not mission_id:
+        return await update.message.reply_text("⚠️ VD: <code>/mission_complete id=1 status=done note=đã tạo 3 job</code>", parse_mode="HTML")
+    status = (data.get("status") or "done").lower()
+    note = data.get("note") or ""
+    ok = complete_operator_mission(update.effective_user.id, mission_id, status=status, result={"source": "telegram"}, note=note)
+    await update.message.reply_text(
+        ("✅" if ok else "❌") + f" Mission <code>#{mission_id}</code> → <code>{html.escape(status)}</code>",
+        parse_mode="HTML",
+    )
 
 async def cmd_operator_next_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -17997,6 +18373,7 @@ def operator_category_keyboard(category):
             ("🎯 Goal audit", "goalaudit"),
             ("🛡 Telegram takeover", "telegramtakeover"),
             ("🎯 Campaign preset", "campaignpreset"),
+            ("📥 Mission inbox", "missioninbox"),
             ("🎛 Next run card", "nextrun"),
             ("🧭 Dispatch one step", "dispatch"),
             ("🔁 Run cycle", "cycle"),
@@ -18151,6 +18528,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Next run card: <code>GET {html.escape(base_url)}/api/operator/next-run</code>",
         f"• One-step dispatcher: <code>GET/POST {html.escape(base_url)}/api/operator/dispatch</code>",
         f"• Safe run cycle: <code>GET/POST {html.escape(base_url)}/api/operator/run-cycle</code>",
+        f"• Mission inbox: <code>GET/POST {html.escape(base_url)}/api/operator/missions</code>",
+        f"• Claim mission: <code>POST {html.escape(base_url)}/api/operator/missions/claim</code>",
         f"• Bootstrap thiếu setup: <code>POST {html.escape(base_url)}/api/operator/bootstrap</code>",
         f"• Campaign preset: <code>POST {html.escape(base_url)}/api/operator/campaign-preset</code>",
         f"• Launch một lệnh: <code>POST {html.escape(base_url)}/api/operator/launch</code>",
@@ -18217,6 +18596,8 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '<pre>{"preset":"tech","platform":"tiktok","limit":3,"execute":false,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload run-cycle mẫu:</b>",
         '<pre>{"days":30,"platform":"tiktok","limit":8,"max_steps":3,"execute":false,"claim_task":true,"include_prompt":true,"notify_admin":true}</pre>',
+        "<b>Payload mission mẫu:</b>",
+        '<pre>{"title":"Chiến dịch AI tools","objective":"Tạo 5 video affiliate công nghệ AI, gắn link phù hợp, review trước đăng.","platform":"tiktok","priority":8,"notify_admin":true}</pre>',
         "<b>Payload make-video mẫu:</b>",
         '<pre>{"topic":"đồ công nghệ văn phòng","platform":"tiktok","channel":"all","limit":3,"build":true,"duration":45,"notify_admin":true}</pre>',
         "<b>Payload affiliate-scale mẫu:</b>",
@@ -18423,6 +18804,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "status": "/operator_status",
         "telegramstatus": "/telegram_status\n/runtime\nGET /runtime",
         "telegramtakeover": "/telegram_takeover\nPOST /api/telegram/takeover",
+        "missioninbox": "/missions\n/mission_add title=Chiến dịch AI tools platform=tiktok priority=8 objective=Tạo 5 video affiliate công nghệ AI, gắn link phù hợp, review trước đăng.\n/mission_claim worker=claude\nGET /api/operator/missions\nPOST /api/operator/missions/claim",
         "audit": "/operator_audit",
         "goalaudit": "/goal_audit days=30 platform=tiktok\nGET /api/operator/goal-audit?days=30&platform=tiktok",
         "smoke": "/operator_smoke\nGET /api/operator/smoke-test",
@@ -22137,6 +22519,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_cycle", cmd_operator_cycle))
     tg_app.add_handler(CommandHandler("operator_command", cmd_operator_command))
     tg_app.add_handler(CommandHandler("operator_mission", cmd_operator_mission))
+    tg_app.add_handler(CommandHandler("mission_add", cmd_mission_add))
+    tg_app.add_handler(CommandHandler("missions", cmd_missions))
+    tg_app.add_handler(CommandHandler("mission_claim", cmd_mission_claim))
+    tg_app.add_handler(CommandHandler("mission_prompt", cmd_mission_prompt))
+    tg_app.add_handler(CommandHandler("mission_complete", cmd_mission_complete))
     tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
     tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
     tg_app.add_handler(CommandHandler("operator_worker_spec", cmd_operator_worker_spec))
@@ -23175,6 +23562,97 @@ async def api_operator_command_center(request: Request, days: int = 30, platform
         "ok": True,
         **operator_command_center_data(ADMIN_ID, days=days, platform=platform, limit=limit),
     }
+
+@fastapi_app.get("/api/operator/missions")
+async def api_operator_missions(request: Request, status: str = "", limit: int = 20):
+    verify_operator_api_token(request)
+    return operator_mission_inbox_data(ADMIN_ID, limit=limit) if not status else {
+        "ok": True,
+        "missions": [serialize_operator_mission(row) for row in list_operator_missions(ADMIN_ID, status=status.lower(), limit=limit)],
+    }
+
+@fastapi_app.post("/api/operator/missions")
+async def api_operator_mission_create(payload: OperatorMissionCreateRequest, request: Request):
+    verify_operator_api_token(request)
+    mission_id = create_operator_mission(
+        ADMIN_ID,
+        title=payload.title or payload.objective[:80],
+        objective=payload.objective,
+        platform=payload.platform,
+        priority=payload.priority,
+        note=payload.note,
+    )
+    pack = operator_mission_prompt_pack_data(ADMIN_ID, mission_id=mission_id, claim=False)
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "📥 <b>NEW OPERATOR MISSION</b>\n\n"
+                    f"• Mission: <code>#{mission_id}</code>\n"
+                    f"• Title: <b>{html.escape((pack or {}).get('mission', {}).get('title') or payload.title or '-')}</b>\n"
+                    "• Claim: <code>/mission_claim worker=claude</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Mission create notify error: {e}")
+    return {"ok": True, "mission_id": mission_id, "prompt_pack": pack}
+
+@fastapi_app.post("/api/operator/missions/claim")
+async def api_operator_mission_claim(payload: OperatorMissionClaimRequest, request: Request):
+    verify_operator_api_token(request)
+    pack = operator_mission_prompt_pack_data(ADMIN_ID, claim=True, worker=payload.worker)
+    if not pack:
+        return {"ok": True, "mission": None, "message": "no queued mission"}
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            mission = pack["mission"]
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🤖 <b>MISSION CLAIMED BY AI</b>\n\n"
+                    f"• Mission: <code>#{mission['id']}</code>\n"
+                    f"• Worker: <code>{html.escape(payload.worker)}</code>\n"
+                    f"• Title: <b>{html.escape(mission.get('title') or '-')}</b>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Mission claim notify error: {e}")
+    if not payload.include_prompt:
+        pack.pop("prompt", None)
+    return pack
+
+@fastapi_app.get("/api/operator/missions/{mission_id}/prompt-pack")
+async def api_operator_mission_prompt_pack(mission_id: int, request: Request):
+    verify_operator_api_token(request)
+    pack = operator_mission_prompt_pack_data(ADMIN_ID, mission_id=mission_id, claim=False)
+    if not pack:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return pack
+
+@fastapi_app.post("/api/operator/missions/{mission_id}/complete")
+async def api_operator_mission_complete(mission_id: int, payload: OperatorMissionCompleteRequest, request: Request):
+    verify_operator_api_token(request)
+    ok = complete_operator_mission(ADMIN_ID, mission_id, status=payload.status, result=payload.result, note=payload.note)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "✅ <b>MISSION UPDATED</b>\n\n"
+                    f"• Mission: <code>#{mission_id}</code>\n"
+                    f"• Status: <code>{html.escape(payload.status)}</code>\n"
+                    f"• Note: {html.escape(payload.note or '-')}"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Mission complete notify error: {e}")
+    return {"ok": True, "mission": serialize_operator_mission(get_operator_mission(ADMIN_ID, mission_id))}
 
 @fastapi_app.get("/api/operator/mission")
 async def api_operator_mission(request: Request, days: int = 30, platform: str = "tiktok", limit: int = 8):
