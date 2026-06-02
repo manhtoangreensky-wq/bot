@@ -50,6 +50,15 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "⚙️ Hệ Thống" in button_texts
 
 
+def test_topup_keyboard_preserves_package_callbacks():
+    keyboard = bot.build_topup_keyboard(123)
+    callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
+    assert "pkg|50k|123" in callbacks
+    assert "pkg|100k|123" in callbacks
+    assert "pkg|200k|123" in callbacks
+    assert "menu|billing" in callbacks
+
+
 def test_lifespan_keeps_api_alive_without_telegram_token(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)

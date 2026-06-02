@@ -1,30 +1,34 @@
-# Next Task Proposal
+# NEXT TASK OPTIONS — STABLE REVENUE BOT ONLY
 
-Sau task foundation này, task tiếp theo nên là một trong các task sau, admin chọn:
+Chưa làm kế hoạch lớn.
+
+Admin chọn 1 trong các task sau:
 
 ## Option A — Extract config.py safely
 
-- Tạo `app/core/config.py`.
-- Move ENV/constants.
+- Tách ENV/constants.
 - Không đổi tên ENV.
-- `bot.py` vẫn chạy.
+- Bot vẫn chạy.
 
 ## Option B — Extract db.py safely
 
-- Tạo `app/core/db.py`.
-- Move DB helpers.
+- Tách DB helpers.
 - Không đổi schema.
 
-## Option C — Trial upsell flow
+## Option C — Complete trial upsell
 
-- Khi thiếu xu/hết trial, hiện gói 50k/100k/200k.
-- Nút tạo PayOS link.
-- Không phá `/naptien`.
+- Chuẩn hóa thiếu xu ở tất cả flow.
+- Nút nạp 50k/100k/200k.
 
-## Option D — Video Factory schema MVP
+## Option D — Complete refund audit
 
-- Tạo `video_projects`, `video_episodes`, `video_scenes`, `platform_outputs`.
+- Sửa hoàn xu ở mọi flow trừ xu trước API.
+
+## Option E — Video Script Lite
+
+- Chỉ tạo script/prompt pack.
 - Không render.
 - Không publish.
+- Platforms: Facebook/TikTok/YouTube.
 
-Codex không tự làm Option A/B/C/D nếu chưa được duyệt.
+Codex không tự làm task tiếp theo.

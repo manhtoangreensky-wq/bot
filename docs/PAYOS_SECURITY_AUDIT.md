@@ -1,4 +1,22 @@
-# PayOS Security Audit
+# PAYOS SECURITY AUDIT
+
+## Current payment packages
+
+- `10k`: 10.000đ -> 100 Xu
+- `20k`: 20.000đ -> 200 Xu
+- `50k`: 50.000đ -> 500 Xu
+- `100k`: 100.000đ -> 1.050 Xu
+- `200k`: 200.000đ -> 2.150 Xu
+- `500k`: 500.000đ -> 5.500 Xu
+
+## Checkout creation
+
+- uses `PAYOS_CLIENT_ID`: Yes.
+- uses `PAYOS_API_KEY`: Yes.
+- uses `PAYOS_CHECKSUM_KEY`: Yes.
+- stores order: Yes, via `payos_orders`.
+- returns checkout URL: Yes when PayOS response code is `00`.
+- fallback: if PayOS config/signature creation fails, the bot shows manual transfer QR flow.
 
 ## PAYOS_CHECKSUM_KEY required
 
@@ -42,10 +60,20 @@ Function: `process_payos_paid_order`.
 - `/tuchoi` rejects manual bill.
 - These are admin-only commands.
 
+## Webhook
+
+- route: `POST /webhook/payos`.
+- signature verification: Required.
+- missing checksum behavior: Reject, no auto-credit.
+- duplicate protection: `payos_processed`.
+- amount mismatch protection: compares against internal order.
+- order status protection: rejects paid/expired/cancelled/duplicate.
+- user notification: sends success message when Telegram app is ready.
+- admin notification: sends success summary when Telegram app is ready.
+
 ## Remaining risk
 
 - Need real PayOS production payment test after Railway deploy.
 - Need verify Railway ENV values match PayOS dashboard.
 - Need confirm PayOS webhook URL points to current Railway service.
 - Need watch logs for signature errors without printing secrets.
-

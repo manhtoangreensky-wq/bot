@@ -19132,6 +19132,41 @@ def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup
     buttons.append([InlineKeyboardButton("❌ Huỷ", callback_data=f"prov|cancel|cancel|{uid}")])
     return InlineKeyboardMarkup(buttons)
 
+def build_topup_keyboard(uid: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💳 Nạp 50k", callback_data=f"pkg|50k|{uid}"),
+            InlineKeyboardButton("⭐ Nạp 100k", callback_data=f"pkg|100k|{uid}"),
+        ],
+        [
+            InlineKeyboardButton("🚀 Nạp 200k", callback_data=f"pkg|200k|{uid}"),
+            InlineKeyboardButton("📦 Xem tất cả gói", callback_data="menu|billing"),
+        ],
+    ])
+
+def insufficient_credits_text(current_credits: int, required_credits: int) -> str:
+    return (
+        "⚠️ <b>Bạn chưa đủ Xu để dùng tính năng này.</b>\n\n"
+        f"• Số dư hiện tại: <b>{int(current_credits or 0)} Xu</b>\n"
+        f"• Cần: <b>{int(required_credits or 0)} Xu</b>\n\n"
+        "Bạn có thể nạp thêm để tiếp tục dùng TOAN AAS."
+    )
+
+async def reply_insufficient_credits(update: Update, current_credits: int, required_credits: int):
+    uid = update.effective_user.id
+    await update.message.reply_text(
+        insufficient_credits_text(current_credits, required_credits),
+        parse_mode="HTML",
+        reply_markup=build_topup_keyboard(uid),
+    )
+
+async def edit_insufficient_credits(query, current_credits: int, required_credits: int, uid: int):
+    await query.edit_message_text(
+        insufficient_credits_text(current_credits, required_credits),
+        parse_mode="HTML",
+        reply_markup=build_topup_keyboard(uid),
+    )
+
 
 async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -19179,7 +19214,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 pending.get("premium_charged", False),
             )
             if not spend_fixed_credit(uid, VOICE_FREE_COST, "spend_voice_free", "Gói voice tiết kiệm"):
-                await query.edit_message_text(f"❌ Không đủ xu. Cần ít nhất {VOICE_FREE_COST} Xu.")
+                credits_now, _, _ = get_user(uid)
+                await edit_insufficient_credits(query, credits_now, VOICE_FREE_COST, uid)
                 return
             await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Tiết Kiệm)...</i>", parse_mode="HTML")
             out = f"v_{uid}.mp3"
@@ -19205,7 +19241,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
             ok = False
             premium_charged = spend_fixed_credit(uid, cost, "spend_voice_paid", "Gói voice cao cấp Fish Audio")
             if not premium_charged:
-                await query.edit_message_text(f"❌ Không đủ xu cho gói cao cấp. Cần {cost} Xu.")
+                credits_now, _, _ = get_user(uid)
+                await edit_insufficient_credits(query, credits_now, cost, uid)
                 return
             premium_refunded = False
             fallback_charged = False
@@ -19259,7 +19296,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         premium_charged,
                     )
                     if not spend_fixed_credit(uid, VOICE_FREE_COST, "spend_voice_free_fallback", "Fallback sang Edge TTS"):
-                        await query.edit_message_text(f"❌ Không đủ xu cho gói fallback. Cần ít nhất {VOICE_FREE_COST} Xu.")
+                        credits_now, _, _ = get_user(uid)
+                        await edit_insufficient_credits(query, credits_now, VOICE_FREE_COST, uid)
                         return
                     fallback_charged = True
                     try:
@@ -19296,7 +19334,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 pending.get("premium_charged", False),
             )
             if not spend_fixed_credit(uid, IMAGE_FREE_COST, "spend_image_free", "Gói tách nền tiết kiệm"):
-                await query.edit_message_text(f"❌ Không đủ xu. Cần ít nhất {IMAGE_FREE_COST} Xu.")
+                credits_now, _, _ = get_user(uid)
+                await edit_insufficient_credits(query, credits_now, IMAGE_FREE_COST, uid)
                 return
             await query.edit_message_text("⏳ <i>Đang tách nền (Gói Tiết Kiệm)...</i>", parse_mode="HTML")
             ok = False
@@ -19329,7 +19368,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
             ok = False
             premium_charged = spend_fixed_credit(uid, cost, "spend_image_paid", "Gói tách nền cao cấp RemoveBG")
             if not premium_charged:
-                await query.edit_message_text(f"❌ Không đủ xu cho gói cao cấp. Cần {cost} Xu.")
+                credits_now, _, _ = get_user(uid)
+                await edit_insufficient_credits(query, credits_now, cost, uid)
                 return
             premium_refunded = False
             if REMOVEBG_API_KEY:
@@ -19380,7 +19420,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     premium_charged,
                 )
                 if not spend_fixed_credit(uid, IMAGE_FREE_COST, "spend_image_free_fallback", "Fallback sang Cutout"):
-                    await query.edit_message_text(f"❌ Không đủ xu cho gói fallback. Cần ít nhất {IMAGE_FREE_COST} Xu.")
+                    credits_now, _, _ = get_user(uid)
+                    await edit_insufficient_credits(query, credits_now, IMAGE_FREE_COST, uid)
                     return
                 cutout_ok = False
                 if CUTOUT_API_KEY:
@@ -30160,6 +30201,12 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     conn = db_connect()
     c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users")
+    total_users = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE has_deposited=1")
+    deposited_users = c.fetchone()[0]
+    c.execute("SELECT COALESCE(SUM(credits),0) FROM users")
+    circulating_credits = c.fetchone()[0] or 0
     c.execute("SELECT user_id, username, credits, total_spent, is_vip FROM users ORDER BY CAST(credits AS INTEGER) DESC LIMIT 8")
     top_users = c.fetchall()
     c.execute("SELECT order_code, user_id, amount, xu, status, created_at FROM payos_orders ORDER BY created_at DESC LIMIT 8")
@@ -30168,11 +30215,23 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recent_credit = c.fetchall()
     c.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM payos_orders WHERE status=?", (PAYOS_STATUS_PAID,))
     paid_count, paid_amount = c.fetchone()
+    c.execute("SELECT COUNT(*) FROM pending_deposits WHERE status='pending'")
+    pending_count = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM leads")
+    lead_count = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM feedback WHERE timestamp >= ?", ((datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S"),))
+    feedback_7d = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM audit_logs WHERE created_at >= ?", ((datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),))
+    audit_24h = c.fetchone()[0]
     conn.close()
 
     lines = [
         "🧭 <b>ADMIN DASHBOARD</b>",
+        f"👥 User: <b>{total_users}</b> | Đã nạp: <b>{deposited_users}</b>",
         f"💳 PayOS đã thanh toán: <b>{paid_count}</b> đơn / <b>{paid_amount:,}đ</b>",
+        f"🪙 Xu đang lưu hành: <b>{circulating_credits}</b>",
+        f"📋 Bill chờ: <b>{pending_count}</b> | Lead: <b>{lead_count}</b> | Góp ý 7 ngày: <b>{feedback_7d}</b>",
+        f"🧾 Audit 24h: <b>{audit_24h}</b>",
         "",
         "<b>Top user theo số dư:</b>",
     ]
@@ -30373,12 +30432,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_cost = calculate_dynamic_cost("image", file_size)
     credits, total_spent, is_vip = get_user(uid)
     final_cost, _ = apply_discount(total_spent, raw_cost)
-    if credits < final_cost and str(uid) != ADMIN_ID and is_vip != 1:
-        return await update.message.reply_text(
-            f"❌ Cần {final_cost} Xu để dùng Gói Cao Cấp.\n"
-            f"Chọn Gói Tiết Kiệm (-5 Xu) hoặc /naptien để nạp thêm.",
-            parse_mode="HTML"
-        )
+    if credits < IMAGE_FREE_COST and str(uid) != ADMIN_ID and is_vip != 1:
+        return await reply_insufficient_credits(update, credits, IMAGE_FREE_COST)
     img_bytes = bytes(await (await update.message.photo[-1].get_file()).download_as_bytearray())
     USER_PENDING[uid] = {
         "type": "image",
@@ -30411,9 +30466,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_size = file_obj.file_size
     can_afford, cost, discount = deduct_dynamic_credit(uid, "whisper", file_size)
     if not can_afford:
-        return await update.message.reply_text(
-            f"❌ Cần {cost} Xu để bóc băng file {math.ceil(file_size/(1024*1024))}MB. Gõ /naptien."
-        )
+        credits_now, _, _ = get_user(uid)
+        return await reply_insufficient_credits(update, credits_now, cost)
     msg = await update.message.reply_text("⚡ <i>[Deepgram] Đang chạy bóc băng...</i>", parse_mode="HTML")
     try:
         file_bytes = bytes(await (await file_obj.get_file()).download_as_bytearray())
@@ -30480,14 +30534,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if trial:
             # Tài khoản chưa nạp: dùng lượt miễn phí, hết thì khoá đến hôm sau
             if remaining <= 0:
-                reset_time = (datetime.now().replace(hour=0, minute=0, second=0) + timedelta(days=1)).strftime("%H:%M ngày %d/%m")
-                return await update.message.reply_text(
+                await update.message.reply_text(
                     f"🚫 <b>Hết {FREE_CHAT_DAILY} lượt chat miễn phí hôm nay!</b>\n\n"
                     f"⏰ Lượt mới reset lúc <b>00:00 ngày mai</b>\n"
-                    f"💡 Hoặc nạp tiền để chat <b>không giới hạn</b> ngay bây giờ:\n"
-                    f"👉 /naptien",
-                    parse_mode="HTML"
+                    f"💡 Hoặc nạp tiền để chat <b>không giới hạn</b> ngay bây giờ.",
+                    parse_mode="HTML",
+                    reply_markup=build_topup_keyboard(uid),
                 )
+                return
             # Còn lượt — dùng miễn phí, không trừ Xu
             consume_free_chat(uid)
             cost, discount = 0, 0.0
@@ -30496,22 +30550,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Đã nạp tiền: trừ Xu bình thường, không giới hạn lượt
             can_afford, cost, discount = deduct_dynamic_credit(uid, action_key, size_calc)
             if not can_afford:
-                return await update.message.reply_text(
-                    f"❌ <b>HẾT XU!</b> Yêu cầu {cost} Xu.\n"
-                    f"💳 Gõ /naptien để nạp thêm.",
-                    parse_mode="HTML"
-                )
+                credits_now, _, _ = get_user(uid)
+                return await reply_insufficient_credits(update, credits_now, cost)
             warn = ""
     elif action_key == "chat" and (is_admin or is_vip):
         cost, discount, warn = 0, 0.0, ""
     else:
-        # voice / download — xử lý bình thường
-        can_afford, cost, discount = deduct_dynamic_credit(uid, action_key, size_calc)
-        if not can_afford:
-            return await update.message.reply_text(
-                f"❌ <b>HẾT HẠN MỨC!</b> Yêu cầu {cost} Xu.\nGõ /naptien để nạp thêm.",
-                parse_mode="HTML"
-            )
+        # voice / download — voice được chọn provider trước; download trừ Xu trực tiếp.
+        if action_key == "voice":
+            min_voice_cost = VOICE_FREE_COST if str(uid) != ADMIN_ID and not is_vip else 0
+            if min_voice_cost and credits < min_voice_cost:
+                return await reply_insufficient_credits(update, credits, min_voice_cost)
+            cost, discount = 0, 0.0
+        else:
+            can_afford, cost, discount = deduct_dynamic_credit(uid, action_key, size_calc)
+            if not can_afford:
+                credits_now, _, _ = get_user(uid)
+                return await reply_insufficient_credits(update, credits_now, cost)
         warn = ""
 
     if act == "voice":
