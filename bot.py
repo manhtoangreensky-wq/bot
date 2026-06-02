@@ -30942,7 +30942,18 @@ fastapi_app = FastAPI(title="TOAN AAS V15.2", lifespan=lifespan)
 
 # ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 @fastapi_app.get("/")
-async def health():
+async def home_page():
+    index_path = os.path.join(os.path.dirname(__file__), "index.html")
+    if not os.path.exists(index_path):
+        return {
+            "status": "ok",
+            "service": APP_VERSION,
+            "message": "Landing page not found. Use /health for status."
+        }
+    return FileResponse(index_path)
+
+@fastapi_app.get("/status")
+async def status_page():
     return {
         "status": "ok",
         "service": f"{APP_VERSION} — Dynamic Billing Verified",

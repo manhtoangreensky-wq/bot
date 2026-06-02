@@ -28,6 +28,7 @@
 - Safety: không auto publish khi chưa duyệt, không spam, không deepfake không consent, affiliate minh bạch.
 - Contact: giữ form POST `/lead`.
 - Banner: added repository-root `banner.png` immediately after hero with responsive `object-fit: contain`.
+- Root route: `/` now serves `index.html` directly; JSON runtime summary moved to `/status`.
 
 ## CTA links
 
@@ -40,6 +41,7 @@
 - `/LOGO.png`: dedicated route, unchanged.
 - `/banner.png`: dedicated route serving only `banner.png`; no catch-all route added.
 - `og:image`: `/banner.png`.
+- `/health`: JSON health endpoint kept unchanged.
 
 ## Manual checks
 
