@@ -30115,7 +30115,15 @@ async def lifespan(app: FastAPI):
         return
     TELEGRAM_STARTUP_ERROR = ""
 
-    tg_app = Application.builder().token(TELEGRAM_TOKEN).build()
+    try:
+        tg_app = Application.builder().token(TELEGRAM_TOKEN).build()
+    except Exception as e:
+        TELEGRAM_STARTUP_ERROR = str(e)
+        ACTIVE_TELEGRAM_UPDATE_MODE = "telegram_startup_error"
+        ACTIVE_TELEGRAM_WEBHOOK_URL = ""
+        logger.exception(f"Telegram builder lỗi nhưng FastAPI vẫn chạy để /runtime chẩn đoán: {e}")
+        yield
+        return
 
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))

@@ -39,6 +39,33 @@ def test_lifespan_keeps_api_alive_without_telegram_token(monkeypatch):
             os.unlink(db_path)
 
 
+def test_lifespan_keeps_api_alive_when_telegram_builder_fails(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "TELEGRAM_TOKEN", "token-that-builder-rejects")
+    monkeypatch.setattr(bot, "TELEGRAM_STARTUP_ERROR", "")
+
+    class BrokenBuilder:
+        def token(self, _token):
+            return self
+
+        def build(self):
+            raise RuntimeError("builder failed")
+
+    monkeypatch.setattr(bot.Application, "builder", staticmethod(lambda: BrokenBuilder()))
+    try:
+        with TestClient(bot.fastapi_app) as client:
+            runtime = client.get("/runtime")
+            assert runtime.status_code == 200
+            payload = runtime.json()
+            assert payload["status"] == "ok"
+            assert "builder failed" in payload["telegram_startup_error"]
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_cost_and_discount_rules():
     assert bot.calculate_dynamic_cost("chat", 0) == 2
     assert bot.calculate_dynamic_cost("download", 0) == 5
