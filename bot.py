@@ -150,8 +150,8 @@ COBALT_API_KEY      = _env("COBALT_API_KEY")
 PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "toanaasbot")
 OFFICIAL_TELEGRAM_URL = _env("OFFICIAL_TELEGRAM_URL", "https://t.me/toanaasbot")
-SUPPORT_TELEGRAM_URL  = _env("SUPPORT_TELEGRAM_URL", OFFICIAL_TELEGRAM_URL)
-ADMIN_TELEGRAM_URL    = _env("ADMIN_TELEGRAM_URL", OFFICIAL_TELEGRAM_URL)
+SUPPORT_TELEGRAM_URL  = _env("SUPPORT_TELEGRAM_URL", "https://t.me/toanaas")
+ADMIN_TELEGRAM_URL    = _env("ADMIN_TELEGRAM_URL", SUPPORT_TELEGRAM_URL)
 TELEGRAM_UPDATE_MODE_RAW = _env("TELEGRAM_UPDATE_MODE")
 TELEGRAM_UPDATE_MODE = (TELEGRAM_UPDATE_MODE_RAW or ("webhook" if PUBLIC_BASE_URL else "polling")).lower()
 TELEGRAM_FORCE_POLLING = _env("TELEGRAM_FORCE_POLLING", "0").lower() in {"1", "true", "yes", "on"}
@@ -1973,6 +1973,8 @@ DEFAULT_BETA_GIFT_CODES = [
     ("BETA1000", 1000, 20, 1, "Beta gift +1000 Xu"),
 ]
 
+gift_beta_request_notify_cache = {}
+
 def create_gift_code_record(conn, code: str, xu: int, usage_limit=1, per_user_limit=1, note="", created_by="", requires_assignment=None) -> tuple[bool, str]:
     norm_code = normalize_promo_code(code)
     xu = int(xu or 0)
@@ -2105,16 +2107,75 @@ def upsert_gift_assignment(conn, code: str, user_id, assigned_by, status="assign
     )
     return get_gift_assignment(conn, user_id, norm_code)
 
-def gift_needs_assignment_message(user_id, code: str) -> str:
+def telegram_user_contact_text(user) -> tuple[str, str, str]:
+    username = (getattr(user, "username", None) or "").strip()
+    full_name = " ".join(
+        p for p in [
+            (getattr(user, "first_name", None) or "").strip(),
+            (getattr(user, "last_name", None) or "").strip(),
+        ]
+        if p
+    ).strip()
+    contact_url = f"https://t.me/{username}" if username else ""
+    return username, full_name, contact_url
+
+def gift_needs_assignment_message(user_or_id, code: str) -> str:
+    user_id = getattr(user_or_id, "id", user_or_id)
+    username, _, _ = telegram_user_contact_text(user_or_id)
     safe_code = html.escape(normalize_promo_code(code) or str(code or "").strip().upper())
+    username_line = f"@{html.escape(username)}" if username else "không có"
+    support_url = html.escape(SUPPORT_TELEGRAM_URL)
     return (
         "🎁 <b>Mã quà tặng cần admin kích hoạt</b>\n\n"
-        f"Mã <code>{safe_code}</code> chỉ áp dụng cho tài khoản đã được admin cấp quyền.\n"
-        "Vui lòng gửi ID Telegram của bạn cho admin/hỗ trợ để được kiểm tra.\n\n"
-        f"ID của bạn: <code>{html.escape(str(user_id))}</code>\n"
-        "Lệnh xem ID: <code>/myid</code>\n\n"
+        f"Mã <code>{safe_code}</code> chỉ áp dụng cho tài khoản đã được admin cấp quyền.\n\n"
+        "<b>Thông tin của bạn:</b>\n"
+        f"• ID Telegram: <code>{html.escape(str(user_id))}</code>\n"
+        f"• Username: {username_line}\n\n"
+        "Vui lòng copy ID Telegram ở trên và nhắn admin/hỗ trợ để được kiểm tra/cấp mã:\n"
+        f"{support_url}\n\n"
         "Mã quà tặng chỉ dùng trong sự kiện đặc biệt, chương trình test hoặc khi admin hỗ trợ riêng."
     )
+
+def beta_gift_support_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 Nhắn admin/hỗ trợ", url=SUPPORT_TELEGRAM_URL)]
+    ])
+
+async def notify_admin_beta_gift_request(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str) -> bool:
+    user = update.effective_user
+    if not user or not ADMIN_ID:
+        return False
+    norm_code = normalize_promo_code(code)
+    if not is_beta_gift_code(norm_code):
+        return False
+    cache_key = f"{user.id}:{norm_code}"
+    now_ts = time.time()
+    last_ts = float(gift_beta_request_notify_cache.get(cache_key) or 0)
+    if now_ts - last_ts < 300:
+        return False
+    gift_beta_request_notify_cache[cache_key] = now_ts
+    username, full_name, contact_url = telegram_user_contact_text(user)
+    username_line = f"@{html.escape(username)}" if username else "không có"
+    full_name_line = html.escape(full_name or "không có")
+    contact_line = html.escape(contact_url) if contact_url else "không có username, hãy dùng ID hoặc đợi user nhắn admin."
+    text = (
+        "🎁 <b>USER YÊU CẦU MÃ BETA</b>\n\n"
+        "User vừa nhập mã nhưng chưa được cấp quyền.\n\n"
+        f"• Mã user nhập: <code>{html.escape(norm_code)}</code>\n"
+        f"• User ID: <code>{html.escape(str(user.id))}</code>\n"
+        f"• Username: {username_line}\n"
+        f"• Tên hiển thị: {full_name_line}\n"
+        f"• Liên hệ: {contact_line}\n\n"
+        "Nếu muốn cấp, admin dùng:\n"
+        f"<code>/gift {html.escape(norm_code)} {html.escape(str(user.id))}</code>\n\n"
+        "Nếu không đủ điều kiện thì bỏ qua."
+    )
+    try:
+        await context.bot.send_message(chat_id=int(ADMIN_ID), text=text, parse_mode="HTML")
+        return True
+    except Exception as e:
+        logger.warning(f"Could not notify admin about beta gift request: {e}")
+        return False
 
 def validate_gift_code(user_id, code: str, conn=None) -> tuple[bool, dict, str]:
     norm_code = normalize_promo_code(code)
@@ -22445,7 +22506,12 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
         if status == "assignment_required":
-            return await update.message.reply_text(gift_needs_assignment_message(uid, code), parse_mode="HTML")
+            await notify_admin_beta_gift_request(update, context, code)
+            return await update.message.reply_text(
+                gift_needs_assignment_message(update.effective_user, code),
+                parse_mode="HTML",
+                reply_markup=beta_gift_support_keyboard(),
+            )
         if status == "already_applied":
             return await update.message.reply_text(
                 "ℹ️ Mã quà tặng này đã được nhận trên tài khoản của bạn, hệ thống không cộng trùng.",
@@ -22676,7 +22742,7 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<code>/gift THANK100</code>\n"
             "<code>/nhanqua SORRY100</code>\n\n"
             "Mã BETA là mã sự kiện/test nội bộ, chỉ dùng khi admin cấp riêng cho ID Telegram của bạn.\n"
-            "Xem ID của bạn: <code>/myid</code>\n\n"
+            "Nếu bạn nhập mã BETA khi chưa được cấp, bot sẽ hiện ID Telegram để bạn gửi admin kiểm tra.\n\n"
             "Admin cấp BETA cho user bằng: <code>/gift BETA100 USER_ID</code>",
             parse_mode="HTML",
         )
@@ -22725,7 +22791,12 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
     if status == "assignment_required":
-        return await update.message.reply_text(gift_needs_assignment_message(update.effective_user.id, code), parse_mode="HTML")
+        await notify_admin_beta_gift_request(update, context, code)
+        return await update.message.reply_text(
+            gift_needs_assignment_message(update.effective_user, code),
+            parse_mode="HTML",
+            reply_markup=beta_gift_support_keyboard(),
+        )
     if status == "already_applied":
         return await update.message.reply_text(
             "ℹ️ Mã quà tặng này đã được nhận trên tài khoản của bạn, hệ thống không cộng trùng.",

@@ -2,6 +2,7 @@ import hmac
 import hashlib
 import os
 import tempfile
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -415,6 +416,22 @@ def test_public_non_beta_gift_redeems_without_assignment(monkeypatch):
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
+
+
+def test_beta_gift_assignment_message_shows_contact_without_myid(monkeypatch):
+    monkeypatch.setattr(bot, "SUPPORT_TELEGRAM_URL", "https://t.me/toanaas")
+    user = SimpleNamespace(id=7817576663, username="martinss888", first_name="Martin", last_name="")
+    message = bot.gift_needs_assignment_message(user, "BETA5")
+    assert "BETA5" in message
+    assert "7817576663" in message
+    assert "@martinss888" in message
+    assert "https://t.me/toanaas" in message
+    assert "/myid" not in message
+    assert "Lệnh xem ID" not in message
+
+    no_username_user = SimpleNamespace(id=12345, username=None, first_name="No", last_name="User")
+    no_username_message = bot.gift_needs_assignment_message(no_username_user, "BETA10")
+    assert "Username: không có" in no_username_message
 
 
 def test_payos_webhook_rejects_missing_checksum(monkeypatch):
