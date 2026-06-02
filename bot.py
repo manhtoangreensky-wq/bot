@@ -8330,66 +8330,6 @@ def add_production_asset(owner_id, job_id, asset_type, url="", file_id="", note=
         update_production_job(job_id, owner_id, asset_url=url)
     return True, asset_id
 
-def normalize_video_asset_type(asset_type=""):
-    raw = (asset_type or "").strip().lower()
-    aliases = {
-        "final": "final_video",
-        "finalvideo": "final_video",
-        "raw": "raw_video",
-        "scene": "scene_video",
-        "scenevideo": "scene_video",
-        "video": "final_video",
-        "mp4": "final_video",
-    }
-    raw = aliases.get(raw, raw or "final_video")
-    allowed = {"final_video", "raw_video", "scene_video", "video", "source", "proof_asset"}
-    return raw if raw in allowed else "source"
-
-def attach_telegram_video_asset(owner_id, job_id, file_id, asset_type="final_video", content_type="", filename="", note=""):
-    file_id = (file_id or "").strip()
-    if not file_id:
-        return False, {"reason": "missing_file_id"}
-    asset_type = normalize_video_asset_type(asset_type)
-    job = get_production_job(job_id, owner_id)
-    if not job:
-        return False, {"reason": "job_not_found"}
-    saved_note = f"telegram_upload {note or ''}".strip()
-    ok, asset_id = add_production_asset(
-        owner_id,
-        job_id,
-        asset_type,
-        "",
-        file_id,
-        saved_note,
-        "",
-        content_type or "video/mp4",
-        filename or "telegram-video.mp4",
-    )
-    if not ok:
-        return False, {"reason": "asset_save_failed"}
-    if asset_type == "final_video":
-        update_production_job(
-            job_id,
-            owner_id,
-            stage="review",
-            status="ready",
-            note=f"telegram_final_video asset:{asset_id} {note or ''}".strip(),
-        )
-    else:
-        update_production_job(
-            job_id,
-            owner_id,
-            status="working",
-            note=f"telegram_asset asset:{asset_id} type:{asset_type} {note or ''}".strip(),
-        )
-    return True, {
-        "asset_id": asset_id,
-        "job_id": int(job_id),
-        "asset_type": asset_type,
-        "review_command": f"/review_video job={int(job_id)} send=1",
-        "asset_send_command": f"/asset_send id={asset_id}",
-    }
-
 def get_production_asset(owner_id, asset_id):
     conn = db_connect()
     c = conn.cursor()
@@ -30014,66 +29954,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         refund_charged_credit(uid, cost, "refund", "", "Hoàn phí bóc băng do lỗi xử lý file", True)
         await update.message.reply_text("❌ Lỗi xử lý audio." + (" Xu đã hoàn lại." if cost > 0 and str(uid) != ADMIN_ID else ""))
 
-async def handle_video_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-    uid = update.effective_user.id
-    if str(uid) != ADMIN_ID:
-        return await update.message.reply_text(
-            "⚠️ Hiện bot nhận link TikTok / YouTube / Facebook để tải hoặc làm sạch video. "
-            "Vui lòng gửi link thay vì gửi file video trực tiếp."
-        )
-
-    file_obj = update.message.video or update.message.document
-    if not file_obj:
-        return
-    caption = update.message.caption or ""
-    data = parse_key_value_args(caption)
-    job_id = safe_int(data.get("job") or data.get("job_id") or data.get("id"), 0)
-    if not job_id:
-        match = re.search(r"(?:job|job_id|id)\s*[:=# ]\s*(\d+)", caption, re.IGNORECASE)
-        job_id = safe_int(match.group(1) if match else 0, 0)
-    if not job_id:
-        return await update.message.reply_text(
-            "⚠️ Gửi video kèm caption: <code>job=&lt;JOB_ID&gt; type=final_video note=...</code>\n"
-            "Type gợi ý: <code>final_video</code>, <code>raw_video</code>, <code>scene_video</code>.",
-            parse_mode="HTML",
-        )
-
-    asset_type = data.get("type") or data.get("asset_type") or "final_video"
-    note = data.get("note") or data.get("desc") or data.get("description") or ""
-    filename = getattr(file_obj, "file_name", "") or f"telegram-video-{job_id}.mp4"
-    content_type = getattr(file_obj, "mime_type", "") or "video/mp4"
-    ok, result = attach_telegram_video_asset(
-        uid,
-        job_id,
-        getattr(file_obj, "file_id", ""),
-        asset_type=asset_type,
-        content_type=content_type,
-        filename=filename,
-        note=note,
-    )
-    if not ok:
-        reason = result.get("reason") if isinstance(result, dict) else "unknown"
-        return await update.message.reply_text(
-            f"❌ Không lưu được video: <code>{html.escape(str(reason))}</code>",
-            parse_mode="HTML",
-        )
-
-    readiness = production_readiness_data(uid, job_id) or {}
-    await update.message.reply_text(
-        "✅ <b>ĐÃ NHẬN VIDEO VÀ GẮN VÀO JOB</b>\n\n"
-        f"• Job: <code>#{job_id}</code>\n"
-        f"• Asset: <code>#{result.get('asset_id')}</code>\n"
-        f"• Type: <code>{html.escape(result.get('asset_type') or '-')}</code>\n"
-        f"• File: <code>{html.escape(filename or '-')}</code>\n"
-        f"• Readiness: <b>{html.escape(readiness.get('level') or 'UNKNOWN')}</b>\n\n"
-        f"• Xem video: <code>{html.escape(result.get('asset_send_command') or '')}</code>\n"
-        f"• Kiểm duyệt: <code>{html.escape(result.get('review_command') or '')}</code>\n"
-        f"• Duyệt đăng: <code>/approve_publish job={job_id} queue=1 mode=manual</code>",
-        parse_mode="HTML",
-    )
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -30412,7 +30292,6 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
-    tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video_upload))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
