@@ -13,7 +13,7 @@ Manual sequence:
 
 - MVP done: `/promo_seed_policy`, `/promo <code>`, `/khuyenmai`, admin list/create/disable, percent bonus on PayOS paid order.
 - `BETA50` is limited/internal only; public first top-up offer is `FIRST30`.
-- Không đổi bảng giá gốc.
+- Bảng giá gốc hiện là base Xu; Launch Bonus được cộng riêng sau PayOS success nếu user còn lần đầu mua gói đó.
 - Không đụng PayOS packages nếu chưa cần.
 
 ```text
@@ -31,8 +31,9 @@ Manual sequence:
 Expected for 50k + FIRST30:
 
 - Base Xu: 500
+- Launch Bonus: 30 if first 50k package purchase
 - Promo bonus: 150
-- Total Xu added: 650
+- Total Xu added: 680 if Launch Bonus applies; 650 if the user already used 50k Launch Bonus
 - Duplicate webhook/checkpayos must not add base or bonus again.
 
 ## Option A - Run real PayOS 10k test manually

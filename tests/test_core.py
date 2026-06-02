@@ -203,15 +203,81 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
         assert desc == "success"
         assert paid_info["promo_bonus"] == 150
         assert paid_info["promo_code"] == "FIRST30"
+        assert paid_info["launch_bonus"] == 30
 
         credits_after_paid, _, _ = bot.get_user(user_id)
-        assert credits_after_paid == initial_credits + 650
+        assert credits_after_paid == initial_credits + 680
 
         processed, desc, _paid_info = bot.process_payos_paid_order("123456789", 50000)
         assert processed is False
         assert desc == "already_paid"
         credits_after_replay, _, _ = bot.get_user(user_id)
         assert credits_after_replay == credits_after_paid
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_launch_bonus_once_per_user_package(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    try:
+        bot.init_db()
+        user_id = "launch-user"
+        initial_credits, _, _ = bot.get_user(user_id)
+
+        bot.create_order("500001", user_id, 50000, 500)
+        processed, desc, paid_info = bot.process_payos_paid_order("500001", 50000)
+        assert processed is True
+        assert desc == "success"
+        assert paid_info["launch_bonus"] == 30
+        credits_after_first, _, _ = bot.get_user(user_id)
+        assert credits_after_first == initial_credits + 530
+
+        bot.create_order("500002", user_id, 50000, 500)
+        processed, desc, paid_info = bot.process_payos_paid_order("500002", 50000)
+        assert processed is True
+        assert desc == "success"
+        assert paid_info["launch_bonus"] == 0
+        credits_after_second, _, _ = bot.get_user(user_id)
+        assert credits_after_second == credits_after_first + 500
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_gift_code_redeems_direct_xu_once(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    try:
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            ok, status = bot.create_gift_code_record(conn, "BETA100", 100, usage_limit=10, per_user_limit=1, note="test gift")
+            assert ok is True
+            assert status == "created"
+            conn.commit()
+        finally:
+            conn.close()
+
+        user_id = "gift-user"
+        initial_credits, _, _ = bot.get_user(user_id)
+        ok, status, info = bot.redeem_gift_code(user_id, "BETA100")
+        assert ok is True
+        assert status == "redeemed"
+        assert info["xu"] == 100
+        credits_after, _, _ = bot.get_user(user_id)
+        assert credits_after == initial_credits + 100
+
+        ok, status, _info = bot.redeem_gift_code(user_id, "BETA100")
+        assert ok is False
+        assert status == "already_applied"
+        credits_replay, _, _ = bot.get_user(user_id)
+        assert credits_replay == credits_after
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)

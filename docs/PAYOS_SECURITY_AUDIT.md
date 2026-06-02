@@ -5,9 +5,11 @@
 - `10k`: 10.000đ -> 100 Xu
 - `20k`: 20.000đ -> 200 Xu
 - `50k`: 50.000đ -> 500 Xu
-- `100k`: 100.000đ -> 1.050 Xu
-- `200k`: 200.000đ -> 2.150 Xu
-- `500k`: 500.000đ -> 5.500 Xu
+- `100k`: 100.000đ -> 1.000 Xu
+- `200k`: 200.000đ -> 2.000 Xu
+- `500k`: 500.000đ -> 5.000 Xu
+
+Launch Bonus is credited separately after PayOS success for the first purchase of eligible packages: 50k +30 Xu, 100k +50 Xu, 200k +150 Xu, 500k +500 Xu.
 
 ## Checkout creation
 

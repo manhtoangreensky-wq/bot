@@ -3,7 +3,7 @@
 ## Compile
 
 - `py_compile`: PASS using Codex bundled Python on 2026-06-02.
-- `pytest -q`: PASS, 13 tests, 1 Starlette/httpx deprecation warning.
+- `pytest -q`: PASS, 18 tests, 1 Starlette/httpx deprecation warning.
 - Import test: PASS, `cmd_help` and `help_text_for_user` exist.
 - Step 7 import test: PASS, `cmd_growth_ai`, `cmd_campaign_report`, and report CSV helper exist.
 - Step 8 compile: PASS after provider status and sales readiness commands.
@@ -48,6 +48,9 @@
 - `/khuyenmai`, `/uudai`, `/promos`: user-facing promo guide and recommended use order.
 - Public codes: `FIRST30`, `SECOND15`, `MONTHLY20`, `WEEKLY10`, `DAILY5`.
 - `BETA50`: beta/internal limited, not broad public offer.
+- Launch Bonus: 50k +30 Xu, 100k +50 Xu, 200k +150 Xu, 500k +500 Xu, once per user/package after PayOS success.
+- Gift codes: `/gift`, `/nhanqua`, and gift-type `/promo` credit Xu immediately when valid.
+- Admin gift commands: `/gift_create`, `/gift_seed_beta`, `/gift_list`, `/gift_disable`.
 - Promo bonus is applied inside `process_payos_paid_order()` transaction after PayOS success.
 - Duplicate paid order replay does not apply base Xu or promo Xu twice.
 - One order uses one promo only; new pending code replaces the previous pending code.
@@ -57,6 +60,7 @@
 
 - trial: `TRIAL_CREDITS = 200`.
 - has_deposited: stored on users and used for first-deposit/referral logic.
+- package base Xu: `PAYMENT_PACKAGES` stores base Xu; Launch Bonus and promo bonus are separate credit events.
 - deduct: fixed and dynamic credit helpers exist.
 - add: `add_credit()` and admin/manual deposit paths exist.
 - refund: `refund_charged_credit()` exists; per-flow coverage still needs audit.

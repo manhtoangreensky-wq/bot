@@ -2,7 +2,7 @@
 
 Date: 2026-06-02
 Source: `bot.py` local audit after Step 11
-Registered Telegram commands: 216
+Registered Telegram commands: 222
 Registered callback groups: 9
 
 ## User Commands
@@ -25,6 +25,8 @@ Registered callback groups: 9
 | `/goi_beta` | `cmd_beta_offer` | YES | Vietnamese alias for `/beta_offer`. |
 | `/promo` | `cmd_promo` | YES | Saves one promo code for the next PayOS order; no stacking and no pre-payment credit. |
 | `/magiamgia` | `cmd_promo` | YES | Vietnamese alias for `/promo`. |
+| `/gift` | `cmd_gift` | YES | Redeems gift/reward Xu codes immediately when valid. |
+| `/nhanqua` | `cmd_gift` | YES | Vietnamese alias for `/gift`. |
 | `/khuyenmai` | `cmd_promo_guide` | YES | Shows Promotion Policy V2.1 and recommended code order. |
 | `/uudai` | `cmd_promo_guide` | YES | Alias for `/khuyenmai`. |
 | `/promos` | `cmd_promo_guide` | YES | Alias for `/khuyenmai`. |
@@ -89,6 +91,10 @@ Registered callback groups: 9
 | `/promo_list` | `cmd_promo_list` | YES | YES | Lists recent promo codes and usage. |
 | `/promo_create` | `cmd_promo_create` | YES | YES | Creates a new promo code without overwriting existing codes. |
 | `/promo_disable` | `cmd_promo_disable` | YES | YES | Disables a promo code without deleting data. |
+| `/gift_create` | `cmd_gift_create` | YES | YES | Creates an immediate Xu gift/reward code. |
+| `/gift_seed_beta` | `cmd_gift_seed_beta` | YES | YES | Seeds default beta gift codes BETA5 through BETA1000. |
+| `/gift_list` | `cmd_gift_list` | YES | YES | Lists gift/reward codes and usage. |
+| `/gift_disable` | `cmd_gift_disable` | YES | YES | Disables a gift/reward code without deleting data. |
 | `/mark_payos_test` | `cmd_mark_payos_test` | YES | YES | Admin records PayOS real test PASS/FAIL/NOT_TESTED; does not alter payments. |
 | `/pricing_admin` | `cmd_pricing_admin` | YES | YES | Admin-only formula/constants for Pricing Engine V2. |
 | `/runtime` | `cmd_runtime` | YES | System menu | Runtime/webhook diagnostics. |

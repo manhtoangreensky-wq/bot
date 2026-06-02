@@ -13,6 +13,8 @@ TOAN AAS keeps base top-up packages stable. Promotions are expressed as extra Xu
 - Duplicate webhook or `/checkpayos` replay must not add promo bonus twice.
 - Public promotion codes start from 50.000đ top-up.
 - 10k and 20k packages are trial/test packages and do not receive public promo bonus.
+- Launch Bonus is separate from promo codes and can coexist with one eligible promo.
+- Gift codes use `gift_xu` and credit Xu immediately after valid redemption.
 
 ## Rule: Minimum top-up for promo
 
@@ -41,6 +43,29 @@ Reason:
 |---|---:|---:|---|
 | BETA50 | +50% Xu | 50k | Beta/internal limited only, not broad public campaign |
 
+## Launch Bonus
+
+| Package | Launch Bonus | Rule |
+|---|---:|---|
+| 50k | +30 Xu | Once per user/package |
+| 100k | +50 Xu | Once per user/package |
+| 200k | +150 Xu | Once per user/package |
+| 500k | +500 Xu | Once per user/package |
+
+Launch Bonus is not a promo code. It is credited only after PayOS success.
+
+## Gift Codes
+
+Gift codes are direct Xu rewards, not deposit promos.
+
+Examples: `BETA100`, `SORRY100`, `VIP500`.
+
+Users redeem with:
+
+- `/gift <code>`
+- `/nhanqua <code>`
+- `/promo <code>` if the code has `promo_type='gift_xu'`
+
 ## Recommended Use Order
 
 1. FIRST30
@@ -62,6 +87,8 @@ User:
 - `/promos`
 - `/promo <code>`
 - `/magiamgia <code>`
+- `/gift <code>`
+- `/nhanqua <code>`
 
 Admin:
 
@@ -70,3 +97,7 @@ Admin:
 - `/promo_list`
 - `/promo_create`
 - `/promo_disable`
+- `/gift_create`
+- `/gift_seed_beta`
+- `/gift_list`
+- `/gift_disable`

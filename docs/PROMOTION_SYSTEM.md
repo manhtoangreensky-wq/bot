@@ -15,11 +15,14 @@ Keep base pricing clear and stable. Promotions do not change PayOS amount; they 
 
 Promo starts at 50k. The 10k/20k packages are trial/test packages and do not receive public promo bonus.
 
+Launch Bonus is separate from promo code and is credited once per user per eligible package after PayOS success.
+
 ## Promo Types
 
 - `percent_bonus`
 - `fixed_bonus_xu`
 - `service_discount_future`
+- `gift_xu`
 
 ## Commands
 
@@ -30,6 +33,8 @@ User:
 - `/khuyenmai`
 - `/uudai`
 - `/promos`
+- `/gift <code>`
+- `/nhanqua <code>`
 
 Admin:
 
@@ -38,6 +43,10 @@ Admin:
 - `/promo_create`
 - `/promo_list`
 - `/promo_disable`
+- `/gift_create`
+- `/gift_seed_beta`
+- `/gift_list`
+- `/gift_disable`
 
 ## Example
 
@@ -45,7 +54,9 @@ Admin:
 
 FIRST30 = +30%.
 
-User receives 650 Xu total after PayOS success: 500 base Xu + 150 bonus Xu.
+If the user has not bought the 50k package before, Launch Bonus adds +30 Xu.
+
+User receives 680 Xu total after PayOS success: 500 base Xu + 30 Launch Bonus + 150 promo bonus.
 
 ## Safety
 

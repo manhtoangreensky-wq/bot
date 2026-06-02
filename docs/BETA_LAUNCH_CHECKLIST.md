@@ -17,7 +17,7 @@ Date: 2026-06-02
 
 - [ ] Test user activates `/promo FIRST30`.
 - [ ] Test user pays 50k or higher PayOS QR.
-- [ ] Test user receives base Xu plus exactly one +30% bonus.
+- [ ] Test user receives base Xu plus Launch Bonus if eligible plus exactly one +30% promo bonus.
 - [ ] Duplicate/replay does not add more Xu.
 - [ ] Admin runs `/mark_payos_test pass order=<order_code> note="Test FIRST30 OK"`.
 - [ ] `/sales_ready` now shows `SALES READY`.
@@ -30,6 +30,7 @@ Date: 2026-06-02
 - [ ] Let new users test one `/film` Basic with 200 trial Xu.
 - [ ] Offer topup 10k/20k as trial packages, and 50k/100k when they want promo.
 - [ ] Ask users to check `/khuyenmai`; public first top-up offer is `FIRST30`.
+- [ ] If sending a free Xu reward, use `/gift <code>` instead of deposit promo codes.
 - [ ] Ask user to post manually, then record result with `/publish_done`.
 - [ ] Ask user to add metrics with `/performance_add`.
 - [ ] Ask user to run `/growth_ai` after enough data.
