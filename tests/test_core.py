@@ -429,3 +429,46 @@ def test_boss_video_launch_parser_clamps_and_keeps_manual_gate():
     assert plan["autorun"] is True
     assert plan["autorun_max_tasks"] == 40
     assert "không tự đăng" in bot.boss_video_usage_text().lower()
+
+
+def test_video_order_api_returns_machine_readable_handoff(monkeypatch):
+    monkeypatch.setattr(bot, "OPERATOR_API_TOKEN", "operator-test-token")
+
+    async def fake_launch(owner_id, topic, **kwargs):
+        return True, "ok", {
+            "target_platforms": [kwargs.get("platform")],
+            "created_platforms": [kwargs.get("platform")],
+            "created_jobs": [{"job_id": 101, "platform": kwargs.get("platform"), "title": topic, "score": 88}],
+            "built_jobs": [{"job_id": 101}],
+            "video_work_orders": {"orders": [{"job_id": 101, "telegram": {"video_brief": "/video_brief job=101"}}]},
+            "automation_next": {"worker_autorun": "/worker_autorun jobs=101 execute=1"},
+            "launch_next": {
+                "first_job_id": 101,
+                "telegram": {
+                    "review": "/review_video job=101 send=1",
+                    "approve": "/approve_publish job=101 queue=1 mode=manual",
+                    "post_publish": "/post_publish job=101",
+                },
+                "api": {"review_video": "/api/operator/jobs/101/review-video"},
+            },
+            "affiliate": {"id": 7, "product": "Test affiliate"},
+            "campaign": {"id": 3, "name": "Test campaign"},
+        }
+
+    monkeypatch.setattr(bot, "operator_launch_pipeline", fake_launch)
+    client = TestClient(bot.fastapi_app)
+    res = client.post(
+        "/api/operator/video-order",
+        headers={"Authorization": "Bearer operator-test-token"},
+        json={"topic": "AI affiliate", "platform": "onlyfans", "limit": 1, "notify_admin": False},
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    order = payload["video_order"]
+    assert order["first_job_id"] == 101
+    assert order["gate"]["auto_publish"] is False
+    assert order["gate"]["onlyfans_manual"] is True
+    assert order["telegram"]["worker"] == "/worker_autorun jobs=101 execute=1"
+    assert order["telegram"]["review"] == "/review_video job=101 send=1"
+    assert order["telegram"]["approve"] == "/approve_publish job=101 queue=1 mode=manual"
+    assert order["api"]["review_video"] == "/api/operator/jobs/101/review-video"

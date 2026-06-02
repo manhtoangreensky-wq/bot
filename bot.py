@@ -19744,6 +19744,10 @@ class OperatorLaunchRequest(BaseModel):
     autorun_max_tasks: int = Field(default=24, ge=1, le=40)
     notify_admin: bool = True
 
+class OperatorVideoOrderRequest(OperatorLaunchRequest):
+    source: str = Field(default="api_video_order", max_length=120)
+    note: str = Field(default="", max_length=1200)
+
 class OperatorFilmSeriesRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=500)
     platform: str = Field(default="tiktok", max_length=40)
@@ -27715,6 +27719,100 @@ def boss_video_usage_text() -> str:
         "Nền tảng: <code>tiktok</code>, <code>facebook</code>, <code>youtube</code>, <code>instagram</code>, <code>threads</code>, <code>onlyfans</code>, hoặc <code>all</code>.\n"
         "Rule: lệnh này chỉ tạo job/task/brief và dừng ở review/publish gate; không tự đăng nếu chưa approve."
     )
+
+def build_video_order_contract(topic: str, platform: str, channel: str, result: dict, source="telegram") -> dict:
+    result = result or {}
+    created_jobs = result.get("created_jobs") or []
+    built_jobs = result.get("built_jobs") or []
+    target_platforms = result.get("target_platforms") or ([platform] if platform else [])
+    created_platforms = result.get("created_platforms") or []
+    launch_next = result.get("launch_next") or {}
+    telegram_next = launch_next.get("telegram") or {}
+    api_next = launch_next.get("api") or {}
+    automation_next = result.get("automation_next") or {}
+    video_orders = (result.get("video_work_orders") or {}).get("orders") or []
+    first_job_id = launch_next.get("first_job_id") or (created_jobs[0].get("job_id") if created_jobs else 0)
+    first_order = video_orders[0] if video_orders else {}
+    first_order_tg = first_order.get("telegram") or {}
+    first_order_job_id = first_order.get("job_id") or first_job_id
+
+    worker_cmd = automation_next.get("worker_autorun") or (
+        f"/worker_intake claim=1 include_prompt=1 job={first_job_id}" if first_job_id else "/worker_intake claim=1 include_prompt=1"
+    )
+    video_brief_cmd = first_order_tg.get("video_brief") or telegram_next.get("video_brief") or (
+        f"/video_brief job={first_order_job_id}" if first_order_job_id else "/video_brief job=<JOB_ID>"
+    )
+    worker_pack_cmd = f"/worker_pack job={first_order_job_id}" if first_order_job_id else "/worker_pack job=<JOB_ID>"
+    review_cmd = telegram_next.get("review") or (f"/review_video job={first_job_id} send=1" if first_job_id else "/review_video job=<JOB_ID> send=1")
+    approve_cmd = telegram_next.get("approve") or (
+        f"/approve_publish job={first_job_id} queue=1 mode=manual" if first_job_id else "/approve_publish job=<JOB_ID> queue=1 mode=manual"
+    )
+    post_publish_cmd = telegram_next.get("post_publish") or (f"/post_publish job={first_job_id}" if first_job_id else "/post_publish job=<JOB_ID>")
+    platform_text = ",".join(str(item).lower() for item in target_platforms) or str(platform or "").lower()
+    onlyfans_manual = "onlyfans" in platform_text
+    return {
+        "ok": True,
+        "source": source,
+        "topic": topic,
+        "platform": platform,
+        "channel": channel,
+        "target_platforms": target_platforms,
+        "created_platforms": created_platforms,
+        "counts": {
+            "created_jobs": len(created_jobs),
+            "built_jobs": len(built_jobs),
+            "video_orders": len(video_orders),
+        },
+        "first_job_id": first_job_id,
+        "jobs": [
+            {
+                "job_id": item.get("job_id"),
+                "platform": item.get("platform"),
+                "title": item.get("title") or item.get("topic"),
+                "score": item.get("score"),
+            }
+            for item in created_jobs[:8]
+        ],
+        "affiliate": result.get("affiliate") or {},
+        "campaign": result.get("campaign") or {},
+        "telegram": {
+            "worker": worker_cmd,
+            "video_brief": video_brief_cmd,
+            "worker_pack": worker_pack_cmd,
+            "review": review_cmd,
+            "approve": approve_cmd,
+            "publish_handoff": "/publisher_handoff queue=<QUEUE_ID>",
+            "post_publish": post_publish_cmd,
+            "track": "/performance_add job=<JOB_ID> type=click value=<N> source=<caption|comment|bio>",
+            "scale": "/affiliate_decisions days=30",
+        },
+        "api": {
+            "worker_intake": "/api/operator/worker-intake",
+            "video_brief": api_next.get("video_brief") or (f"/api/operator/jobs/{first_job_id}/video-brief" if first_job_id else "/api/operator/jobs/<JOB_ID>/video-brief"),
+            "worker_pack": f"/api/operator/jobs/{first_job_id}/worker-pack" if first_job_id else "/api/operator/jobs/<JOB_ID>/worker-pack",
+            "review_video": api_next.get("review_video") or (f"/api/operator/jobs/{first_job_id}/review-video" if first_job_id else "/api/operator/jobs/<JOB_ID>/review-video"),
+            "approve": api_next.get("approve") or (f"/api/operator/jobs/{first_job_id}/approve" if first_job_id else "/api/operator/jobs/<JOB_ID>/approve"),
+            "publish_next": "/api/operator/publish/next",
+            "publish_complete": "/api/operator/publish/<QUEUE_ID>/complete",
+            "performance": "/api/operator/performance",
+            "affiliate_decisions": "/api/operator/affiliate-decisions",
+        },
+        "gate": {
+            "auto_publish": False,
+            "publish_mode": "manual_required" if onlyfans_manual else "review_approval_required",
+            "must_have_output": True,
+            "must_review": True,
+            "must_approve": True,
+            "onlyfans_manual": onlyfans_manual,
+        },
+        "guardrails": [
+            "Do not publish before real worker output exists.",
+            "Do not publish before review and admin approval.",
+            "Use official API only when adapter is api_ready; otherwise use manual handoff.",
+            "OnlyFans is manual-only unless a compliant official adapter is explicitly approved.",
+            "Always keep affiliate disclosure and source tracking.",
+        ],
+    }
 
 async def cmd_tao_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -37088,6 +37186,62 @@ async def api_operator_launch(payload: OperatorLaunchRequest, request: Request):
         "ok": True,
         **result,
         "rule": "Launch có thể bootstrap setup còn thiếu rồi tạo pipeline; vẫn cần worker output, review gate và approve trước publish.",
+    }
+
+@fastapi_app.post("/api/operator/video-order")
+async def api_operator_video_order(payload: OperatorVideoOrderRequest, request: Request):
+    verify_operator_api_token(request)
+    ok, reason, result = await operator_launch_pipeline(
+        ADMIN_ID,
+        payload.topic,
+        platform=payload.platform,
+        channel=payload.channel,
+        affiliate_id=payload.affiliate_id,
+        campaign_id=payload.campaign_id,
+        limit=payload.limit,
+        build=payload.build,
+        duration=payload.duration,
+        variants=payload.variants,
+        autorun=payload.autorun,
+        autorun_max_tasks=payload.autorun_max_tasks,
+        bootstrap=payload.bootstrap,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail={"reason": reason, **(result or {})})
+    contract = build_video_order_contract(
+        payload.topic,
+        payload.platform,
+        payload.channel,
+        result,
+        source=payload.source or "api_video_order",
+    )
+    if payload.notify_admin and tg_app and ADMIN_ID:
+        try:
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "🧠 <b>HEAD BRAIN VIDEO ORDER API</b>\n\n"
+                    f"• Topic: <b>{html.escape(payload.topic)}</b>\n"
+                    f"• Platform: <code>{html.escape(payload.platform)}</code>\n"
+                    f"• Jobs: <b>{contract['counts']['created_jobs']}</b> | Built: <b>{contract['counts']['built_jobs']}</b>\n"
+                    f"• First job: <code>#{contract.get('first_job_id') or '-'}</code>\n"
+                    f"• Worker: <code>{html.escape((contract.get('telegram') or {}).get('worker') or '-')}</code>\n"
+                    f"• Review: <code>{html.escape((contract.get('telegram') or {}).get('review') or '-')}</code>\n"
+                    "• Gate: output thật → review → approve → handoff/API chính thức."
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Operator video order notify error: {e}")
+    return {
+        "ok": True,
+        "video_order": contract,
+        "launch_summary": {
+            "target_platforms": result.get("target_platforms") or [],
+            "created_platforms": result.get("created_platforms") or [],
+            "failed_builds": result.get("failed_builds") or [],
+        },
+        "rule": "Machine-readable video order for Claude/n8n. It creates gated jobs/tasks only; publishing still requires review and approval.",
     }
 
 @fastapi_app.post("/api/operator/film-series")

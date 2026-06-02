@@ -38,6 +38,7 @@ All operator APIs require `OPERATOR_API_TOKEN`.
 
 - `GET /api/operator/head-brain`
 - `POST /api/operator/head-run`
+- `POST /api/operator/video-order`
 - `GET /api/operator/control-contract`
 - `GET /api/operator/goal-audit`
 - `POST /api/operator/launch`
@@ -54,17 +55,47 @@ All operator APIs require `OPERATOR_API_TOKEN`.
 ## Standard Loop
 
 1. Admin sends a topic or money objective in Telegram.
-2. Fast path: admin uses `/tao_video topic="..." platform=tiktok limit=3 build=1`.
-3. AI commander reads `/head_brain` or `GET /api/operator/head-brain`.
-4. If setup is missing, run bootstrap or ask admin for missing ENV/channel/link.
-5. Create job batch with `/operator_launch` or `/make_video`.
-6. Worker claims tasks with `/worker_intake` or task API.
-7. Worker returns real outputs by task complete/upload.
-8. Admin/AI runs `/review_video`.
-9. Admin approves with `/approve_publish`.
-10. Publisher posts manually or through an official `api_ready` adapter.
-11. Result URL and performance are recorded.
-12. AI reads affiliate decisions and creates the next scale/fix batch.
+2. Fast path in Telegram: admin uses `/tao_video topic="..." platform=tiktok limit=3 build=1`.
+3. Fast path for Claude/n8n: call `POST /api/operator/video-order`.
+4. AI commander reads `/head_brain` or `GET /api/operator/head-brain`.
+5. If setup is missing, run bootstrap or ask admin for missing ENV/channel/link.
+6. Create job batch with `/operator_launch` or `/make_video`.
+7. Worker claims tasks with `/worker_intake` or task API.
+8. Worker returns real outputs by task complete/upload.
+9. Admin/AI runs `/review_video`.
+10. Admin approves with `/approve_publish`.
+11. Publisher posts manually or through an official `api_ready` adapter.
+12. Result URL and performance are recorded.
+13. AI reads affiliate decisions and creates the next scale/fix batch.
+
+## Video Order API
+
+`POST /api/operator/video-order` accepts the same core fields as `/operator_launch`:
+
+```json
+{
+  "topic": "công nghệ AI kiếm tiền",
+  "platform": "tiktok",
+  "channel": "all",
+  "limit": 3,
+  "build": true,
+  "bootstrap": true,
+  "autorun": false,
+  "notify_admin": true
+}
+```
+
+It returns a machine-readable `video_order` with:
+
+- created job IDs
+- affiliate/campaign match
+- worker command
+- video brief command/API
+- review command/API
+- approve command/API
+- publish handoff
+- post-publish tracking command
+- explicit gate: no auto publish before real output, review and approval
 
 ## Platform Rules
 
@@ -109,7 +140,8 @@ OnlyFans and adult-oriented workflows require:
 
 1. Live Telegram test: `/head_brain`, `/operator_launch`, `/worker_intake`, `/review_video`.
 2. Live Telegram test: `/tao_video topic="công nghệ AI kiếm tiền" platform=tiktok limit=1 build=1`.
-3. Add or connect one real video generation worker.
-4. Add one official publishing adapter at a time, starting with the safest platform/account.
-5. Keep OnlyFans manual until a compliant official workflow is confirmed.
-6. Use performance tracking before scaling spend or output volume.
+3. API smoke with `POST /api/operator/video-order`.
+4. Add or connect one real video generation worker.
+5. Add one official publishing adapter at a time, starting with the safest platform/account.
+6. Keep OnlyFans manual until a compliant official workflow is confirmed.
+7. Use performance tracking before scaling spend or output volume.

@@ -65,6 +65,7 @@ Expected for 50k + FIRST30:
 
 - Run `/head_brain platform=tiktok days=30 limit=8`.
 - Run `/tao_video topic="công nghệ AI kiếm tiền" platform=tiktok limit=1 build=1`.
+- API smoke: `POST /api/operator/video-order` with the same topic and `notify_admin=false`.
 - Run `/operator_launch topic="công nghệ AI kiếm tiền" platform=tiktok limit=1 build=1`.
 - Run `/worker_intake claim=1 include_prompt=1`.
 - Submit one real worker output or uploaded asset.
