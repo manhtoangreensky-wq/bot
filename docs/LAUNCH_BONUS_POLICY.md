@@ -34,8 +34,24 @@ One order can have:
 
 - Base Xu: 5,000
 - Launch Bonus: +500
-- FIRST30: +30% Xu, capped internally by policy
+- FIRST30 bonus: internal capped calculation
 - Final customer-facing total under current policy: 7,000 Xu
+
+## Storage
+
+`launch_bonus_redemptions` stores one row per user/package:
+
+- `user_id`
+- `package_amount_vnd`
+- `base_xu`
+- `launch_bonus_xu` / `bonus_xu`
+- `order_code`
+- `status`
+- `note`
+
+The unique protection is `user_id + package_amount_vnd`, exposed through `idx_launch_bonus_user_package`.
+
+`payos_orders` also stores the order-time preview fields `package_amount_vnd`, `base_xu`, `launch_bonus_xu` and `xu` total. Actual crediting still happens only after PayOS success.
 
 ## Safety
 

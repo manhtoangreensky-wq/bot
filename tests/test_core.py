@@ -65,6 +65,44 @@ def test_topup_keyboard_preserves_package_callbacks():
     assert "menu|billing" in callbacks
 
 
+def test_launch_bonus_once_per_user_package(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(launch_bonus_redemptions)").fetchall()}
+            assert {"base_xu", "bonus_xu", "launch_bonus_xu", "note"}.issubset(columns)
+            payos_columns = {row[1] for row in conn.execute("PRAGMA table_info(payos_orders)").fetchall()}
+            assert {"package_amount_vnd", "base_xu", "launch_bonus_xu"}.issubset(payos_columns)
+
+            first = bot.calculate_package_credit_for_user("u1", 50000, conn=conn)
+            assert first["base_xu"] == 500
+            assert first["launch_bonus_xu"] == 30
+            assert first["launch_bonus_eligible"] is True
+            assert first["launch_bonus_available"] == 30
+            bot.create_order("order-preview", "u1", 50000, first["total_xu"], base_xu=first["base_xu"], launch_bonus_xu=first["launch_bonus_xu"], package_amount_vnd=50000)
+            row = conn.execute("SELECT xu, package_amount_vnd, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code='order-preview'").fetchone()
+            assert row == (530, 50000, 500, 30)
+
+            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-1", 50000) == 30
+            conn.commit()
+            repeat = bot.calculate_package_credit_for_user("u1", 50000, conn=conn)
+            assert repeat["launch_bonus_xu"] == 0
+            assert repeat["launch_bonus_eligible"] is False
+            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-dup", 50000) == 0
+
+            other_package = bot.calculate_package_credit_for_user("u1", 100000, conn=conn)
+            assert other_package["launch_bonus_xu"] == 50
+        finally:
+            conn.close()
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_lifespan_keeps_api_alive_without_telegram_token(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)

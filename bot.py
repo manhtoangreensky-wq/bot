@@ -549,6 +549,9 @@ def init_db():
         user_id TEXT,
         amount INTEGER,
         xu INTEGER,
+        package_amount_vnd INTEGER DEFAULT 0,
+        base_xu INTEGER DEFAULT 0,
+        launch_bonus_xu INTEGER DEFAULT 0,
         status TEXT DEFAULT 'PENDING',
         created_at DATETIME,
         expires_at DATETIME,
@@ -560,10 +563,13 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
         package_amount_vnd INTEGER,
+        base_xu INTEGER DEFAULT 0,
         order_code TEXT,
         bonus_xu INTEGER DEFAULT 0,
+        launch_bonus_xu INTEGER DEFAULT 0,
         status TEXT DEFAULT 'redeemed',
         created_at TEXT,
+        note TEXT,
         UNIQUE(user_id, package_amount_vnd)
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS credit_events (
@@ -987,6 +993,7 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_promo_state_user ON user_promo_state(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_launch_bonus_user ON launch_bonus_redemptions(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_launch_bonus_order ON launch_bonus_redemptions(order_code)")
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_launch_bonus_user_package ON launch_bonus_redemptions(user_id, package_amount_vnd)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_redemptions_code ON gift_redemptions(code)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_redemptions_user ON gift_redemptions(user_id)")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
@@ -1000,9 +1007,21 @@ def init_db():
         ("paid_at", "DATETIME"),
         ("checkout_url", "TEXT"),
         ("payment_link_id", "TEXT"),
+        ("package_amount_vnd", "INTEGER DEFAULT 0"),
+        ("base_xu", "INTEGER DEFAULT 0"),
+        ("launch_bonus_xu", "INTEGER DEFAULT 0"),
     ]:
         try:
             c.execute(f"ALTER TABLE payos_orders ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    for col, col_type in [
+        ("base_xu", "INTEGER DEFAULT 0"),
+        ("launch_bonus_xu", "INTEGER DEFAULT 0"),
+        ("note", "TEXT"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE launch_bonus_redemptions ADD COLUMN {col} {col_type}")
         except Exception:
             pass
     for col, col_type in [
@@ -1411,14 +1430,16 @@ def mark_payos_order_processed(order_code: str):
     conn.commit()
     conn.close()
 
-def create_order(order_code, user_id, amount, xu):
+def create_order(order_code, user_id, amount, xu, base_xu=0, launch_bonus_xu=0, package_amount_vnd=0):
     conn = db_connect()
     c = conn.cursor()
     created_at = datetime.now()
     expires_at = created_at + timedelta(minutes=ORDER_TTL_MINUTES)
     c.execute(
-        "INSERT INTO payos_orders (order_code, user_id, amount, xu, status, created_at, expires_at) VALUES (?,?,?,?,?,?,?)",
-        (str(order_code), str(user_id), amount, xu, PAYOS_STATUS_PENDING,
+        """INSERT INTO payos_orders
+        (order_code, user_id, amount, xu, package_amount_vnd, base_xu, launch_bonus_xu, status, created_at, expires_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (str(order_code), str(user_id), amount, xu, int(package_amount_vnd or amount or 0), int(base_xu or 0), int(launch_bonus_xu or 0), PAYOS_STATUS_PENDING,
          created_at.strftime("%Y-%m-%d %H:%M:%S"), expires_at.strftime("%Y-%m-%d %H:%M:%S"))
     )
     conn.commit()
@@ -1497,12 +1518,32 @@ def has_used_launch_bonus(user_id, amount_vnd: int, conn=None) -> bool:
 
 def calculate_package_credit_for_user(user_id, amount_vnd: int, conn=None) -> dict:
     base_xu = package_base_xu(amount_vnd)
-    launch_bonus = 0 if has_used_launch_bonus(user_id, amount_vnd, conn=conn) else package_launch_bonus_xu(amount_vnd)
+    launch_bonus_available = package_launch_bonus_xu(amount_vnd)
+    launch_bonus_eligible = launch_bonus_available > 0 and not has_used_launch_bonus(user_id, amount_vnd, conn=conn)
+    launch_bonus = launch_bonus_available if launch_bonus_eligible else 0
     return {
         "base_xu": base_xu,
         "launch_bonus_xu": launch_bonus,
+        "launch_bonus_eligible": launch_bonus_eligible,
+        "launch_bonus_available": launch_bonus_available,
         "total_xu": base_xu + launch_bonus,
     }
+
+def record_launch_bonus_redemption(conn, user_id, amount_vnd: int, base_xu: int, launch_bonus_xu: int, order_code: str) -> int:
+    bonus = int(launch_bonus_xu or 0)
+    if bonus <= 0:
+        return 0
+    note = f"Launch Bonus lan dau mua goi {int(amount_vnd or 0)} VND"
+    try:
+        conn.execute(
+            """INSERT INTO launch_bonus_redemptions
+            (user_id, package_amount_vnd, base_xu, order_code, bonus_xu, launch_bonus_xu, status, created_at, note)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (str(user_id), int(amount_vnd or 0), int(base_xu or 0), str(order_code), int(bonus), int(bonus), "redeemed", now_text(), note),
+        )
+        return int(bonus)
+    except sqlite3.IntegrityError:
+        return 0
 
 def redeem_launch_bonus_for_order(conn, user_id, order_code: str, amount_vnd: int) -> int:
     bonus = package_launch_bonus_xu(amount_vnd)
@@ -1510,16 +1551,14 @@ def redeem_launch_bonus_for_order(conn, user_id, order_code: str, amount_vnd: in
         return 0
     if has_used_launch_bonus(user_id, amount_vnd, conn=conn):
         return 0
-    try:
-        conn.execute(
-            """INSERT INTO launch_bonus_redemptions
-            (user_id, package_amount_vnd, order_code, bonus_xu, status, created_at)
-            VALUES (?,?,?,?,?,?)""",
-            (str(user_id), int(amount_vnd or 0), str(order_code), int(bonus), "redeemed", now_text()),
-        )
-        return int(bonus)
-    except sqlite3.IntegrityError:
-        return 0
+    return record_launch_bonus_redemption(
+        conn,
+        user_id,
+        amount_vnd,
+        package_base_xu(amount_vnd),
+        bonus,
+        order_code,
+    )
 
 def generate_order_code() -> int:
     # payOS hoạt động ổn định hơn với orderCode trong phạm vi số nguyên 32-bit.
@@ -20729,12 +20768,21 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
     pkg = PAYMENT_PACKAGES[pkg_key]
     amount = pkg["amount"]
-    xu = pkg["xu"]
     get_user(uid, query.from_user.first_name or "PayOS user")
     package_credit = calculate_package_credit_for_user(uid, amount)
+    base_xu = int(package_credit.get("base_xu") or pkg["xu"])
     launch_preview = int(package_credit.get("launch_bonus_xu") or 0)
+    xu = int(package_credit.get("total_xu") or base_xu)
     order_code = generate_order_code()
-    create_order(order_code, uid, amount, xu)
+    create_order(
+        order_code,
+        uid,
+        amount,
+        xu,
+        base_xu=base_xu,
+        launch_bonus_xu=launch_preview,
+        package_amount_vnd=amount,
+    )
     USER_BILL_STATE[uid] = {
         "order_code": order_code,
         "amount": amount,
@@ -20789,9 +20837,13 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             checkout_data = res_data["data"]
             checkout_url = checkout_data["checkoutUrl"]
             update_order_checkout_info(order_code, checkout_url, checkout_data.get("paymentLinkId", ""))
-            promo_attach = attach_pending_promo_to_order(uid, order_code, amount, xu)
+            promo_attach = attach_pending_promo_to_order(uid, order_code, amount, base_xu)
             launch_preview_line = (
                 f"🎁 Launch Bonus dự kiến: <b>+{launch_preview} Xu</b> nếu còn lần đầu mua gói này.\n"
+                if launch_preview else ""
+            )
+            total_preview_line = (
+                f"🧾 Tổng Xu gói này sau PayOS success: <b>+{xu} Xu</b>\n"
                 if launch_preview else ""
             )
             promo_line = ""
@@ -20811,8 +20863,9 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
                 f"📋 Gói lựa chọn: <b>{pkg['text']}</b>\n"
                 f"💰 Số tiền cần chuyển: <b>{amount:,}đ</b>\n"
-                f"🪙 Xu gốc: <b>+{xu} Xu</b>\n"
+                f"🪙 Xu gốc: <b>+{base_xu} Xu</b>\n"
                 f"{launch_preview_line}"
+                f"{total_preview_line}"
                 f"{promo_line}"
                 f"🆔 Mã đơn định danh: <code>{order_code}</code>\n\n"
                 f"⏳ Hóa đơn hết hạn sau <b>{ORDER_TTL_MINUTES} phút</b>.\n\n"
