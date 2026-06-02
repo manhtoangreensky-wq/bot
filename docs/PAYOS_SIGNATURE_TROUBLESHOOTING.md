@@ -9,7 +9,7 @@ amount=<amount>&cancelUrl=<cancelUrl>&description=<description>&orderCode=<order
 Example:
 
 ```text
-amount=10000&cancelUrl=https://bot-production-2dd7.up.railway.app/landing&description=DAAS10K&orderCode=178039665&returnUrl=https://bot-production-2dd7.up.railway.app/landing
+amount=10000&cancelUrl=https://bot-production-2dd7.up.railway.app/landing&description=AAS10K&orderCode=178039665&returnUrl=https://bot-production-2dd7.up.railway.app/landing
 ```
 
 ## Common mistakes
@@ -31,3 +31,5 @@ amount=10000&cancelUrl=https://bot-production-2dd7.up.railway.app/landing&descri
 ## After fix
 
 Redeploy Railway and test `/naptien` again. If signature is still invalid, confirm `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, and `PAYOS_CHECKSUM_KEY` are from the same PayOS channel and have no leading/trailing spaces.
+
+Admin can run `/payos_debug_create` before a real payment test to see the HTTP status, PayOS code/desc/message, and exact signature data string without exposing secrets.

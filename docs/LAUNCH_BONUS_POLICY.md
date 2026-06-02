@@ -53,9 +53,14 @@ The unique protection is `user_id + package_amount_vnd`, exposed through `idx_la
 
 `payos_orders` also stores the order-time preview fields `package_amount_vnd`, `base_xu`, `launch_bonus_xu` and `xu` total. Actual crediting still happens only after PayOS success.
 
+Manual fallback uses the same order-time `xu` preview as the PayOS order. Example: a first 50k package order must show `530 Xu` in both PayOS QR flow and manual QR fallback.
+
+If admin approves a manual bill connected to an eligible order, `launch_bonus_redemptions` is recorded so the same user/package cannot receive Launch Bonus twice.
+
 ## Safety
 
 - Never credit Launch Bonus before PayOS success.
 - Do not credit Launch Bonus twice for same user/package.
 - Duplicate webhook must not duplicate base, launch, or promo bonus.
 - Old paid PayOS orders count as prior package purchases for launch eligibility.
+- Manual transfer content uses `AAS <user_id> <order_code>`.

@@ -1577,7 +1577,7 @@ def make_payos_return_url(context: ContextTypes.DEFAULT_TYPE) -> str:
 
 def make_payos_description(pkg_key: str) -> str:
     # payOS giới hạn 9 ký tự mô tả với một số kênh ngân hàng chưa liên kết.
-    return f"DAAS{pkg_key.upper()}"[:9]
+    return f"AAS{pkg_key.upper()}"[:9]
 
 PAYOS_CREATE_SIGNATURE_FIELDS = ("amount", "cancelUrl", "description", "orderCode", "returnUrl")
 
@@ -1593,6 +1593,77 @@ def sign_payos_payment_request(data: dict) -> tuple[str, str]:
     ).hexdigest()
     return signature, raw_str
 
+def parse_payos_response_safe(res) -> tuple[dict, str]:
+    try:
+        data = res.json()
+        if isinstance(data, dict):
+            return data, ""
+        return {}, str(data)[:500]
+    except Exception:
+        return {}, (getattr(res, "text", "") or "")[:500]
+
+def format_payos_create_debug(
+    http_status,
+    res_data: dict,
+    raw_preview: str,
+    order_code: int,
+    amount: int,
+    description: str,
+    cancel_url: str,
+    return_url: str,
+    signature_data: str,
+    signature_variant: str = "standard",
+    html_mode: bool = False,
+) -> str:
+    data = res_data if isinstance(res_data, dict) else {}
+    payos_code = data.get("code", "")
+    payos_desc = data.get("desc", "") or data.get("description", "")
+    payos_message = data.get("message", "")
+    if isinstance(data.get("data"), dict):
+        payos_message = payos_message or data["data"].get("message", "") or data["data"].get("desc", "")
+    if html_mode:
+        def val(value):
+            return f"<code>{html.escape(str(value))}</code>"
+        signature_line = f"<code>{html.escape(signature_data)}</code>"
+        raw_line = f"\nRaw: {val(raw_preview[:500])}" if raw_preview else ""
+    else:
+        def val(value):
+            return str(value)
+        signature_line = str(signature_data)
+        raw_line = f"\nRaw: {raw_preview[:500]}" if raw_preview else ""
+    return (
+        f"HTTP: {val(http_status or 'UNKNOWN')}\n"
+        f"Code: {val(payos_code or '')}\n"
+        f"Desc: {val(payos_desc or '')}\n"
+        f"Message: {val(payos_message or '')}\n"
+        f"Order: {val(order_code)}\n"
+        f"Amount: {val(amount)}\n"
+        f"Description: {val(description)}\n"
+        f"Cancel URL: {val(cancel_url)}\n"
+        f"Return URL: {val(return_url)}\n"
+        f"Signature variant: {val(signature_variant)}\n"
+        f"Signature data:\n{signature_line}"
+        f"{raw_line}"
+    )
+
+async def create_payos_payment_request(payos_body: dict) -> tuple[object, dict, str, str]:
+    signature, raw_str = sign_payos_payment_request(payos_body)
+    request_body = {**payos_body, "signature": signature}
+    headers = {
+        "x-client-id": PAYOS_CLIENT_ID,
+        "x-api-key": PAYOS_API_KEY,
+        "Content-Type": "application/json"
+    }
+    async with httpx.AsyncClient() as client:
+        res = await client.post(
+            "https://api-merchant.payos.vn/v2/payment-requests",
+            headers=headers,
+            json=request_body,
+            timeout=30.0
+        )
+    res_data, raw_preview = parse_payos_response_safe(res)
+    return res, res_data, raw_preview, raw_str
+
 def manual_payment_text(uid: int, amount: int, xu: int, order_code: int, reason: str = "") -> str:
     reason_line = f"⚠️ {reason}\n\n" if reason else ""
     return (
@@ -1606,14 +1677,14 @@ def manual_payment_text(uid: int, amount: int, xu: int, order_code: int, reason:
         f"• Số tài khoản: <code>{MANUAL_BANK_ACCOUNT}</code>\n"
         f"• Chủ tài khoản: <b>{MANUAL_BANK_OWNER}</b>\n"
         f"• Số tiền: <b>{amount:,}đ</b>\n"
-        f"• Nội dung: <code>DAAS {uid} {order_code}</code>\n\n"
+        f"• Nội dung: <code>AAS {uid} {order_code}</code>\n\n"
         f"📸 Sau khi chuyển khoản, gửi ảnh bill ngay tại đây. Admin sẽ kiểm tra và cộng <b>{xu} Xu</b>."
     )
 
 def manual_qr_url(uid: int, amount: int, order_code: int) -> str:
     params = {
         "amount": int(amount),
-        "addInfo": f"DAAS {uid} {order_code}",
+        "addInfo": f"AAS {uid} {order_code}",
         "accountName": MANUAL_BANK_OWNER,
     }
     bank_code = quote(MANUAL_BANK_CODE, safe="")
@@ -19616,9 +19687,11 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
 # ─── ADMIN ALERT ─────────────────────────────────────────────────────────────
 async def alert_admin(context: ContextTypes.DEFAULT_TYPE, service_name: str, error_msg: str):
     try:
+        safe_service = html.escape(str(service_name))
+        safe_error = html.escape(str(error_msg))
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"🚨 <b>BÁO ĐỘNG TOAN AAS</b>\n\n{service_name} lỗi:\n<code>{error_msg}</code>",
+            text=f"🚨 <b>BÁO ĐỘNG TOAN AAS</b>\n\n{safe_service} lỗi:\n<code>{safe_error}</code>",
             parse_mode="HTML"
         )
     except Exception:
@@ -20813,26 +20886,12 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         "returnUrl": return_url
     }
 
-    headers = {
-        "x-client-id": PAYOS_CLIENT_ID,
-        "x-api-key": PAYOS_API_KEY,
-        "Content-Type": "application/json"
-    }
-
     try:
         res = None
         res_data = {}
+        raw_preview = ""
         raw_str = ""
-        signature, raw_str = sign_payos_payment_request(payos_body)
-        request_body = {**payos_body, "signature": signature}
-        async with httpx.AsyncClient() as client:
-            res = await client.post(
-                "https://api-merchant.payos.vn/v2/payment-requests",
-                headers=headers,
-                json=request_body,
-                timeout=30.0
-            )
-            res_data = res.json()
+        res, res_data, raw_preview, raw_str = await create_payos_payment_request(payos_body)
         if res.status_code == 200 and res_data.get("code") == "00":
             checkout_data = res_data["data"]
             checkout_url = checkout_data["checkoutUrl"]
@@ -20876,12 +20935,24 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(qr_text, parse_mode="HTML", reply_markup=kb)
         else:
             update_order_status(order_code, PAYOS_STATUS_CANCELLED)
-            logger.error(f"PayOS error response: {res_data} | signed={raw_str}")
-            desc = res_data.get("desc", "Lỗi không rõ")
+            logger.error(
+                "PayOS create failed | status=%s | order=%s | amount=%s | response=%s | signature_data=%s | raw=%s",
+                getattr(res, "status_code", ""),
+                order_code,
+                amount,
+                res_data,
+                raw_str,
+                raw_preview[:500],
+            )
+            desc = res_data.get("desc") or res_data.get("message") or raw_preview or "Lỗi không rõ"
             await alert_admin(
                 context,
                 "PayOS tạo hóa đơn",
-                f"{desc} | order={order_code} | amount={amount} | signed={raw_str} | nếu vẫn báo signature invalid, kiểm tra PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY cùng kênh, không dư khoảng trắng, rồi redeploy Railway"
+                (
+                    f"PayOS create payment link FAIL\n"
+                    f"{format_payos_create_debug(getattr(res, 'status_code', ''), res_data, raw_preview, order_code, amount, payos_body['description'], payos_body['cancelUrl'], payos_body['returnUrl'], raw_str)}\n\n"
+                    "Signature order must be amount,cancelUrl,description,orderCode,returnUrl."
+                )
             )
             await query.edit_message_text("⚠️ Cổng QR tự động đang bận. Bot đã gửi mã QR nạp thủ công bên dưới.")
             await send_manual_payment(
@@ -20896,7 +20967,14 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
         logger.error(f"PayOS Exception: {e}")
-        await alert_admin(context, "PayOS API", f"Exception order={order_code}: {str(e)}")
+        await alert_admin(
+            context,
+            "PayOS API",
+            (
+                f"Exception order={order_code}: {str(e)}\n"
+                f"{format_payos_create_debug(getattr(res, 'status_code', '') if res else '', res_data, raw_preview, order_code, amount, payos_body['description'], payos_body['cancelUrl'], payos_body['returnUrl'], raw_str)}"
+            )
+        )
         await query.edit_message_text("⚠️ Cổng QR tự động đang bận. Bot đã gửi mã QR nạp thủ công bên dưới.")
         await send_manual_payment(
             context,
@@ -22622,6 +22700,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Gói Doanh Nghiệp: 500.000đ ➔ <b>5.000 Xu</b> + 500 Xu Launch Bonus lần đầu mua gói = <b>5.500 Xu</b>\n\n"
         f"🎁 Launch Bonus theo gói chỉ áp dụng 1 lần cho mỗi tài khoản ở từng gói 50k/100k/200k/500k.\n"
         f"Các lần mua lại cùng gói sẽ nhận Xu gốc.\n\n"
+        f"🏦 Nếu phải nạp thủ công, nội dung chuyển khoản sẽ là: <code>AAS {uid} &lt;order_code&gt;</code>\n\n"
         f"⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. Không lo điền sai nội dung chuyển khoản.\n\n"
         f"👇 <b>Vui lòng click chọn gói cước mong muốn dưới đây:</b>"
     )
@@ -22640,14 +22719,28 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
     uid = update.effective_user.id
     amount = 0
     xu = 0
+    base_xu = 0
+    launch_preview = 0
     if context.args:
         pkg_key = context.args[0].lower()
         if pkg_key in PAYMENT_PACKAGES:
             pkg = PAYMENT_PACKAGES[pkg_key]
-            amount, xu = pkg["amount"], pkg["xu"]
+            amount = pkg["amount"]
+            package_credit = calculate_package_credit_for_user(uid, amount)
+            base_xu = int(package_credit.get("base_xu") or pkg["xu"])
+            launch_preview = int(package_credit.get("launch_bonus_xu") or 0)
+            xu = int(package_credit.get("total_xu") or base_xu)
     order_code = generate_order_code()
     if amount and xu:
-        create_order(order_code, uid, amount, xu)
+        create_order(
+            order_code,
+            uid,
+            amount,
+            xu,
+            base_xu=base_xu,
+            launch_bonus_xu=launch_preview,
+            package_amount_vnd=amount,
+        )
         USER_BILL_STATE[uid] = {"order_code": order_code, "amount": amount, "xu": xu, "pkg_key": context.args[0].lower()}
         return await send_manual_payment(context, update.effective_chat.id, uid, amount, xu, order_code)
     else:
@@ -22658,7 +22751,7 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
             f"• Ngân hàng: <b>{MANUAL_BANK_NAME}</b>\n"
             f"• Số tài khoản: <code>{MANUAL_BANK_ACCOUNT}</code>\n"
             f"• Chủ tài khoản: <b>{MANUAL_BANK_OWNER}</b>\n"
-            f"• Nội dung: <code>DAAS {uid}</code>\n\n"
+            f"• Nội dung: <code>AAS {uid}</code>\n\n"
             "📸 Sau khi chuyển khoản, gửi ảnh bill tại đây.\n"
             "Gợi ý: <code>/thucong 10k</code>, <code>/thucong 100k</code> để bot tự điền số tiền và số Xu."
         )
@@ -34771,18 +34864,42 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = db_connect()
         c = conn.cursor()
         c.execute(
-            "SELECT order_code FROM pending_deposits WHERE user_id=? AND status='pending' ORDER BY submitted_at DESC LIMIT 1",
+            "SELECT order_code, amount, xu FROM pending_deposits WHERE user_id=? AND status='pending' ORDER BY submitted_at DESC LIMIT 1",
             (str(target_id),)
         )
         pending_order = c.fetchone()
+        launch_recorded = 0
+        pending_order_code = str(pending_order[0]) if pending_order and pending_order[0] else ""
+        if pending_order_code:
+            c.execute(
+                "SELECT amount, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code=? LIMIT 1",
+                (pending_order_code,)
+            )
+            order_meta = c.fetchone()
+            if order_meta:
+                order_amount = int(order_meta[0] or pending_order[1] or 0)
+                order_base_xu = int(order_meta[1] or package_base_xu(order_amount))
+                order_launch_xu = int(order_meta[2] or 0)
+                if order_launch_xu <= 0:
+                    credit_info = calculate_package_credit_for_user(target_id, order_amount, conn=conn)
+                    order_launch_xu = int(credit_info.get("launch_bonus_xu") or 0)
+                    order_base_xu = int(credit_info.get("base_xu") or order_base_xu)
+                launch_recorded = record_launch_bonus_redemption(
+                    conn,
+                    target_id,
+                    order_amount,
+                    order_base_xu,
+                    order_launch_xu,
+                    pending_order_code,
+                )
         c.execute(
             "UPDATE pending_deposits SET status='approved' WHERE user_id=? AND status='pending'",
             (str(target_id),)
         )
-        if pending_order and pending_order[0]:
+        if pending_order_code:
             c.execute(
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
-                (PAYOS_STATUS_PAID, now_text(), str(pending_order[0]))
+                (PAYOS_STATUS_PAID, now_text(), pending_order_code)
             )
         c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
         record_audit(
@@ -34792,8 +34909,8 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "bill.approved",
             "pending_deposit",
             str(target_id),
-            before={"status": "pending", "order_code": pending_order[0] if pending_order else ""},
-            after={"status": "approved", "user_id": str(target_id), "xu": int(amount)},
+            before={"status": "pending", "order_code": pending_order_code},
+            after={"status": "approved", "user_id": str(target_id), "xu": int(amount), "launch_bonus_recorded": int(launch_recorded or 0)},
             note="Admin approved manual bill",
         )
         conn.commit()
@@ -34869,6 +34986,61 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Check PayOS error: {e}")
         await update.message.reply_text(f"❌ Không kiểm tra được PayOS: {str(e)}")
+
+async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
+        return await update.message.reply_text(
+            "❌ Thiếu PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY."
+        )
+
+    order_code = generate_order_code()
+    amount = 10000
+    return_url = make_payos_return_url(context)
+    payos_body = {
+        "orderCode": order_code,
+        "amount": amount,
+        "description": make_payos_description("10k"),
+        "cancelUrl": return_url,
+        "returnUrl": return_url,
+    }
+
+    try:
+        res, res_data, raw_preview, raw_str = await create_payos_payment_request(payos_body)
+        if res.status_code == 200 and res_data.get("code") == "00":
+            checkout_data = res_data.get("data") or {}
+            checkout_url = checkout_data.get("checkoutUrl", "")
+            payment_link_id = checkout_data.get("paymentLinkId", "")
+            return await update.message.reply_text(
+                (
+                    "✅ <b>PayOS debug create PASS</b>\n\n"
+                    f"Order: <code>{order_code}</code>\n"
+                    f"Amount: <b>{amount:,}đ</b>\n"
+                    f"Description: <code>{html.escape(payos_body['description'])}</code>\n"
+                    f"paymentLinkId: <code>{html.escape(str(payment_link_id))}</code>\n"
+                    f"Checkout: {html.escape(str(checkout_url))}\n\n"
+                    "Không cần thanh toán link debug này."
+                ),
+                parse_mode="HTML",
+            )
+        return await update.message.reply_text(
+            (
+                "❌ <b>PayOS debug create FAIL</b>\n\n"
+                f"{format_payos_create_debug(res.status_code, res_data, raw_preview, order_code, amount, payos_body['description'], payos_body['cancelUrl'], payos_body['returnUrl'], raw_str, html_mode=True)}"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        _, raw_str = sign_payos_payment_request(payos_body)
+        return await update.message.reply_text(
+            (
+                "❌ <b>PayOS debug create EXCEPTION</b>\n\n"
+                f"Error: <code>{html.escape(str(e))}</code>\n"
+                f"{format_payos_create_debug('', {}, '', order_code, amount, payos_body['description'], payos_body['cancelUrl'], payos_body['returnUrl'], raw_str, html_mode=True)}"
+            ),
+            parse_mode="HTML",
+        )
 
 async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -35181,7 +35353,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption_lower = (update.message.caption or "").lower()
     bill_state = USER_BILL_STATE.get(uid)
     is_bill = bill_state or any(
-        k in caption_lower for k in ["bill", "nạp", "chuyển khoản", "ck", "daas"]
+        k in caption_lower for k in ["bill", "nạp", "chuyển khoản", "ck", "aas", "daas"]
     )
 
     if is_bill:
@@ -35705,6 +35877,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("admin_gopy",  cmd_admin_gopy))
     tg_app.add_handler(CommandHandler("duyet",       cmd_duyet))
     tg_app.add_handler(CommandHandler("checkpayos",  cmd_checkpayos))
+    tg_app.add_handler(CommandHandler("payos_debug_create", cmd_payos_debug_create))
     tg_app.add_handler(CommandHandler("tuchoi",      cmd_tuchoi))
     tg_app.add_handler(CommandHandler("pending",     cmd_pending))
     tg_app.add_handler(CommandHandler("stats",       cmd_stats))

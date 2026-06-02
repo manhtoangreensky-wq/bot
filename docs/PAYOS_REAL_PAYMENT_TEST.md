@@ -21,13 +21,30 @@ This test includes two paths:
 - `/naptien` shows all payment packages.
 - `/promo_seed_policy` has seeded Promotion Policy V2.1.
 - Admin is online to inspect `/dashboard`, `/pending`, and user messages.
-- PayOS checkout URL can be created before sending real money.
+- Admin command `/payos_debug_create` can create a PayOS checkout URL before sending real money.
+- PayOS checkout URL can be created through `/naptien` before sending real money.
 
-If PayOS returns signature invalid, fix create-payment signature first. Do not run a real payment test until `/naptien` can create a checkout URL.
+If PayOS returns signature invalid, fix create-payment signature first. Do not run a real payment test until `/payos_debug_create` and `/naptien` can create a checkout URL.
 
 See `docs/PAYOS_SIGNATURE_TROUBLESHOOTING.md`.
 
-## Test Case 1 - Create QR
+## Test Case 1 - Debug Create QR
+
+Admin flow:
+
+```text
+/payos_debug_create
+```
+
+Expected:
+
+- Command returns `PayOS debug create PASS`.
+- Description is `AAS10K`.
+- Signature data order is `amount,cancelUrl,description,orderCode,returnUrl`.
+- Checkout URL exists.
+- No Xu is added.
+
+## Test Case 2 - Create QR
 
 1. Use a non-admin test user if possible.
 2. Call `/naptien`.
@@ -41,7 +58,7 @@ Expected:
 - Order code exists.
 - No Xu is added before real payment.
 
-## Test Case 2 - Real Payment Without Promo
+## Test Case 3 - Real Payment Without Promo
 
 1. Pay the 10k QR.
 2. Wait for PayOS webhook.
@@ -56,7 +73,7 @@ Expected:
 - `credit_events` contains the PayOS deposit.
 - Dashboard revenue increases once.
 
-## Test Case 3 - Real Payment With FIRST30 Promo
+## Test Case 4 - Real Payment With FIRST30 Promo
 
 Admin setup:
 
@@ -85,7 +102,7 @@ Expected for 50k:
 - `credit_events` contains one `payos_deposit`, one `launch_bonus` if eligible, and one `promo_bonus`.
 - `promotion_redemptions.status` becomes `applied`.
 
-## Test Case 4 - Duplicate Protection
+## Test Case 5 - Duplicate Protection
 
 If a duplicate webhook/order replay can be simulated safely, or if `/checkpayos <order_code>` is run after webhook success, confirm the bot does not add Xu twice.
 
@@ -95,7 +112,7 @@ Expected:
 - Promo bonus is not credited twice.
 - Dashboard revenue does not double count.
 
-## Test Case 5 - Manual Fallback
+## Test Case 6 - Manual Fallback
 
 1. Trigger manual flow with `/thucong` or a PayOS checkout failure.
 2. User sends bill screenshot.
@@ -105,10 +122,13 @@ Expected:
 
 - Pending bill is approved once.
 - User receives the intended Xu.
+- Manual transfer content uses `AAS <user_id> <order_code>`.
+- Manual fallback uses the same order `xu` as the PayOS order, including Launch Bonus when eligible.
 - Credit event is recorded.
 
 ## Pass Criteria Before Public Sale
 
+- [ ] `/payos_debug_create` PASS.
 - [ ] Real 10k PayOS payment PASS.
 - [ ] Real 50k+FIRST30 promo payment PASS.
 - [ ] Duplicate protection PASS or manually reviewed.
