@@ -102,6 +102,11 @@
 - Router: Gemini/OpenAI configured paths only; Claude/Grok planned and not called.
 - Refund: Chat Pro refunds if AI fails after Xu was charged.
 
+## Not in current phase
+
+- Copilot is for development workflow only.
+- OpenLaw/OpenLaws legal automation is backlog, not production.
+
 ## Next risk to fix
 
 1. Verify Railway Volume and DB persistence after redeploy.

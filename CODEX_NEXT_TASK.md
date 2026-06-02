@@ -50,4 +50,10 @@ Sau Step 11 Chat AI Tier System, admin chọn 1 task:
 - Kiểm `/help`, `/menu`, command registry.
 - Chỉ sửa text/handler thiếu, không thêm module lớn.
 
+## Future Backlog
+
+- GitHub Copilot dev workflow
+- Legal Docs Lite with OpenLaw/OpenLaws
+- Legal templates for service contracts and warranty documents
+
 Codex không tự làm task tiếp theo.
