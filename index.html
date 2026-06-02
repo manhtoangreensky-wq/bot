@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TOAN AAS - AI Automation System</title>
+<meta name="description" content="TOAN AAS - AI Automation System: bot Telegram cho Chat AI, voice, audio, tách nền, thanh toán QR, quy trình video AI, affiliate và điều phối công việc.">
+<meta name="theme-color" content="#05764F">
+<link rel="icon" type="image/png" href="/LOGO.png">
+<link rel="apple-touch-icon" href="/LOGO.png">
+<meta property="og:title" content="TOAN AAS - AI Automation System">
+<meta property="og:description" content="Nền tảng AI Automation giúp tạo nội dung, vận hành affiliate, quản lý tác vụ và tự động hóa công việc qua Telegram bot.">
+<meta property="og:image" content="/LOGO.png">
+<meta property="og:type" content="website">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -77,17 +85,25 @@ nav {
   box-shadow:0 10px 30px rgba(1,64,46,0.06);
 }
 .nav-logo {
-  display:flex; align-items:center; gap:10px;
-  font-family:'Space Grotesk',sans-serif; font-weight:700;
-  font-size:15px; letter-spacing:0.08em; color:var(--text-1); text-transform:uppercase;
+  display:flex; align-items:center; gap:12px;
+  color:var(--text-1); text-transform:uppercase;
 }
 .nav-logo-img {
-  width:34px; height:34px; object-fit:contain;
-  border-radius:8px; box-shadow:0 8px 22px rgba(17,184,121,0.16);
+  width:42px; height:42px; object-fit:contain;
+  border-radius:10px; box-shadow:0 8px 22px rgba(17,184,121,0.16);
   animation:float-logo 3s ease-in-out infinite;
 }
 @keyframes float-logo { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
-.nav-logo span { color:var(--teal-dim); }
+.nav-brand-text { display:flex; flex-direction:column; line-height:1.1; }
+.nav-brand-name {
+  font-family:'Space Grotesk',sans-serif; font-weight:800;
+  font-size:16px; letter-spacing:0.1em; color:var(--text-1);
+}
+.nav-brand-name span { color:var(--teal-dim); }
+.nav-brand-subtitle {
+  margin-top:4px; font-size:9px; font-weight:700;
+  letter-spacing:0.16em; color:var(--text-3);
+}
 .nav-links { display:flex; gap:32px; list-style:none; }
 .nav-links a {
   font-size:13px; font-weight:500; letter-spacing:0.04em;
@@ -121,7 +137,7 @@ nav {
 @keyframes float2 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(-20px,-30px)} }
 
 .hero-logo {
-  width:min(460px,78vw); height:auto; display:block;
+  width:min(520px,82vw); height:auto; display:block;
   margin:0 auto 28px;
   filter:drop-shadow(0 26px 42px rgba(1,64,46,0.12));
 }
@@ -147,6 +163,15 @@ nav {
 .hero-sub {
   font-size:16px; font-weight:400; color:var(--text-2);
   line-height:1.8; max-width:580px; margin:0 auto 48px;
+}
+.hero-sync {
+  max-width:760px; margin:0 auto 34px;
+  display:flex; justify-content:center; gap:10px; flex-wrap:wrap;
+}
+.hero-sync span {
+  border:1px solid var(--line); background:rgba(255,255,255,0.8);
+  color:var(--text-2); padding:8px 14px; border-radius:999px;
+  font-size:12px; font-weight:700;
 }
 
 .hero-actions { display:flex; gap:16px; justify-content:center; flex-wrap:wrap; }
@@ -230,6 +255,34 @@ section { position:relative; z-index:2; }
 }
 .step-content h3 { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:19px; margin-bottom:8px; color:var(--text-1); }
 .step-content p { font-size:14px; font-weight:400; color:var(--text-2); line-height:1.75; }
+
+/* ── BOT MENU ── */
+#botmenu { padding:100px 64px; background:var(--bg-2); border-top:1px solid var(--line); }
+.menu-sync-grid { max-width:1100px; margin:0 auto; display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+.menu-panel {
+  background:white; border:1px solid var(--line); padding:30px 28px;
+  box-shadow:0 12px 34px rgba(1,64,46,0.06);
+}
+.menu-panel h3 {
+  font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700;
+  color:var(--text-1); margin-bottom:16px;
+}
+.menu-list { display:grid; gap:10px; }
+.menu-list div {
+  display:flex; justify-content:space-between; gap:12px; align-items:center;
+  border:1px solid var(--line); background:var(--bg-3); padding:12px 14px;
+  font-size:13px; color:var(--text-2); line-height:1.45;
+}
+.menu-list b { color:var(--text-1); }
+.menu-tag {
+  flex-shrink:0; font-family:'Space Grotesk',sans-serif; font-size:10px;
+  color:var(--teal-dim); font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
+}
+.menu-note {
+  max-width:820px; margin:26px auto 0; padding:18px 20px;
+  border:1px solid var(--teal-border); background:var(--teal-glow);
+  color:var(--text-2); font-size:14px; line-height:1.75;
+}
 
 /* ── TECH TRACK ── */
 #tech { padding:72px 64px; background:var(--bg-2); overflow:hidden; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
@@ -349,11 +402,14 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
 .reveal.visible { opacity:1; transform:translateY(0); }
 
 /* ── RESPONSIVE ── */
-@media(max-width:1024px){ .services-grid{grid-template-columns:repeat(2,1fr)} }
+@media(max-width:1024px){ .services-grid{grid-template-columns:repeat(2,1fr)} .menu-sync-grid{grid-template-columns:1fr} }
 @media(max-width:768px){
   nav{padding:16px 24px} .nav-links{display:none}
-  #services,#process,#tech,#order{padding:72px 24px}
+  #services,#process,#botmenu,#tech,#order{padding:72px 24px}
   .services-grid{grid-template-columns:1fr}
+  .menu-panel{padding:24px 18px}
+  .menu-list div{display:block}
+  .menu-tag{display:block;margin-top:6px}
   .order-wrapper{grid-template-columns:1fr} .form-row{grid-template-columns:1fr}
   .hero-stats{gap:28px;flex-wrap:wrap}
   footer{padding:48px 24px 32px}
@@ -371,10 +427,14 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
 <nav>
   <div class="nav-logo">
     <img class="nav-logo-img" src="/LOGO.png" alt="TOAN AAS logo">
-    TOAN <span>AAS</span>
+    <div class="nav-brand-text">
+      <div class="nav-brand-name">TOAN <span>AAS</span></div>
+      <div class="nav-brand-subtitle">AI Automation System</div>
+    </div>
   </div>
   <ul class="nav-links">
     <li><a href="#services">Hệ thống</a></li>
+    <li><a href="#botmenu">Menu Bot</a></li>
     <li><a href="#process">Video AI</a></li>
     <li><a href="#naptien">Nạp Xu</a></li>
     <li><a href="#tech">Nền tảng</a></li>
@@ -395,8 +455,13 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
       <span class="line-gold">AI Automation</span> System
     </h1>
     <p class="hero-sub">
-      Nền tảng AI Automation giúp tạo nội dung, vận hành affiliate, quản lý tác vụ và tự động hóa công việc doanh nghiệp.
+      Nền tảng AI Automation đồng bộ với bot Telegram hiện tại: chat AI, xử lý voice/audio/ảnh/video, nạp Xu, tạo gói nội dung video, vận hành affiliate và điều phối công việc.
     </p>
+    <div class="hero-sync">
+      <span>Menu gọn trong Telegram</span>
+      <span>Thanh toán QR tự động</span>
+      <span>Có duyệt nội dung trước khi đăng</span>
+    </div>
     <div class="hero-actions">
       <a href="https://t.me/Httdhtoan" class="btn-primary">Mở Bot Telegram</a>
       <a href="#naptien" class="btn-ghost">Nạp Xu</a>
@@ -404,10 +469,10 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
       <a href="#order" class="btn-ghost">Gửi yêu cầu tư vấn</a>
     </div>
     <div class="hero-stats">
-      <div class="stat-item"><div class="stat-num">V15.2</div><div class="stat-label">Stable Revenue Bot</div></div>
+      <div class="stat-item"><div class="stat-num">AI</div><div class="stat-label">Bot dịch vụ</div></div>
       <div class="stat-item"><div class="stat-num">3</div><div class="stat-label">Facebook TikTok YouTube</div></div>
-      <div class="stat-item"><div class="stat-num">QR</div><div class="stat-label">PayOS tự động</div></div>
-      <div class="stat-item"><div class="stat-num">AI</div><div class="stat-label">Operator workflow</div></div>
+      <div class="stat-item"><div class="stat-num">QR</div><div class="stat-label">Thanh toán tự động</div></div>
+      <div class="stat-item"><div class="stat-num">Duyệt</div><div class="stat-label">Trước khi đăng</div></div>
     </div>
   </div>
 </section>
@@ -416,39 +481,39 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   <div class="section-header reveal">
     <div class="section-tag">— TOAN AAS —</div>
     <h2 class="section-title">Các Phân Hệ <span class="gold">Đang Vận Hành</span></h2>
-    <p class="section-desc">Đồng bộ với bot hiện tại: doanh thu, nội dung, affiliate, operator và workflow video AI.</p>
+    <p class="section-desc">Đồng bộ với bot hiện tại: dịch vụ AI, nội dung, affiliate, thanh toán, hỗ trợ và điều phối công việc.</p>
   </div>
 
   <div class="services-grid">
     <div class="service-card reveal">
       <div class="service-icon">🤖</div>
-      <h3>Stable Revenue Bot</h3>
-      <p>Chat AI, đọc voice, bóc băng audio, tách nền ảnh, tải video sạch và quản lý số dư Xu ngay trong Telegram.</p>
-      <div class="service-price">Gemini + OpenAI + Deepgram</div>
+      <h3>Bot Dịch Vụ AI</h3>
+      <p>Chat AI, đọc voice, bóc băng audio, tách nền ảnh, tải video sạch, hồ sơ tài khoản, referral và quản lý số dư Xu ngay trong Telegram.</p>
+      <div class="service-price">Dùng trực tiếp trong Telegram</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.1s">
       <div class="service-icon">🎬</div>
-      <h3>Multi-Platform AI Video Factory</h3>
-      <p>Tạo script, scene prompt, storyboard, CTA affiliate và content pack cho Facebook, TikTok, YouTube.</p>
-      <div class="service-price">Script / Scene / Storyboard</div>
+      <h3>Xưởng Video AI Đa Nền Tảng</h3>
+      <p>Tạo ý tưởng, kịch bản, storyboard, mô tả từng cảnh, brief sản xuất và gói nội dung cho Facebook, TikTok, YouTube.</p>
+      <div class="service-price">Kịch bản / Cảnh / Gói nội dung</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.2s">
       <div class="service-icon">💰</div>
-      <h3>Affiliate Automation</h3>
-      <p>Quản lý campaign preset, link affiliate, caption/CTA, publish tracking, postback và growth loop.</p>
-      <div class="service-price">Campaign / Tracking / Scale</div>
+      <h3>Vận Hành Affiliate</h3>
+      <p>Quản lý chiến dịch, kho link, caption/CTA, bài đã đăng, lượt click, đơn hàng, doanh thu và vòng tối ưu tăng trưởng.</p>
+      <div class="service-price">Chiến dịch / Theo dõi / Tối ưu</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.3s">
       <div class="service-icon">🧠</div>
-      <h3>Operator System</h3>
+      <h3>Điều Phối Công Việc Nội Bộ</h3>
       <p>Mission, work order, worker intake, production bundle, review gate và điều phối task nội bộ.</p>
-      <div class="service-price">Admin workflow</div>
+      <div class="service-price">Chỉ vận hành sau hậu trường</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.4s">
       <div class="service-icon">🏦</div>
-      <h3>PayOS Dynamic Billing</h3>
-      <p>QR động tự điền số tiền/nội dung, webhook tự cộng Xu khi giao dịch thành công, có nạp thủ công dự phòng.</p>
-      <div class="service-price">PayOS QR động</div>
+      <h3>Thanh Toán QR Tự Động</h3>
+      <p>QR động tự điền số tiền/nội dung, hệ thống tự cộng Xu khi giao dịch thành công, có nạp thủ công dự phòng.</p>
+      <div class="service-price">Tự động + thủ công dự phòng</div>
     </div>
     <div class="service-card reveal" style="transition-delay:0.5s">
       <div class="service-icon">🏗️</div>
@@ -459,11 +524,46 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   </div>
 </section>
 
+<section id="botmenu">
+  <div class="section-header reveal">
+    <div class="section-tag">— Telegram Bot —</div>
+    <h2 class="section-title">Trải Nghiệm <span class="gold">Gọn Và Dễ Dùng</span></h2>
+    <p class="section-desc">Website chỉ giới thiệu tiện ích khách hàng thấy được. Công nghệ nền và lệnh nội bộ được ẩn khỏi giao diện public.</p>
+  </div>
+  <div class="menu-sync-grid">
+    <div class="menu-panel reveal">
+      <h3>Khách hàng sử dụng</h3>
+      <div class="menu-list">
+        <div><b>🤖 Chat và xử lý nội dung</b><span class="menu-tag">nhắn trực tiếp</span></div>
+        <div><b>🎬 Lên ý tưởng video AI</b><span class="menu-tag">theo chủ đề</span></div>
+        <div><b>💰 Nội dung bán hàng affiliate</b><span class="menu-tag">có CTA rõ</span></div>
+        <div><b>💳 Nạp Xu sử dụng dịch vụ</b><span class="menu-tag">QR hoặc thủ công</span></div>
+        <div><b>👤 Theo dõi tài khoản</b><span class="menu-tag">số dư / giới thiệu</span></div>
+        <div><b>🛟 Gửi góp ý và bill lỗi</b><span class="menu-tag">hỗ trợ nhanh</span></div>
+      </div>
+    </div>
+    <div class="menu-panel reveal" style="transition-delay:0.12s">
+      <h3>Hậu trường đã ẩn</h3>
+      <div class="menu-list">
+        <div><b>🎬 Sản xuất nội dung</b><span class="menu-tag">quy trình riêng</span></div>
+        <div><b>💰 Tối ưu chiến dịch</b><span class="menu-tag">dựa trên dữ liệu</span></div>
+        <div><b>🧠 Điều phối công việc</b><span class="menu-tag">chỉ admin</span></div>
+        <div><b>📊 Quản lý hệ thống</b><span class="menu-tag">chỉ admin</span></div>
+        <div><b>⚙️ Kiểm tra vận hành</b><span class="menu-tag">chỉ admin</span></div>
+        <div><b>💳 Duyệt thanh toán</b><span class="menu-tag">chỉ admin</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="menu-note reveal">
+    Website không công khai tên công cụ, công nghệ nền, lệnh nội bộ hoặc quy trình bí mật. Khách chỉ thấy tiện ích và kết quả họ nhận được.
+  </div>
+</section>
+
 <section id="process">
   <div class="section-header reveal">
     <div class="section-tag">— Video AI Workflow —</div>
     <h2 class="section-title">Quy Trình <span class="gold">Tạo Video AI Affiliate</span></h2>
-    <p class="section-desc">Làm gọn như công ty một người: AI lập kế hoạch, operator chia task, admin duyệt rồi mới đăng.</p>
+    <p class="section-desc">Làm gọn như công ty một người: AI lập kế hoạch, hệ thống chia việc, admin duyệt rồi mới đăng.</p>
   </div>
   <div class="process-steps">
     <div class="process-step reveal">
@@ -477,21 +577,21 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
       <div class="step-num">02</div>
       <div class="step-content">
         <h3>Tạo blueprint, series và scene pack</h3>
-        <p>Admin dùng /film_blueprint, /film_series, /storyboard_crop và /scene_pack để tạo kịch bản, cảnh, prompt ảnh/video, voice line và CTA.</p>
+        <p>Hệ thống tạo kịch bản, cảnh, mô tả hình ảnh/video, lời thoại và CTA theo từng nền tảng.</p>
       </div>
     </div>
     <div class="process-step reveal" style="transition-delay:0.2s">
       <div class="step-num">03</div>
       <div class="step-content">
         <h3>Worker sản xuất, admin duyệt</h3>
-        <p>Worker nhận task qua /worker_intake. Nội dung đi qua review gate, không auto publish khi chưa duyệt.</p>
+        <p>Nội dung được chia thành từng việc nhỏ, đóng gói để sản xuất và đi qua bước kiểm duyệt trước khi dùng.</p>
       </div>
     </div>
     <div class="process-step reveal" style="transition-delay:0.3s">
       <div class="step-num">04</div>
       <div class="step-content">
         <h3>Đăng, đo và scale</h3>
-        <p>Ghi nhận /publish_done, theo dõi click/đơn/doanh thu rồi dùng /growth_loop để đẩy mạnh nội dung thắng.</p>
+        <p>Ghi nhận bài đã đăng, theo dõi click/đơn/doanh thu rồi đẩy mạnh những nội dung có hiệu quả tốt.</p>
       </div>
     </div>
   </div>
@@ -508,12 +608,12 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
       <div class="tech-pill"><span>📘</span> Facebook Reels/Page</div>
       <div class="tech-pill"><span>🎵</span> TikTok Affiliate</div>
       <div class="tech-pill"><span>▶️</span> YouTube Shorts</div>
-      <div class="tech-pill"><span>🤖</span> Gemini + OpenAI</div>
-      <div class="tech-pill"><span>🗣️</span> Deepgram</div>
-      <div class="tech-pill"><span>🐟</span> Fish Audio</div>
-      <div class="tech-pill"><span>✂️</span> Remove.bg + Cutout</div>
-      <div class="tech-pill"><span>🏦</span> PayOS QR Động</div>
-      <div class="tech-pill"><span>🔁</span> Growth Loop</div>
+      <div class="tech-pill"><span>🤖</span> Chat AI thông minh</div>
+      <div class="tech-pill"><span>🗣️</span> Bóc băng audio</div>
+      <div class="tech-pill"><span>🔊</span> Đọc nội dung thành voice</div>
+      <div class="tech-pill"><span>✂️</span> Tách nền ảnh</div>
+      <div class="tech-pill"><span>🏦</span> Thanh toán QR động</div>
+      <div class="tech-pill"><span>🔁</span> Tối ưu tăng trưởng</div>
       <div class="tech-pill"><span>📘</span> Facebook Reels/Page</div>
       <div class="tech-pill"><span>🎵</span> TikTok Affiliate</div>
       <div class="tech-pill"><span>▶️</span> YouTube Shorts</div>
@@ -523,9 +623,9 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
 
 <section id="naptien">
   <div class="section-header reveal">
-    <div class="section-tag">— PayOS QR Động —</div>
+    <div class="section-tag">— Thanh Toán QR —</div>
     <h2 class="section-title">Nạp Xu <span class="gold">Sử Dụng Dịch Vụ</span></h2>
-    <p class="section-desc">Thanh toán bằng PayOS QR động, tự động cộng Xu sau khi giao dịch thành công.</p>
+    <p class="section-desc">Thanh toán bằng QR động, tự động cộng Xu sau khi giao dịch thành công và có nạp thủ công dự phòng.</p>
   </div>
 
   <div class="pricing-grid reveal">
@@ -543,7 +643,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
     </div>
     <div class="pricing-card featured">
       <div class="pricing-name">Gói Tiêu Chuẩn</div><div class="pricing-price">100.000đ</div><div class="pricing-xu">1.050 Xu — Tặng 50 Xu</div><div class="pricing-divider"></div>
-      <div class="pricing-feature">Chat AI + Voice</div><div class="pricing-feature">Deepgram + RemoveBG</div><div class="pricing-feature">Bắt đầu workflow affiliate</div>
+      <div class="pricing-feature">Chat AI + Voice</div><div class="pricing-feature">Audio + tách nền ảnh</div><div class="pricing-feature">Bắt đầu workflow affiliate</div>
     </div>
     <div class="pricing-card">
       <div class="pricing-name">Gói Nâng Cao</div><div class="pricing-price">200.000đ</div><div class="pricing-xu">2.150 Xu — Tặng 150 Xu</div><div class="pricing-divider"></div>
@@ -556,9 +656,9 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
   </div>
 
   <div class="payment-flow reveal" style="transition-delay:0.2s">
-    <div class="payment-flow-title">📋 Quy trình nạp Xu PayOS QR động</div>
-    <div class="payment-step"><div class="payment-step-num">1</div><div class="payment-step-text">Gõ <b>/naptien</b> trong bot, chọn gói 10k/20k/50k/100k/200k/500k và mở link thanh toán PayOS.</div></div>
-    <div class="payment-step"><div class="payment-step-num">2</div><div class="payment-step-text">PayOS gọi webhook về hệ thống. Bot kiểm tra chữ ký, mã đơn, số tiền và chống cộng Xu trùng.</div></div>
+    <div class="payment-flow-title">📋 Quy trình nạp Xu bằng QR động</div>
+    <div class="payment-step"><div class="payment-step-num">1</div><div class="payment-step-text">Mở mục nạp Xu trong bot, chọn gói 10k/20k/50k/100k/200k/500k và thanh toán bằng QR.</div></div>
+    <div class="payment-step"><div class="payment-step-num">2</div><div class="payment-step-text">Hệ thống kiểm tra mã đơn, số tiền và chống cộng Xu trùng trước khi cập nhật số dư.</div></div>
     <div class="payment-step"><div class="payment-step-num">3</div><div class="payment-step-text">Xu cộng tự động. Nếu QR lỗi, dùng nạp thủ công và gửi bill để admin duyệt.</div></div>
   </div>
 </section>
@@ -587,13 +687,13 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
         <div class="form-group">
           <label>Module muốn tích hợp *</label>
           <div class="service-options">
-            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="stable-revenue-bot"> <span class="service-opt-label">Stable Revenue Bot</span></div>
-            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="video-factory"> <span class="service-opt-label">AI Video Factory</span></div>
-            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="affiliate-automation"> <span class="service-opt-label">Affiliate Automation</span></div>
-            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="operator-system"> <span class="service-opt-label">Operator System</span></div>
+            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="bot-dich-vu-ai"> <span class="service-opt-label">Bot dịch vụ AI</span></div>
+            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="quy-trinh-video-ai"> <span class="service-opt-label">Quy trình video AI</span></div>
+            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="van-hanh-affiliate"> <span class="service-opt-label">Vận hành affiliate</span></div>
+            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="dieu-phoi-noi-bo"> <span class="service-opt-label">Điều phối nội bộ</span></div>
           </div>
         </div>
-        <div class="form-group"><label>Ghi chú triển khai</label><textarea id="fnote" placeholder="Ví dụ: muốn bot PayOS, video AI, affiliate tracking, dashboard admin..."></textarea></div>
+        <div class="form-group"><label>Ghi chú triển khai</label><textarea id="fnote" placeholder="Ví dụ: muốn bot dịch vụ AI, quy trình video, quản lý affiliate, báo cáo doanh thu..."></textarea></div>
         <button class="submit-btn" onclick="submitLead()">GỬI YÊU CẦU TƯ VẤN →</button>
         <div id="leadStatus" style="margin-top:14px;color:var(--text-2);font-size:13px;line-height:1.5;"></div>
       </div>
@@ -610,7 +710,7 @@ footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid va
     </div>
     <div class="footer-links-col">
       <h4>Module Nổi Bật</h4>
-      <a href="#services">Stable Revenue Bot</a><a href="#services">Video Factory</a><a href="#services">Affiliate Automation</a><a href="#services">Operator System</a>
+      <a href="#services">Bot dịch vụ AI</a><a href="#services">Quy trình video AI</a><a href="#services">Vận hành affiliate</a><a href="#services">Điều phối nội bộ</a>
     </div>
     <div class="footer-links-col">
       <h4>Liên hệ</h4>
