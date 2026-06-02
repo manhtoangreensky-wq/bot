@@ -8,6 +8,7 @@ Run after deploy:
 
 ```text
 /providers
+/payos_env_check
 /payos_debug_create
 /naptien
 ```
@@ -15,7 +16,7 @@ Run after deploy:
 Then select:
 
 - 10k: expected 100 Xu, no Launch Bonus, no promo.
-- 50k: expected 500 Xu base. This package is promo-eligible but has no Launch Bonus.
+- 50k: expected 500 Xu base plus 30 Xu Launch Bonus on first purchase of the 50k package.
 - 100k: expected 1,000 Xu base plus 50 Xu Launch Bonus on first purchase of the 100k package.
 
 ## Expected Debug PASS
@@ -23,14 +24,25 @@ Then select:
 `/payos_debug_create` must return:
 
 - `PayOS debug create PASS`
-- `Description: AAS10K`
+- Working signature variant
 - Checkout URL exists
 - `paymentLinkId` exists when PayOS returns it
-- Signature data order:
+- Per-variant result list with HTTP status, PayOS code/desc, order code and signature data
+
+Default/expected signature data order:
 
 ```text
 amount=...&cancelUrl=...&description=AAS10K&orderCode=...&returnUrl=...
 ```
+
+The debug command tries these variants with separate `orderCode` values:
+
+- `standard_sorted`: `amount,cancelUrl,description,orderCode,returnUrl`
+- `faq_order`: `amount,orderCode,description,returnUrl,cancelUrl`
+- `payload_order`: `orderCode,amount,description,cancelUrl,returnUrl`
+- `sorted_all_payload_keys`: alphabetical payload keys excluding `signature`
+
+If one variant passes, the bot stores it as `payos_create_signature_variant` for future create-payment requests.
 
 The debug command stores its result in `system_settings` so `/sales_ready` can tell whether PayOS checkout creation has been proven.
 
@@ -50,7 +62,10 @@ The bot must not show:
 
 - `PAYOS_API_KEY`
 - `PAYOS_CHECKSUM_KEY`
+- `PAYOS_CLIENT_ID`
 - Telegram token
+
+`/payos_env_check` only shows configured/missing and value lengths. It does not print key values.
 
 ## Sales Ready Rule
 

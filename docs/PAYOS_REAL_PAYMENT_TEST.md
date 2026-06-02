@@ -33,6 +33,7 @@ See `docs/PAYOS_SIGNATURE_TROUBLESHOOTING.md`.
 Admin flow:
 
 ```text
+/payos_env_check
 /payos_debug_create
 ```
 
@@ -40,7 +41,9 @@ Expected:
 
 - Command returns `PayOS debug create PASS`.
 - Description is `AAS10K`.
-- Signature data order is `amount,cancelUrl,description,orderCode,returnUrl`.
+- Working signature variant is shown.
+- Variant results include HTTP status, PayOS code/desc and signature data.
+- Default expected signature data order is `amount,cancelUrl,description,orderCode,returnUrl`.
 - Checkout URL exists.
 - No Xu is added.
 

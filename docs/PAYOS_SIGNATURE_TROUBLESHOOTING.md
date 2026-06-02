@@ -33,3 +33,12 @@ amount=10000&cancelUrl=https://bot-production-2dd7.up.railway.app/landing&descri
 Redeploy Railway and test `/naptien` again. If signature is still invalid, confirm `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, and `PAYOS_CHECKSUM_KEY` are from the same PayOS channel and have no leading/trailing spaces.
 
 Admin can run `/payos_debug_create` before a real payment test to see the HTTP status, PayOS code/desc/message, and exact signature data string without exposing secrets.
+
+`/payos_debug_create` tests multiple create-payment signature variants:
+
+- `standard_sorted`: `amount,cancelUrl,description,orderCode,returnUrl`
+- `faq_order`: `amount,orderCode,description,returnUrl,cancelUrl`
+- `payload_order`: `orderCode,amount,description,cancelUrl,returnUrl`
+- `sorted_all_payload_keys`: alphabetical payload keys excluding `signature`
+
+If a variant creates a checkout URL, the bot stores that working variant for later PayOS create-payment requests. Admin can run `/payos_env_check` to confirm PayOS ENV variables are configured by length only; it never prints key values.

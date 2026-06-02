@@ -233,20 +233,35 @@ def test_payos_create_payment_signature_data_order(monkeypatch):
     payload = {
         "amount": 10000,
         "cancelUrl": "https://bot-production-2dd7.up.railway.app/landing",
-        "description": "DAAS10K",
+        "description": "AAS10K",
         "orderCode": 178039665,
         "returnUrl": "https://bot-production-2dd7.up.railway.app/landing",
     }
     expected = (
         "amount=10000"
         "&cancelUrl=https://bot-production-2dd7.up.railway.app/landing"
-        "&description=DAAS10K"
+        "&description=AAS10K"
         "&orderCode=178039665"
         "&returnUrl=https://bot-production-2dd7.up.railway.app/landing"
     )
     signature, raw = bot.sign_payos_payment_request(payload)
     assert raw == expected
     assert signature == hmac.new(b"checksum-test", expected.encode("utf-8"), hashlib.sha256).hexdigest()
+    assert bot.build_payos_signature_data(payload, "faq_order") == (
+        "amount=10000"
+        "&orderCode=178039665"
+        "&description=AAS10K"
+        "&returnUrl=https://bot-production-2dd7.up.railway.app/landing"
+        "&cancelUrl=https://bot-production-2dd7.up.railway.app/landing"
+    )
+    assert bot.build_payos_signature_data(payload, "payload_order") == (
+        "orderCode=178039665"
+        "&amount=10000"
+        "&description=AAS10K"
+        "&cancelUrl=https://bot-production-2dd7.up.railway.app/landing"
+        "&returnUrl=https://bot-production-2dd7.up.railway.app/landing"
+    )
+    assert bot.build_payos_signature_data(payload, "sorted_all_payload_keys") == expected
 
 
 def test_payos_paid_order_applies_first30_once(monkeypatch):
