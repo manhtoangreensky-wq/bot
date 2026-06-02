@@ -17,7 +17,8 @@
   --bg: #07130f;
   --bg-soft: #0d1f18;
   --panel: #11281f;
-  --panel-2: #f6fbf8;
+  --panel-2: #edf7f2;
+  --panel-3: #f4faf6;
   --text: #f2fff8;
   --text-muted: #a8c5b8;
   --ink: #0c2118;
@@ -28,7 +29,7 @@
   --green-2: #0a8f66;
   --green-3: #064f3a;
   --gold: #d5aa3c;
-  --white: #fff;
+  --white: #f8fcfa;
   --shadow: 0 24px 70px rgba(0,0,0,.22);
   --radius: 8px;
 }
@@ -72,7 +73,7 @@ a { color: inherit; text-decoration: none; }
   height: 44px;
   object-fit: contain;
   border-radius: 8px;
-  background: #fff;
+  background: var(--panel-3);
   box-shadow: 0 12px 28px rgba(24,199,134,.18);
 }
 .brand-title {
@@ -120,7 +121,7 @@ a { color: inherit; text-decoration: none; }
   background:
     radial-gradient(circle at 78% 10%, rgba(24,199,134,.22), transparent 32%),
     radial-gradient(circle at 20% 14%, rgba(213,170,60,.14), transparent 28%),
-    linear-gradient(180deg, #07130f 0%, #0c2018 68%, #f6fbf8 68%, #f6fbf8 100%);
+    linear-gradient(180deg, #07130f 0%, #0c2018 68%, #edf7f2 68%, #edf7f2 100%);
 }
 .hero-grid {
   position: absolute;
@@ -213,7 +214,7 @@ h1 {
   padding: 30px;
   border: 1px solid rgba(24,199,134,.24);
   border-radius: var(--radius);
-  background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(236,250,243,.92));
+  background: linear-gradient(180deg, rgba(244,250,246,.96), rgba(225,243,235,.92));
   color: var(--ink);
   box-shadow: var(--shadow);
 }
@@ -235,7 +236,7 @@ h1 {
   font-size: 13px;
   font-weight: 800;
   color: var(--ink-muted);
-  background: rgba(255,255,255,.72);
+  background: rgba(237,247,242,.84);
 }
 .hero-points b { display: block; color: var(--ink); font-size: 15px; }
 
@@ -248,7 +249,7 @@ h1 {
   overflow: hidden;
   border: 1px solid var(--line-dark);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: #0a1712;
   box-shadow: 0 22px 54px rgba(7,19,15,.18);
 }
 .brand-banner-frame img {
@@ -291,7 +292,7 @@ h2 {
 .card {
   border: 1px solid var(--line-dark);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--white);
   padding: 26px;
   min-height: 210px;
   box-shadow: 0 14px 34px rgba(7,19,15,.06);
@@ -366,7 +367,7 @@ h2 {
 .price-card {
   border: 1px solid var(--line-dark);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--white);
   padding: 24px;
 }
 .price-card.featured {
@@ -395,6 +396,13 @@ h2 {
   font-size: 14px;
 }
 .price-card li + li { margin-top: 8px; }
+.pricing-note {
+  margin-top: 18px;
+  color: var(--ink-muted);
+  font-size: 14px;
+  font-weight: 750;
+}
+.pricing-note b { color: var(--green-3); }
 
 .steps {
   display: grid;
@@ -409,7 +417,7 @@ h2 {
   padding: 22px;
   border: 1px solid var(--line-dark);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--white);
 }
 .dark .step {
   border-color: var(--line);
@@ -456,7 +464,7 @@ h2 {
 .contact-card {
   border: 1px solid var(--line-dark);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--white);
   padding: 30px;
   box-shadow: 0 16px 38px rgba(7,19,15,.06);
 }
@@ -481,7 +489,7 @@ input, textarea, select {
   padding: 13px 14px;
   font: inherit;
   color: var(--ink);
-  background: #fbfffd;
+  background: #f4faf6;
   outline: none;
 }
 textarea { min-height: 120px; resize: vertical; }
@@ -549,12 +557,12 @@ footer {
   height: 32px;
   object-fit: contain;
   border-radius: 7px;
-  background: #fff;
+  background: var(--panel-3);
 }
 
 @media (max-width: 980px) {
   .links { display: none; }
-  .hero { min-height: auto; background: linear-gradient(180deg, #07130f 0%, #0c2018 78%, #f6fbf8 78%, #f6fbf8 100%); }
+  .hero { min-height: auto; background: linear-gradient(180deg, #07130f 0%, #0c2018 78%, #edf7f2 78%, #edf7f2 100%); }
   .hero-layout, .contact-wrap { grid-template-columns: 1fr; }
   .grid-3, .pricing, .platforms { grid-template-columns: 1fr; }
   .platform { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.12); }
@@ -731,28 +739,29 @@ footer {
         <article class="price-card featured">
           <div class="price-name">Gói Trung</div>
           <div class="price">50.000đ</div>
-          <div class="xu">500 Xu</div>
+          <div class="xu">500 Xu gốc + 30 Xu Launch Bonus lần đầu</div>
           <ul><li>Gói phổ biến cho creator cá nhân</li><li>Đủ dùng cho nhiều workflow nhỏ</li></ul>
         </article>
         <article class="price-card">
           <div class="price-name">Gói Tiêu Chuẩn</div>
           <div class="price">100.000đ</div>
-          <div class="xu">1.050 Xu - tặng 50 Xu</div>
+          <div class="xu">1.000 Xu gốc + 50 Xu Launch Bonus lần đầu</div>
           <ul><li>Bắt đầu làm content affiliate đều hơn</li><li>Phù hợp dùng hằng ngày</li></ul>
         </article>
         <article class="price-card">
           <div class="price-name">Gói Nâng Cao</div>
           <div class="price">200.000đ</div>
-          <div class="xu">2.150 Xu - tặng 150 Xu</div>
+          <div class="xu">2.000 Xu gốc + 150 Xu Launch Bonus lần đầu</div>
           <ul><li>Nhiều batch nội dung hơn</li><li>Phù hợp creator và shop nhỏ</li></ul>
         </article>
         <article class="price-card">
           <div class="price-name">Gói Doanh Nghiệp</div>
           <div class="price">500.000đ</div>
-          <div class="xu">5.500 Xu - tặng 500 Xu</div>
+          <div class="xu">5.000 Xu gốc + 500 Xu Launch Bonus lần đầu</div>
           <ul><li>Vận hành cường độ cao</li><li>Phù hợp team bán hàng số</li></ul>
         </article>
       </div>
+      <p class="pricing-note"><b>Launch Bonus</b> chỉ áp dụng 1 lần cho từng gói đủ điều kiện của mỗi tài khoản. Mã ưu đãi như FIRST30 có thể cộng thêm sau khi PayOS xác nhận thanh toán.</p>
     </div>
   </section>
 
