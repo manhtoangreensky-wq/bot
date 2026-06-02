@@ -567,6 +567,41 @@ Nguyên tắc:
 - Có phí riêng.
 - Có hợp đồng/phạm vi trách nhiệm riêng.
 
+### 9.4.1 Claude Ads Safety Checker — backlog admin-first
+
+Claude có thể được dùng trong tương lai như một lớp kiểm tra quảng cáo cho module Ads admin-first. Đây không phải quyền mở ads automation cho khách ở bot V1.
+
+Tên module tương lai:
+
+- Claude Ads Safety Checker
+
+Luồng tương lai:
+
+1. Bot tạo video script/caption/CTA.
+2. Claude kiểm tra từ khóa rủi ro, claim bị hạn chế, hứa hẹn quá đà, nhóm ngành nhạy cảm và policy risk theo nền tảng.
+3. Bot trả risk level: `SAFE`, `NEEDS_REWRITE`, hoặc `HIGH_RISK`.
+4. Bot gợi ý bản copy an toàn hơn.
+5. Admin review.
+6. Admin approve trước khi publish hoặc chạy ads.
+
+Command admin có thể thiết kế sau:
+
+- `/ads_check <caption>`
+- `/ads_rewrite <caption>`
+- `/ads_score <caption>`
+- `/ads_pack topic="..."`
+- `/ads_risk_report`
+
+Quy tắc bắt buộc:
+
+- Ads Assistant là admin-first.
+- Customer ads automation vẫn OFF mặc định.
+- Không tự launch quảng cáo.
+- Không thu mật khẩu.
+- Không thu/thay khách giữ payment card.
+- Không cam kết approval, doanh thu hoặc lợi nhuận.
+- Nếu mở cho khách sau này, phải có pricing, workflow, approval gate và quy định trách nhiệm riêng do admin duyệt.
+
 ---
 
 # 10. Core Foundation sau bot ổn định

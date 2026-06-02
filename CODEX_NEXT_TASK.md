@@ -69,6 +69,7 @@ Expected for 100k first purchase:
 - Affiliate vault.
 - Auto publish.
 - Ads assistant.
+- Claude Ads Safety Checker for future admin-first Ads module.
 - Customer social account connection.
 - Risk keyword checker.
 - Compliance checker.
@@ -84,6 +85,15 @@ Expected for 100k first purchase:
 - GitHub Copilot dev workflow.
 - Legal Docs Lite with OpenLaw/OpenLaws.
 - Legal templates for service contracts and warranty documents.
+
+## Future Ads Rule - Admin First
+
+- Claude Ads Safety Checker belongs to future TOAN AAS Lab/admin sandbox, not the current customer bot.
+- Possible future commands: `/ads_check`, `/ads_rewrite`, `/ads_score`, `/ads_pack`, `/ads_risk_report`.
+- Future flow: generate script/caption/CTA -> Claude safety check -> risk level `SAFE`/`NEEDS_REWRITE`/`HIGH_RISK` -> safer rewrite -> admin review -> admin approve.
+- Customer ads automation remains OFF by default.
+- No automatic ad launch, no password collection, no payment card collection, and no approval/revenue guarantee.
+- Customer-facing ads service can open later only if admin approves pricing, workflow, approval gate and responsibility rules.
 
 ## Future Publish Rule - Admin First
 

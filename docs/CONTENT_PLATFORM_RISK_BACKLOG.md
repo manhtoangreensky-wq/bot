@@ -120,3 +120,36 @@ Sensitive categories:
 - Sản phẩm bị hạn chế
 - Cam kết kết quả tuyệt đối
 - Before/after claims
+
+## Future Claude Ads Safety Checker
+
+Status: backlog only. Do not expose to current customer bot.
+
+Claude có thể dùng trong tương lai như Ads Safety Checker và Ads Copy Optimizer cho module Ads admin-first.
+
+Future flow:
+
+1. Bot generates video script/caption/CTA.
+2. Claude checks risky words, restricted claims, exaggerated promises, sensitive categories and platform policy risks.
+3. Bot returns risk level: `SAFE`, `NEEDS_REWRITE`, or `HIGH_RISK`.
+4. Bot suggests safer alternative copy.
+5. Admin reviews.
+6. Admin approves before posting or running ads.
+
+Possible future admin commands:
+
+- `/ads_check <caption>`
+- `/ads_rewrite <caption>`
+- `/ads_score <caption>`
+- `/ads_pack topic="..."`
+- `/ads_risk_report`
+
+Rules:
+
+- Ads Assistant is admin-first.
+- Customer ads automation remains OFF by default.
+- No automatic ad launch.
+- No password collection.
+- No payment card collection.
+- No guarantee of platform approval or revenue.
+- Customer-facing ads service can be opened later only if admin approves pricing, workflow and responsibility rules.
