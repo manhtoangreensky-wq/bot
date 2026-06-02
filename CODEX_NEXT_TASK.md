@@ -61,6 +61,16 @@ Expected for 50k + FIRST30:
 - Add templates for affiliate, product review, story, education, local service.
 - No render.
 
+## Option D2 - Head Brain Live Smoke
+
+- Run `/head_brain platform=tiktok days=30 limit=8`.
+- Run `/operator_launch topic="công nghệ AI kiếm tiền" platform=tiktok limit=1 build=1`.
+- Run `/worker_intake claim=1 include_prompt=1`.
+- Submit one real worker output or uploaded asset.
+- Run `/review_video job=<JOB_ID> send=1`.
+- Queue manual publish with `/approve_publish job=<JOB_ID> queue=1 mode=manual`.
+- Do not enable auto publish.
+
 ## Option E - AI Caption Variant Generator
 
 - Generate 5 hook/caption/CTA variants from winning posts.

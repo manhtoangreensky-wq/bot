@@ -53,6 +53,8 @@ Output should include:
 - no deepfake of real people
 - manual review required
 - age and legal compliance required before implementation
+- keep manual-only until an official, compliant adapter is explicitly approved
+- no hidden scraping, credential sharing, or platform-rule bypass
 
 ## Website / Landing
 
@@ -61,3 +63,18 @@ Output should include:
 - offer page
 - contact form
 - payment link
+
+## Control Brain Integration
+
+All platforms should flow through:
+
+1. channel readiness
+2. affiliate match
+3. job/task generation
+4. worker output
+5. review gate
+6. approve/publish queue
+7. performance tracking
+8. scale/fix/pause decision
+
+The default state is manual publishing. API publishing is allowed only when the adapter is official, configured, reviewed and `api_ready`.

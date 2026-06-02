@@ -3,7 +3,7 @@
 ## Compile
 
 - `py_compile`: PASS using Codex bundled Python on 2026-06-02.
-- `pytest -q`: PASS, 18 tests, 1 Starlette/httpx deprecation warning.
+- `pytest -q`: PASS, 19 tests, 1 Starlette/httpx deprecation warning.
 - Import test: PASS, `cmd_help` and `help_text_for_user` exist.
 - Step 7 import test: PASS, `cmd_growth_ai`, `cmd_campaign_report`, and report CSV helper exist.
 - Step 8 compile: PASS after provider status and sales readiness commands.
@@ -235,3 +235,13 @@
   1. Real Telegram verification for `/film`, `/addlink`, `/publish_done`, `/performance_report`.
   2. Real PayOS 10k payment test.
   3. Railway Volume persistence confirmation.
+
+## Head Brain Control Status
+
+- `/head_brain`: registered admin command for the control cockpit.
+- `/head_run`: registered admin command for safe preview/run cycles.
+- `/operator_contract`: registered admin command for the AI commander contract.
+- `/goal_audit`: registered admin command for completion and blocker audit.
+- Head brain default rule: create plans/jobs/tasks and stop at review/approve/publish gates.
+- Auto publish remains disabled unless a separate task explicitly enables an official adapter.
+- Operating doc: `docs/HEAD_BRAIN_OPERATING_SYSTEM.md`.

@@ -66,6 +66,23 @@ topic
 -> publish queue
 -> performance tracking
 
+## Head Brain Control
+
+The Video Factory is controlled through the head-brain layer, not by isolated commands.
+
+Recommended control sequence:
+
+1. `/head_brain platform=tiktok days=30 limit=8`
+2. `/operator_launch topic="<topic>" platform=tiktok limit=3 build=1`
+3. `/worker_intake claim=1 include_prompt=1`
+4. `/review_video job=<JOB_ID> send=1`
+5. `/approve_publish job=<JOB_ID> queue=1 mode=manual`
+6. `/publisher_handoff queue=<QUEUE_ID>` or official adapter if `api_ready`
+7. `/performance_add job=<JOB_ID> type=click value=<N>`
+8. `/affiliate_decisions days=30`
+
+See `docs/HEAD_BRAIN_OPERATING_SYSTEM.md` for the command/API contract.
+
 ## Policy
 
 - Do not copy a reference video directly.

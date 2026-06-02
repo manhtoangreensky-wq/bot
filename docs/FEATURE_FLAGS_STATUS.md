@@ -20,6 +20,7 @@ Source: `init_db()` defaults in `bot.py`.
 ## Required guardrails
 
 - Keep `auto_publish = 0` until admin explicitly approves a separate task.
+- Head brain may create plans, jobs, worker tasks and review packets while `auto_publish = 0`; it must stop at publish handoff or manual approval.
 - Keep `payos_dynamic = 1` only after PayOS ENV and real payment test pass.
 - Keep `trial_upsell = 1` because it supports revenue without adding new provider risk.
 - Do not add new feature flag schema in Step 8.

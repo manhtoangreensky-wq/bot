@@ -381,3 +381,36 @@ def test_ai_video_factory_prompt_gate_and_manifest_builder(monkeypatch):
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
+
+
+def test_head_brain_contract_keeps_review_and_publish_gates(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    monkeypatch.setattr(bot, "PUBLIC_BASE_URL", "https://example.com")
+    monkeypatch.setattr(bot, "OPERATOR_API_TOKEN", "operator-test-token")
+    try:
+        bot.init_db()
+        assert bot.is_feature_enabled("auto_publish") is False
+
+        cockpit = bot.operator_head_brain_cockpit_data("admin-only", days=1, platform="tiktok", limit=3)
+        assert cockpit["ok"] is True
+        assert cockpit["claude_next"]["read"].startswith("https://example.com/api/operator/head-brain")
+        assert "review" in cockpit["operator_commands"]
+        assert cockpit["operator_commands"]["approve"].startswith("/approve_publish")
+        assert any(lane["phase"] == "publish" for lane in cockpit["lanes"])
+        guardrails = "\n".join(cockpit["guardrails"]).lower()
+        assert "không tự publish" in guardrails
+        assert "admin chưa approve" in guardrails
+
+        contract = bot.operator_control_contract_data("admin-only", days=1, platform="onlyfans", limit=3)
+        gates = "\n".join(contract["non_negotiable_gates"]).lower()
+        assert "không auto publish" in gates
+        assert "consent" in gates
+        assert "18+" in gates
+        publish_phase = next(item for item in contract["lifecycle"] if item["phase"] == "publish")
+        assert "manual" in publish_phase["telegram"].lower() or "handoff" in publish_phase["telegram"].lower()
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
