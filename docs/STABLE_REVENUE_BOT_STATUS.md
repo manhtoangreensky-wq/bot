@@ -241,7 +241,7 @@
 - `/head_brain`: registered admin command for the control cockpit.
 - `/head_run`: registered admin command for safe preview/run cycles.
 - `/tao_video` and `/boss_video`: registered admin aliases for one-shot video order creation through the existing head-brain/operator launch pipeline.
-- `POST /api/operator/video-order`: machine-readable video order endpoint for Claude/n8n; returns worker/review/approve/publish/tracking handoff and keeps auto-publish off.
+- `POST /api/operator/video-order`: machine-readable video order endpoint for Claude/n8n; returns worker/review/approve/publish/tracking handoff, batch work orders, submit/upload URLs and a run card while keeping auto-publish off.
 - `/operator_contract`: registered admin command for the AI commander contract.
 - `/goal_audit`: registered admin command for completion and blocker audit.
 - Head brain default rule: create plans/jobs/tasks and stop at review/approve/publish gates.

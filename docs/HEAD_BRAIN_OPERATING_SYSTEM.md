@@ -89,6 +89,8 @@ It returns a machine-readable `video_order` with:
 
 - created job IDs
 - affiliate/campaign match
+- `work_orders` for the first jobs, including task id, worker prompt preview, submit/upload URLs, acceptance URL and review URL
+- `run_card` with the exact worker -> review -> approve -> publish handoff sequence
 - worker command
 - video brief command/API
 - review command/API

@@ -440,7 +440,21 @@ def test_video_order_api_returns_machine_readable_handoff(monkeypatch):
             "created_platforms": [kwargs.get("platform")],
             "created_jobs": [{"job_id": 101, "platform": kwargs.get("platform"), "title": topic, "score": 88}],
             "built_jobs": [{"job_id": 101}],
-            "video_work_orders": {"orders": [{"job_id": 101, "telegram": {"video_brief": "/video_brief job=101"}}]},
+            "video_work_orders": {"orders": [{
+                "job_id": 101,
+                "task_id": 202,
+                "platform": kwargs.get("platform"),
+                "topic": topic,
+                "scene_count": 5,
+                "duration_sec": 45,
+                "worker_prompt": "Create a compliant affiliate video with source tracking.",
+                "complete_url": "/api/operator/tasks/202/complete",
+                "upload_url": "/api/operator/tasks/202/upload",
+                "acceptance_url": "/api/operator/output-acceptance?job_id=101&task_id=202",
+                "review_url": "/api/operator/jobs/101/review-video",
+                "telegram": {"video_brief": "/video_brief job=101", "worker_pack": "/worker_pack job=101 task=202"},
+                "affiliate": {"product": "Test affiliate", "tracking_url": "https://example.com/r/7", "related_count": 2},
+            }]},
             "automation_next": {"worker_autorun": "/worker_autorun jobs=101 execute=1"},
             "launch_next": {
                 "first_job_id": 101,
@@ -471,4 +485,12 @@ def test_video_order_api_returns_machine_readable_handoff(monkeypatch):
     assert order["telegram"]["worker"] == "/worker_autorun jobs=101 execute=1"
     assert order["telegram"]["review"] == "/review_video job=101 send=1"
     assert order["telegram"]["approve"] == "/approve_publish job=101 queue=1 mode=manual"
+    assert order["telegram"]["work_orders"] == "/video_work_orders jobs=101 tool=claude"
     assert order["api"]["review_video"] == "/api/operator/jobs/101/review-video"
+    assert order["api"]["work_orders"] == "/api/operator/video-work-orders?job_ids=101&tool=claude"
+    assert order["work_orders"][0]["task_id"] == 202
+    assert order["work_orders"][0]["submit"]["upload"] == "/api/operator/tasks/202/upload"
+    assert order["work_orders"][0]["submit"]["complete"] == "/api/operator/tasks/202/complete"
+    assert order["run_card"]["state"] == "VIDEO_ORDER_CREATED"
+    assert order["run_card"]["sequence"][1]["action"] == "submit_real_video_or_scene_output"
+    assert order["run_card"]["sequence"][3]["telegram"] == "/approve_publish job=101 queue=1 mode=manual"

@@ -27720,6 +27720,61 @@ def boss_video_usage_text() -> str:
         "Rule: lệnh này chỉ tạo job/task/brief và dừng ở review/publish gate; không tự đăng nếu chưa approve."
     )
 
+def build_video_order_work_order_summary(order: dict) -> dict:
+    order = order or {}
+    job_id = safe_int(order.get("job_id"), 0)
+    task_id = safe_int(order.get("task_id"), 0)
+    telegram = order.get("telegram") or {}
+    affiliate = order.get("affiliate") or {}
+
+    complete_url = order.get("complete_url") or (f"/api/operator/tasks/{task_id}/complete" if task_id else "/api/operator/tasks/<TASK_ID>/complete")
+    upload_url = order.get("upload_url") or (f"/api/operator/tasks/{task_id}/upload" if task_id else "/api/operator/tasks/<TASK_ID>/upload")
+    acceptance_url = order.get("acceptance_url") or (
+        f"/api/operator/output-acceptance?job_id={job_id}&task_id={task_id}" if job_id and task_id else "/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>"
+    )
+    review_url = order.get("review_url") or (f"/api/operator/jobs/{job_id}/review-video" if job_id else "/api/operator/jobs/<JOB_ID>/review-video")
+
+    return {
+        "job_id": job_id,
+        "task_id": task_id,
+        "platform": order.get("platform"),
+        "topic": order.get("topic"),
+        "template": order.get("template"),
+        "duration_sec": order.get("duration_sec"),
+        "scene_count": order.get("scene_count") or 0,
+        "telegram": {
+            "video_brief": telegram.get("video_brief") or (f"/video_brief job={job_id}" if job_id else "/video_brief job=<JOB_ID>"),
+            "worker_pack": telegram.get("worker_pack") or (f"/worker_pack job={job_id}" if job_id else "/worker_pack job=<JOB_ID>"),
+            "task_prompt": telegram.get("task_prompt") or (f"/task_prompt id={task_id}" if task_id else "/task_prompt id=<TASK_ID>"),
+            "compose_video": telegram.get("compose_video") or (f"/compose_video job={job_id} voice=1" if job_id else "/compose_video job=<JOB_ID> voice=1"),
+            "review_video": telegram.get("review_video") or (f"/review_video job={job_id} send=1" if job_id else "/review_video job=<JOB_ID> send=1"),
+            "approve_publish": telegram.get("approve_publish") or (f"/approve_publish job={job_id} queue=1 mode=manual" if job_id else "/approve_publish job=<JOB_ID> queue=1 mode=manual"),
+        },
+        "api": {
+            "video_brief": order.get("video_brief_url") or (f"/api/operator/jobs/{job_id}/video-brief" if job_id else "/api/operator/jobs/<JOB_ID>/video-brief"),
+            "worker_pack": order.get("worker_pack_url") or (f"/api/operator/jobs/{job_id}/worker-pack" if job_id else "/api/operator/jobs/<JOB_ID>/worker-pack"),
+            "task_prompt": order.get("task_prompt_url") or (f"/api/operator/task-prompt?task_id={task_id}" if task_id else "/api/operator/task-prompt?task_id=<TASK_ID>"),
+            "complete": complete_url,
+            "upload": upload_url,
+            "acceptance": acceptance_url,
+            "review": review_url,
+            "compose_video": order.get("compose_video_url") or (f"/api/operator/jobs/{job_id}/compose-video" if job_id else "/api/operator/jobs/<JOB_ID>/compose-video"),
+        },
+        "submit": {
+            "complete": complete_url,
+            "upload": upload_url,
+            "required_status": "ready",
+            "asset_type": "final_video_or_scene_asset",
+        },
+        "affiliate": {
+            "product": affiliate.get("product") or "",
+            "tracking_url": affiliate.get("tracking_url") or "",
+            "related_count": affiliate.get("related_count") or 0,
+        },
+        "quality_gates": (order.get("quality_gates") or [])[:6],
+        "worker_prompt_preview": truncate_text(order.get("worker_prompt") or "", 700),
+    }
+
 def build_video_order_contract(topic: str, platform: str, channel: str, result: dict, source="telegram") -> dict:
     result = result or {}
     created_jobs = result.get("created_jobs") or []
@@ -27735,6 +27790,8 @@ def build_video_order_contract(topic: str, platform: str, channel: str, result: 
     first_order = video_orders[0] if video_orders else {}
     first_order_tg = first_order.get("telegram") or {}
     first_order_job_id = first_order.get("job_id") or first_job_id
+    work_order_summaries = [build_video_order_work_order_summary(item) for item in video_orders[:8]]
+    first_work_order = work_order_summaries[0] if work_order_summaries else {}
 
     worker_cmd = automation_next.get("worker_autorun") or (
         f"/worker_intake claim=1 include_prompt=1 job={first_job_id}" if first_job_id else "/worker_intake claim=1 include_prompt=1"
@@ -27750,6 +27807,11 @@ def build_video_order_contract(topic: str, platform: str, channel: str, result: 
     post_publish_cmd = telegram_next.get("post_publish") or (f"/post_publish job={first_job_id}" if first_job_id else "/post_publish job=<JOB_ID>")
     platform_text = ",".join(str(item).lower() for item in target_platforms) or str(platform or "").lower()
     onlyfans_manual = "onlyfans" in platform_text
+    job_ids_text = ",".join(str(item.get("job_id")) for item in created_jobs[:8] if item.get("job_id"))
+    work_orders_tg = f"/video_work_orders jobs={job_ids_text} tool=claude" if job_ids_text else "/video_work_orders tool=claude"
+    work_orders_api = f"/api/operator/video-work-orders?job_ids={job_ids_text}&tool=claude" if job_ids_text else "/api/operator/video-work-orders?tool=claude"
+    first_submit = (first_work_order.get("submit") or {}) if first_work_order else {}
+    first_api = (first_work_order.get("api") or {}) if first_work_order else {}
     return {
         "ok": True,
         "source": source,
@@ -27773,12 +27835,67 @@ def build_video_order_contract(topic: str, platform: str, channel: str, result: 
             }
             for item in created_jobs[:8]
         ],
+        "work_orders": work_order_summaries,
+        "run_card": {
+            "state": "VIDEO_ORDER_CREATED",
+            "next_actor": "tool_worker",
+            "next_action": "create_real_output_and_submit",
+            "batch": {
+                "telegram": work_orders_tg,
+                "api": work_orders_api,
+            },
+            "sequence": [
+                {
+                    "step": 1,
+                    "actor": "commander_or_worker",
+                    "action": "read_batch_work_orders_or_first_worker_pack",
+                    "telegram": work_orders_tg if work_order_summaries else worker_pack_cmd,
+                    "api": work_orders_api if work_order_summaries else f"/api/operator/jobs/{first_job_id}/worker-pack" if first_job_id else "/api/operator/jobs/<JOB_ID>/worker-pack",
+                },
+                {
+                    "step": 2,
+                    "actor": "tool_worker",
+                    "action": "submit_real_video_or_scene_output",
+                    "api": first_submit.get("upload") or first_submit.get("complete") or "/api/operator/tasks/<TASK_ID>/upload",
+                    "fallback_api": first_submit.get("complete") or "/api/operator/tasks/<TASK_ID>/complete",
+                },
+                {
+                    "step": 3,
+                    "actor": "reviewer",
+                    "action": "check_output_acceptance_and_review",
+                    "api": first_api.get("acceptance") or "/api/operator/output-acceptance?job_id=<JOB_ID>&task_id=<TASK_ID>",
+                    "telegram": review_cmd,
+                },
+                {
+                    "step": 4,
+                    "actor": "admin",
+                    "action": "approve_manual_publish_queue",
+                    "api": api_next.get("approve") or (f"/api/operator/jobs/{first_job_id}/approve" if first_job_id else "/api/operator/jobs/<JOB_ID>/approve"),
+                    "telegram": approve_cmd,
+                },
+                {
+                    "step": 5,
+                    "actor": "publisher",
+                    "action": "manual_or_official_api_handoff_only_after_approval",
+                    "api": "/api/operator/publish/next",
+                    "telegram": "/publisher_handoff queue=<QUEUE_ID>",
+                },
+                {
+                    "step": 6,
+                    "actor": "growth_analyst",
+                    "action": "record_performance_and_scale_decision",
+                    "api": "/api/operator/performance",
+                    "telegram": "/affiliate_decisions days=30",
+                },
+            ],
+        },
         "affiliate": result.get("affiliate") or {},
         "campaign": result.get("campaign") or {},
         "telegram": {
             "worker": worker_cmd,
             "video_brief": video_brief_cmd,
             "worker_pack": worker_pack_cmd,
+            "work_orders": work_orders_tg,
             "review": review_cmd,
             "approve": approve_cmd,
             "publish_handoff": "/publisher_handoff queue=<QUEUE_ID>",
@@ -27790,6 +27907,7 @@ def build_video_order_contract(topic: str, platform: str, channel: str, result: 
             "worker_intake": "/api/operator/worker-intake",
             "video_brief": api_next.get("video_brief") or (f"/api/operator/jobs/{first_job_id}/video-brief" if first_job_id else "/api/operator/jobs/<JOB_ID>/video-brief"),
             "worker_pack": f"/api/operator/jobs/{first_job_id}/worker-pack" if first_job_id else "/api/operator/jobs/<JOB_ID>/worker-pack",
+            "work_orders": work_orders_api,
             "review_video": api_next.get("review_video") or (f"/api/operator/jobs/{first_job_id}/review-video" if first_job_id else "/api/operator/jobs/<JOB_ID>/review-video"),
             "approve": api_next.get("approve") or (f"/api/operator/jobs/{first_job_id}/approve" if first_job_id else "/api/operator/jobs/<JOB_ID>/approve"),
             "publish_next": "/api/operator/publish/next",
@@ -27892,9 +28010,12 @@ async def cmd_tao_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         first_order_job_id = first_order.get("job_id")
         first_order_tg = first_order.get("telegram") or {}
         first_order_brief = first_order_tg.get("video_brief") or f"/video_brief job={first_order_job_id}"
+        batch_job_ids = ",".join(str(item.get("job_id")) for item in video_orders[:8] if item.get("job_id"))
+        batch_order_cmd = f"/video_work_orders jobs={batch_job_ids} tool=claude" if batch_job_ids else "/video_work_orders tool=claude"
         lines.append(
             "\n<b>Worker handoff:</b>\n"
             f"• Work orders: <b>{len(video_orders)}</b>\n"
+            f"• Batch: <code>{html.escape(batch_order_cmd)}</code>\n"
             f"• Brief: <code>{html.escape(first_order_brief)}</code>\n"
             f"• Worker pack: <code>/worker_pack job={first_order_job_id}</code>"
         )
