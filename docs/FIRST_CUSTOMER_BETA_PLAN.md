@@ -19,7 +19,7 @@ Date: 2026-06-02
 5. Ask the user to run `/beta_offer`.
 6. If using a controlled beta promo, send the code privately and ask the user to run `/promo <code>`.
 7. Ask the user to generate first content with `/film`.
-8. Ask the user to top up 10k or 50k through `/naptien` if they want more runs.
+8. Ask the user to top up 10k/20k for trial, or 50k+ if they want to use promo.
 9. User posts manually.
 10. User records post with `/publish_done`.
 11. User records metrics with `/performance_add`.
@@ -30,7 +30,7 @@ Date: 2026-06-02
 
 - 3-10 test users.
 - At least 3 successful topups.
-- One 20k+FIRST30 PayOS test credits exactly 260 Xu before wider beta.
+- One 50k+FIRST30 PayOS test credits exactly 650 Xu before wider beta.
 - `BETA50` remains limited/internal only.
 - No PayOS crediting errors.
 - No promo duplicate bonus.

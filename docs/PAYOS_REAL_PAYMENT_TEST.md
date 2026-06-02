@@ -9,7 +9,7 @@ Run real low-value PayOS payments before selling to customers.
 This test includes two paths:
 
 1. PayOS 10k without promo.
-2. PayOS 20k or higher with public promo `FIRST30`.
+2. PayOS 50k or higher with public promo `FIRST30`.
 
 `BETA50` is limited/internal only and should not be the broad public launch test.
 
@@ -68,13 +68,13 @@ User flow:
 /naptien
 ```
 
-Then select package `20k` or higher and pay the real QR.
+Then select package `50k` or higher and pay the real QR.
 
-Expected for 20k:
+Expected for 50k:
 
-- Base Xu: 200.
-- FIRST30 bonus Xu: 60.
-- Total Xu added: 260.
+- Base Xu: 500.
+- FIRST30 bonus Xu: 150.
+- Total Xu added: 650.
 - Promo bonus is added only after payment success.
 - `credit_events` contains one `payos_deposit` and one `promo_bonus`.
 - `promotion_redemptions.status` becomes `applied`.
@@ -104,7 +104,7 @@ Expected:
 ## Pass Criteria Before Public Sale
 
 - [ ] Real 10k PayOS payment PASS.
-- [ ] Real 20k+FIRST30 promo payment PASS.
+- [ ] Real 50k+FIRST30 promo payment PASS.
 - [ ] Duplicate protection PASS or manually reviewed.
 - [ ] Dashboard revenue updates once.
 - [ ] Promo bonus does not duplicate.

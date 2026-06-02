@@ -10,6 +10,7 @@ Date: 2026-06-02
 - Monthly/large package: `MONTHLY20`, +20% Xu.
 - Daily: `DAILY5`, +5% Xu.
 - Limited/internal: `BETA50`, +50% Xu, not broad public offer.
+- Public promo minimum top-up starts at 50k; 10k/20k are trial packages.
 
 ## Real Payment Test
 
@@ -21,13 +22,13 @@ Use a non-admin test user:
 /naptien
 ```
 
-Choose 20k or higher and pay the real PayOS QR.
+Choose 50k or higher and pay the real PayOS QR.
 
-Expected for 20k:
+Expected for 50k:
 
-- Base Xu: 200.
-- Promo bonus: 60.
-- Total credit: 260 Xu.
+- Base Xu: 500.
+- Promo bonus: 150.
+- Total credit: 650 Xu.
 - Duplicate webhook or `/checkpayos` replay does not add base or bonus again.
 
 ## Safety

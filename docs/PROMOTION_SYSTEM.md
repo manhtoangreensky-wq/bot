@@ -2,7 +2,7 @@
 
 ## Strategy
 
-Keep base pricing clear and stable. Promotions do not reduce PayOS amount; they grant extra Xu after successful payment.
+Keep base pricing clear and stable. Promotions do not change PayOS amount; they grant extra Xu after successful payment.
 
 ## User Flow
 
@@ -12,6 +12,8 @@ Keep base pricing clear and stable. Promotions do not reduce PayOS amount; they 
 4. User enters one code, for example `/promo FIRST30`.
 5. User runs `/naptien` and pays through PayOS.
 6. After PayOS success, the bot credits base Xu plus one promo bonus.
+
+Promo starts at 50k. The 10k/20k packages are trial/test packages and do not receive public promo bonus.
 
 ## Promo Types
 
@@ -39,11 +41,11 @@ Admin:
 
 ## Example
 
-20k = 200 Xu.
+50k = 500 Xu.
 
 FIRST30 = +30%.
 
-User receives 260 Xu total after PayOS success: 200 base Xu + 60 bonus Xu.
+User receives 650 Xu total after PayOS success: 500 base Xu + 150 bonus Xu.
 
 ## Safety
 

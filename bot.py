@@ -358,9 +358,9 @@ PROMO_POLICY_CODES = [
         "value": 30,
         "usage_limit": 1000,
         "per_user_limit": 1,
-        "min_amount_vnd": 20000,
+        "min_amount_vnd": 50000,
         "max_bonus_xu": 1500,
-        "note": "Nạp lần đầu +30% Xu",
+        "note": "Nạp lần đầu từ 50k +30% Xu",
     },
     {
         "code": PROMO_SECOND_TOPUP_CODE,
@@ -371,7 +371,7 @@ PROMO_POLICY_CODES = [
         "per_user_limit": 1,
         "min_amount_vnd": 50000,
         "max_bonus_xu": 800,
-        "note": "Nạp lần 2 +15% Xu",
+        "note": "Nạp lần 2 từ 50k +15% Xu",
     },
     {
         "code": PROMO_WEEKLY_CODE,
@@ -382,7 +382,7 @@ PROMO_POLICY_CODES = [
         "per_user_limit": 1,
         "min_amount_vnd": 50000,
         "max_bonus_xu": 500,
-        "note": "Ưu đãi tuần +10% Xu",
+        "note": "Ưu đãi tuần từ 50k +10% Xu",
     },
     {
         "code": PROMO_MONTHLY_CODE,
@@ -393,7 +393,7 @@ PROMO_POLICY_CODES = [
         "per_user_limit": 1,
         "min_amount_vnd": 100000,
         "max_bonus_xu": 1500,
-        "note": "Ưu đãi tháng +20% Xu cho gói lớn",
+        "note": "Ưu đãi tháng từ 100k +20% Xu",
     },
     {
         "code": PROMO_DAILY_CODE,
@@ -402,9 +402,9 @@ PROMO_POLICY_CODES = [
         "value": 5,
         "usage_limit": 10000,
         "per_user_limit": 1,
-        "min_amount_vnd": 20000,
+        "min_amount_vnd": 50000,
         "max_bonus_xu": 150,
-        "note": "Ưu đãi ngày +5% Xu",
+        "note": "Ưu đãi ngày từ 50k +5% Xu",
     },
     {
         "code": PROMO_BETA_LIMITED_CODE,
@@ -415,7 +415,7 @@ PROMO_POLICY_CODES = [
         "per_user_limit": 1,
         "min_amount_vnd": 50000,
         "max_bonus_xu": 1000,
-        "note": "Beta/internal limited +50% Xu",
+        "note": "Beta/internal từ 50k +50% Xu",
     },
 ]
 PROMO_LEGACY_DISABLE_CODES = ("SECOND20", "WEEKLY15", "DAILY10")
@@ -20531,9 +20531,10 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                     "• Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n"
                 )
             elif promo_attach.get("code") and promo_attach.get("reason") not in {"no_pending"}:
+                reason_text = promo_code_status_message(str(promo_attach.get("reason") or ""))
                 promo_line = (
                     f"⚠️ Mã <code>{html.escape(promo_attach.get('code') or '')}</code> chưa đủ điều kiện cho gói này "
-                    f"(<code>{html.escape(promo_attach.get('reason') or '')}</code>), đơn vẫn tạo bình thường.\n"
+                    f"({html.escape(reason_text)}), đơn vẫn tạo bình thường.\n"
                 )
             qr_text = (
                 f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
@@ -21341,7 +21342,7 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Gói trải nghiệm tài khoản mới</b>",
         "• Tạo tài khoản mới nhận 200 Xu trải nghiệm",
         "• Có thể thử 1 video basic trước khi nạp thêm",
-        "• Nạp lần đầu nên dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu mã còn hiệu lực",
+        "• Nạp lần đầu từ 50k nên dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu mã còn hiệu lực",
         "• <code>BETA50</code> chỉ dành cho nhóm test rất giới hạn hoặc nội bộ",
         "• Khuyến nghị bắt đầu bằng gói 50k hoặc 100k để đủ Xu chạy video/affiliate",
         "• Không cam kết doanh thu, công cụ giúp tạo nội dung nhanh hơn và có quy trình rõ hơn",
@@ -21393,17 +21394,18 @@ async def cmd_promo_seed_policy(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text(
         "✅ <b>Đã seed Promotion Policy V2.1</b>\n\n"
         "<b>Ưu đãi công khai:</b>\n"
-        "• <code>FIRST30</code> — nạp lần đầu +30%\n"
-        "• <code>SECOND15</code> — nạp lần 2 +15%\n"
-        "• <code>WEEKLY10</code> — ưu đãi tuần +10%\n"
-        "• <code>MONTHLY20</code> — ưu đãi tháng +20% cho gói lớn\n"
-        "• <code>DAILY5</code> — ưu đãi ngày +5%\n\n"
+        "• <code>FIRST30</code> — từ 50k +30%\n"
+        "• <code>SECOND15</code> — từ 50k +15%\n"
+        "• <code>WEEKLY10</code> — từ 50k +10%\n"
+        "• <code>DAILY5</code> — từ 50k +5%\n"
+        "• <code>MONTHLY20</code> — từ 100k +20%\n\n"
         "<b>Giới hạn:</b>\n"
-        "• <code>BETA50</code> — beta/internal +50%, không quảng bá rộng\n\n"
+        "• <code>BETA50</code> — từ 50k +50%, beta/internal giới hạn\n\n"
         "<b>Quy tắc:</b>\n"
+        "• Gói 10k/20k dùng để thử nghiệm, không áp dụng mã ưu đãi\n"
         "• Mỗi đơn chỉ dùng 1 mã\n"
         "• Không cộng dồn mã\n"
-        "• Không giảm tiền nạp, chỉ tặng thêm Xu\n\n"
+        "• Bonus Xu chỉ cộng sau khi PayOS thanh toán thành công\n\n"
         "Dùng: <code>/promo_list</code>",
         parse_mode="HTML",
     )
@@ -21442,8 +21444,8 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Xem ưu đãi đang có: <code>/khuyenmai</code>",
             "",
             "<b>Chính sách:</b>",
-            "• Không giảm tiền nạp",
-            "• Hệ thống tặng thêm Xu",
+            "• Ưu đãi áp dụng cho đơn nạp từ 50k",
+            "• Gói 10k/20k chỉ để thử nghiệm",
             "• Mỗi đơn chỉ áp dụng 1 mã",
             "• Không cộng dồn mã",
         ]
@@ -21481,7 +21483,7 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{replaced_line}"
             f"• Mã: <code>{norm_code}</code>\n"
             f"• Ưu đãi: <b>{html.escape(promo_public_label(info))}</b> khi nạp thành công\n"
-            f"• Điều kiện: nạp PayOS từ <b>{promo_min_amount(info):,}đ</b>\n"
+            f"• Áp dụng cho đơn nạp từ <b>{promo_min_amount(info):,}đ</b> trở lên\n"
             "• Không cộng dồn mã khác\n"
             "• Áp dụng cho lần nạp tiếp theo nếu đủ điều kiện\n\n"
             "Dùng <code>/naptien</code> để nạp Xu.",
@@ -21510,19 +21512,21 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "🎁 <b>ƯU ĐÃI TOAN AAS</b>",
         "",
-        "TOAN AAS không giảm giá nạp tiền.",
-        "Hệ thống tặng thêm Xu để bạn dùng được nhiều hơn.",
+        "🎁 Mã ưu đãi áp dụng cho đơn nạp từ 50.000đ trở lên.",
+        "Gói 10k/20k chỉ để thử nghiệm, không áp dụng mã ưu đãi.",
         "",
         f"🔥 <b>Nên dùng trước:</b> {html.escape(recommended)}",
         "",
         "<b>Thứ tự gợi ý:</b>",
-        "1. <code>FIRST30</code> — nạp lần đầu +30% Xu",
-        "2. <code>SECOND15</code> — nạp lần 2 +15% Xu",
-        "3. <code>MONTHLY20</code> — ưu đãi tháng +20% Xu cho gói lớn",
-        "4. <code>WEEKLY10</code> — ưu đãi tuần +10% Xu",
-        "5. <code>DAILY5</code> — ưu đãi ngày +5% Xu",
+        "1. <code>FIRST30</code> — nạp lần đầu từ 50k: +30% Xu",
+        "2. <code>SECOND15</code> — nạp lần 2 từ 50k: +15% Xu",
+        "3. <code>MONTHLY20</code> — ưu đãi tháng từ 100k: +20% Xu",
+        "4. <code>WEEKLY10</code> — ưu đãi tuần từ 50k: +10% Xu",
+        "5. <code>DAILY5</code> — ưu đãi ngày từ 50k: +5% Xu",
         "",
         "⚠️ <b>Quy tắc:</b>",
+        "• Ưu đãi bắt đầu từ gói 50k",
+        "• Gói 10k/20k chỉ để thử nghiệm, không áp dụng mã ưu đãi",
         "• Mỗi đơn nạp chỉ áp dụng 1 mã",
         "• Không cộng dồn mã",
         "• Mã mới sẽ thay mã đang chờ dùng",
@@ -21538,6 +21542,7 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.extend([
             "",
             f"🎫 Mã đang chờ áp dụng: <code>{html.escape(pending['promo']['code'])}</code>",
+            "Mã chỉ áp dụng nếu đơn nạp đủ điều kiện từ 50k.",
             "Nếu nhập mã khác, mã mới sẽ thay mã này.",
         ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -21587,7 +21592,7 @@ async def cmd_promo_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
     value = safe_int(data.get("value"), 0)
     if not code or promo_type not in {"percent_bonus", "fixed_bonus_xu", "service_discount_future"} or value <= 0:
         return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/promo_create code=FIRST30 type=percent_bonus value=30 limit=1000 per_user=1 min=20000 max_bonus=1500 note=...</code>",
+            "⚠️ Cú pháp: <code>/promo_create code=FIRST30 type=percent_bonus value=30 limit=1000 per_user=1 min=50000 max_bonus=1500 note=...</code>",
             parse_mode="HTML",
         )
     usage_limit = max(0, safe_int(data.get("limit") or data.get("usage_limit"), 0))
@@ -21679,12 +21684,14 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "🎁 <b>Chính sách ưu đãi:</b>",
         "• User mới nhận <b>200 Xu</b> trải nghiệm",
-        "• Nạp lần đầu dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu còn hiệu lực",
-        "• Nạp lần 2 dùng <code>SECOND15</code> để nhận thêm +15% Xu nếu còn hiệu lực",
-        "• Ưu đãi tuần: <code>WEEKLY10</code>",
-        "• Ưu đãi ngày: <code>DAILY5</code>",
-        "• Ưu đãi tháng/gói lớn: <code>MONTHLY20</code>",
-        "• Không giảm giá gốc, không cộng dồn mã, mỗi đơn chỉ dùng 1 mã",
+        "• Gói 10k/20k dùng để thử nghiệm",
+        "• Mã ưu đãi bắt đầu từ đơn nạp 50k",
+        "• <code>FIRST30</code>: nạp lần đầu từ 50k +30% Xu",
+        "• <code>SECOND15</code>: nạp lần 2 từ 50k +15% Xu",
+        "• <code>WEEKLY10</code>: ưu đãi tuần từ 50k +10% Xu",
+        "• <code>DAILY5</code>: ưu đãi ngày từ 50k +5% Xu",
+        "• <code>MONTHLY20</code>: ưu đãi tháng từ 100k +20% Xu",
+        "• Mỗi đơn chỉ dùng 1 mã, không cộng dồn",
         "",
         "Giá đã bao gồm chi phí AI, server, xử lý lỗi và vận hành hệ thống. Admin có thể tạo khuyến mãi theo từng thời điểm.",
     ]
@@ -21928,8 +21935,8 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
         "<b>B. Test Promo Policy V2.1</b>",
         "1. Admin chạy <code>/promo_seed_policy</code> hoặc <code>/promo_seed_beta</code>.",
         "2. User test khác chạy <code>/promo FIRST30</code>.",
-        "3. User test gọi <code>/naptien</code>, chọn gói 20k hoặc 50k và thanh toán PayOS.",
-        "4. Kỳ vọng user nhận Xu gốc + <b>30% bonus</b> sau thanh toán thành công.",
+        "3. User test gọi <code>/naptien</code>, chọn gói 50k và thanh toán PayOS.",
+        "4. Kỳ vọng user nhận <b>500 Xu gốc + 150 Xu bonus</b> sau thanh toán thành công.",
         "5. <code>BETA50</code> chỉ dùng beta/internal giới hạn, nên test với gói từ 50k.",
         "6. Gửi/replay cùng webhook/order nếu có môi trường an toàn: không cộng thêm Xu gốc hoặc bonus lần hai.",
         "",
@@ -22083,6 +22090,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending_text = (
             f"🎫 Mã đang áp dụng: <code>{html.escape(pending['promo']['code'])}</code> "
             f"({html.escape(promo_public_label(pending['promo']))})\n"
+            "Lưu ý: mã chỉ áp dụng nếu đơn nạp đủ điều kiện từ 50k.\n"
             "Lưu ý: nếu nhập mã khác, mã mới sẽ thay mã này.\n\n"
         )
     msg = (
@@ -22091,7 +22099,8 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🪙 Số dư hiện tại: <b>{credits} Xu</b>\n\n"
         f"🎁 <b>Có mã ưu đãi?</b>\n"
         f"Nhập <code>/promo FIRST30</code> trước khi chọn gói nạp.\n"
-        f"Hệ thống không giảm giá nạp, chỉ tặng thêm Xu sau khi thanh toán thành công.\n"
+        f"Ưu đãi áp dụng cho đơn nạp từ 50.000đ trở lên.\n"
+        f"Gói 10k/20k dùng để thử nghiệm, không áp dụng mã ưu đãi.\n"
         f"Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n\n"
         f"{pending_text}"
         f"<b>🛒 BẢNG GIÁ (1 Xu = 100đ):</b>\n"

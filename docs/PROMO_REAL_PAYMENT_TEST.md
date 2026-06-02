@@ -32,16 +32,16 @@ Expected:
 ## Payment Test
 
 1. Test user runs `/naptien`.
-2. Test user selects package `20k` or higher.
+2. Test user selects package `50k` or higher.
 3. Test user pays the PayOS QR.
 4. Wait for webhook or use `/checkpayos <order_code>`.
 5. Test user runs `/profile`.
 
-Expected for 20k + FIRST30:
+Expected for 50k + FIRST30:
 
-- 20k package adds 200 Xu.
-- FIRST30 adds 60 Xu.
-- Total new credit from this payment is 260 Xu.
+- 50k package adds 500 Xu.
+- FIRST30 adds 150 Xu.
+- Total new credit from this payment is 650 Xu.
 - `credit_events` has one `payos_deposit` and one `promo_bonus`.
 - `promotion_redemptions.status` becomes `applied`.
 

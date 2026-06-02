@@ -176,17 +176,17 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
         assert info["promo_type"] == "percent_bonus"
         assert info["value"] == 30
 
-        bot.create_order("123456789", user_id, 20000, 200)
-        processed, desc, paid_info = bot.process_payos_paid_order("123456789", 20000)
+        bot.create_order("123456789", user_id, 50000, 500)
+        processed, desc, paid_info = bot.process_payos_paid_order("123456789", 50000)
         assert processed is True
         assert desc == "success"
-        assert paid_info["promo_bonus"] == 60
+        assert paid_info["promo_bonus"] == 150
         assert paid_info["promo_code"] == "FIRST30"
 
         credits_after_paid, _, _ = bot.get_user(user_id)
-        assert credits_after_paid == initial_credits + 260
+        assert credits_after_paid == initial_credits + 650
 
-        processed, desc, _paid_info = bot.process_payos_paid_order("123456789", 20000)
+        processed, desc, _paid_info = bot.process_payos_paid_order("123456789", 50000)
         assert processed is False
         assert desc == "already_paid"
         credits_after_replay, _, _ = bot.get_user(user_id)

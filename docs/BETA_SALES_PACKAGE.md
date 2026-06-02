@@ -20,8 +20,8 @@ Sell to the first 3-10 beta users to validate real demand, payment flow, and the
 - For testing the bot.
 - Goal: user confirms the bot works and understands Xu.
 - Suggested commands: `/profile`, `/naptien`, `/film`, `/help`.
-- Optional controlled promo: if admin sends a private code, user runs `/promo <code>` before paying.
-- Public promo test expectation: 20k package with `FIRST30` gives 200 Xu plus 60 Xu promo = 260 Xu total.
+- Public promo does not apply to this trial package.
+- Public promo test expectation: 50k package with `FIRST30` gives 500 Xu plus 150 Xu promo = 650 Xu total.
 - `BETA50` is limited/internal only and should not be promoted broadly.
 
 ### Package 2 - Creator Start - 50k
@@ -29,6 +29,7 @@ Sell to the first 3-10 beta users to validate real demand, payment flow, and the
 - 500 Xu.
 - For creating script/caption content regularly.
 - Goal: user creates 5-10 content pieces.
+- First package eligible for public promo codes such as `FIRST30`.
 - Suggested commands: `/film`, `/addlink`, `/calendar`.
 
 ### Package 3 - Affiliate Builder - 100k

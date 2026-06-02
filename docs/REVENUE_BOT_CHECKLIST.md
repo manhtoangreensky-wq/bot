@@ -23,7 +23,7 @@
 - [ ] Missing checksum không tự cộng xu.
 - [ ] `/promo_seed_policy` admin tạo policy FIRST30/SECOND15/WEEKLY10/MONTHLY20/DAILY5/BETA50.
 - [ ] `/promo FIRST30` user kích hoạt trước khi nạp lần đầu.
-- [ ] 20k + FIRST30 cộng đúng 260 Xu.
+- [ ] 50k + FIRST30 cộng đúng 650 Xu.
 - [ ] Promo không cộng bonus trùng khi replay cùng order.
 - [ ] Manual fallback hoạt động.
 - [ ] Pending bill duyệt/từ chối đúng.

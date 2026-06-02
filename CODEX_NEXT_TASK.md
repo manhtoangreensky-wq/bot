@@ -22,17 +22,17 @@ Manual sequence:
 /promo_seed_policy
 /promo FIRST30
 /naptien
-# choose 20k or higher and pay real QR
+# choose 50k or higher and pay real QR
 /checkpayos <order_code>   # only if webhook has not credited yet
 /mark_payos_test pass order=<order_code> note="FIRST30 OK"
 /sales_ready
 ```
 
-Expected for 20k + FIRST30:
+Expected for 50k + FIRST30:
 
-- Base Xu: 200
-- Promo bonus: 60
-- Total Xu added: 260
+- Base Xu: 500
+- Promo bonus: 150
+- Total Xu added: 650
 - Duplicate webhook/checkpayos must not add base or bonus again.
 
 ## Option A - Run real PayOS 10k test manually
@@ -45,7 +45,7 @@ Expected for 20k + FIRST30:
 ## Option B - First customer beta launch
 
 - Open beta for 3-10 users.
-- Offer: 200 Xu trial + FIRST30 for first top-up while active.
+- Offer: 200 Xu trial + FIRST30 for first top-up from 50k while active.
 - Watch `/dashboard`, `/performance_report`, `/sales_ready`.
 
 ## Option C - Sales copy/posts
