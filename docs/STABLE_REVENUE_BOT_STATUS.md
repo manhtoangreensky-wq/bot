@@ -48,7 +48,7 @@
 - `/khuyenmai`, `/uudai`, `/promos`: user-facing promo guide and recommended use order.
 - Public codes: `FIRST30`, `SECOND15`, `MONTHLY20`, `WEEKLY10`, `DAILY5`.
 - `BETA50`: beta/internal limited, not broad public offer.
-- Launch Bonus: 50k +30 Xu, 100k +50 Xu, 200k +150 Xu, 500k +500 Xu, once per user/package after PayOS success.
+- Launch Bonus: 100k +50 Xu, 200k +150 Xu, 500k +500 Xu, once per user/package after PayOS success. 50k is promo-eligible but has no Launch Bonus.
 - Launch Bonus storage: `launch_bonus_redemptions` keeps `user_id + package_amount_vnd` unique, with base/bonus/order/note fields for audit.
 - Gift codes: `/gift`, `/nhanqua`, and gift-type `/promo` credit Xu immediately when valid.
 - Admin gift commands: `/gift_create`, `/gift_seed_beta`, `/gift_list`, `/gift_disable`.

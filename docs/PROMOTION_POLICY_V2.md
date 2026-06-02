@@ -47,12 +47,13 @@ Reason:
 
 | Package | Launch Bonus | Rule |
 |---|---:|---|
-| 50k | +30 Xu | Once per user/package |
 | 100k | +50 Xu | Once per user/package |
 | 200k | +150 Xu | Once per user/package |
 | 500k | +500 Xu | Once per user/package |
 
 Launch Bonus is not a promo code. It is credited only after PayOS success.
+
+The 50k package is the first promo-eligible package, but it does not receive Launch Bonus.
 
 ## Gift Codes
 

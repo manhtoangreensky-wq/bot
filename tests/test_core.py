@@ -78,24 +78,30 @@ def test_launch_bonus_once_per_user_package(monkeypatch):
             payos_columns = {row[1] for row in conn.execute("PRAGMA table_info(payos_orders)").fetchall()}
             assert {"package_amount_vnd", "base_xu", "launch_bonus_xu"}.issubset(payos_columns)
 
-            first = bot.calculate_package_credit_for_user("u1", 50000, conn=conn)
-            assert first["base_xu"] == 500
-            assert first["launch_bonus_xu"] == 30
-            assert first["launch_bonus_eligible"] is True
-            assert first["launch_bonus_available"] == 30
-            bot.create_order("order-preview", "u1", 50000, first["total_xu"], base_xu=first["base_xu"], launch_bonus_xu=first["launch_bonus_xu"], package_amount_vnd=50000)
-            row = conn.execute("SELECT xu, package_amount_vnd, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code='order-preview'").fetchone()
-            assert row == (530, 50000, 500, 30)
+            fifty = bot.calculate_package_credit_for_user("u1", 50000, conn=conn)
+            assert fifty["base_xu"] == 500
+            assert fifty["launch_bonus_xu"] == 0
+            assert fifty["launch_bonus_eligible"] is False
+            assert fifty["launch_bonus_available"] == 0
 
-            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-1", 50000) == 30
+            first = bot.calculate_package_credit_for_user("u1", 100000, conn=conn)
+            assert first["base_xu"] == 1000
+            assert first["launch_bonus_xu"] == 50
+            assert first["launch_bonus_eligible"] is True
+            assert first["launch_bonus_available"] == 50
+            bot.create_order("order-preview", "u1", 100000, first["total_xu"], base_xu=first["base_xu"], launch_bonus_xu=first["launch_bonus_xu"], package_amount_vnd=100000)
+            row = conn.execute("SELECT xu, package_amount_vnd, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code='order-preview'").fetchone()
+            assert row == (1050, 100000, 1000, 50)
+
+            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-1", 100000) == 50
             conn.commit()
-            repeat = bot.calculate_package_credit_for_user("u1", 50000, conn=conn)
+            repeat = bot.calculate_package_credit_for_user("u1", 100000, conn=conn)
             assert repeat["launch_bonus_xu"] == 0
             assert repeat["launch_bonus_eligible"] is False
-            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-dup", 50000) == 0
+            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-dup", 100000) == 0
 
-            other_package = bot.calculate_package_credit_for_user("u1", 100000, conn=conn)
-            assert other_package["launch_bonus_xu"] == 50
+            other_package = bot.calculate_package_credit_for_user("u1", 200000, conn=conn)
+            assert other_package["launch_bonus_xu"] == 150
         finally:
             conn.close()
     finally:
@@ -241,10 +247,10 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
         assert desc == "success"
         assert paid_info["promo_bonus"] == 150
         assert paid_info["promo_code"] == "FIRST30"
-        assert paid_info["launch_bonus"] == 30
+        assert paid_info["launch_bonus"] == 0
 
         credits_after_paid, _, _ = bot.get_user(user_id)
-        assert credits_after_paid == initial_credits + 680
+        assert credits_after_paid == initial_credits + 650
 
         processed, desc, _paid_info = bot.process_payos_paid_order("123456789", 50000)
         assert processed is False
@@ -266,21 +272,21 @@ def test_launch_bonus_once_per_user_package(monkeypatch):
         user_id = "launch-user"
         initial_credits, _, _ = bot.get_user(user_id)
 
-        bot.create_order("500001", user_id, 50000, 500)
-        processed, desc, paid_info = bot.process_payos_paid_order("500001", 50000)
+        bot.create_order("100001", user_id, 100000, 1000)
+        processed, desc, paid_info = bot.process_payos_paid_order("100001", 100000)
         assert processed is True
         assert desc == "success"
-        assert paid_info["launch_bonus"] == 30
+        assert paid_info["launch_bonus"] == 50
         credits_after_first, _, _ = bot.get_user(user_id)
-        assert credits_after_first == initial_credits + 530
+        assert credits_after_first == initial_credits + 1050
 
-        bot.create_order("500002", user_id, 50000, 500)
-        processed, desc, paid_info = bot.process_payos_paid_order("500002", 50000)
+        bot.create_order("100002", user_id, 100000, 1000)
+        processed, desc, paid_info = bot.process_payos_paid_order("100002", 100000)
         assert processed is True
         assert desc == "success"
         assert paid_info["launch_bonus"] == 0
         credits_after_second, _, _ = bot.get_user(user_id)
-        assert credits_after_second == credits_after_first + 500
+        assert credits_after_second == credits_after_first + 1000
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)

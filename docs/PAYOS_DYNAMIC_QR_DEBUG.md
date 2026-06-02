@@ -15,7 +15,8 @@ Run after deploy:
 Then select:
 
 - 10k: expected 100 Xu, no Launch Bonus, no promo.
-- 50k: expected 500 Xu base plus 30 Xu Launch Bonus on first purchase of the 50k package.
+- 50k: expected 500 Xu base. This package is promo-eligible but has no Launch Bonus.
+- 100k: expected 1,000 Xu base plus 50 Xu Launch Bonus on first purchase of the 100k package.
 
 ## Expected Debug PASS
 

@@ -27,9 +27,9 @@ Choose 50k or higher and pay the real PayOS QR.
 Expected for 50k:
 
 - Base Xu: 500.
-- Launch Bonus: 30 if this is the user's first 50k package purchase.
+- Launch Bonus: 0 for 50k. This package is promo-eligible but has no Launch Bonus.
 - Promo bonus: 150.
-- Total credit: 680 Xu for a first 50k package purchase; 650 Xu if Launch Bonus was already used for 50k.
+- Total credit: 650 Xu.
 - Duplicate webhook or `/checkpayos` replay does not add base or bonus again.
 
 ## Safety

@@ -343,7 +343,6 @@ TRIAL_CREDITS     = 200
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
 LAUNCH_BONUS_BY_AMOUNT = {
-    50000: 30,
     100000: 50,
     200000: 150,
     500000: 500,
@@ -21170,6 +21169,234 @@ INTERNAL_CUSTOMER_FEATURE_TEXT = (
     "để tạo kịch bản, caption, prompt cảnh, hashtag và CTA."
 )
 
+CUSTOMER_GUIDE_SECTIONS = [
+    (
+        "start",
+        "Đọc trước",
+        (
+            "📘 <b>TOAN AAS dùng để làm gì?</b>\n\n"
+            "TOAN AAS là bot Telegram gom các công cụ AI vào một quy trình dễ dùng. "
+            "Bạn không cần mở nhiều web, tự nghĩ prompt, tự sửa caption và tự chia cảnh từ đầu.\n\n"
+            "<b>Luồng chính:</b>\n"
+            "1. Bạn nói mục tiêu, chủ đề hoặc sản phẩm.\n"
+            "2. Bot tạo ý tưởng, kịch bản, storyboard, scene prompt, caption, hashtag và CTA.\n"
+            "3. Bạn kiểm tra, sửa lại theo thương hiệu/sản phẩm thật.\n"
+            "4. Bạn tự dùng nội dung đó để tạo video/voice/ảnh hoặc đăng lên kênh của mình.\n"
+            "5. Sau khi đăng, bạn có thể đưa số liệu thủ công để bot gợi ý cải thiện.\n\n"
+            "<b>Phạm vi hiện tại:</b>\n"
+            "TOAN AAS tạo nội dung/video pack để bạn tự đăng. Bot chưa tự đăng bài, chưa kết nối tài khoản mạng xã hội, "
+            "chưa chạy quảng cáo hộ khách và không nhận mật khẩu/thẻ thanh toán của khách."
+        ),
+    ),
+    (
+        "quick",
+        "Dùng nhanh",
+        (
+            "⚡ <b>Luồng dùng nhanh cho người mới</b>\n\n"
+            "1. Mở Telegram và tìm <b>@toanaasbot</b>.\n"
+            "2. Bấm START hoặc gõ <code>/start</code>.\n"
+            "3. Gõ <code>/profile</code> để xem số Xu.\n"
+            "4. Gõ <code>/khuyenmai</code> để xem ưu đãi.\n"
+            "5. Nếu muốn nạp Xu, gõ <code>/naptien</code> và chọn gói.\n"
+            "6. Nếu muốn tạo nội dung video, gõ <code>/film chủ đề của bạn</code>.\n\n"
+            "<b>Ví dụ:</b>\n"
+            "<code>/film review máy xay sinh tố mini cho mẹ bỉm, đăng TikTok, giọng gần gũi, mục tiêu bán hàng</code>\n\n"
+            "Nếu không nhớ lệnh, gõ <code>/help</code> hoặc <code>/huongdan</code>."
+        ),
+    ),
+    (
+        "commands",
+        "Bảng lệnh",
+        (
+            "🧭 <b>Muốn làm gì thì dùng lệnh nào?</b>\n\n"
+            "• Xem menu: <code>/start</code>, <code>/menu</code>, <code>/help</code>\n"
+            "• Xem số Xu: <code>/profile</code>\n"
+            "• Xem bảng giá: <code>/pricing</code> hoặc <code>/banggia</code>\n"
+            "• Xem ưu đãi: <code>/khuyenmai</code>, <code>/uudai</code>, <code>/promos</code>\n"
+            "• Nhập mã ưu đãi nạp: <code>/promo FIRST30</code>\n"
+            "• Nhận mã quà tặng: <code>/gift BETA100</code> hoặc <code>/nhanqua BETA100</code>\n"
+            "• Nạp Xu: <code>/naptien</code>\n"
+            "• Tạo script/prompt/caption video: <code>/film &lt;chủ đề&gt;</code>\n"
+            "• Phân tích hook/caption/CTA: <code>/growth_ai</code>\n"
+            "• Báo cáo thủ công: <code>/campaign_report</code>\n"
+            "• Góp ý/báo lỗi: <code>/gopy nội dung</code>\n\n"
+            "Bạn cũng có thể hỏi AI trực tiếp bằng cách nhắn câu hỏi vào bot."
+        ),
+    ),
+    (
+        "credits",
+        "Xu, nạp tiền, ưu đãi",
+        (
+            "💳 <b>Xu, gói nạp và ưu đãi</b>\n\n"
+            "Xu là số dư trong bot. User mới nhận <b>200 Xu trải nghiệm</b>.\n\n"
+            "<b>Gói nạp:</b>\n"
+            "• 10.000đ → 100 Xu, dùng thử\n"
+            "• 20.000đ → 200 Xu, dùng thử thêm\n"
+            "• 50.000đ → 500 Xu, bắt đầu dùng promo\n"
+            "• 100.000đ → 1.000 Xu + 50 Xu Launch Bonus nếu lần đầu mua gói 100k\n"
+            "• 200.000đ → 2.000 Xu + 150 Xu Launch Bonus nếu lần đầu mua gói 200k\n"
+            "• 500.000đ → 5.000 Xu + 500 Xu Launch Bonus nếu lần đầu mua gói 500k\n\n"
+            "<b>Promo code nạp tiền:</b>\n"
+            "Nhập <code>/promo FIRST30</code> trước khi nạp. Promo áp dụng từ gói 50k, mỗi đơn chỉ dùng 1 mã, "
+            "không cộng dồn và chỉ cộng Xu sau khi thanh toán thành công.\n\n"
+            "<b>Gift code:</b>\n"
+            "Nhập <code>/gift BETA100</code> hoặc <code>/nhanqua BETA100</code>. Nếu mã hợp lệ, Xu cộng ngay."
+        ),
+    ),
+    (
+        "topup",
+        "Cách nạp Xu",
+        (
+            "🏦 <b>Cách nạp Xu từng bước</b>\n\n"
+            "<b>PayOS QR động:</b>\n"
+            "1. Gõ <code>/naptien</code>.\n"
+            "2. Nếu có mã ưu đãi, nhập mã trước, ví dụ <code>/promo FIRST30</code>.\n"
+            "3. Chọn gói muốn nạp.\n"
+            "4. Bot tạo link/QR thanh toán.\n"
+            "5. Mở app ngân hàng, quét QR hoặc bấm link thanh toán.\n"
+            "6. Thanh toán đúng số tiền và chờ hệ thống cộng Xu.\n"
+            "7. Gõ <code>/profile</code> để kiểm tra số dư.\n\n"
+            "<b>Khi cổng tự động bận:</b>\n"
+            "Bot sẽ gửi QR thủ công. Bạn chuyển đúng số tiền với nội dung:\n"
+            "<code>AAS &lt;ID Telegram&gt; &lt;Mã đơn&gt;</code>\n\n"
+            "Sau đó chụp bill và gửi lại trong chat để admin kiểm tra."
+        ),
+    ),
+    (
+        "film",
+        "Làm video review",
+        (
+            "🎬 <b>Quy trình tạo video review để tự đăng</b>\n\n"
+            "<b>Chuẩn bị 5 thông tin:</b>\n"
+            "1. Sản phẩm/chủ đề là gì?\n"
+            "2. Khách hàng mục tiêu là ai?\n"
+            "3. Đăng ở đâu: TikTok, Facebook Reels hay YouTube Shorts?\n"
+            "4. Giọng văn: gần gũi, chuyên gia, hài hước, sang trọng?\n"
+            "5. Có link sản phẩm không? Nếu có, dán trực tiếp vào prompt.\n\n"
+            "<b>Lệnh mẫu:</b>\n"
+            "<code>/film topic=\"review máy xay sinh tố mini cho mẹ bỉm\" platform=\"tiktok\" tone=\"gần gũi\" goal=\"bán hàng\" link=\"https://...\"</code>\n\n"
+            "<b>Bot thường trả về:</b>\n"
+            "ý tưởng video, hook 3 giây đầu, kịch bản nói, storyboard, scene prompt, caption, hashtag và CTA.\n\n"
+            "<b>Sau khi nhận kết quả:</b>\n"
+            "đọc lại, sửa tên sản phẩm/giá/ưu đãi nếu cần, copy script/prompt/caption để tự quay, dựng hoặc đăng."
+        ),
+    ),
+    (
+        "daily",
+        "Làm đều mỗi ngày",
+        (
+            "📅 <b>Quy trình 3 video/ngày cho một sản phẩm</b>\n\n"
+            "<b>Buổi sáng:</b>\n"
+            "<code>/film cho tôi 3 ý tưởng video ngắn về [sản phẩm], mỗi video 30 giây, đăng TikTok, mục tiêu kéo tương tác và inbox</code>\n\n"
+            "<b>Buổi trưa:</b>\n"
+            "Chọn 1 ý tưởng dễ làm nhất, dùng script để quay/tạo video, tạo voice nếu cần, ghép subtitle.\n\n"
+            "<b>Buổi tối:</b>\n"
+            "Đăng video, lưu link bài đăng, hôm sau ghi lại view/like/comment/click/inbox/doanh thu nếu có.\n\n"
+            "Sau đó dùng <code>/growth_ai</code> hoặc hỏi tự nhiên để bot gợi ý hook, caption, CTA và ý tưởng tiếp theo."
+        ),
+    ),
+    (
+        "media",
+        "Audio, voice, ảnh",
+        (
+            "🎙️ <b>Audio, voice, ảnh và prompt hình ảnh</b>\n\n"
+            "<b>Bóc băng audio/video:</b>\n"
+            "Gửi voice/mp3/m4a hoặc file phù hợp vào bot. Sau khi có transcript, bạn có thể yêu cầu:\n"
+            "<code>Tóm tắt đoạn này thành 5 ý chính, rồi viết lại thành script TikTok 30 giây</code>\n\n"
+            "<b>Tạo voice-off:</b>\n"
+            "Tạo script bằng <code>/film</code>, kiểm tra câu ngắn dễ nghe, rồi dùng công cụ voice/TTS trong bot nếu menu hỗ trợ.\n\n"
+            "<b>Ảnh/tách nền/prompt thumbnail:</b>\n"
+            "Gửi ảnh nếu cần tách nền. Nếu cần prompt ảnh, hỏi:\n"
+            "<code>Viết prompt tạo ảnh thumbnail TikTok cho sản phẩm [tên sản phẩm], nền sáng, bố cục rõ, có khoảng trống để thêm chữ</code>"
+        ),
+    ),
+    (
+        "optimize",
+        "Tối ưu sau khi đăng",
+        (
+            "📈 <b>Tối ưu bài đã đăng</b>\n\n"
+            "Sau khi tự đăng video, hãy ghi lại:\n"
+            "• link bài đăng\n"
+            "• nền tảng\n"
+            "• view, like, comment, share\n"
+            "• click link hoặc inbox nếu có\n"
+            "• doanh thu nếu có\n\n"
+            "<b>Ví dụ hỏi bot:</b>\n"
+            "<code>Video của tôi có 3000 view, 120 like, 8 comment, 5 share, 15 click nhưng chưa có đơn. Hãy phân tích lý do và gợi ý 5 video tiếp theo</code>\n\n"
+            "Bot có thể giúp sửa hook, đổi góc nội dung, viết CTA mạnh hơn, chọn ý tưởng tiếp theo và gợi ý caption/hashtag mới."
+        ),
+    ),
+    (
+        "rules",
+        "Checklist & giới hạn",
+        (
+            "✅ <b>Checklist trước khi đăng</b>\n\n"
+            "• Video có hook trong 3 giây đầu chưa?\n"
+            "• Người xem có hiểu sản phẩm giải quyết vấn đề gì không?\n"
+            "• Có nói quá đà hoặc cam kết tuyệt đối không?\n"
+            "• Có CTA chưa?\n"
+            "• Caption có rõ lợi ích không?\n"
+            "• Hashtag có liên quan không?\n"
+            "• Âm thanh/subtitle có dễ nghe, dễ đọc không?\n"
+            "• Có dùng hình/giọng/người thật khi chưa có quyền không?\n\n"
+            "<b>TOAN AAS hiện chưa làm cho khách:</b>\n"
+            "• chưa tự đăng bài\n"
+            "• chưa kết nối tài khoản Facebook/TikTok/YouTube\n"
+            "• chưa chạy quảng cáo hộ khách\n"
+            "• chưa cam kết doanh thu\n"
+            "• kho affiliate/link store là phần admin/internal/backlog, chưa public cho khách\n\n"
+            "Khách hiện nhận được: script, prompt, caption, hashtag, CTA và hướng tối ưu để tự đăng."
+        ),
+    ),
+]
+
+CUSTOMER_GUIDE_LOOKUP = {key: (idx + 1, title, body) for idx, (key, title, body) in enumerate(CUSTOMER_GUIDE_SECTIONS)}
+
+def guide_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    row = []
+    for idx, (key, title, _body) in enumerate(CUSTOMER_GUIDE_SECTIONS, start=1):
+        row.append(InlineKeyboardButton(str(idx), callback_data=f"menu|guide_{key}"))
+        if len(row) == 5:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def guide_index_text() -> str:
+    lines = [
+        "📘 <b>HƯỚNG DẪN SỬ DỤNG TOAN AAS</b>",
+        "",
+        "Bot tạo nội dung, script, prompt, caption, hashtag, CTA, voice/media pack để bạn tự đăng lên Facebook, TikTok, YouTube.",
+        "",
+        "<b>Mục lục:</b>",
+    ]
+    for idx, (_key, title, _body) in enumerate(CUSTOMER_GUIDE_SECTIONS, start=1):
+        lines.append(f"{idx}. {html.escape(title)} — <code>/huongdan {idx}</code>")
+    lines.extend([
+        "",
+        "Nên bắt đầu: <code>/huongdan 2</code> rồi dùng <code>/film chủ đề</code>.",
+        "Lưu ý: hiện chưa tự đăng bài, chưa kết nối tài khoản MXH và chưa chạy quảng cáo hộ khách.",
+    ])
+    return "\n".join(lines)
+
+def guide_section_text(section_key_or_number: str) -> str:
+    raw = (section_key_or_number or "").strip().lower()
+    selected = None
+    if raw.isdigit():
+        idx = int(raw)
+        if 1 <= idx <= len(CUSTOMER_GUIDE_SECTIONS):
+            key, title, body = CUSTOMER_GUIDE_SECTIONS[idx - 1]
+            selected = (idx, title, body)
+    elif raw in CUSTOMER_GUIDE_LOOKUP:
+        selected = CUSTOMER_GUIDE_LOOKUP[raw]
+    if not selected:
+        return guide_index_text()
+    idx, title, body = selected
+    return f"📘 <b>Hướng dẫn {idx}: {html.escape(title)}</b>\n\n{body}\n\nMục lục: <code>/huongdan</code>"
+
 async def reply_internal_customer_feature(update: Update):
     return await update.message.reply_text(INTERNAL_CUSTOMER_FEATURE_TEXT, parse_mode="HTML")
 
@@ -21186,13 +21413,14 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video Factory", callback_data="menu|video_factory")],
             [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
             [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
-            [InlineKeyboardButton("💳 Billing", callback_data="menu|billing"), InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
+            [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("💳 Billing", callback_data="menu|billing")],
+            [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
         ]
     else:
         rows = [
             [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video AI", callback_data="menu|video_factory")],
             [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|billing"), InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing")],
-            [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
+            [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
         ]
     return InlineKeyboardMarkup(rows)
 
@@ -21407,6 +21635,7 @@ def menu_text_support() -> str:
     return (
         "🛟 <b>Hỗ Trợ</b>\n\n"
         "• Hướng dẫn nhanh: <code>/help</code> hoặc <code>/commands</code>\n"
+        "• Hướng dẫn chi tiết: <code>/huongdan</code> hoặc <code>/guide</code>\n"
         "• Góp ý/báo lỗi: <code>/gopy nội dung</code>\n"
         "• Thiếu xu: mở <code>/naptien</code> và chọn gói.\n"
         "• PayOS chưa cộng: chờ webhook hoặc gửi bill thủ công bằng <code>/thucong</code>.\n"
@@ -21447,6 +21676,10 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_billing(is_admin), menu_nav_keyboard("billing", is_admin)
     if action == "support":
         return menu_text_support(), menu_nav_keyboard("support", is_admin)
+    if action == "guide":
+        return guide_index_text(), guide_keyboard()
+    if action.startswith("guide_"):
+        return guide_section_text(action.replace("guide_", "", 1)), guide_keyboard()
     if action.startswith("hint_"):
         section, hint = menu_hint_text(action)
         return hint, menu_nav_keyboard(section, is_admin)
@@ -21502,6 +21735,7 @@ def help_text_for_user(user_id) -> str:
         "🎁 Tài khoản mới nhận <b>200 Xu trải nghiệm</b>, đủ để thử 1 lượt <code>/film</code> Basic.\n\n"
         "<b>1. Tài khoản & nạp Xu</b>\n"
         "• <code>/profile</code> — xem số dư, VIP, referral\n"
+        "• <code>/huongdan</code> hoặc <code>/guide</code> — xem hướng dẫn sử dụng chi tiết\n"
         "• <code>/naptien</code> — tạo QR nạp Xu\n"
         "• <code>/khuyenmai</code> hoặc <code>/uudai</code> — xem ưu đãi nên dùng\n"
         "• <code>/promo &lt;mã&gt;</code> hoặc <code>/magiamgia &lt;mã&gt;</code> — lưu mã ưu đãi cho lần nạp tiếp theo\n"
@@ -21551,6 +21785,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         help_text_for_user(uid),
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(is_admin_user(uid)),
+    )
+
+async def cmd_huongdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    section = context.args[0] if context.args else ""
+    await update.message.reply_text(
+        guide_section_text(section),
+        parse_mode="HTML",
+        reply_markup=guide_keyboard(),
     )
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -21813,7 +22055,7 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Tạo tài khoản mới nhận 200 Xu trải nghiệm",
         "• Có thể thử 1 video basic trước khi nạp thêm",
         "• Nạp lần đầu từ 50k nên dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu mã còn hiệu lực",
-        "• Gói 50k/100k/200k/500k có Launch Bonus lần đầu mua từng gói",
+        "• Gói 100k/200k/500k có Launch Bonus lần đầu mua từng gói",
         "• <code>BETA50</code> chỉ dành cho nhóm test rất giới hạn hoặc nội bộ",
         "• Khuyến nghị bắt đầu bằng gói 50k hoặc 100k để đủ Xu tạo nhiều Content Pack",
         "• Không cam kết doanh thu, công cụ giúp tạo nội dung nhanh hơn và có quy trình rõ hơn",
@@ -22018,7 +22260,6 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "5. <code>DAILY5</code> — ưu đãi ngày từ 50k: +5% Xu",
         "",
         "🎁 <b>Launch Bonus theo gói:</b>",
-        "• Lần đầu mua gói 50k: +30 Xu",
         "• Lần đầu mua gói 100k: +50 Xu",
         "• Lần đầu mua gói 200k: +150 Xu",
         "• Lần đầu mua gói 500k: +500 Xu",
@@ -22329,7 +22570,6 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Mỗi đơn chỉ dùng 1 mã, không cộng dồn",
         "",
         "🎁 <b>Launch Bonus lần đầu mua gói:</b>",
-        "• 50k: 500 Xu gốc + 30 Xu = 530 Xu",
         "• 100k: 1.000 Xu gốc + 50 Xu = 1.050 Xu",
         "• 200k: 2.000 Xu gốc + 150 Xu = 2.150 Xu",
         "• 500k: 5.000 Xu gốc + 500 Xu = 5.500 Xu",
@@ -22760,11 +23000,11 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>🛒 BẢNG GIÁ (1 Xu = 100đ):</b>\n"
         f"• Gói Dùng Thử: 10.000đ ➔ <b>100 Xu</b>\n"
         f"• Gói Nhỏ: 20.000đ ➔ <b>200 Xu</b>\n"
-        f"• Gói Trung: 50.000đ ➔ <b>500 Xu</b> + 30 Xu Launch Bonus lần đầu mua gói = <b>530 Xu</b>\n"
+        f"• Gói Trung: 50.000đ ➔ <b>500 Xu</b>\n"
         f"• Gói Tiêu Chuẩn: 100.000đ ➔ <b>1.000 Xu</b> + 50 Xu Launch Bonus lần đầu mua gói = <b>1.050 Xu</b>\n"
         f"• Gói Nâng Cao: 200.000đ ➔ <b>2.000 Xu</b> + 150 Xu Launch Bonus lần đầu mua gói = <b>2.150 Xu</b>\n"
         f"• Gói Doanh Nghiệp: 500.000đ ➔ <b>5.000 Xu</b> + 500 Xu Launch Bonus lần đầu mua gói = <b>5.500 Xu</b>\n\n"
-        f"🎁 Launch Bonus theo gói chỉ áp dụng 1 lần cho mỗi tài khoản ở từng gói 50k/100k/200k/500k.\n"
+        f"🎁 Launch Bonus theo gói chỉ áp dụng 1 lần cho mỗi tài khoản ở từng gói 100k/200k/500k.\n"
         f"Các lần mua lại cùng gói sẽ nhận Xu gốc.\n\n"
         f"🏦 Nếu phải nạp thủ công, nội dung chuyển khoản sẽ là: <code>AAS {uid} &lt;order_code&gt;</code>\n\n"
         f"⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. Không lo điền sai nội dung chuyển khoản.\n\n"
@@ -35802,6 +36042,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("help",        cmd_help))
     tg_app.add_handler(CommandHandler("commands",    cmd_help))
+    tg_app.add_handler(CommandHandler("huongdan",    cmd_huongdan))
+    tg_app.add_handler(CommandHandler("guide",       cmd_huongdan))
+    tg_app.add_handler(CommandHandler("hdsd",        cmd_huongdan))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))

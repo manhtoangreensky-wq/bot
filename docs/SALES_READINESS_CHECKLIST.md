@@ -26,7 +26,8 @@ Date: 2026-06-02
 - [ ] `/naptien`.
 - [ ] `/promo FIRST30` activates once for a beta test user after admin `/promo_seed_policy`.
 - [ ] PayOS 10k real payment test.
-- [ ] PayOS first 50k + FIRST30 real payment gives exactly 680 Xu: 500 base + 30 Launch Bonus + 150 promo.
+- [ ] PayOS 50k + FIRST30 real payment gives exactly 650 Xu: 500 base + 150 promo, no Launch Bonus.
+- [ ] PayOS first 100k real payment gives exactly 1,050 Xu without promo: 1,000 base + 50 Launch Bonus.
 - [ ] Manual fallback.
 - [ ] Missing-Xu upsell.
 - [ ] Refund on paid API failure.

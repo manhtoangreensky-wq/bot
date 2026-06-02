@@ -280,12 +280,11 @@ Launch Bonus không phải tặng mãi mãi mỗi lần mua. Launch Bonus là ư
 
 | Gói | Xu gốc | Launch Bonus lần đầu mua gói | Tổng lần đầu mua gói | Mua lại cùng gói |
 |---|---:|---:|---:|---:|
-| 50k | 500 | +30 | 530 | 500 |
 | 100k | 1.000 | +50 | 1.050 | 1.000 |
 | 200k | 2.000 | +150 | 2.150 | 2.000 |
 | 500k | 5.000 | +500 | 5.500 | 5.000 |
 
-10k và 20k không có Launch Bonus. Đây là gói thử nghiệm.
+10k, 20k và 50k không có Launch Bonus. 50k là gói bắt đầu được dùng mã ưu đãi.
 
 Nguyên tắc kỹ thuật:
 
@@ -413,7 +412,7 @@ Manual fallback phải:
 - Dùng cùng amount.
 - Dùng cùng Xu đã tính trong order.
 - Không tự tính lại từ PAYMENT_PACKAGES cũ.
-- Nếu order 50k lần đầu có 530 Xu, manual fallback cũng phải hiện 530 Xu.
+- Nếu order 100k lần đầu có 1.050 Xu, manual fallback cũng phải hiện 1.050 Xu.
 - Admin duyệt manual thì phải cộng đúng Xu và ghi Launch Bonus redemption nếu có.
 
 ---

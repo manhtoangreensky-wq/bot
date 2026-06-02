@@ -40,9 +40,9 @@ Expected:
 Expected for 50k + FIRST30:
 
 - 50k package adds 500 Xu.
-- Launch Bonus adds 30 Xu if this is the user's first 50k package purchase.
+- Launch Bonus adds 0 Xu for 50k. The 50k package is promo-eligible but has no Launch Bonus.
 - FIRST30 adds 150 Xu.
-- Total new credit from this payment is 680 Xu for a first 50k package purchase; 650 Xu if Launch Bonus was already used for 50k.
+- Total new credit from this payment is 650 Xu.
 - `credit_events` has one `payos_deposit`, one `launch_bonus` if eligible, and one `promo_bonus`.
 - `promotion_redemptions.status` becomes `applied`.
 

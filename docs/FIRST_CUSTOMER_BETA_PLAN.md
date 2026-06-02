@@ -29,7 +29,7 @@ Date: 2026-06-02
 
 - 3-10 test users.
 - At least 3 successful topups.
-- One first 50k+FIRST30 PayOS test credits exactly 680 Xu before wider beta: 500 base + 30 Launch Bonus + 150 promo.
+- One 50k+FIRST30 PayOS test credits exactly 650 Xu before wider beta: 500 base + 150 promo, no Launch Bonus.
 - `BETA50` remains limited/internal only.
 - No PayOS crediting errors.
 - No promo duplicate bonus.

@@ -23,8 +23,8 @@
 - [ ] Missing checksum không tự cộng xu.
 - [ ] `/promo_seed_policy` admin tạo policy FIRST30/SECOND15/WEEKLY10/MONTHLY20/DAILY5/BETA50.
 - [ ] `/promo FIRST30` user kích hoạt trước khi nạp lần đầu.
-- [ ] Lần đầu mua gói 50k + FIRST30 cộng đúng 680 Xu: 500 gốc + 30 Launch Bonus + 150 promo.
-- [ ] Mua lại gói 50k + FIRST30 cộng đúng 650 Xu nếu Launch Bonus 50k đã dùng.
+- [ ] Gói 50k + FIRST30 cộng đúng 650 Xu: 500 gốc + 150 promo, không có Launch Bonus.
+- [ ] Lần đầu mua gói 100k không promo cộng đúng 1.050 Xu: 1.000 gốc + 50 Launch Bonus.
 - [ ] `/gift <code>` cộng Xu quà tặng trực tiếp và không cho nhận trùng quá giới hạn.
 - [ ] Promo không cộng bonus trùng khi replay cùng order.
 - [ ] Manual fallback hoạt động.

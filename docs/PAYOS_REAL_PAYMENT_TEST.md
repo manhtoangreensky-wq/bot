@@ -95,9 +95,15 @@ Then select package `50k` or higher and pay the real QR.
 Expected for 50k:
 
 - Base Xu: 500.
-- Launch Bonus: 30 if this is the user's first 50k package purchase.
+- Launch Bonus: 0. The 50k package is promo-eligible but has no Launch Bonus.
 - FIRST30 bonus Xu: 150.
-- Total Xu added: 680 for a first 50k package purchase; 650 if Launch Bonus was already used for 50k.
+- Total Xu added: 650.
+
+Expected for 100k first purchase without promo:
+
+- Base Xu: 1,000.
+- Launch Bonus: 50 if this is the user's first 100k package purchase.
+- Total Xu added: 1,050.
 - Promo bonus is added only after payment success.
 - `credit_events` contains one `payos_deposit`, one `launch_bonus` if eligible, and one `promo_bonus`.
 - `promotion_redemptions.status` becomes `applied`.
