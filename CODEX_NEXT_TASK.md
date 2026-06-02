@@ -5,65 +5,87 @@ Chưa làm app ngoài.
 Chưa làm dashboard web.
 Chưa làm ERP/Device Ops/SaaS.
 
-Sau Step 11 Chat AI Tier System, admin chọn 1 task:
+## Current priority
 
-## Option A - Promotion/Discount Code System
+Run the real PayOS 10k payment test with BETA50 promo before selling beta.
 
-- Tạo mã giảm giá theo % hoặc tặng Xu.
-- Không đổi bảng giá gốc.
-- Không đụng PayOS packages nếu chưa cần.
+Manual sequence:
 
-## Option B - PayOS Real Payment Manual Test
+```text
+/backup_db
+/providers
+/promo_seed_beta
+/promo_list
+/promo BETA50
+/naptien
+# choose 10k and pay real QR
+/checkpayos <order_code>   # only if webhook has not credited yet
+/mark_payos_test pass order=<order_code> note="10k + BETA50 OK"
+/sales_ready
+```
 
-- Test gói 10k thật.
-- Nếu PASS, chạy `/mark_payos_test pass order=<order_code> note="Test 10k OK"`.
-- Không sửa code nếu không phát hiện lỗi rõ.
+Expected for 10k + BETA50:
 
-## Option C - Beta Launch Offer
+- Base Xu: 100
+- Promo bonus: 50
+- Total Xu added: 150
+- Duplicate webhook/checkpayos must not add base or bonus again.
 
-- Mở bán thử cho 3-10 user.
-- Test `/naptien`, `/film`, `/chat_pro`, `/growth_ai`.
+## Option A - Run real PayOS 10k test manually
+
+- Test without promo if needed.
+- Test with `/promo BETA50`.
+- Confirm dashboard and user balance.
+- Mark pass only after manual verification.
+
+## Option B - First customer beta launch
+
+- Open beta for 3-10 users.
+- Offer: 200 Xu trial + BETA50 while active.
+- Watch `/dashboard`, `/promo_list`, `/performance_report`, `/sales_ready`.
+
+## Option C - Sales copy/posts
+
+- Write Facebook/Zalo/TikTok launch posts.
+- Write direct-message closing scripts.
+- Write onboarding messages for first beta customers.
 
 ## Option D - Video Script template packs
 
-- Cải thiện `/film` output theo niche.
-- Không render.
+- Improve `/film` output by niche.
+- Add templates for affiliate, product review, story, education, local service.
+- No render.
 
 ## Option E - AI Caption Variant Generator
 
-- Tạo 5 hook/caption/CTA variants từ bài thắng.
-- Có thể dùng dữ liệu `/growth_ai`.
-- Không auto publish.
+- Generate 5 hook/caption/CTA variants from winning posts.
+- Use `/growth_ai` and `/performance_report` data when available.
+- No auto publish.
 
-## Option F - Extract config.py safely
+## Option F - Trial top-up migration for old users
 
-- Tách ENV/constants.
-- Không đổi behavior.
+If admin wants to top up users who already received 150 Xu to 200 Xu:
 
-## Option G - Extract db.py safely
+- Write a safe one-time migration.
+- Only top up users with old trial credit event.
+- Add exactly 50 Xu once.
+- Record clear credit event.
+- Admin approval required before running.
 
-- Tách DB helpers.
-- Không đổi schema.
+## Option G - Extract config.py safely
 
-## Option H - Command QA Polish
+- Separate ENV/constants.
+- Do not change behavior.
 
-- Kiểm `/help`, `/menu`, command registry.
-- Chỉ sửa text/handler thiếu, không thêm module lớn.
+## Option H - Extract db.py safely
+
+- Separate DB helpers.
+- Do not change schema.
 
 ## Future Backlog
 
 - GitHub Copilot dev workflow
 - Legal Docs Lite with OpenLaw/OpenLaws
 - Legal templates for service contracts and warranty documents
-
-## Optional future task — Trial top-up migration
-
-Nếu admin muốn bù user cũ đã nhận 150 Xu lên 200 Xu:
-
-- Viết migration an toàn.
-- Chỉ bù user có `trial_credit_event` cũ.
-- Chỉ bù thêm 50 Xu một lần.
-- Ghi `credit_event` rõ ràng.
-- Admin duyệt trước khi chạy.
 
 Codex không tự làm task tiếp theo.
