@@ -1,61 +1,68 @@
 # PayOS Dynamic QR Debug
 
-## Current Issue
+Current phase: Stable Revenue Bot only.
 
-Bot falls back to manual QR when PayOS create payment link fails.
+## Admin Test Order
 
-## Required Debug
-
-Use admin-only command:
+Run after deploy:
 
 ```text
+/providers
 /payos_debug_create
+/naptien
 ```
 
-The command reports:
+Then select:
+
+- 10k: expected 100 Xu, no Launch Bonus, no promo.
+- 50k: expected 500 Xu base plus 30 Xu Launch Bonus on first purchase of the 50k package.
+
+## Expected Debug PASS
+
+`/payos_debug_create` must return:
+
+- `PayOS debug create PASS`
+- `Description: AAS10K`
+- Checkout URL exists
+- `paymentLinkId` exists when PayOS returns it
+- Signature data order:
+
+```text
+amount=...&cancelUrl=...&description=AAS10K&orderCode=...&returnUrl=...
+```
+
+The debug command stores its result in `system_settings` so `/sales_ready` can tell whether PayOS checkout creation has been proven.
+
+## Expected Debug FAIL
+
+If PayOS rejects the request, the bot must show:
 
 - HTTP status
 - PayOS code
 - PayOS desc/message
-- Signature data
-- orderCode
+- order code
 - amount
 - description
-- returnUrl/cancelUrl
+- signature data
 
-## Do Not Expose
+The bot must not show:
 
 - `PAYOS_API_KEY`
 - `PAYOS_CHECKSUM_KEY`
-- `TELEGRAM_TOKEN`
+- Telegram token
 
-## Signature Data
+## Sales Ready Rule
 
-The create-payment signature string must use this exact order:
-
-```text
-amount=<amount>&cancelUrl=<cancelUrl>&description=<description>&orderCode=<orderCode>&returnUrl=<returnUrl>
-```
-
-Do not URL-encode values before signing.
-
-## Payment Content
-
-Use `AAS`, not `DAAS`.
-
-Manual transfer content:
-
-```text
-AAS <user_id> <order_code>
-```
-
-PayOS description examples:
-
-```text
-AAS10K
-AAS50K
-```
+- If `/payos_debug_create` has not produced a checkout URL: `BETA READY / NEED PAYOS DEBUG`.
+- If checkout URL is created but no real payment has been marked pass: `BETA READY`.
+- If checkout URL works and admin marks real payment pass: `SALES READY`.
 
 ## Manual Fallback
 
-Manual fallback must use the same `order_code`, `amount`, and order `xu` preview as the PayOS order. If a 50k first package order is eligible for Launch Bonus, the fallback text must show `530 Xu`.
+If PayOS creation fails during `/naptien`, the bot sends manual VietQR using the same order:
+
+- same `order_code`
+- same amount
+- same calculated Xu
+- transfer content: `AAS <user_id> <order_code>`
+

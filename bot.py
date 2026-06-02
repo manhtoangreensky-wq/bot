@@ -8897,7 +8897,7 @@ def operator_control_contract_data(owner_id, days=30, platform="tiktok", limit=8
         },
         "non_negotiable_gates": [
             "Không publish nếu chưa có final asset thật.",
-            "Không publish tự động nếu adapter/publisher không api_ready.",
+            "Không auto publish / không publish tự động nếu adapter/publisher không api_ready.",
             "Không dùng ảnh/giọng người thật thiếu consent; nội dung người lớn phải 18+.",
             "Không copy nguyên video/thương hiệu/claim từ nguồn tham khảo.",
             "Không hứa lợi nhuận, duyệt vay/thẻ, hoặc kết quả tài chính chắc chắn.",
@@ -21115,9 +21115,28 @@ def sales_readiness_payload() -> dict:
         "order": get_system_setting("payos_real_payment_test_order", ""),
         "note": get_system_setting("payos_real_payment_test_note", ""),
     }
+    payos_debug = {
+        "status": (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper(),
+        "at": get_system_setting("payos_debug_create_at", ""),
+        "order": get_system_setting("payos_debug_create_order", ""),
+        "checkout_url": get_system_setting("payos_debug_create_checkout_url", ""),
+        "payment_link_id": get_system_setting("payos_debug_create_payment_link_id", ""),
+        "http_status": get_system_setting("payos_debug_create_http_status", ""),
+        "code": get_system_setting("payos_debug_create_code", ""),
+        "desc": get_system_setting("payos_debug_create_desc", ""),
+        "note": get_system_setting("payos_debug_create_note", ""),
+    }
     base_ready = not blockers
-    sales_ready = base_ready and payos_test["status"] == "PASS"
-    status = "SALES READY" if sales_ready else ("BETA READY" if base_ready else "NOT READY")
+    checkout_ready = payos_debug["status"] == "PASS" and bool(payos_debug.get("checkout_url"))
+    sales_ready = base_ready and checkout_ready and payos_test["status"] == "PASS"
+    if sales_ready:
+        status = "SALES READY"
+    elif base_ready and checkout_ready:
+        status = "BETA READY"
+    elif base_ready:
+        status = "BETA READY / NEED PAYOS DEBUG"
+    else:
+        status = "NOT READY"
     return {
         "status": status,
         "db_ok": db_status["ok"],
@@ -21126,10 +21145,11 @@ def sales_readiness_payload() -> dict:
         "packages": len(PAYMENT_PACKAGES),
         "trial_credits": TRIAL_CREDITS,
         "free_chat_daily": FREE_CHAT_DAILY,
+        "payos_debug_create": payos_debug,
         "payos_real_test": payos_test,
         "promo": promo_readiness_payload(),
         "blockers": blockers,
-        "note": "SALES READY chỉ bật khi admin đã mark PayOS real payment test PASS.",
+        "note": "SALES READY chỉ bật khi /payos_debug_create PASS và admin đã mark PayOS real payment test PASS.",
     }
 
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
@@ -21707,6 +21727,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     providers = data["providers"]
     commands = data["commands"]
     payos_test = data["payos_real_test"]
+    payos_debug = data.get("payos_debug_create") or {}
     promo = data.get("promo") or {}
     blockers = data["blockers"] or []
     lines = [
@@ -21735,6 +21756,14 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f" | <b>{html.escape(promo.get('label') or 'limited')}</b>"
         f" | used <b>{int(promo.get('used_count', 0) or 0)}/{int(promo.get('max_uses', 0) or 0)}</b>",
         "",
+        "<b>PayOS checkout debug</b>",
+        f"• Status: <code>{html.escape(payos_debug.get('status') or 'NOT_TESTED')}</code>",
+        f"• At: <code>{html.escape(payos_debug.get('at') or '-')}</code>",
+        f"• Order: <code>{html.escape(payos_debug.get('order') or '-')}</code>",
+        f"• HTTP/Code: <code>{html.escape(str(payos_debug.get('http_status') or '-'))}</code> / <code>{html.escape(str(payos_debug.get('code') or '-'))}</code>",
+        f"• Checkout URL: <code>{'YES' if payos_debug.get('checkout_url') else 'NO'}</code>",
+        f"• Note: <code>{html.escape(payos_debug.get('note') or '-')}</code>",
+        "",
         "<b>PayOS real test</b>",
         f"• Status: <code>{html.escape(payos_test.get('status') or 'NOT_TESTED')}</code>",
         f"• At: <code>{html.escape(payos_test.get('at') or '-')}</code>",
@@ -21758,8 +21787,12 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     if blockers:
         lines.extend(f"• {html.escape(item)}" for item in blockers)
+    if not blockers and (payos_debug.get("status") != "PASS" or not payos_debug.get("checkout_url")):
+        lines.append("• Cần chạy <code>/payos_debug_create</code> tới khi tạo được checkout URL PayOS.")
     if not blockers and payos_test.get("status") != "PASS":
         lines.append("• Cần test thanh toán thật 10k và chạy <code>/mark_payos_test pass order=&lt;order_code&gt; note=\"...\"</code>.")
+    if data["status"] == "BETA READY / NEED PAYOS DEBUG":
+        lines.append("• BETA READY / NEED PAYOS DEBUG — cấu hình nền tảng ổn, nhưng chưa chứng minh tạo checkout URL PayOS.")
     if data["status"] == "BETA READY":
         lines.append("• BETA READY — cần admin xác nhận PayOS real payment 10k để chuyển SALES READY.")
     if data["status"] == "SALES READY":
@@ -34905,6 +34938,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending_order = c.fetchone()
         launch_recorded = 0
         pending_order_code = str(pending_order[0]) if pending_order and pending_order[0] else ""
+        expected_order_xu = int(pending_order[2] or 0) if pending_order and pending_order[2] else 0
         if pending_order_code:
             c.execute(
                 "SELECT amount, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code=? LIMIT 1",
@@ -34951,6 +34985,12 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
         credits, _, _ = get_user(target_id)
+        mismatch_line = ""
+        if expected_order_xu and int(amount) != int(expected_order_xu):
+            mismatch_line = (
+                f"\n⚠️ Lưu ý: pending order dự kiến <b>{expected_order_xu} Xu</b>, "
+                f"admin vừa duyệt <b>{amount} Xu</b>."
+            )
         await context.bot.send_message(
             chat_id=target_id,
             text=(
@@ -34961,7 +35001,10 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ),
             parse_mode="HTML"
         )
-        await update.message.reply_text(f"✅ Đã duyệt {amount} Xu cho ID: {target_id}")
+        await update.message.reply_text(
+            f"✅ Đã duyệt {amount} Xu cho ID: {target_id}{mismatch_line}",
+            parse_mode="HTML",
+        )
     except (IndexError, ValueError):
         await update.message.reply_text("⚠️ Cú pháp: /duyet <ID> <Số_Xu>")
 
@@ -34997,21 +35040,29 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             processed, desc, info = process_payos_paid_order(str(order_code), amount_vnd)
             if processed:
                 target_id = info["target_id"]
+                base_xu = int(info.get("base_xu") or info.get("xu") or 0)
+                launch_bonus = int(info.get("launch_bonus", 0) or 0)
                 promo_bonus = int(info.get("promo_bonus", 0) or 0)
                 promo_code = info.get("promo_code") or ""
+                launch_line = (
+                    f"🎁 Launch Bonus: <b>+{launch_bonus} Xu</b>\n"
+                    if launch_bonus else ""
+                )
                 promo_line = (
                     f"🎁 <code>{html.escape(promo_code)}</code>: <b>+{promo_bonus} Xu</b>\n"
-                    f"🧾 Tổng cộng đơn này: <b>+{int(info['xu']) + promo_bonus} Xu</b>\n"
                     if promo_bonus else ""
                 )
+                total_xu = base_xu + launch_bonus + promo_bonus
                 credits_now, _, _ = get_user(target_id)
                 await context.bot.send_message(
                     chat_id=target_id,
                     text=(
                         f"🎉 <b>NẠP TỰ ĐỘNG THÀNH CÔNG!</b>\n\n"
                         f"PayOS đã xác nhận đơn <code>{order_code}</code>.\n"
-                        f"🪙 Xu gốc: <b>+{info['xu']} Xu</b>\n"
+                        f"🪙 Xu gốc: <b>+{base_xu} Xu</b>\n"
+                        f"{launch_line}"
                         f"{promo_line}"
+                        f"🧾 Tổng cộng đơn này: <b>+{total_xu} Xu</b>\n"
                         f"💼 Số dư hiện tại: <b>{credits_now} Xu</b>"
                     ),
                     parse_mode="HTML"
@@ -35026,6 +35077,9 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
     if str(update.effective_user.id) != ADMIN_ID:
         return
     if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
+        set_system_setting("payos_debug_create_status", "FAIL", "Missing PayOS env", update.effective_user.id)
+        set_system_setting("payos_debug_create_at", now_text(), "Missing PayOS env", update.effective_user.id)
+        set_system_setting("payos_debug_create_note", "missing_payos_env", "Missing PayOS env", update.effective_user.id)
         return await update.message.reply_text(
             "❌ Thiếu PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY."
         )
@@ -35047,18 +35101,41 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
             checkout_data = res_data.get("data") or {}
             checkout_url = checkout_data.get("checkoutUrl", "")
             payment_link_id = checkout_data.get("paymentLinkId", "")
+            now = now_text()
+            set_system_setting("payos_debug_create_status", "PASS", f"order={order_code}", update.effective_user.id)
+            set_system_setting("payos_debug_create_at", now, f"order={order_code}", update.effective_user.id)
+            set_system_setting("payos_debug_create_order", str(order_code), "PayOS debug checkout created", update.effective_user.id)
+            set_system_setting("payos_debug_create_checkout_url", checkout_url, "PayOS debug checkout created", update.effective_user.id)
+            set_system_setting("payos_debug_create_payment_link_id", payment_link_id, "PayOS debug checkout created", update.effective_user.id)
+            set_system_setting("payos_debug_create_http_status", str(res.status_code), "PayOS debug checkout created", update.effective_user.id)
+            set_system_setting("payos_debug_create_code", str(res_data.get("code") or ""), "PayOS debug checkout created", update.effective_user.id)
+            set_system_setting("payos_debug_create_desc", str(res_data.get("desc") or ""), "PayOS debug checkout created", update.effective_user.id)
+            set_system_setting("payos_debug_create_note", "checkout_url_created", "PayOS debug checkout created", update.effective_user.id)
             return await update.message.reply_text(
                 (
                     "✅ <b>PayOS debug create PASS</b>\n\n"
                     f"Order: <code>{order_code}</code>\n"
                     f"Amount: <b>{amount:,}đ</b>\n"
                     f"Description: <code>{html.escape(payos_body['description'])}</code>\n"
+                    "Signature variant: <code>standard</code>\n"
+                    f"Signature data:\n<code>{html.escape(raw_str)}</code>\n"
                     f"paymentLinkId: <code>{html.escape(str(payment_link_id))}</code>\n"
                     f"Checkout: {html.escape(str(checkout_url))}\n\n"
                     "Không cần thanh toán link debug này."
                 ),
                 parse_mode="HTML",
             )
+        data = res_data if isinstance(res_data, dict) else {}
+        now = now_text()
+        set_system_setting("payos_debug_create_status", "FAIL", f"order={order_code}", update.effective_user.id)
+        set_system_setting("payos_debug_create_at", now, f"order={order_code}", update.effective_user.id)
+        set_system_setting("payos_debug_create_order", str(order_code), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_checkout_url", "", "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_payment_link_id", "", "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_http_status", str(getattr(res, "status_code", "")), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_code", str(data.get("code") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_desc", str(data.get("desc") or data.get("message") or raw_preview or "")[:300], "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_note", "checkout_create_failed", "PayOS debug create failed", update.effective_user.id)
         return await update.message.reply_text(
             (
                 "❌ <b>PayOS debug create FAIL</b>\n\n"
@@ -35068,6 +35145,16 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
         )
     except Exception as e:
         _, raw_str = sign_payos_payment_request(payos_body)
+        now = now_text()
+        set_system_setting("payos_debug_create_status", "FAIL", f"order={order_code}", update.effective_user.id)
+        set_system_setting("payos_debug_create_at", now, f"order={order_code}", update.effective_user.id)
+        set_system_setting("payos_debug_create_order", str(order_code), "PayOS debug exception", update.effective_user.id)
+        set_system_setting("payos_debug_create_checkout_url", "", "PayOS debug exception", update.effective_user.id)
+        set_system_setting("payos_debug_create_payment_link_id", "", "PayOS debug exception", update.effective_user.id)
+        set_system_setting("payos_debug_create_http_status", "", "PayOS debug exception", update.effective_user.id)
+        set_system_setting("payos_debug_create_code", "", "PayOS debug exception", update.effective_user.id)
+        set_system_setting("payos_debug_create_desc", str(e)[:300], "PayOS debug exception", update.effective_user.id)
+        set_system_setting("payos_debug_create_note", "exception", "PayOS debug exception", update.effective_user.id)
         return await update.message.reply_text(
             (
                 "❌ <b>PayOS debug create EXCEPTION</b>\n\n"
@@ -35305,6 +35392,7 @@ async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     backup_filename = f"toan_aas_db_backup_{timestamp}.db"
 
     if not db_path or not os.path.exists(db_path):
+        safe_path = db_path or db_file_health_label()
         record_audit_event(
             ADMIN_ID,
             "admin",
@@ -35315,7 +35403,10 @@ async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
             note="/backup_db DB file not found",
         )
         return await update.message.reply_text(
-            f"❌ Không tìm thấy DB file: <code>{html.escape(db_file_health_label())}</code>",
+            "❌ <b>Không tìm thấy DB file để backup</b>\n\n"
+            f"• Path: <code>{html.escape(safe_path)}</code>\n"
+            "• Size: <code>unknown</code>\n"
+            "• Gợi ý: kiểm tra biến <code>DB_FILE</code> hoặc Railway volume.",
             parse_mode="HTML",
         )
 
@@ -35331,6 +35422,7 @@ async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     size = os.path.getsize(db_path)
     if size > BACKUP_MAX_BYTES:
+        safe_path = db_path or db_file_health_label()
         record_audit_event(
             ADMIN_ID,
             "admin",
@@ -35341,7 +35433,11 @@ async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
             note="/backup_db file too large for Telegram",
         )
         return await update.message.reply_text(
-            "⚠️ DB backup quá lớn để gửi qua Telegram. Hãy backup trực tiếp trên server/volume.",
+            "⚠️ <b>DB backup vượt giới hạn Telegram</b>\n\n"
+            f"• Path: <code>{html.escape(safe_path)}</code>\n"
+            f"• Size: <b>{size:,}</b> bytes\n"
+            f"• Limit: <b>{BACKUP_MAX_BYTES:,}</b> bytes\n\n"
+            "Hãy backup trực tiếp trên server/volume hoặc giảm dung lượng DB trước khi gửi qua Telegram.",
             parse_mode="HTML",
         )
 
@@ -35370,6 +35466,8 @@ async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         logger.error(f"DB backup send error: {e}")
+        safe_error = str(e)[:300]
+        safe_path = db_path or db_file_health_label()
         record_audit_event(
             ADMIN_ID,
             "admin",
@@ -35379,7 +35477,13 @@ async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
             after={"reason": "send_error", "error": str(e)[:300]},
             note="/backup_db send failed",
         )
-        await update.message.reply_text("❌ Không gửi được backup DB qua Telegram.")
+        await update.message.reply_text(
+            "❌ <b>Không gửi được backup DB qua Telegram</b>\n\n"
+            f"• Path: <code>{html.escape(safe_path)}</code>\n"
+            f"• Size: <b>{size:,}</b> bytes\n"
+            f"• Error: <code>{html.escape(safe_error)}</code>",
+            parse_mode="HTML",
+        )
 
 # ─── MESSAGE HANDLERS ─────────────────────────────────────────────────────────
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):

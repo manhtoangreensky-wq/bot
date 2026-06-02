@@ -15,13 +15,17 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
 
 ## Current Priority
 
-1. PayOS dynamic QR debug.
-2. AAS payment content.
-3. Manual fallback correct Xu.
-4. Backup DB send file.
-5. Sales readiness.
-6. Then real payment test.
-7. Do not start big plan yet.
+1. Deploy latest Stable Revenue Bot.
+2. Test `/payos_debug_create`.
+3. Test `/naptien` chọn 10k.
+4. Test `/naptien` chọn 50k.
+5. Test `/promo_seed_policy`.
+6. Test `/promo FIRST30`.
+7. Test `/gift_seed_beta`.
+8. Test `/gift BETA100`.
+9. Test `/backup_db`.
+10. Test `/sales_ready`.
+11. Do not start big plan yet.
 
 Manual sequence:
 
