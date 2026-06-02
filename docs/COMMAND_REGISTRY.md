@@ -1,8 +1,8 @@
 # COMMAND REGISTRY - TOAN AAS
 
 Date: 2026-06-02
-Source: `bot.py` local audit after Step 6
-Registered Telegram commands: 190
+Source: `bot.py` local audit after Step 7
+Registered Telegram commands: 193
 Registered callback groups: 9
 
 ## User Commands
@@ -47,6 +47,9 @@ Registered callback groups: 9
 | `/publish_done` | `cmd_publish_done` | YES | Manual record of published post. |
 | `/performance_add` | `cmd_performance_add` | YES | Manual metrics input. |
 | `/performance_report` | `cmd_performance_report` | YES | Manual performance rollup. |
+| `/growth_ai` | `cmd_growth_ai` | YES | AI Growth Coach, 30 Xu for normal users. |
+| `/campaign_report` | `cmd_campaign_report` | YES | TXT/CSV campaign report export. |
+| `/export_report` | `cmd_campaign_report` | YES | Alias for campaign report export. |
 | `/posts` | `cmd_posts` | YES | Recent published posts. |
 | `/growth_loop` | `cmd_growth_loop` | YES | User rule-based growth loop, admin can request manual mode. |
 

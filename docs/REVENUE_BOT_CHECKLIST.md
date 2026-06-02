@@ -68,9 +68,16 @@
 - [ ] `/performance_add post_id=1 views=... clicks=... revenue=...` lưu vào `manual_performance_events`.
 - [ ] `/performance_report` tổng hợp views/clicks/revenue theo nền tảng.
 - [ ] `/growth_loop` cho user thường trả rule-based recommendation.
+- [ ] `/growth_ai` có data thì trừ 30 Xu với user thường.
+- [ ] `/growth_ai` không có data thì hướng dẫn `/publish_done` + `/performance_add` và không trừ Xu.
+- [ ] `/growth_ai` AI lỗi thì hoàn Xu.
+- [ ] `/campaign_report format=txt` gửi file TXT.
+- [ ] `/campaign_report format=csv` gửi file CSV.
+- [ ] `/export_report` alias hoạt động.
 - [ ] Admin `/growth_loop` vẫn giữ operator loop mặc định.
 - [ ] Admin `/growth_loop manual=1` xem manual post loop.
 - [ ] `/dashboard` có số bài publish/manual performance/revenue nhập tay.
+- [ ] `/dashboard` có count AI Growth Coach tháng này.
 - [ ] Không gọi social API, không auto publish.
 
 ## Data safety

@@ -22,6 +22,8 @@ import uvicorn
 import time
 import random
 import re
+import csv
+import io
 import tempfile
 import shutil
 import xml.etree.ElementTree as ET
@@ -337,6 +339,7 @@ TRIAL_CREDITS     = 150
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
 FILM_SCRIPT_COST   = 50
+GROWTH_AI_COST     = 30
 CONTENT_PLATFORM_ALIASES = {
     "fb": "facebook",
     "facebook": "facebook",
@@ -19852,12 +19855,14 @@ def menu_text_affiliate(is_admin: bool) -> str:
             "• <code>/publish_done tiktok https://... chủ đề...</code>\n"
             "• <code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n"
             "• <code>/performance_report</code> — xem hiệu quả\n"
-            "• <code>/growth_loop</code> — gợi ý scale/fix\n\n"
+            "• <code>/growth_loop</code> — gợi ý scale/fix nhanh\n"
+            f"• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
+            "• <code>/campaign_report format=txt</code> — xuất báo cáo\n\n"
             "Quy tắc: không spam, không deepfake người thật không có consent, CTA/disclosure affiliate cần minh bạch."
         )
     return (
         "💰 <b>Affiliate Automation</b>\n\n"
-        "<b>User-facing</b>\n• <code>/addlink</code>\n• <code>/links</code>\n• <code>/campaign</code>\n• <code>/addcal</code>\n• <code>/calendar</code>\n• <code>/publish_done</code>\n• <code>/performance_add</code>\n• <code>/performance_report</code>\n• <code>/posts</code>\n\n"
+        "<b>User-facing</b>\n• <code>/addlink</code>\n• <code>/links</code>\n• <code>/campaign</code>\n• <code>/addcal</code>\n• <code>/calendar</code>\n• <code>/publish_done</code>\n• <code>/performance_add</code>\n• <code>/performance_report</code>\n• <code>/growth_ai</code>\n• <code>/campaign_report</code>\n• <code>/posts</code>\n\n"
         "<b>A. Setup chiến dịch</b>\n• <code>/campaign_preset</code>\n• <code>/postback_setup</code>\n\n"
         "<b>B. Tạo batch video</b>\n• <code>/affiliate_scale</code>\n\n"
         "<b>C. Ghi nhận bài đăng</b>\n• <code>/publish_done</code>\n\n"
@@ -20025,7 +20030,9 @@ def help_text_for_user(user_id) -> str:
         "• <code>/publish_done tiktok https://... chủ đề</code>\n"
         "• <code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n"
         "• <code>/performance_report</code> — báo cáo hiệu quả\n"
-        "• <code>/growth_loop</code> — gợi ý scale/fix\n\n"
+        "• <code>/growth_loop</code> — gợi ý scale/fix nhanh\n"
+        f"• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
+        "• <code>/campaign_report format=txt</code> hoặc <code>format=csv</code> — xuất báo cáo\n\n"
         "<b>6. Hỗ trợ</b>\n"
         "• <code>/gopy nội dung</code> — góp ý/báo lỗi"
     )
@@ -22884,6 +22891,321 @@ def manual_growth_loop_items(user_id, days=30, platform="", limit=5) -> list[dic
             "recommendation_id": rec_id,
         })
     return items[: max(1, min(int(limit or 5), 20))]
+
+def money_vnd(value) -> str:
+    return f"{float(value or 0):,.0f}đ"
+
+def parse_growth_report_args(raw: str, default_days: int = 14) -> dict:
+    data, remainder = parse_loose_kv_args(raw)
+    tokens = remainder.split()
+    days = safe_int(data.get("days") or data.get("ngay") or (tokens[0] if tokens else default_days), default_days)
+    fmt = clean_arg_value(data.get("format") or data.get("fmt") or "txt").lower()
+    if fmt not in {"txt", "csv"}:
+        fmt = "txt"
+    return {
+        "days": max(1, min(days, 90)),
+        "platform": normalize_manual_publish_platform(data.get("platform") or data.get("nen") or ""),
+        "campaign_id": safe_int(data.get("campaign_id") or data.get("campaign") or data.get("camp"), 0),
+        "goal": clean_arg_value(data.get("goal") or data.get("muctieu") or data.get("mục_tiêu") or "kiếm tiền affiliate"),
+        "format": fmt,
+    }
+
+def collect_user_performance_summary(user_id, days=14, campaign_id=None, platform=None, limit=20) -> dict:
+    days = max(1, min(safe_int(days, 14), 90))
+    limit = max(1, min(safe_int(limit, 20), 50))
+    campaign_id = safe_int(campaign_id, 0)
+    platform = normalize_manual_publish_platform(platform or "")
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    filters = ["pp.user_id=?", "pp.created_at>=?"]
+    params = [str(user_id), since]
+    if platform:
+        filters.append("pp.platform=?")
+        params.append(platform)
+    if campaign_id:
+        filters.append("pp.campaign_id=?")
+        params.append(campaign_id)
+    where = " AND ".join(filters)
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        f"""SELECT pp.id, pp.platform, pp.topic, pp.post_url, pp.campaign_id, pp.affiliate_link_id,
+                  pp.published_at, pp.created_at,
+                  COALESCE(ca.name,''), COALESCE(al.product_name,''), COALESCE(al.niche,''),
+                  COALESCE(SUM(mpe.views),0), COALESCE(SUM(mpe.likes),0), COALESCE(SUM(mpe.comments),0),
+                  COALESCE(SUM(mpe.shares),0), COALESCE(SUM(mpe.clicks),0), COALESCE(SUM(mpe.revenue),0)
+        FROM published_posts pp
+        LEFT JOIN manual_performance_events mpe ON mpe.published_post_id=pp.id AND mpe.user_id=pp.user_id
+        LEFT JOIN campaigns ca ON ca.id=pp.campaign_id AND ca.owner_id=pp.user_id
+        LEFT JOIN affiliate_links al ON al.id=pp.affiliate_link_id AND al.owner_id=pp.user_id
+        WHERE {where}
+        GROUP BY pp.id, pp.platform, pp.topic, pp.post_url, pp.campaign_id, pp.affiliate_link_id,
+                 pp.published_at, pp.created_at, ca.name, al.product_name, al.niche
+        ORDER BY pp.id DESC
+        LIMIT ?""",
+        params + [limit],
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    posts = []
+    totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0, "clicks": 0, "revenue": 0.0}
+    by_platform = {}
+    for row in rows:
+        (
+            post_id, row_platform, topic, post_url, row_campaign_id, affiliate_id,
+            published_at, created_at, campaign_name, affiliate_product, affiliate_niche,
+            views, likes, comments, shares, clicks, revenue,
+        ) = row
+        views = int(views or 0)
+        likes = int(likes or 0)
+        comments = int(comments or 0)
+        shares = int(shares or 0)
+        clicks = int(clicks or 0)
+        revenue = float(revenue or 0)
+        score = calculate_performance_score(views, likes, comments, shares, clicks, revenue)
+        rec = build_growth_recommendation(row_platform, views, likes, comments, shares, clicks, revenue)
+        item = {
+            "post_id": int(post_id),
+            "platform": row_platform or "",
+            "topic": topic or "",
+            "post_url": post_url or "",
+            "campaign_id": int(row_campaign_id or 0),
+            "campaign_name": campaign_name or "",
+            "affiliate_id": int(affiliate_id or 0),
+            "affiliate_product": affiliate_product or "",
+            "affiliate_niche": affiliate_niche or "",
+            "published_at": published_at or created_at or "",
+            "views": views,
+            "likes": likes,
+            "comments": comments,
+            "shares": shares,
+            "clicks": clicks,
+            "revenue": revenue,
+            "score": score,
+            "recommendation": rec,
+        }
+        posts.append(item)
+        totals["views"] += views
+        totals["likes"] += likes
+        totals["comments"] += comments
+        totals["shares"] += shares
+        totals["clicks"] += clicks
+        totals["revenue"] += revenue
+        key = row_platform or "unknown"
+        slot = by_platform.setdefault(key, {"platform": key, "posts": 0, "views": 0, "clicks": 0, "revenue": 0.0})
+        slot["posts"] += 1
+        slot["views"] += views
+        slot["clicks"] += clicks
+        slot["revenue"] += revenue
+
+    top_by_revenue = sorted(posts, key=lambda x: (x["revenue"], x["clicks"], x["views"]), reverse=True)[:5]
+    top_by_views = sorted(posts, key=lambda x: (x["views"], x["clicks"]), reverse=True)[:5]
+    high_view_low_click = [p for p in posts if p["views"] >= 1000 and p["clicks"] <= max(3, p["views"] // 500)]
+    clicks_no_revenue = [p for p in posts if p["clicks"] >= 10 and p["revenue"] <= 0]
+    revenue_good = [p for p in posts if p["revenue"] > 0]
+    weak_posts = [p for p in posts if p["score"] < 20]
+    return {
+        "user_id": str(user_id),
+        "days": days,
+        "since": since,
+        "platform": platform or "all",
+        "campaign_id": campaign_id,
+        "post_count": len(posts),
+        "totals": totals,
+        "platform_breakdown": sorted(by_platform.values(), key=lambda x: (x["revenue"], x["views"]), reverse=True),
+        "posts": posts,
+        "top_by_revenue": top_by_revenue,
+        "top_by_views": top_by_views,
+        "high_view_low_click": high_view_low_click[:5],
+        "clicks_no_revenue": clicks_no_revenue[:5],
+        "revenue_good": revenue_good[:5],
+        "weak_posts": weak_posts[:5],
+        "has_data": bool(posts),
+    }
+
+def compact_post_for_ai(post: dict) -> dict:
+    return {
+        "post_id": post.get("post_id"),
+        "platform": post.get("platform"),
+        "topic": post.get("topic"),
+        "campaign": post.get("campaign_name") or post.get("campaign_id"),
+        "affiliate_product": post.get("affiliate_product"),
+        "views": post.get("views"),
+        "likes": post.get("likes"),
+        "comments": post.get("comments"),
+        "shares": post.get("shares"),
+        "clicks": post.get("clicks"),
+        "revenue": post.get("revenue"),
+        "score": post.get("score"),
+        "rule_recommendation": (post.get("recommendation") or {}).get("title"),
+    }
+
+def build_growth_ai_prompt(summary, user_goal="kiếm tiền affiliate", platforms="facebook,tiktok,youtube") -> str:
+    payload = {
+        "filters": {
+            "days": summary.get("days"),
+            "platform": summary.get("platform"),
+            "campaign_id": summary.get("campaign_id"),
+            "goal": user_goal,
+            "target_platforms": platforms,
+        },
+        "totals": summary.get("totals"),
+        "platform_breakdown": summary.get("platform_breakdown"),
+        "top_by_revenue": [compact_post_for_ai(p) for p in summary.get("top_by_revenue", [])],
+        "top_by_views": [compact_post_for_ai(p) for p in summary.get("top_by_views", [])],
+        "high_view_low_click": [compact_post_for_ai(p) for p in summary.get("high_view_low_click", [])],
+        "clicks_no_revenue": [compact_post_for_ai(p) for p in summary.get("clicks_no_revenue", [])],
+        "weak_posts": [compact_post_for_ai(p) for p in summary.get("weak_posts", [])],
+    }
+    return (
+        "Bạn là AI Growth Coach cho TOAN AAS.\n\n"
+        "Dữ liệu dưới đây do user nhập thủ công sau khi đăng bài affiliate. Không bịa số liệu ngoài input.\n"
+        "Không hứa chắc doanh thu. Không đề xuất spam, auto publish, deepfake, copy nội dung người khác hoặc né kiểm duyệt.\n"
+        "Affiliate cần disclosure minh bạch.\n\n"
+        "Hãy trả lời tiếng Việt theo format:\n\n"
+        "# 1. Tổng quan\n"
+        "- Điểm mạnh hiện tại\n- Điểm yếu hiện tại\n- Nền tảng đang tốt nhất\n- Nội dung có dấu hiệu kiếm tiền tốt nhất\n\n"
+        "# 2. Bài nên SCALE\n"
+        "Với mỗi bài: post_id, lý do, hành động, 3 biến thể hook mới, CTA đề xuất, platform nên đăng lại.\n\n"
+        "# 3. Bài nên FIX\n"
+        "Nêu vấn đề hook/caption/CTA/offer/platform, cách sửa, caption mới, pinned comment.\n\n"
+        "# 4. Bài nên PAUSE\n"
+        "Nêu lý do và khi nào thử lại.\n\n"
+        "# 5. Kế hoạch 7 ngày tới\n"
+        "Ngày 1 đến ngày 7, mỗi ngày nên làm gì.\n\n"
+        "# 6. Cảnh báo an toàn\n"
+        "- Không spam\n- Không auto publish\n- Affiliate cần disclosure\n- Không deepfake/copy nội dung người khác\n\n"
+        "Nếu dữ liệu ít, nói rõ dữ liệu chưa đủ.\n\n"
+        "DỮ LIỆU INPUT:\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
+
+async def call_growth_ai(prompt: str, user_id="growth_ai") -> str:
+    result = AgentGemini.chat(
+        "Bạn là AI Growth Coach của TOAN AAS. Phân tích dữ liệu thủ công và đưa khuyến nghị thực chiến, an toàn.",
+        prompt,
+        f"growth_ai_{user_id}",
+    )
+    if not result or result.strip().startswith("❌"):
+        raise RuntimeError(result or "AI provider unavailable")
+    return result.strip()
+
+def save_ai_growth_recommendation(user_id, campaign_id, output_text: str, summary: dict) -> int:
+    rec = {
+        "type": "ai_growth_coach",
+        "score": 0,
+        "title": "AI Growth Coach",
+        "reason": f"AI phân tích {summary.get('post_count', 0)} bài trong {summary.get('days', 0)} ngày.",
+        "action": (output_text or "")[:1200],
+    }
+    return save_growth_recommendation(user_id, 0, int(campaign_id or 0), rec)
+
+def report_next_actions(summary: dict) -> list[str]:
+    actions = []
+    if summary.get("top_by_revenue"):
+        p = summary["top_by_revenue"][0]
+        actions.append(f"Scale bài #{p['post_id']} trên {p['platform']} vì đã có revenue {money_vnd(p['revenue'])}.")
+    if summary.get("high_view_low_click"):
+        p = summary["high_view_low_click"][0]
+        actions.append(f"Sửa CTA/caption cho bài #{p['post_id']} vì view cao nhưng click thấp.")
+    if summary.get("clicks_no_revenue"):
+        p = summary["clicks_no_revenue"][0]
+        actions.append(f"Kiểm tra offer/link cho bài #{p['post_id']} vì có click nhưng chưa ra revenue.")
+    if summary.get("weak_posts"):
+        p = summary["weak_posts"][0]
+        actions.append(f"Tạm dừng hoặc rewrite bài #{p['post_id']} vì score thấp.")
+    if not actions:
+        actions.append("Tiếp tục đăng thêm 3-5 bài và nhập số liệu để có tín hiệu rõ hơn.")
+    return actions
+
+def build_campaign_report_txt(summary: dict) -> str:
+    totals = summary.get("totals", {})
+    lines = [
+        "TOAN AAS CAMPAIGN REPORT",
+        "",
+        f"User: {summary.get('user_id')}",
+        f"Period: {summary.get('days')} days since {summary.get('since')}",
+        f"Platform: {summary.get('platform')}",
+        f"Campaign ID: {summary.get('campaign_id') or 'all'}",
+        f"Generated at: {now_text()}",
+        "",
+        "SUMMARY",
+        f"- Total posts: {summary.get('post_count', 0)}",
+        f"- Total views: {int(totals.get('views') or 0):,}",
+        f"- Total likes: {int(totals.get('likes') or 0):,}",
+        f"- Total comments: {int(totals.get('comments') or 0):,}",
+        f"- Total shares: {int(totals.get('shares') or 0):,}",
+        f"- Total clicks: {int(totals.get('clicks') or 0):,}",
+        f"- Total revenue: {money_vnd(totals.get('revenue'))}",
+        "",
+        "PLATFORM BREAKDOWN",
+    ]
+    for item in summary.get("platform_breakdown", []):
+        lines.append(
+            f"- {item.get('platform')}: {item.get('posts')} posts | {int(item.get('views') or 0):,} views | "
+            f"{int(item.get('clicks') or 0):,} clicks | {money_vnd(item.get('revenue'))}"
+        )
+    lines.extend(["", "TOP POSTS", "#id | platform | topic | views | clicks | revenue | score | url"])
+    for p in summary.get("top_by_revenue", []) + [p for p in summary.get("top_by_views", []) if p not in summary.get("top_by_revenue", [])]:
+        lines.append(
+            f"#{p['post_id']} | {p['platform']} | {p['topic'][:90]} | {p['views']} | {p['clicks']} | "
+            f"{money_vnd(p['revenue'])} | {p['score']} | {p['post_url']}"
+        )
+    lines.extend(["", "RECOMMENDATIONS"])
+    for p in summary.get("posts", [])[:20]:
+        rec = p.get("recommendation") or {}
+        lines.append(f"- #{p['post_id']} {p['platform']} | {rec.get('title')}: {rec.get('action')}")
+    lines.extend(["", "NEXT ACTIONS"])
+    for idx, action in enumerate(report_next_actions(summary), 1):
+        lines.append(f"{idx}. {action}")
+    lines.extend(["", "SAFETY", "- No auto publish.", "- No social API used.", "- Affiliate disclosure required."])
+    return "\n".join(lines)
+
+def build_campaign_report_csv(summary: dict) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["post_id", "platform", "topic", "post_url", "views", "likes", "comments", "shares", "clicks", "revenue", "score", "published_at"])
+    for p in summary.get("posts", []):
+        writer.writerow([
+            p.get("post_id"),
+            p.get("platform"),
+            p.get("topic"),
+            p.get("post_url"),
+            p.get("views"),
+            p.get("likes"),
+            p.get("comments"),
+            p.get("shares"),
+            p.get("clicks"),
+            p.get("revenue"),
+            p.get("score"),
+            p.get("published_at"),
+        ])
+    return buffer.getvalue()
+
+def create_temp_report_file(user_id, content, ext="txt"):
+    ext = "csv" if str(ext).lower() == "csv" else "txt"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"toan_aas_campaign_report_{user_id}_{timestamp}.{ext}"
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=f".{ext}", encoding="utf-8", newline="") as f:
+        f.write(content or "")
+        return f.name, filename
+
+async def send_report_file(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id, content: str, ext="txt", caption=""):
+    tmp_path, filename = create_temp_report_file(user_id, content, ext)
+    try:
+        with open(tmp_path, "rb") as f:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=f,
+                filename=filename,
+                caption=caption or filename,
+            )
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 def parse_video_script_args(raw: str) -> dict:
     raw = (raw or "").strip()
@@ -28143,6 +28465,141 @@ async def cmd_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_growth_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    raw = " ".join(context.args).strip()
+    args = parse_growth_report_args(raw, default_days=14)
+    summary = collect_user_performance_summary(
+        uid,
+        days=args["days"],
+        campaign_id=args["campaign_id"],
+        platform=args["platform"],
+        limit=20,
+    )
+    if not summary.get("has_data"):
+        return await update.message.reply_text(
+            "📈 <b>AI Growth Coach cần dữ liệu trước.</b>\n\n"
+            "Bước 1:\n<code>/publish_done tiktok https://... chủ đề</code>\n\n"
+            "Bước 2:\n<code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n\n"
+            "Bước 3:\n<code>/growth_ai</code>\n\n"
+            "Chưa có dữ liệu nên không trừ Xu.",
+            parse_mode="HTML",
+        )
+
+    credits, _, is_vip = get_user(uid, update.effective_user.first_name)
+    is_admin = str(uid) == ADMIN_ID
+    cost = 0 if (is_admin or is_vip) else GROWTH_AI_COST
+    charged = False
+    if cost > 0:
+        if credits < cost:
+            return await reply_insufficient_credits(update, credits, cost)
+        charged = spend_fixed_credit(uid, cost, "spend_growth_ai", f"AI Growth Coach {args['days']}d {args['platform'] or 'all'}")
+        if not charged:
+            credits_now, _, _ = get_user(uid)
+            return await reply_insufficient_credits(update, credits_now, cost)
+
+    totals = summary["totals"]
+    status_msg = await update.message.reply_text(
+        "📈 <b>AI Growth Coach đang phân tích...</b>\n\n"
+        f"• Số ngày: <b>{summary['days']}</b>\n"
+        f"• Nền tảng: <code>{html.escape(summary['platform'])}</code>\n"
+        f"• Số bài: <b>{summary['post_count']}</b>\n"
+        f"• Views: <b>{int(totals['views']):,}</b> | Clicks: <b>{int(totals['clicks']):,}</b> | Revenue: <b>{money_vnd(totals['revenue'])}</b>",
+        parse_mode="HTML",
+    )
+    try:
+        prompt = build_growth_ai_prompt(summary, user_goal=args["goal"], platforms=args["platform"] or "facebook,tiktok,youtube")
+        output_text = await call_growth_ai(prompt, uid)
+        try:
+            save_ai_growth_recommendation(uid, args["campaign_id"], output_text, summary)
+        except Exception as e:
+            logger.warning(f"AI growth recommendation save failed: {type(e).__name__}")
+        credits_after, _, _ = get_user(uid)
+        header = (
+            f"📈 <b>AI Growth Coach — TOAN AAS</b>\n\n"
+            f"• Số ngày: <b>{summary['days']}</b>\n"
+            f"• Nền tảng: <code>{html.escape(summary['platform'])}</code>\n"
+            f"• Số bài: <b>{summary['post_count']}</b>\n"
+            f"• Tổng views: <b>{int(totals['views']):,}</b>\n"
+            f"• Tổng clicks: <b>{int(totals['clicks']):,}</b>\n"
+            f"• Tổng revenue: <b>{money_vnd(totals['revenue'])}</b>\n"
+            f"• Chi phí: <b>{cost} Xu</b>\n\n"
+        )
+        if len(output_text) > 3200:
+            await status_msg.edit_text(
+                header + f"<b>Preview:</b>\n<pre>{html_pre(output_text, 2600)}</pre>\n\n"
+                f"💼 Số dư còn lại: <b>{credits_after} Xu</b>\n"
+                "File phân tích đầy đủ đã được gửi bên dưới.\n"
+                "Lệnh tiếp: <code>/campaign_report</code> | <code>/film &lt;chủ đề&gt;</code> | <code>/naptien</code>",
+                parse_mode="HTML",
+            )
+            await send_report_file(
+                context,
+                update.effective_chat.id,
+                uid,
+                "TOAN AAS AI GROWTH COACH\n\n" + output_text,
+                "txt",
+                "📎 AI Growth Coach full report",
+            )
+        else:
+            await status_msg.edit_text(
+                header + f"<pre>{html.escape(output_text)}</pre>\n\n"
+                f"💼 Số dư còn lại: <b>{credits_after} Xu</b>\n"
+                "Lệnh tiếp: <code>/campaign_report</code> | <code>/film &lt;chủ đề&gt;</code> | <code>/naptien</code>",
+                parse_mode="HTML",
+            )
+    except Exception as e:
+        logger.warning(f"AI Growth Coach error: {type(e).__name__}")
+        refunded = refund_charged_credit(uid, cost, "growth_ai_refund", "", "Hoàn phí AI Growth Coach do AI lỗi", charged)
+        refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b>." if refunded else ""
+        await status_msg.edit_text(
+            "❌ AI Growth Coach đang lỗi hoặc quá tải. Vui lòng thử lại sau." + refund_line,
+            parse_mode="HTML",
+        )
+
+async def cmd_campaign_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    raw = " ".join(context.args).strip()
+    args = parse_growth_report_args(raw, default_days=30)
+    summary = collect_user_performance_summary(
+        uid,
+        days=args["days"],
+        campaign_id=args["campaign_id"],
+        platform=args["platform"],
+        limit=50,
+    )
+    if not summary.get("has_data"):
+        return await update.message.reply_text(
+            "📭 <b>Chưa có dữ liệu để xuất báo cáo.</b>\n\n"
+            "Bước 1: <code>/publish_done tiktok https://... chủ đề</code>\n"
+            "Bước 2: <code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n"
+            "Bước 3: <code>/campaign_report format=txt</code> hoặc <code>/campaign_report format=csv</code>",
+            parse_mode="HTML",
+        )
+    fmt = args["format"]
+    content = build_campaign_report_csv(summary) if fmt == "csv" else build_campaign_report_txt(summary)
+    totals = summary["totals"]
+    caption = (
+        f"📊 TOAN AAS Campaign Report ({fmt.upper()})\n"
+        f"{summary['post_count']} bài | {int(totals['views']):,} views | "
+        f"{int(totals['clicks']):,} clicks | {money_vnd(totals['revenue'])}"
+    )
+    try:
+        await send_report_file(context, update.effective_chat.id, uid, content, fmt, caption)
+        await update.message.reply_text(
+            "✅ Đã xuất báo cáo chiến dịch.\n\n"
+            "Gợi ý tiếp: <code>/growth_loop</code> để xem rule nhanh hoặc <code>/growth_ai</code> để AI phân tích sâu.",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.warning(f"Campaign report export error: {type(e).__name__}")
+        fallback = html.escape(truncate_text(content, 3200))
+        await update.message.reply_text(
+            "⚠️ Không gửi được file, gửi bản rút gọn:\n\n"
+            f"<pre>{fallback}</pre>",
+            parse_mode="HTML",
+        )
+
 async def cmd_growth_loop_manual(update: Update, context: ContextTypes.DEFAULT_TYPE, raw: str):
     data, remainder = parse_loose_kv_args(raw)
     days = max(1, min(safe_int(data.get("days") or data.get("ngay") or (remainder.split()[0] if remainder.split() else 30), 30), 180))
@@ -28167,6 +28624,7 @@ async def cmd_growth_loop_manual(update: Update, context: ContextTypes.DEFAULT_T
             f"Hành động: {html.escape(rec['action'])}\n"
             f"Lệnh gợi ý: <code>/film topic=\"{html.escape((item['topic'] or 'ý tưởng video')[:80])}\" platforms=facebook,tiktok,youtube</code>\n"
         )
+    lines.append("\nMuốn phân tích sâu bằng AI: <code>/growth_ai</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -31667,6 +32125,8 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     manual_revenue_today = c.fetchone()[0] or 0
     c.execute("SELECT COALESCE(SUM(revenue),0) FROM manual_performance_events WHERE created_at LIKE ?", (f"{month_prefix}%",))
     manual_revenue_month = c.fetchone()[0] or 0
+    c.execute("SELECT COUNT(*) FROM growth_recommendations WHERE recommendation_type='ai_growth_coach' AND created_at LIKE ?", (f"{month_prefix}%",))
+    growth_ai_month = c.fetchone()[0] or 0
     conn.close()
 
     lines = [
@@ -31680,6 +32140,7 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎁 <b>Referral:</b> thưởng <b>{referral_rewards}</b> lượt / <b>{referral_bonus_total or 0} Xu</b>",
         f"🎬 <b>Video/Affiliate:</b> script hôm nay <b>{video_scripts_today}</b> | campaign active <b>{active_campaigns}</b> | link active <b>{affiliate_active}</b> (+{affiliate_today} hôm nay) | lịch 7 ngày <b>{calendar_7d}</b>",
         f"📈 <b>Publish tracking:</b> bài hôm nay <b>{manual_posts_today}</b> | nhập số liệu <b>{manual_perf_today}</b> | revenue tay hôm nay <b>{manual_revenue_today:,.0f}đ</b> | tháng <b>{manual_revenue_month:,.0f}đ</b>",
+        f"🧠 <b>AI Growth:</b> report AI tháng này <b>{growth_ai_month}</b>",
         f"📋 <b>Cần chú ý:</b> bill chờ <b>{pending_count}</b> | lead <b>{lead_count}</b> | góp ý 7 ngày <b>{feedback_7d}</b> | audit 24h <b>{audit_24h}</b>",
         "",
         "<b>Lệnh nhanh:</b> /pending | /backup_db | /health | /naptien",
@@ -32294,6 +32755,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("publish_done", cmd_publish_done))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
     tg_app.add_handler(CommandHandler("performance_report", cmd_performance_report))
+    tg_app.add_handler(CommandHandler("growth_ai", cmd_growth_ai))
+    tg_app.add_handler(CommandHandler("campaign_report", cmd_campaign_report))
+    tg_app.add_handler(CommandHandler("export_report", cmd_campaign_report))
     tg_app.add_handler(CommandHandler("posts", cmd_posts))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("money_pack", cmd_money_pack))

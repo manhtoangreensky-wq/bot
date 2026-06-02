@@ -5,6 +5,7 @@
 - `py_compile`: PASS using Codex bundled Python on 2026-06-02.
 - `pytest -q`: PASS, 13 tests, 1 Starlette/httpx deprecation warning.
 - Import test: PASS, `cmd_help` and `help_text_for_user` exist.
+- Step 7 import test: PASS, `GROWTH_AI_COST=30`, `cmd_growth_ai`, `cmd_campaign_report`, and report CSV helper exist.
 
 ## UI
 
@@ -106,10 +107,22 @@
 - `/performance_report`: aggregates manual posts by platform and top posts.
 - `/posts`: lists recent manually recorded posts.
 - `/growth_loop`: user-facing rule-based recommendations from manual metrics.
+- `/growth_ai`: AI Growth Coach deep analysis, 30 Xu for normal users, admin/VIP free.
+- `/campaign_report`: TXT/CSV report export, free MVP.
+- `/export_report`: alias for `/campaign_report`.
 - `/growth_loop manual=1`: admin can view manual loop; admin default remains operator growth loop.
 - DB: `published_posts`, `manual_performance_events`, `growth_recommendations`.
 - Dashboard: includes manual publish/performance/revenue counters.
 - Safety: no social API calls, no auto publish, no browser automation, no render API.
+
+## Growth Coach & Reports
+
+- `/growth_loop`: rule-based, fast, no AI charge.
+- `/growth_ai`: Gemini/OpenAI text fallback through existing `AgentGemini.chat`.
+- `/growth_ai` pricing: 30 Xu; no charge when no data; refund on AI error.
+- `/campaign_report`: exports TXT or CSV using owner-scoped manual data.
+- Report export: temp file only, deleted after Telegram send.
+- Local route smoke after Step 7: PASS for `/`, `/landing`, `/health`, `/banner.png`.
 
 ## Live Website Status
 
@@ -130,6 +143,7 @@
 - `/film`: registered in local `bot.py`; needs live AI/Xu test.
 - Affiliate commands: `/addlink`, `/links`, `/campaign`, `/addcal`, `/calendar` registered in local `bot.py`.
 - Performance commands: `/publish_done`, `/performance_add`, `/performance_report`, `/posts`, `/growth_loop` registered in local `bot.py`.
+- Growth/report commands: `/growth_ai`, `/campaign_report`, `/export_report` registered in local `bot.py`.
 - Admin commands: `/dashboard`, `/admin`, `/stats`, `/pending`, `/duyet`, `/tuchoi`, `/add`, `/setvip`, `/backup_db`, `/runtime`, `/checkpayos`, `/telegram_takeover`.
 
 ## Ready For Next Revenue Step?
