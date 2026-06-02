@@ -30077,6 +30077,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 tg_app: Application = None
 tg_polling_task: asyncio.Task | None = None
 tg_webhook_watchdog_task: asyncio.Task | None = None
+TELEGRAM_STARTUP_ERROR = ""
 
 async def run_polling_guarded():
     try:
@@ -30105,12 +30106,14 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, tg_webhook_watchdog_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR
     init_db()
     if not TELEGRAM_TOKEN:
+        TELEGRAM_STARTUP_ERROR = "TELEGRAM_TOKEN chưa được set"
         logger.error("❌ TELEGRAM_TOKEN chưa được set!")
         yield
         return
+    TELEGRAM_STARTUP_ERROR = ""
 
     tg_app = Application.builder().token(TELEGRAM_TOKEN).build()
 
@@ -30302,65 +30305,73 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_task_callback, pattern=r"^task\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
 
-    await tg_app.initialize()
-    await tg_app.start()
-    active_update_mode = TELEGRAM_UPDATE_MODE
-    webhook_url = ""
-    webhook_info_payload = {"ok": False, "reason": "not_checked", "expected_url": expected_telegram_webhook_url()}
-    if (
-        active_update_mode == "polling"
-        and PUBLIC_BASE_URL
-        and not TELEGRAM_FORCE_POLLING
-        and (not TELEGRAM_UPDATE_MODE_RAW or is_railway_runtime())
-    ):
-        active_update_mode = "webhook"
-    if active_update_mode == "webhook" and PUBLIC_BASE_URL:
-        takeover_result = await set_telegram_webhook_takeover(tg_app.bot, drop_pending_updates=True)
-        webhook_url = takeover_result.get("webhook_url") or ""
-        try:
-            webhook_info_payload = takeover_result.get("telegram_webhook_info") or serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), webhook_url)
-        except Exception as e:
-            webhook_info_payload = {"ok": False, "error": str(e), "expected_url": webhook_url}
-        ACTIVE_TELEGRAM_UPDATE_MODE = "webhook"
-        ACTIVE_TELEGRAM_WEBHOOK_URL = webhook_url
-        if TELEGRAM_TAKEOVER_INTERVAL_SECONDS > 0:
-            tg_webhook_watchdog_task = asyncio.create_task(telegram_webhook_watchdog())
-        logger.info(f"🚀 TOAN DAAS ONLINE WEBHOOK — build={APP_BUILD} webhook={webhook_url}")
-    else:
-        active_update_mode = "polling"
-        try:
-            await tg_app.bot.delete_webhook(drop_pending_updates=True)
-        except Exception as e:
-            logger.warning(f"Không xóa được webhook cũ trước khi polling: {e}")
-        try:
-            webhook_info_payload = serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), expected_telegram_webhook_url())
-        except Exception as e:
-            webhook_info_payload = {"ok": False, "error": str(e), "expected_url": expected_telegram_webhook_url()}
-        tg_polling_task = asyncio.create_task(run_polling_guarded())
-        ACTIVE_TELEGRAM_UPDATE_MODE = "polling"
+    telegram_started = False
+    try:
+        await tg_app.initialize()
+        await tg_app.start()
+        telegram_started = True
+        active_update_mode = TELEGRAM_UPDATE_MODE
+        webhook_url = ""
+        webhook_info_payload = {"ok": False, "reason": "not_checked", "expected_url": expected_telegram_webhook_url()}
+        if (
+            active_update_mode == "polling"
+            and PUBLIC_BASE_URL
+            and not TELEGRAM_FORCE_POLLING
+            and (not TELEGRAM_UPDATE_MODE_RAW or is_railway_runtime())
+        ):
+            active_update_mode = "webhook"
+        if active_update_mode == "webhook" and PUBLIC_BASE_URL:
+            takeover_result = await set_telegram_webhook_takeover(tg_app.bot, drop_pending_updates=True)
+            webhook_url = takeover_result.get("webhook_url") or ""
+            try:
+                webhook_info_payload = takeover_result.get("telegram_webhook_info") or serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), webhook_url)
+            except Exception as e:
+                webhook_info_payload = {"ok": False, "error": str(e), "expected_url": webhook_url}
+            ACTIVE_TELEGRAM_UPDATE_MODE = "webhook"
+            ACTIVE_TELEGRAM_WEBHOOK_URL = webhook_url
+            if TELEGRAM_TAKEOVER_INTERVAL_SECONDS > 0:
+                tg_webhook_watchdog_task = asyncio.create_task(telegram_webhook_watchdog())
+            logger.info(f"🚀 TOAN DAAS ONLINE WEBHOOK — build={APP_BUILD} webhook={webhook_url}")
+        else:
+            active_update_mode = "polling"
+            try:
+                await tg_app.bot.delete_webhook(drop_pending_updates=True)
+            except Exception as e:
+                logger.warning(f"Không xóa được webhook cũ trước khi polling: {e}")
+            try:
+                webhook_info_payload = serialize_telegram_webhook_info(await tg_app.bot.get_webhook_info(), expected_telegram_webhook_url())
+            except Exception as e:
+                webhook_info_payload = {"ok": False, "error": str(e), "expected_url": expected_telegram_webhook_url()}
+            tg_polling_task = asyncio.create_task(run_polling_guarded())
+            ACTIVE_TELEGRAM_UPDATE_MODE = "polling"
+            ACTIVE_TELEGRAM_WEBHOOK_URL = ""
+            logger.info(f"🚀 TOAN DAAS ONLINE POLLING — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
+        ownership = telegram_update_ownership_diagnosis(webhook_info_payload, active_update_mode)
+        if ADMIN_ID:
+            try:
+                await tg_app.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        "🧬 <b>TOAN DAAS DEPLOYED</b>\n\n"
+                        f"• Build: <code>{APP_BUILD}</code>\n"
+                        f"• Deploy: <code>{APP_DEPLOY_ID or '-'}</code>\n"
+                        f"• Update mode: <code>{html.escape(active_update_mode)}</code>\n"
+                        f"• Raw mode: <code>{html.escape(TELEGRAM_UPDATE_MODE_RAW or '-')}</code> | force polling: <code>{str(TELEGRAM_FORCE_POLLING).lower()}</code>\n"
+                        f"• Public URL source: <code>{html.escape(PUBLIC_BASE_URL_SOURCE or '-')}</code>\n"
+                        f"• Webhook: <code>{html.escape(webhook_url or '-')}</code>\n"
+                        f"• Telegram owner: <code>{html.escape(ownership.get('level') or '-')}</code>\n"
+                        f"• Next: <code>{html.escape(ownership.get('next_action') or '/runtime')}</code>\n"
+                        "• Lệnh kiểm tra: /runtime hoặc /telegram_status"
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Không gửi được thông báo deploy cho admin: {e}")
+    except Exception as e:
+        TELEGRAM_STARTUP_ERROR = str(e)
+        ACTIVE_TELEGRAM_UPDATE_MODE = "telegram_startup_error"
         ACTIVE_TELEGRAM_WEBHOOK_URL = ""
-        logger.info(f"🚀 TOAN DAAS ONLINE POLLING — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
-    ownership = telegram_update_ownership_diagnosis(webhook_info_payload, active_update_mode)
-    if ADMIN_ID:
-        try:
-            await tg_app.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=(
-                    "🧬 <b>TOAN DAAS DEPLOYED</b>\n\n"
-                    f"• Build: <code>{APP_BUILD}</code>\n"
-                    f"• Deploy: <code>{APP_DEPLOY_ID or '-'}</code>\n"
-                    f"• Update mode: <code>{html.escape(active_update_mode)}</code>\n"
-                    f"• Raw mode: <code>{html.escape(TELEGRAM_UPDATE_MODE_RAW or '-')}</code> | force polling: <code>{str(TELEGRAM_FORCE_POLLING).lower()}</code>\n"
-                    f"• Public URL source: <code>{html.escape(PUBLIC_BASE_URL_SOURCE or '-')}</code>\n"
-                    f"• Webhook: <code>{html.escape(webhook_url or '-')}</code>\n"
-                    f"• Telegram owner: <code>{html.escape(ownership.get('level') or '-')}</code>\n"
-                    f"• Next: <code>{html.escape(ownership.get('next_action') or '/runtime')}</code>\n"
-                    "• Lệnh kiểm tra: /runtime hoặc /telegram_status"
-                ),
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.warning(f"Không gửi được thông báo deploy cho admin: {e}")
+        logger.exception(f"Telegram startup lỗi nhưng FastAPI vẫn chạy để /runtime chẩn đoán: {e}")
     yield
     if tg_polling_task:
         try:
@@ -30370,8 +30381,9 @@ async def lifespan(app: FastAPI):
         tg_polling_task.cancel()
     if tg_webhook_watchdog_task:
         tg_webhook_watchdog_task.cancel()
-    await tg_app.stop()
-    await tg_app.shutdown()
+    if tg_app and telegram_started:
+        await tg_app.stop()
+        await tg_app.shutdown()
     logger.info("🛑 Bot đã dừng an toàn.")
 
 fastapi_app = FastAPI(title="TOAN DAAS V15.2", lifespan=lifespan)
@@ -30391,6 +30403,7 @@ async def health():
         "railway_runtime_detected": is_railway_runtime(),
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "",
         "telegram_webhook_watchdog": ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG or "",
+        "telegram_startup_error": TELEGRAM_STARTUP_ERROR or "",
         "public_base_url": PUBLIC_BASE_URL or "",
         "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
     }
@@ -30420,6 +30433,7 @@ async def runtime_health():
         "telegram_webhook_url": expected_webhook,
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "",
         "telegram_webhook_watchdog": ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG or "",
+        "telegram_startup_error": TELEGRAM_STARTUP_ERROR or "",
         "telegram_takeover_interval_seconds": TELEGRAM_TAKEOVER_INTERVAL_SECONDS,
         "telegram_webhook_info": webhook_info,
         "telegram_ownership": ownership,

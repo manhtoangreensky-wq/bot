@@ -21,6 +21,24 @@ def test_health_and_runtime_endpoints():
     assert runtime.json()["service"].startswith("TOAN DAAS")
 
 
+def test_lifespan_keeps_api_alive_without_telegram_token(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "TELEGRAM_TOKEN", "")
+    monkeypatch.setattr(bot, "TELEGRAM_STARTUP_ERROR", "")
+    try:
+        with TestClient(bot.fastapi_app) as client:
+            runtime = client.get("/runtime")
+            assert runtime.status_code == 200
+            payload = runtime.json()
+            assert payload["status"] == "ok"
+            assert "TELEGRAM_TOKEN" in payload["telegram_startup_error"]
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_cost_and_discount_rules():
     assert bot.calculate_dynamic_cost("chat", 0) == 2
     assert bot.calculate_dynamic_cost("download", 0) == 5
