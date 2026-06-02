@@ -45,6 +45,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/start`: menu chính.
 - `/huongdan`, `/guide`, `/hdsd`: xem hướng dẫn sử dụng từng bước và tải tài liệu Word/Markdown.
 - `/profile`: xem số dư, hạng, tổng chi.
+- `/trial_status`: kiểm tra trạng thái 200 Xu trải nghiệm theo ID Telegram.
 - `/naptien`: tạo hóa đơn PayOS QR động.
 - `/khuyenmai`, `/uudai`, `/promos`: xem ưu đãi đang có và thứ tự nên dùng.
 - `/promo <mã>`, `/magiamgia <mã>`: lưu một mã ưu đãi cho lần nạp PayOS tiếp theo.

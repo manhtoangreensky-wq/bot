@@ -1,6 +1,7 @@
 import hmac
 import hashlib
 import os
+import sqlite3
 import tempfile
 from types import SimpleNamespace
 
@@ -432,6 +433,98 @@ def test_beta_gift_assignment_message_shows_contact_without_myid(monkeypatch):
     no_username_user = SimpleNamespace(id=12345, username=None, first_name="No", last_name="User")
     no_username_message = bot.gift_needs_assignment_message(no_username_user, "BETA10")
     assert "Username: không có" in no_username_message
+
+
+def test_trial_grant_locked_per_telegram_id(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        credits, spent, vip = bot.get_user("trial-user", "First Name")
+        assert (credits, spent, vip) == (bot.TRIAL_CREDITS, 0, 0)
+
+        conn = bot.db_connect()
+        try:
+            c = conn.cursor()
+            c.execute("SELECT granted_xu FROM trial_grants WHERE user_id=?", ("trial-user",))
+            assert c.fetchone()[0] == bot.TRIAL_CREDITS
+            c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id=? AND event_type='trial_grant'", ("trial-user",))
+            assert c.fetchone()[0] == 1
+        finally:
+            conn.close()
+
+        credits_again, _, _ = bot.get_user("trial-user", "Changed Username")
+        assert credits_again == bot.TRIAL_CREDITS
+        conn = bot.db_connect()
+        try:
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id=? AND event_type='trial_grant'", ("trial-user",))
+            assert c.fetchone()[0] == 1
+            c.execute("DELETE FROM users WHERE user_id=?", ("trial-user",))
+            conn.commit()
+        finally:
+            conn.close()
+
+        recreated_credits, recreated_spent, recreated_vip = bot.get_user("trial-user", "Recreated")
+        assert (recreated_credits, recreated_spent, recreated_vip) == (0, 0, 0)
+        conn = bot.db_connect()
+        try:
+            c = conn.cursor()
+            c.execute("SELECT credits FROM users WHERE user_id=?", ("trial-user",))
+            assert c.fetchone()[0] == 0
+            c.execute(
+                "SELECT delta FROM credit_events WHERE user_id=? AND event_type='trial_already_granted_recreated'",
+                ("trial-user",),
+            )
+            assert c.fetchone()[0] == 0
+        finally:
+            conn.close()
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_trial_grants_backfill_existing_users(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """CREATE TABLE users (
+                    user_id TEXT PRIMARY KEY,
+                    username TEXT,
+                    credits INTEGER DEFAULT 0,
+                    is_vip INTEGER DEFAULT 0,
+                    join_date TEXT,
+                    total_spent INTEGER DEFAULT 0
+                )"""
+            )
+            conn.execute(
+                "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
+                ("existing-user", "Existing", 75, 0, "2026-01-01 00:00:00", 0),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            c = conn.cursor()
+            c.execute("SELECT credits FROM users WHERE user_id=?", ("existing-user",))
+            assert c.fetchone()[0] == 75
+            c.execute("SELECT granted_xu, note FROM trial_grants WHERE user_id=?", ("existing-user",))
+            row = c.fetchone()
+            assert row[0] == bot.TRIAL_CREDITS
+            assert row[1] == "Backfilled from existing users"
+        finally:
+            conn.close()
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
 
 
 def test_payos_webhook_rejects_missing_checksum(monkeypatch):

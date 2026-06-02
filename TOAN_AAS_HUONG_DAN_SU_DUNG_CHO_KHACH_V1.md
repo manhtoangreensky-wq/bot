@@ -76,6 +76,7 @@ Sau đó bot sẽ tạo nội dung. Bạn đọc kết quả, sửa lại thông
 |---|---|---|
 | Xem bot có gì | `/start` hoặc `/help` | Đọc menu, chọn nhóm công cụ |
 | Xem số Xu | `/profile` | Nếu thiếu Xu thì nạp |
+| Kiểm tra Xu trải nghiệm | `/trial_status` | Xem ID Telegram đã nhận 200 Xu trial chưa |
 | Nạp Xu | `/naptien` | Chọn gói, quét QR, chờ cộng Xu hoặc gửi bill thủ công |
 | Xem khuyến mãi | `/khuyenmai` | Chọn mã phù hợp, nhập `/promo MÃ` trước khi nạp |
 | Nhập mã promo | `/promo FIRST30` | Sau đó vào `/naptien` chọn gói đủ điều kiện |
@@ -101,6 +102,10 @@ Nếu bạn không nhớ lệnh, gõ:
 Xu là số dư trong bot. Bạn dùng Xu để chạy công cụ.
 
 - User mới nhận **200 Xu trải nghiệm**.
+- Mỗi ID Telegram chỉ nhận **200 Xu trải nghiệm một lần**.
+- Xóa chat, block bot rồi bấm Start lại hoặc đổi username không làm bạn nhận lại 200 Xu.
+- Xu được quản lý theo ID Telegram, không theo nội dung đoạn chat.
+- Khi cần hỗ trợ, dùng `/myid` hoặc `/trial_status` rồi gửi ID Telegram cho admin.
 - 1 Xu tương đương định giá nội bộ khoảng **100đ**.
 - Một số tác vụ thường miễn phí hoặc có giới hạn/ngày.
 - Tác vụ tạo nội dung/video pack, phân tích sâu, xuất báo cáo sẽ tốn Xu.
@@ -130,6 +135,23 @@ Xu là số dư trong bot. Bạn dùng Xu để chạy công cụ.
 Gói 10k và 20k chỉ dùng thử, không có Launch Bonus. Launch Bonus bắt đầu từ gói 50k trở lên.
 Launch Bonus áp dụng 1 lần cho mỗi tài khoản ở từng gói 50k/100k/200k/500k.
 Các lần mua lại cùng gói chỉ nhận Xu gốc.
+
+---
+
+### 5.3. Nếu tôi xóa chat với bot thì sao?
+
+TOAN AAS quản lý Xu theo **ID Telegram**, không theo nội dung đoạn chat.
+
+Mỗi ID Telegram chỉ nhận **200 Xu trải nghiệm một lần**. Nếu bạn xóa chat rồi bấm Start lại, hệ thống vẫn nhận diện ID cũ và không cấp lại 200 Xu.
+
+Số dư được lưu theo ID Telegram khi hệ thống DB còn dữ liệu. Khi cần hỗ trợ, hãy dùng:
+
+```text
+/myid
+/trial_status
+```
+
+Sau đó gửi ID Telegram cho admin/hỗ trợ để kiểm tra.
 
 ---
 

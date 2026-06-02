@@ -525,6 +525,13 @@ def init_db():
         join_date TEXT,
         total_spent INTEGER DEFAULT 0
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS trial_grants (
+        user_id TEXT PRIMARY KEY,
+        granted_xu INTEGER DEFAULT 200,
+        granted_at TEXT,
+        username TEXT,
+        note TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS feedback (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT, username TEXT, content TEXT, timestamp DATETIME
@@ -1008,6 +1015,7 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_promo_redemptions_user_status ON promotion_redemptions(user_id, status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_promo_redemptions_order ON promotion_redemptions(order_code)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_promo_state_user ON user_promo_state(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_trial_grants_user_id ON trial_grants(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_launch_bonus_user ON launch_bonus_redemptions(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_launch_bonus_order ON launch_bonus_redemptions(order_code)")
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_launch_bonus_user_package ON launch_bonus_redemptions(user_id, package_amount_vnd)")
@@ -1082,6 +1090,16 @@ def init_db():
         SET requires_assignment=0
         WHERE promo_type='gift_xu'
           AND UPPER(code) NOT LIKE 'BETA%'"""
+    )
+    c.execute(
+        """INSERT OR IGNORE INTO trial_grants (user_id, granted_xu, granted_at, username, note)
+        SELECT user_id,
+               ?,
+               COALESCE(join_date, datetime('now')),
+               COALESCE(username, ''),
+               'Backfilled from existing users'
+        FROM users""",
+        (TRIAL_CREDITS,),
     )
     for col, col_type in [
         ("order_code", "TEXT"),
@@ -1372,20 +1390,63 @@ def record_credit_event(conn, user_id, delta, event_type, ref_id="", note=""):
     )
 
 def get_user(user_id, username="Unknown"):
+    uid = str(user_id)
+    clean_username = str(username or "Unknown")
     conn = db_connect()
     c = conn.cursor()
-    c.execute("SELECT credits, total_spent, is_vip FROM users WHERE user_id=?", (str(user_id),))
+    c.execute("SELECT credits, total_spent, is_vip FROM users WHERE user_id=?", (uid,))
     row = c.fetchone()
-    if not row:
+    if row:
+        conn.close()
+        return row[0], row[1], row[2]
+
+    c.execute("SELECT granted_xu FROM trial_grants WHERE user_id=?", (uid,))
+    trial_row = c.fetchone()
+    if trial_row:
+        initial_credits = 0
+        note = "User recreated after missing users row; trial already granted before, no new trial credits."
         c.execute(
             "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
-            (str(user_id), username, TRIAL_CREDITS, 0, now_text(), 0)
+            (uid, clean_username, initial_credits, 0, now_text(), 0)
         )
-        record_credit_event(conn, user_id, TRIAL_CREDITS, "trial_grant", "", "Tặng 200 Xu trải nghiệm")
+        record_credit_event(conn, uid, 0, "trial_already_granted_recreated", "", note)
         conn.commit()
-        row = (TRIAL_CREDITS, 0, 0)
+        conn.close()
+        return initial_credits, 0, 0
+
+    initial_credits = TRIAL_CREDITS
+    now = now_text()
+    c.execute(
+        "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
+        (uid, clean_username, initial_credits, 0, now, 0)
+    )
+    c.execute(
+        """INSERT OR IGNORE INTO trial_grants (user_id, granted_xu, granted_at, username, note)
+        VALUES (?,?,?,?,?)""",
+        (uid, TRIAL_CREDITS, now, clean_username, "First trial grant"),
+    )
+    record_credit_event(conn, uid, TRIAL_CREDITS, "trial_grant", "", "Tặng 200 Xu trải nghiệm lần đầu")
+    conn.commit()
     conn.close()
-    return row[0], row[1], row[2]
+    return initial_credits, 0, 0
+
+def get_trial_grant_status(user_id) -> dict:
+    uid = str(user_id)
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT granted_xu, granted_at, username, note FROM trial_grants WHERE user_id=?", (uid,))
+        row = c.fetchone()
+        return {
+            "user_id": uid,
+            "granted": row is not None,
+            "granted_xu": int(row[0] or 0) if row else 0,
+            "granted_at": row[1] if row else "",
+            "username": row[2] if row else "",
+            "note": row[3] if row else "",
+        }
+    finally:
+        conn.close()
 
 def add_credit(user_id, amount, event_type="manual_add", ref_id="", note=""):
     get_user(user_id)
@@ -21502,7 +21563,9 @@ CUSTOMER_GUIDE_SECTIONS = [
         "Xu, nạp tiền, ưu đãi",
         (
             "💳 <b>Xu, gói nạp và ưu đãi</b>\n\n"
-            "Xu là số dư trong bot. User mới nhận <b>200 Xu trải nghiệm</b>.\n\n"
+            "Xu là số dư trong bot. User mới nhận <b>200 Xu trải nghiệm</b>.\n"
+            "Mỗi ID Telegram chỉ nhận 200 Xu trải nghiệm một lần. Xóa chat, block bot rồi start lại hoặc đổi username không làm nhận lại 200 Xu.\n"
+            "Bạn có thể dùng <code>/trial_status</code> để kiểm tra trạng thái trial của mình.\n\n"
             "<b>Gói nạp:</b>\n"
             "• 10.000đ → 100 Xu, dùng thử\n"
             "• 20.000đ → 200 Xu, dùng thử thêm\n"
@@ -21515,6 +21578,18 @@ CUSTOMER_GUIDE_SECTIONS = [
             "không cộng dồn và chỉ cộng Xu sau khi thanh toán thành công.\n\n"
             "<b>Gift code:</b>\n"
             "Gift public hợp lệ sẽ cộng Xu trực tiếp. Riêng mã <code>BETA*</code> là mã sự kiện/test, cần admin cấp theo ID Telegram trước."
+        ),
+    ),
+    (
+        "trial",
+        "Xóa chat và trial",
+        (
+            "❓ <b>Nếu tôi xóa chat với bot thì sao?</b>\n\n"
+            "TOAN AAS quản lý Xu theo <b>ID Telegram</b>, không theo nội dung đoạn chat.\n"
+            "Mỗi ID chỉ nhận <b>200 Xu trải nghiệm</b> một lần.\n\n"
+            "Nếu bạn xóa chat rồi bấm Start lại, hệ thống vẫn nhận diện ID cũ và không cấp lại 200 Xu.\n"
+            "Số dư được lưu theo ID Telegram khi hệ thống DB còn dữ liệu.\n\n"
+            "Khi cần hỗ trợ, dùng <code>/myid</code> hoặc <code>/trial_status</code> rồi gửi ID Telegram cho admin."
         ),
     ),
     (
@@ -21740,6 +21815,7 @@ def menu_text_main(is_admin: bool) -> str:
         "💳 Nạp Xu: PayOS QR động hoặc QR thủ công khi cổng tự động bận."
         f"{admin_line}\n\n"
         "🎁 Tài khoản mới được tặng <b>200 Xu trải nghiệm</b>.\n"
+        "Mỗi ID Telegram chỉ nhận quà trải nghiệm một lần; xóa chat hoặc đổi username không làm reset 200 Xu.\n"
         "Bạn có thể dùng ngay 1 lượt <code>/film</code> Basic để thử quy trình tạo video script.\n"
         "💳 Hết Xu thì dùng <code>/naptien</code> để nạp thêm.\n\n"
         "<b>Bắt đầu nhanh:</b>\n"
@@ -22014,9 +22090,11 @@ def help_text_for_user(user_id) -> str:
     is_admin = is_admin_user(user_id)
     text = (
         "📘 <b>Hướng dẫn TOAN AAS</b>\n\n"
-        "🎁 Tài khoản mới nhận <b>200 Xu trải nghiệm</b>, đủ để thử 1 lượt <code>/film</code> Basic.\n\n"
+        "🎁 Tài khoản mới nhận <b>200 Xu trải nghiệm</b>, đủ để thử 1 lượt <code>/film</code> Basic.\n"
+        "Mỗi ID Telegram chỉ nhận 200 Xu trải nghiệm một lần. Xóa chat/start lại không cấp lại 200 Xu.\n\n"
         "<b>1. Tài khoản & nạp Xu</b>\n"
         "• <code>/profile</code> — xem số dư, VIP, referral\n"
+        "• <code>/trial_status</code> — kiểm tra trạng thái 200 Xu trải nghiệm\n"
         "• <code>/huongdan</code> hoặc <code>/guide</code> — xem hướng dẫn sử dụng chi tiết\n"
         "• <code>/naptien</code> — tạo QR nạp Xu\n"
         "• <code>/khuyenmai</code> hoặc <code>/uudai</code> — xem ưu đãi nên dùng\n"
@@ -22734,6 +22812,29 @@ async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
     )
 
+async def cmd_trial_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user:
+        return
+    credits, _, _ = get_user(user.id, user.first_name or user.username or "Unknown")
+    trial = get_trial_grant_status(user.id)
+    trial_text = "đã nhận" if trial.get("granted") else "chưa nhận"
+    granted_line = (
+        f"• Thời điểm cấp: <code>{html.escape(str(trial.get('granted_at') or '-'))}</code>\n"
+        if trial.get("granted")
+        else ""
+    )
+    await update.message.reply_text(
+        "🎁 <b>Trạng thái Xu trải nghiệm</b>\n\n"
+        f"• ID Telegram: <code>{html.escape(str(user.id))}</code>\n"
+        f"• Trial {TRIAL_CREDITS} Xu: <b>{trial_text}</b>\n"
+        f"{granted_line}"
+        f"• Số dư hiện tại: <b>{int(credits or 0)} Xu</b>\n\n"
+        f"Lưu ý: mỗi ID Telegram chỉ nhận {TRIAL_CREDITS} Xu trải nghiệm một lần. "
+        "Xóa đoạn chat hoặc đổi username không làm reset quà tặng.",
+        parse_mode="HTML",
+    )
+
 async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text(
@@ -23411,6 +23512,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Gói Doanh Nghiệp: 500.000đ ➔ <b>5.000 Xu</b> + 500 Xu Launch Bonus lần đầu mua gói = <b>5.500 Xu</b>\n\n"
         f"🎁 Launch Bonus theo gói chỉ áp dụng 1 lần cho mỗi tài khoản ở từng gói 50k/100k/200k/500k.\n"
         f"Các lần mua lại cùng gói sẽ nhận Xu gốc.\n\n"
+        f"🎁 Trial {TRIAL_CREDITS} Xu chỉ cấp 1 lần theo ID Telegram. Xóa chat hoặc start lại không làm nhận lại trial.\n\n"
         f"🏦 Nếu phải nạp thủ công, nội dung chuyển khoản sẽ là: <code>AAS {uid} &lt;order_code&gt;</code>\n\n"
         f"⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. Không lo điền sai nội dung chuyển khoản.\n\n"
         f"👇 <b>Vui lòng click chọn gói cước mong muốn dưới đây:</b>"
@@ -36520,6 +36622,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("mark_payos_test", cmd_mark_payos_test))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("myid",        cmd_myid))
+    tg_app.add_handler(CommandHandler("trial_status", cmd_trial_status))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
     tg_app.add_handler(CommandHandler("pricing",     cmd_pricing))
     tg_app.add_handler(CommandHandler("banggia",     cmd_pricing))
