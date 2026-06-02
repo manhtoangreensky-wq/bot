@@ -8,7 +8,16 @@
 
 ## Compile Status
 
-- `python -m py_compile bot.py`: PASS before this documentation pass.
+- `python -m py_compile bot.py`: PASS during TASK 1 audit.
+
+## Business Scope From Latest Direction
+
+- First 30 days: foundation plus early revenue.
+- Primary money platforms: Facebook, TikTok, YouTube.
+- Secondary platforms: Instagram, Threads, OnlyFans, Website.
+- Do not prioritize HR, Tax, or Travel modules during the first 90 days.
+- Device Ops should wait, or stay Lite until there is a real paying customer.
+- Do not expand the system too broadly before the revenue bot is stable.
 
 ## Environment Variables In Use
 
@@ -190,12 +199,53 @@ Current `init_db()` creates these tables:
 - Lead form endpoint exists.
 - Admin dashboard/stats commands exist.
 
+## PayOS / Billing State
+
+- PayOS config is read from `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, and `PAYOS_CHECKSUM_KEY`.
+- PayOS webhook route exists at `POST /webhook/payos`.
+- Signature verification function exists: `verify_payos_signature`.
+- Paid order processing function exists: `process_payos_paid_order`.
+- Duplicate order tracking table exists: `payos_processed`.
+- PayOS order table exists: `payos_orders`.
+- Manual bill fallback exists through `/thucong`, `/duyet`, `/tuchoi`, and `pending_deposits`.
+- Credit ledger exists through `credit_events`.
+- Do not change PayOS logic without a focused payment test plan.
+
+## AI State
+
+- Main chat provider class exists: `AgentGemini`.
+- Gemini key: `GEMINI_API_KEY`.
+- OpenAI fallback key: `OPENAI_API_KEY`.
+- Deepgram transcription class exists: `AgentDeepgram`.
+- Deepgram key: `DEEPGRAM_API_KEY`.
+- Future high-end providers such as Claude/Groq are mentioned in comments but not active runtime providers in the current code.
+
+## Media State
+
+- Voice uses a premium-first/fallback-second pattern:
+  - Fish Audio HD when `FISH_AUDIO_KEY` is configured.
+  - Edge TTS fallback through `edge_tts`.
+- Image background removal uses:
+  - RemoveBG HD when `REMOVEBG_API_KEY` is configured.
+  - Cutout.pro fallback when `CUTOUT_API_KEY` is configured.
+- Downloader class exists: `AgentDownloader`.
+- Cobalt config exists through `COBALT_API_URL` and `COBALT_API_KEY`.
+- Failed paid media tasks should preserve refund behavior.
+
 ## Current Gaps / Not Fully Verified
 
 - Railway production public domain is currently not reachable from local checks.
+- SQLite persistence on Railway is risky unless a persistent volume is configured.
+- `/health` is not currently listed as a route; `GET /` and `GET /runtime` exist.
 - Operator/Video Factory tables and commands exist, but the full automatic workflow is not verified end-to-end.
 - Real video generation API integration is not yet proven.
 - Auto-publish for TikTok/YouTube/Instagram/Facebook is not proven end-to-end.
 - n8n/Claude worker execution is planned/configurable but not proven as a live closed loop.
 - Affiliate postback exists generically, but per-network parsers and revenue attribution still need hardening.
 - The current `bot.py` remains a very large single-file system and should be extracted gradually.
+
+## TASK 1 Conclusion
+
+The current codebase is more than a simple revenue bot: it already contains operator, affiliate, publish, and Video Factory foundations. The near-term priority should still be stability and revenue, not adding more broad modules.
+
+The next approved task should be TASK 2: document and reduce data persistence risk on Railway without changing PayOS logic.
