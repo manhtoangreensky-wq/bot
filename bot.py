@@ -331,7 +331,8 @@ MANUAL_BANK_ACCOUNT   = _env("MANUAL_BANK_ACCOUNT", "8899397968")
 MANUAL_BANK_OWNER     = _env("MANUAL_BANK_OWNER", "NGUYEN MANH TOAN")
 
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
-DB_FILE           = "toandaas_system.db"
+DB_FILE           = _env("DB_FILE", "toandaas_system.db")
+BACKUP_MAX_BYTES  = 45 * 1024 * 1024
 TRIAL_CREDITS     = 150
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
@@ -651,6 +652,52 @@ def init_db():
         created_at DATETIME,
         updated_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor_id TEXT,
+        actor_type TEXT,
+        action TEXT,
+        object_type TEXT,
+        object_id TEXT,
+        before_json TEXT,
+        after_json TEXT,
+        note TEXT,
+        created_at DATETIME
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS system_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT,
+        source TEXT,
+        payload_json TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at DATETIME,
+        processed_at DATETIME
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS feature_flags (
+        key TEXT PRIMARY KEY,
+        enabled INTEGER DEFAULT 0,
+        scope TEXT DEFAULT 'all',
+        note TEXT,
+        updated_at DATETIME
+    )""")
+    feature_flag_defaults = [
+        ("video_factory", 0, "Video Factory large features are gated until foundation is stable."),
+        ("youtube_output", 0, "YouTube output generation is gated."),
+        ("affiliate_engine", 0, "Affiliate engine advanced automation is gated."),
+        ("device_ops", 0, "Device Ops is out of first 90 day production scope."),
+        ("auto_publish", 0, "Auto publish stays off until explicit approval."),
+        ("worker_queue", 0, "Worker queue stays off until reviewed."),
+        ("dashboard", 0, "Dashboard expansion is gated."),
+        ("trial_upsell", 1, "Trial upsell is safe to show when payment flow is stable."),
+        ("payos_dynamic", 1, "Dynamic QR billing is enabled."),
+        ("telegram_menu_v2", 1, "TOAN AAS grouped Telegram menu is enabled."),
+        ("website_rebrand", 1, "TOAN AAS landing page rebrand is enabled."),
+    ]
+    for key, enabled, note in feature_flag_defaults:
+        c.execute(
+            "INSERT OR IGNORE INTO feature_flags (key, enabled, scope, note, updated_at) VALUES (?,?,?,?,?)",
+            (key, int(enabled), "all", note, now_text())
+        )
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -805,6 +852,105 @@ def init_db():
 def now_text():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+SENSITIVE_AUDIT_KEYS = ("key", "token", "secret", "password", "authorization", "api")
+
+def _safe_audit_value(value):
+    if isinstance(value, dict):
+        safe = {}
+        for key, item in value.items():
+            if any(marker in str(key).lower() for marker in SENSITIVE_AUDIT_KEYS):
+                safe[key] = "***"
+            else:
+                safe[key] = _safe_audit_value(item)
+        return safe
+    if isinstance(value, list):
+        return [_safe_audit_value(item) for item in value]
+    return value
+
+def _audit_json(value):
+    if value is None:
+        return ""
+    try:
+        return json.dumps(_safe_audit_value(value), ensure_ascii=False, default=str)
+    except Exception:
+        return str(value)
+
+def record_audit(conn, actor_id, actor_type, action, object_type="", object_id="", before=None, after=None, note=""):
+    try:
+        c = conn.cursor()
+        c.execute(
+            """INSERT INTO audit_logs
+            (actor_id, actor_type, action, object_type, object_id, before_json, after_json, note, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                str(actor_id or ""),
+                str(actor_type or ""),
+                str(action or ""),
+                str(object_type or ""),
+                str(object_id or ""),
+                _audit_json(before),
+                _audit_json(after),
+                str(note or "")[:1200],
+                now_text(),
+            )
+        )
+    except Exception as e:
+        logger.warning(f"Audit log write failed: {e}")
+
+def record_audit_event(actor_id, actor_type, action, object_type="", object_id="", before=None, after=None, note=""):
+    conn = None
+    try:
+        conn = db_connect()
+        record_audit(conn, actor_id, actor_type, action, object_type, object_id, before, after, note)
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Audit event write failed: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def emit_event(conn, event_type, source, payload=None, status="pending"):
+    try:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO system_events (event_type, source, payload_json, status, created_at, processed_at) VALUES (?,?,?,?,?,?)",
+            (
+                str(event_type or ""),
+                str(source or ""),
+                _audit_json(payload or {}),
+                str(status or "pending"),
+                now_text(),
+                "",
+            )
+        )
+    except Exception as e:
+        logger.warning(f"System event write failed: {e}")
+
+def is_feature_enabled(key, user_id=None, default=False) -> bool:
+    conn = None
+    try:
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute(
+            "SELECT enabled FROM feature_flags WHERE key=? AND (scope='all' OR scope=?)",
+            (str(key), str(user_id or "all"))
+        )
+        row = c.fetchone()
+        if row is None:
+            return bool(default)
+        return bool(int(row[0] or 0))
+    except Exception:
+        return bool(default)
+    finally:
+        if conn:
+            conn.close()
+
+def db_file_health_label() -> str:
+    base = os.path.basename(str(DB_FILE or ""))
+    if not base:
+        return "not_configured"
+    return base if str(DB_FILE) == base else f"configured:{base}"
+
 def record_credit_event(conn, user_id, delta, event_type, ref_id="", note=""):
     c = conn.cursor()
     c.execute("SELECT credits FROM users WHERE user_id=?", (str(user_id),))
@@ -837,6 +983,18 @@ def add_credit(user_id, amount, event_type="manual_add", ref_id="", note=""):
     c = conn.cursor()
     c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (amount, str(user_id)))
     record_credit_event(conn, user_id, amount, event_type, ref_id, note)
+    if event_type in {"admin_add", "manual_deposit"}:
+        record_audit(
+            conn,
+            ADMIN_ID,
+            "admin",
+            "credit.added",
+            "user",
+            str(user_id),
+            before=None,
+            after={"delta": int(amount), "event_type": event_type, "ref_id": ref_id},
+            note=note,
+        )
     conn.commit()
     conn.close()
 
@@ -18139,6 +18297,24 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
         record_credit_event(conn, target_id, int(xu), "payos_deposit", order_code, f"Nạp PayOS {amount_vnd}đ")
         referral_bonus = award_referral_bonus_if_needed(conn, target_id)
         info["referral_bonus"] = referral_bonus
+        record_audit(
+            conn,
+            "payos",
+            "system",
+            "payment.paid",
+            "payos_order",
+            str(order_code),
+            before={"status": status, "amount": expected_amount},
+            after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "amount": amount_vnd, "xu": xu},
+            note="PayOS paid order credited",
+        )
+        emit_event(
+            conn,
+            "payment.paid",
+            "payos",
+            {"order_code": str(order_code), "user_id": str(target_id), "amount": int(amount_vnd), "xu": int(xu)},
+            status="processed",
+        )
         conn.commit()
         return True, "success", info
     except Exception:
@@ -19535,7 +19711,7 @@ def menu_text_system() -> str:
         f"• Runtime build: <code>{APP_BUILD}</code>\n"
         f"• App version: <code>{html.escape(APP_VERSION)}</code>\n"
         "• <code>/runtime</code>\n• <code>/telegram_takeover</code>\n• <code>/telegram_status</code>\n"
-        "• <code>/checkpayos &lt;mã_đơn&gt;</code>\n• API health: <code>GET /health</code>"
+        "• <code>/backup_db</code>\n• <code>/checkpayos &lt;mã_đơn&gt;</code>\n• API health: <code>GET /health</code>"
     )
 
 def menu_text_billing(is_admin: bool) -> str:
@@ -29814,6 +29990,17 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 (PAYOS_STATUS_PAID, now_text(), str(pending_order[0]))
             )
         c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
+        record_audit(
+            conn,
+            ADMIN_ID,
+            "admin",
+            "bill.approved",
+            "pending_deposit",
+            str(target_id),
+            before={"status": "pending", "order_code": pending_order[0] if pending_order else ""},
+            after={"status": "approved", "user_id": str(target_id), "xu": int(amount)},
+            note="Admin approved manual bill",
+        )
         conn.commit()
         conn.close()
         credits, _, _ = get_user(target_id)
@@ -29890,6 +30077,18 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.execute(
             "UPDATE pending_deposits SET status='rejected' WHERE user_id=? AND status='pending'",
             (str(target_id),)
+        )
+        rejected_count = c.rowcount
+        record_audit(
+            conn,
+            ADMIN_ID,
+            "admin",
+            "bill.rejected",
+            "pending_deposit",
+            str(target_id),
+            before={"status": "pending"},
+            after={"status": "rejected", "rows": int(rejected_count or 0)},
+            note="Admin rejected manual bill",
         )
         conn.commit()
         conn.close()
@@ -29999,7 +30198,21 @@ async def cmd_setvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         flag = int(context.args[1])
         conn = db_connect()
         c = conn.cursor()
+        c.execute("SELECT is_vip FROM users WHERE user_id=?", (str(target_id),))
+        before_row = c.fetchone()
+        before_vip = before_row[0] if before_row else None
         c.execute("UPDATE users SET is_vip=? WHERE user_id=?", (flag, str(target_id)))
+        record_audit(
+            conn,
+            ADMIN_ID,
+            "admin",
+            "user.vip_updated",
+            "user",
+            str(target_id),
+            before={"is_vip": before_vip},
+            after={"is_vip": flag},
+            note="Admin updated VIP flag",
+        )
         conn.commit()
         conn.close()
         label = "VIP ✅" if flag == 1 else "Tiêu Chuẩn"
@@ -30011,6 +30224,91 @@ async def cmd_setvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception:
         await update.message.reply_text("⚠️ Cú pháp: /setvip <ID> <1|0>")
+
+async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    db_path = str(DB_FILE or "")
+    db_name = os.path.basename(db_path) or "toandaas_system.db"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_filename = f"toan_aas_db_backup_{timestamp}.db"
+
+    if not db_path or not os.path.exists(db_path):
+        record_audit_event(
+            ADMIN_ID,
+            "admin",
+            "backup.failed",
+            "database",
+            db_name,
+            after={"reason": "db_file_not_found", "db_file": db_file_health_label()},
+            note="/backup_db DB file not found",
+        )
+        return await update.message.reply_text(
+            f"❌ Không tìm thấy DB file: <code>{html.escape(db_file_health_label())}</code>",
+            parse_mode="HTML",
+        )
+
+    try:
+        conn = db_connect()
+        try:
+            conn.execute("PRAGMA wal_checkpoint(FULL)")
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning(f"DB checkpoint before backup failed: {e}")
+
+    size = os.path.getsize(db_path)
+    if size > BACKUP_MAX_BYTES:
+        record_audit_event(
+            ADMIN_ID,
+            "admin",
+            "backup.failed",
+            "database",
+            db_name,
+            after={"reason": "file_too_large", "size": size, "limit": BACKUP_MAX_BYTES},
+            note="/backup_db file too large for Telegram",
+        )
+        return await update.message.reply_text(
+            "⚠️ DB backup quá lớn để gửi qua Telegram. Hãy backup trực tiếp trên server/volume.",
+            parse_mode="HTML",
+        )
+
+    try:
+        with open(db_path, "rb") as f:
+            await context.bot.send_document(
+                chat_id=ADMIN_ID,
+                document=f,
+                filename=backup_filename,
+                caption=(
+                    "🧩 <b>TOAN AAS DB Backup</b>\n\n"
+                    f"• Time: <code>{timestamp}</code>\n"
+                    f"• DB: <code>{html.escape(db_name)}</code>\n"
+                    f"• Size: <b>{size:,}</b> bytes"
+                ),
+                parse_mode="HTML",
+            )
+        record_audit_event(
+            ADMIN_ID,
+            "admin",
+            "backup.created",
+            "database",
+            db_name,
+            after={"db_file": db_file_health_label(), "size": size, "filename": backup_filename},
+            note="/backup_db sent to admin",
+        )
+    except Exception as e:
+        logger.error(f"DB backup send error: {e}")
+        record_audit_event(
+            ADMIN_ID,
+            "admin",
+            "backup.failed",
+            "database",
+            db_name,
+            after={"reason": "send_error", "error": str(e)[:300]},
+            note="/backup_db send failed",
+        )
+        await update.message.reply_text("❌ Không gửi được backup DB qua Telegram.")
 
 # ─── MESSAGE HANDLERS ─────────────────────────────────────────────────────────
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -30319,6 +30617,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
+    tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
@@ -30609,22 +30908,30 @@ async def health():
 @fastapi_app.get("/health")
 async def health_check():
     db_ok = False
+    db_error = ""
     try:
         conn = db_connect()
         conn.execute("SELECT 1")
         conn.close()
         db_ok = True
-    except Exception:
+    except Exception as e:
+        db_error = str(e)[:160]
         db_ok = False
     return {
         "status": "ok" if db_ok else "degraded",
         "service": "TOAN AAS",
+        "version": APP_VERSION.replace("TOAN AAS", "").strip(),
         "app_version": APP_VERSION,
         "build": APP_BUILD,
         "uptime_seconds": int(time.time() - START_TIME),
         "db_ok": db_ok,
+        "db_file": db_file_health_label(),
+        "db_error": db_error,
         "payos_configured": bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY),
         "ai_provider_available": bool(GEMINI_API_KEY or OPENAI_API_KEY),
+        "telegram_configured": bool(TELEGRAM_TOKEN),
+        "public_base_url_configured": bool(PUBLIC_BASE_URL),
+        "timestamp": now_text(),
     }
 
 @fastapi_app.get("/runtime")
@@ -33744,7 +34051,11 @@ async def webhook_payos(request: Request):
     sig  = body.get("signature", "")
     data = body.get("data", {})
 
-    if PAYOS_CHECKSUM_KEY and not verify_payos_signature(data, sig):
+    if not PAYOS_CHECKSUM_KEY:
+        logger.warning("PayOS webhook rejected: PAYOS_CHECKSUM_KEY is not configured")
+        raise HTTPException(status_code=500, detail="PayOS checksum key not configured")
+
+    if not verify_payos_signature(data, sig):
         logger.warning("PayOS webhook: chữ ký xác thực không hợp lệ!")
         raise HTTPException(status_code=400, detail="Invalid signature")
 

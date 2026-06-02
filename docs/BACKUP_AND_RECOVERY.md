@@ -1,45 +1,52 @@
-# Backup And Recovery
+# Backup & Recovery — TOAN AAS
 
-## Goal
+## Mục tiêu
 
-If the server crashes or a redeploy loses data, TOAN AAS should recover user credits, PayOS orders, manual bill approvals, affiliate links, and operator work quickly.
+Không mất user, xu, đơn PayOS, `credit_events`, bill thủ công, affiliate links và dữ liệu vận hành.
 
-## Short Term
+## Backup hiện tại
 
-- Identify the actual SQLite DB path.
-- Back up the SQLite file daily.
-- Store backup outside Railway runtime storage, for example Google Drive/S3 when a connector is approved.
-- Keep at least 7 recent backups.
-- Back up before large deploys or schema changes.
+- Manual command: `/backup_db`.
+- DB_FILE: đọc từ ENV `DB_FILE`, default `toandaas_system.db`.
+- Backup receiver: `ADMIN_ID`.
+- Lưu ý: `/backup_db` gửi file SQLite qua Telegram cho admin, có checkpoint WAL trước khi gửi.
 
-## Medium Term
+## Backup ngắn hạn
 
-- Move to managed PostgreSQL.
-- Enable automated backups.
-- Use point-in-time restore if the provider supports it.
-- Export critical tables on a schedule:
-  - `users`
-  - `payos_orders`
-  - `payos_processed`
-  - `credit_events`
-  - `pending_deposits`
-  - `transactions`
-  - `affiliate_links`
-  - `performance_events`
+- Admin chạy `/backup_db` mỗi ngày.
+- Trước khi deploy lớn, chạy `/backup_db`.
+- Trước migration, chạy `/backup_db`.
+- Sau khi tạo Railway Volume, chạy backup trước và sau khi đổi `DB_FILE`.
 
-## Recovery Checklist
+## Backup trung hạn
 
-1. Stop service.
-2. Restore DB.
-3. Start service.
-4. Check `/health`.
-5. Check `/runtime`.
-6. Check `/dashboard`.
-7. Verify recent PayOS orders.
-8. Verify user credits.
-9. Verify manual bills pending/approved.
-10. Notify admin with recovery summary.
+- Upload Google Drive/S3/R2.
+- Giữ 7 bản gần nhất.
+- Mỗi bản có timestamp.
+- Tách backup khỏi Telegram nếu DB lớn hơn giới hạn gửi file.
 
-## Do Not Implement Yet
+## Restore checklist
 
-Do not implement automatic backup in this task. This file is a plan until the storage target and credentials are approved.
+1. Stop Railway service.
+2. Lấy file backup mới nhất.
+3. Upload lại vào đúng `DB_FILE` path.
+4. Start service.
+5. Kiểm tra `/health`.
+6. Kiểm tra `/profile` với user test.
+7. Kiểm tra `/dashboard` admin.
+8. Kiểm tra `payos_orders` gần nhất.
+9. Kiểm tra `credit_events` gần nhất.
+
+## Khi nào bắt buộc backup
+
+- Trước khi sửa DB schema.
+- Trước khi chuyển Railway Volume.
+- Trước khi tách `db.py`.
+- Trước khi deploy major update.
+- Trước khi thêm Video Factory schema.
+
+## Rủi ro còn lại
+
+- `/backup_db` là backup thủ công, chưa phải backup tự động hằng ngày.
+- Nếu file DB quá lớn, Telegram có thể không nhận file.
+- Cần test restore thật ít nhất một lần trên môi trường staging/local.

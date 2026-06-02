@@ -2,9 +2,9 @@
 
 ## Version
 
-- App version in code: `TOAN DAAS V15.2`
+- App version in code: `TOAN AAS V15.2`
 - Main file: `bot.py`
-- Current line count after this pass: `33620`
+- Current line count after this pass: `33097`
 
 ## Compile Status
 
@@ -59,6 +59,7 @@ Current `bot.py` reads these ENV names:
 - `OPERATOR_UPLOAD_DIR`
 - `MAX_OPERATOR_UPLOAD_MB`
 - `META_GRAPH_VERSION`
+- `DB_FILE`
 - `REFERENCE_VIDEO_DIR`
 - `MANUAL_BANK_NAME`
 - `MANUAL_BANK_CODE`
@@ -185,6 +186,9 @@ Current `init_db()` creates these tables:
 - `reference_videos`
 - `trend_candidates`
 - `publish_queue`
+- `audit_logs`
+- `system_events`
+- `feature_flags`
 
 ## Functions That Appear Stable
 
@@ -237,10 +241,10 @@ Current `init_db()` creates these tables:
 
 | Area | Current State | Risk | Recommendation |
 | --- | --- | --- | --- |
-| Version | `APP_VERSION = TOAN DAAS V15.2` | Branding is still mixed between DAAS and AAS in some surfaces. | Rename gradually only after stability tasks pass. |
+| Version | `APP_VERSION = TOAN AAS V15.2` | Public brand has been reworked to TOAN AAS. | Keep internal legacy identifiers stable unless a focused migration is approved. |
 | Entrypoint | `bot.py`, FastAPI object `fastapi_app` | Monolith is large; one syntax error can crash all runtime. | Extract gradually, starting with config and DB helpers. |
 | Routes | `GET /`, `GET /runtime`, `GET /health`, Telegram webhook, landing, lead, affiliate, operator APIs, PayOS webhook. | Many operator routes exist but are not fully verified end to end. | Keep admin/API-token guards and test route groups in phases. |
-| Database | SQLite file `toandaas_system.db` with revenue, affiliate, operator, and Video Factory foundation tables. | Railway storage can be ephemeral without volume. | Configure Railway Volume or backup before relying on production SQLite. |
+| Database | SQLite file defaults to `toandaas_system.db`; `DB_FILE` ENV can point to Railway Volume. | Railway storage can be ephemeral without volume. | Configure Railway Volume and verify backup before relying on production SQLite. |
 | PayOS | Dynamic QR, webhook signature verification, duplicate table, manual fallback. | Real payment still needs production verification. | Do not change PayOS without focused tests. |
 | AI | Gemini and OpenAI clients exist; Deepgram exists; media fallback pattern exists. | API quota/key failures can interrupt paid flows. | Preserve refund behavior and add clear admin alerts for quota failures. |
 | Media | Voice, image background removal, downloader paths exist. | Some tool integrations still need real-world test. | Test paid-first/free-fallback behavior one tool at a time. |
@@ -250,8 +254,10 @@ Current `init_db()` creates these tables:
 ## Current Gaps / Not Fully Verified
 
 - Railway production public domain is currently not reachable from local checks.
-- SQLite persistence on Railway is risky unless a persistent volume is configured.
-- `/health` now exists as a local-only status endpoint; production monitoring still needs manual setup.
+- SQLite persistence on Railway is risky unless `DB_FILE` points to a persistent volume.
+- `/health` now exists and reports DB/config status without calling external APIs; production monitoring still needs manual setup.
+- `/backup_db` exists for admin manual DB backup, but automated off-platform backup is not implemented.
+- `audit_logs`, `system_events`, and `feature_flags` foundations exist.
 - Operator/Video Factory tables and commands exist, but the full automatic workflow is not verified end-to-end.
 - Real video generation API integration is not yet proven.
 - Auto-publish for TikTok/YouTube/Instagram/Facebook is not proven end-to-end.
@@ -263,4 +269,4 @@ Current `init_db()` creates these tables:
 
 The current codebase is more than a simple revenue bot: it already contains operator, affiliate, publish, and Video Factory foundations. The near-term priority should still be stability and revenue, not adding more broad modules.
 
-The next approved task should be Railway persistence hardening: configure Railway Volume/backup or add `DB_FILE` ENV support with a tested migration plan.
+The next approved task should be manual Railway persistence verification: configure Railway Volume, set `DB_FILE=/data/toandaas_system.db`, test `/health`, run `/backup_db`, then redeploy and verify data remains.

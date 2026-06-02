@@ -21,6 +21,10 @@ def test_health_and_runtime_endpoints():
     health_payload = health.json()
     assert health_payload["service"] == "TOAN AAS"
     assert "db_ok" in health_payload
+    assert "db_file" in health_payload
+    assert "payos_configured" in health_payload
+    assert "telegram_configured" in health_payload
+    assert "public_base_url_configured" in health_payload
     runtime = client.get("/runtime")
     assert runtime.status_code == 200
     assert runtime.json()["service"].startswith("TOAN AAS")
@@ -106,6 +110,37 @@ def test_payos_signature_verification(monkeypatch):
     sig = hmac.new(b"checksum-test", raw.encode("utf-8"), hashlib.sha256).hexdigest()
     assert bot.verify_payos_signature(data, sig)
     assert not bot.verify_payos_signature(data, "bad-signature")
+
+
+def test_payos_webhook_rejects_missing_checksum(monkeypatch):
+    monkeypatch.setattr(bot, "PAYOS_CHECKSUM_KEY", "")
+    client = TestClient(bot.fastapi_app)
+    res = client.post(
+        "/webhook/payos",
+        json={"success": True, "data": {"orderCode": 123, "amount": 10000, "status": "PAID"}, "signature": ""},
+    )
+    assert res.status_code == 500
+
+
+def test_foundation_tables_and_feature_flags(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            c = conn.cursor()
+            for table in ["audit_logs", "system_events", "feature_flags"]:
+                c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+                assert c.fetchone()[0] == table
+            assert bot.is_feature_enabled("telegram_menu_v2") is True
+            assert bot.is_feature_enabled("auto_publish") is False
+        finally:
+            conn.close()
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
 
 
 def test_refund_charged_credit_restores_credit_and_total_spent(monkeypatch):

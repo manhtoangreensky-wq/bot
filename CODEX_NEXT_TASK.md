@@ -1,34 +1,30 @@
-# CODEX NEXT TASK
+# Next Task Proposal
 
-## Current Instruction
+Sau task foundation này, task tiếp theo nên là một trong các task sau, admin chọn:
 
-Do not start the next task without approval.
+## Option A — Extract config.py safely
 
-The current completed scope is stabilization docs plus a safe `/health` endpoint.
+- Tạo `app/core/config.py`.
+- Move ENV/constants.
+- Không đổi tên ENV.
+- `bot.py` vẫn chạy.
 
-## Next Task Proposal A: Support `DB_FILE` ENV Safely
+## Option B — Extract db.py safely
 
-- Read `AGENTS.md`.
-- Run `python -m py_compile bot.py`.
-- Keep default `toandaas_system.db`.
-- Allow `DB_FILE` from ENV only after reviewing Railway Volume path.
-- Do not move data automatically.
-- Document migration steps from old DB path to volume DB path.
+- Tạo `app/core/db.py`.
+- Move DB helpers.
+- Không đổi schema.
 
-## Next Task Proposal B: Extract Config
+## Option C — Trial upsell flow
 
-- Create `app/core/config.py`.
-- Do not rename ENV.
-- Keep `bot.py` import-compatible.
-- Do not hardcode secrets.
-- Run `python -m py_compile bot.py` and `pytest -q`.
+- Khi thiếu xu/hết trial, hiện gói 50k/100k/200k.
+- Nút tạo PayOS link.
+- Không phá `/naptien`.
 
-## Next Task Proposal C: Safe Video Factory Schema Audit
+## Option D — Video Factory schema MVP
 
-- Inspect existing `init_db()`.
-- Identify which Video Factory tables already exist.
-- Add only missing tables/columns using idempotent SQL.
-- Test against a temporary SQLite database.
-- Do not change Telegram handlers.
-- Do not change PayOS.
-- Do not change Railway entrypoint.
+- Tạo `video_projects`, `video_episodes`, `video_scenes`, `platform_outputs`.
+- Không render.
+- Không publish.
+
+Codex không tự làm Option A/B/C/D nếu chưa được duyệt.

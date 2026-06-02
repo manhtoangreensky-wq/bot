@@ -1,45 +1,53 @@
-# Railway Volume Setup
+# Railway Volume Setup — TOAN AAS
 
-## Warning
+## Vì sao cần làm
 
-If TOAN AAS uses SQLite on Railway without a persistent volume or backup, a redeploy or runtime storage reset can lose the database file depending on the deployment/storage configuration.
+TOAN AAS hiện dùng SQLite. Nếu DB nằm trong filesystem không persistent của Railway, redeploy có thể làm mất dữ liệu user/xu/giao dịch.
 
-## Manual Checks
+## Cách làm thủ công trên Railway
 
-1. Check whether the Railway service has a Volume attached.
-2. Check which path the SQLite database uses.
-3. Check whether that path is inside the mounted volume.
-4. Redeploy once in a controlled test and confirm the DB file remains.
-5. Confirm there is a backup plan for recent PayOS orders, user credits, and bill approvals.
-
-## Current Code State
-
-Current `bot.py` uses:
+1. Mở Railway Project.
+2. Chọn service bot.
+3. Vào Volumes.
+4. Tạo volume mount vào `/data`.
+5. Vào Variables.
+6. Thêm:
 
 ```text
-DB_FILE = "toandaas_system.db"
+DB_FILE=/data/toandaas_system.db
 ```
 
-This task does not change `DB_FILE` logic. Do not assume `DB_FILE=/data/toandaas_system.db` works until a separate approved task adds and tests ENV support.
+7. Redeploy.
+8. Kiểm tra `/health` xem `db_ok=true`.
+9. Tạo user test.
+10. Redeploy lại.
+11. Kiểm tra user test còn không.
 
-## Option A: Short Term
+## Checklist xác nhận
 
-- Configure a Railway Volume.
-- In a later approved code task, support `DB_FILE` from ENV.
-- Set `DB_FILE=/data/toandaas_system.db` only after code supports it.
-- Copy the current SQLite database into the volume path.
-- Back up the DB daily.
+- [ ] Volume đã tạo.
+- [ ] DB_FILE đã trỏ `/data/toandaas_system.db`.
+- [ ] `/health` `db_ok=true`.
+- [ ] Redeploy không mất user.
+- [ ] Backup hoạt động.
 
-## Option B: Medium Term
+## Cảnh báo
 
-- Move to managed PostgreSQL.
-- Create a tested SQLite-to-PostgreSQL migration.
-- Keep SQLite backup for at least 30 days.
-- Keep PayOS order and credit ledger history intact.
+Không đổi `DB_FILE` nếu chưa backup DB cũ.
 
-## Do Not Do In This Task
+Nếu trước đó DB cũ đang nằm ở `toandaas_system.db`, cần copy dữ liệu thủ công sang volume trước khi chạy production.
 
-- Do not rewrite database logic.
-- Do not migrate automatically.
-- Do not change PayOS logic.
-- Do not drop or rename tables.
+Không xóa DB cũ cho đến khi đã xác nhận:
+
+- `/health` trên Railway OK.
+- `/profile` của user test còn đúng.
+- PayOS order gần nhất còn trong DB.
+- `credit_events` còn lịch sử.
+
+## Plan B
+
+Nếu Railway Volume không ổn:
+
+- Chuyển Turso.
+- Hoặc Supabase/PostgreSQL.
+- Hoặc backup DB mỗi ngày về admin.

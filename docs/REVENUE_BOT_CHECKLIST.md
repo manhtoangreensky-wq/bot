@@ -1,92 +1,87 @@
-# Revenue Bot Checklist
+# TOAN AAS Revenue Bot Checklist
 
-## Railway ENV
-
-Required for stable revenue bot:
-
-- `TELEGRAM_TOKEN`
-- `ADMIN_ID`
-- `PORT`
-- `PUBLIC_BASE_URL` or Railway public domain fallback
-- `GEMINI_API_KEY` or `OPENAI_API_KEY`
-- `PAYOS_CLIENT_ID`
-- `PAYOS_API_KEY`
-- `PAYOS_CHECKSUM_KEY`
-- `DEEPGRAM_API_KEY`
-- `REMOVEBG_API_KEY` or `CUTOUT_API_KEY`
-
-Recommended:
-
-- `FISH_AUDIO_KEY`
-- `DEEPL_API_KEY`
-- `RAPIDAPI_KEY`
-- `RAPIDAPI_HOST`
-- `COBALT_API_KEY`
-- `LEAD_WEBHOOK_SECRET`
-- `OPERATOR_API_TOKEN`
-- `AFFILIATE_POSTBACK_TOKEN`
-
-## Telegram Test
+## Daily test
 
 - `/start`
+- `/menu`
 - `/profile`
 - `/naptien`
-- `/tools`
-- `/mmo`
-- `/ref`
-- `/dashboard` as admin
-- Normal user cannot access admin/operator commands.
+- `/health`
+- admin `/dashboard`
+- admin `/backup_db`
 
-## Payment Test
+## Payment test
 
-- Create 10k order.
-- Open PayOS checkout.
-- PayOS webhook credits the user.
-- Duplicate order is not credited twice.
-- Wrong amount is not credited.
-- Expired/cancelled order is not credited.
-- Manual bill fallback reaches admin.
-- `/duyet` credits correctly.
-- `/tuchoi` notifies customer.
+- Tạo gói 10k.
+- Tạo PayOS checkout.
+- PayOS webhook.
+- Không cộng trùng.
+- Amount mismatch không cộng.
+- Thiếu checksum không cộng.
+- Manual fallback gửi bill về admin.
+- `/duyet` cộng xu đúng.
+- `/tuchoi` thông báo khách đúng.
 
-## AI Test
+## AI test
 
-- Normal chat works.
-- Gemini failure falls back to OpenAI.
-- Missing Gemini and OpenAI returns a clear error.
-- Credits are charged/refunded correctly.
+- Chat AI.
+- Gemini fallback OpenAI.
+- Cả hai thiếu thì báo lỗi rõ.
+- Không trừ xu sai khi AI lỗi.
 
-## Media Test
+## Media test
 
-- Audio transcription works.
-- Deepgram error refunds charged credits.
-- Image background removal works.
-- RemoveBG failure falls back to Cutout when configured.
-- Voice generation works.
-- Premium voice failure falls back to Edge TTS when configured.
-- Video download/cleanup path works.
+- Voice.
+- STT.
+- Image background removal.
+- Video downloader.
+- Paid tool lỗi thì fallback/hoàn xu đúng.
 
-## Security
+## Admin test
 
-- No API key/token in logs.
-- No `.env` committed.
-- User cannot call admin commands.
-- PayOS signature is verified.
-- PayOS amount must match order before crediting.
-- Lead endpoint uses secret if configured.
-- Manual bank info is intentional and configurable by ENV.
+- `/stats`
+- `/dashboard`
+- `/pending`
+- `/duyet`
+- `/tuchoi`
+- `/add`
+- `/setvip`
+- `/backup_db`
 
-## Production Check
+## Data safety
+
+- Railway volume.
+- `DB_FILE`.
+- `/backup_db`.
+- Latest backup timestamp.
+- `audit_logs` có ghi action billing/admin.
+- `system_events` có event payment.
+- `feature_flags` seed đúng.
+
+## Production check
 
 - `GET /` returns OK.
-- `GET /health` returns status, app version, uptime, `db_ok`, `payos_configured`, and `ai_provider_available`.
-- `GET /runtime` returns current build.
+- `GET /landing` returns landing.
+- `GET /LOGO.png` returns logo.
+- `GET /health` returns:
+  - `status`
+  - `service`
+  - `version`
+  - `app_version`
+  - `uptime_seconds`
+  - `db_ok`
+  - `db_file`
+  - `payos_configured`
+  - `ai_provider_available`
+  - `telegram_configured`
+  - `public_base_url_configured`
+  - `timestamp`
 - Telegram webhook URL points to current Railway service.
 - No other deployment uses the same Telegram token.
 
 ## Railway Persistence Check
 
 - Confirm Railway Volume exists before trusting SQLite for production money data.
-- Confirm current DB path is inside the persistent volume if `DB_FILE` support is enabled in a future task.
-- Until `DB_FILE` ENV is supported, back up `toandaas_system.db` manually before redeploys.
+- Set `DB_FILE=/data/toandaas_system.db` only after backup/copy plan.
+- Redeploy and verify test user remains.
 - Never disable PayOS/manual bill logs while testing storage.
