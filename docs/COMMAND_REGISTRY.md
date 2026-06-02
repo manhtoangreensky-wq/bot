@@ -1,8 +1,8 @@
 # COMMAND REGISTRY - TOAN AAS
 
 Date: 2026-06-02
-Source: `bot.py` local audit after Step 7
-Registered Telegram commands: 193
+Source: `bot.py` local audit after Step 8
+Registered Telegram commands: 197
 Registered callback groups: 9
 
 ## User Commands
@@ -67,6 +67,10 @@ Registered callback groups: 9
 | `/setvip` | `cmd_setvip` | YES | YES | VIP flag. |
 | `/admin_gopy` | `cmd_admin_gopy` | YES | YES | View feedback. |
 | `/backup_db` | `cmd_backup_db` | YES | YES | Sends DB file to admin if available. |
+| `/providers` | `cmd_providers` | YES | YES | Provider key status, configured/missing only. |
+| `/costs` | `cmd_costs` | YES | YES | Cost control and paid-provider risk summary. |
+| `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
+| `/payos_test_plan` | `cmd_payos_test_plan` | YES | YES | Real PayOS 10k manual test checklist. |
 | `/runtime` | `cmd_runtime` | YES | System menu | Runtime/webhook diagnostics. |
 | `/checkpayos` | `cmd_checkpayos` | YES | System menu | PayOS order check. |
 | `/telegram_status` | `cmd_telegram_status` | YES | System menu | Telegram update mode. |

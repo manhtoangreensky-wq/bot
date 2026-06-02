@@ -6,6 +6,7 @@
 - `pytest -q`: PASS, 13 tests, 1 Starlette/httpx deprecation warning.
 - Import test: PASS, `cmd_help` and `help_text_for_user` exist.
 - Step 7 import test: PASS, `GROWTH_AI_COST=30`, `cmd_growth_ai`, `cmd_campaign_report`, and report CSV helper exist.
+- Step 8 compile: PASS after provider status and sales readiness commands.
 
 ## UI
 
@@ -49,6 +50,23 @@
 - `/stats`: exists.
 - `/backup_db`: exists.
 - `/pending`, `/duyet`, `/tuchoi`, `/checkpayos`: exist.
+- `/providers`: exists, admin-only, shows configured/missing only.
+- `/costs`: exists, admin-only, summarizes Xu pricing and provider cost risk.
+- `/sales_ready`: exists, admin-only, reports NOT READY or BETA READY only.
+- `/payos_test_plan`: exists, admin-only, checklist for one real 10k payment test.
+
+## Provider & Sales Readiness
+
+- `/providers`: added in Step 8; no key suffixes or secret values are printed.
+- `/sales_ready`: added in Step 8; BETA READY requires DB, PayOS, AI, `/film`, and `/backup_db`.
+- `/costs`: added in Step 8; documents `/film` 50 Xu, `/growth_ai` 30 Xu, trial 150 Xu, free chat daily 20.
+- `/payos_test_plan`: added in Step 8; guides real 10k payment validation.
+- PayOS real payment test: still manual and required before public selling.
+- API key setup docs: `docs/API_KEYS_SETUP.md`.
+- Cost control docs: `docs/COST_CONTROL.md`.
+- Sales readiness docs: `docs/SALES_READINESS_CHECKLIST.md`.
+- Provider security audit: `docs/PROVIDER_SECURITY_AUDIT.md`.
+- Current status: BETA READY only after admin completes `/sales_ready` checks and real PayOS test; never auto-marked SALES READY.
 
 ## Next risk to fix
 

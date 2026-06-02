@@ -93,6 +93,10 @@
 - [ ] `/stats`
 - [ ] `/dashboard`
 - [ ] `/admin`
+- [ ] `/providers`
+- [ ] `/costs`
+- [ ] `/sales_ready`
+- [ ] `/payos_test_plan`
 - [ ] `/pending`
 - [ ] `/duyet`
 - [ ] `/tuchoi`
@@ -136,3 +140,14 @@
 - [ ] `cutout_configured`
 - [ ] `telegram_configured`
 - [ ] `public_base_url_configured`
+
+## Provider and sales readiness
+
+- [ ] `/providers` shows configured/missing only.
+- [ ] `/providers` does not reveal key suffixes, tokens, checksum, or raw secret values.
+- [ ] `/costs` matches current Xu pricing: `/film` 50, `/growth_ai` 30, trial 150, free chat daily 20.
+- [ ] `/sales_ready` returns NOT READY or BETA READY only.
+- [ ] `/payos_test_plan` is available to admin.
+- [ ] `docs/API_KEYS_SETUP.md` reviewed before adding new provider keys.
+- [ ] `docs/PAYOS_REAL_PAYMENT_TEST.md` completed with one real 10k payment before public sale.
+- [ ] `docs/FEATURE_FLAGS_STATUS.md` confirms `auto_publish=0`.

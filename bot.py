@@ -19705,6 +19705,102 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 def is_admin_user(user_id) -> bool:
     return str(user_id) == ADMIN_ID
 
+def bool_env_status(value) -> str:
+    return "configured" if bool(value) else "missing"
+
+def db_status_payload() -> dict:
+    try:
+        conn = db_connect()
+        conn.execute("SELECT 1")
+        conn.close()
+        return {"ok": True, "error": ""}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:160]}
+
+def provider_status_payload() -> dict:
+    cobalt_custom_url = bool(_env("COBALT_API_URL"))
+    payos_ready = bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY)
+    ai_ready = bool(GEMINI_API_KEY or OPENAI_API_KEY)
+    return {
+        "core": {
+            "telegram": bool(TELEGRAM_TOKEN),
+            "public_base_url": bool(PUBLIC_BASE_URL),
+        },
+        "payos": {
+            "client_id": bool(PAYOS_CLIENT_ID),
+            "api_key": bool(PAYOS_API_KEY),
+            "checksum_key": bool(PAYOS_CHECKSUM_KEY),
+            "ready": payos_ready,
+        },
+        "ai": {
+            "gemini": bool(GEMINI_API_KEY),
+            "openai": bool(OPENAI_API_KEY),
+            "ready": ai_ready,
+        },
+        "audio": {
+            "deepgram": bool(DEEPGRAM_API_KEY),
+            "fish_audio": bool(FISH_AUDIO_KEY),
+            "edge_tts": True,
+        },
+        "image": {
+            "removebg": bool(REMOVEBG_API_KEY),
+            "cutout": bool(CUTOUT_API_KEY),
+            "ready": bool(REMOVEBG_API_KEY or CUTOUT_API_KEY),
+        },
+        "downloader": {
+            "cobalt_url": cobalt_custom_url,
+            "cobalt_key": bool(COBALT_API_KEY),
+            "rapidapi": bool(RAPIDAPI_KEY),
+            "rapidapi_host": bool(RAPIDAPI_HOST),
+        },
+        "security": {
+            "lead_webhook_secret": bool(LEAD_WEBHOOK_SECRET),
+            "telegram_webhook_secret": bool(TELEGRAM_WEBHOOK_SECRET),
+            "operator_api_token": bool(OPERATOR_API_TOKEN),
+            "affiliate_postback_token": bool(AFFILIATE_POSTBACK_TOKEN),
+        },
+    }
+
+def provider_status_text(value) -> str:
+    if isinstance(value, bool):
+        return "configured" if value else "missing"
+    return bool_env_status(value)
+
+def sales_readiness_payload() -> dict:
+    providers = provider_status_payload()
+    db_status = db_status_payload()
+    commands = {
+        "backup_db": callable(globals().get("cmd_backup_db")),
+        "film": callable(globals().get("cmd_film")),
+        "growth_ai": callable(globals().get("cmd_growth_ai")),
+        "campaign_report": callable(globals().get("cmd_campaign_report")),
+        "performance_report": callable(globals().get("cmd_performance_report")),
+    }
+    blockers = []
+    if not db_status["ok"]:
+        blockers.append("DB chưa OK")
+    if not providers["payos"]["ready"]:
+        blockers.append("PayOS thiếu Client ID/API Key/Checksum")
+    if not providers["ai"]["ready"]:
+        blockers.append("Thiếu Gemini hoặc OpenAI")
+    if not commands["film"]:
+        blockers.append("Thiếu /film")
+    if not commands["backup_db"]:
+        blockers.append("Thiếu /backup_db")
+    beta_ready = not blockers
+    return {
+        "status": "BETA READY" if beta_ready else "NOT READY",
+        "db_ok": db_status["ok"],
+        "providers": providers,
+        "commands": commands,
+        "packages": len(PAYMENT_PACKAGES),
+        "trial_credits": TRIAL_CREDITS,
+        "free_chat_daily": FREE_CHAT_DAILY,
+        "payos_real_test": "MANUAL CHECK REQUIRED",
+        "blockers": blockers,
+        "note": "BETA READY vẫn cần admin test PayOS thật gói 10k trước khi bán public.",
+    }
+
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup([[KeyboardButton("🏠 TOAN AAS MENU")]], resize_keyboard=True)
 
@@ -19887,7 +19983,8 @@ def menu_text_admin() -> str:
         "<b>A. User & Xu</b>\n• <code>/add</code>\n• <code>/setvip</code>\n\n"
         "<b>B. Bill thủ công</b>\n• <code>/pending</code>\n• <code>/duyet</code>\n• <code>/tuchoi</code>\n\n"
         "<b>C. Dashboard</b>\n• <code>/dashboard</code>\n• <code>/stats</code>\n\n"
-        "<b>D. Góp ý</b>\n• <code>/admin_gopy</code>"
+        "<b>D. Kiểm tra trước khi bán</b>\n• <code>/providers</code>\n• <code>/sales_ready</code>\n• <code>/costs</code>\n• <code>/payos_test_plan</code>\n\n"
+        "<b>E. Góp ý</b>\n• <code>/admin_gopy</code>"
     )
 
 def menu_text_system() -> str:
@@ -19896,6 +19993,7 @@ def menu_text_system() -> str:
         f"• Runtime build: <code>{APP_BUILD}</code>\n"
         f"• App version: <code>{html.escape(APP_VERSION)}</code>\n"
         "• <code>/runtime</code>\n• <code>/telegram_takeover</code>\n• <code>/telegram_status</code>\n"
+        "• <code>/providers</code>\n• <code>/sales_ready</code>\n• <code>/costs</code>\n• <code>/payos_test_plan</code>\n"
         "• <code>/backup_db</code>\n• <code>/checkpayos &lt;mã_đơn&gt;</code>\n• API health: <code>GET /health</code>"
     )
 
@@ -20042,6 +20140,7 @@ def help_text_for_user(user_id) -> str:
             "• <code>/dashboard</code> hoặc <code>/admin</code>\n"
             "• <code>/stats</code>, <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code>\n"
             "• <code>/add</code>, <code>/setvip</code>, <code>/backup_db</code>\n"
+            "• <code>/providers</code>, <code>/sales_ready</code>, <code>/costs</code>, <code>/payos_test_plan</code>\n"
             "• <code>/runtime</code>, <code>/checkpayos</code>, <code>/telegram_takeover</code>"
         )
     return text
@@ -20084,6 +20183,143 @@ async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYP
         html.escape(data.get("rule") or ""),
         "",
         "Nếu Telegram vẫn hiện A-TOOLS khi audit OK, vấn đề nằm ở webhook/process cũ cùng TELEGRAM_TOKEN; chạy <code>/telegram_status</code> và <code>/telegram_takeover</code>.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    providers = provider_status_payload()
+    db_status = db_status_payload()
+    lines = [
+        "🔐 <b>TOAN AAS Provider Status</b>",
+        "",
+        "<b>Core</b>",
+        f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
+        f"• Public URL: <code>{provider_status_text(providers['core']['public_base_url'])}</code>",
+        f"• DB: <code>{'OK' if db_status['ok'] else 'FAIL'}</code>",
+        f"• PayOS Client ID: <code>{provider_status_text(providers['payos']['client_id'])}</code>",
+        f"• PayOS API Key: <code>{provider_status_text(providers['payos']['api_key'])}</code>",
+        f"• PayOS Checksum: <code>{provider_status_text(providers['payos']['checksum_key'])}</code>",
+        "",
+        "<b>AI</b>",
+        f"• Gemini: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
+        f"• OpenAI fallback: <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        "",
+        "<b>Audio</b>",
+        f"• Deepgram STT: <code>{provider_status_text(providers['audio']['deepgram'])}</code>",
+        f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
+        "• Edge TTS: <code>built-in/fallback</code>",
+        "",
+        "<b>Image</b>",
+        f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
+        f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
+        "",
+        "<b>Downloader</b>",
+        f"• Cobalt URL: <code>{provider_status_text(providers['downloader']['cobalt_url'])}</code>",
+        f"• Cobalt Key: <code>{provider_status_text(providers['downloader']['cobalt_key'])}</code>",
+        f"• RapidAPI Key: <code>{provider_status_text(providers['downloader']['rapidapi'])}</code>",
+        f"• RapidAPI Host: <code>{provider_status_text(providers['downloader']['rapidapi_host'])}</code>",
+        "",
+        "<b>Security</b>",
+        f"• Lead webhook secret: <code>{provider_status_text(providers['security']['lead_webhook_secret'])}</code>",
+        f"• Telegram webhook secret: <code>{provider_status_text(providers['security']['telegram_webhook_secret'])}</code>",
+        f"• Operator API token: <code>{provider_status_text(providers['security']['operator_api_token'])}</code>",
+        f"• Affiliate postback token: <code>{provider_status_text(providers['security']['affiliate_postback_token'])}</code>",
+        "",
+        "Không có API key/token/secret nào được hiển thị.",
+    ]
+    if not db_status["ok"]:
+        lines.append(f"DB error: <code>{html.escape(db_status.get('error') or '-')}</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    providers = provider_status_payload()
+    lines = [
+        "💸 <b>TOAN AAS Cost Control</b>",
+        "",
+        f"• <code>/film</code>: <b>{FILM_SCRIPT_COST} Xu</b>/lần",
+        f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>/lần",
+        "• Chat AI: theo dynamic cost/free trial trong code hiện tại",
+        "• Voice/STT/Image/Downloader: theo provider choice và dynamic cost hiện tại",
+        f"• Trial credits: <b>{TRIAL_CREDITS} Xu</b>",
+        f"• Free chat daily: <b>{FREE_CHAT_DAILY}</b> lượt/ngày",
+        "",
+        "<b>Provider rủi ro</b>",
+        f"• Gemini/OpenAI: {'READY' if providers['ai']['ready'] else 'MISSING'} — tốn token khi gọi AI",
+        f"• Deepgram: {provider_status_text(providers['audio']['deepgram']).upper()} — tốn theo audio",
+        f"• Fish Audio: {provider_status_text(providers['audio']['fish_audio']).upper()} — tốn theo ký tự/giọng",
+        f"• RemoveBG/Cutout: {'READY' if providers['image']['ready'] else 'MISSING'} — tốn theo ảnh",
+        f"• Cobalt/RapidAPI: {'READY' if (providers['downloader']['cobalt_url'] or providers['downloader']['rapidapi']) else 'MISSING'} — rủi ro tải video",
+        "",
+        "Nguyên tắc: nếu API lỗi sau khi trừ Xu thì phải hoàn Xu; admin test provider thật trước khi mở bán public.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    data = sales_readiness_payload()
+    providers = data["providers"]
+    commands = data["commands"]
+    blockers = data["blockers"] or ["Cần admin xác nhận PayOS real payment 10k trước khi bán public"]
+    lines = [
+        "🚀 <b>TOAN AAS Sales Readiness</b>",
+        "",
+        "<b>Website</b>",
+        "• Landing /: <code>Need check on live Railway</code>",
+        "• Banner: <code>Need check on live Railway</code>",
+        "",
+        "<b>Core</b>",
+        f"• DB: <code>{'OK' if data['db_ok'] else 'FAIL'}</code>",
+        "• Health: <code>OK if /health returns JSON</code>",
+        f"• Backup command: <code>{'available' if commands['backup_db'] else 'missing'}</code>",
+        "",
+        "<b>Providers</b>",
+        f"• PayOS: <code>{'READY' if providers['payos']['ready'] else 'NOT READY'}</code>",
+        f"• AI: <code>{'READY' if providers['ai']['ready'] else 'NOT READY'}</code>",
+        f"• STT: <code>{'READY' if providers['audio']['deepgram'] else 'MISSING'}</code>",
+        f"• Image: <code>{'READY' if providers['image']['ready'] else 'MISSING'}</code>",
+        "",
+        "<b>Money</b>",
+        f"• Packages: <b>{data['packages']}</b>",
+        f"• Trial credits: <b>{data['trial_credits']}</b>",
+        f"• Free chat daily: <b>{data['free_chat_daily']}</b>",
+        f"• Real PayOS test: <code>{data['payos_real_test']}</code>",
+        "",
+        "<b>Revenue features</b>",
+        f"• /film: <code>{'available' if commands['film'] else 'missing'}</code>",
+        f"• /growth_ai: <code>{'available' if commands['growth_ai'] else 'missing'}</code>",
+        f"• /campaign_report: <code>{'available' if commands['campaign_report'] else 'missing'}</code>",
+        f"• /performance_report: <code>{'available' if commands['performance_report'] else 'missing'}</code>",
+        "",
+        f"<b>Status:</b> <code>{data['status']}</code>",
+        "",
+        "<b>Blockers / manual checks</b>",
+    ]
+    lines.extend(f"• {html.escape(item)}" for item in blockers)
+    if data["status"] == "BETA READY":
+        lines.append("• BETA READY — cần admin xác nhận PayOS real payment 10k để chuyển SALES READY.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    lines = [
+        "🧾 <b>PAYOS REAL PAYMENT TEST PLAN</b>",
+        "",
+        "1. Chạy <code>/backup_db</code> trước khi test.",
+        "2. Chạy <code>/providers</code> và kiểm tra PayOS đủ 3 khóa.",
+        "3. Dùng user test gọi <code>/naptien</code>, chọn gói 10k.",
+        "4. Thanh toán thật 10k qua QR PayOS.",
+        "5. Kiểm tra <code>/profile</code>: user nhận đúng 100 Xu.",
+        "6. Kiểm tra <code>/dashboard</code>: doanh thu và giao dịch tăng.",
+        "7. Kiểm tra duplicate webhook/order không cộng Xu lần 2.",
+        "8. Ghi kết quả vào checklist trước khi bán public.",
+        "",
+        "Nếu PayOS lỗi, dùng <code>/thucong</code> và duyệt bill bằng <code>/duyet</code>.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -32603,6 +32839,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
     tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
+    tg_app.add_handler(CommandHandler("providers",   cmd_providers))
+    tg_app.add_handler(CommandHandler("costs",       cmd_costs))
+    tg_app.add_handler(CommandHandler("sales_ready", cmd_sales_ready))
+    tg_app.add_handler(CommandHandler("payos_test_plan", cmd_payos_test_plan))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
@@ -32983,16 +33223,10 @@ async def status_page():
 
 @fastapi_app.get("/health")
 async def health_check():
-    db_ok = False
-    db_error = ""
-    try:
-        conn = db_connect()
-        conn.execute("SELECT 1")
-        conn.close()
-        db_ok = True
-    except Exception as e:
-        db_error = str(e)[:160]
-        db_ok = False
+    db_status = db_status_payload()
+    providers = provider_status_payload()
+    db_ok = db_status["ok"]
+    db_error = db_status["error"]
     return {
         "status": "ok" if db_ok else "degraded",
         "service": "TOAN AAS",
@@ -33003,16 +33237,16 @@ async def health_check():
         "db_ok": db_ok,
         "db_file": db_file_health_label(),
         "db_error": db_error,
-        "payos_configured": bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY),
-        "gemini_configured": bool(GEMINI_API_KEY),
-        "openai_configured": bool(OPENAI_API_KEY),
-        "ai_provider_available": bool(GEMINI_API_KEY or OPENAI_API_KEY),
-        "deepgram_configured": bool(DEEPGRAM_API_KEY),
-        "fish_audio_configured": bool(FISH_AUDIO_KEY),
-        "removebg_configured": bool(REMOVEBG_API_KEY),
-        "cutout_configured": bool(CUTOUT_API_KEY),
-        "telegram_configured": bool(TELEGRAM_TOKEN),
-        "public_base_url_configured": bool(PUBLIC_BASE_URL),
+        "payos_configured": providers["payos"]["ready"],
+        "gemini_configured": providers["ai"]["gemini"],
+        "openai_configured": providers["ai"]["openai"],
+        "ai_provider_available": providers["ai"]["ready"],
+        "deepgram_configured": providers["audio"]["deepgram"],
+        "fish_audio_configured": providers["audio"]["fish_audio"],
+        "removebg_configured": providers["image"]["removebg"],
+        "cutout_configured": providers["image"]["cutout"],
+        "telegram_configured": providers["core"]["telegram"],
+        "public_base_url_configured": providers["core"]["public_base_url"],
         "timestamp": now_text(),
     }
 
