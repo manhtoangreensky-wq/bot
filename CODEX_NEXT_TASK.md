@@ -1,5 +1,12 @@
 # NEXT TASK OPTIONS - STABLE REVENUE BOT ONLY
 
+## Master Goal Source
+
+- Current long-term source of truth: `docs/TOAN_AAS_MASTER_GOAL_PLAN_V4_4000_WORDS_CODEX_READY.md`.
+- Treat the V4 master plan as the future target after the current bot reaches Stable Revenue/Sales Ready.
+- Do not implement the future trend-to-video-to-publish pipeline in the public customer bot yet.
+- Current work remains limited to making the Stable Revenue Bot reliable, sellable and easy to operate.
+
 Chưa quay lại kế hoạch lớn TOAN AAS.
 Chưa làm app ngoài.
 Chưa làm dashboard web.
