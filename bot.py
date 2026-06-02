@@ -22,6 +22,7 @@ import uvicorn
 import time
 import random
 import re
+import unicodedata
 import csv
 import io
 import tempfile
@@ -4549,6 +4550,11 @@ def operator_worker_spec_data():
             "Điều phối sản xuất video affiliate hợp pháp: chọn affiliate, tìm trend, tạo job, giao task cho AI/tool, "
             "chuẩn bị publish pack, đăng có kiểm soát và ghi performance."
         ),
+        "telegram_group_security": {
+            "rule": TELEGRAM_GROUP_MANAGEMENT_BLOCK_MESSAGE,
+            "disabled_actions": sorted(TELEGRAM_GROUP_MANAGEMENT_METHODS),
+            "allowed_resolution": "Admin đổi thủ công trong Telegram; AI/operator/n8n/worker không được gọi hoặc mô phỏng thao tác này.",
+        },
         "toolchain_url": f"{base_url}/api/operator/toolchain",
         "film_blueprint_url": f"{base_url}/api/operator/film-blueprint",
         "film_project_pack_url": f"{base_url}/api/operator/film-project-pack",
@@ -7933,7 +7939,8 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
         "system_prompt": (
             "Bạn là AI Commander cho TOAN AAS. Admin ra mục tiêu trong Telegram; nhiệm vụ của bạn là điều phối pipeline "
             "tạo video affiliate theo trend, giao task cho AI/tool worker, yêu cầu review trước publish, ghi số liệu sau đăng "
-            "và đề xuất scale. Không tự publish nếu chưa approved. Không lộ token/key. Không copy nguyên video tham khảo. "
+            "và đề xuất scale. Không tự publish nếu chưa approved. Không đổi tên/ảnh/mô tả/quyền nhóm Telegram. "
+            "Không lộ token/key. Không copy nguyên video tham khảo. "
             "Ưu tiên tool trả phí/chất lượng cao trước; nếu lỗi/quota thì ghi tool event, fallback tool rẻ/miễn phí và báo admin."
         ),
         "operating_loop": [
@@ -21599,6 +21606,87 @@ def truthy_value(value, default=False):
         return False
     return default
 
+TELEGRAM_GROUP_MANAGEMENT_METHODS = {
+    "set_chat_title",
+    "set_chat_photo",
+    "set_chat_description",
+    "delete_chat_photo",
+    "set_chat_permissions",
+    "promote_chat_member",
+    "restrict_chat_member",
+    "chatadministratorrights",
+}
+
+TELEGRAM_GROUP_MANAGEMENT_PHRASES = (
+    "doi ten nhom",
+    "doi ten group",
+    "doi title nhom",
+    "rename group",
+    "rename chat",
+    "group title",
+    "chat title",
+    "set group title",
+    "set chat title",
+    "doi anh nhom",
+    "doi avatar nhom",
+    "group photo",
+    "chat photo",
+    "set chat photo",
+    "delete chat photo",
+    "xoa anh nhom",
+    "doi mo ta nhom",
+    "mo ta nhom",
+    "group description",
+    "chat description",
+    "set chat description",
+    "doi quyen nhom",
+    "quyen nhom",
+    "set chat permissions",
+    "group permissions",
+    "promote admin",
+    "promote member",
+    "promote chat member",
+    "thang admin",
+    "thang quan tri vien",
+    "cap quyen admin",
+    "cap quyen quan tri",
+    "restrict member",
+    "restrict chat member",
+    "han che thanh vien",
+    "cam thanh vien trong nhom",
+    "ban thanh vien trong nhom",
+)
+
+TELEGRAM_GROUP_MANAGEMENT_BLOCK_MESSAGE = (
+    "Telegram group management is disabled by default. "
+    "Không cho bot/AI/operator đổi tên nhóm, ảnh nhóm, mô tả nhóm, quyền nhóm hoặc quyền admin. "
+    "Admin hãy chỉnh thủ công trong Telegram nếu thật sự cần."
+)
+
+def security_fold_text(value) -> str:
+    text = str(value or "").replace("đ", "d").replace("Đ", "D")
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", text.lower()).strip()
+
+def is_telegram_group_management_request(raw_text) -> bool:
+    lower_raw = str(raw_text or "").lower()
+    if any(method in lower_raw for method in TELEGRAM_GROUP_MANAGEMENT_METHODS):
+        return True
+    folded = security_fold_text(raw_text)
+    return any(phrase in folded for phrase in TELEGRAM_GROUP_MANAGEMENT_PHRASES)
+
+def blocked_telegram_group_management_plan(raw_text) -> dict:
+    return {
+        "intent": "blocked_telegram_group_management",
+        "topic": str(raw_text or "")[:300],
+        "confidence": 100,
+        "execute": 0,
+        "safe_mode": 1,
+        "blocked_by_security": True,
+        "safety_note": TELEGRAM_GROUP_MANAGEMENT_BLOCK_MESSAGE,
+    }
+
 def extract_supported_video_url(text):
     urls = re.findall(r"https?://[^\s<>\"]+", text or "", flags=re.I)
     supported_hosts = (
@@ -22420,6 +22508,8 @@ def operator_brain_fallback(raw_text):
     }
 
 def parse_operator_brain(raw_text, owner_id):
+    if is_telegram_group_management_request(raw_text):
+        return blocked_telegram_group_management_plan(raw_text)
     fallback = operator_brain_fallback(raw_text)
     if not (gemini_client or openai_client):
         return fallback
@@ -23357,6 +23447,20 @@ async def run_brain_plan(update, context, plan):
         context.args = old_args
 
 def operator_command_plan_data(owner_id, command):
+    if is_telegram_group_management_request(command):
+        plan = blocked_telegram_group_management_plan(command)
+        return {
+            "ok": True,
+            "generated_at": now_text(),
+            "command": command,
+            "plan": plan,
+            "preview": "DISABLED_TELEGRAM_GROUP_MANAGEMENT",
+            "confidence": 100,
+            "safety_note": TELEGRAM_GROUP_MANAGEMENT_BLOCK_MESSAGE,
+            "execute_allowed": False,
+            "blocked_by_security": True,
+            "rule": TELEGRAM_GROUP_MANAGEMENT_BLOCK_MESSAGE,
+        }
     plan = parse_operator_brain(command, owner_id)
     preview = brain_command_preview(plan)
     return {
@@ -28750,6 +28854,13 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain sau đăng job 12 cần đo gì</code>\n"
             "• <code>/brain kiểm tra job 12 đã đủ đăng chưa</code>\n"
             "• <code>/brain báo cáo vận hành 7 ngày</code>",
+            parse_mode="HTML"
+        )
+    if is_telegram_group_management_request(raw_text):
+        return await update.message.reply_text(
+            "🔒 <b>TELEGRAM GROUP SECURITY</b>\n\n"
+            f"{html.escape(TELEGRAM_GROUP_MANAGEMENT_BLOCK_MESSAGE)}\n\n"
+            "Không có lệnh tự động nào được phép đổi tên nhóm, ảnh nhóm, mô tả nhóm, quyền nhóm hoặc quyền admin.",
             parse_mode="HTML"
         )
     plan = parse_operator_brain(raw_text, update.effective_user.id)
@@ -35254,7 +35365,13 @@ async def api_operator_command_run(payload: OperatorCommandRunRequest, request: 
         "executed": False,
         "message": "execute=false",
     }
-    if payload.execute:
+    if plan_data.get("blocked_by_security"):
+        result = {
+            "executed": False,
+            "blocked_by_security": True,
+            "message": TELEGRAM_GROUP_MANAGEMENT_BLOCK_MESSAGE,
+        }
+    elif payload.execute:
         if not plan_data.get("execute_allowed"):
             result = {
                 "executed": False,

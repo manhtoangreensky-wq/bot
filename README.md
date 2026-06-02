@@ -14,6 +14,12 @@ python bot.py
 
 Không lưu token/API key thật trong source code. Cấu hình trên Railway/Render/VPS bằng biến môi trường theo `.env.example`.
 
+## Bảo mật Telegram group
+
+- Không cấp quyền `Change group info` cho bot trong nhóm/kênh Telegram.
+- Không cấp quyền đổi ảnh nhóm, đổi mô tả nhóm, cấp admin hoặc hạn chế thành viên nếu không có nhu cầu vận hành thật.
+- TOAN AAS không tự động đổi tên nhóm, ảnh nhóm, mô tả nhóm, quyền nhóm hoặc quyền admin. Nếu cần đổi thông tin nhóm, admin đổi thủ công trong Telegram.
+
 ## Biến môi trường quan trọng
 
 - `TELEGRAM_TOKEN`: token bot từ BotFather.
