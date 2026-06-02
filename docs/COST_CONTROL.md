@@ -25,7 +25,7 @@ Date: 2026-06-02
 
 | Item | Value |
 |---|---:|
-| Trial credits | 150 Xu |
+| Trial credits | 200 Xu |
 | Free chat daily | 20 messages/day |
 | `/film` | 200 Xu basic; 500 Xu pro; 1,200 Xu series |
 | `/growth_ai` | 120 Xu |
@@ -44,6 +44,13 @@ Date: 2026-06-02
 5. Test refund paths for Chat Pro, AI, STT, TTS, image, and downloader errors.
 6. Run `/dashboard` and verify revenue/usage counters.
 7. Keep `auto_publish` disabled.
+
+## Trial strategy
+
+- New users receive 200 Xu as a marketing/onboarding cost.
+- Reason: `/film` Basic costs 200 Xu, so a new user can experience the core video script workflow once.
+- Do not increase trial higher until abuse controls and payment conversion are verified.
+- Existing users are not auto-topped up from 150 to 200 in this task.
 
 ## Cost review cadence
 

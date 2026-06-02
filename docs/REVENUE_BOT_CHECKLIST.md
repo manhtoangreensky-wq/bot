@@ -26,7 +26,7 @@
 
 ## Credits
 
-- [ ] Trial credit tạo user mới.
+- [ ] Trial credit tạo user mới là 200 Xu.
 - [ ] Spend/trừ xu đúng.
 - [ ] Refund khi API lỗi.
 - [ ] Chat paid exception hoàn xu.
@@ -158,7 +158,7 @@
 - [ ] `/pricing_admin` admin-only.
 - [ ] `/costs` hiển thị Chat Pro Pro/Deep/content-unit/cap.
 - [ ] `/providers` does not reveal key suffixes, tokens, checksum, or raw secret values.
-- [ ] `/costs` matches current Xu pricing: `/film` 200/500/1,200, `/growth_ai` 120, `/campaign_report` 50, trial 150, free chat daily 20.
+- [ ] `/costs` matches current Xu pricing: `/film` 200/500/1,200, `/growth_ai` 120, `/campaign_report` 50, trial 200, free chat daily 20.
 - [ ] `/sales_ready` returns NOT READY or BETA READY only.
 - [ ] `/payos_test_plan` is available to admin.
 - [ ] `docs/API_KEYS_SETUP.md` reviewed before adding new provider keys.

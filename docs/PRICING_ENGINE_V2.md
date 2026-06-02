@@ -66,6 +66,17 @@ Retail price = internal cost x 3
 | `tier=pro` | 500 Xu |
 | `tier=series` | 1,200 Xu |
 
+## Trial Strategy
+
+New user trial = 200 Xu.
+
+Reason:
+
+- `/film` Basic = 200 Xu.
+- User mới cần đủ Xu để trải nghiệm tính năng video cốt lõi.
+- Sau khi thấy giá trị, user được hướng dẫn `/naptien` để nạp thêm.
+- Áp dụng cho user mới sau deploy; user cũ không tự động được bù nếu chưa có migration riêng.
+
 ## Promotion strategy
 
 - Do not lower the base price table.

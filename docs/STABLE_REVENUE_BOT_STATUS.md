@@ -10,6 +10,7 @@
 - Step 9 compile: PASS after sales hardening, `/mark_payos_test`, and beta offer commands.
 - Step 10 compile: PASS after Pricing Engine V2 and higher Xu defaults.
 - Step 11 compile: PASS after Chat AI Tier System and `/chat_pro`.
+- Trial bonus update: `TRIAL_CREDITS = 200` so new users can try one `/film` Basic.
 
 ## UI
 
@@ -41,7 +42,7 @@
 
 ## Credits
 
-- trial: `TRIAL_CREDITS = 150`.
+- trial: `TRIAL_CREDITS = 200`.
 - has_deposited: stored on users and used for first-deposit/referral logic.
 - deduct: fixed and dynamic credit helpers exist.
 - add: `add_credit()` and admin/manual deposit paths exist.
@@ -64,7 +65,7 @@
 
 - `/providers`: added in Step 8; no key suffixes or secret values are printed.
 - `/sales_ready`: Step 9 logic supports NOT READY, BETA READY, and SALES READY after PayOS real test PASS.
-- `/costs`: added in Step 8 and updated in Step 10; documents `/film` 200/500/1,200 Xu, `/growth_ai` 120 Xu, `/campaign_report` 50 Xu, trial 150 Xu, free chat daily 20.
+- `/costs`: added in Step 8 and updated in Step 10; documents `/film` 200/500/1,200 Xu, `/growth_ai` 120 Xu, `/campaign_report` 50 Xu, trial 200 Xu, free chat daily 20.
 - `/payos_test_plan`: added in Step 8; guides real 10k payment validation.
 - PayOS real payment test: still manual and required before public selling.
 - API key setup docs: `docs/API_KEYS_SETUP.md`.
@@ -106,6 +107,12 @@
 
 - Copilot is for development workflow only.
 - OpenLaw/OpenLaws legal automation is backlog, not production.
+
+## Trial / Welcome Bonus
+
+- New users receive 200 Xu trải nghiệm after deploy.
+- Purpose: enough to test one `/film` Basic run.
+- Existing users are not automatically topped up from 150 to 200 in this task.
 
 ## Next risk to fix
 

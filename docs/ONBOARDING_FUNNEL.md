@@ -12,13 +12,21 @@ Move a new user from trial usage to a paid Xu top-up without exposing internal a
    - Video Script Lite: `/film` for Facebook/TikTok/YouTube script packs.
    - Affiliate workflow: save links, plan content, track performance.
    - PayOS Xu: dynamic QR top-up and manual bill fallback.
-3. User checks `/profile`.
-4. User uses a trial/free tool.
-5. When credits are missing, the bot shows current Xu, required Xu, missing Xu, and top-up buttons.
-6. User opens `/naptien` or clicks a package button.
-7. PayOS webhook or manual admin approval adds Xu.
-8. User returns to `/film`, AI tools, or affiliate workflow.
-9. Admin watches `/dashboard`, `/pending`, `/performance_report`, and `/backup_db`.
+3. New user receives 200 Xu trải nghiệm.
+4. User checks `/profile`.
+5. User tries one `/film` Basic run.
+6. When credits are missing, the bot shows current Xu, required Xu, missing Xu, and top-up buttons.
+7. User opens `/naptien` or clicks a package button.
+8. PayOS webhook or manual admin approval adds Xu.
+9. User returns to `/film`, AI tools, or affiliate workflow.
+10. Admin watches `/dashboard`, `/pending`, `/performance_report`, and `/backup_db`.
+
+## Trial Strategy
+
+- New user trial = 200 Xu.
+- Goal: enough for one `/film` Basic run.
+- Applies to new users after deploy.
+- Existing users are not auto-topped up without a separate migration.
 
 ## Key Commands
 

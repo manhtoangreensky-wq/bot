@@ -56,4 +56,14 @@ Sau Step 11 Chat AI Tier System, admin chọn 1 task:
 - Legal Docs Lite with OpenLaw/OpenLaws
 - Legal templates for service contracts and warranty documents
 
+## Optional future task — Trial top-up migration
+
+Nếu admin muốn bù user cũ đã nhận 150 Xu lên 200 Xu:
+
+- Viết migration an toàn.
+- Chỉ bù user có `trial_credit_event` cũ.
+- Chỉ bù thêm 50 Xu một lần.
+- Ghi `credit_event` rõ ràng.
+- Admin duyệt trước khi chạy.
+
 Codex không tự làm task tiếp theo.

@@ -15,14 +15,15 @@ Date: 2026-06-02
 1. Send the website link.
 2. Send the Telegram bot link.
 3. Ask the user to run `/profile`.
-4. Ask the user to run `/beta_offer`.
-5. Ask the user to top up 10k or 50k through `/naptien`.
+4. Explain that new users receive 200 Xu, enough to try one `/film` Basic.
+5. Ask the user to run `/beta_offer`.
 6. Ask the user to generate first content with `/film`.
-7. User posts manually.
-8. User records post with `/publish_done`.
-9. User records metrics with `/performance_add`.
-10. User runs `/growth_ai` after there is enough data.
-11. Ask for feedback.
+7. Ask the user to top up 10k or 50k through `/naptien` if they want more runs.
+8. User posts manually.
+9. User records post with `/publish_done`.
+10. User records metrics with `/performance_add`.
+11. User runs `/growth_ai` after there is enough data.
+12. Ask for feedback.
 
 ## Beta KPI
 

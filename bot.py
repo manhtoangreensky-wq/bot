@@ -335,7 +335,7 @@ MANUAL_BANK_OWNER     = _env("MANUAL_BANK_OWNER", "NGUYEN MANH TOAN")
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
 DB_FILE           = _env("DB_FILE", "toandaas_system.db")
 BACKUP_MAX_BYTES  = 45 * 1024 * 1024
-TRIAL_CREDITS     = 150
+TRIAL_CREDITS     = 200
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
 
@@ -1156,7 +1156,7 @@ def get_user(user_id, username="Unknown"):
             "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
             (str(user_id), username, TRIAL_CREDITS, 0, now_text(), 0)
         )
-        record_credit_event(conn, user_id, TRIAL_CREDITS, "trial_grant", "", "Tặng xu dùng thử")
+        record_credit_event(conn, user_id, TRIAL_CREDITS, "trial_grant", "", "Tặng 200 Xu trải nghiệm")
         conn.commit()
         row = (TRIAL_CREDITS, 0, 0)
     conn.close()
@@ -20108,14 +20108,15 @@ def menu_text_main(is_admin: bool) -> str:
         "• Lưu link affiliate, lên lịch nội dung, theo dõi hiệu quả\n"
         "• Nạp Xu tự động bằng PayOS QR động"
         f"{admin_line}\n\n"
-        "🎁 Tài khoản mới có <b>150 Xu</b> dùng thử.\n"
+        "🎁 Tài khoản mới được tặng <b>200 Xu trải nghiệm</b>.\n"
+        "Bạn có thể dùng ngay 1 lượt <code>/film</code> Basic để thử quy trình tạo video script.\n"
         "💳 Hết Xu thì dùng <code>/naptien</code> để nạp thêm.\n\n"
         "<b>Bắt đầu nhanh:</b>\n"
         "1. <code>/profile</code> — xem số dư\n"
-        "2. <code>/film &lt;chủ đề&gt;</code> — tạo script video\n"
-        "3. Mở nhóm <b>Kiếm Tiền</b> — lưu link affiliate\n"
-        "4. <code>/calendar</code> — xem lịch nội dung\n"
-        "5. <code>/naptien</code> — nạp Xu"
+        "2. <code>/film &lt;chủ đề&gt;</code> — tạo Video Script Basic\n"
+        "3. <code>/pricing</code> — xem bảng giá\n"
+        "4. <code>/naptien</code> — nạp thêm Xu khi cần\n"
+        "5. Mở nhóm <b>Kiếm Tiền</b> — lưu link affiliate"
         f"{runtime_line}\n\n"
         "Chọn nhóm chức năng bên dưới:"
     )
@@ -20368,6 +20369,7 @@ def help_text_for_user(user_id) -> str:
     is_admin = is_admin_user(user_id)
     text = (
         "📘 <b>Hướng dẫn TOAN AAS</b>\n\n"
+        "🎁 Tài khoản mới nhận <b>200 Xu trải nghiệm</b>, đủ để thử 1 lượt <code>/film</code> Basic.\n\n"
         "<b>1. Tài khoản & nạp Xu</b>\n"
         "• <code>/profile</code> — xem số dư, VIP, referral\n"
         "• <code>/naptien</code> — tạo QR nạp Xu\n"
@@ -20658,6 +20660,11 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Nạp 10k nhận 100 Xu",
         "• Dùng Chat AI, tách nền, voice và <code>/film</code> cơ bản",
         "",
+        "<b>Gói trải nghiệm tài khoản mới</b>",
+        "• Tạo tài khoản mới nhận 200 Xu trải nghiệm",
+        "• Có thể thử 1 video basic trước khi nạp thêm",
+        "• Không cam kết doanh thu, công cụ giúp tạo nội dung nhanh hơn và có quy trình rõ hơn",
+        "",
         "<b>Gói 2 — Creator Start</b>",
         "• Nạp 50k nhận 500 Xu",
         "• Phù hợp tạo nhiều script/caption cho Facebook, TikTok, YouTube",
@@ -20710,6 +20717,8 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tải/xử lý video: từ <b>{VIDEO_DOWNLOAD_MIN_COST} Xu</b>, tính theo MB",
         "",
         "💳 <b>Nạp Xu:</b> <code>/naptien</code>",
+        "",
+        "🎁 <b>Khuyến mãi trải nghiệm:</b> Tài khoản mới nhận <b>200 Xu</b>, đủ để thử 1 lượt <code>/film</code> Basic.",
         "",
         "Giá đã bao gồm chi phí AI, server, xử lý lỗi và vận hành hệ thống. Admin có thể tạo khuyến mãi theo từng thời điểm.",
     ]

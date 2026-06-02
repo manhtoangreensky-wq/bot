@@ -15,6 +15,7 @@ Date: 2026-06-02
 ## Bot onboarding
 
 - [ ] `/start` is clear for customers.
+- [ ] `/start` explains new users receive 200 Xu and can try one `/film` Basic.
 - [ ] `/menu` is clear for customers.
 - [ ] `/help` and `/commands` work.
 - [ ] Normal users do not see admin/operator commands.

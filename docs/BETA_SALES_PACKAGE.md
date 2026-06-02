@@ -8,6 +8,12 @@ Sell to the first 3-10 beta users to validate real demand, payment flow, and the
 
 ## Beta packages
 
+## New user experience
+
+- Tài khoản mới nhận 200 Xu trải nghiệm.
+- Có thể thử 1 `/film` Basic trước khi nạp thêm.
+- Sau đó chọn nạp 10k/50k/100k nếu muốn tiếp tục.
+
 ### Package 1 - Trial User - 10k
 
 - 100 Xu.
