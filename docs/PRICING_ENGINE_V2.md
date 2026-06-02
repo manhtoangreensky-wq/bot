@@ -31,8 +31,10 @@ Retail price = internal cost x 3
 | `/film tier=series` | 1,200 Xu |
 | `/growth_ai` | 120 Xu |
 | `/campaign_report` | 50 Xu |
-| Chat short | from 5 Xu |
-| Chat long/heavy | 15-30 Xu |
+| Normal chat | fair-use / existing normal chat flow |
+| `/chat_pro` Pro | from 20 Xu |
+| `/chat_pro tier=deep` | from 50 Xu |
+| Long Chat Pro content | +20 Xu / content unit, capped at 200 Xu |
 | Voice/TTS | from 50 Xu + length |
 | Audio/STT | from 80 Xu |
 | Background removal | 80-150 Xu |
@@ -44,6 +46,15 @@ Retail price = internal cost x 3
 |---|---:|---:|---:|
 | Audio/STT | 30 Xu | 20 Xu | 80 Xu |
 | Downloader/video | 50 Xu | 15 Xu | 100 Xu |
+
+## Chat Pro pricing
+
+| Input | Price |
+|---|---:|
+| Short Pro request | 20 Xu |
+| Short Deep/high-model request | 50 Xu |
+| Each extra content unit | +20 Xu |
+| Maximum per request | 200 Xu |
 
 ## Film pricing
 

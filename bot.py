@@ -363,6 +363,21 @@ CHAT_SHORT_COST    = 5
 CHAT_LONG_COST     = 15
 CHAT_HEAVY_COST    = 30
 REPORT_EXPORT_COST = CAMPAIGN_REPORT_COST
+
+# Chat AI Tier System. Normal chat keeps the existing fair-use flow; Pro/Deep
+# are explicit paid commands so customers can choose higher-value answers.
+CHAT_NORMAL_COST = 0
+CHAT_PRO_BASE_COST = 10
+CHAT_PRO_STANDARD_COST = 20
+CHAT_PRO_DEEP_COST = 50
+CHAT_PRO_MAX_COST = 200
+CHAT_PRO_MB_UNIT_COST = 20
+CHAT_PRO_MIN_COST = 10
+CHAT_TEXT_MB_CHARS = 4000
+CHAT_TIER_NORMAL = "normal"
+CHAT_TIER_PRO = "pro"
+CHAT_TIER_DEEP = "deep"
+CHAT_ADVANCED_MODEL_LEVELS = {"sonnet", "opus", "gpt_pro", "gemini_pro", "claude", "grok"}
 CONTENT_PLATFORM_ALIASES = {
     "fb": "facebook",
     "facebook": "facebook",
@@ -390,6 +405,7 @@ PAYOS_STATUS_CANCELLED = "CANCELLED"
 
 # ─── FREE CHAT CONFIG ─────────────────────────────────────────────────────────
 FREE_CHAT_DAILY   = 20   # lượt chat/ngày cho tài khoản chưa nạp tiền
+CHAT_NORMAL_DAILY_LIMIT = FREE_CHAT_DAILY
 
 # ─── PLACEHOLDER: AI KEYS CAO CẤP (bỏ comment khi sẵn sàng) ──────────────────
 # Bước 1: Thêm biến môi trường tương ứng trên server/render/railway
@@ -18404,6 +18420,110 @@ def calculate_chat_cost(size_or_length) -> int:
         return CHAT_LONG_COST
     return CHAT_HEAVY_COST
 
+def normalize_chat_tier(value: str) -> str:
+    tier = str(value or CHAT_TIER_PRO).strip().lower()
+    return tier if tier in {CHAT_TIER_NORMAL, CHAT_TIER_PRO, CHAT_TIER_DEEP} else CHAT_TIER_PRO
+
+def normalize_chat_model(value: str) -> str:
+    model = str(value or "auto").strip().lower().replace("-", "_")
+    aliases = {
+        "gpt": "openai",
+        "chatgpt": "openai",
+        "chatgpt_pro": "gpt_pro",
+        "gemini": "gemini",
+        "gemini_advanced": "gemini_pro",
+        "claude_sonnet": "sonnet",
+        "claude_opus": "opus",
+    }
+    return aliases.get(model, model or "auto")
+
+def estimate_text_mb(text: str) -> int:
+    chars = len(text or "")
+    if chars <= 0:
+        return 1
+    return max(1, math.ceil(chars / CHAT_TEXT_MB_CHARS))
+
+def calculate_chat_pro_cost(text: str, tier: str = CHAT_TIER_PRO, model_level: str = "standard") -> int:
+    units = estimate_text_mb(text)
+    tier_norm = normalize_chat_tier(tier)
+    model_norm = normalize_chat_model(model_level)
+    if tier_norm == CHAT_TIER_DEEP or model_norm in CHAT_ADVANCED_MODEL_LEVELS:
+        base = CHAT_PRO_DEEP_COST
+    elif tier_norm == CHAT_TIER_PRO:
+        base = CHAT_PRO_STANDARD_COST
+    else:
+        base = CHAT_PRO_BASE_COST
+    cost = base + max(0, units - 1) * CHAT_PRO_MB_UNIT_COST
+    return min(max(CHAT_PRO_MIN_COST, cost), CHAT_PRO_MAX_COST)
+
+def choose_chat_provider(tier=CHAT_TIER_NORMAL, requested_model="auto") -> dict:
+    tier_norm = normalize_chat_tier(tier)
+    model_norm = normalize_chat_model(requested_model)
+
+    if model_norm in {"sonnet", "opus", "claude"}:
+        return {
+            "provider": "claude",
+            "model_label": "Claude Sonnet/Opus",
+            "ready": False,
+            "reason": "Claude Pro chưa được cấu hình trong bản hiện tại.",
+            "tier": tier_norm,
+            "model": model_norm,
+        }
+    if model_norm == "grok":
+        return {
+            "provider": "grok",
+            "model_label": "Grok cao cấp",
+            "ready": False,
+            "reason": "Grok chưa được cấu hình trong bản hiện tại.",
+            "tier": tier_norm,
+            "model": model_norm,
+        }
+    if model_norm in {"openai", "gpt_pro"}:
+        return {
+            "provider": "openai",
+            "model_label": "OpenAI Pro" if model_norm == "gpt_pro" else "OpenAI",
+            "ready": bool(openai_client),
+            "reason": "" if openai_client else "OpenAI chưa được cấu hình.",
+            "tier": tier_norm,
+            "model": model_norm,
+        }
+    if model_norm in {"gemini", "gemini_pro"}:
+        return {
+            "provider": "gemini",
+            "model_label": "Gemini Pro" if model_norm == "gemini_pro" or tier_norm == CHAT_TIER_DEEP else "Gemini Flash",
+            "ready": bool(gemini_client),
+            "reason": "" if gemini_client else "Gemini chưa được cấu hình.",
+            "tier": tier_norm,
+            "model": model_norm,
+        }
+
+    if gemini_client:
+        return {
+            "provider": "gemini",
+            "model_label": "Gemini Pro" if tier_norm in {CHAT_TIER_PRO, CHAT_TIER_DEEP} else "Gemini Flash",
+            "ready": True,
+            "reason": "",
+            "tier": tier_norm,
+            "model": "auto",
+        }
+    if openai_client:
+        return {
+            "provider": "openai",
+            "model_label": "OpenAI Pro" if tier_norm in {CHAT_TIER_PRO, CHAT_TIER_DEEP} else "OpenAI Fast",
+            "ready": True,
+            "reason": "",
+            "tier": tier_norm,
+            "model": "auto",
+        }
+    return {
+        "provider": "none",
+        "model_label": "No AI provider",
+        "ready": False,
+        "reason": "Thiếu GEMINI_API_KEY hoặc OPENAI_API_KEY.",
+        "tier": tier_norm,
+        "model": model_norm,
+    }
+
 def calculate_film_cost(episodes=1, scenes=5, tier="basic") -> int:
     tier_norm = str(tier or "basic").strip().lower()
     if tier_norm == "pro":
@@ -19857,6 +19977,11 @@ def provider_status_payload() -> dict:
         "ai": {
             "gemini": bool(GEMINI_API_KEY),
             "openai": bool(OPENAI_API_KEY),
+            "claude": False,
+            "grok": False,
+            "router_normal": ai_ready,
+            "router_pro": ai_ready,
+            "router_deep": ai_ready,
             "ready": ai_ready,
         },
         "audio": {
@@ -20022,6 +20147,8 @@ def menu_text_ai_basic() -> str:
     return (
         "🤖 <b>AI Cơ Bản — dùng hằng ngày</b>\n\n"
         "• <b>Chat AI:</b> nhắn trực tiếp trong khung chat.\n"
+        "• <b>Chat Pro:</b> <code>/chat_pro nội dung</code> để nhận phân tích sâu.\n"
+        "• <b>Model AI:</b> <code>/models</code> hoặc <code>/ai_models</code> để xem các cấp AI.\n"
         "• <b>Đọc voice:</b> nhập <code>Đọc voice: nội dung</code>.\n"
         "• <b>Bóc băng audio:</b> gửi voice/mp3/m4a.\n"
         "• <b>Tách nền ảnh:</b> gửi ảnh vào bot.\n"
@@ -20348,6 +20475,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>AI</b>",
         f"• Gemini: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
         f"• OpenAI fallback: <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        "• Claude Sonnet/Opus: <code>planned/missing</code>",
+        "• Grok cao cấp: <code>planned/missing</code>",
+        f"• Router normal/pro/deep: <code>{'ready' if providers['ai']['ready'] else 'missing'}</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{provider_status_text(providers['audio']['deepgram'])}</code>",
@@ -20386,7 +20516,10 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/film</code>: <b>{FILM_SCRIPT_COST} Xu</b>/lần",
         f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>/lần",
         f"• <code>/campaign_report</code>: <b>{CAMPAIGN_REPORT_COST} Xu</b>/lần",
-        "• Chat AI: theo dynamic cost/free trial trong code hiện tại",
+        f"• Chat thường: <b>{CHAT_NORMAL_COST} Xu</b> trong fair-use hằng ngày ({CHAT_NORMAL_DAILY_LIMIT} lượt)",
+        f"• <code>/chat_pro</code> Pro: từ <b>{CHAT_PRO_STANDARD_COST} Xu</b>",
+        f"• <code>/chat_pro tier=deep</code>: từ <b>{CHAT_PRO_DEEP_COST} Xu</b>",
+        f"• Chat Pro nội dung dài: +<b>{CHAT_PRO_MB_UNIT_COST} Xu</b>/đơn vị, cap <b>{CHAT_PRO_MAX_COST} Xu</b>",
         f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + block {VOICE_BLOCK_CHARS} ký tự",
         f"• STT/audio: từ <b>{AUDIO_MIN_COST} Xu</b>, +{AUDIO_COST_PER_MB} Xu/MB",
         f"• Image: từ <b>{IMAGE_REMOVE_BG_BASE_COST}-{IMAGE_REMOVE_BG_PREMIUM_COST} Xu</b>",
@@ -20396,6 +20529,7 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Provider rủi ro</b>",
         f"• Gemini/OpenAI: {'READY' if providers['ai']['ready'] else 'MISSING'} — tốn token khi gọi AI",
+        "• Claude/Grok: PLANNED — chưa gọi thật trong bản này",
         f"• Deepgram: {provider_status_text(providers['audio']['deepgram']).upper()} — tốn theo audio",
         f"• Fish Audio: {provider_status_text(providers['audio']['fish_audio']).upper()} — tốn theo ký tự/giọng",
         f"• RemoveBG/Cutout: {'READY' if providers['image']['ready'] else 'MISSING'} — tốn theo ảnh",
@@ -20566,8 +20700,10 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/campaign_report</code>: <b>{CAMPAIGN_REPORT_COST} Xu</b>",
         "",
         "🤖 <b>AI Tools</b>",
-        f"• Chat ngắn: từ <b>{CHAT_SHORT_COST} Xu</b>",
-        f"• Chat dài/nặng: từ <b>{CHAT_LONG_COST}-{CHAT_HEAVY_COST} Xu</b>",
+        f"• Chat thường: model nhanh/tiết kiệm, fair-use hằng ngày ({CHAT_NORMAL_DAILY_LIMIT} lượt)",
+        f"• <code>/chat_pro</code> Pro: từ <b>{CHAT_PRO_STANDARD_COST} Xu</b>",
+        f"• <code>/chat_pro tier=deep</code>: từ <b>{CHAT_PRO_DEEP_COST} Xu</b>",
+        f"• Nội dung dài: +<b>{CHAT_PRO_MB_UNIT_COST} Xu</b>/đơn vị nội dung, không tính token lắt nhắt",
         f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + theo độ dài",
         f"• Bóc băng audio: từ <b>{AUDIO_MIN_COST} Xu</b>, tính theo MB",
         f"• Tách nền ảnh: từ <b>{IMAGE_REMOVE_BG_BASE_COST}-{IMAGE_REMOVE_BG_PREMIUM_COST} Xu</b>",
@@ -20593,6 +20729,11 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• FILM_SCRIPT_COST = <b>{FILM_SCRIPT_COST}</b>",
         f"• GROWTH_AI_COST = <b>{GROWTH_AI_COST}</b>",
         f"• CAMPAIGN_REPORT_COST = <b>{CAMPAIGN_REPORT_COST}</b>",
+        f"• CHAT_NORMAL_DAILY_LIMIT = <b>{CHAT_NORMAL_DAILY_LIMIT}</b>",
+        f"• CHAT_PRO_STANDARD_COST = <b>{CHAT_PRO_STANDARD_COST}</b>",
+        f"• CHAT_PRO_DEEP_COST = <b>{CHAT_PRO_DEEP_COST}</b>",
+        f"• CHAT_PRO_MB_UNIT_COST = <b>{CHAT_PRO_MB_UNIT_COST}</b>",
+        f"• CHAT_PRO_MAX_COST = <b>{CHAT_PRO_MAX_COST}</b>",
         f"• AUDIO_BASE_COST = <b>{AUDIO_BASE_COST}</b>",
         f"• AUDIO_COST_PER_MB = <b>{AUDIO_COST_PER_MB}</b>",
         f"• AUDIO_MIN_COST = <b>{AUDIO_MIN_COST}</b>",
@@ -20610,6 +20751,187 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Khuyến mãi dùng % giảm hoặc tặng Xu.",
         "• Không bán dưới giá vốn.",
         "• Video/render thật sau này phải có bảng giá riêng.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+def parse_chat_pro_args(raw: str) -> dict:
+    kv, remainder = parse_loose_kv_args(raw)
+    tier = normalize_chat_tier(kv.get("tier") or kv.get("mode") or CHAT_TIER_PRO)
+    model = normalize_chat_model(kv.get("model") or kv.get("ai") or "auto")
+    prompt = kv.get("prompt") or kv.get("topic") or kv.get("question") or remainder
+    goal = kv.get("goal") or kv.get("muctieu") or kv.get("mục_tiêu") or ""
+    if goal and prompt and goal not in prompt:
+        prompt = f"Mục tiêu: {goal}\n\nNội dung: {prompt}"
+    return {
+        "tier": tier,
+        "model": model,
+        "prompt": (prompt or "").strip(),
+        "goal": goal,
+    }
+
+def chat_pro_usage_text() -> str:
+    return (
+        "🧠 Chat Pro — trả lời chuyên sâu\n\n"
+        "Dùng khi cần:\n"
+        "• phân tích dài\n"
+        "• kế hoạch kinh doanh\n"
+        "• code/debug\n"
+        "• chiến lược nội dung\n"
+        "• prompt cao cấp\n"
+        "• tài liệu nhiều nội dung\n\n"
+        "Cách dùng:\n"
+        "<code>/chat_pro phân tích kế hoạch bán hàng trong 7 ngày</code>\n"
+        "<code>/chat_pro tier=deep model=gemini_pro topic=\"...\"</code>\n"
+        "<code>/chat_pro model=openai ...</code>\n\n"
+        "Giá:\n"
+        f"• Pro: từ <b>{CHAT_PRO_STANDARD_COST} Xu</b>\n"
+        f"• Deep/model cao cấp: từ <b>{CHAT_PRO_DEEP_COST} Xu</b>\n"
+        f"• Nội dung dài: +<b>{CHAT_PRO_MB_UNIT_COST} Xu</b>/đơn vị nội dung\n"
+        "Không trừ Xu nếu chỉ xem hướng dẫn."
+    )
+
+def build_chat_pro_prompt(user_prompt, tier=CHAT_TIER_PRO, model_level="standard"):
+    tier_norm = normalize_chat_tier(tier)
+    model_norm = normalize_chat_model(model_level)
+    depth_line = (
+        "Phân tích như cố vấn chiến lược/senior expert. Đưa kế hoạch, rủi ro, checklist hành động và ưu tiên rõ ràng."
+        if tier_norm == CHAT_TIER_DEEP or model_norm in CHAT_ADVANCED_MODEL_LEVELS
+        else "Trả lời sâu, có cấu trúc, thực chiến, không lan man."
+    )
+    return (
+        "Bạn là Chat Pro của TOAN AAS.\n"
+        f"{depth_line}\n"
+        "Luôn trả lời tiếng Việt, trung thực, không bịa chắc chắn, không hứa kết quả doanh thu.\n"
+        "Nếu thiếu dữ liệu, nói rõ giả định và đề xuất bước kiểm chứng.\n"
+        "Khi phù hợp, xuất theo cấu trúc: Tóm tắt, Phân tích, Kế hoạch, Rủi ro, Việc làm ngay.\n\n"
+        f"Yêu cầu của user:\n{user_prompt}"
+    )
+
+def call_chat_pro_ai(user_prompt: str, provider_payload: dict, user_id=None) -> str:
+    if not provider_payload.get("ready"):
+        raise RuntimeError(provider_payload.get("reason") or "Provider chưa sẵn sàng")
+    provider = provider_payload.get("provider")
+    system_prompt = build_chat_pro_prompt(
+        user_prompt,
+        provider_payload.get("tier", CHAT_TIER_PRO),
+        provider_payload.get("model", "standard"),
+    )
+    try:
+        if provider == "gemini" and gemini_client:
+            res = gemini_client.models.generate_content(
+                model="gemini-2.0-flash",
+                config=types.GenerateContentConfig(system_instruction=system_prompt),
+                contents=user_prompt,
+            )
+            output = res.text
+        elif provider == "openai" and openai_client:
+            res = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=1800,
+            )
+            output = res.choices[0].message.content
+        else:
+            raise RuntimeError(provider_payload.get("reason") or "Provider chưa sẵn sàng")
+    except Exception as e:
+        raise RuntimeError(f"{provider or 'AI'} error: {type(e).__name__}") from e
+    output = (output or "").strip()
+    if not output or output.startswith("❌"):
+        raise RuntimeError(output or "AI không trả kết quả")
+    return output
+
+def create_temp_chat_pro_file(user_id, content: str):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"toan_aas_chat_pro_{user_id}_{timestamp}.md"
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".md", encoding="utf-8") as f:
+        f.write(content or "")
+        return f.name, filename
+
+async def send_chat_pro_output(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id, output_text: str, caption: str):
+    if len(output_text or "") <= 3200:
+        await context.bot.send_message(chat_id=chat_id, text=f"{output_text}\n\n{caption}")
+        return
+    preview = truncate_text(output_text, 1800)
+    await context.bot.send_message(chat_id=chat_id, text=f"{preview}\n\n{caption}\n\nĐã gửi bản đầy đủ bằng file.")
+    tmp_path, filename = create_temp_chat_pro_file(user_id, output_text)
+    try:
+        with open(tmp_path, "rb") as f:
+            await context.bot.send_document(chat_id=chat_id, document=f, filename=filename, caption="TOAN AAS Chat Pro - bản đầy đủ")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+async def cmd_chat_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    parsed = parse_chat_pro_args(" ".join(context.args or []))
+    prompt = parsed["prompt"]
+    if not prompt:
+        return await update.message.reply_text(chat_pro_usage_text(), parse_mode="HTML")
+
+    provider = choose_chat_provider(parsed["tier"], parsed["model"])
+    if not provider.get("ready"):
+        return await update.message.reply_text(
+            "⚠️ Chat Pro chưa chạy được provider bạn chọn.\n\n"
+            f"Model: {provider.get('model_label')}\n"
+            f"Lý do: {provider.get('reason')}\n\n"
+            "Gợi ý: dùng <code>/chat_pro model=auto nội dung...</code> hoặc kiểm tra <code>/models</code>.",
+            parse_mode="HTML",
+        )
+
+    credits, _, is_vip = get_user(uid, update.effective_user.first_name)
+    is_admin = str(uid) == ADMIN_ID
+    cost = 0 if (is_admin or is_vip) else calculate_chat_pro_cost(prompt, parsed["tier"], parsed["model"])
+    if cost > 0 and credits < cost:
+        return await reply_insufficient_credits(update, credits, cost)
+    charged = False
+    if cost > 0:
+        charged = spend_fixed_credit(uid, cost, "spend_chat_pro", f"Chat Pro {parsed['tier']} {parsed['model']}")
+        if not charged:
+            credits_now, _, _ = get_user(uid)
+            return await reply_insufficient_credits(update, credits_now, cost)
+
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    try:
+        output = call_chat_pro_ai(prompt, provider, uid)
+        credits_after, _, _ = get_user(uid)
+        caption = (
+            f"Model: {provider.get('model_label')} | Tier: {parsed['tier']} | "
+            f"Chi phí: {cost} Xu | Còn lại: {credits_after} Xu"
+        )
+        await send_chat_pro_output(context, update.effective_chat.id, uid, output, caption)
+    except Exception as e:
+        logger.warning(f"Chat Pro AI error: {type(e).__name__}")
+        refunded = refund_charged_credit(uid, cost, "refund_chat_pro", "", "Hoàn phí Chat Pro do AI lỗi", charged)
+        refund_line = f"\n\n✅ Đã hoàn lại {cost} Xu." if refunded else ""
+        await update.message.reply_text("❌ Chat Pro đang lỗi tạm thời. Vui lòng thử lại sau." + refund_line)
+
+async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    providers = provider_status_payload()
+    lines = [
+        "🤖 <b>AI Models trong TOAN AAS</b>",
+        "",
+        "<b>Chat thường</b>",
+        "• Auto Fast AI — dùng model nhanh/tiết kiệm.",
+        "• Phù hợp hỏi đáp, caption, sửa nội dung, ý tưởng nhanh.",
+        "",
+        "<b>Chat Pro</b>",
+        f"• Gemini Pro style: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
+        f"• OpenAI Pro style: <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        f"• Giá từ <b>{CHAT_PRO_STANDARD_COST} Xu</b>.",
+        "",
+        "<b>Chat Deep</b>",
+        "• Dùng cho chiến lược, hệ thống, code/debug, nội dung lớn.",
+        f"• Giá từ <b>{CHAT_PRO_DEEP_COST} Xu</b> trở lên.",
+        "• Claude/Grok: planned / pending provider setup.",
+        "",
+        "Kiểm tra giá: <code>/pricing</code>",
+        "Dùng Chat Pro: <code>/chat_pro nội dung...</code>",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -33188,6 +33510,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("pricing",     cmd_pricing))
     tg_app.add_handler(CommandHandler("banggia",     cmd_pricing))
     tg_app.add_handler(CommandHandler("pricing_admin", cmd_pricing_admin))
+    tg_app.add_handler(CommandHandler("chat_pro",    cmd_chat_pro))
+    tg_app.add_handler(CommandHandler("models",      cmd_models))
+    tg_app.add_handler(CommandHandler("ai_models",   cmd_models))
     tg_app.add_handler(CommandHandler("beta_offer",  cmd_beta_offer))
     tg_app.add_handler(CommandHandler("goi_beta",    cmd_beta_offer))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))

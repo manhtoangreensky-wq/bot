@@ -117,6 +117,13 @@ def test_cost_and_discount_rules():
     assert bot.calculate_dynamic_cost("download", 0) == bot.VIDEO_DOWNLOAD_MIN_COST
     assert bot.calculate_audio_cost(1) == bot.AUDIO_MIN_COST
     assert bot.calculate_video_download_cost(1) == bot.VIDEO_DOWNLOAD_MIN_COST
+    assert bot.estimate_text_mb("") == 1
+    assert bot.estimate_text_mb("x" * bot.CHAT_TEXT_MB_CHARS) == 1
+    assert bot.estimate_text_mb("x" * (bot.CHAT_TEXT_MB_CHARS + 1)) == 2
+    assert bot.calculate_chat_pro_cost("short") == bot.CHAT_PRO_STANDARD_COST
+    assert bot.calculate_chat_pro_cost("short", tier="deep") == bot.CHAT_PRO_DEEP_COST
+    assert bot.calculate_chat_pro_cost("short", model_level="sonnet") == bot.CHAT_PRO_DEEP_COST
+    assert bot.calculate_chat_pro_cost("x" * (bot.CHAT_TEXT_MB_CHARS * 20)) == bot.CHAT_PRO_MAX_COST
     assert bot.calculate_film_cost() == bot.VIDEO_BASIC_COST
     assert bot.calculate_film_cost(episodes=3, scenes=5) == 400
     assert bot.calculate_film_cost(episodes=1, scenes=10) == 300
@@ -125,6 +132,22 @@ def test_cost_and_discount_rules():
     assert bot.apply_discount(0, 100) == (100, 0.0)
     assert bot.apply_discount(5000, 100) == (90, 0.10)
     assert bot.apply_discount(20000, 100) == (80, 0.20)
+
+
+def test_chat_provider_router(monkeypatch):
+    monkeypatch.setattr(bot, "gemini_client", object())
+    monkeypatch.setattr(bot, "openai_client", None)
+    provider = bot.choose_chat_provider("pro", "auto")
+    assert provider["ready"] is True
+    assert provider["provider"] == "gemini"
+
+    provider = bot.choose_chat_provider("pro", "openai")
+    assert provider["ready"] is False
+    assert provider["provider"] == "openai"
+
+    provider = bot.choose_chat_provider("deep", "sonnet")
+    assert provider["ready"] is False
+    assert provider["provider"] == "claude"
 
 
 def test_payos_signature_verification(monkeypatch):

@@ -5,7 +5,7 @@ Chưa làm app ngoài.
 Chưa làm dashboard web.
 Chưa làm ERP/Device Ops/SaaS.
 
-Sau Step 10 Pricing Engine V2, admin chọn 1 task:
+Sau Step 11 Chat AI Tier System, admin chọn 1 task:
 
 ## Option A - Promotion/Discount Code System
 
@@ -13,16 +13,16 @@ Sau Step 10 Pricing Engine V2, admin chọn 1 task:
 - Không đổi bảng giá gốc.
 - Không đụng PayOS packages nếu chưa cần.
 
-## Option B - Beta Launch Offer
+## Option B - PayOS Real Payment Manual Test
 
 - Test gói 10k thật.
 - Nếu PASS, chạy `/mark_payos_test pass order=<order_code> note="Test 10k OK"`.
-- Mở bán thử cho 3-10 user.
-
-## Option C - PayOS Real Payment Manual Test
-
-- Làm đúng `docs/PAYOS_REAL_PAYMENT_TEST.md`.
 - Không sửa code nếu không phát hiện lỗi rõ.
+
+## Option C - Beta Launch Offer
+
+- Mở bán thử cho 3-10 user.
+- Test `/naptien`, `/film`, `/chat_pro`, `/growth_ai`.
 
 ## Option D - Video Script template packs
 

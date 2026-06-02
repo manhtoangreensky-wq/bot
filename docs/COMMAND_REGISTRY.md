@@ -1,8 +1,8 @@
 # COMMAND REGISTRY - TOAN AAS
 
 Date: 2026-06-02
-Source: `bot.py` local audit after Step 10
-Registered Telegram commands: 203
+Source: `bot.py` local audit after Step 11
+Registered Telegram commands: 206
 Registered callback groups: 9
 
 ## User Commands
@@ -17,6 +17,9 @@ Registered callback groups: 9
 | `/naptien` | `cmd_naptien` | YES | PayOS package selection. |
 | `/pricing` | `cmd_pricing` | YES | User-facing Pricing Engine V2 table. |
 | `/banggia` | `cmd_pricing` | YES | Vietnamese alias for `/pricing`. |
+| `/chat_pro` | `cmd_chat_pro` | YES | Paid Pro/Deep chat with upfront Xu price. |
+| `/models` | `cmd_models` | YES | User-facing AI tier/model status. |
+| `/ai_models` | `cmd_models` | YES | Alias for `/models`. |
 | `/thucong` | `cmd_thanhtoan_thucong` | YES | Manual bill fallback. |
 | `/beta_offer` | `cmd_beta_offer` | YES | Shows beta packages and customer workflow. |
 | `/goi_beta` | `cmd_beta_offer` | YES | Vietnamese alias for `/beta_offer`. |
@@ -29,6 +32,7 @@ Registered callback groups: 9
 | Feature | Trigger | Cost | Refund? | Notes |
 |---|---|---:|---:|---|
 | Chat AI | Plain text message | Dynamic/free trial | YES | Gemini/OpenAI fallback path, paid exception refunds. |
+| Chat Pro | `/chat_pro` | 20-200 Xu | YES | Gemini/OpenAI router, Claude/Grok planned only. |
 | Voice/TTS | `Đọc voice: nội dung` or routed text | Provider choice | YES | Paid Fish Audio, fallback Edge TTS. |
 | STT/audio | Voice/mp3/m4a message | Dynamic | YES | Deepgram flow. |
 | Background removal | Photo message | Provider choice | YES | RemoveBG/Cutout provider choice/fallback. |

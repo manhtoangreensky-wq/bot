@@ -30,6 +30,7 @@ Date: 2026-06-02
 | `/film` | 200 Xu basic; 500 Xu pro; 1,200 Xu series |
 | `/growth_ai` | 120 Xu |
 | `/campaign_report` | 50 Xu |
+| `/chat_pro` | from 20 Xu; deep from 50 Xu; cap 200 Xu |
 | Audio/STT | from 80 Xu, MB-based |
 | Downloader/video | from 100 Xu, MB-based |
 | Popular upsell packages | 50k / 100k / 200k |
@@ -40,7 +41,7 @@ Date: 2026-06-02
 2. Run `/sales_ready`.
 3. Run `/payos_test_plan` and complete one real 10k PayOS payment.
 4. Test insufficient-Xu upsell.
-5. Test refund paths for AI, STT, TTS, image, and downloader errors.
+5. Test refund paths for Chat Pro, AI, STT, TTS, image, and downloader errors.
 6. Run `/dashboard` and verify revenue/usage counters.
 7. Keep `auto_publish` disabled.
 

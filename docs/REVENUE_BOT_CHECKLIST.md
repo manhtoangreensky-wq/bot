@@ -38,6 +38,12 @@
 ## AI tools
 
 - [ ] Chat Gemini/OpenAI fallback.
+- [ ] `/models` và `/ai_models` hiển thị normal/pro/deep, không lộ key.
+- [ ] `/chat_pro` thiếu nội dung trả hướng dẫn và không trừ Xu.
+- [ ] `/chat_pro` câu ngắn tính từ 20 Xu nếu provider configured.
+- [ ] `/chat_pro tier=deep` tính từ 50 Xu.
+- [ ] `/chat_pro model=sonnet` báo planned/missing và không trừ Xu.
+- [ ] `/chat_pro` AI lỗi thì hoàn Xu.
 - [ ] Voice Fish/Edge fallback.
 - [ ] STT Deepgram.
 - [ ] Background removal RemoveBG/Cutout fallback.
@@ -150,6 +156,7 @@
 - [ ] `/providers` shows configured/missing only.
 - [ ] `/pricing` và `/banggia` hiển thị bảng giá user.
 - [ ] `/pricing_admin` admin-only.
+- [ ] `/costs` hiển thị Chat Pro Pro/Deep/content-unit/cap.
 - [ ] `/providers` does not reveal key suffixes, tokens, checksum, or raw secret values.
 - [ ] `/costs` matches current Xu pricing: `/film` 200/500/1,200, `/growth_ai` 120, `/campaign_report` 50, trial 150, free chat daily 20.
 - [ ] `/sales_ready` returns NOT READY or BETA READY only.

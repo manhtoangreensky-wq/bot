@@ -9,6 +9,7 @@
 - Step 8 compile: PASS after provider status and sales readiness commands.
 - Step 9 compile: PASS after sales hardening, `/mark_payos_test`, and beta offer commands.
 - Step 10 compile: PASS after Pricing Engine V2 and higher Xu defaults.
+- Step 11 compile: PASS after Chat AI Tier System and `/chat_pro`.
 
 ## UI
 
@@ -87,10 +88,19 @@
 - `/pricing` and `/banggia`: user-facing price table.
 - `/pricing_admin`: admin-only formula/constants.
 - `/film`: 200 Xu basic, 500 Xu pro, 1,200 Xu series.
+- `/chat_pro`: Pro from 20 Xu, Deep from 50 Xu, long content +20 Xu/unit, cap 200 Xu.
 - `/growth_ai`: 120 Xu.
 - `/campaign_report`: 50 Xu for normal users; no data means no charge; export errors refund.
 - MB helpers: `calculate_audio_cost`, `calculate_video_download_cost`, `calculate_mb_cost`.
 - Safety: PayOS packages and payment callbacks untouched in Step 10.
+
+## Chat AI Tier Status
+
+- Normal chat: existing fair-use/legacy billing flow preserved.
+- `/chat_pro`: explicit paid deep-answer command.
+- `/models` and `/ai_models`: user-facing tier/model status.
+- Router: Gemini/OpenAI configured paths only; Claude/Grok planned and not called.
+- Refund: Chat Pro refunds if AI fails after Xu was charged.
 
 ## Next risk to fix
 
