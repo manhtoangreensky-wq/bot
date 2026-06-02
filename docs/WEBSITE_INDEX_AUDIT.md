@@ -42,7 +42,7 @@ Checked on 2026-06-02 before adding banner:
 
 - `10k`: 10.000đ -> 100 Xu
 - `20k`: 20.000đ -> 200 Xu
-- `50k`: 50.000đ -> 500 Xu base, promo-eligible but no Launch Bonus
+- `50k`: 50.000đ -> 500 Xu base + 30 Xu Launch Bonus on first purchase of the 50k package
 - `100k`: 100.000đ -> 1.000 Xu base, plus 50 Xu Launch Bonus on first 100k purchase
 - `200k`: 200.000đ -> 2.000 Xu base, plus 150 Xu Launch Bonus on first 200k purchase
 - `500k`: 500.000đ -> 5.000 Xu base, plus 500 Xu Launch Bonus on first 500k purchase

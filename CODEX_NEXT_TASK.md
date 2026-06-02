@@ -45,9 +45,9 @@ Manual sequence:
 Expected for 50k + FIRST30:
 
 - Base Xu: 500
-- Launch Bonus: 0 because 50k is not Launch Bonus eligible
+- Launch Bonus: 30 if this is the user's first 50k package purchase
 - Promo bonus: 150
-- Total Xu added: 650
+- Total Xu added: 680
 - Duplicate webhook/checkpayos must not add base or bonus again.
 
 Expected for 100k first purchase:

@@ -345,6 +345,7 @@ REFERRAL_BONUS_XU  = 20
 GUIDE_DOCX_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx"
 GUIDE_MD_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.md"
 LAUNCH_BONUS_BY_AMOUNT = {
+    50000: 30,
     100000: 50,
     200000: 150,
     500000: 500,
@@ -21444,7 +21445,7 @@ CUSTOMER_GUIDE_SECTIONS = [
             "<b>Gói nạp:</b>\n"
             "• 10.000đ → 100 Xu, dùng thử\n"
             "• 20.000đ → 200 Xu, dùng thử thêm\n"
-            "• 50.000đ → 500 Xu, bắt đầu dùng promo\n"
+            "• 50.000đ → 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua gói 50k\n"
             "• 100.000đ → 1.000 Xu + 50 Xu Launch Bonus nếu lần đầu mua gói 100k\n"
             "• 200.000đ → 2.000 Xu + 150 Xu Launch Bonus nếu lần đầu mua gói 200k\n"
             "• 500.000đ → 5.000 Xu + 500 Xu Launch Bonus nếu lần đầu mua gói 500k\n\n"
@@ -21452,7 +21453,7 @@ CUSTOMER_GUIDE_SECTIONS = [
             "Nhập <code>/promo FIRST30</code> trước khi nạp. Promo áp dụng từ gói 50k, mỗi đơn chỉ dùng 1 mã, "
             "không cộng dồn và chỉ cộng Xu sau khi thanh toán thành công.\n\n"
             "<b>Gift code:</b>\n"
-            "Nhập <code>/gift BETA100</code> hoặc <code>/nhanqua BETA100</code>. Nếu mã hợp lệ, Xu cộng ngay."
+            "Gift public hợp lệ sẽ cộng Xu trực tiếp. Riêng mã <code>BETA*</code> là mã sự kiện/test, cần admin cấp theo ID Telegram trước."
         ),
     ),
     (
@@ -22307,7 +22308,7 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Không cam kết doanh thu, công cụ giúp tạo nội dung nhanh hơn và có quy trình rõ hơn",
         "",
         "<b>Gói 2 — Creator Start</b>",
-        "• Nạp 50k nhận 500 Xu",
+        "• Nạp 50k nhận 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua gói 50k",
         "• Phù hợp tạo nhiều script/caption cho Facebook, TikTok, YouTube",
         "• Gợi ý dùng: <code>/film</code>, <code>/growth_ai</code>, <code>/campaign_report</code>",
         "",
@@ -23333,11 +23334,11 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>🛒 BẢNG GIÁ (1 Xu = 100đ):</b>\n"
         f"• Gói Dùng Thử: 10.000đ ➔ <b>100 Xu</b>\n"
         f"• Gói Nhỏ: 20.000đ ➔ <b>200 Xu</b>\n"
-        f"• Gói Trung: 50.000đ ➔ <b>500 Xu</b>\n"
+        f"• Gói Trung: 50.000đ ➔ <b>500 Xu</b> + 30 Xu Launch Bonus lần đầu mua gói = <b>530 Xu</b>\n"
         f"• Gói Tiêu Chuẩn: 100.000đ ➔ <b>1.000 Xu</b> + 50 Xu Launch Bonus lần đầu mua gói = <b>1.050 Xu</b>\n"
         f"• Gói Nâng Cao: 200.000đ ➔ <b>2.000 Xu</b> + 150 Xu Launch Bonus lần đầu mua gói = <b>2.150 Xu</b>\n"
         f"• Gói Doanh Nghiệp: 500.000đ ➔ <b>5.000 Xu</b> + 500 Xu Launch Bonus lần đầu mua gói = <b>5.500 Xu</b>\n\n"
-        f"🎁 Launch Bonus theo gói chỉ áp dụng 1 lần cho mỗi tài khoản ở từng gói 100k/200k/500k.\n"
+        f"🎁 Launch Bonus theo gói chỉ áp dụng 1 lần cho mỗi tài khoản ở từng gói 50k/100k/200k/500k.\n"
         f"Các lần mua lại cùng gói sẽ nhận Xu gốc.\n\n"
         f"🏦 Nếu phải nạp thủ công, nội dung chuyển khoản sẽ là: <code>AAS {uid} &lt;order_code&gt;</code>\n\n"
         f"⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. Không lo điền sai nội dung chuyển khoản.\n\n"

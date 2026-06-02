@@ -98,9 +98,9 @@ Then select package `50k` or higher and pay the real QR.
 Expected for 50k:
 
 - Base Xu: 500.
-- Launch Bonus: 0. The 50k package is promo-eligible but has no Launch Bonus.
+- Launch Bonus: 30 if this is the user's first 50k package purchase.
 - FIRST30 bonus Xu: 150.
-- Total Xu added: 650.
+- Total Xu added: 680.
 
 Expected for 100k first purchase without promo:
 

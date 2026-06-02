@@ -9,7 +9,7 @@
 - `200k`: 200.000đ -> 2.000 Xu
 - `500k`: 500.000đ -> 5.000 Xu
 
-Launch Bonus is credited separately after PayOS success for the first purchase of eligible packages: 100k +50 Xu, 200k +150 Xu, 500k +500 Xu. The 50k package is promo-eligible but has no Launch Bonus.
+Launch Bonus is credited separately after PayOS success for the first purchase of eligible packages: 50k +30 Xu, 100k +50 Xu, 200k +150 Xu, 500k +500 Xu.
 
 ## Checkout creation
 

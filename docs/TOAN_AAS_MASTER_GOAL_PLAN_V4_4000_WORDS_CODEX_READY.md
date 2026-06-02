@@ -280,11 +280,12 @@ Launch Bonus không phải tặng mãi mãi mỗi lần mua. Launch Bonus là ư
 
 | Gói | Xu gốc | Launch Bonus lần đầu mua gói | Tổng lần đầu mua gói | Mua lại cùng gói |
 |---|---:|---:|---:|---:|
+| 50k | 500 | +30 | 530 | 500 |
 | 100k | 1.000 | +50 | 1.050 | 1.000 |
 | 200k | 2.000 | +150 | 2.150 | 2.000 |
 | 500k | 5.000 | +500 | 5.500 | 5.000 |
 
-10k, 20k và 50k không có Launch Bonus. 50k là gói bắt đầu được dùng mã ưu đãi.
+10k và 20k không có Launch Bonus. Launch Bonus bắt đầu từ gói 50k trở lên.
 
 Nguyên tắc kỹ thuật:
 

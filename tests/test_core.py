@@ -83,14 +83,13 @@ def test_customer_guide_is_public_and_policy_aligned():
 
     assert "/huongdan 1" in guide_index
     assert "📘 Hướng Dẫn" in button_texts
-    assert "50.000đ → 500 Xu" in guide_credit
+    assert "50.000đ → 500 Xu + 30 Xu Launch Bonus" in guide_credit
     assert "100.000đ → 1.000 Xu + 50 Xu Launch Bonus" in guide_credit
-    assert "50.000đ → 500 Xu + 30 Xu Launch Bonus" not in guide_credit
-    assert bot.package_launch_bonus_xu(50000) == 0
+    assert bot.package_launch_bonus_xu(50000) == 30
     assert bot.package_launch_bonus_xu(100000) == 50
 
 
-def test_launch_bonus_once_per_user_package(monkeypatch):
+def test_launch_bonus_preview_once_per_user_package(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setattr(bot, "DB_FILE", db_path)
@@ -105,9 +104,17 @@ def test_launch_bonus_once_per_user_package(monkeypatch):
 
             fifty = bot.calculate_package_credit_for_user("u1", 50000, conn=conn)
             assert fifty["base_xu"] == 500
-            assert fifty["launch_bonus_xu"] == 0
-            assert fifty["launch_bonus_eligible"] is False
-            assert fifty["launch_bonus_available"] == 0
+            assert fifty["launch_bonus_xu"] == 30
+            assert fifty["launch_bonus_eligible"] is True
+            assert fifty["launch_bonus_available"] == 30
+            bot.create_order("order-preview-50", "u1", 50000, fifty["total_xu"], base_xu=fifty["base_xu"], launch_bonus_xu=fifty["launch_bonus_xu"], package_amount_vnd=50000)
+            row = conn.execute("SELECT xu, package_amount_vnd, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code='order-preview-50'").fetchone()
+            assert row == (530, 50000, 500, 30)
+            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-50", 50000) == 30
+            conn.commit()
+            fifty_repeat = bot.calculate_package_credit_for_user("u1", 50000, conn=conn)
+            assert fifty_repeat["launch_bonus_xu"] == 0
+            assert fifty_repeat["launch_bonus_eligible"] is False
 
             first = bot.calculate_package_credit_for_user("u1", 100000, conn=conn)
             assert first["base_xu"] == 1000
@@ -287,10 +294,10 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
         assert desc == "success"
         assert paid_info["promo_bonus"] == 150
         assert paid_info["promo_code"] == "FIRST30"
-        assert paid_info["launch_bonus"] == 0
+        assert paid_info["launch_bonus"] == 30
 
         credits_after_paid, _, _ = bot.get_user(user_id)
-        assert credits_after_paid == initial_credits + 650
+        assert credits_after_paid == initial_credits + 680
 
         processed, desc, _paid_info = bot.process_payos_paid_order("123456789", 50000)
         assert processed is False

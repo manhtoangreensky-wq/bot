@@ -6,6 +6,7 @@ Launch Bonus is granted once per user per eligible package.
 
 | Package | Base Xu | Launch Bonus | First purchase total | Repeat purchase total |
 |---|---:|---:|---:|---:|
+| 50k | 500 | +30 | 530 | 500 |
 | 100k | 1,000 | +50 | 1,050 | 1,000 |
 | 200k | 2,000 | +150 | 2,150 | 2,000 |
 | 500k | 5,000 | +500 | 5,500 | 5,000 |
@@ -14,7 +15,6 @@ Non-eligible:
 
 - 10k = 100 Xu
 - 20k = 200 Xu
-- 50k = 500 Xu
 
 ## Promo Interaction
 
@@ -53,7 +53,7 @@ The unique protection is `user_id + package_amount_vnd`, exposed through `idx_la
 
 `payos_orders` also stores the order-time preview fields `package_amount_vnd`, `base_xu`, `launch_bonus_xu` and `xu` total. Actual crediting still happens only after PayOS success.
 
-Manual fallback uses the same order-time `xu` preview as the PayOS order. Example: a first 100k package order must show `1,050 Xu` in both PayOS QR flow and manual QR fallback.
+Manual fallback uses the same order-time `xu` preview as the PayOS order. Example: a first 50k package order must show `530 Xu`, and a first 100k package order must show `1,050 Xu`, in both PayOS QR flow and manual QR fallback.
 
 If admin approves a manual bill connected to an eligible order, `launch_bonus_redemptions` is recorded so the same user/package cannot receive Launch Bonus twice.
 

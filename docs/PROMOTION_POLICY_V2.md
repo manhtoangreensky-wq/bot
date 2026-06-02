@@ -53,7 +53,7 @@ Reason:
 
 Launch Bonus is not a promo code. It is credited only after PayOS success.
 
-The 50k package is the first promo-eligible package, but it does not receive Launch Bonus.
+The 50k package is the first promo-eligible package and receives +30 Xu Launch Bonus on the user's first 50k package purchase.
 
 ## Gift Codes
 

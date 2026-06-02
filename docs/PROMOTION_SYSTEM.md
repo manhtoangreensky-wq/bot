@@ -52,11 +52,11 @@ Admin:
 
 50k = 500 Xu.
 
+Launch Bonus = +30 Xu if this is the user's first 50k package purchase.
+
 FIRST30 = +30%.
 
-The 50k package has no Launch Bonus.
-
-User receives 650 Xu total after PayOS success: 500 base Xu + 150 promo bonus.
+User receives 680 Xu total after PayOS success on first 50k+FIRST30: 500 base Xu + 30 Launch Bonus + 150 promo bonus.
 
 ## Safety
 
