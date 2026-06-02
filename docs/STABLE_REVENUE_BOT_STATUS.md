@@ -7,6 +7,7 @@
 - Import test: PASS, `cmd_help` and `help_text_for_user` exist.
 - Step 7 import test: PASS, `GROWTH_AI_COST=30`, `cmd_growth_ai`, `cmd_campaign_report`, and report CSV helper exist.
 - Step 8 compile: PASS after provider status and sales readiness commands.
+- Step 9 compile: PASS after sales hardening, `/mark_payos_test`, and beta offer commands.
 
 ## UI
 
@@ -54,11 +55,12 @@
 - `/costs`: exists, admin-only, summarizes Xu pricing and provider cost risk.
 - `/sales_ready`: exists, admin-only, reports NOT READY or BETA READY only.
 - `/payos_test_plan`: exists, admin-only, checklist for one real 10k payment test.
+- `/mark_payos_test`: exists, admin-only, records PASS/FAIL/NOT_TESTED in `system_settings`.
 
 ## Provider & Sales Readiness
 
 - `/providers`: added in Step 8; no key suffixes or secret values are printed.
-- `/sales_ready`: added in Step 8; BETA READY requires DB, PayOS, AI, `/film`, and `/backup_db`.
+- `/sales_ready`: Step 9 logic supports NOT READY, BETA READY, and SALES READY after PayOS real test PASS.
 - `/costs`: added in Step 8; documents `/film` 50 Xu, `/growth_ai` 30 Xu, trial 150 Xu, free chat daily 20.
 - `/payos_test_plan`: added in Step 8; guides real 10k payment validation.
 - PayOS real payment test: still manual and required before public selling.
@@ -66,7 +68,17 @@
 - Cost control docs: `docs/COST_CONTROL.md`.
 - Sales readiness docs: `docs/SALES_READINESS_CHECKLIST.md`.
 - Provider security audit: `docs/PROVIDER_SECURITY_AUDIT.md`.
-- Current status: BETA READY only after admin completes `/sales_ready` checks and real PayOS test; never auto-marked SALES READY.
+- Current status: SALES READY only after admin runs `/mark_payos_test pass ...`; no automatic payment/order mutation is performed.
+
+## Sales Hardening Status
+
+- `/status`: hardened to compact public JSON.
+- `/runtime`: protected by `OPERATOR_API_TOKEN` on the public FastAPI route.
+- `/health`: remains public and compact.
+- `system_settings`: added for non-secret operational flags such as PayOS real test state.
+- `/beta_offer` and `/goi_beta`: user-facing beta package commands.
+- Sales docs: `docs/BETA_SALES_PACKAGE.md`, `docs/FIRST_CUSTOMER_BETA_PLAN.md`, `docs/SALES_SCRIPT.md`.
+- Safety: PayOS packages/webhook/billing callbacks untouched in Step 9.
 
 ## Next risk to fix
 

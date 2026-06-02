@@ -78,3 +78,25 @@ Do not run this on production while selling. Code expectation:
 - [ ] Dashboard revenue updates.
 - [ ] Backup was taken before and after test.
 - [ ] Manual fallback path is understood by admin.
+
+## Final admin confirmation
+
+After a successful real 10k test, run:
+
+```text
+/mark_payos_test pass order=<order_code> note="Test 10k OK, user received 100 Xu"
+```
+
+If the test fails, run:
+
+```text
+/mark_payos_test fail note="Webhook did not arrive"
+```
+
+Reset status if needed:
+
+```text
+/mark_payos_test reset
+```
+
+Then run `/sales_ready` again.

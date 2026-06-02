@@ -13,9 +13,12 @@ def test_env_loader_default(monkeypatch):
     assert bot._env("TOAN_AAS_TEST_MISSING", "fallback") == "fallback"
 
 
-def test_health_and_runtime_endpoints():
+def test_health_status_and_runtime_endpoints(monkeypatch):
     client = TestClient(bot.fastapi_app)
     assert client.get("/").status_code == 200
+    status = client.get("/status")
+    assert status.status_code == 200
+    assert status.json()["health"] == "/health"
     health = client.get("/health")
     assert health.status_code == 200
     health_payload = health.json()
@@ -26,6 +29,9 @@ def test_health_and_runtime_endpoints():
     assert "telegram_configured" in health_payload
     assert "public_base_url_configured" in health_payload
     runtime = client.get("/runtime")
+    assert runtime.status_code == 403
+    monkeypatch.setattr(bot, "OPERATOR_API_TOKEN", "runtime-test-token")
+    runtime = client.get("/runtime?token=runtime-test-token")
     assert runtime.status_code == 200
     assert runtime.json()["service"].startswith("TOAN AAS")
 
@@ -65,9 +71,10 @@ def test_lifespan_keeps_api_alive_without_telegram_token(monkeypatch):
     monkeypatch.setattr(bot, "DB_FILE", db_path)
     monkeypatch.setattr(bot, "TELEGRAM_TOKEN", "")
     monkeypatch.setattr(bot, "TELEGRAM_STARTUP_ERROR", "")
+    monkeypatch.setattr(bot, "OPERATOR_API_TOKEN", "runtime-test-token")
     try:
         with TestClient(bot.fastapi_app) as client:
-            runtime = client.get("/runtime")
+            runtime = client.get("/runtime?token=runtime-test-token")
             assert runtime.status_code == 200
             payload = runtime.json()
             assert payload["status"] == "ok"
@@ -83,6 +90,7 @@ def test_lifespan_keeps_api_alive_when_telegram_builder_fails(monkeypatch):
     monkeypatch.setattr(bot, "DB_FILE", db_path)
     monkeypatch.setattr(bot, "TELEGRAM_TOKEN", "token-that-builder-rejects")
     monkeypatch.setattr(bot, "TELEGRAM_STARTUP_ERROR", "")
+    monkeypatch.setattr(bot, "OPERATOR_API_TOKEN", "runtime-test-token")
 
     class BrokenBuilder:
         def token(self, _token):
@@ -94,7 +102,7 @@ def test_lifespan_keeps_api_alive_when_telegram_builder_fails(monkeypatch):
     monkeypatch.setattr(bot.Application, "builder", staticmethod(lambda: BrokenBuilder()))
     try:
         with TestClient(bot.fastapi_app) as client:
-            runtime = client.get("/runtime")
+            runtime = client.get("/runtime?token=runtime-test-token")
             assert runtime.status_code == 200
             payload = runtime.json()
             assert payload["status"] == "ok"

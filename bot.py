@@ -767,6 +767,13 @@ def init_db():
         created_at DATETIME,
         processed_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS system_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        note TEXT,
+        updated_at TEXT,
+        updated_by TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS feature_flags (
         key TEXT PRIMARY KEY,
         enabled INTEGER DEFAULT 0,
@@ -1003,6 +1010,47 @@ def record_audit_event(actor_id, actor_type, action, object_type="", object_id="
         conn.commit()
     except Exception as e:
         logger.warning(f"Audit event write failed: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def get_system_setting(key, default=""):
+    conn = None
+    try:
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute("SELECT value FROM system_settings WHERE key=?", (str(key),))
+        row = c.fetchone()
+        return row[0] if row else default
+    except sqlite3.OperationalError as e:
+        if "no such table: system_settings" not in str(e).lower():
+            logger.warning(f"System setting read failed: {e}")
+        return default
+    except Exception as e:
+        logger.warning(f"System setting read failed: {e}")
+        return default
+    finally:
+        if conn:
+            conn.close()
+
+def get_system_settings(keys: list[str]) -> dict:
+    return {key: get_system_setting(key, "") for key in keys}
+
+def set_system_setting(key, value, note="", updated_by=""):
+    conn = None
+    try:
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute(
+            """INSERT OR REPLACE INTO system_settings
+            (key, value, note, updated_at, updated_by)
+            VALUES (?,?,?,?,?)""",
+            (str(key), str(value or ""), str(note or "")[:1200], now_text(), str(updated_by or "")),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"System setting write failed: {e}")
+        raise
     finally:
         if conn:
             conn.close()
@@ -19770,6 +19818,7 @@ def sales_readiness_payload() -> dict:
     providers = provider_status_payload()
     db_status = db_status_payload()
     commands = {
+        "naptien": callable(globals().get("cmd_naptien")),
         "backup_db": callable(globals().get("cmd_backup_db")),
         "film": callable(globals().get("cmd_film")),
         "growth_ai": callable(globals().get("cmd_growth_ai")),
@@ -19783,22 +19832,32 @@ def sales_readiness_payload() -> dict:
         blockers.append("PayOS thiếu Client ID/API Key/Checksum")
     if not providers["ai"]["ready"]:
         blockers.append("Thiếu Gemini hoặc OpenAI")
+    if not commands["naptien"]:
+        blockers.append("Thiếu /naptien")
     if not commands["film"]:
         blockers.append("Thiếu /film")
     if not commands["backup_db"]:
         blockers.append("Thiếu /backup_db")
-    beta_ready = not blockers
+    payos_test = {
+        "status": (get_system_setting("payos_real_payment_test_status", "NOT_TESTED") or "NOT_TESTED").upper(),
+        "at": get_system_setting("payos_real_payment_test_at", ""),
+        "order": get_system_setting("payos_real_payment_test_order", ""),
+        "note": get_system_setting("payos_real_payment_test_note", ""),
+    }
+    base_ready = not blockers
+    sales_ready = base_ready and payos_test["status"] == "PASS"
+    status = "SALES READY" if sales_ready else ("BETA READY" if base_ready else "NOT READY")
     return {
-        "status": "BETA READY" if beta_ready else "NOT READY",
+        "status": status,
         "db_ok": db_status["ok"],
         "providers": providers,
         "commands": commands,
         "packages": len(PAYMENT_PACKAGES),
         "trial_credits": TRIAL_CREDITS,
         "free_chat_daily": FREE_CHAT_DAILY,
-        "payos_real_test": "MANUAL CHECK REQUIRED",
+        "payos_real_test": payos_test,
         "blockers": blockers,
-        "note": "BETA READY vẫn cần admin test PayOS thật gói 10k trước khi bán public.",
+        "note": "SALES READY chỉ bật khi admin đã mark PayOS real payment test PASS.",
     }
 
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
@@ -19983,7 +20042,7 @@ def menu_text_admin() -> str:
         "<b>A. User & Xu</b>\n• <code>/add</code>\n• <code>/setvip</code>\n\n"
         "<b>B. Bill thủ công</b>\n• <code>/pending</code>\n• <code>/duyet</code>\n• <code>/tuchoi</code>\n\n"
         "<b>C. Dashboard</b>\n• <code>/dashboard</code>\n• <code>/stats</code>\n\n"
-        "<b>D. Kiểm tra trước khi bán</b>\n• <code>/providers</code>\n• <code>/sales_ready</code>\n• <code>/costs</code>\n• <code>/payos_test_plan</code>\n\n"
+        "<b>D. Kiểm tra trước khi bán</b>\n• <code>/providers</code>\n• <code>/sales_ready</code>\n• <code>/costs</code>\n• <code>/payos_test_plan</code>\n• <code>/mark_payos_test</code>\n\n"
         "<b>E. Góp ý</b>\n• <code>/admin_gopy</code>"
     )
 
@@ -19993,7 +20052,7 @@ def menu_text_system() -> str:
         f"• Runtime build: <code>{APP_BUILD}</code>\n"
         f"• App version: <code>{html.escape(APP_VERSION)}</code>\n"
         "• <code>/runtime</code>\n• <code>/telegram_takeover</code>\n• <code>/telegram_status</code>\n"
-        "• <code>/providers</code>\n• <code>/sales_ready</code>\n• <code>/costs</code>\n• <code>/payos_test_plan</code>\n"
+        "• <code>/providers</code>\n• <code>/sales_ready</code>\n• <code>/costs</code>\n• <code>/payos_test_plan</code>\n• <code>/mark_payos_test</code>\n"
         "• <code>/backup_db</code>\n• <code>/checkpayos &lt;mã_đơn&gt;</code>\n• API health: <code>GET /health</code>"
     )
 
@@ -20004,6 +20063,7 @@ def menu_text_billing(is_admin: bool) -> str:
         "• <code>/naptien</code> — chọn gói PayOS QR động.\n"
         "• <code>/thucong</code> — nạp thủ công khi QR tự động lỗi.\n"
         "• <code>/ref</code> — lấy link giới thiệu.\n\n"
+        "• <code>/beta_offer</code> hoặc <code>/goi_beta</code> — xem gói bán thử.\n\n"
         "Các gói phổ biến: 10k, 50k, 100k. Bot vẫn giữ các gói 20k, 200k, 500k."
     )
     if is_admin:
@@ -20132,7 +20192,12 @@ def help_text_for_user(user_id) -> str:
         f"• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
         "• <code>/campaign_report format=txt</code> hoặc <code>format=csv</code> — xuất báo cáo\n\n"
         "<b>6. Hỗ trợ</b>\n"
-        "• <code>/gopy nội dung</code> — góp ý/báo lỗi"
+        "• <code>/gopy nội dung</code> — góp ý/báo lỗi\n\n"
+        "<b>7. Bán thử/Beta</b>\n"
+        "• <code>/beta_offer</code> hoặc <code>/goi_beta</code> — xem gói dùng thử\n"
+        "• <code>/naptien</code> — nạp Xu\n"
+        "• <code>/film &lt;chủ đề&gt;</code> — tạo nội dung\n"
+        "• <code>/growth_ai</code> — AI gợi ý tối ưu"
     )
     if is_admin:
         text += (
@@ -20141,6 +20206,7 @@ def help_text_for_user(user_id) -> str:
             "• <code>/stats</code>, <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code>\n"
             "• <code>/add</code>, <code>/setvip</code>, <code>/backup_db</code>\n"
             "• <code>/providers</code>, <code>/sales_ready</code>, <code>/costs</code>, <code>/payos_test_plan</code>\n"
+            "• <code>/mark_payos_test</code> — ghi nhận PayOS real test PASS/FAIL\n"
             "• <code>/runtime</code>, <code>/checkpayos</code>, <code>/telegram_takeover</code>"
         )
     return text
@@ -20258,13 +20324,65 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+def parse_mark_payos_test_args(args: list[str]) -> tuple[str, str, str]:
+    raw = " ".join(args or []).strip()
+    action = (args[0].lower() if args else "").strip()
+    order = ""
+    note = ""
+    order_match = re.search(r"\border=([^\s]+)", raw)
+    if order_match:
+        order = order_match.group(1).strip().strip("\"'")
+    note_match = re.search(r"\bnote=(.+)$", raw)
+    if note_match:
+        note = note_match.group(1).strip().strip("\"'")
+    return action, order, note
+
+async def cmd_mark_payos_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    action, order, note = parse_mark_payos_test_args(context.args)
+    if action not in {"pass", "fail", "reset"}:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp:\n"
+            "<code>/mark_payos_test pass order=123456 note=\"Test 10k OK\"</code>\n"
+            "<code>/mark_payos_test fail note=\"Webhook chưa về\"</code>\n"
+            "<code>/mark_payos_test reset</code>",
+            parse_mode="HTML",
+        )
+    status = "NOT_TESTED" if action == "reset" else action.upper()
+    marked_at = now_text()
+    set_system_setting("payos_real_payment_test_status", status, note, update.effective_user.id)
+    set_system_setting("payos_real_payment_test_at", marked_at, note, update.effective_user.id)
+    set_system_setting("payos_real_payment_test_order", order, note, update.effective_user.id)
+    set_system_setting("payos_real_payment_test_note", note, note, update.effective_user.id)
+    record_audit_event(
+        update.effective_user.id,
+        "admin",
+        "payos.real_test_marked",
+        "system_setting",
+        "payos_real_payment_test_status",
+        before=None,
+        after={"status": status, "order": order, "marked_at": marked_at},
+        note=note,
+    )
+    await update.message.reply_text(
+        "✅ <b>Đã ghi nhận PayOS real payment test</b>\n\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        f"• At: <code>{html.escape(marked_at)}</code>\n"
+        f"• Order: <code>{html.escape(order or '-')}</code>\n"
+        f"• Note: <code>{html.escape(note or '-')}</code>\n\n"
+        "Kiểm tra lại: <code>/sales_ready</code>",
+        parse_mode="HTML",
+    )
+
 async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     data = sales_readiness_payload()
     providers = data["providers"]
     commands = data["commands"]
-    blockers = data["blockers"] or ["Cần admin xác nhận PayOS real payment 10k trước khi bán public"]
+    payos_test = data["payos_real_test"]
+    blockers = data["blockers"] or []
     lines = [
         "🚀 <b>TOAN AAS Sales Readiness</b>",
         "",
@@ -20287,9 +20405,15 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Packages: <b>{data['packages']}</b>",
         f"• Trial credits: <b>{data['trial_credits']}</b>",
         f"• Free chat daily: <b>{data['free_chat_daily']}</b>",
-        f"• Real PayOS test: <code>{data['payos_real_test']}</code>",
+        "",
+        "<b>PayOS real test</b>",
+        f"• Status: <code>{html.escape(payos_test.get('status') or 'NOT_TESTED')}</code>",
+        f"• At: <code>{html.escape(payos_test.get('at') or '-')}</code>",
+        f"• Order: <code>{html.escape(payos_test.get('order') or '-')}</code>",
+        f"• Note: <code>{html.escape(payos_test.get('note') or '-')}</code>",
         "",
         "<b>Revenue features</b>",
+        f"• /naptien: <code>{'available' if commands['naptien'] else 'missing'}</code>",
         f"• /film: <code>{'available' if commands['film'] else 'missing'}</code>",
         f"• /growth_ai: <code>{'available' if commands['growth_ai'] else 'missing'}</code>",
         f"• /campaign_report: <code>{'available' if commands['campaign_report'] else 'missing'}</code>",
@@ -20299,9 +20423,48 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Blockers / manual checks</b>",
     ]
-    lines.extend(f"• {html.escape(item)}" for item in blockers)
+    if blockers:
+        lines.extend(f"• {html.escape(item)}" for item in blockers)
+    if not blockers and payos_test.get("status") != "PASS":
+        lines.append("• Cần test thanh toán thật 10k và chạy <code>/mark_payos_test pass order=&lt;order_code&gt; note=\"...\"</code>.")
     if data["status"] == "BETA READY":
         lines.append("• BETA READY — cần admin xác nhận PayOS real payment 10k để chuyển SALES READY.")
+    if data["status"] == "SALES READY":
+        lines.append("• ✅ Có thể bắt đầu bán thử Beta cho nhóm nhỏ 3–10 khách.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lines = [
+        "🚀 <b>TOAN AAS Beta Offer</b>",
+        "",
+        "Dành cho người muốn dùng AI để tạo nội dung, affiliate và quản lý Xu ngay trong Telegram.",
+        "",
+        "<b>Gói 1 — Dùng thử</b>",
+        "• Nạp 10k nhận 100 Xu",
+        "• Dùng Chat AI, tách nền, voice và <code>/film</code> cơ bản",
+        "",
+        "<b>Gói 2 — Creator Start</b>",
+        "• Nạp 50k nhận 500 Xu",
+        "• Phù hợp tạo nhiều script/caption cho Facebook, TikTok, YouTube",
+        "• Gợi ý dùng: <code>/film</code>, <code>/addlink</code>, <code>/calendar</code>",
+        "",
+        "<b>Gói 3 — Affiliate Builder</b>",
+        "• Nạp 100k nhận 1.050 Xu",
+        "• Phù hợp test affiliate content 7 ngày",
+        "• Gồm: <code>/film</code>, <code>/publish_done</code>, <code>/performance_report</code>, <code>/growth_ai</code>",
+        "",
+        "<b>Quy trình</b>",
+        "1. <code>/profile</code> xem Xu",
+        "2. <code>/naptien</code> nạp Xu",
+        "3. <code>/film &lt;chủ đề&gt;</code>",
+        "4. Đăng thủ công",
+        "5. <code>/performance_add</code> nhập số liệu",
+        "6. <code>/growth_ai</code> nhận gợi ý tối ưu",
+        "",
+        "Kết quả phụ thuộc nội dung, sản phẩm, nền tảng và cách triển khai. TOAN AAS không cam kết doanh thu chắc chắn và không auto publish.",
+        "",
+        "Lệnh nhanh: <code>/naptien</code> | <code>/film chủ đề</code> | <code>/help</code>",
+    ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -20317,7 +20480,8 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
         "5. Kiểm tra <code>/profile</code>: user nhận đúng 100 Xu.",
         "6. Kiểm tra <code>/dashboard</code>: doanh thu và giao dịch tăng.",
         "7. Kiểm tra duplicate webhook/order không cộng Xu lần 2.",
-        "8. Ghi kết quả vào checklist trước khi bán public.",
+        "8. Nếu PASS, chạy <code>/mark_payos_test pass order=&lt;order_code&gt; note=\"Test 10k OK\"</code>.",
+        "9. Ghi kết quả vào checklist trước khi bán public.",
         "",
         "Nếu PayOS lỗi, dùng <code>/thucong</code> và duyệt bill bằng <code>/duyet</code>.",
     ]
@@ -32843,8 +33007,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("costs",       cmd_costs))
     tg_app.add_handler(CommandHandler("sales_ready", cmd_sales_ready))
     tg_app.add_handler(CommandHandler("payos_test_plan", cmd_payos_test_plan))
+    tg_app.add_handler(CommandHandler("mark_payos_test", cmd_mark_payos_test))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
+    tg_app.add_handler(CommandHandler("beta_offer",  cmd_beta_offer))
+    tg_app.add_handler(CommandHandler("goi_beta",    cmd_beta_offer))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
     tg_app.add_handler(CommandHandler("invite",      cmd_invite))
     tg_app.add_handler(CommandHandler("tools",       cmd_tools))
@@ -33190,6 +33357,18 @@ async def lifespan(app: FastAPI):
 
 fastapi_app = FastAPI(title="TOAN AAS V15.2", lifespan=lifespan)
 
+def verify_runtime_access(request: Request):
+    token = (
+        request.headers.get("x-operator-token")
+        or request.query_params.get("token", "")
+        or ""
+    )
+    auth = request.headers.get("authorization", "")
+    bearer = auth.replace("Bearer ", "", 1).strip() if auth.lower().startswith("bearer ") else ""
+    token = token or bearer
+    if not OPERATOR_API_TOKEN or not token or not hmac.compare_digest(str(token), OPERATOR_API_TOKEN):
+        raise HTTPException(status_code=403, detail="runtime admin only")
+
 # ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 @fastapi_app.get("/")
 async def home_page():
@@ -33206,19 +33385,10 @@ async def home_page():
 async def status_page():
     return {
         "status": "ok",
-        "service": f"{APP_VERSION} — Dynamic Billing Verified",
+        "service": "TOAN AAS",
         "build": APP_BUILD,
-        "deploy_id": APP_DEPLOY_ID or "",
-        "telegram_update_mode": TELEGRAM_UPDATE_MODE,
-        "telegram_update_mode_active": ACTIVE_TELEGRAM_UPDATE_MODE or "",
-        "telegram_update_mode_raw": TELEGRAM_UPDATE_MODE_RAW or "",
-        "telegram_force_polling": TELEGRAM_FORCE_POLLING,
-        "railway_runtime_detected": is_railway_runtime(),
-        "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "",
-        "telegram_webhook_watchdog": ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG or "",
-        "telegram_startup_error": TELEGRAM_STARTUP_ERROR or "",
-        "public_base_url": PUBLIC_BASE_URL or "",
-        "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
+        "health": "/health",
+        "landing": "/",
     }
 
 @fastapi_app.get("/health")
@@ -33251,7 +33421,8 @@ async def health_check():
     }
 
 @fastapi_app.get("/runtime")
-async def runtime_health():
+async def runtime_health(request: Request):
+    verify_runtime_access(request)
     expected_webhook = expected_telegram_webhook_url()
     webhook_info = {"ok": False, "reason": "telegram_app_not_ready", "expected_url": expected_webhook}
     if tg_app:

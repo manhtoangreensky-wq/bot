@@ -1,8 +1,8 @@
 # COMMAND REGISTRY - TOAN AAS
 
 Date: 2026-06-02
-Source: `bot.py` local audit after Step 8
-Registered Telegram commands: 197
+Source: `bot.py` local audit after Step 9
+Registered Telegram commands: 200
 Registered callback groups: 9
 
 ## User Commands
@@ -16,6 +16,8 @@ Registered callback groups: 9
 | `/profile` | `cmd_profile` | YES | Balance, VIP, referral status. |
 | `/naptien` | `cmd_naptien` | YES | PayOS package selection. |
 | `/thucong` | `cmd_thanhtoan_thucong` | YES | Manual bill fallback. |
+| `/beta_offer` | `cmd_beta_offer` | YES | Shows beta packages and customer workflow. |
+| `/goi_beta` | `cmd_beta_offer` | YES | Vietnamese alias for `/beta_offer`. |
 | `/ref` | `cmd_ref` | YES | Referral link and stats. |
 | `/invite` | `cmd_invite` | YES | Alias to referral flow. |
 | `/gopy` | `cmd_gopy` | YES | User feedback. |
@@ -71,6 +73,7 @@ Registered callback groups: 9
 | `/costs` | `cmd_costs` | YES | YES | Cost control and paid-provider risk summary. |
 | `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
 | `/payos_test_plan` | `cmd_payos_test_plan` | YES | YES | Real PayOS 10k manual test checklist. |
+| `/mark_payos_test` | `cmd_mark_payos_test` | YES | YES | Admin records PayOS real test PASS/FAIL/NOT_TESTED; does not alter payments. |
 | `/runtime` | `cmd_runtime` | YES | System menu | Runtime/webhook diagnostics. |
 | `/checkpayos` | `cmd_checkpayos` | YES | System menu | PayOS order check. |
 | `/telegram_status` | `cmd_telegram_status` | YES | System menu | Telegram update mode. |

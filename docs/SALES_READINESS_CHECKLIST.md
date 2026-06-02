@@ -57,6 +57,7 @@ Date: 2026-06-02
 - [ ] `/costs`.
 - [ ] `/sales_ready`.
 - [ ] `/payos_test_plan`.
+- [ ] `/mark_payos_test`.
 - [ ] `/backup_db`.
 - [ ] `/runtime`.
 
@@ -72,4 +73,18 @@ Date: 2026-06-02
 
 - `NOT READY`: DB, PayOS, AI, or `/film` is not ready.
 - `BETA READY`: core checks pass, but PayOS real payment still needs manual confirmation.
-- `SALES READY`: PayOS real test passes, backup works, tools pass smoke tests, and at least 3 beta users run without payment errors.
+- `SALES READY`: core checks pass and `/mark_payos_test pass ...` has recorded `payos_real_payment_test_status=PASS`.
+
+## PayOS real test status
+
+- `NOT_TESTED`: default state.
+- `FAIL`: admin marked the test as failed.
+- `PASS`: admin confirmed a real 10k payment test passed.
+
+Command:
+
+```text
+/mark_payos_test pass order=<order_code> note="Test 10k OK"
+```
+
+Rule: never mark `SALES READY` until PayOS real test is `PASS`.
