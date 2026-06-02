@@ -4,768 +4,878 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TOAN AAS - AI Automation System</title>
-<meta name="description" content="TOAN AAS - AI Automation System: bot Telegram cho Chat AI, voice, audio, tách nền, thanh toán QR, quy trình video AI, affiliate và điều phối công việc.">
-<meta name="theme-color" content="#05764F">
-<link rel="icon" type="image/png" href="/LOGO.png">
-<link rel="apple-touch-icon" href="/LOGO.png">
+<meta name="description" content="TOAN AAS - Bot AI Telegram cho công cụ AI hằng ngày, Video Script Lite, nạp Xu PayOS, affiliate và quy trình nội dung Facebook, TikTok, YouTube.">
+<meta name="theme-color" content="#0A8F66">
 <meta property="og:title" content="TOAN AAS - AI Automation System">
-<meta property="og:description" content="Nền tảng AI Automation giúp tạo nội dung, vận hành affiliate, quản lý tác vụ và tự động hóa công việc qua Telegram bot.">
+<meta property="og:description" content="Hệ thống AI tạo nội dung, nạp Xu tự động và hỗ trợ kiếm tiền đa nền tảng trong một bot Telegram.">
 <meta property="og:image" content="/LOGO.png">
 <meta property="og:type" content="website">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="/LOGO.png">
+<link rel="apple-touch-icon" href="/LOGO.png">
 <style>
 :root {
-  /* ── LOGO GREEN LIGHT TECH PALETTE ── */
-  --bg-0:       #F6FAF8;
-  --bg-1:       #EEF6F2;
-  --bg-2:       #FFFFFF;
-  --bg-3:       #F8FCFA;
-  --bg-4:       #E5F3EC;
-
-  /* Logo green accent */
-  --teal:       #11B879;
-  --teal-dim:   #05764F;
-  --teal-deep:  #01402E;
-  --teal-glow:  rgba(17,184,121,0.12);
-  --teal-border:rgba(17,184,121,0.22);
-
-  /* Premium accent */
-  --gold:       #B68A22;
-  --gold-dim:   #8A6614;
-  --gold-glow:  rgba(182,138,34,0.12);
-
-  /* Typography */
-  --text-1:  #10231B;
-  --text-2:  #52655D;
-  --text-3:  #879891;
-
-  /* Border/Divider */
-  --line:    rgba(5,118,79,0.12);
-  --line-2:  rgba(16,35,27,0.10);
-  --shadow:  0 18px 50px rgba(1,64,46,0.10);
+  --bg: #07130f;
+  --bg-soft: #0d1f18;
+  --panel: #11281f;
+  --panel-2: #f6fbf8;
+  --text: #f2fff8;
+  --text-muted: #a8c5b8;
+  --ink: #0c2118;
+  --ink-muted: #526a60;
+  --line: rgba(255,255,255,.12);
+  --line-dark: rgba(7,19,15,.12);
+  --green: #18c786;
+  --green-2: #0a8f66;
+  --green-3: #064f3a;
+  --gold: #d5aa3c;
+  --white: #fff;
+  --shadow: 0 24px 70px rgba(0,0,0,.22);
+  --radius: 8px;
 }
 
-* { margin:0; padding:0; box-sizing:border-box; }
-html { scroll-behavior:smooth; }
-
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
 body {
-  font-family: 'Inter', sans-serif;
-  background:
-    radial-gradient(circle at 18% 0%, rgba(17,184,121,0.12), transparent 30%),
-    linear-gradient(180deg, #FFFFFF 0%, var(--bg-0) 42%, var(--bg-1) 100%);
-  color: var(--text-1);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
   overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
 }
+a { color: inherit; text-decoration: none; }
 
-/* GRAIN OVERLAY */
-body::after {
-  content:'';
-  position:fixed; inset:0;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
-  pointer-events:none; z-index:0; opacity:0.32;
-}
+.shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
 
-/* CURSOR GLOW */
-.cursor-glow {
-  position:fixed; width:500px; height:500px; border-radius:50%;
-  background:radial-gradient(circle, rgba(17,184,121,0.08) 0%, transparent 65%);
-  pointer-events:none; z-index:1;
-  transform:translate(-50%,-50%);
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid rgba(24,199,134,.18);
+  background: rgba(7,19,15,.82);
+  backdrop-filter: blur(18px);
 }
-
-/* ── NAV ── */
-nav {
-  position:fixed; top:0; left:0; right:0; z-index:100;
-  padding:18px 64px;
-  display:flex; align-items:center; justify-content:space-between;
-  background:rgba(255,255,255,0.82);
-  backdrop-filter:blur(24px);
-  border-bottom:1px solid var(--line);
-  box-shadow:0 10px 30px rgba(1,64,46,0.06);
+.nav {
+  height: 74px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
 }
-.nav-logo {
-  display:flex; align-items:center; gap:12px;
-  color:var(--text-1); text-transform:uppercase;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 190px;
 }
-.nav-logo-img {
-  width:42px; height:42px; object-fit:contain;
-  border-radius:10px; box-shadow:0 8px 22px rgba(17,184,121,0.16);
-  animation:float-logo 3s ease-in-out infinite;
+.brand img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(24,199,134,.18);
 }
-@keyframes float-logo { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
-.nav-brand-text { display:flex; flex-direction:column; line-height:1.1; }
-.nav-brand-name {
-  font-family:'Space Grotesk',sans-serif; font-weight:800;
-  font-size:16px; letter-spacing:0.1em; color:var(--text-1);
+.brand-title {
+  font-weight: 900;
+  letter-spacing: .08em;
+  line-height: 1;
 }
-.nav-brand-name span { color:var(--teal-dim); }
-.nav-brand-subtitle {
-  margin-top:4px; font-size:9px; font-weight:700;
-  letter-spacing:0.16em; color:var(--text-3);
+.brand-title span { color: var(--green); }
+.brand-sub {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
 }
-.nav-links { display:flex; gap:32px; list-style:none; }
-.nav-links a {
-  font-size:13px; font-weight:500; letter-spacing:0.04em;
-  color:var(--text-2); text-decoration:none; transition:color 0.2s; text-transform:uppercase;
+.links {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 750;
 }
-.nav-links a:hover { color:var(--teal); }
+.links a:hover { color: var(--green); }
 .nav-cta {
-  background:var(--teal-deep); border:1px solid var(--teal-deep); color:white;
-  padding:10px 24px; font-family:'Space Grotesk',sans-serif;
-  font-size:12px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase;
-  cursor:pointer; transition:all 0.3s; text-decoration:none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: var(--radius);
+  background: var(--green);
+  color: #042117;
+  font-weight: 900;
+  box-shadow: 0 14px 34px rgba(24,199,134,.26);
 }
-.nav-cta:hover { background:var(--teal); color:white; border-color:var(--teal); box-shadow:0 10px 24px rgba(17,184,121,0.24); }
 
-/* ── HERO ── */
 .hero {
-  position:relative; min-height:96vh;
-  display:flex; align-items:center; justify-content:center; text-align:center;
-  padding:120px 40px 72px; overflow:hidden;
+  position: relative;
+  min-height: 760px;
+  display: grid;
+  align-items: center;
+  padding: 72px 0 56px;
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(246,250,248,0.94) 58%, rgba(238,246,242,0.98) 100%);
+    radial-gradient(circle at 78% 10%, rgba(24,199,134,.22), transparent 32%),
+    radial-gradient(circle at 20% 14%, rgba(213,170,60,.14), transparent 28%),
+    linear-gradient(180deg, #07130f 0%, #0c2018 68%, #f6fbf8 68%, #f6fbf8 100%);
 }
 .hero-grid {
-  position:absolute; inset:0;
+  position: absolute;
+  inset: 0;
   background-image:
-    linear-gradient(rgba(5,118,79,0.055) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(5,118,79,0.055) 1px,transparent 1px);
-  background-size:56px 56px;
-  mask-image:radial-gradient(ellipse 80% 70% at 50% 50%, black 0%, transparent 100%);
+    linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: linear-gradient(180deg, #000 0%, transparent 76%);
 }
-@keyframes float2 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(-20px,-30px)} }
+.hero-layout {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.02fr .78fr;
+  gap: 56px;
+  align-items: center;
+}
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 24px;
+  padding: 8px 13px;
+  border: 1px solid rgba(24,199,134,.32);
+  border-radius: 999px;
+  color: var(--green);
+  background: rgba(24,199,134,.08);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.eyebrow::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--green);
+  box-shadow: 0 0 18px var(--green);
+}
+h1 {
+  font-size: clamp(42px, 6vw, 78px);
+  line-height: .98;
+  letter-spacing: -.035em;
+  max-width: 760px;
+}
+.hero h1 small {
+  display: block;
+  margin-bottom: 13px;
+  color: var(--green);
+  font-size: .42em;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.hero h1 span { color: var(--gold); }
+.hero-copy {
+  margin-top: 26px;
+  max-width: 680px;
+  color: var(--text-muted);
+  font-size: 18px;
+}
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 13px;
+  margin-top: 34px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  padding: 0 22px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(255,255,255,.07);
+  color: var(--text);
+  font-weight: 850;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
+}
+.btn:hover { transform: translateY(-2px); border-color: rgba(24,199,134,.52); }
+.btn.primary {
+  border-color: var(--green);
+  background: var(--green);
+  color: #032016;
+  box-shadow: 0 18px 44px rgba(24,199,134,.26);
+}
+.hero-logo-card {
+  padding: 30px;
+  border: 1px solid rgba(24,199,134,.24);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(236,250,243,.92));
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.hero-logo-card img {
+  display: block;
+  width: min(100%, 440px);
+  margin: 0 auto;
+}
+.hero-points {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.hero-points div {
+  border: 1px solid var(--line-dark);
+  border-radius: var(--radius);
+  padding: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink-muted);
+  background: rgba(255,255,255,.72);
+}
+.hero-points b { display: block; color: var(--ink); font-size: 15px; }
 
-.hero-logo {
-  width:min(520px,82vw); height:auto; display:block;
-  margin:0 auto 28px;
-  filter:drop-shadow(0 26px 42px rgba(1,64,46,0.12));
+section { padding: 92px 0; }
+.light { background: var(--panel-2); color: var(--ink); }
+.dark { background: var(--bg); color: var(--text); }
+.section-head {
+  max-width: 720px;
+  margin-bottom: 38px;
 }
+.tag {
+  color: var(--green-2);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.dark .tag { color: var(--green); }
+h2 {
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1.08;
+  letter-spacing: -.025em;
+}
+.section-head p {
+  margin-top: 16px;
+  color: var(--ink-muted);
+  font-size: 17px;
+}
+.dark .section-head p { color: var(--text-muted); }
 
-.hero-badge {
-  display:inline-flex; align-items:center; gap:10px;
-  border:1px solid var(--teal-border); background:rgba(255,255,255,0.78);
-  padding:8px 20px; font-size:11px; font-weight:600;
-  letter-spacing:0.15em; text-transform:uppercase; color:var(--teal);
-  margin-bottom:36px; border-radius:4px;
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.card {
+  border: 1px solid var(--line-dark);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 26px;
+  min-height: 210px;
+  box-shadow: 0 14px 34px rgba(7,19,15,.06);
 }
-.hero-badge-dot { width:6px; height:6px; border-radius:50%; background:var(--teal); animation:pulse 2s ease-in-out infinite; }
-@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.8)} }
+.dark .card {
+  border-color: var(--line);
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.035));
+  box-shadow: none;
+}
+.card-kicker {
+  color: var(--green-2);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.dark .card-kicker { color: var(--green); }
+.card h3 {
+  margin-top: 13px;
+  font-size: 21px;
+  line-height: 1.2;
+}
+.card p {
+  margin-top: 12px;
+  color: var(--ink-muted);
+}
+.dark .card p { color: var(--text-muted); }
 
-.hero h1 {
-  font-family:'Space Grotesk',sans-serif; font-weight:700;
-  font-size:clamp(40px,7vw,84px); line-height:1.05;
-  letter-spacing:-0.03em; margin-bottom:24px; color:var(--text-1);
+.video-band {
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid rgba(24,199,134,.22);
+  background: linear-gradient(135deg, #0c231a 0%, #112b21 48%, #103c2a 100%);
+  box-shadow: var(--shadow);
 }
-.hero h1 .line-gold { color:var(--gold); }
-.hero h1 .line-neon { color:var(--teal-dim); }
+.video-top {
+  padding: 34px;
+  border-bottom: 1px solid rgba(255,255,255,.12);
+}
+.video-top p {
+  max-width: 780px;
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 17px;
+}
+.platforms {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+.platform {
+  padding: 30px;
+  min-height: 230px;
+  border-right: 1px solid rgba(255,255,255,.12);
+}
+.platform:last-child { border-right: 0; }
+.platform b {
+  display: inline-flex;
+  margin-bottom: 14px;
+  color: var(--green);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+.platform h3 { font-size: 24px; }
+.platform p { margin-top: 12px; color: var(--text-muted); }
 
-.hero-sub {
-  font-size:16px; font-weight:400; color:var(--text-2);
-  line-height:1.8; max-width:580px; margin:0 auto 48px;
+.pricing {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
 }
-.hero-sync {
-  max-width:760px; margin:0 auto 34px;
-  display:flex; justify-content:center; gap:10px; flex-wrap:wrap;
+.price-card {
+  border: 1px solid var(--line-dark);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 24px;
 }
-.hero-sync span {
-  border:1px solid var(--line); background:rgba(255,255,255,0.8);
-  color:var(--text-2); padding:8px 14px; border-radius:999px;
-  font-size:12px; font-weight:700;
+.price-card.featured {
+  border-color: rgba(24,199,134,.5);
+  box-shadow: 0 18px 42px rgba(24,199,134,.12);
 }
+.price-name {
+  color: var(--green-2);
+  font-weight: 900;
+}
+.price {
+  margin-top: 8px;
+  font-size: 30px;
+  font-weight: 950;
+  letter-spacing: -.03em;
+}
+.xu {
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-weight: 800;
+}
+.price-card ul {
+  margin-top: 18px;
+  list-style: none;
+  color: var(--ink-muted);
+  font-size: 14px;
+}
+.price-card li + li { margin-top: 8px; }
 
-.hero-actions { display:flex; gap:16px; justify-content:center; flex-wrap:wrap; }
-.btn-primary {
-  background:var(--teal-deep); color:white; border:none;
-  padding:15px 40px; font-family:'Space Grotesk',sans-serif;
-  font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
-  cursor:pointer; transition:all 0.3s; text-decoration:none; display:inline-block;
+.steps {
+  display: grid;
+  gap: 14px;
+  counter-reset: step;
 }
-.btn-primary:hover { background:var(--teal); transform:translateY(-2px); box-shadow:0 12px 26px rgba(17,184,121,0.28); }
-.btn-ghost {
-  background:rgba(255,255,255,0.64); color:var(--text-1); border:1px solid var(--line-2);
-  padding:15px 40px; font-family:'Space Grotesk',sans-serif;
-  font-size:13px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase;
-  cursor:pointer; transition:all 0.3s; text-decoration:none; display:inline-block;
+.step {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 18px;
+  align-items: start;
+  padding: 22px;
+  border: 1px solid var(--line-dark);
+  border-radius: var(--radius);
+  background: #fff;
 }
-.btn-ghost:hover { border-color:var(--teal-dim); color:var(--teal-dim); background:white; }
-
-.hero-stats {
-  display:flex; gap:56px; justify-content:center;
-  margin-top:64px; padding-top:38px; border-top:1px solid var(--line);
+.dark .step {
+  border-color: var(--line);
+  background: rgba(255,255,255,.055);
 }
-.stat-item { text-align:center; }
-.stat-num { font-family:'Space Grotesk',sans-serif; font-size:30px; font-weight:700; color:var(--gold); }
-.stat-label { font-size:11px; font-weight:500; color:var(--text-3); letter-spacing:0.1em; text-transform:uppercase; margin-top:6px; }
-
-/* ── SECTIONS ── */
-section { position:relative; z-index:2; }
-.section-header { text-align:center; margin-bottom:60px; }
-.section-tag { font-size:11px; font-weight:600; letter-spacing:0.2em; text-transform:uppercase; color:var(--teal); margin-bottom:14px; }
-.section-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:clamp(26px,4vw,44px); line-height:1.15; letter-spacing:-0.02em; color:var(--text-1); }
-.section-title .gold { color:var(--gold); }
-.section-desc { margin-top:14px; font-size:15px; font-weight:400; color:var(--text-2); max-width:500px; margin-left:auto; margin-right:auto; line-height:1.75; }
-
-/* ── SERVICES ── */
-#services { padding:100px 64px; background:var(--bg-1); }
-.services-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; max-width:1200px; margin:0 auto; background:var(--line); }
-.service-card {
-  background:var(--bg-2); padding:40px 32px;
-  transition:all 0.3s; position:relative; overflow:hidden; cursor:default;
-  box-shadow:0 1px 0 rgba(255,255,255,0.8) inset;
-}
-.service-card::before {
-  content:''; position:absolute; top:0; left:0; right:0; height:2px;
-  background:linear-gradient(90deg,transparent,var(--teal),transparent);
-  transform:scaleX(0); transition:transform 0.4s;
-}
-.service-card:hover::before { transform:scaleX(1); }
-.service-card:hover { background:var(--bg-3); box-shadow:var(--shadow); }
-
-.service-icon {
-  width:48px; height:48px; border:1px solid var(--teal-border);
-  display:flex; align-items:center; justify-content:center;
-  margin-bottom:22px; font-size:22px; background:var(--teal-glow);
-  transition:all 0.3s;
-}
-.service-card:hover .service-icon { background:var(--teal); border-color:var(--teal); }
-.service-card h3 { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:17px; margin-bottom:12px; color:var(--text-1); line-height:1.35; }
-.service-card p { font-size:14px; font-weight:400; color:var(--text-2); line-height:1.75; }
-.service-price {
-  margin-top:22px; font-family:'Space Grotesk',sans-serif;
-  font-size:12px; font-weight:600; color:var(--teal);
-  letter-spacing:0.08em; text-transform:uppercase;
-  border-top:1px solid var(--line); padding-top:16px;
-}
-
-/* ── PROCESS ── */
-#process { padding:100px 64px; background:var(--bg-0); }
-.process-steps { display:flex; flex-direction:column; max-width:800px; margin:0 auto; position:relative; }
-.process-steps::before {
-  content:''; position:absolute; left:29px; top:30px; bottom:30px; width:2px;
-  background:linear-gradient(to bottom,var(--teal-dim),var(--gold-dim),transparent);
-}
-.process-step { display:flex; gap:40px; align-items:flex-start; padding:32px 0; border-bottom:1px solid var(--line); }
-.process-step:last-child { border-bottom:none; }
 .step-num {
-  width:60px; height:60px; border:2px solid var(--teal-dim); background:var(--bg-2);
-  display:flex; align-items:center; justify-content:center;
-  font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700;
-  color:var(--teal); flex-shrink:0; position:relative; z-index:2;
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: rgba(24,199,134,.12);
+  color: var(--green-2);
+  font-weight: 950;
 }
-.step-content h3 { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:19px; margin-bottom:8px; color:var(--text-1); }
-.step-content p { font-size:14px; font-weight:400; color:var(--text-2); line-height:1.75; }
+.dark .step-num { color: var(--green); }
+.step h3 { font-size: 20px; }
+.step p { margin-top: 7px; color: var(--ink-muted); }
+.dark .step p { color: var(--text-muted); }
 
-/* ── BOT MENU ── */
-#botmenu { padding:100px 64px; background:var(--bg-2); border-top:1px solid var(--line); }
-.menu-sync-grid { max-width:1100px; margin:0 auto; display:grid; grid-template-columns:1fr 1fr; gap:22px; }
-.menu-panel {
-  background:white; border:1px solid var(--line); padding:30px 28px;
-  box-shadow:0 12px 34px rgba(1,64,46,0.06);
+.safety-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
 }
-.menu-panel h3 {
-  font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700;
-  color:var(--text-1); margin-bottom:16px;
+.safety-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,.055);
 }
-.menu-list { display:grid; gap:10px; }
-.menu-list div {
-  display:flex; justify-content:space-between; gap:12px; align-items:center;
-  border:1px solid var(--line); background:var(--bg-3); padding:12px 14px;
-  font-size:13px; color:var(--text-2); line-height:1.45;
-}
-.menu-list b { color:var(--text-1); }
-.menu-tag {
-  flex-shrink:0; font-family:'Space Grotesk',sans-serif; font-size:10px;
-  color:var(--teal-dim); font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
-}
-.menu-note {
-  max-width:820px; margin:26px auto 0; padding:18px 20px;
-  border:1px solid var(--teal-border); background:var(--teal-glow);
-  color:var(--text-2); font-size:14px; line-height:1.75;
+.safety-item b {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text);
 }
 
-/* ── TECH TRACK ── */
-#tech { padding:72px 64px; background:var(--bg-2); overflow:hidden; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
-.tech-track-wrapper { overflow:hidden; mask-image:linear-gradient(90deg,transparent,black 12%,black 88%,transparent); }
-.tech-track { display:flex; gap:12px; animation:scroll-tech 28s linear infinite; width:max-content; }
-@keyframes scroll-tech { from{transform:translateX(0)} to{transform:translateX(-50%)} }
-.tech-pill {
-  display:flex; align-items:center; gap:10px; padding:10px 22px;
-  border:1px solid var(--line); background:white;
-  font-size:13px; font-weight:500; color:var(--text-2);
-  white-space:nowrap; transition:all 0.2s;
+.contact-wrap {
+  display: grid;
+  grid-template-columns: .9fr 1.1fr;
+  gap: 24px;
 }
-.tech-pill span { font-size:16px; }
+.contact-card {
+  border: 1px solid var(--line-dark);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 30px;
+  box-shadow: 0 16px 38px rgba(7,19,15,.06);
+}
+.contact-card p { color: var(--ink-muted); margin-top: 12px; }
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.field { margin-bottom: 14px; }
+.field label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+input, textarea, select {
+  width: 100%;
+  border: 1px solid var(--line-dark);
+  border-radius: var(--radius);
+  padding: 13px 14px;
+  font: inherit;
+  color: var(--ink);
+  background: #fbfffd;
+  outline: none;
+}
+textarea { min-height: 120px; resize: vertical; }
+input:focus, textarea:focus, select:focus { border-color: var(--green-2); }
+.choices {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.choice {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  border: 1px solid var(--line-dark);
+  border-radius: var(--radius);
+  padding: 12px;
+  color: var(--ink-muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+.choice.selected {
+  border-color: rgba(24,199,134,.55);
+  background: rgba(24,199,134,.08);
+  color: var(--green-3);
+}
+.submit {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--green-2);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+.status {
+  min-height: 22px;
+  margin-top: 13px;
+  color: var(--ink-muted);
+  font-size: 14px;
+}
 
-/* ── ORDER FORM ── */
-#order { padding:100px 64px; background:var(--bg-1); }
-.order-wrapper { max-width:920px; margin:0 auto; display:grid; grid-template-columns:1fr 1.6fr; gap:48px; align-items:start; }
-.order-info h3 { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; margin-bottom:16px; color:var(--gold); }
-.order-info p { font-size:14px; font-weight:400; color:var(--text-2); line-height:1.85; margin-bottom:28px; }
-.order-feature { display:flex; align-items:flex-start; gap:12px; margin-bottom:14px; }
-.order-feature-dot { width:6px; height:6px; border-radius:50%; background:var(--teal); margin-top:6px; flex-shrink:0; }
-.order-feature span { font-size:13px; font-weight:400; color:var(--text-2); line-height:1.6; }
+footer {
+  padding: 38px 0;
+  border-top: 1px solid var(--line);
+  background: #06100c;
+  color: var(--text-muted);
+}
+.footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 950;
+}
+.footer-brand img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  border-radius: 7px;
+  background: #fff;
+}
 
-.order-form-card { background:var(--bg-2); border:1px solid var(--line); padding:40px; }
-.form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-.form-group { margin-bottom:20px; }
-.form-group label {
-  display:block; font-size:10px; font-weight:600;
-  letter-spacing:0.14em; text-transform:uppercase; color:var(--text-3); margin-bottom:8px;
+@media (max-width: 980px) {
+  .links { display: none; }
+  .hero { min-height: auto; background: linear-gradient(180deg, #07130f 0%, #0c2018 78%, #f6fbf8 78%, #f6fbf8 100%); }
+  .hero-layout, .contact-wrap { grid-template-columns: 1fr; }
+  .grid-3, .pricing, .platforms { grid-template-columns: 1fr; }
+  .platform { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.12); }
+  .platform:last-child { border-bottom: 0; }
 }
-.form-group input,.form-group select,.form-group textarea {
-  width:100%; background:white; border:1px solid var(--line);
-  color:var(--text-1); padding:13px 16px;
-  font-family:'Inter',sans-serif; font-size:14px; outline:none; transition:all 0.2s;
-}
-.form-group input:focus,.form-group select:focus,.form-group textarea:focus {
-  border-color:var(--teal-dim); box-shadow:0 0 0 3px rgba(45,212,191,0.08);
-}
-.form-group textarea { resize:vertical; min-height:90px; }
-.service-options { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:20px; }
-.service-opt {
-  border:1px solid var(--line); background:white;
-  padding:12px 14px; cursor:pointer; transition:all 0.2s;
-  display:flex; align-items:center; gap:8px;
-}
-.service-opt.selected { border-color:var(--teal-dim); background:var(--teal-glow); }
-.service-opt input[type="checkbox"] { width:14px; height:14px; accent-color:var(--teal); cursor:pointer; }
-.service-opt-label { font-size:13px; font-weight:500; color:var(--text-2); }
-.service-opt.selected .service-opt-label { color:var(--teal); }
-.submit-btn {
-  width:100%; background:var(--teal-deep); color:white; border:none;
-  padding:17px; font-family:'Space Grotesk',sans-serif;
-  font-size:14px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
-  cursor:pointer; transition:all 0.3s;
-}
-.submit-btn:hover { background:var(--teal); transform:translateY(-1px); box-shadow:0 8px 22px rgba(17,184,121,0.24); }
-
-/* ── NẠP XU SECTION ── */
-#naptien { padding:100px 64px; background:var(--bg-2); }
-.pricing-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; max-width:1000px; margin:0 auto 60px; }
-.pricing-card {
-  background:white; border:1px solid var(--line);
-  padding:32px 28px; position:relative; transition:all 0.3s;
-}
-.pricing-card:hover { border-color:var(--teal-dim); transform:translateY(-4px); box-shadow:var(--shadow); }
-.pricing-card.featured { border-color:var(--teal-dim); background:var(--bg-4); }
-.pricing-card.featured::before {
-  content:'PHỔ BIẾN'; position:absolute; top:-1px; left:50%; transform:translateX(-50%);
-  background:var(--teal); color:var(--bg-0); font-size:9px; font-weight:700;
-  letter-spacing:0.15em; padding:4px 14px;
-}
-.pricing-name { font-size:11px; font-weight:600; letter-spacing:0.15em; text-transform:uppercase; color:var(--text-3); margin-bottom:16px; }
-.pricing-price { font-family:'Space Grotesk',sans-serif; font-size:32px; font-weight:700; color:var(--gold); margin-bottom:4px; }
-.pricing-xu { font-size:13px; font-weight:600; color:var(--teal); margin-bottom:20px; }
-.pricing-divider { height:1px; background:var(--line); margin-bottom:20px; }
-.pricing-feature { font-size:13px; color:var(--text-2); margin-bottom:8px; display:flex; gap:8px; align-items:flex-start; }
-.pricing-feature::before { content:'✓'; color:var(--teal); font-weight:700; flex-shrink:0; }
-
-.payment-flow {
-  max-width:700px; margin:0 auto;
-  background:white; border:1px solid var(--teal-border); padding:36px 40px; box-shadow:var(--shadow);
-}
-.payment-flow-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:var(--text-1); margin-bottom:24px; }
-.payment-step { display:flex; gap:20px; align-items:flex-start; margin-bottom:18px; }
-.payment-step-num {
-  width:32px; height:32px; border-radius:50%; background:var(--teal); color:var(--bg-0);
-  font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:13px;
-  display:flex; align-items:center; justify-content:center; flex-shrink:0;
-}
-.payment-step-text { font-size:14px; color:var(--text-2); line-height:1.65; }
-.payment-step-text b { color:var(--text-1); }
-.payment-bank {
-  margin-top:8px; padding:14px 18px;
-  background:var(--bg-2); border:1px solid var(--line);
-  font-family:'Space Grotesk',sans-serif; font-size:14px; color:var(--text-1);
-  display:flex; align-items:center; gap:12px;
-}
-.payment-bank-label { font-size:10px; color:var(--text-3); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:4px; }
-
-@media(max-width:992px){ .pricing-grid{grid-template-columns:repeat(2,1fr)} }
-@media(max-width:768px){ #naptien{padding:72px 24px} .pricing-grid{grid-template-columns:1fr} .payment-flow{padding:24px 20px} }
-
-/* ── FOOTER ── */
-footer { padding:60px 64px 40px; background:var(--bg-0); border-top:1px solid var(--line); }
-.footer-neon-line { height:1px; background:linear-gradient(90deg,transparent,var(--teal-dim),transparent); margin-bottom:48px; opacity:0.4; }
-.footer-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:48px; }
-.footer-brand { display:flex; align-items:center; gap:10px; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:var(--gold); margin-bottom:12px; }
-.footer-logo-img { width:40px; height:40px; object-fit:contain; border-radius:9px; }
-.footer-tagline { font-size:13px; font-weight:400; color:var(--text-3); max-width:260px; line-height:1.65; }
-.footer-links-col h4 { font-size:10px; font-weight:600; letter-spacing:0.15em; text-transform:uppercase; color:var(--text-3); margin-bottom:16px; }
-.footer-links-col a { display:block; font-size:13px; font-weight:400; color:var(--text-2); text-decoration:none; margin-bottom:10px; transition:color 0.2s; }
-.footer-links-col a:hover { color:var(--teal); }
-.footer-bottom { border-top:1px solid var(--line); padding-top:24px; display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:400; color:var(--text-3); }
-
-/* ── REVEAL ── */
-.reveal { opacity:0; transform:translateY(20px); transition:opacity 0.6s ease,transform 0.6s ease; }
-.reveal.visible { opacity:1; transform:translateY(0); }
-
-/* ── RESPONSIVE ── */
-@media(max-width:1024px){ .services-grid{grid-template-columns:repeat(2,1fr)} .menu-sync-grid{grid-template-columns:1fr} }
-@media(max-width:768px){
-  nav{padding:16px 24px} .nav-links{display:none}
-  #services,#process,#botmenu,#tech,#order{padding:72px 24px}
-  .services-grid{grid-template-columns:1fr}
-  .menu-panel{padding:24px 18px}
-  .menu-list div{display:block}
-  .menu-tag{display:block;margin-top:6px}
-  .order-wrapper{grid-template-columns:1fr} .form-row{grid-template-columns:1fr}
-  .hero-stats{gap:28px;flex-wrap:wrap}
-  footer{padding:48px 24px 32px}
-  .footer-top{flex-direction:column;gap:32px}
-  .footer-bottom{flex-direction:column;gap:12px;text-align:center}
-  .hero h1{font-size:clamp(34px,9vw,60px)}
-  .hero-logo{width:min(340px,82vw); margin-bottom:22px}
+@media (max-width: 680px) {
+  .shell { width: min(100% - 28px, 1180px); }
+  .nav { height: 66px; }
+  .brand img { width: 38px; height: 38px; }
+  .brand-sub { display: none; }
+  .nav-cta { min-height: 38px; padding: 0 14px; font-size: 13px; }
+  .hero { padding: 54px 0 42px; }
+  .hero-actions .btn { width: 100%; }
+  .hero-points, .grid-2, .safety-list, .form-grid, .choices { grid-template-columns: 1fr; }
+  section { padding: 68px 0; }
+  .step { grid-template-columns: 1fr; }
+  .footer-row { flex-direction: column; align-items: flex-start; }
 }
 </style>
 </head>
 <body>
-
-<div class="cursor-glow" id="cursorGlow"></div>
-
-<nav>
-  <div class="nav-logo">
-    <img class="nav-logo-img" src="/LOGO.png" alt="TOAN AAS logo">
-    <div class="nav-brand-text">
-      <div class="nav-brand-name">TOAN <span>AAS</span></div>
-      <div class="nav-brand-subtitle">AI Automation System</div>
-    </div>
-  </div>
-  <ul class="nav-links">
-    <li><a href="#services">Hệ thống</a></li>
-    <li><a href="#botmenu">Menu Bot</a></li>
-    <li><a href="#process">Video AI</a></li>
-    <li><a href="#naptien">Nạp Xu</a></li>
-    <li><a href="#tech">Nền tảng</a></li>
-    <li><a href="#order">Tư vấn</a></li>
-  </ul>
-  <a href="https://t.me/Httdhtoan" class="nav-cta">Mở Bot</a>
-</nav>
-
-<section class="hero">
-  <div class="hero-grid"></div>
-  <div style="position:relative;z-index:2;">
-    <img class="hero-logo" src="/LOGO.png" alt="TOAN AAS - AI Automation System">
-    <div class="hero-badge">
-      <div class="hero-badge-dot"></div> AI Automation System
-    </div>
-    <h1>
-      TOAN AAS — <br>
-      <span class="line-gold">AI Automation</span> System
-    </h1>
-    <p class="hero-sub">
-      Nền tảng AI Automation đồng bộ với bot Telegram hiện tại: chat AI, xử lý voice/audio/ảnh/video, nạp Xu, tạo gói nội dung video, vận hành affiliate và điều phối công việc.
-    </p>
-    <div class="hero-sync">
-      <span>Menu gọn trong Telegram</span>
-      <span>Thanh toán QR tự động</span>
-      <span>Có duyệt nội dung trước khi đăng</span>
-    </div>
-    <div class="hero-actions">
-      <a href="https://t.me/Httdhtoan" class="btn-primary">Mở Bot Telegram</a>
-      <a href="#naptien" class="btn-ghost">Nạp Xu</a>
-      <a href="#process" class="btn-ghost">Xem Quy Trình Video AI</a>
-      <a href="#order" class="btn-ghost">Gửi yêu cầu tư vấn</a>
-    </div>
-    <div class="hero-stats">
-      <div class="stat-item"><div class="stat-num">AI</div><div class="stat-label">Bot dịch vụ</div></div>
-      <div class="stat-item"><div class="stat-num">3</div><div class="stat-label">Facebook TikTok YouTube</div></div>
-      <div class="stat-item"><div class="stat-num">QR</div><div class="stat-label">Thanh toán tự động</div></div>
-      <div class="stat-item"><div class="stat-num">Duyệt</div><div class="stat-label">Trước khi đăng</div></div>
-    </div>
-  </div>
-</section>
-
-<section id="services">
-  <div class="section-header reveal">
-    <div class="section-tag">— TOAN AAS —</div>
-    <h2 class="section-title">Các Phân Hệ <span class="gold">Đang Vận Hành</span></h2>
-    <p class="section-desc">Đồng bộ với bot hiện tại: dịch vụ AI, nội dung, affiliate, thanh toán, hỗ trợ và điều phối công việc.</p>
-  </div>
-
-  <div class="services-grid">
-    <div class="service-card reveal">
-      <div class="service-icon">🤖</div>
-      <h3>Bot Dịch Vụ AI</h3>
-      <p>Chat AI, đọc voice, bóc băng audio, tách nền ảnh, tải video sạch, hồ sơ tài khoản, referral và quản lý số dư Xu ngay trong Telegram.</p>
-      <div class="service-price">Dùng trực tiếp trong Telegram</div>
-    </div>
-    <div class="service-card reveal" style="transition-delay:0.1s">
-      <div class="service-icon">🎬</div>
-      <h3>Xưởng Video AI Đa Nền Tảng</h3>
-      <p>Tạo ý tưởng, kịch bản, storyboard, mô tả từng cảnh, brief sản xuất và gói nội dung cho Facebook, TikTok, YouTube.</p>
-      <div class="service-price">Kịch bản / Cảnh / Gói nội dung</div>
-    </div>
-    <div class="service-card reveal" style="transition-delay:0.2s">
-      <div class="service-icon">💰</div>
-      <h3>Vận Hành Affiliate</h3>
-      <p>Quản lý chiến dịch, kho link, caption/CTA, bài đã đăng, lượt click, đơn hàng, doanh thu và vòng tối ưu tăng trưởng.</p>
-      <div class="service-price">Chiến dịch / Theo dõi / Tối ưu</div>
-    </div>
-    <div class="service-card reveal" style="transition-delay:0.3s">
-      <div class="service-icon">🧠</div>
-      <h3>Điều Phối Công Việc Nội Bộ</h3>
-      <p>Mission, work order, worker intake, production bundle, review gate và điều phối task nội bộ.</p>
-      <div class="service-price">Chỉ vận hành sau hậu trường</div>
-    </div>
-    <div class="service-card reveal" style="transition-delay:0.4s">
-      <div class="service-icon">🏦</div>
-      <h3>Thanh Toán QR Tự Động</h3>
-      <p>QR động tự điền số tiền/nội dung, hệ thống tự cộng Xu khi giao dịch thành công, có nạp thủ công dự phòng.</p>
-      <div class="service-price">Tự động + thủ công dự phòng</div>
-    </div>
-    <div class="service-card reveal" style="transition-delay:0.5s">
-      <div class="service-icon">🏗️</div>
-      <h3>Future Business Automation</h3>
-      <p>Device Ops, Project OS, CRM Lite và Dashboard sẽ được mở rộng sau khi lõi doanh thu ổn định.</p>
-      <div class="service-price">Roadmap 90 ngày</div>
-    </div>
-  </div>
-</section>
-
-<section id="botmenu">
-  <div class="section-header reveal">
-    <div class="section-tag">— Telegram Bot —</div>
-    <h2 class="section-title">Trải Nghiệm <span class="gold">Gọn Và Dễ Dùng</span></h2>
-    <p class="section-desc">Website chỉ giới thiệu tiện ích khách hàng thấy được. Công nghệ nền và lệnh nội bộ được ẩn khỏi giao diện public.</p>
-  </div>
-  <div class="menu-sync-grid">
-    <div class="menu-panel reveal">
-      <h3>Khách hàng sử dụng</h3>
-      <div class="menu-list">
-        <div><b>🤖 Chat và xử lý nội dung</b><span class="menu-tag">nhắn trực tiếp</span></div>
-        <div><b>🎬 Lên ý tưởng video AI</b><span class="menu-tag">theo chủ đề</span></div>
-        <div><b>💰 Nội dung bán hàng affiliate</b><span class="menu-tag">có CTA rõ</span></div>
-        <div><b>💳 Nạp Xu sử dụng dịch vụ</b><span class="menu-tag">QR hoặc thủ công</span></div>
-        <div><b>👤 Theo dõi tài khoản</b><span class="menu-tag">số dư / giới thiệu</span></div>
-        <div><b>🛟 Gửi góp ý và bill lỗi</b><span class="menu-tag">hỗ trợ nhanh</span></div>
+<header class="topbar">
+  <div class="shell nav">
+    <a class="brand" href="#top" aria-label="TOAN AAS">
+      <img src="/LOGO.png" alt="TOAN AAS logo">
+      <div>
+        <div class="brand-title">TOAN <span>AAS</span></div>
+        <div class="brand-sub">AI Automation System</div>
       </div>
-    </div>
-    <div class="menu-panel reveal" style="transition-delay:0.12s">
-      <h3>Hậu trường đã ẩn</h3>
-      <div class="menu-list">
-        <div><b>🎬 Sản xuất nội dung</b><span class="menu-tag">quy trình riêng</span></div>
-        <div><b>💰 Tối ưu chiến dịch</b><span class="menu-tag">dựa trên dữ liệu</span></div>
-        <div><b>🧠 Điều phối công việc</b><span class="menu-tag">chỉ admin</span></div>
-        <div><b>📊 Quản lý hệ thống</b><span class="menu-tag">chỉ admin</span></div>
-        <div><b>⚙️ Kiểm tra vận hành</b><span class="menu-tag">chỉ admin</span></div>
-        <div><b>💳 Duyệt thanh toán</b><span class="menu-tag">chỉ admin</span></div>
-      </div>
-    </div>
+    </a>
+    <nav class="links" aria-label="Primary">
+      <a href="#services">Dịch vụ AI</a>
+      <a href="#video">Video AI</a>
+      <a href="#pricing">Nạp Xu</a>
+      <a href="#affiliate">Affiliate</a>
+      <a href="#workflow">Quy trình</a>
+      <a href="#contact">Liên hệ</a>
+    </nav>
+    <a class="nav-cta" href="https://t.me/Httdhtoan">Mở Bot</a>
   </div>
-  <div class="menu-note reveal">
-    Website không công khai tên công cụ, công nghệ nền, lệnh nội bộ hoặc quy trình bí mật. Khách chỉ thấy tiện ích và kết quả họ nhận được.
-  </div>
-</section>
+</header>
 
-<section id="process">
-  <div class="section-header reveal">
-    <div class="section-tag">— Video AI Workflow —</div>
-    <h2 class="section-title">Quy Trình <span class="gold">Tạo Video AI Affiliate</span></h2>
-    <p class="section-desc">Làm gọn như công ty một người: AI lập kế hoạch, hệ thống chia việc, admin duyệt rồi mới đăng.</p>
-  </div>
-  <div class="process-steps">
-    <div class="process-step reveal">
-      <div class="step-num">01</div>
-      <div class="step-content">
-        <h3>Tìm trend và chọn sản phẩm</h3>
-        <p>Ưu tiên Facebook, TikTok, YouTube. AI phân tích niche, thương hiệu, sản phẩm affiliate và chọn góc nội dung dễ kéo người xem.</p>
-      </div>
-    </div>
-    <div class="process-step reveal" style="transition-delay:0.1s">
-      <div class="step-num">02</div>
-      <div class="step-content">
-        <h3>Tạo blueprint, series và scene pack</h3>
-        <p>Hệ thống tạo kịch bản, cảnh, mô tả hình ảnh/video, lời thoại và CTA theo từng nền tảng.</p>
-      </div>
-    </div>
-    <div class="process-step reveal" style="transition-delay:0.2s">
-      <div class="step-num">03</div>
-      <div class="step-content">
-        <h3>Worker sản xuất, admin duyệt</h3>
-        <p>Nội dung được chia thành từng việc nhỏ, đóng gói để sản xuất và đi qua bước kiểm duyệt trước khi dùng.</p>
-      </div>
-    </div>
-    <div class="process-step reveal" style="transition-delay:0.3s">
-      <div class="step-num">04</div>
-      <div class="step-content">
-        <h3>Đăng, đo và scale</h3>
-        <p>Ghi nhận bài đã đăng, theo dõi click/đơn/doanh thu rồi đẩy mạnh những nội dung có hiệu quả tốt.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="tech">
-  <div class="section-header reveal" style="margin-bottom:40px">
-    <div class="section-tag">— Nền Tảng —</div>
-    <h2 class="section-title">Kiếm Tiền Chính <span class="gold">Facebook / TikTok / YouTube</span></h2>
-    <p class="section-desc">Nền tảng phụ: Instagram, Threads, Website và OnlyFans hợp pháp/có consent.</p>
-  </div>
-  <div class="tech-track-wrapper">
-    <div class="tech-track" id="techTrack">
-      <div class="tech-pill"><span>📘</span> Facebook Reels/Page</div>
-      <div class="tech-pill"><span>🎵</span> TikTok Affiliate</div>
-      <div class="tech-pill"><span>▶️</span> YouTube Shorts</div>
-      <div class="tech-pill"><span>🤖</span> Chat AI thông minh</div>
-      <div class="tech-pill"><span>🗣️</span> Bóc băng audio</div>
-      <div class="tech-pill"><span>🔊</span> Đọc nội dung thành voice</div>
-      <div class="tech-pill"><span>✂️</span> Tách nền ảnh</div>
-      <div class="tech-pill"><span>🏦</span> Thanh toán QR động</div>
-      <div class="tech-pill"><span>🔁</span> Tối ưu tăng trưởng</div>
-      <div class="tech-pill"><span>📘</span> Facebook Reels/Page</div>
-      <div class="tech-pill"><span>🎵</span> TikTok Affiliate</div>
-      <div class="tech-pill"><span>▶️</span> YouTube Shorts</div>
-    </div>
-  </div>
-</section>
-
-<section id="naptien">
-  <div class="section-header reveal">
-    <div class="section-tag">— Thanh Toán QR —</div>
-    <h2 class="section-title">Nạp Xu <span class="gold">Sử Dụng Dịch Vụ</span></h2>
-    <p class="section-desc">Thanh toán bằng QR động, tự động cộng Xu sau khi giao dịch thành công và có nạp thủ công dự phòng.</p>
-  </div>
-
-  <div class="pricing-grid reveal">
-    <div class="pricing-card">
-      <div class="pricing-name">Gói Dùng Thử</div><div class="pricing-price">10.000đ</div><div class="pricing-xu">100 Xu</div><div class="pricing-divider"></div>
-      <div class="pricing-feature">Chat AI cơ bản</div><div class="pricing-feature">Tách nền / voice tiết kiệm</div><div class="pricing-feature">Dùng thử bot nhanh</div>
-    </div>
-    <div class="pricing-card">
-      <div class="pricing-name">Gói Nhỏ</div><div class="pricing-price">20.000đ</div><div class="pricing-xu">200 Xu</div><div class="pricing-divider"></div>
-      <div class="pricing-feature">Chat AI</div><div class="pricing-feature">Bóc băng audio nhỏ</div><div class="pricing-feature">Tải video / tách nền</div>
-    </div>
-    <div class="pricing-card">
-      <div class="pricing-name">Gói Trung</div><div class="pricing-price">50.000đ</div><div class="pricing-xu">500 Xu</div><div class="pricing-divider"></div>
-      <div class="pricing-feature">Dùng đều hằng ngày</div><div class="pricing-feature">Audio, ảnh, voice</div><div class="pricing-feature">Phù hợp creator cá nhân</div>
-    </div>
-    <div class="pricing-card featured">
-      <div class="pricing-name">Gói Tiêu Chuẩn</div><div class="pricing-price">100.000đ</div><div class="pricing-xu">1.050 Xu — Tặng 50 Xu</div><div class="pricing-divider"></div>
-      <div class="pricing-feature">Chat AI + Voice</div><div class="pricing-feature">Audio + tách nền ảnh</div><div class="pricing-feature">Bắt đầu workflow affiliate</div>
-    </div>
-    <div class="pricing-card">
-      <div class="pricing-name">Gói Nâng Cao</div><div class="pricing-price">200.000đ</div><div class="pricing-xu">2.150 Xu — Tặng 150 Xu</div><div class="pricing-divider"></div>
-      <div class="pricing-feature">Creator/doanh nghiệp nhỏ</div><div class="pricing-feature">Nhiều batch nội dung</div><div class="pricing-feature">Hỗ trợ qua Telegram</div>
-    </div>
-    <div class="pricing-card">
-      <div class="pricing-name">Gói Doanh Nghiệp</div><div class="pricing-price">500.000đ</div><div class="pricing-xu">5.500 Xu — Tặng 500 Xu</div><div class="pricing-divider"></div>
-      <div class="pricing-feature">Vận hành cường độ cao</div><div class="pricing-feature">Ưu tiên hỗ trợ</div><div class="pricing-feature">Phù hợp team bán hàng</div>
-    </div>
-  </div>
-
-  <div class="payment-flow reveal" style="transition-delay:0.2s">
-    <div class="payment-flow-title">📋 Quy trình nạp Xu bằng QR động</div>
-    <div class="payment-step"><div class="payment-step-num">1</div><div class="payment-step-text">Mở mục nạp Xu trong bot, chọn gói 10k/20k/50k/100k/200k/500k và thanh toán bằng QR.</div></div>
-    <div class="payment-step"><div class="payment-step-num">2</div><div class="payment-step-text">Hệ thống kiểm tra mã đơn, số tiền và chống cộng Xu trùng trước khi cập nhật số dư.</div></div>
-    <div class="payment-step"><div class="payment-step-num">3</div><div class="payment-step-text">Xu cộng tự động. Nếu QR lỗi, dùng nạp thủ công và gửi bill để admin duyệt.</div></div>
-  </div>
-</section>
-
-<section id="order">
-  <div class="section-header reveal">
-    <div class="section-tag">— Safety & Consulting —</div>
-    <h2 class="section-title">Vận Hành <span class="gold">Có Kiểm Duyệt</span></h2>
-    <p class="section-desc">Không spam, không deepfake người thật không có consent, không tự publish khi chưa duyệt, affiliate cần minh bạch CTA/disclosure.</p>
-  </div>
-  <div class="order-wrapper">
-    <div class="order-info reveal">
-      <h3>TOAN AAS cho người bán hàng số</h3>
-      <p>Hệ thống gom các bước nghiên cứu trend, viết nội dung, tạo video pack, gắn affiliate, ghi nhận bài đăng và đo hiệu quả vào một quy trình gọn.</p>
-      <div style="margin-top:32px; padding:20px; border:1px solid rgba(10,109,99,0.15); background:var(--bg-2); border-radius:8px;">
-        <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--teal);margin-bottom:8px;">Liên hệ triển khai</div>
-        <div style="font-size:15px;font-weight:600;color:var(--text-2);">Telegram: <a href="https://t.me/Httdhtoan" style="color:var(--gold); text-decoration:none;">@Httdhtoan</a></div>
-      </div>
-    </div>
-    <div class="order-form-card reveal" style="transition-delay:0.15s">
-      <div id="orderForm">
-        <div class="form-row">
-          <div class="form-group"><label>Tên Doanh nghiệp / Cá nhân *</label><input type="text" id="fname" placeholder="Toàn Nguyễn"></div>
-          <div class="form-group"><label>Số điện thoại *</label><input type="text" id="fphone" placeholder="077..."></div>
+<main id="top">
+  <section class="hero">
+    <div class="hero-grid"></div>
+    <div class="shell hero-layout">
+      <div>
+        <div class="eyebrow">Stable Revenue Bot</div>
+        <h1>
+          <small>TOAN AAS - AI Automation System</small>
+          Bot AI kiếm tiền và tự động hóa nội dung cho <span>Facebook, TikTok, YouTube</span>
+        </h1>
+        <p class="hero-copy">
+          Tạo script video, caption, voice, bóc băng audio, tách nền ảnh, tải video sạch và quản lý Xu bằng PayOS QR động - tất cả trong một bot Telegram.
+        </p>
+        <div class="hero-actions">
+          <a class="btn primary" href="https://t.me/Httdhtoan">Mở Bot Telegram</a>
+          <a class="btn" href="#pricing">Nạp Xu Ngay</a>
+          <a class="btn" href="#video">Xem Quy Trình Video AI</a>
+          <a class="btn" href="#contact">Gửi Yêu Cầu Tư Vấn</a>
         </div>
-        <div class="form-group">
-          <label>Module muốn tích hợp *</label>
-          <div class="service-options">
-            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="bot-dich-vu-ai"> <span class="service-opt-label">Bot dịch vụ AI</span></div>
-            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="quy-trinh-video-ai"> <span class="service-opt-label">Quy trình video AI</span></div>
-            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="van-hanh-affiliate"> <span class="service-opt-label">Vận hành affiliate</span></div>
-            <div class="service-opt" onclick="toggleService(this)"><input type="checkbox" value="dieu-phoi-noi-bo"> <span class="service-opt-label">Điều phối nội bộ</span></div>
+      </div>
+      <aside class="hero-logo-card" aria-label="TOAN AAS summary">
+        <img src="/LOGO.png" alt="TOAN AAS - AI Automation System">
+        <div class="hero-points">
+          <div><b>150 Xu</b>Dùng thử khi tạo tài khoản mới</div>
+          <div><b>PayOS QR</b>Nạp Xu tự động, có thủ công dự phòng</div>
+          <div><b>/film</b>Tạo Video Script Lite cho 3 nền tảng</div>
+          <div><b>Affiliate</b>Lưu link, lên lịch, tạo nội dung bán hàng</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="services" class="light">
+    <div class="shell">
+      <div class="section-head">
+        <div class="tag">Dịch vụ AI</div>
+        <h2>Dịch vụ AI đang có trong TOAN AAS</h2>
+        <p>Các tiện ích khách dùng trực tiếp trong Telegram, có cơ chế Xu và hoàn Xu khi lỗi xử lý sau khi đã trừ phí.</p>
+      </div>
+      <div class="grid-3">
+        <article class="card">
+          <div class="card-kicker">Chat AI</div>
+          <h3>Hỏi đáp và viết nội dung</h3>
+          <p>Lên ý tưởng, viết caption, tóm tắt, tạo nội dung bán hàng và hỗ trợ công việc hằng ngày.</p>
+        </article>
+        <article class="card">
+          <div class="card-kicker">Đọc Voice</div>
+          <h3>Văn bản thành giọng nói</h3>
+          <p>Tạo voice từ nội dung để phục vụ video ngắn, kịch bản review và nội dung giáo dục.</p>
+        </article>
+        <article class="card">
+          <div class="card-kicker">Bóc Băng Audio</div>
+          <h3>Voice, MP3, M4A thành văn bản</h3>
+          <p>Chuyển audio thành transcript để tái sử dụng làm bài viết, caption hoặc kịch bản video.</p>
+        </article>
+        <article class="card">
+          <div class="card-kicker">Tách Nền Ảnh</div>
+          <h3>Ảnh sản phẩm gọn hơn</h3>
+          <p>Hỗ trợ xử lý ảnh sản phẩm, ảnh bán hàng và ảnh minh họa cho nội dung affiliate.</p>
+        </article>
+        <article class="card">
+          <div class="card-kicker">Tải Video Sạch</div>
+          <h3>Lấy tư liệu cho workflow nội dung</h3>
+          <p>Hỗ trợ tải video phục vụ tham khảo, phân tích format và chuẩn bị tư liệu vận hành.</p>
+        </article>
+        <article class="card">
+          <div class="card-kicker">Video Script Lite</div>
+          <h3>Kịch bản, scene prompt, caption</h3>
+          <p>Nhập chủ đề, bot tạo outline, cảnh, lời thoại, prompt, CTA và hashtag cho Facebook, TikTok, YouTube.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="video" class="dark">
+    <div class="shell">
+      <div class="video-band">
+        <div class="video-top">
+          <div class="tag">Multi-Platform Video Factory Lite</div>
+          <h2>Tạo Content Pack cho Facebook, TikTok, YouTube</h2>
+          <p>Nhập một chủ đề, bot tạo gói nội dung gồm outline, cảnh quay, lời thoại, prompt video, caption, hashtag và CTA riêng cho từng nền tảng. Bản hiện tại tạo script và file nội dung, chưa tự render hoặc tự publish.</p>
+        </div>
+        <div class="platforms">
+          <article class="platform">
+            <b>Facebook</b>
+            <h3>Storytelling và CTA mềm</h3>
+            <p>Caption dài hơn, góc kể chuyện, phù hợp Reels, Page, Group và bài bán hàng có giải thích rõ.</p>
+          </article>
+          <article class="platform">
+            <b>TikTok</b>
+            <h3>Hook nhanh, nhịp ngắn</h3>
+            <p>Mở đầu mạnh, caption gọn, hashtag theo chủ đề, phù hợp affiliate và review sản phẩm.</p>
+          </article>
+          <article class="platform">
+            <b>YouTube Shorts</b>
+            <h3>Title có keyword</h3>
+            <p>Mô tả, pinned comment, hashtag và ý tưởng mở rộng thành video dài hơn nếu nội dung thắng.</p>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing" class="light">
+    <div class="shell">
+      <div class="section-head">
+        <div class="tag">PayOS Xu & Billing</div>
+        <h2>Nạp Xu tự động bằng PayOS QR động</h2>
+        <p>Chọn gói, quét QR, hệ thống tự cộng Xu sau khi thanh toán thành công. Nếu QR động lỗi, bot hỗ trợ VietQR thủ công và admin duyệt tay.</p>
+      </div>
+      <div class="pricing">
+        <article class="price-card">
+          <div class="price-name">Gói Dùng Thử</div>
+          <div class="price">10.000đ</div>
+          <div class="xu">100 Xu</div>
+          <ul><li>Phù hợp test bot nhanh</li><li>Dùng dịch vụ AI cơ bản</li></ul>
+        </article>
+        <article class="price-card">
+          <div class="price-name">Gói Nhỏ</div>
+          <div class="price">20.000đ</div>
+          <div class="xu">200 Xu</div>
+          <ul><li>Chat, voice, audio nhỏ</li><li>Dùng thử nhiều tiện ích</li></ul>
+        </article>
+        <article class="price-card featured">
+          <div class="price-name">Gói Trung</div>
+          <div class="price">50.000đ</div>
+          <div class="xu">500 Xu</div>
+          <ul><li>Gói phổ biến cho creator cá nhân</li><li>Đủ dùng cho nhiều workflow nhỏ</li></ul>
+        </article>
+        <article class="price-card">
+          <div class="price-name">Gói Tiêu Chuẩn</div>
+          <div class="price">100.000đ</div>
+          <div class="xu">1.050 Xu - tặng 50 Xu</div>
+          <ul><li>Bắt đầu làm content affiliate đều hơn</li><li>Phù hợp dùng hằng ngày</li></ul>
+        </article>
+        <article class="price-card">
+          <div class="price-name">Gói Nâng Cao</div>
+          <div class="price">200.000đ</div>
+          <div class="xu">2.150 Xu - tặng 150 Xu</div>
+          <ul><li>Nhiều batch nội dung hơn</li><li>Phù hợp creator và shop nhỏ</li></ul>
+        </article>
+        <article class="price-card">
+          <div class="price-name">Gói Doanh Nghiệp</div>
+          <div class="price">500.000đ</div>
+          <div class="xu">5.500 Xu - tặng 500 Xu</div>
+          <ul><li>Vận hành cường độ cao</li><li>Phù hợp team bán hàng số</li></ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="affiliate" class="light" style="padding-top:0;">
+    <div class="shell">
+      <div class="section-head">
+        <div class="tag">Affiliate Workflow</div>
+        <h2>Từ link affiliate đến lịch nội dung</h2>
+        <p>TOAN AAS giúp gom link, tạo script, lên lịch và theo dõi hướng scale. Bản hiện tại giữ đăng bài thủ công để an toàn nền tảng.</p>
+      </div>
+      <div class="steps">
+        <div class="step"><div class="step-num">01</div><div><h3>Lưu link affiliate</h3><p>Lưu sản phẩm, thương hiệu, niche và ghi chú bằng kho link trong bot.</p></div></div>
+        <div class="step"><div class="step-num">02</div><div><h3>Tạo kịch bản bằng /film</h3><p>Chọn chủ đề và affiliate_id, AI tạo script, caption, CTA và hashtag theo từng nền tảng.</p></div></div>
+        <div class="step"><div class="step-num">03</div><div><h3>Lên lịch đăng</h3><p>Đặt lịch cho Facebook, TikTok, YouTube hoặc nền tảng phụ, gắn campaign và link tương ứng.</p></div></div>
+        <div class="step"><div class="step-num">04</div><div><h3>Đăng thủ công và đo hiệu quả</h3><p>Admin hoặc người vận hành kiểm duyệt, tự đăng và ghi nhận số liệu để scale nội dung thắng.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="workflow" class="dark">
+    <div class="shell">
+      <div class="section-head">
+        <div class="tag">Quy trình sử dụng</div>
+        <h2>Quy trình kiếm tiền bằng TOAN AAS</h2>
+        <p>Đi từ dùng thử, tạo nội dung, nạp Xu, đăng thủ công rồi tối ưu theo số liệu.</p>
+      </div>
+      <div class="grid-2">
+        <div class="step"><div class="step-num">1</div><div><h3>Vào bot Telegram</h3><p>Tài khoản mới nhận 150 Xu dùng thử nếu trial đang bật.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div><h3>Dùng AI tools hoặc Video Script Lite</h3><p>Tạo nội dung, xử lý audio/ảnh/voice hoặc tạo content pack đa nền tảng.</p></div></div>
+        <div class="step"><div class="step-num">3</div><div><h3>Nạp Xu bằng PayOS khi cần</h3><p>Bot tạo QR động theo gói, kiểm tra số tiền và tự cộng Xu khi thanh toán thành công.</p></div></div>
+        <div class="step"><div class="step-num">4</div><div><h3>Đăng thủ công và tối ưu dần</h3><p>Kiểm duyệt nội dung, đăng lên kênh phù hợp, ghi nhận hiệu quả và scale hướng thắng.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="safety" class="dark" style="padding-top:0;">
+    <div class="shell">
+      <div class="section-head">
+        <div class="tag">An toàn & Minh bạch</div>
+        <h2>Tự động hóa có kiểm soát</h2>
+        <p>Hệ thống được xây theo hướng hỗ trợ vận hành, không cổ vũ spam hoặc giả mạo.</p>
+      </div>
+      <div class="safety-list">
+        <div class="safety-item"><b>Không auto publish khi chưa duyệt</b>Nội dung cần qua bước kiểm tra trước khi dùng trên kênh thật.</div>
+        <div class="safety-item"><b>Không spam nền tảng</b>Ưu tiên chất lượng, nhịp đăng hợp lý và theo dõi hiệu quả.</div>
+        <div class="safety-item"><b>Không deepfake người thật không consent</b>Chỉ dùng nhân vật tự tạo hoặc người thật có đồng ý rõ ràng, đủ điều kiện hợp pháp.</div>
+        <div class="safety-item"><b>Affiliate cần minh bạch</b>CTA, comment ghim hoặc mô tả cần thể hiện rõ đây là link giới thiệu khi cần.</div>
+        <div class="safety-item"><b>Giao dịch có ghi nhận</b>Thanh toán, Xu và thao tác quan trọng được lưu để admin kiểm tra.</div>
+        <div class="safety-item"><b>Có phương án thủ công</b>Khi QR động hoặc API lỗi, bot vẫn có quy trình nạp thủ công và duyệt bill.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="contact" class="light">
+    <div class="shell contact-wrap">
+      <div class="contact-card">
+        <div class="tag">Liên hệ</div>
+        <h2>Bắt đầu với TOAN AAS</h2>
+        <p>Mở bot để dùng ngay hoặc gửi nhu cầu để được tư vấn cách triển khai nội dung, affiliate và nạp Xu phù hợp.</p>
+        <div class="hero-actions" style="margin-top:24px;">
+          <a class="btn primary" href="https://t.me/Httdhtoan">Mở Bot Telegram</a>
+          <a class="btn" href="#pricing" style="color:var(--ink);border-color:var(--line-dark);">Xem Gói Xu</a>
+        </div>
+        <p style="margin-top:22px;">Telegram: <a href="https://t.me/Httdhtoan" style="color:var(--green-2);font-weight:900;">@Httdhtoan</a></p>
+      </div>
+
+      <div class="contact-card">
+        <form id="leadForm">
+          <div class="form-grid">
+            <div class="field">
+              <label for="fname">Tên của bạn *</label>
+              <input id="fname" name="name" type="text" placeholder="Nguyễn Văn A" autocomplete="name">
+            </div>
+            <div class="field">
+              <label for="fphone">Số điện thoại/Zalo *</label>
+              <input id="fphone" name="phone" type="text" placeholder="09..." autocomplete="tel">
+            </div>
           </div>
-        </div>
-        <div class="form-group"><label>Ghi chú triển khai</label><textarea id="fnote" placeholder="Ví dụ: muốn bot dịch vụ AI, quy trình video, quản lý affiliate, báo cáo doanh thu..."></textarea></div>
-        <button class="submit-btn" onclick="submitLead()">GỬI YÊU CẦU TƯ VẤN →</button>
-        <div id="leadStatus" style="margin-top:14px;color:var(--text-2);font-size:13px;line-height:1.5;"></div>
+          <div class="field">
+            <label>Nền tảng quan tâm *</label>
+            <div class="choices">
+              <label class="choice"><input type="checkbox" value="facebook"> Facebook</label>
+              <label class="choice"><input type="checkbox" value="tiktok"> TikTok</label>
+              <label class="choice"><input type="checkbox" value="youtube"> YouTube</label>
+              <label class="choice"><input type="checkbox" value="ai-tools"> AI Tools</label>
+              <label class="choice"><input type="checkbox" value="affiliate"> Affiliate</label>
+              <label class="choice"><input type="checkbox" value="payos-xu"> PayOS Xu</label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="fnote">Nhu cầu</label>
+            <textarea id="fnote" name="note" placeholder="Ví dụ: muốn tạo video affiliate cho TikTok, quản lý link Shopee/Lazada, nạp Xu cho team..."></textarea>
+          </div>
+          <button class="submit" type="submit">Gửi yêu cầu tư vấn</button>
+          <div id="leadStatus" class="status" aria-live="polite"></div>
+        </form>
       </div>
     </div>
-  </div>
-</section>
+  </section>
+</main>
 
 <footer>
-  <div class="footer-neon-line"></div>
-  <div class="footer-top">
-    <div>
-      <div class="footer-brand"><img class="footer-logo-img" src="/LOGO.png" alt="TOAN AAS logo">TOAN AAS</div>
-      <p class="footer-tagline">Built for AI Automation, Affiliate and Business Operations.</p>
+  <div class="shell footer-row">
+    <div class="footer-brand">
+      <img src="/LOGO.png" alt="TOAN AAS logo">
+      <span>TOAN AAS</span>
     </div>
-    <div class="footer-links-col">
-      <h4>Module Nổi Bật</h4>
-      <a href="#services">Bot dịch vụ AI</a><a href="#services">Quy trình video AI</a><a href="#services">Vận hành affiliate</a><a href="#services">Điều phối nội bộ</a>
-    </div>
-    <div class="footer-links-col">
-      <h4>Liên hệ</h4>
-      <a href="https://t.me/Httdhtoan">Telegram: @Httdhtoan</a><a href="#naptien">Nạp Xu Hệ Thống</a><a href="#order">Gửi yêu cầu tư vấn</a>
-    </div>
-  </div>
-  <div class="footer-bottom">
-    <span>© 2026 TOAN AAS — AI Automation System.</span>
-    <span style="color:var(--text-3); font-weight:700;">Built for AI Automation, Affiliate and Business Operations.</span>
+    <div>Built for AI Automation, Affiliate and Business Operations.</div>
+    <div>© 2026 TOAN AAS - AI Automation System.</div>
   </div>
 </footer>
 
 <script>
-const glow = document.getElementById('cursorGlow');
-document.addEventListener('mousemove', e => {
-  glow.style.left = e.clientX + 'px'; glow.style.top = e.clientY + 'px';
+document.querySelectorAll('.choice').forEach(choice => {
+  const input = choice.querySelector('input');
+  choice.addEventListener('click', () => {
+    window.setTimeout(() => {
+      choice.classList.toggle('selected', input.checked);
+    }, 0);
+  });
 });
-const observer = new IntersectionObserver(entries => {
-  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
-}, { threshold: 0.1 });
-document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
-function toggleService(el) {
-  el.classList.toggle('selected');
-  el.querySelector('input').checked = el.classList.contains('selected');
-}
-async function submitLead() {
+
+document.getElementById('leadForm').addEventListener('submit', async event => {
+  event.preventDefault();
   const status = document.getElementById('leadStatus');
   const name = document.getElementById('fname').value.trim();
   const phone = document.getElementById('fphone').value.trim();
   const note = document.getElementById('fnote').value.trim();
-  const services = Array.from(document.querySelectorAll('.service-opt input:checked')).map(i => i.value);
+  const services = Array.from(document.querySelectorAll('.choice input:checked')).map(item => item.value);
+
   if (!name || !phone || services.length === 0) {
-    status.textContent = 'Vui lòng nhập tên, số điện thoại và chọn ít nhất một module.';
+    status.textContent = 'Vui lòng nhập tên, số điện thoại/Zalo và chọn ít nhất một nền tảng.';
     return;
   }
+
   status.textContent = 'Đang gửi yêu cầu...';
   try {
-    const res = await fetch('/lead', {
+    const response = await fetch('/lead', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({name, phone, services, note, source: 'toan-aas-landing'})
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!response.ok) throw new Error('HTTP ' + response.status);
     status.textContent = 'Đã gửi yêu cầu. TOAN AAS sẽ liên hệ lại qua Telegram/điện thoại.';
-    document.getElementById('fname').value = '';
-    document.getElementById('fphone').value = '';
-    document.getElementById('fnote').value = '';
-    document.querySelectorAll('.service-opt').forEach(el => {
-      el.classList.remove('selected');
-      el.querySelector('input').checked = false;
-    });
-  } catch (err) {
-    status.innerHTML = 'Chưa gửi được qua API. Vui lòng nhắn trực tiếp Telegram: <a href="https://t.me/Httdhtoan" style="color:var(--teal);text-decoration:none;">@Httdhtoan</a>.';
+    event.target.reset();
+    document.querySelectorAll('.choice').forEach(choice => choice.classList.remove('selected'));
+  } catch (error) {
+    status.innerHTML = 'Chưa gửi được qua API. Vui lòng nhắn trực tiếp Telegram: <a href="https://t.me/Httdhtoan" style="color:#0a8f66;font-weight:900;">@Httdhtoan</a>.';
   }
-}
+});
 </script>
 </body>
 </html>
