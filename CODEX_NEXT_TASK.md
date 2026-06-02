@@ -63,6 +63,14 @@ Expected for 50k + FIRST30:
 - Risk keyword checker.
 - Compliance checker.
 - Paid service package for publish/ads management.
+- TOAN AAS Admin Trend-to-Video-to-Publish Pipeline:
+  - Admin Trend Finder.
+  - Admin Trend Scoring.
+  - Admin AI Video Builder.
+  - Admin Voice Builder.
+  - Admin Review Gate.
+  - Admin Publish Queue.
+  - Admin Performance Tracker.
 - GitHub Copilot dev workflow.
 - Legal Docs Lite with OpenLaw/OpenLaws.
 - Legal templates for service contracts and warranty documents.
@@ -75,5 +83,6 @@ Expected for 50k + FIRST30:
 - `admin_publish` is admin/internal only and requires explicit approval before live testing.
 - No customer social account connection, no customer auto publish, no customer ads management in the current bot.
 - If customer publish opens later, it must be a separate paid feature with account permission, approval gate, audit log, failure handling and admin disable switch.
+- Future pipeline stages: `trend_scan -> trend_score -> angle_select -> script_generate -> scene_prompt_generate -> video_generate_task -> voice_generate -> assemble_or_export -> platform_output_generate -> risk_check -> admin_review -> admin_approve -> publish_queue -> publish_execute -> performance_track -> growth_ai_feedback`.
 
 Codex không tự làm task tiếp theo.

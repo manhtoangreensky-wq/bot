@@ -206,6 +206,14 @@
 - Report export: temp file only, deleted after Telegram send.
 - Local route smoke after Step 7: PASS for `/`, `/landing`, `/health`, `/banner.png`.
 
+## Future Admin-First Pipeline Status
+
+- TOAN AAS Admin Trend-to-Video-to-Publish Pipeline is a future backlog item, not current customer scope.
+- Current bot V1 only gives customers AI tools and content/video packs for self-posting.
+- Trend finder, AI video builder, publish queue, platform account manager and ads assistant stay admin/internal or off by default.
+- Required future flags: `trend_finder` admin-only, `ai_video_builder` admin-only, `publish_workflow` off by default, `admin_publish` admin-only, `customer_publish` off by default, `auto_publish` off by default, `ads_assistant` off by default.
+- No customer social account connection, no customer auto publish and no customer ads management in Stable Revenue Bot.
+
 ## Live Website Status
 
 - `/`: PASS before Step 6; serves TOAN AAS landing HTML.
