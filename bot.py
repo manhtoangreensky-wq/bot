@@ -21803,7 +21803,7 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "5. Ghi chú số liệu thủ công bên ngoài bot hoặc gửi admin nếu cần tổng hợp",
         "6. <code>/growth_ai</code> nhận gợi ý tối ưu hook/caption/CTA",
         "",
-        "Kết quả phụ thuộc nội dung, sản phẩm, nền tảng và cách triển khai. TOAN AAS không cam kết doanh thu chắc chắn và không auto publish.",
+        "Kết quả phụ thuộc nội dung, sản phẩm, nền tảng và cách triển khai. TOAN AAS không cam kết doanh thu chắc chắn và hiện chưa tự đăng bài cho khách.",
         "",
         "Lệnh nhanh: <code>/khuyenmai</code> | <code>/promo FIRST30</code> | <code>/naptien</code> | <code>/film chủ đề</code>",
     ]
@@ -25671,7 +25671,7 @@ def build_growth_ai_prompt(summary, user_goal="kiếm tiền affiliate", platfor
     return (
         "Bạn là AI Growth Coach cho TOAN AAS.\n\n"
         "Dữ liệu dưới đây do user nhập thủ công sau khi đăng bài affiliate. Không bịa số liệu ngoài input.\n"
-        "Không hứa chắc doanh thu. Không đề xuất spam, auto publish, deepfake, copy nội dung người khác hoặc né kiểm duyệt.\n"
+        "Không hứa chắc doanh thu. Không đề xuất spam, tự đăng bài khi chưa duyệt, deepfake, copy nội dung người khác hoặc né kiểm duyệt.\n"
         "Affiliate cần disclosure minh bạch.\n\n"
         "Hãy trả lời tiếng Việt theo format:\n\n"
         "# 1. Tổng quan\n"
@@ -25685,7 +25685,7 @@ def build_growth_ai_prompt(summary, user_goal="kiếm tiền affiliate", platfor
         "# 5. Kế hoạch 7 ngày tới\n"
         "Ngày 1 đến ngày 7, mỗi ngày nên làm gì.\n\n"
         "# 6. Cảnh báo an toàn\n"
-        "- Không spam\n- Không auto publish\n- Affiliate cần disclosure\n- Không deepfake/copy nội dung người khác\n\n"
+        "- Không spam\n- Không tự đăng bài khi chưa duyệt\n- Affiliate cần disclosure\n- Không deepfake/copy nội dung người khác\n\n"
         "Nếu dữ liệu ít, nói rõ dữ liệu chưa đủ.\n\n"
         "DỮ LIỆU INPUT:\n"
         f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
@@ -25769,7 +25769,7 @@ def build_campaign_report_txt(summary: dict) -> str:
     lines.extend(["", "NEXT ACTIONS"])
     for idx, action in enumerate(report_next_actions(summary), 1):
         lines.append(f"{idx}. {action}")
-    lines.extend(["", "SAFETY", "- No auto publish.", "- No social API used.", "- Affiliate disclosure required."])
+    lines.extend(["", "SAFETY", "- No customer auto posting.", "- No social API used.", "- Affiliate disclosure required."])
     return "\n".join(lines)
 
 def build_campaign_report_csv(summary: dict) -> str:
@@ -25925,7 +25925,7 @@ def build_video_script_prompt(topic, niche, episodes, scenes, platforms, affilia
 
 def generate_video_script_pack(prompt: str, user_id) -> str:
     result = AgentGemini.chat(
-        "Bạn là AI Video Script Lite của TOAN AAS. Chỉ tạo script/prompt pack, không render video, không auto publish.",
+        "Bạn là AI Video Script Lite của TOAN AAS. Chỉ tạo script/prompt pack, không render video, không tự đăng bài cho khách.",
         prompt,
         f"film_{user_id}",
     )
