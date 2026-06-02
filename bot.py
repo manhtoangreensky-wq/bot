@@ -1443,31 +1443,13 @@ def make_payos_description(pkg_key: str) -> str:
     # payOS giới hạn 9 ký tự mô tả với một số kênh ngân hàng chưa liên kết.
     return f"DAAS{pkg_key.upper()}"[:9]
 
-def sign_payos_payment_request(data: dict, variant: str = "payos_sorted") -> tuple[str, str]:
-    if variant == "faq_field_order":
-        raw_str = (
-            f"amount={data['amount']}"
-            f"&orderCode={data['orderCode']}"
-            f"&description={data['description']}"
-            f"&returnUrl={data['returnUrl']}"
-            f"&cancelUrl={data['cancelUrl']}"
-        )
-    elif variant == "payload_order":
-        raw_str = (
-            f"orderCode={data['orderCode']}"
-            f"&amount={data['amount']}"
-            f"&description={data['description']}"
-            f"&cancelUrl={data['cancelUrl']}"
-            f"&returnUrl={data['returnUrl']}"
-        )
-    else:
-        raw_str = (
-            f"amount={data['amount']}"
-            f"&cancelUrl={data['cancelUrl']}"
-            f"&description={data['description']}"
-            f"&orderCode={data['orderCode']}"
-            f"&returnUrl={data['returnUrl']}"
-        )
+PAYOS_CREATE_SIGNATURE_FIELDS = ("amount", "cancelUrl", "description", "orderCode", "returnUrl")
+
+def build_payos_signature_data(payload: dict) -> str:
+    return "&".join(f"{key}={payload[key]}" for key in PAYOS_CREATE_SIGNATURE_FIELDS)
+
+def sign_payos_payment_request(data: dict) -> tuple[str, str]:
+    raw_str = build_payos_signature_data(data)
     signature = hmac.new(
         PAYOS_CHECKSUM_KEY.encode("utf-8"),
         raw_str.encode("utf-8"),
@@ -20499,25 +20481,16 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         res = None
         res_data = {}
         raw_str = ""
-        used_variant = ""
-        signature_variants = ("payos_sorted", "faq_field_order", "payload_order")
+        signature, raw_str = sign_payos_payment_request(payos_body)
+        request_body = {**payos_body, "signature": signature}
         async with httpx.AsyncClient() as client:
-            for variant in signature_variants:
-                signature, raw_str = sign_payos_payment_request(payos_body, variant)
-                request_body = {**payos_body, "signature": signature}
-                res = await client.post(
-                    "https://api-merchant.payos.vn/v2/payment-requests",
-                    headers=headers,
-                    json=request_body,
-                    timeout=30.0
-                )
-                res_data = res.json()
-                used_variant = variant
-                if res.status_code == 200 and res_data.get("code") == "00":
-                    break
-                desc_try = str(res_data.get("desc", "")).lower()
-                if "signature" not in desc_try and "kiểm tra" not in desc_try:
-                    break
+            res = await client.post(
+                "https://api-merchant.payos.vn/v2/payment-requests",
+                headers=headers,
+                json=request_body,
+                timeout=30.0
+            )
+            res_data = res.json()
         if res.status_code == 200 and res_data.get("code") == "00":
             checkout_data = res_data["data"]
             checkout_url = checkout_data["checkoutUrl"]
@@ -20546,17 +20519,17 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 f"⏳ Hóa đơn hết hạn sau <b>{ORDER_TTL_MINUTES} phút</b>.\n\n"
                 f"👉 Nhấn vào nút liên kết dưới đây để nhận diện mã QR thanh toán động. Hệ thống sẽ tự động điền sẵn số tiền và nội dung hóa đơn chính xác!"
             )
-            logger.info(f"PayOS create success | order={order_code} | signature_variant={used_variant}")
+            logger.info(f"PayOS create success | order={order_code}")
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 QUÉT MÃ QR THANH TOÁN", url=checkout_url)]])
             await query.edit_message_text(qr_text, parse_mode="HTML", reply_markup=kb)
         else:
             update_order_status(order_code, PAYOS_STATUS_CANCELLED)
-            logger.error(f"PayOS error response: {res_data} | variant={used_variant} | signed={raw_str}")
+            logger.error(f"PayOS error response: {res_data} | signed={raw_str}")
             desc = res_data.get("desc", "Lỗi không rõ")
             await alert_admin(
                 context,
                 "PayOS tạo hóa đơn",
-                f"{desc} | order={order_code} | amount={amount} | variant={used_variant} | signed={raw_str} | nếu cả 3 variant đều lỗi, kiểm tra PAYOS_CHECKSUM_KEY có cùng kênh với Client ID/API Key không"
+                f"{desc} | order={order_code} | amount={amount} | signed={raw_str} | nếu vẫn báo signature invalid, kiểm tra PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY cùng kênh, không dư khoảng trắng, rồi redeploy Railway"
             )
             await query.edit_message_text("⚠️ Cổng QR tự động đang bận. Bot đã gửi mã QR nạp thủ công bên dưới.")
             await send_manual_payment(
@@ -21939,6 +21912,11 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
         "4. Kỳ vọng user nhận <b>500 Xu gốc + 150 Xu bonus</b> sau thanh toán thành công.",
         "5. <code>BETA50</code> chỉ dùng beta/internal giới hạn, nên test với gói từ 50k.",
         "6. Gửi/replay cùng webhook/order nếu có môi trường an toàn: không cộng thêm Xu gốc hoặc bonus lần hai.",
+        "",
+        "<b>Nếu PayOS báo signature invalid</b>",
+        "• Kiểm tra PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY cùng một kênh PayOS.",
+        "• Kiểm tra Railway Variables không dư khoảng trắng đầu/cuối.",
+        "• Sau khi sửa ENV phải redeploy Railway.",
         "",
         "<b>C. Khóa sales</b>",
         "1. Chỉ khi A và B đạt kỳ vọng, chạy <code>/mark_payos_test pass order=&lt;order_code&gt; note=\"Test FIRST30 OK\"</code>.",

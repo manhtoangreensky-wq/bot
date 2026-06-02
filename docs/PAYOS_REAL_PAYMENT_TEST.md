@@ -21,6 +21,11 @@ This test includes two paths:
 - `/naptien` shows all payment packages.
 - `/promo_seed_policy` has seeded Promotion Policy V2.1.
 - Admin is online to inspect `/dashboard`, `/pending`, and user messages.
+- PayOS checkout URL can be created before sending real money.
+
+If PayOS returns signature invalid, fix create-payment signature first. Do not run a real payment test until `/naptien` can create a checkout URL.
+
+See `docs/PAYOS_SIGNATURE_TROUBLESHOOTING.md`.
 
 ## Test Case 1 - Create QR
 

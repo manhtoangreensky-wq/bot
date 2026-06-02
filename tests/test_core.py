@@ -159,6 +159,27 @@ def test_payos_signature_verification(monkeypatch):
     assert not bot.verify_payos_signature(data, "bad-signature")
 
 
+def test_payos_create_payment_signature_data_order(monkeypatch):
+    monkeypatch.setattr(bot, "PAYOS_CHECKSUM_KEY", "checksum-test")
+    payload = {
+        "amount": 10000,
+        "cancelUrl": "https://bot-production-2dd7.up.railway.app/landing",
+        "description": "DAAS10K",
+        "orderCode": 178039665,
+        "returnUrl": "https://bot-production-2dd7.up.railway.app/landing",
+    }
+    expected = (
+        "amount=10000"
+        "&cancelUrl=https://bot-production-2dd7.up.railway.app/landing"
+        "&description=DAAS10K"
+        "&orderCode=178039665"
+        "&returnUrl=https://bot-production-2dd7.up.railway.app/landing"
+    )
+    signature, raw = bot.sign_payos_payment_request(payload)
+    assert raw == expected
+    assert signature == hmac.new(b"checksum-test", expected.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
 def test_payos_paid_order_applies_first30_once(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
