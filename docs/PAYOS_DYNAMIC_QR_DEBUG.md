@@ -65,4 +65,3 @@ If PayOS creation fails during `/naptien`, the bot sends manual VietQR using the
 - same amount
 - same calculated Xu
 - transfer content: `AAS <user_id> <order_code>`
-
