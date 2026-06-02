@@ -11,11 +11,15 @@ Run the real PayOS 10k payment test with BETA50 promo before selling beta.
 
 Manual sequence:
 
+- MVP done: `/promo_seed_beta`, `/promo <code>`, BETA50/BETA30 one-time bonus on PayOS paid order.
+- Next improvement if needed: mã giảm giá theo %, expiry date, campaign-specific code, admin list/disable commands.
+- Không đổi bảng giá gốc.
+- Không đụng PayOS packages nếu chưa cần.
+
 ```text
 /backup_db
 /providers
 /promo_seed_beta
-/promo_list
 /promo BETA50
 /naptien
 # choose 10k and pay real QR
@@ -42,7 +46,7 @@ Expected for 10k + BETA50:
 
 - Open beta for 3-10 users.
 - Offer: 200 Xu trial + BETA50 while active.
-- Watch `/dashboard`, `/promo_list`, `/performance_report`, `/sales_ready`.
+- Watch `/dashboard`, `/performance_report`, `/sales_ready`.
 
 ## Option C - Sales copy/posts
 

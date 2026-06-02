@@ -40,6 +40,16 @@
 - duplicate protection: `payos_processed` plus order status checks.
 - manual fallback: `/thucong`, `pending_deposits`, `/duyet`, `/tuchoi`.
 
+## Promo / Beta Codes
+
+- `/promo_seed_beta`: admin-only, seeds `BETA50` and `BETA30`.
+- `/promo <code>`: user-facing activation for private beta codes.
+- `BETA50`: 10k PayOS minimum, one-time +50 Xu.
+- Expected 10k+BETA50 result: 100 Xu package + 50 Xu promo = 150 Xu.
+- Promo bonus is applied inside `process_payos_paid_order()` transaction.
+- Duplicate paid order replay does not apply base Xu or promo Xu twice.
+- Real PayOS promo test still requires admin execution on Railway.
+
 ## Credits
 
 - trial: `TRIAL_CREDITS = 200`.
@@ -67,6 +77,7 @@
 - `/sales_ready`: Step 9 logic supports NOT READY, BETA READY, and SALES READY after PayOS real test PASS.
 - `/costs`: added in Step 8 and updated in Step 10; documents `/film` 200/500/1,200 Xu, `/growth_ai` 120 Xu, `/campaign_report` 50 Xu, trial 200 Xu, free chat daily 20.
 - `/payos_test_plan`: added in Step 8; guides real 10k payment validation.
+- `/payos_test_plan`: now includes BETA50 real payment test steps.
 - PayOS real payment test: still manual and required before public selling.
 - API key setup docs: `docs/API_KEYS_SETUP.md`.
 - Cost control docs: `docs/COST_CONTROL.md`.

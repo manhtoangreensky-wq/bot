@@ -1,50 +1,58 @@
-# PAYOS + PROMO TEST AUDIT
+# PayOS Promo Test Audit - TOAN AAS
+
+Date: 2026-06-02
+
+## Scope
+
+Audit and prepare the bot for a real PayOS 10k payment test with the beta promo code `BETA50`.
 
 ## Compile
 
-- py_compile: pending manual/local run. GitHub connector cannot execute code.
+- `python -m py_compile bot.py`: PASS locally with Codex bundled Python.
+- `pytest -q`: PASS locally, 15 tests, 1 Starlette/httpx deprecation warning.
 
-## PayOS config
+## PayOS Findings
 
-| ENV | Status shown only configured/missing | Notes |
-|---|---|---|
-| PAYOS_CLIENT_ID | required | Must be checked with `/providers`. |
-| PAYOS_API_KEY | required | Must be checked with `/providers`. |
-| PAYOS_CHECKSUM_KEY | required | Must be checked with `/providers`; never print the key. |
+- `PAYMENT_PACKAGES` remains unchanged.
+- PayOS package callbacks still use `pkg|`.
+- Provider callbacks still use `prov|`.
+- `/webhook/payos` still verifies PayOS checksum before crediting.
+- Paid orders still go through `process_payos_paid_order()`.
+- Duplicate protection still uses both `payos_orders.status=PAID` and `payos_processed`.
+- `/sales_ready` only returns `SALES READY` after admin records `payos_real_payment_test_status=PASS`.
 
-## Payment flow
+## Promo MVP
 
-| Step | Function/Table | Status |
-|---|---|---|
-| User starts deposit | `/naptien` and `pkg\|` callback | Must create order only, no Xu before payment. |
-| Order persistence | `payos_orders` | Must store order_code, amount, base_xu, user_id. |
-| Success confirmation | PayOS webhook or `/checkpayos` | Must verify payment status before adding Xu. |
-| Idempotency | `payos_processed` / processed-order guard | Must prevent duplicate credit. |
-| Credit event | `credit_events` | Must record deposit and promo bonus separately if applicable. |
+- Admin command: `/promo_seed_beta`.
+- User command: `/promo <code>`.
+- Seeded beta codes:
+  - `BETA50`: minimum 10k PayOS payment, one-time +50 Xu.
+  - `BETA30`: minimum 10k PayOS payment, one-time +30 Xu.
+- Promo activation creates a pending redemption for that user/code.
+- Promo bonus is applied inside the same DB transaction as PayOS paid order credit.
+- The same code cannot be applied twice to the same user.
+- Replay of the same paid order returns `already_paid` and does not add base Xu or promo Xu again.
 
-## Webhook safety
+## Expected Real Test
 
-| Check | Exists? | Notes |
-|---|---|---|
-| Checksum verification | manual/code verification required | Do not bypass checksum for production. |
-| Idempotency | manual/code verification required | Same order_code must not add Xu twice. |
-| Duplicate prevention | manual/code verification required | Includes promo bonus duplicate prevention. |
-| Credit event | required | Base deposit and promo bonus should be auditable. |
+For a user who has activated `BETA50`:
 
-## Promo flow
+- Package: `10k`
+- Base Xu: `100`
+- Promo Xu: `50`
+- Total expected credit: `150 Xu`
 
-| Step | Table/Function | Status |
-|---|---|---|
-| Pending promo | `user_promo_state` or equivalent | User runs `/promo BETA50` before `/naptien`. |
-| Promo code | `promo_codes` | `BETA50` should be active, percent_bonus 50, min 10000. |
-| Redemption | `promo_redemptions` | Pending at order creation, redeemed only after payment success. |
-| Bonus calculation | helper | 10k package = 100 base Xu; BETA50 = 50 bonus Xu. |
-| Duplicate prevention | order_code + redemption status | Bonus must not be added twice. |
+## Not Done By Codex
 
-## Blockers before real test
+- No real payment was performed locally.
+- No PayOS secret was inspected.
+- No PayOS package amount was changed.
+- No production DB was edited manually.
 
-1. `/providers` must show PayOS configured.
-2. `/backup_db` must run before payment test.
-3. `BETA50` must exist and be active.
-4. Real payment test should use a non-admin test user when possible.
-5. Admin must confirm PASS only after checking base Xu + bonus Xu + duplicate safety.
+## Required Admin Confirmation
+
+Only after a real 10k + BETA50 test passes, run:
+
+```text
+/mark_payos_test pass order=<order_code> note="Test 10k+BETA50 OK, user received 150 Xu"
+```

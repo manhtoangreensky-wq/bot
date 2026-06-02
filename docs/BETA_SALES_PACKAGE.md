@@ -20,6 +20,8 @@ Sell to the first 3-10 beta users to validate real demand, payment flow, and the
 - For testing the bot.
 - Goal: user confirms the bot works and understands Xu.
 - Suggested commands: `/profile`, `/naptien`, `/film`, `/help`.
+- Optional controlled promo: if admin sends a private code, user runs `/promo <code>` before paying.
+- `BETA50` test expectation: 10k package gives 100 Xu plus 50 Xu promo = 150 Xu total.
 
 ### Package 2 - Creator Start - 50k
 
@@ -49,3 +51,4 @@ Sell to the first 3-10 beta users to validate real demand, payment flow, and the
 - Clearer workflow.
 - Manual tracking of posts and results.
 - AI suggestions for improving hooks, captions, and CTA.
+- Promo codes are limited beta bonuses, not permanent package price changes.

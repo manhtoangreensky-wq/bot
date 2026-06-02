@@ -1,119 +1,58 @@
-# Promo Real Payment Test — TOAN AAS
+# Promo Real Payment Test - BETA50
+
+Date: 2026-06-02
 
 ## Goal
 
-Verify that a real PayOS payment with a promotion code adds the correct base Xu and bonus Xu without duplicate credit.
+Confirm that a real PayOS payment can credit the normal package Xu plus one promo bonus without duplicate credit.
 
-## BETA50 Expected Calculation
+## Setup
 
-Payment package:
-
-- 10k = 100 Xu
-
-Promo:
-
-- BETA50 = +50% Xu bonus
-
-Expected result:
-
-- Base Xu: 100
-- Bonus Xu: 50
-- Total Xu added: 150
-
-## Important Rules
-
-- Promo changes only the Xu credited to the user, not the VND amount paid through PayOS.
-- Promo bonus is added only after payment success.
-- Promo bonus must be idempotent; duplicate webhook or duplicate `/checkpayos` must not add the bonus again.
-- Promo is per-user limited according to the promo configuration.
-- Promo usage_count must increase only after successful redemption.
-- Never bypass PayOS checksum validation.
-
-## Admin Setup
-
-Run these commands as admin before the test:
+1. Admin runs:
 
 ```text
-/backup_db
-/providers
 /promo_seed_beta
-/promo_list
 ```
 
-Expected:
-
-- PayOS Client/API/Checksum are configured.
-- BETA50 exists and is active.
-- BETA50 is percent_bonus 50.
-- BETA50 min amount is at least 10k or lower.
-
-## User Test Flow
-
-Use a non-admin test user when possible:
+2. Use a non-admin test Telegram account.
+3. Test user runs:
 
 ```text
 /promo BETA50
-/naptien
-```
-
-Then choose the 10k package and pay the real QR.
-
-Expected before payment:
-
-- Order is created as pending.
-- User does not receive Xu yet.
-- Promo is pending for that order if the integration attaches promo to the order.
-
-Expected after payment:
-
-- User receives 100 base Xu.
-- User receives 50 promo bonus Xu.
-- Total increase for this payment is 150 Xu.
-- Deposit and promo bonus are auditable in credit events or equivalent logs.
-
-## Admin Verification
-
-After the payment:
-
-```text
-/profile
-/dashboard
-/checkpayos <order_code>
-/sales_ready
-```
-
-If all checks pass:
-
-```text
-/mark_payos_test pass order=<order_code> note="10k + BETA50 OK"
-```
-
-If the test fails:
-
-```text
-/mark_payos_test fail note="Describe the issue clearly"
-```
-
-## Duplicate Safety Check
-
-If safe to do so, trigger the order check again:
-
-```text
-/checkpayos <order_code>
 ```
 
 Expected:
 
-- Base Xu is not added again.
-- Promo bonus is not added again.
-- Revenue dashboard is not double counted.
+- Bot confirms the code is activated.
+- No Xu is added yet.
+- Promo waits for a valid PayOS payment.
 
-## Pass Criteria
+## Payment Test
 
-- [ ] QR checkout URL created.
-- [ ] User paid exactly 10k.
-- [ ] Base Xu +100 credited once.
-- [ ] BETA50 bonus +50 credited once.
-- [ ] Duplicate check does not double credit.
-- [ ] Admin marked PayOS test PASS.
-- [ ] `/sales_ready` shows SALES READY or the remaining blocker clearly.
+1. Test user runs `/naptien`.
+2. Test user selects package `10k`.
+3. Test user pays the PayOS QR.
+4. Wait for webhook.
+5. Test user runs `/profile`.
+
+Expected:
+
+- 10k package adds 100 Xu.
+- `BETA50` adds 50 Xu.
+- Total new credit from this payment is 150 Xu.
+- `credit_events` has one `payos_deposit` and one `promo_bonus`.
+- `promotion_redemptions.status` becomes `applied`.
+
+## Duplicate Test
+
+If safe to simulate replay:
+
+- Replay the same PayOS order/webhook or run `/checkpayos <order_code>` after webhook success.
+- Expected result: no new 100 Xu and no new 50 Xu.
+- `process_payos_paid_order()` should return `already_paid` or duplicate/ignored state.
+
+## Failure Conditions
+
+- User receives more than 150 Xu from one 10k+BETA50 payment.
+- User can apply `BETA50` twice.
+- `/sales_ready` shows `SALES READY` before admin marks the real test PASS.

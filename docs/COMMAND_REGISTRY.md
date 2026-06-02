@@ -2,7 +2,7 @@
 
 Date: 2026-06-02
 Source: `bot.py` local audit after Step 11
-Registered Telegram commands: 206
+Registered Telegram commands: 208
 Registered callback groups: 9
 
 ## User Commands
@@ -23,6 +23,7 @@ Registered callback groups: 9
 | `/thucong` | `cmd_thanhtoan_thucong` | YES | Manual bill fallback. |
 | `/beta_offer` | `cmd_beta_offer` | YES | Shows beta packages and customer workflow. |
 | `/goi_beta` | `cmd_beta_offer` | YES | Vietnamese alias for `/beta_offer`. |
+| `/promo` | `cmd_promo` | YES | Activates a private beta promo code; bonus applies after PayOS paid order. |
 | `/ref` | `cmd_ref` | YES | Referral link and stats. |
 | `/invite` | `cmd_invite` | YES | Alias to referral flow. |
 | `/gopy` | `cmd_gopy` | YES | User feedback. |
@@ -79,6 +80,7 @@ Registered callback groups: 9
 | `/costs` | `cmd_costs` | YES | YES | Cost control and paid-provider risk summary. |
 | `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
 | `/payos_test_plan` | `cmd_payos_test_plan` | YES | YES | Real PayOS 10k manual test checklist. |
+| `/promo_seed_beta` | `cmd_promo_seed_beta` | YES | YES | Seeds BETA50/BETA30 promo codes for controlled beta payment tests. |
 | `/mark_payos_test` | `cmd_mark_payos_test` | YES | YES | Admin records PayOS real test PASS/FAIL/NOT_TESTED; does not alter payments. |
 | `/pricing_admin` | `cmd_pricing_admin` | YES | YES | Admin-only formula/constants for Pricing Engine V2. |
 | `/runtime` | `cmd_runtime` | YES | System menu | Runtime/webhook diagnostics. |

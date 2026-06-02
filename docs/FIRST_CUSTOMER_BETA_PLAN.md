@@ -17,19 +17,22 @@ Date: 2026-06-02
 3. Ask the user to run `/profile`.
 4. Explain that new users receive 200 Xu, enough to try one `/film` Basic.
 5. Ask the user to run `/beta_offer`.
-6. Ask the user to generate first content with `/film`.
-7. Ask the user to top up 10k or 50k through `/naptien` if they want more runs.
-8. User posts manually.
-9. User records post with `/publish_done`.
-10. User records metrics with `/performance_add`.
-11. User runs `/growth_ai` after there is enough data.
-12. Ask for feedback.
+6. If using a controlled beta promo, send the code privately and ask the user to run `/promo <code>`.
+7. Ask the user to generate first content with `/film`.
+8. Ask the user to top up 10k or 50k through `/naptien` if they want more runs.
+9. User posts manually.
+10. User records post with `/publish_done`.
+11. User records metrics with `/performance_add`.
+12. User runs `/growth_ai` after there is enough data.
+13. Ask for feedback.
 
 ## Beta KPI
 
 - 3-10 test users.
 - At least 3 successful topups.
+- One 10k+BETA50 PayOS test credits exactly 150 Xu before wider beta.
 - No PayOS crediting errors.
+- No promo duplicate bonus.
 - At least 10 `/film` runs.
 - At least 3 `/growth_ai` runs.
 - At least 3 user feedback notes.
@@ -38,5 +41,6 @@ Date: 2026-06-02
 
 - PayOS credits wrong amount.
 - Duplicate webhook credits twice.
+- Promo code credits twice.
 - User sees admin-only commands.
 - Provider errors do not refund charged Xu.

@@ -24,7 +24,9 @@ Date: 2026-06-02
 
 - [ ] `/profile`.
 - [ ] `/naptien`.
+- [ ] `/promo BETA50` activates once for a beta test user after admin `/promo_seed_beta`.
 - [ ] PayOS 10k real payment test.
+- [ ] PayOS 10k + BETA50 real payment gives exactly 150 Xu.
 - [ ] Manual fallback.
 - [ ] Missing-Xu upsell.
 - [ ] Refund on paid API failure.
@@ -58,6 +60,7 @@ Date: 2026-06-02
 - [ ] `/costs`.
 - [ ] `/sales_ready`.
 - [ ] `/payos_test_plan`.
+- [ ] `/promo_seed_beta`.
 - [ ] `/mark_payos_test`.
 - [ ] `/backup_db`.
 - [ ] `/runtime`.
@@ -75,6 +78,7 @@ Date: 2026-06-02
 - `NOT READY`: DB, PayOS, AI, or `/film` is not ready.
 - `BETA READY`: core checks pass, but PayOS real payment still needs manual confirmation.
 - `SALES READY`: core checks pass and `/mark_payos_test pass ...` has recorded `payos_real_payment_test_status=PASS`.
+- Promo/BETA50 is visible in `/sales_ready` for admin review, but does not automatically mark sales ready.
 
 ## PayOS real test status
 

@@ -21,6 +21,10 @@
 - [ ] Duplicate webhook không cộng trùng.
 - [ ] Amount mismatch không cộng xu.
 - [ ] Missing checksum không tự cộng xu.
+- [ ] `/promo_seed_beta` admin tạo BETA50/BETA30.
+- [ ] `/promo BETA50` user kích hoạt trước khi nạp.
+- [ ] 10k + BETA50 cộng đúng 150 Xu.
+- [ ] Promo không cộng bonus trùng khi replay cùng order.
 - [ ] Manual fallback hoạt động.
 - [ ] Pending bill duyệt/từ chối đúng.
 
@@ -107,6 +111,7 @@
 - [ ] `/costs`
 - [ ] `/sales_ready`
 - [ ] `/payos_test_plan`
+- [ ] `/promo_seed_beta`
 - [ ] `/pending`
 - [ ] `/duyet`
 - [ ] `/tuchoi`

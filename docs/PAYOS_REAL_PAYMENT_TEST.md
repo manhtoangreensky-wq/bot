@@ -6,7 +6,7 @@ Date: 2026-06-02
 
 Run one real low-value PayOS payment before selling to customers.
 
-This test now includes two paths:
+This test includes two paths:
 
 1. PayOS 10k without promo.
 2. PayOS 10k with BETA50 promo.
@@ -17,8 +17,8 @@ This test now includes two paths:
 - `/providers` shows PayOS Client ID, API Key, and Checksum as `configured`.
 - `/backup_db` has been run successfully.
 - `/naptien` shows all payment packages.
-- `/promo_seed_beta` or `/promo_create` can create BETA50.
-- Admin is online to inspect `/dashboard`, `/pending`, `/promo_list`, and user messages.
+- `/promo_seed_beta` can create BETA50 and BETA30.
+- Admin is online to inspect `/dashboard`, `/pending`, and user messages.
 
 ## Test case 1 - Create QR
 
@@ -45,8 +45,8 @@ Expected:
 
 - Test user receives exactly 100 Xu.
 - Order status becomes `PAID`.
-- `payos_processed` or the equivalent idempotency guard contains the order code.
-- `credit_events` or equivalent audit log contains the PayOS deposit.
+- `payos_processed` contains the order code.
+- `credit_events` contains the PayOS deposit.
 - Dashboard revenue increases once.
 
 ## Test case 3 - Real payment with BETA50 promo
@@ -57,7 +57,6 @@ Admin setup:
 /backup_db
 /providers
 /promo_seed_beta
-/promo_list
 ```
 
 User flow:
@@ -75,8 +74,8 @@ Expected:
 - BETA50 bonus Xu: 50.
 - Total Xu added: 150.
 - Promo bonus is added only after payment success.
-- Promo bonus is auditable separately from the base deposit when possible.
-- Promo usage count increases once.
+- `credit_events` contains one `payos_deposit` and one `promo_bonus`.
+- `promotion_redemptions.status` becomes `applied`.
 
 ## Test case 4 - Duplicate protection
 
@@ -122,7 +121,7 @@ Do not run this on production while selling. Code expectation:
 After a successful real 10k + BETA50 test, run:
 
 ```text
-/mark_payos_test pass order=<order_code> note="10k + BETA50 OK"
+/mark_payos_test pass order=<order_code> note="Test 10k+BETA50 OK, user received 150 Xu"
 ```
 
 If the test fails, run:
