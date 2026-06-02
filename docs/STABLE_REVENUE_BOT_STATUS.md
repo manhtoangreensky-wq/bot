@@ -42,12 +42,15 @@
 
 ## Promo / Beta Codes
 
-- `/promo_seed_beta`: admin-only, seeds `BETA50` and `BETA30`.
-- `/promo <code>`: user-facing activation for private beta codes.
-- `BETA50`: 10k PayOS minimum, one-time +50 Xu.
-- Expected 10k+BETA50 result: 100 Xu package + 50 Xu promo = 150 Xu.
-- Promo bonus is applied inside `process_payos_paid_order()` transaction.
+- `/promo_seed_policy`: admin-only, seeds Promotion Policy V2.1.
+- `/promo_seed_beta`: compatibility alias for `/promo_seed_policy`.
+- `/promo <code>` and `/magiamgia <code>`: user-facing one-code pending promo activation.
+- `/khuyenmai`, `/uudai`, `/promos`: user-facing promo guide and recommended use order.
+- Public codes: `FIRST30`, `SECOND15`, `MONTHLY20`, `WEEKLY10`, `DAILY5`.
+- `BETA50`: beta/internal limited, not broad public offer.
+- Promo bonus is applied inside `process_payos_paid_order()` transaction after PayOS success.
 - Duplicate paid order replay does not apply base Xu or promo Xu twice.
+- One order uses one promo only; new pending code replaces the previous pending code.
 - Real PayOS promo test still requires admin execution on Railway.
 
 ## Credits

@@ -159,32 +159,34 @@ def test_payos_signature_verification(monkeypatch):
     assert not bot.verify_payos_signature(data, "bad-signature")
 
 
-def test_payos_paid_order_applies_beta50_once(monkeypatch):
+def test_payos_paid_order_applies_first30_once(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setattr(bot, "DB_FILE", db_path)
     monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
     try:
         bot.init_db()
-        bot.seed_beta_promotions()
+        bot.seed_promotion_policy()
         user_id = "promo-user"
         initial_credits, _, _ = bot.get_user(user_id)
 
-        ok, status, info = bot.activate_promo_for_user(user_id, "BETA50")
+        ok, status, info = bot.activate_promo_for_user(user_id, "FIRST30")
         assert ok is True
         assert status == "activated"
-        assert info["bonus_xu"] == 50
+        assert info["promo_type"] == "percent_bonus"
+        assert info["value"] == 30
 
-        bot.create_order("123456789", user_id, 10000, 100)
-        processed, desc, paid_info = bot.process_payos_paid_order("123456789", 10000)
+        bot.create_order("123456789", user_id, 20000, 200)
+        processed, desc, paid_info = bot.process_payos_paid_order("123456789", 20000)
         assert processed is True
         assert desc == "success"
-        assert paid_info["promo_bonus"] == 50
+        assert paid_info["promo_bonus"] == 60
+        assert paid_info["promo_code"] == "FIRST30"
 
         credits_after_paid, _, _ = bot.get_user(user_id)
-        assert credits_after_paid == initial_credits + 150
+        assert credits_after_paid == initial_credits + 260
 
-        processed, desc, _paid_info = bot.process_payos_paid_order("123456789", 10000)
+        processed, desc, _paid_info = bot.process_payos_paid_order("123456789", 20000)
         assert processed is False
         assert desc == "already_paid"
         credits_after_replay, _, _ = bot.get_user(user_id)

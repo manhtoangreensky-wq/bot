@@ -340,11 +340,85 @@ TRIAL_CREDITS     = 200
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
 PROMO_BETA50_CODE  = "BETA50"
-PROMO_BETA30_CODE  = "BETA30"
-PROMO_BETA50_BONUS_XU = 50
-PROMO_BETA30_BONUS_XU = 30
-PROMO_BETA_MIN_AMOUNT = 10000
-PROMO_BETA_MAX_USES = 50
+PROMO_STACKING_ALLOWED = False
+PROMO_DEFAULT_EXPIRY_HOURS = 24
+PROMO_FIRST_TOPUP_CODE = "FIRST30"
+PROMO_SECOND_TOPUP_CODE = "SECOND15"
+PROMO_WEEKLY_CODE = "WEEKLY10"
+PROMO_MONTHLY_CODE = "MONTHLY20"
+PROMO_DAILY_CODE = "DAILY5"
+PROMO_BETA_LIMITED_CODE = PROMO_BETA50_CODE
+PROMO_PUBLIC_MAX_PERCENT = 30
+PROMO_INTERNAL_MAX_PERCENT = 50
+PROMO_POLICY_CODES = [
+    {
+        "code": PROMO_FIRST_TOPUP_CODE,
+        "name": "First top-up bonus",
+        "promo_type": "percent_bonus",
+        "value": 30,
+        "usage_limit": 1000,
+        "per_user_limit": 1,
+        "min_amount_vnd": 20000,
+        "max_bonus_xu": 1500,
+        "note": "Nạp lần đầu +30% Xu",
+    },
+    {
+        "code": PROMO_SECOND_TOPUP_CODE,
+        "name": "Second top-up bonus",
+        "promo_type": "percent_bonus",
+        "value": 15,
+        "usage_limit": 1000,
+        "per_user_limit": 1,
+        "min_amount_vnd": 50000,
+        "max_bonus_xu": 800,
+        "note": "Nạp lần 2 +15% Xu",
+    },
+    {
+        "code": PROMO_WEEKLY_CODE,
+        "name": "Weekly bonus",
+        "promo_type": "percent_bonus",
+        "value": 10,
+        "usage_limit": 10000,
+        "per_user_limit": 1,
+        "min_amount_vnd": 50000,
+        "max_bonus_xu": 500,
+        "note": "Ưu đãi tuần +10% Xu",
+    },
+    {
+        "code": PROMO_MONTHLY_CODE,
+        "name": "Monthly large-package bonus",
+        "promo_type": "percent_bonus",
+        "value": 20,
+        "usage_limit": 10000,
+        "per_user_limit": 1,
+        "min_amount_vnd": 100000,
+        "max_bonus_xu": 1500,
+        "note": "Ưu đãi tháng +20% Xu cho gói lớn",
+    },
+    {
+        "code": PROMO_DAILY_CODE,
+        "name": "Daily light bonus",
+        "promo_type": "percent_bonus",
+        "value": 5,
+        "usage_limit": 10000,
+        "per_user_limit": 1,
+        "min_amount_vnd": 20000,
+        "max_bonus_xu": 150,
+        "note": "Ưu đãi ngày +5% Xu",
+    },
+    {
+        "code": PROMO_BETA_LIMITED_CODE,
+        "name": "Beta/internal limited bonus",
+        "promo_type": "percent_bonus",
+        "value": 50,
+        "usage_limit": 20,
+        "per_user_limit": 1,
+        "min_amount_vnd": 50000,
+        "max_bonus_xu": 1000,
+        "note": "Beta/internal limited +50% Xu",
+    },
+]
+PROMO_LEGACY_DISABLE_CODES = ("SECOND20", "WEEKLY15", "DAILY10")
 
 # Pricing Engine V2: default prices are intentionally high enough to cover
 # provider cost, server cost, support, refund risk, and future promotions.
@@ -520,6 +594,12 @@ def init_db():
         created_at TEXT,
         applied_at TEXT,
         UNIQUE(code, user_id)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_promo_state (
+        user_id TEXT PRIMARY KEY,
+        code TEXT,
+        set_at TEXT,
+        expires_at TEXT
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS campaigns (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -872,7 +952,10 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_published_posts_platform ON published_posts(platform)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_perf_post_id ON manual_performance_events(published_post_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_growth_user_id ON growth_recommendations(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_promotion_codes_status ON promotion_codes(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_promo_redemptions_user_status ON promotion_redemptions(user_id, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_promo_redemptions_order ON promotion_redemptions(order_code)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_promo_state_user ON user_promo_state(user_id)")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -887,6 +970,33 @@ def init_db():
     ]:
         try:
             c.execute(f"ALTER TABLE payos_orders ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    for col, col_type in [
+        ("name", "TEXT"),
+        ("promo_type", "TEXT DEFAULT 'fixed_bonus_xu'"),
+        ("value", "INTEGER DEFAULT 0"),
+        ("min_amount_vnd", "INTEGER DEFAULT 0"),
+        ("max_bonus_xu", "INTEGER DEFAULT 0"),
+        ("usage_limit", "INTEGER DEFAULT 0"),
+        ("usage_count", "INTEGER DEFAULT 0"),
+        ("per_user_limit", "INTEGER DEFAULT 1"),
+        ("starts_at", "TEXT"),
+        ("ends_at", "TEXT"),
+        ("created_by", "TEXT"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE promotion_codes ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    for col, col_type in [
+        ("amount_vnd", "INTEGER DEFAULT 0"),
+        ("base_xu", "INTEGER DEFAULT 0"),
+        ("redeemed_at", "TEXT"),
+        ("note", "TEXT"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE promotion_redemptions ADD COLUMN {col} {col_type}")
         except Exception:
             pass
     for col, col_type in [
@@ -1455,49 +1565,34 @@ def award_referral_bonus_if_needed(conn, referred_user_id) -> int:
     return REFERRAL_BONUS_XU
 
 def normalize_promo_code(code: str) -> str:
-    return re.sub(r"[^A-Z0-9_-]", "", str(code or "").upper())[:40]
+    return re.sub(r"[^A-Z0-9_-]", "", str(code or "").strip().upper())[:32]
 
-def seed_beta_promotions(conn=None) -> dict:
-    own_conn = conn is None
-    if own_conn:
-        conn = db_connect()
-    c = conn.cursor()
-    now = now_text()
-    rows = [
-        (
-            PROMO_BETA50_CODE,
-            PROMO_BETA50_BONUS_XU,
-            PROMO_BETA_MIN_AMOUNT,
-            PROMO_BETA_MAX_USES,
-            "Beta launch: nạp tối thiểu 10k nhận thêm 50 Xu một lần.",
-        ),
-        (
-            PROMO_BETA30_CODE,
-            PROMO_BETA30_BONUS_XU,
-            PROMO_BETA_MIN_AMOUNT,
-            PROMO_BETA_MAX_USES,
-            "Beta backup: nạp tối thiểu 10k nhận thêm 30 Xu một lần.",
-        ),
-    ]
-    for code, bonus_xu, min_amount, max_uses, note in rows:
-        c.execute(
-            """INSERT INTO promotion_codes
-            (code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(code) DO UPDATE SET
-                bonus_xu=excluded.bonus_xu,
-                discount_percent=excluded.discount_percent,
-                max_uses=excluded.max_uses,
-                min_amount=excluded.min_amount,
-                status='active',
-                note=excluded.note,
-                updated_at=excluded.updated_at""",
-            (code, bonus_xu, 0, max_uses, 0, min_amount, "active", note, now, now),
-        )
-    if own_conn:
-        conn.commit()
-        conn.close()
-    return {code: bonus_xu for code, bonus_xu, *_ in rows}
+def promo_policy_by_code(code: str) -> dict:
+    norm = normalize_promo_code(code)
+    for item in PROMO_POLICY_CODES:
+        if item["code"] == norm:
+            return dict(item)
+    return {}
+
+def promo_public_label(promo: dict) -> str:
+    promo_type = promo.get("promo_type") or "fixed_bonus_xu"
+    value = int(promo.get("value") or promo.get("bonus_xu") or 0)
+    if promo_type == "percent_bonus":
+        return f"+{value}% Xu"
+    if promo_type == "fixed_bonus_xu":
+        return f"+{value} Xu"
+    if promo_type == "service_discount_future":
+        return "ưu đãi dịch vụ tương lai"
+    return f"+{value} Xu"
+
+def promo_min_amount(promo: dict) -> int:
+    return int(promo.get("min_amount_vnd") or promo.get("min_amount") or 0)
+
+def promo_usage_limit(promo: dict) -> int:
+    return int(promo.get("usage_limit") or promo.get("max_uses") or 0)
+
+def promo_usage_count(promo: dict) -> int:
+    return max(int(promo.get("usage_count") or 0), int(promo.get("used_count") or 0))
 
 def get_promo_code(conn, code: str):
     c = conn.cursor()
@@ -1508,6 +1603,256 @@ def get_promo_code(conn, code: str):
     )
     return c.fetchone()
 
+def get_promo_code_dict(conn, code: str) -> dict:
+    c = conn.cursor()
+    c.execute(
+        """SELECT code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note,
+                  name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count,
+                  per_user_limit, starts_at, ends_at, created_at, updated_at
+        FROM promotion_codes WHERE code=?""",
+        (normalize_promo_code(code),),
+    )
+    row = c.fetchone()
+    if not row:
+        return {}
+    keys = [
+        "code", "bonus_xu", "discount_percent", "max_uses", "used_count", "min_amount", "status", "note",
+        "name", "promo_type", "value", "min_amount_vnd", "max_bonus_xu", "usage_limit", "usage_count",
+        "per_user_limit", "starts_at", "ends_at", "created_at", "updated_at",
+    ]
+    promo = dict(zip(keys, row))
+    if not promo.get("promo_type"):
+        promo["promo_type"] = "percent_bonus" if int(promo.get("discount_percent") or 0) > 0 else "fixed_bonus_xu"
+    if not int(promo.get("value") or 0):
+        promo["value"] = int(promo.get("discount_percent") or promo.get("bonus_xu") or 0)
+    if not int(promo.get("min_amount_vnd") or 0):
+        promo["min_amount_vnd"] = int(promo.get("min_amount") or 0)
+    if not int(promo.get("usage_limit") or 0):
+        promo["usage_limit"] = int(promo.get("max_uses") or 0)
+    if not int(promo.get("usage_count") or 0):
+        promo["usage_count"] = int(promo.get("used_count") or 0)
+    promo["per_user_limit"] = max(1, int(promo.get("per_user_limit") or 1))
+    return promo
+
+def seed_promotion_policy(conn=None) -> dict:
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    c = conn.cursor()
+    now = now_text()
+    seeded = {}
+    for item in PROMO_POLICY_CODES:
+        code = normalize_promo_code(item["code"])
+        promo_type = item["promo_type"]
+        value = int(item["value"])
+        usage_limit = int(item["usage_limit"])
+        min_amount_vnd = int(item["min_amount_vnd"])
+        max_bonus_xu = int(item["max_bonus_xu"])
+        per_user_limit = int(item["per_user_limit"])
+        bonus_xu = value if promo_type == "fixed_bonus_xu" else 0
+        discount_percent = value if promo_type == "percent_bonus" else 0
+        c.execute(
+            """INSERT INTO promotion_codes
+            (code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note, created_at, updated_at,
+             name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count, per_user_limit, created_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                bonus_xu=excluded.bonus_xu,
+                discount_percent=excluded.discount_percent,
+                max_uses=excluded.max_uses,
+                min_amount=excluded.min_amount,
+                status='active',
+                note=excluded.note,
+                updated_at=excluded.updated_at,
+                name=excluded.name,
+                promo_type=excluded.promo_type,
+                value=excluded.value,
+                min_amount_vnd=excluded.min_amount_vnd,
+                max_bonus_xu=excluded.max_bonus_xu,
+                usage_limit=excluded.usage_limit,
+                per_user_limit=excluded.per_user_limit""",
+            (
+                code, bonus_xu, discount_percent, usage_limit, 0, min_amount_vnd, "active", item["note"], now, now,
+                item["name"], promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, 0, per_user_limit, ADMIN_ID,
+            ),
+        )
+        seeded[code] = item
+    for code in PROMO_LEGACY_DISABLE_CODES:
+        c.execute(
+            "UPDATE promotion_codes SET status='disabled', updated_at=? WHERE code=?",
+            (now, normalize_promo_code(code)),
+        )
+    if own_conn:
+        conn.commit()
+        conn.close()
+    return seeded
+
+def seed_beta_promotions(conn=None) -> dict:
+    return seed_promotion_policy(conn)
+
+def user_paid_payos_count(conn, user_id) -> int:
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM payos_orders WHERE user_id=? AND status=?", (str(user_id), PAYOS_STATUS_PAID))
+    return int((c.fetchone() or [0])[0] or 0)
+
+def count_user_promo_usage(conn, user_id, code: str) -> int:
+    c = conn.cursor()
+    c.execute(
+        """SELECT COUNT(*) FROM promotion_redemptions
+        WHERE user_id=? AND code=? AND status IN ('applied','redeemed','success')""",
+        (str(user_id), normalize_promo_code(code)),
+    )
+    return int((c.fetchone() or [0])[0] or 0)
+
+def promo_topup_sequence_allowed(conn, user_id, code: str, after_paid=False) -> tuple[bool, str]:
+    paid_count = user_paid_payos_count(conn, user_id)
+    code = normalize_promo_code(code)
+    if code == PROMO_FIRST_TOPUP_CODE:
+        if paid_count <= (1 if after_paid else 0):
+            return True, ""
+        return False, "first_topup_only"
+    if code == PROMO_SECOND_TOPUP_CODE:
+        expected = 2 if after_paid else 1
+        if paid_count == expected:
+            return True, ""
+        return False, "second_topup_only"
+    return True, ""
+
+def validate_promo_code(user_id, code: str, amount_vnd=0, conn=None, after_paid=False) -> tuple[bool, dict, str]:
+    norm_code = normalize_promo_code(code)
+    if not norm_code:
+        return False, {}, "missing_code"
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    try:
+        promo = get_promo_code_dict(conn, norm_code)
+        if not promo:
+            return False, {"code": norm_code}, "not_found"
+        status = str(promo.get("status") or "").lower()
+        if status != "active":
+            return False, promo, "inactive"
+        now = now_text()
+        if promo.get("starts_at") and str(promo["starts_at"]) > now:
+            return False, promo, "not_started"
+        if promo.get("ends_at") and str(promo["ends_at"]) < now:
+            return False, promo, "expired"
+        limit = promo_usage_limit(promo)
+        if limit > 0 and promo_usage_count(promo) >= limit:
+            return False, promo, "sold_out"
+        per_user_limit = max(1, int(promo.get("per_user_limit") or 1))
+        if count_user_promo_usage(conn, user_id, norm_code) >= per_user_limit:
+            return False, promo, "already_applied"
+        if int(amount_vnd or 0) > 0 and int(amount_vnd or 0) < promo_min_amount(promo):
+            return False, promo, "min_amount"
+        ok_sequence, sequence_reason = promo_topup_sequence_allowed(conn, user_id, norm_code, after_paid=after_paid)
+        if not ok_sequence:
+            return False, promo, sequence_reason
+        return True, promo, "ok"
+    finally:
+        if own_conn:
+            conn.close()
+
+def calculate_promo_bonus(promo: dict, base_xu: int, amount_vnd: int = 0) -> int:
+    promo_type = promo.get("promo_type") or "fixed_bonus_xu"
+    value = int(promo.get("value") or promo.get("bonus_xu") or 0)
+    if promo_type == "percent_bonus":
+        bonus = math.floor(int(base_xu or 0) * value / 100)
+    elif promo_type == "fixed_bonus_xu":
+        bonus = value
+    else:
+        bonus = 0
+    max_bonus = int(promo.get("max_bonus_xu") or 0)
+    if max_bonus > 0:
+        bonus = min(bonus, max_bonus)
+    return max(0, int(bonus or 0))
+
+def get_user_pending_promo_raw(conn, user_id) -> dict:
+    c = conn.cursor()
+    c.execute("SELECT code, set_at, expires_at FROM user_promo_state WHERE user_id=?", (str(user_id),))
+    row = c.fetchone()
+    if not row:
+        return {}
+    return {"code": row[0], "set_at": row[1] or "", "expires_at": row[2] or ""}
+
+def clear_user_pending_promo(user_id, conn=None):
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    conn.execute("DELETE FROM user_promo_state WHERE user_id=?", (str(user_id),))
+    if own_conn:
+        conn.commit()
+        conn.close()
+
+def get_user_pending_promo(user_id, conn=None) -> dict:
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    try:
+        state = get_user_pending_promo_raw(conn, user_id)
+        if not state:
+            return {}
+        if state.get("expires_at") and state["expires_at"] < now_text():
+            clear_user_pending_promo(user_id, conn)
+            return {}
+        ok, promo, reason = validate_promo_code(user_id, state["code"], conn=conn)
+        if not ok:
+            clear_user_pending_promo(user_id, conn)
+            return {"code": normalize_promo_code(state["code"]), "status": reason}
+        return {**state, "promo": promo, "status": "pending"}
+    finally:
+        if own_conn:
+            conn.commit()
+            conn.close()
+
+def set_user_pending_promo(user_id, code: str, conn=None) -> dict:
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    c = conn.cursor()
+    norm_code = normalize_promo_code(code)
+    old_state = get_user_pending_promo_raw(conn, user_id)
+    expires_at = (datetime.now() + timedelta(hours=PROMO_DEFAULT_EXPIRY_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
+    c.execute(
+        """INSERT INTO user_promo_state (user_id, code, set_at, expires_at)
+        VALUES (?,?,?,?)
+        ON CONFLICT(user_id) DO UPDATE SET code=excluded.code, set_at=excluded.set_at, expires_at=excluded.expires_at""",
+        (str(user_id), norm_code, now_text(), expires_at),
+    )
+    if old_state.get("code") and old_state.get("code") != norm_code:
+        c.execute(
+            "UPDATE promotion_redemptions SET status='replaced', note=? WHERE user_id=? AND status='pending' AND code<>?",
+            (f"Replaced by {norm_code}", str(user_id), norm_code),
+        )
+    if own_conn:
+        conn.commit()
+        conn.close()
+    return {"old_code": old_state.get("code") or "", "new_code": norm_code, "expires_at": expires_at}
+
+def ensure_pending_promo_redemption(conn, user_id, code: str, order_code="", amount_vnd=0, base_xu=0, bonus_xu=0) -> int:
+    c = conn.cursor()
+    norm_code = normalize_promo_code(code)
+    c.execute("SELECT id, status FROM promotion_redemptions WHERE code=? AND user_id=?", (norm_code, str(user_id)))
+    row = c.fetchone()
+    if row:
+        redemption_id, status = row
+        if str(status or "").lower() in {"applied", "redeemed", "success"}:
+            return int(redemption_id)
+        c.execute(
+            """UPDATE promotion_redemptions
+            SET status='pending', order_code=?, bonus_xu=?, amount_vnd=?, base_xu=?, created_at=?, applied_at='', redeemed_at='', note=''
+            WHERE id=?""",
+            (str(order_code or ""), int(bonus_xu or 0), int(amount_vnd or 0), int(base_xu or 0), now_text(), redemption_id),
+        )
+        return int(redemption_id)
+    c.execute(
+        """INSERT INTO promotion_redemptions
+        (code, user_id, order_code, bonus_xu, status, created_at, applied_at, amount_vnd, base_xu, redeemed_at, note)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (norm_code, str(user_id), str(order_code or ""), int(bonus_xu or 0), "pending", now_text(), "", int(amount_vnd or 0), int(base_xu or 0), "", ""),
+    )
+    return int(c.lastrowid)
+
 def activate_promo_for_user(user_id, code: str) -> tuple[bool, str, dict]:
     norm_code = normalize_promo_code(code)
     if not norm_code:
@@ -1517,59 +1862,32 @@ def activate_promo_for_user(user_id, code: str) -> tuple[bool, str, dict]:
     c = conn.cursor()
     try:
         c.execute("BEGIN IMMEDIATE")
-        row = get_promo_code(conn, norm_code)
-        if not row:
+        ok, promo, reason = validate_promo_code(user_id, norm_code, conn=conn)
+        info = dict(promo or {"code": norm_code})
+        info["bonus_xu"] = calculate_promo_bonus(info, 0, 0) if info else 0
+        if not ok:
             conn.rollback()
-            return False, "not_found", {"code": norm_code}
-        code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note = row
-        info = {
-            "code": code,
-            "bonus_xu": int(bonus_xu or 0),
-            "discount_percent": int(discount_percent or 0),
-            "max_uses": int(max_uses or 0),
-            "used_count": int(used_count or 0),
-            "min_amount": int(min_amount or 0),
-            "status": status,
-            "note": note or "",
-        }
-        if str(status or "").lower() != "active":
-            conn.rollback()
-            return False, "inactive", info
-        if info["max_uses"] > 0 and info["used_count"] >= info["max_uses"]:
-            conn.rollback()
-            return False, "sold_out", info
-
-        c.execute(
-            "SELECT status, order_code, bonus_xu FROM promotion_redemptions WHERE code=? AND user_id=?",
-            (code, str(user_id)),
-        )
-        existing = c.fetchone()
-        if existing:
-            conn.rollback()
-            existing_status, existing_order, existing_bonus = existing
-            info.update({"redemption_status": existing_status, "order_code": existing_order or "", "applied_bonus_xu": int(existing_bonus or 0)})
-            if str(existing_status or "").lower() == "applied":
-                return False, "already_applied", info
-            return True, "already_pending", info
-
-        c.execute(
-            """INSERT INTO promotion_redemptions
-            (code, user_id, order_code, bonus_xu, status, created_at, applied_at)
-            VALUES (?,?,?,?,?,?,?)""",
-            (code, str(user_id), "", 0, "pending", now_text(), ""),
-        )
+            return False, reason, info
+        current = get_user_pending_promo_raw(conn, user_id)
+        state = set_user_pending_promo(user_id, norm_code, conn)
+        ensure_pending_promo_redemption(conn, user_id, norm_code)
         record_audit(
             conn,
             user_id,
             "user",
             "promo.activated",
             "promotion_code",
-            code,
-            before=None,
-            after={"user_id": str(user_id), "status": "pending"},
-            note="User activated promo code",
+            norm_code,
+            before={"pending_code": current.get("code") or ""},
+            after={"user_id": str(user_id), "pending_code": norm_code, "expires_at": state["expires_at"]},
+            note="User activated promo code; one pending promo only",
         )
         conn.commit()
+        if current.get("code") == norm_code:
+            return True, "already_pending", info
+        if current.get("code"):
+            info["replaced_code"] = current.get("code")
+            return True, "replaced", info
         return True, "activated", info
     except Exception:
         conn.rollback()
@@ -1581,9 +1899,11 @@ def get_user_promo_summary(user_id) -> dict:
     conn = db_connect()
     c = conn.cursor()
     try:
+        pending = get_user_pending_promo(user_id, conn)
         c.execute(
-            """SELECT r.code, r.status, r.order_code, r.bonus_xu, r.created_at, r.applied_at,
-                      p.min_amount, p.max_uses, p.used_count
+            """SELECT r.code, r.status, r.order_code, r.bonus_xu, r.created_at, COALESCE(r.redeemed_at, r.applied_at),
+                      COALESCE(p.min_amount_vnd, p.min_amount), COALESCE(p.usage_limit, p.max_uses),
+                      COALESCE(p.usage_count, p.used_count), p.promo_type, p.value, p.max_bonus_xu, p.note
             FROM promotion_redemptions r
             LEFT JOIN promotion_codes p ON p.code=r.code
             WHERE r.user_id=?
@@ -1592,61 +1912,110 @@ def get_user_promo_summary(user_id) -> dict:
             (str(user_id),),
         )
         rows = c.fetchall()
-        return {"rows": rows}
+        return {"rows": rows, "pending": pending}
     finally:
         conn.close()
 
-def apply_promo_bonus_for_paid_order(conn, user_id, order_code: str, amount_vnd: int) -> int:
+def attach_pending_promo_to_order(user_id, order_code: str, amount_vnd: int, base_xu: int) -> dict:
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        state = get_user_pending_promo(user_id, conn)
+        if not state or not state.get("promo"):
+            conn.commit()
+            return {"attached": False, "reason": "no_pending"}
+        promo = state["promo"]
+        ok, promo, reason = validate_promo_code(user_id, promo["code"], amount_vnd=amount_vnd, conn=conn)
+        if not ok:
+            conn.commit()
+            return {"attached": False, "code": normalize_promo_code(state.get("code")), "reason": reason}
+        c.execute(
+            "SELECT id FROM promotion_redemptions WHERE order_code=? AND status IN ('pending','applied','redeemed','success') LIMIT 1",
+            (str(order_code),),
+        )
+        if c.fetchone():
+            conn.commit()
+            return {"attached": False, "code": promo["code"], "reason": "order_already_has_promo"}
+        bonus = calculate_promo_bonus(promo, base_xu, amount_vnd)
+        c.execute(
+            "UPDATE promotion_redemptions SET status='replaced', note=? WHERE user_id=? AND status='pending' AND code<>?",
+            (f"Order {order_code} selected {promo['code']}", str(user_id), promo["code"]),
+        )
+        redemption_id = ensure_pending_promo_redemption(
+            conn, user_id, promo["code"], order_code=order_code, amount_vnd=amount_vnd, base_xu=base_xu, bonus_xu=bonus
+        )
+        conn.commit()
+        return {"attached": True, "id": redemption_id, "code": promo["code"], "bonus_xu": bonus, "promo": promo}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def redeem_promo_for_order(conn, user_id, order_code: str, amount_vnd: int, base_xu: int) -> dict:
     c = conn.cursor()
     c.execute(
-        """SELECT r.id, r.code, p.bonus_xu, p.min_amount, p.max_uses, p.used_count, p.status
-        FROM promotion_redemptions r
-        JOIN promotion_codes p ON p.code=r.code
-        WHERE r.user_id=? AND r.status='pending'
-        ORDER BY r.created_at ASC
+        """SELECT id, code, bonus_xu FROM promotion_redemptions
+        WHERE user_id=? AND order_code=? AND status='pending'
+        ORDER BY created_at ASC
         LIMIT 1""",
-        (str(user_id),),
+        (str(user_id), str(order_code)),
     )
     row = c.fetchone()
     if not row:
-        return 0
-
-    redemption_id, code, bonus_xu, min_amount, max_uses, used_count, promo_status = row
-    if str(promo_status or "").lower() != "active":
         c.execute(
-            "UPDATE promotion_redemptions SET status=?, order_code=?, applied_at=? WHERE id=? AND status='pending'",
-            ("inactive", str(order_code), now_text(), redemption_id),
+            """SELECT id, code, bonus_xu FROM promotion_redemptions
+            WHERE user_id=? AND (order_code='' OR order_code IS NULL) AND status='pending'
+            ORDER BY created_at ASC
+            LIMIT 1""",
+            (str(user_id),),
         )
-        return 0
-    if int(max_uses or 0) > 0 and int(used_count or 0) >= int(max_uses or 0):
-        c.execute(
-            "UPDATE promotion_redemptions SET status=?, order_code=?, applied_at=? WHERE id=? AND status='pending'",
-            ("sold_out", str(order_code), now_text(), redemption_id),
-        )
-        return 0
-    if int(amount_vnd or 0) < int(min_amount or 0):
-        return 0
+        row = c.fetchone()
+    if not row:
+        return {"bonus_xu": 0, "code": "", "status": "none"}
 
-    bonus = max(0, int(bonus_xu or 0))
-    if bonus <= 0:
+    redemption_id, code, stored_bonus = row
+    ok, promo, reason = validate_promo_code(user_id, code, amount_vnd=amount_vnd, conn=conn, after_paid=True)
+    if not ok:
         c.execute(
-            "UPDATE promotion_redemptions SET status=?, order_code=?, applied_at=? WHERE id=? AND status='pending'",
-            ("applied", str(order_code), now_text(), redemption_id),
+            """UPDATE promotion_redemptions
+            SET status=?, order_code=?, amount_vnd=?, base_xu=?, applied_at=?, redeemed_at=?, note=?
+            WHERE id=? AND status='pending'""",
+            (reason, str(order_code), int(amount_vnd or 0), int(base_xu or 0), now_text(), now_text(), reason, redemption_id),
         )
-        return 0
+        if get_user_pending_promo_raw(conn, user_id).get("code") == normalize_promo_code(code):
+            clear_user_pending_promo(user_id, conn)
+        return {"bonus_xu": 0, "code": normalize_promo_code(code), "status": reason}
 
-    c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (bonus, str(user_id)))
+    bonus = calculate_promo_bonus(promo, base_xu, amount_vnd)
+    if int(stored_bonus or 0) > 0:
+        bonus = int(stored_bonus or 0)
+    if bonus > 0:
+        c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (bonus, str(user_id)))
+        record_credit_event(conn, user_id, bonus, "promo_bonus", f"{promo['code']}:{order_code}", f"Promo {promo['code']} thưởng {bonus} Xu")
     c.execute(
         """UPDATE promotion_redemptions
-        SET status='applied', order_code=?, bonus_xu=?, applied_at=?
+        SET status='applied', order_code=?, bonus_xu=?, amount_vnd=?, base_xu=?, applied_at=?, redeemed_at=?, note=?
         WHERE id=? AND status='pending'""",
-        (str(order_code), bonus, now_text(), redemption_id),
+        (str(order_code), bonus, int(amount_vnd or 0), int(base_xu or 0), now_text(), now_text(), "Redeemed after PayOS success", redemption_id),
     )
     c.execute(
-        "UPDATE promotion_codes SET used_count = used_count + 1, updated_at=? WHERE code=?",
-        (now_text(), code),
+        """UPDATE promotion_redemptions
+        SET status='skipped', note=?
+        WHERE order_code=? AND status='pending' AND id<>?""",
+        ("One order only uses one promo", str(order_code), redemption_id),
     )
-    record_credit_event(conn, user_id, bonus, "promo_bonus", f"{code}:{order_code}", f"Promo {code} thưởng {bonus} Xu")
+    c.execute(
+        """UPDATE promotion_codes
+        SET used_count = used_count + 1,
+            usage_count = usage_count + 1,
+            updated_at=?
+        WHERE code=?""",
+        (now_text(), promo["code"]),
+    )
+    if get_user_pending_promo_raw(conn, user_id).get("code") == promo["code"]:
+        clear_user_pending_promo(user_id, conn)
     record_audit(
         conn,
         "payos",
@@ -1654,11 +2023,19 @@ def apply_promo_bonus_for_paid_order(conn, user_id, order_code: str, amount_vnd:
         "promo.bonus_applied",
         "promotion_redemption",
         str(redemption_id),
-        before={"status": "pending", "code": code},
+        before={"status": "pending", "code": promo["code"]},
         after={"status": "applied", "order_code": str(order_code), "bonus_xu": bonus},
         note="Promo bonus applied inside PayOS paid transaction",
     )
-    return bonus
+    return {"bonus_xu": bonus, "code": promo["code"], "status": "applied", "redemption_id": redemption_id}
+
+def apply_promo_bonus_for_paid_order(conn, user_id, order_code: str, amount_vnd: int) -> int:
+    c = conn.cursor()
+    c.execute("SELECT xu FROM payos_orders WHERE order_code=?", (str(order_code),))
+    row = c.fetchone()
+    base_xu = int(row[0] or 0) if row else 0
+    result = redeem_promo_for_order(conn, user_id, order_code, amount_vnd, base_xu)
+    return int(result.get("bonus_xu") or 0)
 
 def create_campaign(owner_id, name, niche, platforms, affiliate_url="", pay_url="") -> int:
     conn = db_connect()
@@ -18894,9 +19271,12 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             (str(order_code), now_text())
         )
         record_credit_event(conn, target_id, int(xu), "payos_deposit", order_code, f"Nạp PayOS {amount_vnd}đ")
-        promo_bonus = apply_promo_bonus_for_paid_order(conn, target_id, order_code, amount_vnd)
+        promo_result = redeem_promo_for_order(conn, target_id, order_code, amount_vnd, int(xu))
+        promo_bonus = int(promo_result.get("bonus_xu") or 0)
         referral_bonus = award_referral_bonus_if_needed(conn, target_id)
         info["promo_bonus"] = promo_bonus
+        info["promo_code"] = promo_result.get("code") or ""
+        info["promo_status"] = promo_result.get("status") or ""
         info["referral_bonus"] = referral_bonus
         record_audit(
             conn,
@@ -20142,11 +20522,25 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             checkout_data = res_data["data"]
             checkout_url = checkout_data["checkoutUrl"]
             update_order_checkout_info(order_code, checkout_url, checkout_data.get("paymentLinkId", ""))
+            promo_attach = attach_pending_promo_to_order(uid, order_code, amount, xu)
+            promo_line = ""
+            if promo_attach.get("attached"):
+                promo_line = (
+                    f"🎁 Mã <code>{html.escape(promo_attach.get('code') or '')}</code> sẽ tặng thêm "
+                    f"<b>+{int(promo_attach.get('bonus_xu') or 0)} Xu</b> sau khi thanh toán thành công.\n"
+                    "• Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n"
+                )
+            elif promo_attach.get("code") and promo_attach.get("reason") not in {"no_pending"}:
+                promo_line = (
+                    f"⚠️ Mã <code>{html.escape(promo_attach.get('code') or '')}</code> chưa đủ điều kiện cho gói này "
+                    f"(<code>{html.escape(promo_attach.get('reason') or '')}</code>), đơn vẫn tạo bình thường.\n"
+                )
             qr_text = (
                 f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
                 f"📋 Gói lựa chọn: <b>{pkg['text']}</b>\n"
                 f"💰 Số tiền cần chuyển: <b>{amount:,}đ</b>\n"
                 f"🪙 Hạn mức nhận được: <b>+{xu} Xu</b>\n"
+                f"{promo_line}"
                 f"🆔 Mã đơn định danh: <code>{order_code}</code>\n\n"
                 f"⏳ Hóa đơn hết hạn sau <b>{ORDER_TTL_MINUTES} phút</b>.\n\n"
                 f"👉 Nhấn vào nút liên kết dưới đây để nhận diện mã QR thanh toán động. Hệ thống sẽ tự động điền sẵn số tiền và nội dung hóa đơn chính xác!"
@@ -20262,19 +20656,19 @@ def promo_readiness_payload() -> dict:
     conn = None
     try:
         conn = db_connect()
-        row = get_promo_code(conn, PROMO_BETA50_CODE)
-        if not row:
-            return {"beta50_seeded": False, "status": "missing", "bonus_xu": 0, "used_count": 0, "max_uses": 0}
-        _code, bonus_xu, _discount_percent, max_uses, used_count, _min_amount, status, _note = row
+        promo = get_promo_code_dict(conn, PROMO_BETA50_CODE)
+        if not promo:
+            return {"beta50_seeded": False, "status": "missing", "bonus_xu": 0, "used_count": 0, "max_uses": 0, "label": ""}
         return {
-            "beta50_seeded": str(status or "").lower() == "active",
-            "status": status or "missing",
-            "bonus_xu": int(bonus_xu or 0),
-            "used_count": int(used_count or 0),
-            "max_uses": int(max_uses or 0),
+            "beta50_seeded": str(promo.get("status") or "").lower() == "active",
+            "status": promo.get("status") or "missing",
+            "bonus_xu": int(promo.get("bonus_xu") or 0),
+            "used_count": promo_usage_count(promo),
+            "max_uses": promo_usage_limit(promo),
+            "label": promo_public_label(promo),
         }
     except Exception as e:
-        return {"beta50_seeded": False, "status": "error", "error": str(e)[:120], "bonus_xu": 0, "used_count": 0, "max_uses": 0}
+        return {"beta50_seeded": False, "status": "error", "error": str(e)[:120], "bonus_xu": 0, "used_count": 0, "max_uses": 0, "label": ""}
     finally:
         if conn:
             conn.close()
@@ -20290,6 +20684,8 @@ def sales_readiness_payload() -> dict:
         "campaign_report": callable(globals().get("cmd_campaign_report")),
         "performance_report": callable(globals().get("cmd_performance_report")),
         "promo": callable(globals().get("cmd_promo")),
+        "promo_guide": callable(globals().get("cmd_promo_guide")),
+        "promo_seed_policy": callable(globals().get("cmd_promo_seed_policy")),
         "promo_seed_beta": callable(globals().get("cmd_promo_seed_beta")),
     }
     blockers = []
@@ -20643,7 +21039,8 @@ def help_text_for_user(user_id) -> str:
         "<b>1. Tài khoản & nạp Xu</b>\n"
         "• <code>/profile</code> — xem số dư, VIP, referral\n"
         "• <code>/naptien</code> — tạo QR nạp Xu\n"
-        "• <code>/promo &lt;mã&gt;</code> — kích hoạt mã ưu đãi nếu admin gửi riêng\n"
+        "• <code>/khuyenmai</code> hoặc <code>/uudai</code> — xem ưu đãi nên dùng\n"
+        "• <code>/promo &lt;mã&gt;</code> hoặc <code>/magiamgia &lt;mã&gt;</code> — lưu mã ưu đãi cho lần nạp tiếp theo\n"
         "• <code>/thucong</code> — gửi bill thủ công khi QR lỗi\n"
         "• <code>/ref</code> hoặc <code>/invite</code> — lấy link giới thiệu\n\n"
         "<b>2. Công cụ AI</b>\n"
@@ -20682,8 +21079,9 @@ def help_text_for_user(user_id) -> str:
             "• <code>/stats</code>, <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code>\n"
             "• <code>/add</code>, <code>/setvip</code>, <code>/backup_db</code>\n"
             "• <code>/providers</code>, <code>/sales_ready</code>, <code>/costs</code>, <code>/payos_test_plan</code>\n"
-            "• <code>/pricing_admin</code> — xem công thức Pricing Engine V2\n"
-            "• <code>/promo_seed_beta</code> — tạo mã BETA50/BETA30 cho test bán thử\n"
+        "• <code>/pricing_admin</code> — xem công thức Pricing Engine V2\n"
+            "• <code>/promo_seed_policy</code> hoặc <code>/promo_seed_beta</code> — seed mã ưu đãi V2.1\n"
+            "• <code>/promo_list</code>, <code>/promo_create</code>, <code>/promo_disable</code>\n"
             "• <code>/mark_payos_test</code> — ghi nhận PayOS real test PASS/FAIL\n"
             "• <code>/runtime</code>, <code>/checkpayos</code>, <code>/telegram_takeover</code>"
         )
@@ -20896,7 +21294,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Trial credits: <b>{data['trial_credits']}</b>",
         f"• Free chat daily: <b>{data['free_chat_daily']}</b>",
         f"• Promo BETA50: <code>{'seeded' if promo.get('beta50_seeded') else promo.get('status', 'missing')}</code>"
-        f" | bonus <b>{int(promo.get('bonus_xu', 0) or 0)} Xu</b>"
+        f" | <b>{html.escape(promo.get('label') or 'limited')}</b>"
         f" | used <b>{int(promo.get('used_count', 0) or 0)}/{int(promo.get('max_uses', 0) or 0)}</b>",
         "",
         "<b>PayOS real test</b>",
@@ -20912,6 +21310,8 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• /campaign_report: <code>{'available' if commands['campaign_report'] else 'missing'}</code>",
         f"• /performance_report: <code>{'available' if commands['performance_report'] else 'missing'}</code>",
         f"• /promo: <code>{'available' if commands.get('promo') else 'missing'}</code>",
+        f"• /khuyenmai: <code>{'available' if commands.get('promo_guide') else 'missing'}</code>",
+        f"• /promo_seed_policy: <code>{'available' if commands.get('promo_seed_policy') else 'missing'}</code>",
         f"• /promo_seed_beta: <code>{'available' if commands.get('promo_seed_beta') else 'missing'}</code>",
         "",
         f"<b>Status:</b> <code>{data['status']}</code>",
@@ -20941,6 +21341,9 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Gói trải nghiệm tài khoản mới</b>",
         "• Tạo tài khoản mới nhận 200 Xu trải nghiệm",
         "• Có thể thử 1 video basic trước khi nạp thêm",
+        "• Nạp lần đầu nên dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu mã còn hiệu lực",
+        "• <code>BETA50</code> chỉ dành cho nhóm test rất giới hạn hoặc nội bộ",
+        "• Khuyến nghị bắt đầu bằng gói 50k hoặc 100k để đủ Xu chạy video/affiliate",
         "• Không cam kết doanh thu, công cụ giúp tạo nội dung nhanh hơn và có quy trình rõ hơn",
         "",
         "<b>Gói 2 — Creator Start</b>",
@@ -20963,96 +21366,287 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Kết quả phụ thuộc nội dung, sản phẩm, nền tảng và cách triển khai. TOAN AAS không cam kết doanh thu chắc chắn và không auto publish.",
         "",
-        "Lệnh nhanh: <code>/naptien</code> | <code>/film chủ đề</code> | <code>/help</code>",
+        "Lệnh nhanh: <code>/khuyenmai</code> | <code>/promo FIRST30</code> | <code>/naptien</code> | <code>/film chủ đề</code>",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
-async def cmd_promo_seed_beta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_promo_seed_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     conn = db_connect()
     try:
-        seed_beta_promotions(conn)
+        seeded = seed_promotion_policy(conn)
         record_audit(
             conn,
             update.effective_user.id,
             "admin",
-            "promo.seed_beta",
+            "promo.seed_policy",
             "promotion_code",
-            "BETA",
+            "POLICY_V2_1",
             before=None,
-            after={
-                PROMO_BETA50_CODE: PROMO_BETA50_BONUS_XU,
-                PROMO_BETA30_CODE: PROMO_BETA30_BONUS_XU,
-            },
-            note="Seed beta promotion codes",
+            after={code: item.get("value") for code, item in seeded.items()},
+            note="Seed Promotion Policy V2.1",
         )
         conn.commit()
     finally:
         conn.close()
     await update.message.reply_text(
-        "✅ <b>Đã seed mã Beta</b>\n\n"
-        f"• <code>{PROMO_BETA50_CODE}</code>: nạp tối thiểu {PROMO_BETA_MIN_AMOUNT:,}đ nhận thêm <b>{PROMO_BETA50_BONUS_XU} Xu</b>\n"
-        f"• <code>{PROMO_BETA30_CODE}</code>: nạp tối thiểu {PROMO_BETA_MIN_AMOUNT:,}đ nhận thêm <b>{PROMO_BETA30_BONUS_XU} Xu</b>\n\n"
-        "Test chuẩn: user nhập <code>/promo BETA50</code> rồi nạp gói 10k qua PayOS. Kỳ vọng nhận 100 + 50 = <b>150 Xu</b>.",
+        "✅ <b>Đã seed Promotion Policy V2.1</b>\n\n"
+        "<b>Ưu đãi công khai:</b>\n"
+        "• <code>FIRST30</code> — nạp lần đầu +30%\n"
+        "• <code>SECOND15</code> — nạp lần 2 +15%\n"
+        "• <code>WEEKLY10</code> — ưu đãi tuần +10%\n"
+        "• <code>MONTHLY20</code> — ưu đãi tháng +20% cho gói lớn\n"
+        "• <code>DAILY5</code> — ưu đãi ngày +5%\n\n"
+        "<b>Giới hạn:</b>\n"
+        "• <code>BETA50</code> — beta/internal +50%, không quảng bá rộng\n\n"
+        "<b>Quy tắc:</b>\n"
+        "• Mỗi đơn chỉ dùng 1 mã\n"
+        "• Không cộng dồn mã\n"
+        "• Không giảm tiền nạp, chỉ tặng thêm Xu\n\n"
+        "Dùng: <code>/promo_list</code>",
         parse_mode="HTML",
     )
+
+async def cmd_promo_seed_beta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_promo_seed_policy(update, context)
+
+def promo_code_status_message(status: str) -> str:
+    messages = {
+        "not_found": "Mã không hợp lệ, hết lượt, hết hạn hoặc chưa đủ điều kiện.",
+        "inactive": "Mã đang tạm khóa.",
+        "disabled": "Mã đang tạm khóa.",
+        "sold_out": "Mã đã hết lượt dùng.",
+        "expired": "Mã đã hết hạn.",
+        "not_started": "Mã chưa đến thời gian áp dụng.",
+        "already_applied": "Mã này đã được dùng cho tài khoản của bạn.",
+        "min_amount": "Gói nạp chưa đạt số tiền tối thiểu của mã.",
+        "first_topup_only": "Mã FIRST30 chỉ dành cho lần nạp đầu tiên.",
+        "second_topup_only": "Mã SECOND15 chỉ dành cho lần nạp PayOS thứ 2.",
+    }
+    return messages.get(status, "Mã không hợp lệ, hết lượt, hết hạn hoặc chưa đủ điều kiện.")
 
 async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not context.args:
         summary = get_user_promo_summary(uid)
         rows = summary.get("rows") or []
+        pending = summary.get("pending") or {}
         lines = [
             "🎁 <b>Mã ưu đãi TOAN AAS</b>",
             "",
-            "Nhập mã được admin gửi riêng:",
-            "<code>/promo MÃ_CỦA_BẠN</code>",
+            "Nhập mã được admin công bố:",
+            "<code>/promo FIRST30</code>",
+            "<code>/promo WEEKLY10</code>",
             "",
-            "Mã hợp lệ sẽ tự cộng bonus một lần khi bạn nạp PayOS thành công.",
+            "Xem ưu đãi đang có: <code>/khuyenmai</code>",
+            "",
+            "<b>Chính sách:</b>",
+            "• Không giảm tiền nạp",
+            "• Hệ thống tặng thêm Xu",
+            "• Mỗi đơn chỉ áp dụng 1 mã",
+            "• Không cộng dồn mã",
         ]
+        if pending.get("promo"):
+            lines.extend([
+                "",
+                f"🎫 Mã đang chờ áp dụng: <code>{html.escape(pending['promo']['code'])}</code>",
+                "Nếu nhập mã khác, mã mới sẽ thay mã này.",
+            ])
         if rows:
             lines.append("")
             lines.append("<b>Mã gần đây</b>")
-            for code, status, order_code, bonus_xu, created_at, applied_at, min_amount, max_uses, used_count in rows:
+            for row in rows:
+                code, status, order_code, bonus_xu, created_at, applied_at, min_amount, max_uses, used_count, promo_type, value, max_bonus_xu, note = row
                 order_part = f" | order {html.escape(str(order_code))}" if order_code else ""
+                label = promo_public_label({"promo_type": promo_type, "value": value, "bonus_xu": bonus_xu})
                 lines.append(
                     f"• <code>{html.escape(str(code))}</code>: <code>{html.escape(str(status))}</code>"
-                    f" | bonus {int(bonus_xu or 0)} Xu{order_part}"
+                    f" | {html.escape(label)}{order_part}"
                 )
         return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
     code = context.args[0]
     ok, status, info = activate_promo_for_user(uid, code)
     norm_code = html.escape(info.get("code") or normalize_promo_code(code))
-    if ok and status == "activated":
-        return await update.message.reply_text(
-            "✅ <b>Đã kích hoạt mã ưu đãi</b>\n\n"
-            f"• Mã: <code>{norm_code}</code>\n"
-            f"• Bonus: <b>{int(info.get('bonus_xu', 0))} Xu</b>\n"
-            f"• Điều kiện: nạp PayOS từ <b>{int(info.get('min_amount', 0)):,}đ</b>\n\n"
-            "Bước tiếp theo: dùng <code>/naptien</code>, chọn gói phù hợp và thanh toán PayOS.",
-            parse_mode="HTML",
+    if ok and status in {"activated", "already_pending", "replaced"}:
+        replaced = info.get("replaced_code") or ""
+        replaced_line = (
+            f"Đã thay mã <code>{html.escape(replaced)}</code> bằng <code>{norm_code}</code>. "
+            "Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n\n"
+            if status == "replaced" and replaced else ""
         )
-    if ok and status == "already_pending":
         return await update.message.reply_text(
-            "ℹ️ Mã này đã được kích hoạt và đang chờ lần nạp PayOS hợp lệ.\n"
+            "✅ <b>Đã lưu mã ưu đãi</b>\n\n"
+            f"{replaced_line}"
+            f"• Mã: <code>{norm_code}</code>\n"
+            f"• Ưu đãi: <b>{html.escape(promo_public_label(info))}</b> khi nạp thành công\n"
+            f"• Điều kiện: nạp PayOS từ <b>{promo_min_amount(info):,}đ</b>\n"
+            "• Không cộng dồn mã khác\n"
+            "• Áp dụng cho lần nạp tiếp theo nếu đủ điều kiện\n\n"
             "Dùng <code>/naptien</code> để nạp Xu.",
             parse_mode="HTML",
         )
-    if status == "already_applied":
-        return await update.message.reply_text(
-            "⚠️ Mã này đã được dùng cho tài khoản của bạn, không thể nhận bonus lần hai.",
-            parse_mode="HTML",
-        )
-    if status == "sold_out":
-        return await update.message.reply_text("⚠️ Mã ưu đãi đã hết lượt dùng.")
-    if status == "inactive":
-        return await update.message.reply_text("⚠️ Mã ưu đãi đang tạm khóa.")
     return await update.message.reply_text(
-        "❌ Mã ưu đãi không hợp lệ hoặc chưa được admin kích hoạt.",
+        "❌ " + html.escape(promo_code_status_message(status)) + "\n\n"
+        "Xem các ưu đãi gợi ý: <code>/khuyenmai</code>",
         parse_mode="HTML",
     )
+
+async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    conn = db_connect()
+    try:
+        pending = get_user_pending_promo(uid, conn)
+        paid_count = user_paid_payos_count(conn, uid)
+    finally:
+        conn.close()
+    if paid_count <= 0:
+        recommended = "FIRST30 — ưu đãi công khai tốt nhất cho lần nạp đầu."
+    elif paid_count == 1:
+        recommended = "SECOND15 — ưu đãi cho lần nạp PayOS thứ 2."
+    else:
+        recommended = "MONTHLY20 cho gói lớn, hoặc WEEKLY10/DAILY5 nếu đủ điều kiện."
+    lines = [
+        "🎁 <b>ƯU ĐÃI TOAN AAS</b>",
+        "",
+        "TOAN AAS không giảm giá nạp tiền.",
+        "Hệ thống tặng thêm Xu để bạn dùng được nhiều hơn.",
+        "",
+        f"🔥 <b>Nên dùng trước:</b> {html.escape(recommended)}",
+        "",
+        "<b>Thứ tự gợi ý:</b>",
+        "1. <code>FIRST30</code> — nạp lần đầu +30% Xu",
+        "2. <code>SECOND15</code> — nạp lần 2 +15% Xu",
+        "3. <code>MONTHLY20</code> — ưu đãi tháng +20% Xu cho gói lớn",
+        "4. <code>WEEKLY10</code> — ưu đãi tuần +10% Xu",
+        "5. <code>DAILY5</code> — ưu đãi ngày +5% Xu",
+        "",
+        "⚠️ <b>Quy tắc:</b>",
+        "• Mỗi đơn nạp chỉ áp dụng 1 mã",
+        "• Không cộng dồn mã",
+        "• Mã mới sẽ thay mã đang chờ dùng",
+        "• Bonus Xu chỉ cộng sau khi PayOS thanh toán thành công",
+        "• Mã có thể hết lượt/hết hạn/không đủ điều kiện",
+        "• <code>BETA50</code> chỉ dành cho nhóm test rất giới hạn",
+        "",
+        "<b>Cách dùng:</b>",
+        "<code>/promo FIRST30</code>",
+        "<code>/naptien</code>",
+    ]
+    if pending.get("promo"):
+        lines.extend([
+            "",
+            f"🎫 Mã đang chờ áp dụng: <code>{html.escape(pending['promo']['code'])}</code>",
+            "Nếu nhập mã khác, mã mới sẽ thay mã này.",
+        ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_promo_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute(
+            """SELECT code, status, promo_type, value, bonus_xu, min_amount_vnd, min_amount,
+                      usage_count, used_count, usage_limit, max_uses, per_user_limit, max_bonus_xu, note
+            FROM promotion_codes
+            ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, updated_at DESC, created_at DESC
+            LIMIT 20"""
+        )
+        rows = c.fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return await update.message.reply_text("Chưa có mã khuyến mãi.")
+    lines = ["🎁 <b>Promo Codes</b>"]
+    for code, status, promo_type, value, bonus_xu, min_amount_vnd, min_amount, usage_count, used_count, usage_limit, max_uses, per_user, max_bonus, note in rows:
+        promo = {"promo_type": promo_type, "value": value, "bonus_xu": bonus_xu}
+        usage = promo_usage_count({"usage_count": usage_count, "used_count": used_count})
+        limit = promo_usage_limit({"usage_limit": usage_limit, "max_uses": max_uses})
+        min_vnd = int(min_amount_vnd or min_amount or 0)
+        lines.extend([
+            "",
+            f"<code>{html.escape(str(code))}</code> — <b>{html.escape(str(status or '-'))}</b>",
+            f"Type: <b>{html.escape(promo_public_label(promo))}</b>",
+            f"Usage: <b>{usage}/{limit if limit else '∞'}</b>",
+            f"Per user: <b>{int(per_user or 1)}</b>",
+            f"Min: <b>{min_vnd:,}đ</b>",
+            f"Max bonus: <b>{int(max_bonus or 0):,} Xu</b>",
+            f"Note: {html.escape(str(note or '-'))}",
+        ])
+    await update.message.reply_text("\n".join(lines[:90]), parse_mode="HTML")
+
+async def cmd_promo_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    data = parse_key_value_args(" ".join(context.args))
+    code = normalize_promo_code(data.get("code") or (context.args[0] if context.args else ""))
+    promo_type = (data.get("type") or data.get("promo_type") or "").strip().lower()
+    value = safe_int(data.get("value"), 0)
+    if not code or promo_type not in {"percent_bonus", "fixed_bonus_xu", "service_discount_future"} or value <= 0:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/promo_create code=FIRST30 type=percent_bonus value=30 limit=1000 per_user=1 min=20000 max_bonus=1500 note=...</code>",
+            parse_mode="HTML",
+        )
+    usage_limit = max(0, safe_int(data.get("limit") or data.get("usage_limit"), 0))
+    per_user = max(1, safe_int(data.get("per_user") or data.get("per_user_limit"), 1))
+    min_amount = max(0, safe_int(data.get("min") or data.get("min_amount") or data.get("min_amount_vnd"), 0))
+    max_bonus = max(0, safe_int(data.get("max_bonus") or data.get("max_bonus_xu"), 0))
+    note = (data.get("note") or "").strip()[:300]
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute("SELECT 1 FROM promotion_codes WHERE code=?", (code,))
+        if c.fetchone():
+            return await update.message.reply_text(f"⚠️ Mã <code>{html.escape(code)}</code> đã tồn tại, không overwrite.", parse_mode="HTML")
+        now = now_text()
+        c.execute(
+            """INSERT INTO promotion_codes
+            (code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note, created_at, updated_at,
+             name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count, per_user_limit, created_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                code,
+                value if promo_type == "fixed_bonus_xu" else 0,
+                value if promo_type == "percent_bonus" else 0,
+                usage_limit,
+                0,
+                min_amount,
+                "active",
+                note,
+                now,
+                now,
+                code,
+                promo_type,
+                value,
+                min_amount,
+                max_bonus,
+                usage_limit,
+                0,
+                per_user,
+                str(update.effective_user.id),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    await update.message.reply_text(f"✅ Đã tạo mã <code>{html.escape(code)}</code> ({html.escape(promo_type)} {value}).", parse_mode="HTML")
+
+async def cmd_promo_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    code = normalize_promo_code(context.args[0] if context.args else "")
+    if not code:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/promo_disable FIRST30</code>", parse_mode="HTML")
+    conn = db_connect()
+    try:
+        conn.execute("UPDATE promotion_codes SET status='disabled', updated_at=? WHERE code=?", (now_text(), code))
+        conn.commit()
+    finally:
+        conn.close()
+    await update.message.reply_text(f"✅ Đã tắt mã <code>{html.escape(code)}</code>.", parse_mode="HTML")
 
 async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
@@ -21083,7 +21677,14 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "💳 <b>Nạp Xu:</b> <code>/naptien</code>",
         "",
-        "🎁 <b>Khuyến mãi trải nghiệm:</b> Tài khoản mới nhận <b>200 Xu</b>, đủ để thử 1 lượt <code>/film</code> Basic.",
+        "🎁 <b>Chính sách ưu đãi:</b>",
+        "• User mới nhận <b>200 Xu</b> trải nghiệm",
+        "• Nạp lần đầu dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu còn hiệu lực",
+        "• Nạp lần 2 dùng <code>SECOND15</code> để nhận thêm +15% Xu nếu còn hiệu lực",
+        "• Ưu đãi tuần: <code>WEEKLY10</code>",
+        "• Ưu đãi ngày: <code>DAILY5</code>",
+        "• Ưu đãi tháng/gói lớn: <code>MONTHLY20</code>",
+        "• Không giảm giá gốc, không cộng dồn mã, mỗi đơn chỉ dùng 1 mã",
         "",
         "Giá đã bao gồm chi phí AI, server, xử lý lỗi và vận hành hệ thống. Admin có thể tạo khuyến mãi theo từng thời điểm.",
     ]
@@ -21324,15 +21925,16 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
         "6. Kiểm tra <code>/dashboard</code>: doanh thu và giao dịch tăng.",
         "7. Kiểm tra duplicate webhook/order không cộng Xu lần 2.",
         "",
-        "<b>B. Test Promo BETA50</b>",
-        "1. Admin chạy <code>/promo_seed_beta</code>.",
-        "2. User test khác chạy <code>/promo BETA50</code>.",
-        "3. User test gọi <code>/naptien</code>, chọn gói 10k và thanh toán PayOS.",
-        "4. Kỳ vọng user nhận <b>150 Xu</b> = 100 Xu gói 10k + 50 Xu promo.",
-        "5. Gửi/replay cùng webhook/order nếu có môi trường an toàn: không cộng thêm 100 Xu hoặc 50 Xu lần hai.",
+        "<b>B. Test Promo Policy V2.1</b>",
+        "1. Admin chạy <code>/promo_seed_policy</code> hoặc <code>/promo_seed_beta</code>.",
+        "2. User test khác chạy <code>/promo FIRST30</code>.",
+        "3. User test gọi <code>/naptien</code>, chọn gói 20k hoặc 50k và thanh toán PayOS.",
+        "4. Kỳ vọng user nhận Xu gốc + <b>30% bonus</b> sau thanh toán thành công.",
+        "5. <code>BETA50</code> chỉ dùng beta/internal giới hạn, nên test với gói từ 50k.",
+        "6. Gửi/replay cùng webhook/order nếu có môi trường an toàn: không cộng thêm Xu gốc hoặc bonus lần hai.",
         "",
         "<b>C. Khóa sales</b>",
-        "1. Chỉ khi A và B đạt kỳ vọng, chạy <code>/mark_payos_test pass order=&lt;order_code&gt; note=\"Test 10k+BETA50 OK\"</code>.",
+        "1. Chỉ khi A và B đạt kỳ vọng, chạy <code>/mark_payos_test pass order=&lt;order_code&gt; note=\"Test FIRST30 OK\"</code>.",
         "2. Ghi kết quả vào checklist trước khi bán public.",
         "",
         "Nếu PayOS lỗi, dùng <code>/thucong</code> và duyệt bill bằng <code>/duyet</code>.",
@@ -21475,10 +22077,23 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     credits, _, _ = get_user(uid, update.effective_user.first_name)
+    pending = get_user_pending_promo(uid)
+    pending_text = ""
+    if pending.get("promo"):
+        pending_text = (
+            f"🎫 Mã đang áp dụng: <code>{html.escape(pending['promo']['code'])}</code> "
+            f"({html.escape(promo_public_label(pending['promo']))})\n"
+            "Lưu ý: nếu nhập mã khác, mã mới sẽ thay mã này.\n\n"
+        )
     msg = (
         f"💳 <b>NẠP SỐ DƯ TỰ ĐỘNG (QR ĐỘNG) — TOAN AAS</b>\n\n"
         f"👤 ID Telegram: <code>{uid}</code>\n"
         f"🪙 Số dư hiện tại: <b>{credits} Xu</b>\n\n"
+        f"🎁 <b>Có mã ưu đãi?</b>\n"
+        f"Nhập <code>/promo FIRST30</code> trước khi chọn gói nạp.\n"
+        f"Hệ thống không giảm giá nạp, chỉ tặng thêm Xu sau khi thanh toán thành công.\n"
+        f"Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n\n"
+        f"{pending_text}"
         f"<b>🛒 BẢNG GIÁ (1 Xu = 100đ):</b>\n"
         f"• Gói Dùng Thử: 10.000đ ➔ <b>100 Xu</b>\n"
         f"• Gói Nhỏ: 20.000đ ➔ <b>200 Xu</b>\n"
@@ -33345,13 +33960,21 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             processed, desc, info = process_payos_paid_order(str(order_code), amount_vnd)
             if processed:
                 target_id = info["target_id"]
+                promo_bonus = int(info.get("promo_bonus", 0) or 0)
+                promo_code = info.get("promo_code") or ""
+                promo_line = (
+                    f"🎁 <code>{html.escape(promo_code)}</code>: <b>+{promo_bonus} Xu</b>\n"
+                    f"🧾 Tổng cộng đơn này: <b>+{int(info['xu']) + promo_bonus} Xu</b>\n"
+                    if promo_bonus else ""
+                )
                 credits_now, _, _ = get_user(target_id)
                 await context.bot.send_message(
                     chat_id=target_id,
                     text=(
                         f"🎉 <b>NẠP TỰ ĐỘNG THÀNH CÔNG!</b>\n\n"
                         f"PayOS đã xác nhận đơn <code>{order_code}</code>.\n"
-                        f"🪙 Đã cộng: <b>+{info['xu']} Xu</b>\n"
+                        f"🪙 Xu gốc: <b>+{info['xu']} Xu</b>\n"
+                        f"{promo_line}"
                         f"💼 Số dư hiện tại: <b>{credits_now} Xu</b>"
                     ),
                     parse_mode="HTML"
@@ -34004,7 +34627,15 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("beta_offer",  cmd_beta_offer))
     tg_app.add_handler(CommandHandler("goi_beta",    cmd_beta_offer))
     tg_app.add_handler(CommandHandler("promo",       cmd_promo))
+    tg_app.add_handler(CommandHandler("magiamgia",   cmd_promo))
+    tg_app.add_handler(CommandHandler("khuyenmai",   cmd_promo_guide))
+    tg_app.add_handler(CommandHandler("uudai",       cmd_promo_guide))
+    tg_app.add_handler(CommandHandler("promos",      cmd_promo_guide))
+    tg_app.add_handler(CommandHandler("promo_seed_policy", cmd_promo_seed_policy))
     tg_app.add_handler(CommandHandler("promo_seed_beta", cmd_promo_seed_beta))
+    tg_app.add_handler(CommandHandler("promo_list",  cmd_promo_list))
+    tg_app.add_handler(CommandHandler("promo_create", cmd_promo_create))
+    tg_app.add_handler(CommandHandler("promo_disable", cmd_promo_disable))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
     tg_app.add_handler(CommandHandler("invite",      cmd_invite))
     tg_app.add_handler(CommandHandler("tools",       cmd_tools))
@@ -37570,9 +38201,14 @@ async def webhook_payos(request: Request):
     target_id = info["target_id"]
     xu = info["xu"]
     promo_bonus = int(info.get("promo_bonus", 0) or 0)
+    promo_code = info.get("promo_code") or ""
     referral_bonus = info.get("referral_bonus", 0)
     credits_now, _, _ = get_user(target_id)
-    promo_line = f"🎁 Mã ưu đãi: <b>+{promo_bonus} Xu</b>\n" if promo_bonus else ""
+    promo_line = (
+        f"🎁 <code>{html.escape(promo_code)}</code>: <b>+{promo_bonus} Xu</b>\n"
+        f"🧾 Tổng cộng đơn này: <b>+{int(xu) + promo_bonus} Xu</b>\n"
+        if promo_bonus else ""
+    )
     logger.info(f"✅ PayOS dynamic QR nạp thành công {xu} Xu cho {target_id} | Đơn: {order_code}")
 
     if tg_app:
@@ -37583,7 +38219,7 @@ async def webhook_payos(request: Request):
                     f"🎉 <b>NẠP TỰ ĐỘNG THÀNH CÔNG!</b>\n\n"
                     f"✅ PayOS xác nhận cổng QR Động trực tuyến!\n"
                     f"💰 Số tiền giao dịch: <b>{amount_vnd:,}đ</b>\n"
-                    f"🪙 Hạn mức cộng: <b>+{xu} Xu</b>\n"
+                    f"🪙 Xu gốc: <b>+{xu} Xu</b>\n"
                     f"{promo_line}"
                     f"💼 Số dư tài khoản hiện tại: <b>{credits_now} Xu</b>\n\n"
                     f"Cảm ơn bạn đã tin dùng dịch vụ TOAN AAS! 🙏"

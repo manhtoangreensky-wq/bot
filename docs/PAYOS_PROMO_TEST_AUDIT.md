@@ -1,58 +1,38 @@
-# PayOS Promo Test Audit - TOAN AAS
+# PayOS Promo Test Audit - Promotion Policy V2.1
 
 Date: 2026-06-02
 
-## Scope
+## Current Promo Policy
 
-Audit and prepare the bot for a real PayOS 10k payment test with the beta promo code `BETA50`.
+- Public first top-up: `FIRST30`, +30% Xu.
+- Second top-up: `SECOND15`, +15% Xu.
+- Weekly: `WEEKLY10`, +10% Xu.
+- Monthly/large package: `MONTHLY20`, +20% Xu.
+- Daily: `DAILY5`, +5% Xu.
+- Limited/internal: `BETA50`, +50% Xu, not broad public offer.
 
-## Compile
+## Real Payment Test
 
-- `python -m py_compile bot.py`: PASS locally with Codex bundled Python.
-- `pytest -q`: PASS locally, 15 tests, 1 Starlette/httpx deprecation warning.
-
-## PayOS Findings
-
-- `PAYMENT_PACKAGES` remains unchanged.
-- PayOS package callbacks still use `pkg|`.
-- Provider callbacks still use `prov|`.
-- `/webhook/payos` still verifies PayOS checksum before crediting.
-- Paid orders still go through `process_payos_paid_order()`.
-- Duplicate protection still uses both `payos_orders.status=PAID` and `payos_processed`.
-- `/sales_ready` only returns `SALES READY` after admin records `payos_real_payment_test_status=PASS`.
-
-## Promo MVP
-
-- Admin command: `/promo_seed_beta`.
-- User command: `/promo <code>`.
-- Seeded beta codes:
-  - `BETA50`: minimum 10k PayOS payment, one-time +50 Xu.
-  - `BETA30`: minimum 10k PayOS payment, one-time +30 Xu.
-- Promo activation creates a pending redemption for that user/code.
-- Promo bonus is applied inside the same DB transaction as PayOS paid order credit.
-- The same code cannot be applied twice to the same user.
-- Replay of the same paid order returns `already_paid` and does not add base Xu or promo Xu again.
-
-## Expected Real Test
-
-For a user who has activated `BETA50`:
-
-- Package: `10k`
-- Base Xu: `100`
-- Promo Xu: `50`
-- Total expected credit: `150 Xu`
-
-## Not Done By Codex
-
-- No real payment was performed locally.
-- No PayOS secret was inspected.
-- No PayOS package amount was changed.
-- No production DB was edited manually.
-
-## Required Admin Confirmation
-
-Only after a real 10k + BETA50 test passes, run:
+Use a non-admin test user:
 
 ```text
-/mark_payos_test pass order=<order_code> note="Test 10k+BETA50 OK, user received 150 Xu"
+/promo_seed_policy
+/promo FIRST30
+/naptien
 ```
+
+Choose 20k or higher and pay the real PayOS QR.
+
+Expected for 20k:
+
+- Base Xu: 200.
+- Promo bonus: 60.
+- Total credit: 260 Xu.
+- Duplicate webhook or `/checkpayos` replay does not add base or bonus again.
+
+## Safety
+
+- PayOS VND amount is unchanged.
+- `PAYMENT_PACKAGES` is unchanged.
+- Bonus is applied only inside PayOS success processing.
+- One order uses one promo only.

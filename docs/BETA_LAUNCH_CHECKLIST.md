@@ -10,16 +10,16 @@ Date: 2026-06-02
 - [ ] `/backup_db` has been run.
 - [ ] Railway volume or backup plan is confirmed.
 - [ ] `/providers` shows PayOS configured.
-- [ ] `/promo_seed_beta` has been run if using BETA50.
+- [ ] `/promo_seed_policy` has been run.
 - [ ] `/sales_ready` is not `SALES READY` until real PayOS test PASS.
 
 ## Real Money Test
 
-- [ ] Test user activates `/promo BETA50`.
-- [ ] Test user pays 10k PayOS QR.
-- [ ] Test user receives exactly 150 Xu.
+- [ ] Test user activates `/promo FIRST30`.
+- [ ] Test user pays 20k or higher PayOS QR.
+- [ ] Test user receives base Xu plus exactly one +30% bonus.
 - [ ] Duplicate/replay does not add more Xu.
-- [ ] Admin runs `/mark_payos_test pass order=<order_code> note="Test 10k+BETA50 OK"`.
+- [ ] Admin runs `/mark_payos_test pass order=<order_code> note="Test FIRST30 OK"`.
 - [ ] `/sales_ready` now shows `SALES READY`.
 
 ## First 3-10 Users
@@ -29,7 +29,7 @@ Date: 2026-06-02
 - [ ] Ask each user to run `/profile`.
 - [ ] Let new users test one `/film` Basic with 200 trial Xu.
 - [ ] Offer topup 10k/50k/100k only after they understand Xu.
-- [ ] If using a promo, send code privately and ask user to run `/promo <code>`.
+- [ ] Ask users to check `/khuyenmai`; public first top-up offer is `FIRST30`.
 - [ ] Ask user to post manually, then record result with `/publish_done`.
 - [ ] Ask user to add metrics with `/performance_add`.
 - [ ] Ask user to run `/growth_ai` after enough data.

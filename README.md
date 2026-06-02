@@ -45,6 +45,8 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/start`: menu chính.
 - `/profile`: xem số dư, hạng, tổng chi.
 - `/naptien`: tạo hóa đơn PayOS QR động.
+- `/khuyenmai`, `/uudai`, `/promos`: xem ưu đãi đang có và thứ tự nên dùng.
+- `/promo <mã>`, `/magiamgia <mã>`: lưu một mã ưu đãi cho lần nạp PayOS tiếp theo.
 - `/thucong`: nạp thủ công khi QR tự động lỗi.
 - `/ref`: lấy link giới thiệu nhận thưởng.
 - `/gopy <nội dung>`: góp ý hoặc báo lỗi.
@@ -54,6 +56,9 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/add <ID> <Số_Xu>`: cộng xu thủ công.
 - `/duyet <ID> <Số_Xu>`: duyệt bill thủ công.
 - `/checkpayos <Mã_đơn>`: admin gọi PayOS kiểm tra lại đơn đã tạo link và tự cộng xu nếu trạng thái đã thanh toán.
+- `/promo_seed_policy`: seed Promotion Policy V2.1.
+- `/promo_seed_beta`: alias tương thích cho `/promo_seed_policy`.
+- `/promo_list`, `/promo_create`, `/promo_disable`: quản lý mã ưu đãi, không giảm tiền nạp và không cộng dồn.
 - `/tuchoi <ID>`: từ chối bill thủ công.
 - `/pending`: xem bill đang chờ.
 - `/stats`: thống kê nhanh.

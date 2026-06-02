@@ -4,12 +4,14 @@ Date: 2026-06-02
 
 ## Goal
 
-Run one real low-value PayOS payment before selling to customers.
+Run real low-value PayOS payments before selling to customers.
 
 This test includes two paths:
 
 1. PayOS 10k without promo.
-2. PayOS 10k with BETA50 promo.
+2. PayOS 20k or higher with public promo `FIRST30`.
+
+`BETA50` is limited/internal only and should not be the broad public launch test.
 
 ## Preconditions
 
@@ -17,10 +19,10 @@ This test includes two paths:
 - `/providers` shows PayOS Client ID, API Key, and Checksum as `configured`.
 - `/backup_db` has been run successfully.
 - `/naptien` shows all payment packages.
-- `/promo_seed_beta` can create BETA50 and BETA30.
+- `/promo_seed_policy` has seeded Promotion Policy V2.1.
 - Admin is online to inspect `/dashboard`, `/pending`, and user messages.
 
-## Test case 1 - Create QR
+## Test Case 1 - Create QR
 
 1. Use a non-admin test user if possible.
 2. Call `/naptien`.
@@ -34,7 +36,7 @@ Expected:
 - Order code exists.
 - No Xu is added before real payment.
 
-## Test case 2 - Real payment without promo
+## Test Case 2 - Real Payment Without Promo
 
 1. Pay the 10k QR.
 2. Wait for PayOS webhook.
@@ -49,35 +51,35 @@ Expected:
 - `credit_events` contains the PayOS deposit.
 - Dashboard revenue increases once.
 
-## Test case 3 - Real payment with BETA50 promo
+## Test Case 3 - Real Payment With FIRST30 Promo
 
 Admin setup:
 
 ```text
 /backup_db
 /providers
-/promo_seed_beta
+/promo_seed_policy
 ```
 
 User flow:
 
 ```text
-/promo BETA50
+/promo FIRST30
 /naptien
 ```
 
-Then select package `10k` and pay the real QR.
+Then select package `20k` or higher and pay the real QR.
 
-Expected:
+Expected for 20k:
 
-- Base Xu: 100.
-- BETA50 bonus Xu: 50.
-- Total Xu added: 150.
+- Base Xu: 200.
+- FIRST30 bonus Xu: 60.
+- Total Xu added: 260.
 - Promo bonus is added only after payment success.
 - `credit_events` contains one `payos_deposit` and one `promo_bonus`.
 - `promotion_redemptions.status` becomes `applied`.
 
-## Test case 4 - Duplicate protection
+## Test Case 4 - Duplicate Protection
 
 If a duplicate webhook/order replay can be simulated safely, or if `/checkpayos <order_code>` is run after webhook success, confirm the bot does not add Xu twice.
 
@@ -87,7 +89,7 @@ Expected:
 - Promo bonus is not credited twice.
 - Dashboard revenue does not double count.
 
-## Test case 5 - Manual fallback
+## Test Case 5 - Manual Fallback
 
 1. Trigger manual flow with `/thucong` or a PayOS checkout failure.
 2. User sends bill screenshot.
@@ -99,29 +101,22 @@ Expected:
 - User receives the intended Xu.
 - Credit event is recorded.
 
-## Test case 6 - Missing checksum audit
-
-Do not run this on production while selling. Code expectation:
-
-- Missing checksum rejects automatic webhook credit.
-- Manual fallback remains available.
-
-## Pass criteria before public sale
+## Pass Criteria Before Public Sale
 
 - [ ] Real 10k PayOS payment PASS.
-- [ ] Real 10k + BETA50 promo payment PASS.
+- [ ] Real 20k+FIRST30 promo payment PASS.
 - [ ] Duplicate protection PASS or manually reviewed.
 - [ ] Dashboard revenue updates once.
 - [ ] Promo bonus does not duplicate.
 - [ ] Backup was taken before and after test.
 - [ ] Manual fallback path is understood by admin.
 
-## Final admin confirmation
+## Final Admin Confirmation
 
-After a successful real 10k + BETA50 test, run:
+After a successful real FIRST30 test, run:
 
 ```text
-/mark_payos_test pass order=<order_code> note="Test 10k+BETA50 OK, user received 150 Xu"
+/mark_payos_test pass order=<order_code> note="Test FIRST30 OK, base+bonus credited once"
 ```
 
 If the test fails, run:

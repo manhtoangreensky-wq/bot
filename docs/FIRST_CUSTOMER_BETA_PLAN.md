@@ -30,7 +30,8 @@ Date: 2026-06-02
 
 - 3-10 test users.
 - At least 3 successful topups.
-- One 10k+BETA50 PayOS test credits exactly 150 Xu before wider beta.
+- One 20k+FIRST30 PayOS test credits exactly 260 Xu before wider beta.
+- `BETA50` remains limited/internal only.
 - No PayOS crediting errors.
 - No promo duplicate bonus.
 - At least 10 `/film` runs.

@@ -2,7 +2,7 @@
 
 Date: 2026-06-02
 Source: `bot.py` local audit after Step 11
-Registered Telegram commands: 208
+Registered Telegram commands: 216
 Registered callback groups: 9
 
 ## User Commands
@@ -23,7 +23,11 @@ Registered callback groups: 9
 | `/thucong` | `cmd_thanhtoan_thucong` | YES | Manual bill fallback. |
 | `/beta_offer` | `cmd_beta_offer` | YES | Shows beta packages and customer workflow. |
 | `/goi_beta` | `cmd_beta_offer` | YES | Vietnamese alias for `/beta_offer`. |
-| `/promo` | `cmd_promo` | YES | Activates a private beta promo code; bonus applies after PayOS paid order. |
+| `/promo` | `cmd_promo` | YES | Saves one promo code for the next PayOS order; no stacking and no pre-payment credit. |
+| `/magiamgia` | `cmd_promo` | YES | Vietnamese alias for `/promo`. |
+| `/khuyenmai` | `cmd_promo_guide` | YES | Shows Promotion Policy V2.1 and recommended code order. |
+| `/uudai` | `cmd_promo_guide` | YES | Alias for `/khuyenmai`. |
+| `/promos` | `cmd_promo_guide` | YES | Alias for `/khuyenmai`. |
 | `/ref` | `cmd_ref` | YES | Referral link and stats. |
 | `/invite` | `cmd_invite` | YES | Alias to referral flow. |
 | `/gopy` | `cmd_gopy` | YES | User feedback. |
@@ -80,7 +84,11 @@ Registered callback groups: 9
 | `/costs` | `cmd_costs` | YES | YES | Cost control and paid-provider risk summary. |
 | `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
 | `/payos_test_plan` | `cmd_payos_test_plan` | YES | YES | Real PayOS 10k manual test checklist. |
-| `/promo_seed_beta` | `cmd_promo_seed_beta` | YES | YES | Seeds BETA50/BETA30 promo codes for controlled beta payment tests. |
+| `/promo_seed_policy` | `cmd_promo_seed_policy` | YES | YES | Seeds Promotion Policy V2.1 codes: FIRST30, SECOND15, WEEKLY10, MONTHLY20, DAILY5, BETA50. |
+| `/promo_seed_beta` | `cmd_promo_seed_beta` | YES | YES | Compatibility alias for `/promo_seed_policy`. |
+| `/promo_list` | `cmd_promo_list` | YES | YES | Lists recent promo codes and usage. |
+| `/promo_create` | `cmd_promo_create` | YES | YES | Creates a new promo code without overwriting existing codes. |
+| `/promo_disable` | `cmd_promo_disable` | YES | YES | Disables a promo code without deleting data. |
 | `/mark_payos_test` | `cmd_mark_payos_test` | YES | YES | Admin records PayOS real test PASS/FAIL/NOT_TESTED; does not alter payments. |
 | `/pricing_admin` | `cmd_pricing_admin` | YES | YES | Admin-only formula/constants for Pricing Engine V2. |
 | `/runtime` | `cmd_runtime` | YES | System menu | Runtime/webhook diagnostics. |

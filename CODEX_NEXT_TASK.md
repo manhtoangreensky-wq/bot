@@ -7,45 +7,45 @@ Chưa làm ERP/Device Ops/SaaS.
 
 ## Current priority
 
-Run the real PayOS 10k payment test with BETA50 promo before selling beta.
+Run the real PayOS payment test with Promotion Policy V2.1 before selling beta.
 
 Manual sequence:
 
-- MVP done: `/promo_seed_beta`, `/promo <code>`, BETA50/BETA30 one-time bonus on PayOS paid order.
-- Next improvement if needed: mã giảm giá theo %, expiry date, campaign-specific code, admin list/disable commands.
+- MVP done: `/promo_seed_policy`, `/promo <code>`, `/khuyenmai`, admin list/create/disable, percent bonus on PayOS paid order.
+- `BETA50` is limited/internal only; public first top-up offer is `FIRST30`.
 - Không đổi bảng giá gốc.
 - Không đụng PayOS packages nếu chưa cần.
 
 ```text
 /backup_db
 /providers
-/promo_seed_beta
-/promo BETA50
+/promo_seed_policy
+/promo FIRST30
 /naptien
-# choose 10k and pay real QR
+# choose 20k or higher and pay real QR
 /checkpayos <order_code>   # only if webhook has not credited yet
-/mark_payos_test pass order=<order_code> note="10k + BETA50 OK"
+/mark_payos_test pass order=<order_code> note="FIRST30 OK"
 /sales_ready
 ```
 
-Expected for 10k + BETA50:
+Expected for 20k + FIRST30:
 
-- Base Xu: 100
-- Promo bonus: 50
-- Total Xu added: 150
+- Base Xu: 200
+- Promo bonus: 60
+- Total Xu added: 260
 - Duplicate webhook/checkpayos must not add base or bonus again.
 
 ## Option A - Run real PayOS 10k test manually
 
 - Test without promo if needed.
-- Test with `/promo BETA50`.
+- Test with `/promo FIRST30`.
 - Confirm dashboard and user balance.
 - Mark pass only after manual verification.
 
 ## Option B - First customer beta launch
 
 - Open beta for 3-10 users.
-- Offer: 200 Xu trial + BETA50 while active.
+- Offer: 200 Xu trial + FIRST30 for first top-up while active.
 - Watch `/dashboard`, `/performance_report`, `/sales_ready`.
 
 ## Option C - Sales copy/posts
