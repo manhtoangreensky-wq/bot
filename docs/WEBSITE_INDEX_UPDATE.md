@@ -7,6 +7,8 @@
 ## Files changed
 
 - `index.html`
+- `banner.png`
+- `bot.py` - safe `/banner.png` FileResponse route only
 - `docs/WEBSITE_INDEX_AUDIT.md`
 - `docs/WEBSITE_INDEX_UPDATE.md`
 - `docs/STABLE_REVENUE_BOT_STATUS.md`
@@ -25,12 +27,19 @@
 - Affiliate Workflow: lưu link, tạo script bằng `/film`, lên lịch, đăng thủ công, đo hiệu quả.
 - Safety: không auto publish khi chưa duyệt, không spam, không deepfake không consent, affiliate minh bạch.
 - Contact: giữ form POST `/lead`.
+- Banner: added repository-root `banner.png` immediately after hero with responsive `object-fit: contain`.
 
 ## CTA links
 
 - Bot: `https://t.me/Httdhtoan`
-- Nạp Xu: anchor `#pricing`, hướng người dùng về bot để dùng `/naptien`.
+- Nạp Xu: anchor `#pricing`, hướng người dùng mở bot và dùng `/naptien`.
 - Lead: form POST `/lead`.
+
+## Static assets
+
+- `/LOGO.png`: dedicated route, unchanged.
+- `/banner.png`: dedicated route serving only `banner.png`; no catch-all route added.
+- `og:image`: `/banner.png`.
 
 ## Manual checks
 

@@ -23,9 +23,39 @@
 - `/`: JSON runtime/health summary from `bot.py`, not the marketing landing page.
 - `/landing`: `FileResponse(index.html)` from repository root.
 - Static logo: `/LOGO.png` and `/logo.png`.
+- Static banner: `/banner.png` serves only repository-root `banner.png`.
+
+## Verification Before Banner
+
+Checked on 2026-06-02 before adding banner:
+
+- Live `/`: HTTP 200, `application/json`, returns runtime JSON.
+- Live `/landing`: HTTP 200, `text/html`, contains `TOAN AAS - AI Automation System`.
+- Live `/LOGO.png`: HTTP 200, `image/png`.
+- Local `bot.py`: `/landing` uses `FileResponse(index.html)`.
+- Local `bot.py`: `/LOGO.png` uses a dedicated safe route.
+- No catch-all static route is used.
+
+## Pricing Check
+
+`index.html` pricing matches `PAYMENT_PACKAGES` in `bot.py`:
+
+- `10k`: 10.000đ -> 100 Xu
+- `20k`: 20.000đ -> 200 Xu
+- `50k`: 50.000đ -> 500 Xu
+- `100k`: 100.000đ -> 1.050 Xu
+- `200k`: 200.000đ -> 2.150 Xu
+- `500k`: 500.000đ -> 5.500 Xu
+
+## Telegram CTA Check
+
+- Website CTA uses `https://t.me/Httdhtoan`.
+- `BOT_USERNAME` default in `bot.py` and `.env.example` is `Httdhtoan`.
+- CTA copy now tells users to open Telegram bot and use `/naptien` to top up Xu.
 
 ## Decision
 
 - File edited: `index.html`.
-- Files not edited: `bot.py` route logic, PayOS, billing, database, Telegram handlers.
-- Reason: landing HTML is a standalone file and does not require backend logic changes.
+- Backend route edited only to add safe `/banner.png` FileResponse.
+- Files not edited: PayOS, billing, database, Telegram handlers.
+- Reason: banner is a repository-root image and needs an explicit safe asset route.

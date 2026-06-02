@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#0A8F66">
 <meta property="og:title" content="TOAN AAS - AI Automation System">
 <meta property="og:description" content="Hệ thống AI tạo nội dung, nạp Xu tự động và hỗ trợ kiếm tiền đa nền tảng trong một bot Telegram.">
-<meta property="og:image" content="/LOGO.png">
+<meta property="og:image" content="/banner.png">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" href="/LOGO.png">
 <link rel="apple-touch-icon" href="/LOGO.png">
@@ -238,6 +238,25 @@ h1 {
   background: rgba(255,255,255,.72);
 }
 .hero-points b { display: block; color: var(--ink); font-size: 15px; }
+
+.brand-banner {
+  padding: 0 0 84px;
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.brand-banner-frame {
+  overflow: hidden;
+  border: 1px solid var(--line-dark);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: 0 22px 54px rgba(7,19,15,.18);
+}
+.brand-banner-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
 
 section { padding: 92px 0; }
 .light { background: var(--panel-2); color: var(--ink); }
@@ -610,6 +629,14 @@ footer {
     </div>
   </section>
 
+  <section class="brand-banner" aria-label="TOAN AAS banner">
+    <div class="shell">
+      <div class="brand-banner-frame">
+        <img src="/banner.png" alt="TOAN AAS AI Automation System banner" loading="lazy">
+      </div>
+    </div>
+  </section>
+
   <section id="services" class="light">
     <div class="shell">
       <div class="section-head">
@@ -686,7 +713,7 @@ footer {
       <div class="section-head">
         <div class="tag">PayOS Xu & Billing</div>
         <h2>Nạp Xu tự động bằng PayOS QR động</h2>
-        <p>Chọn gói, quét QR, hệ thống tự cộng Xu sau khi thanh toán thành công. Nếu QR động lỗi, bot hỗ trợ VietQR thủ công và admin duyệt tay.</p>
+        <p>Chọn gói, quét QR, hệ thống tự cộng Xu sau khi thanh toán thành công. Mở Bot Telegram và dùng <b>/naptien</b> để nạp Xu. Nếu QR động lỗi, bot hỗ trợ VietQR thủ công và admin duyệt tay.</p>
       </div>
       <div class="pricing">
         <article class="price-card">
