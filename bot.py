@@ -23403,7 +23403,7 @@ def operator_brain_fallback(raw_text):
         }
 
     if any(word in lower for word in [
-        "lưu link affiliate", "luu link affiliate", "import affiliate", "nhập affiliate", "nhap affiliate",
+        "nhập link nội bộ", "nhap link noi bo", "import affiliate", "nhập affiliate", "nhap affiliate",
         "nạp link affiliate", "nap link affiliate", "thêm nhiều link", "them nhieu link"
     ]) and any_url:
         return {
@@ -24575,7 +24575,7 @@ async def run_brain_plan(update, context, plan):
             raw_links = plan.get("topic") or plan.get("raw") or ""
             if not raw_links:
                 return await update.message.reply_text(
-                    "⚠️ Cần paste danh sách link. Ví dụ: <code>/brain lưu link affiliate https://... (Tên sản phẩm)</code>",
+                    "⚠️ INTERNAL TEST ONLY. Cần paste danh sách link. Ví dụ: <code>/brain nhập link nội bộ https://... (Tên sản phẩm)</code>",
                     parse_mode="HTML",
                 )
             context.args = raw_links.split()
@@ -26163,7 +26163,7 @@ async def cmd_addlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price_vnd, commission_rate, audience, allowed_claims, blocked_claims, base_score
     )
     await update.message.reply_text(
-        f"✅ <b>Đã lưu link affiliate #{affiliate_id}</b>\n"
+        f"✅ <b>INTERNAL TEST ONLY — Đã lưu link nội bộ #{affiliate_id}</b>\n"
         f"• Sản phẩm: <b>{html.escape(product)}</b>\n"
         f"• Nhóm: {html.escape(niche)} | Network: <code>{html.escape(network)}</code>\n"
         f"• Link: <code>{html.escape(short_url_display(url))}</code>\n\n"
@@ -30354,7 +30354,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "rank": "/trend_rank\n/trend_rank 20",
         "viralremix": "/viral_remix url=https://... topic=công nghệ AI platform=tiktok save=1\n/viral_remix ref=<REF_ID> topic=đạo lý gia đình\nGET /api/operator/viral-remix?url=<URL>&topic=<TOPIC>",
         "affseed": "/affiliate_seed\n/affiliate_import https://shorten.asia/abc (Tên sản phẩm)\n/affiliates",
-        "affimport": "/affiliate_import https://shorten.asia/abc (Tên sản phẩm), https://trackfin.asia/xyz (Brand)\n/brain lưu link affiliate https://... (Tên sản phẩm)",
+        "affimport": "/affiliate_import https://shorten.asia/abc (Tên sản phẩm), https://trackfin.asia/xyz (Brand)\n/brain nhập link nội bộ https://... (Tên sản phẩm)",
         "affiliates": "/affiliates",
         "affcockpit": "/affiliate_cockpit days=30 platform=tiktok limit=10\n/affiliate_cockpit aff=<AFF_ID> days=30\nGET /api/operator/affiliate-cockpit?days=30&platform=tiktok",
         "affreport": "/affiliate_report days=30\n/affiliate_report days=90 limit=20",
@@ -30465,7 +30465,7 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/brain autopilot 3 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain tạo 5 video trend công nghệ AI cho tiktok aff 2 campaign 1</code>\n"
             "• <code>/brain tạo phim AI series 5 tập chủ đề đạo lý gia đình trên tiktok</code>\n"
-            "• <code>/brain lưu link affiliate https://shorten.asia/abc (Tên sản phẩm)</code>\n"
+            "• <code>/brain nhập link nội bộ https://shorten.asia/abc (Tên sản phẩm)</code>\n"
             "• <code>/brain học video này https://facebook.com/...</code>\n"
             "• <code>/brain quét video tham khảo path=D:\\mybot\\TOANAAS\\video AI tham khảo</code>\n"
             "• <code>/brain duyệt job 12 để đăng</code>\n"
