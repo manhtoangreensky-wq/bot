@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║   TOAN DAAS V15.2 - DYNAMIC QR READY                             ║
+║   TOAN AAS V15.2 - DYNAMIC QR READY                             ║
 ║   FastAPI + Telegram Bot (Shared Event Loop via Lifespan)        ║
 ║   Dynamic Billing | Deepgram | Auto-Tiers | PayOS Dynamic QR     ║
 ║   Cutout Fallback | OpenAI Fallback | Full Env Vars              ║
@@ -101,7 +101,7 @@ def detect_public_base_url() -> tuple[str, str]:
 
 TELEGRAM_TOKEN      = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
 ADMIN_ID            = _env("ADMIN_ID", "7126457028")
-APP_VERSION         = "TOAN DAAS V15.2"
+APP_VERSION         = "TOAN AAS V15.2"
 START_TIME          = time.time()
 APP_BUILD_SHA       = (
     _env("RAILWAY_GIT_COMMIT_SHA")
@@ -216,7 +216,7 @@ def telegram_update_ownership_diagnosis(info_payload: dict, active_update_mode: 
             next_action = f"Restart đúng Railway service hoặc set webhook về {expected_url}; tắt service A_TOOLSX/cũ nếu còn chạy."
         else:
             level = "OWNED_BY_THIS_DEPLOY"
-            message = "Telegram webhook đang trỏ đúng deployment TOAN DAAS hiện tại."
+            message = "Telegram webhook đang trỏ đúng deployment TOAN AAS hiện tại."
             next_action = "/start hoặc /goal_audit"
     else:
         level = "POLLING_MODE"
@@ -291,8 +291,8 @@ async def telegram_webhook_watchdog():
                     await tg_app.bot.send_message(
                         chat_id=ADMIN_ID,
                         text=(
-                            "🛡 <b>TOAN DAAS WEBHOOK WATCHDOG</b>\n\n"
-                            "Bot vừa tự kéo Telegram update về đúng Railway TOAN DAAS.\n"
+                            "🛡 <b>TOAN AAS WEBHOOK WATCHDOG</b>\n\n"
+                            "Bot vừa tự kéo Telegram update về đúng Railway TOAN AAS.\n"
                             f"• Webhook cũ: <code>{html.escape(info_payload.get('url') or '-')}</code>\n"
                             f"• Webhook đúng: <code>{html.escape(expected_url or '-')}</code>\n"
                             f"• Kết quả: <code>{html.escape(str(takeover.get('ok')))}</code>\n"
@@ -2027,7 +2027,7 @@ def seed_default_affiliate_links(owner_id):
 DEFAULT_OPERATOR_CHANNELS = [
     {
         "platform": "tiktok",
-        "name": "TOAN DAAS Tech Affiliate",
+        "name": "TOAN AAS Tech Affiliate",
         "account": "tk1",
         "focus": "AI tools, công nghệ, review sản phẩm, affiliate",
         "audience": "creator, dân văn phòng, người muốn kiếm tiền online",
@@ -2036,7 +2036,7 @@ DEFAULT_OPERATOR_CHANNELS = [
     },
     {
         "platform": "tiktok",
-        "name": "TOAN DAAS Tech Affiliate 2",
+        "name": "TOAN AAS Tech Affiliate 2",
         "account": "tk2",
         "focus": "AI tools, app kiếm tiền, sản phẩm công nghệ, affiliate dài hạn",
         "audience": "creator mới, dân văn phòng, người thích công nghệ thực dụng",
@@ -2045,7 +2045,7 @@ DEFAULT_OPERATOR_CHANNELS = [
     },
     {
         "platform": "facebook",
-        "name": "TOAN DAAS Facebook Affiliate",
+        "name": "TOAN AAS Facebook Affiliate",
         "account": "page1",
         "focus": "AI automation, công nghệ, deal sản phẩm, tài chính minh bạch",
         "audience": "người dùng Facebook, chủ shop nhỏ, creator",
@@ -2054,7 +2054,7 @@ DEFAULT_OPERATOR_CHANNELS = [
     },
     {
         "platform": "facebook",
-        "name": "TOAN DAAS Facebook Affiliate 2",
+        "name": "TOAN AAS Facebook Affiliate 2",
         "account": "page2",
         "focus": "Reels affiliate, deal công nghệ, tài chính minh bạch, mẹo dùng AI",
         "audience": "người dùng Facebook, chủ shop nhỏ, nhân viên văn phòng",
@@ -2063,7 +2063,7 @@ DEFAULT_OPERATOR_CHANNELS = [
     },
     {
         "platform": "onlyfans",
-        "name": "TOAN DAAS AI Model Studio",
+        "name": "TOAN AAS AI Model Studio",
         "account": "of1",
         "focus": "AI model hợp pháp, behind-the-scenes, affiliate lifestyle",
         "audience": "fan trưởng thành 18+",
@@ -2072,7 +2072,7 @@ DEFAULT_OPERATOR_CHANNELS = [
     },
     {
         "platform": "onlyfans",
-        "name": "TOAN DAAS AI Model Studio 2",
+        "name": "TOAN AAS AI Model Studio 2",
         "account": "of2",
         "focus": "AI model hợp pháp, lifestyle affiliate, behind-the-scenes, creator workflow",
         "audience": "fan trưởng thành 18+ quan tâm AI model và lifestyle",
@@ -2083,17 +2083,17 @@ DEFAULT_OPERATOR_CHANNELS = [
 
 DEFAULT_OPERATOR_CAMPAIGNS = [
     {
-        "name": "TOAN DAAS Tech Affiliate",
+        "name": "TOAN AAS Tech Affiliate",
         "niche": "công nghệ AI, thiết bị, app, affiliate dài hạn",
         "platforms": "tiktok,facebook,onlyfans",
     },
     {
-        "name": "TOAN DAAS Finance Affiliate",
+        "name": "TOAN AAS Finance Affiliate",
         "niche": "thẻ ngân hàng, app tài chính, voucher, lead hợp pháp",
         "platforms": "tiktok,facebook",
     },
     {
-        "name": "TOAN DAAS Travel Lifestyle",
+        "name": "TOAN AAS Travel Lifestyle",
         "niche": "du lịch, vé máy bay, khách sạn, lifestyle affiliate",
         "platforms": "tiktok,facebook",
     },
@@ -2107,7 +2107,7 @@ DEFAULT_CAMPAIGN_PRESETS = [
         "niche": "công nghệ AI, điện thoại, máy tính, thiết bị, app, phần mềm, affiliate dài hạn",
         "topic": "AI tools, điện thoại, laptop, app kiếm tiền, thiết bị công nghệ đáng mua",
         "platforms": ["tiktok", "facebook"],
-        "campaign_name": "TOAN DAAS Tech Affiliate",
+        "campaign_name": "TOAN AAS Tech Affiliate",
         "angle": "review nhanh, so sánh lợi ích thực tế, demo vấn đề trước/sau, CTA chọn nhiều link sản phẩm liên quan",
         "affiliate_query": "Shopee Lazada TikTok Samsung CellphoneS Điện Thoại Vui Hoàng Hà Mobile ShopDunk Nguyễn Kim MediaMart Bền Computer",
         "compliance": "Không nói quá công dụng, không giả review nếu chưa test; ghi rõ có link affiliate khi đăng.",
@@ -2119,7 +2119,7 @@ DEFAULT_CAMPAIGN_PRESETS = [
         "niche": "sàn thương mại điện tử, deal, voucher, đồ gia dụng, thời trang, sản phẩm mua online",
         "topic": "deal tốt, voucher, sản phẩm tiện ích đáng mua trên Shopee Lazada TikTok Shop",
         "platforms": ["tiktok", "facebook"],
-        "campaign_name": "TOAN DAAS Tech Affiliate",
+        "campaign_name": "TOAN AAS Tech Affiliate",
         "angle": "top list nhiều lựa chọn, so sánh giá trị, gắn tất cả link sản phẩm liên quan vào caption/bình luận",
         "affiliate_query": "Shopee Lazada TikTok Chickita Savani JUNO Vascara Adidas Supersports JOCKEY VERA Aeon",
         "compliance": "Không dùng giá/khuyến mãi nếu chưa kiểm tra ngày đăng; tránh claim giảm giá cố định.",
@@ -2131,7 +2131,7 @@ DEFAULT_CAMPAIGN_PRESETS = [
         "niche": "ngân hàng, thẻ tín dụng, vay hợp pháp, app tài chính, bảo hiểm, lead tài chính",
         "topic": "app ngân hàng, thẻ, vay hợp pháp, ưu đãi tài chính cá nhân cần biết",
         "platforms": ["tiktok", "facebook"],
-        "campaign_name": "TOAN DAAS Finance Affiliate",
+        "campaign_name": "TOAN AAS Finance Affiliate",
         "angle": "giải thích điều kiện, checklist tự kiểm tra, so sánh lựa chọn theo nhu cầu, CTA minh bạch",
         "affiliate_query": "VPBank MBBank BIDV VIB HDBank Liobank Cathay Lotte HomeCredit Tima Bảo Minh EVOCARD MSB",
         "compliance": "Không cam kết duyệt hồ sơ, không cam kết lợi nhuận, nhắc người xem tự đọc điều khoản chính thức.",
@@ -2143,7 +2143,7 @@ DEFAULT_CAMPAIGN_PRESETS = [
         "niche": "du lịch, vé máy bay, khách sạn, tour, trải nghiệm, SIM du lịch",
         "topic": "vé máy bay, khách sạn, tour, lịch trình du lịch tiết kiệm và tiện lợi",
         "platforms": ["tiktok", "facebook"],
-        "campaign_name": "TOAN DAAS Travel Lifestyle",
+        "campaign_name": "TOAN AAS Travel Lifestyle",
         "angle": "lịch trình ngắn, mẹo tiết kiệm, so sánh nhiều lựa chọn vé/khách sạn/tour",
         "affiliate_query": "Traveloka Vé máy bay BestPrice Vietnam Airlines VinWonders Klook Vé Giá rẻ Gotadi ATADI",
         "compliance": "Không nói còn vé/giá nếu chưa kiểm tra; dùng CTA kiểm tra giá hiện tại qua link.",
@@ -2155,7 +2155,7 @@ DEFAULT_CAMPAIGN_PRESETS = [
         "niche": "AI model hợp pháp, lifestyle, behind-the-scenes, affiliate creator tools, fan trưởng thành 18+",
         "topic": "AI model hợp pháp, hậu trường tạo content, lifestyle affiliate và công cụ creator",
         "platforms": ["onlyfans", "tiktok", "facebook"],
-        "campaign_name": "TOAN DAAS Tech Affiliate",
+        "campaign_name": "TOAN AAS Tech Affiliate",
         "angle": "behind-the-scenes, quy trình tạo nhân vật AI hợp pháp, lifestyle sản phẩm liên quan, manual review",
         "affiliate_query": "creator tools lifestyle thời trang VERA JOCKEY Vascara Adidas Samsung TikTok For Business Zalo Ads",
         "compliance": "Manual only cho OnlyFans; chỉ dùng nhân vật AI tự tạo hoặc người thật có consent rõ ràng, đủ 18 tuổi; không giả mạo.",
@@ -2177,7 +2177,7 @@ def get_campaign_preset(preset_key=""):
     return DEFAULT_CAMPAIGN_PRESETS[0]
 
 def ensure_campaign_for_preset(owner_id, preset):
-    campaign_name = preset.get("campaign_name") or preset.get("name") or "TOAN DAAS Campaign"
+    campaign_name = preset.get("campaign_name") or preset.get("name") or "TOAN AAS Campaign"
     existing = find_campaign_by_name(owner_id, campaign_name)
     if existing:
         return existing, False
@@ -2969,7 +2969,7 @@ def operator_mission_prompt_pack_data(owner_id, mission_id=0, claim=False, worke
     today = operator_today_data(owner_id)
     publisher = publisher_status_data(owner_id)
     prompt = (
-        "Bạn là AI Commander cho TOAN DAAS. Điều phối pipeline kiếm tiền affiliate hợp pháp.\n"
+        "Bạn là AI Commander cho TOAN AAS. Điều phối pipeline kiếm tiền affiliate hợp pháp.\n"
         "Nhiệm vụ: đọc objective, chọn kênh/affiliate/trend phù hợp, tạo hoặc đề xuất production jobs, "
         "giao task cho worker, dừng ở review/publish gate và luôn gắn tracking doanh thu.\n\n"
         f"MISSION #{mission['id']}: {mission['title']}\n"
@@ -3942,7 +3942,7 @@ def operator_smoke_test_data(owner_id):
 def operator_worker_spec_data():
     base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
     return {
-        "name": "TOAN DAAS AI Operator Worker Spec",
+        "name": "TOAN AAS AI Operator Worker Spec",
         "version": "1.0",
         "base_url": base_url,
         "auth": {
@@ -4130,7 +4130,7 @@ def operator_worker_spec_data():
             "goal_audit": {
                 "method": "GET",
                 "url": "/api/operator/goal-audit?days=30&platform=tiktok&limit=8",
-                "purpose": "Kiểm tra end-to-end mục tiêu TOAN DAAS: Telegram/admin, Claude/n8n, worker output thật, review, publish, affiliate, tracking tiền và scale.",
+                "purpose": "Kiểm tra end-to-end mục tiêu TOAN AAS: Telegram/admin, Claude/n8n, worker output thật, review, publish, affiliate, tracking tiền và scale.",
             },
             "head_brain": {
                 "method": "GET",
@@ -4824,7 +4824,7 @@ def operator_n8n_template_data():
     base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
     bearer = "Bearer <OPERATOR_API_TOKEN>"
     return {
-        "name": "TOAN DAAS n8n Safe Operator Loop",
+        "name": "TOAN AAS n8n Safe Operator Loop",
         "version": "1.0",
         "base_url": base_url,
         "purpose": (
@@ -5283,7 +5283,7 @@ def operator_n8n_workflow_json_data():
         ]
     }
     return {
-        "name": "TOAN DAAS Safe Operator Loop",
+        "name": "TOAN AAS Safe Operator Loop",
         "active": False,
         "nodes": [
             {
@@ -7334,9 +7334,9 @@ def operator_commander_pack_data(owner_id, days=30, platform="tiktok", limit=8):
     return {
         "generated_at": now_text(),
         "base_url": base_url,
-        "role": "Claude Opus / AI commander điều phối công ty một người TOAN DAAS qua Telegram/API.",
+        "role": "Claude Opus / AI commander điều phối công ty một người TOAN AAS qua Telegram/API.",
         "system_prompt": (
-            "Bạn là AI Commander cho TOAN DAAS. Admin ra mục tiêu trong Telegram; nhiệm vụ của bạn là điều phối pipeline "
+            "Bạn là AI Commander cho TOAN AAS. Admin ra mục tiêu trong Telegram; nhiệm vụ của bạn là điều phối pipeline "
             "tạo video affiliate theo trend, giao task cho AI/tool worker, yêu cầu review trước publish, ghi số liệu sau đăng "
             "và đề xuất scale. Không tự publish nếu chưa approved. Không lộ token/key. Không copy nguyên video tham khảo. "
             "Ưu tiên tool trả phí/chất lượng cao trước; nếu lỗi/quota thì ghi tool event, fallback tool rẻ/miễn phí và báo admin."
@@ -9537,7 +9537,7 @@ VIDEO_PATTERN_BANK = {
         "scene_goals": ["viral_example_hook", "why_it_works", "gpt_prompt_extract", "tool_generation", "output_result", "affiliate_bridge", "performance_proof", "cta"],
         "proof_assets_required": [
             "Ví dụ viral chỉ dùng làm tham khảo format, không copy nguyên video/nhân vật/giọng.",
-            "Prompt tự viết lại bằng ngôn ngữ riêng của TOAN DAAS.",
+            "Prompt tự viết lại bằng ngôn ngữ riêng của TOAN AAS.",
             "Output do hệ thống tự tạo bằng tool hợp lệ.",
             "Dashboard/page/performance proof thật hoặc ghi rõ demo.",
         ],
@@ -9841,7 +9841,7 @@ def select_reference_examples_for_job(owner_id, job, limit=3):
     selected = refs[:max(1, int(limit or 3))]
     for item in selected:
         item["apply_rule"] = (
-            "Học cấu trúc hook, nhịp cảnh, proof placement và CTA; viết lại bằng nội dung/asset TOAN DAAS, "
+            "Học cấu trúc hook, nhịp cảnh, proof placement và CTA; viết lại bằng nội dung/asset TOAN AAS, "
             "không copy nguyên video/voice/face/text/claim."
         )
     return selected
@@ -9909,7 +9909,7 @@ def reference_video_inventory_data(limit=80, owner_id=None):
         "setup_hint": "" if exists else f"Tạo thư mục {folder} và đặt video tham khảo vào đó, hoặc set REFERENCE_VIDEO_DIR.",
         "worker_rule": (
             "Trước khi viết prompt/dựng video, đọc catalog/files reference để chọn 1-3 format gần nhất. "
-            "Chỉ học cấu trúc và nhịp dựng; output phải là nội dung/asset riêng của TOAN DAAS."
+            "Chỉ học cấu trúc và nhịp dựng; output phải là nội dung/asset riêng của TOAN AAS."
         ),
     }
 
@@ -9917,7 +9917,7 @@ def reference_learning_pack_data():
     patterns = video_pattern_bank_data()
     inventory = reference_video_inventory_data(limit=40)
     return {
-        "name": "TOAN DAAS Reference Learning Pack",
+        "name": "TOAN AAS Reference Learning Pack",
         "source_summary": {
             "reference_folder": inventory.get("folder"),
             "reference_folder_exists": inventory.get("exists"),
@@ -9935,7 +9935,7 @@ def reference_learning_pack_data():
         "patterns": patterns,
         "how_to_apply": [
             "Chọn pattern bằng select_video_pattern theo topic/platform/duration hoặc đọc video_pattern trong manifest.",
-            "Tạo hook bằng công thức của pattern, nhưng viết lại bằng ngôn ngữ TOAN DAAS.",
+            "Tạo hook bằng công thức của pattern, nhưng viết lại bằng ngôn ngữ TOAN AAS.",
             "Dùng video tham khảo chỉ để học bố cục; không copy mặt, giọng, scene, text, tài liệu, dashboard hoặc claim của người khác.",
             "Mỗi job có proof_assets_required; worker phải tạo hoặc upload proof_asset trước khi job đạt readiness.",
             "Publish pack phải có disclosure affiliate, link chính, link liên quan và tracking theo caption/comment/status/bio.",
@@ -9955,7 +9955,7 @@ def reference_learning_pack_data():
             "edit": ["final_video", "subtitle", "cta overlay", "proof/affiliate placement"],
             "publish": ["caption", "pinned comment", "related links", "tracking source", "disclosure"],
         },
-        "rule": "Biến ý tưởng của thị trường thành format riêng của TOAN DAAS; chỉ copy cấu trúc tư duy, không copy tài sản/nội dung nhận diện.",
+        "rule": "Biến ý tưởng của thị trường thành format riêng của TOAN AAS; chỉ copy cấu trúc tư duy, không copy tài sản/nội dung nhận diện.",
     }
 
 def _affiliate_match_summary(owner_id, niche="", trend_text="", platform="", affiliate_id=0, limit=6):
@@ -10068,7 +10068,7 @@ def viral_remix_pack_data(
             "lời thoại/voice-over",
             "text overlay",
             "góc máy cụ thể nếu quá giống bản gốc",
-            "claim/offer/proof nếu không thuộc TOAN DAAS",
+            "claim/offer/proof nếu không thuộc TOAN AAS",
         ],
         "can_keep": [
             "công thức hook",
@@ -10095,7 +10095,7 @@ def viral_remix_pack_data(
             "scene": idx,
             "goal": goal,
             "rewrite_instruction": (
-                f"Tạo cảnh mới cho goal '{goal}' bằng nhân vật/bối cảnh riêng của TOAN DAAS; "
+                f"Tạo cảnh mới cho goal '{goal}' bằng nhân vật/bối cảnh riêng của TOAN AAS; "
                 "không dùng lại frame, voice, caption hoặc claim của reference."
             ),
             "output_needed": ["visual_description", "voice_over", "image_prompt", "video_prompt", "caption_or_overlay"],
@@ -10108,7 +10108,7 @@ def viral_remix_pack_data(
         "work_orders": "/video_work_orders jobs=<JOB_ID>,<JOB_ID>",
     }
     worker_prompt = (
-        "Bạn là Viral Remix Operator cho TOAN DAAS. Phân tích reference để lấy cấu trúc hook/scene/CTA, "
+        "Bạn là Viral Remix Operator cho TOAN AAS. Phân tích reference để lấy cấu trúc hook/scene/CTA, "
         f"nhưng tạo video mới cho topic '{topic}' trên {platform}. Mode={mode}. "
         "Không reup, không copy lời thoại, không clone mặt/giọng/người thật, không giữ watermark. "
         f"Affiliate chính gợi ý: {primary_affiliate.get('product_name') or 'chọn từ affiliate_matches'}; "
@@ -10118,7 +10118,7 @@ def viral_remix_pack_data(
     return {
         "ok": True,
         "generated_at": now_text(),
-        "name": "TOAN DAAS Viral Remix Pack",
+        "name": "TOAN AAS Viral Remix Pack",
         "reference": reference or {},
         "selected_references": selected_refs,
         "pattern": selected_pattern,
@@ -10379,7 +10379,7 @@ def ai_film_project_pack_data(
         "rule": "MVP dùng bảng production_* hiện tại; khi cần SaaS/web app riêng mới tách projects/episodes/scenes đầy đủ.",
     }
     claude_prompt = (
-        "Bạn là Film Operator cho TOAN DAAS. Hãy tạo dự án phim AI affiliate theo contract này: "
+        "Bạn là Film Operator cho TOAN AAS. Hãy tạo dự án phim AI affiliate theo contract này: "
         f"topic='{topic}', platform='{platform}', episodes={episodes}, scenes_per_episode={scenes_per_episode}, duration={duration}s, template='{template}'. "
         "Bắt buộc tạo character bible, storyboard JSON, image/video prompt từng cảnh, voice profile cố định, caption/comment affiliate, "
         "và dừng ở review gate. Chỉ học cấu trúc video tham khảo, không copy nhân vật/lời thoại/hình ảnh/voice/watermark. "
@@ -11041,7 +11041,7 @@ def fallback_production_manifest(job, variant=None, duration=45):
             "goal": goal,
             "visual_prompt": f"Vertical 9:16 {pattern.get('name')} scene about {topic or product_name or 'AI affiliate product'}, clean realistic creator style, proof-oriented, no impersonation, no copyrighted likeness.",
             "video_tool": "kling",
-            "on_screen_text": hook if idx == 1 else (product_name or topic or "TOAN DAAS"),
+            "on_screen_text": hook if idx == 1 else (product_name or topic or "TOAN AAS"),
             "voice_line": hook if idx == 1 else f"Giải thích ngắn về {topic or product_name or 'sản phẩm'} theo góc {goal}.",
             "asset_needed": f"scene_{idx}_video.mp4",
         })
@@ -11162,7 +11162,7 @@ def build_manifest_handoff_prompt(job, manifest_row, target_tool):
     proof_assets = manifest.get("proof_assets_required") or []
     title = manifest.get("title") or topic or f"job #{jid}"
     common = (
-        f"VAI TRÒ: Bạn là {target_tool.upper()} trong AI Operator TOAN DAAS.\n"
+        f"VAI TRÒ: Bạn là {target_tool.upper()} trong AI Operator TOAN AAS.\n"
         f"Manifest: #{manifest_id} | Job: #{jid} | Variant: {variant_id or '-'} | Platform: {platform or '-'} | Format: {manifest.get('format','9:16')}\n"
         f"Title: {title}\n"
         f"Affiliate: {network or '-'} / {product_name or '-'} / {affiliate_url or '-'}\n\n"
@@ -11753,7 +11753,7 @@ def operator_task_prompt_pack_data(owner_id, task_id=0, job_id=0, tool=""):
     success_criteria = "\n".join(f"- {item}" for item in runbook.get("success_criteria", [])) or "- Output dùng được cho bước kế tiếp"
     worker_steps = "\n".join(f"{idx}. {step}" for idx, step in enumerate(runbook.get("worker_steps", []), start=1)) or "1. Thực hiện prompt task.\n2. Upload/complete output."
     prompt_text = (
-        "Bạn là AI/tool worker trong hệ thống TOAN DAAS. Chỉ thực hiện đúng task được giao, "
+        "Bạn là AI/tool worker trong hệ thống TOAN AAS. Chỉ thực hiện đúng task được giao, "
         "không tự publish, không đổi affiliate link, không bịa output.\n\n"
         f"JOB #{row_job_id}\n"
         f"- Platform: {job_payload.get('platform') or '-'}\n"
@@ -12206,7 +12206,7 @@ def operator_video_brief_data(owner_id, job_id=0, task_id=0, tool="", include_fu
     template = "kingcontent_film_series" if is_film_series else "viral_affiliate_short"
     base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
     prompt_lines = [
-        "Bạn là AI worker sản xuất video cho TOAN DAAS.",
+        "Bạn là AI worker sản xuất video cho TOAN AAS.",
         "Mục tiêu: tạo output thật cho task/job hiện tại, ưu tiên tool tốt/có phí trước; lỗi/quota thì fallback tool rẻ/miễn phí và báo admin bằng tool-events.",
         f"Job #{jid} | platform={platform or '-'} | channel={channel_name or channel_id or '-'} | topic={topic or '-'}",
         f"Affiliate chính: {network or '-'} - {product_name or '-'} - {((affiliate_bundle.get('primary') or {}).get('tracking') or {}).get('caption') or affiliate_url or '-'}",
@@ -12428,7 +12428,7 @@ def operator_visual_scene_text_pack(owner_id, task, job):
         or first_labeled_line(prompt, ["On-screen text", "Text", "Hook", "Caption"])
         or title
         or topic
-        or "TOAN DAAS Affiliate"
+        or "TOAN AAS Affiliate"
     )
     subline = (
         manifest_scene.get("voice_line")
@@ -12441,7 +12441,7 @@ def operator_visual_scene_text_pack(owner_id, task, job):
     if product_name or network:
         footer = f"{network or 'Affiliate'} • {product_name or 'Sản phẩm liên quan'}"
     return {
-        "topic": truncate_text(topic or product_name or "TOAN DAAS", 80),
+        "topic": truncate_text(topic or product_name or "TOAN AAS", 80),
         "headline": truncate_text(headline, 130),
         "subline": truncate_text(subline, 180),
         "footer": truncate_text(footer, 100),
@@ -12525,7 +12525,7 @@ async def create_operator_visual_scene_fallback(owner_id, task, job, duration=6)
     draw.rounded_rectangle((70, 120, width - 70, height - 120), radius=42, fill=(246, 250, 247), outline=(32, 184, 123), width=4)
     draw.rounded_rectangle((94, 144, width - 94, 306), radius=30, fill=(7, 64, 48))
     draw.ellipse((width - 245, 190, width - 125, 310), fill=(30, 210, 135))
-    draw.text((126, 190), "TOAN DAAS", font=load_operator_font(58, True), fill=(238, 255, 247))
+    draw.text((126, 190), "TOAN AAS", font=load_operator_font(58, True), fill=(238, 255, 247))
     draw.text((126, 252), f"Scene {pack['scene_no'] or 1} • {pack['platform']}", font=load_operator_font(28, False), fill=(167, 245, 211))
     draw_wrapped_text(draw, (126, 420), pack["topic"], load_operator_font(38, True), (9, 85, 62), width - 252, 10, 2, "center")
     draw_wrapped_text(draw, (126, 650), pack["headline"], load_operator_font(68, True), (3, 47, 35), width - 252, 16, 4, "center")
@@ -17083,7 +17083,7 @@ def build_production_prompt(slot):
         channel_name, account_label, topic_focus, audience, network, product_name, affiliate_url, commission_note
     ) = slot
     return (
-        "Bạn là AI Operator điều phối sản xuất video affiliate cho TOAN DAAS. "
+        "Bạn là AI Operator điều phối sản xuất video affiliate cho TOAN AAS. "
         "Lập brief sản xuất có thể giao cho Claude/Gemini/Runway/Kling/CapCut/FFmpeg, không spam, không mạo danh, "
         "không hướng dẫn né kiểm duyệt. Nội dung người mẫu/OnlyFans chỉ dùng nhân vật tự tạo hoặc người thật có đồng ý rõ ràng, đủ 18 tuổi.\n\n"
         f"Calendar slot: #{slot_id}\n"
@@ -17114,7 +17114,7 @@ def build_operator_stage_prompt(job, target_stage):
         "publish": "Chuẩn bị caption, hashtag, affiliate placement và checklist đăng thủ công/API chính thức cho nền tảng.",
     }
     return (
-        "Bạn là AI Operator trưởng của TOAN DAAS. Hãy tạo lệnh điều phối stage tiếp theo cho production job. "
+        "Bạn là AI Operator trưởng của TOAN AAS. Hãy tạo lệnh điều phối stage tiếp theo cho production job. "
         "Giữ nguyên triết lý công cụ: dùng công cụ tốt/có phí trước, khi hết quota/hết tiền/lỗi thì fallback sang công cụ ít phí/miễn phí, "
         "đồng thời báo admin cần bổ sung quota/số dư/key. Không spam, không mạo danh, không hướng dẫn né kiểm duyệt.\n\n"
         f"Job ID: #{jid}\n"
@@ -17160,7 +17160,7 @@ def build_publish_pack_prompt(job):
     else:
         platform_rule = "Nền tảng bất kỳ: minh bạch affiliate, không spam, không mạo danh, không cam kết kết quả tài chính."
     return (
-        "Bạn là AI Operator trưởng chuẩn bị gói đăng bài kiếm tiền cho TOAN DAAS. "
+        "Bạn là AI Operator trưởng chuẩn bị gói đăng bài kiếm tiền cho TOAN AAS. "
         "Tạo nội dung đăng hợp pháp, không spam, không mạo danh, không cam kết thu nhập phi thực tế, "
         "không hướng dẫn né kiểm duyệt. Nếu nền tảng là OnlyFans hoặc có người mẫu/AI influencer thì chỉ dùng nhân vật tự tạo "
         "hoặc người thật có consent rõ ràng và đủ 18 tuổi.\n\n"
@@ -17942,7 +17942,7 @@ def build_handoff_prompt(job, target_tool, target_stage):
         "edge": "Edge TTS: fallback voice miễn phí/ít phí.",
     }
     return (
-        f"VAI TRÒ: Bạn là {target_tool.upper()} trong hệ thống AI Operator TOAN DAAS.\n"
+        f"VAI TRÒ: Bạn là {target_tool.upper()} trong hệ thống AI Operator TOAN AAS.\n"
         "NHIỆM VỤ: Hoàn thành đúng stage được giao, tạo output có thể dùng trực tiếp cho sản xuất video affiliate.\n\n"
         "QUY TẮC BẮT BUỘC:\n"
         "- Ưu tiên công cụ tốt/có phí trước; nếu hết quota/hết tiền/lỗi thì ghi rõ fallback ít phí/miễn phí và báo admin.\n"
@@ -17977,7 +17977,7 @@ def build_review_gate_prompt(job):
         note, brief, asset_url, publish_url, channel_name, account_label, network, product_name, affiliate_url
     ) = job
     return (
-        "Bạn là AI compliance reviewer cho TOAN DAAS. Hãy kiểm duyệt production job trước khi đăng. "
+        "Bạn là AI compliance reviewer cho TOAN AAS. Hãy kiểm duyệt production job trước khi đăng. "
         "Không cần trích dẫn luật; hãy kiểm tra thực dụng theo rủi ro nền tảng và rủi ro kinh doanh.\n\n"
         f"Job ID: #{jid}\n"
         f"Platform: {platform or '-'}\n"
@@ -18012,7 +18012,7 @@ def slots_per_day(posting_slots: str) -> int:
 def content_topic_for_slot(niche, channel_focus, platform, day_index, slot_index):
     focus = channel_focus or niche or "công nghệ"
     templates = [
-        "Review nhanh {focus}: vấn đề thật và cách TOAN DAAS xử lý",
+        "Review nhanh {focus}: vấn đề thật và cách TOAN AAS xử lý",
         "Top công cụ {focus} đáng dùng trong ngày",
         "Case study kiếm tiền với {focus} và link affiliate phù hợp",
         "So sánh sản phẩm {focus}: nên mua loại nào",
@@ -18152,7 +18152,7 @@ async def alert_admin(context: ContextTypes.DEFAULT_TYPE, service_name: str, err
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"🚨 <b>BÁO ĐỘNG TOAN DAAS</b>\n\n{service_name} lỗi:\n<code>{error_msg}</code>",
+            text=f"🚨 <b>BÁO ĐỘNG TOAN AAS</b>\n\n{service_name} lỗi:\n<code>{error_msg}</code>",
             parse_mode="HTML"
         )
     except Exception:
@@ -19368,87 +19368,255 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
-def build_start_message_text(user_id) -> str:
-    is_admin = str(user_id) == ADMIN_ID
-    command_lines = [
-        "• /profile — Xem Hạng VIP & Số dư",
-        "• /naptien — Nạp thêm hạn mức",
-        "• /thucong — Nạp thủ công khi QR tự động lỗi",
-        "• /gopy &lt;nội dung&gt; — Góp ý / báo lỗi",
-    ]
+def is_admin_user(user_id) -> bool:
+    return str(user_id) == ADMIN_ID
+
+def main_reply_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup([[KeyboardButton("🏠 TOAN AAS MENU")]], resize_keyboard=True)
+
+def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     if is_admin:
-        command_lines.extend([
-            f"• /runtime — Kiểm tra bản đang chạy: <code>{APP_BUILD}</code>",
-            "• /operator_menu — Menu nút theo thư mục: Trend, Affiliate, Sản xuất, Đăng bài, Doanh thu, API",
-            "• /operator_contract — Hợp đồng điều khiển cho Admin/Claude/n8n/worker",
-            "• /telegram_takeover — Ép Telegram webhook về đúng Railway TOAN DAAS",
-            "• /campaign_preset — Preset chiến dịch: tech/ecom/finance/travel/onlyfans",
-            "• /postback_setup — Cấu hình callback affiliate network vào bot",
-            "• /brain &lt;lệnh&gt; — Ra lệnh tự nhiên cho AI Operator",
-            "• /mission_add objective=... — Gửi mission cấp cao cho Claude/n8n",
-            "• /mission_run id=&lt;ID&gt; execute=1 — Chạy mission qua executor an toàn",
-            "• /mission_workorders id=&lt;ID&gt; — Gói giao việc video/job/task cho worker",
-            "• /film_blueprint — Blueprint phim AI nhiều tập + affiliate comments",
-            "• /film_series topic=... — Tạo series phim AI thành nhiều production job",
-            "• /storyboard_crop — Hướng dẫn upload/cắt storyboard 2x5 thành scene_image",
-            "• /scene_pack job=... scene=1 — Gói ảnh/prompt/upload cho từng cảnh",
-            "• /worker_intake claim=0/1 — Worker nhận task + prompt + toolchain + upload URL",
-            "• /autopilot — Tìm trend, tạo job và build production bundle",
-            "• /affiliate_scale — Chọn affiliate rồi tự tạo batch video theo trend",
-            "• /publish_done — Ghi URL bài đã đăng + view/click/đơn/doanh thu trong một lệnh",
-            "• /growth_loop — Đọc số liệu rồi chọn/chạy bước scale-fix-test tiếp theo",
-            "• /dashboard — Dashboard quản trị hệ thống",
-            "• /checkpayos &lt;mã_đơn&gt; — Kiểm tra lại đơn PayOS",
-            "• /tools và /mmo — Kho công cụ/quy trình nội bộ Admin",
-        ])
-    runtime_line = f"🧬 <b>Runtime:</b> <code>{APP_BUILD}</code>\n\n" if is_admin else ""
-    command_text = "\n".join(command_lines)
+        rows = [
+            [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video Factory", callback_data="menu|video_factory")],
+            [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
+            [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
+            [InlineKeyboardButton("💳 Billing", callback_data="menu|billing"), InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
+        ]
+    else:
+        rows = [
+            [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video AI", callback_data="menu|video_factory")],
+            [InlineKeyboardButton("💰 Kiếm Tiền", callback_data="menu|affiliate"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|billing")],
+            [InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing"), InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
+        ]
+    return InlineKeyboardMarkup(rows)
+
+def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if section == "video_factory":
+        rows.append([InlineKeyboardButton("🧭 Quy trình tạo Video AI", callback_data="menu|video_workflow")])
+        if is_admin:
+            rows.append([InlineKeyboardButton("🚀 Film Blueprint", callback_data="menu|hint_film_blueprint")])
+            rows.append([InlineKeyboardButton("📦 Scene Pack", callback_data="menu|hint_scene_pack")])
+            rows.append([InlineKeyboardButton("📈 Growth Loop", callback_data="menu|hint_growth_loop")])
+    elif section == "video_workflow":
+        rows.append([InlineKeyboardButton("🚀 Bắt đầu Film Blueprint", callback_data="menu|hint_film_blueprint")])
+        rows.append([InlineKeyboardButton("📦 Scene Pack", callback_data="menu|hint_scene_pack"), InlineKeyboardButton("📈 Growth Loop", callback_data="menu|hint_growth_loop")])
+    elif section == "affiliate" and is_admin:
+        rows.append([InlineKeyboardButton("🎯 Campaign Preset", callback_data="menu|hint_campaign_preset")])
+        rows.append([InlineKeyboardButton("🔁 Postback Setup", callback_data="menu|hint_postback_setup")])
+    elif section == "billing":
+        rows.append([InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien"), InlineKeyboardButton("👤 Cú pháp /profile", callback_data="menu|hint_profile")])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def menu_text_main(is_admin: bool) -> str:
+    runtime_line = f"\n🧬 Runtime: <code>{APP_BUILD}</code>" if is_admin else ""
     return (
-        "👑 <b>HỆ SINH THÁI AI — TOAN DAAS V15.2</b>\n\n"
-        "Chào mừng! Hệ thống tính phí thông minh theo dung lượng thực tế.\n\n"
-        f"{runtime_line}"
-        "🛠️ <b>CÁCH SỬ DỤNG:</b>\n"
-        "<b>1. Chat AI:</b> Nhắn tin bình thường (tính theo độ dài chữ).\n"
-        "<b>2. Bóc băng Audio:</b> Gửi tin nhắn thoại 🎤 hoặc file .mp3/.m4a (tính theo MB).\n"
-        "<b>3. Tải Video Sạch:</b> Gửi link TikTok / YouTube / Facebook.\n"
-        "<b>4. Tách Nền Ảnh:</b> Gửi ảnh bất kỳ (tính theo MB).\n"
-        "<b>5. Đọc Voice:</b> Nhập 'Đọc voice: (nội dung)' (tính theo ký tự).\n\n"
-        "💡 <b>Lệnh hệ thống:</b>\n"
-        f"{command_text}"
+        "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
+        "Trợ lý AI Automation cho nội dung, affiliate, video và vận hành.\n\n"
+        "Bạn có thể:\n"
+        "• Chat AI, đọc voice, bóc băng, tách nền\n"
+        "• Tạo kịch bản/video pack cho Facebook, TikTok, YouTube\n"
+        "• Vận hành affiliate và theo dõi tăng trưởng\n"
+        "• Quản trị task/operator nội bộ nếu là admin"
+        f"{runtime_line}\n\n"
+        "Chọn nhóm chức năng bên dưới:"
     )
+
+def build_account_line(user_id) -> str:
+    if not str(user_id).isdigit():
+        return ""
+    try:
+        credits, total_spent, is_vip = get_user(user_id)
+        if is_admin_user(user_id):
+            balance = "Vô hạn"
+        elif is_vip:
+            balance = f"{credits} Xu | VIP"
+        else:
+            balance = f"{credits} Xu"
+        return f"\n👤 Tài khoản: <code>{user_id}</code> | Số dư: <b>{balance}</b>\n"
+    except Exception:
+        return ""
+
+def build_start_message_text(user_id) -> str:
+    is_admin = is_admin_user(user_id)
+    text = menu_text_main(is_admin)
+    account_line = build_account_line(user_id)
+    if account_line:
+        text = text.replace("\n\nChọn nhóm chức năng bên dưới:", account_line + "\nChọn nhóm chức năng bên dưới:")
+    return text
+
+def menu_text_ai_basic() -> str:
+    return (
+        "🤖 <b>AI Cơ Bản — dùng hằng ngày</b>\n\n"
+        "• <b>Chat AI:</b> nhắn trực tiếp trong khung chat.\n"
+        "• <b>Đọc voice:</b> nhập <code>Đọc voice: nội dung</code>.\n"
+        "• <b>Bóc băng audio:</b> gửi voice/mp3/m4a.\n"
+        "• <b>Tách nền ảnh:</b> gửi ảnh vào bot.\n"
+        "• <b>Tải video sạch:</b> gửi link TikTok/YouTube/Facebook.\n\n"
+        "Các luồng trả phí vẫn giữ cơ chế ưu tiên công cụ tốt trước, fallback công cụ dự phòng và hoàn xu khi lỗi."
+    )
+
+def menu_text_video_factory(is_admin: bool) -> str:
+    if not is_admin:
+        return (
+            "🎬 <b>Multi-Platform AI Video Factory</b>\n\n"
+            "Tạo ý tưởng, kịch bản, storyboard, scene prompt và content pack cho Facebook, TikTok, YouTube.\n\n"
+            "Khách hàng có thể gửi chủ đề để AI hỗ trợ lên ý tưởng/kịch bản. Các lệnh sản xuất nội bộ đang khóa cho admin để bảo vệ quy trình vận hành."
+        )
+    return (
+        "🎬 <b>Multi-Platform AI Video Factory</b>\n\n"
+        "Quy trình admin:\n"
+        "1. Ý tưởng/blueprint: <code>/film_blueprint</code>\n"
+        "2. Tạo series: <code>/film_series topic=...</code>\n"
+        "3. Storyboard: <code>/storyboard_crop</code>\n"
+        "4. Scene pack: <code>/scene_pack job=... scene=1</code>\n"
+        "5. Worker nhận task: <code>/worker_intake claim=1</code>\n"
+        "6. Publish: <code>/publish_done</code>\n"
+        "7. Growth: <code>/growth_loop</code>"
+    )
+
+def menu_text_video_workflow(is_admin: bool) -> str:
+    lock_note = "" if is_admin else "\n\n🔒 Các lệnh nội bộ chỉ mở cho admin. User thường xem workflow để hiểu quy trình."
+    return (
+        "🎬 <b>Quy trình tạo video AI chuẩn TOAN AAS</b>\n\n"
+        "1. Chọn nền tảng: Facebook / TikTok / YouTube\n"
+        "2. Chọn niche: tech / travel / finance / product review / story / education\n"
+        "3. Tạo blueprint: <code>/film_blueprint</code>\n"
+        "4. Tạo series: <code>/film_series topic=... episodes=... scenes=...</code>\n"
+        "5. Tạo/cắt storyboard: <code>/storyboard_crop</code>\n"
+        "6. Tạo gói từng cảnh: <code>/scene_pack job=... scene=1</code>\n"
+        "7. Worker nhận task: <code>/worker_intake claim=1</code>\n"
+        "8. Duyệt nội dung qua review gate/operator check\n"
+        "9. Đăng thủ công hoặc dùng <code>/publish_done</code> để ghi nhận\n"
+        "10. Tối ưu bằng <code>/growth_loop</code>"
+        f"{lock_note}"
+    )
+
+def menu_text_affiliate(is_admin: bool) -> str:
+    if not is_admin:
+        return (
+            "💰 <b>Affiliate Automation</b>\n\n"
+            "TOAN AAS hỗ trợ tạo nội dung bán hàng/affiliate cho Facebook, TikTok, YouTube và các nền tảng phụ như Instagram, Threads, Website, OnlyFans hợp pháp/có consent.\n\n"
+            "Quy tắc: không spam, không deepfake người thật không có consent, CTA/disclosure affiliate cần minh bạch."
+        )
+    return (
+        "💰 <b>Affiliate Automation</b>\n\n"
+        "<b>A. Setup chiến dịch</b>\n• <code>/campaign_preset</code>\n• <code>/postback_setup</code>\n\n"
+        "<b>B. Tạo batch video</b>\n• <code>/affiliate_scale</code>\n\n"
+        "<b>C. Ghi nhận bài đăng</b>\n• <code>/publish_done</code>\n\n"
+        "<b>D. Đọc số liệu và scale</b>\n• <code>/growth_loop</code>\n\n"
+        "Nền tảng chính: Facebook, TikTok, YouTube. Phụ: Instagram, Threads, Website, OnlyFans hợp pháp/có consent."
+    )
+
+def menu_text_operator(is_admin: bool) -> str:
+    if not is_admin:
+        return "🔒 <b>Operator System</b>\n\nKhu vực điều phối AI/worker chỉ dành cho admin."
+    return (
+        "🧠 <b>Operator System — điều phối AI/worker</b>\n\n"
+        "<b>A. Điều khiển operator</b>\n• <code>/operator_menu</code>\n• <code>/operator_contract</code>\n• <code>/brain</code>\n\n"
+        "<b>B. Mission</b>\n• <code>/mission_add</code>\n• <code>/mission_run</code>\n• <code>/mission_workorders</code>\n\n"
+        "<b>C. Worker intake</b>\n• <code>/worker_intake</code>\n\n"
+        "<b>D. Autopilot</b>\n• <code>/autopilot</code>"
+    )
+
+def menu_text_admin() -> str:
+    return (
+        "📊 <b>Quản Trị</b>\n\n"
+        "<b>A. User & Xu</b>\n• <code>/add</code>\n• <code>/setvip</code>\n\n"
+        "<b>B. Bill thủ công</b>\n• <code>/pending</code>\n• <code>/duyet</code>\n• <code>/tuchoi</code>\n\n"
+        "<b>C. Dashboard</b>\n• <code>/dashboard</code>\n• <code>/stats</code>\n\n"
+        "<b>D. Góp ý</b>\n• <code>/admin_gopy</code>"
+    )
+
+def menu_text_system() -> str:
+    return (
+        "⚙️ <b>Hệ Thống</b>\n\n"
+        f"• Runtime build: <code>{APP_BUILD}</code>\n"
+        f"• App version: <code>{html.escape(APP_VERSION)}</code>\n"
+        "• <code>/runtime</code>\n• <code>/telegram_takeover</code>\n• <code>/telegram_status</code>\n"
+        "• <code>/checkpayos &lt;mã_đơn&gt;</code>\n• API health: <code>GET /health</code>"
+    )
+
+def menu_text_billing(is_admin: bool) -> str:
+    text = (
+        "💳 <b>Billing & Tài khoản</b>\n\n"
+        "• <code>/profile</code> — xem số dư, VIP và referral.\n"
+        "• <code>/naptien</code> — chọn gói PayOS QR động.\n"
+        "• <code>/thucong</code> — nạp thủ công khi QR tự động lỗi.\n"
+        "• <code>/ref</code> — lấy link giới thiệu.\n\n"
+        "Các gói phổ biến: 10k, 50k, 100k. Bot vẫn giữ các gói 20k, 200k, 500k."
+    )
+    if is_admin:
+        text += "\n\n<b>Admin billing:</b>\n• <code>/checkpayos</code>\n• <code>/pending</code>\n• <code>/duyet</code>\n• <code>/tuchoi</code>\n• <code>/add</code>\n• <code>/dashboard</code>"
+    return text
+
+def menu_text_support() -> str:
+    return (
+        "🛟 <b>Hỗ Trợ</b>\n\n"
+        "• Góp ý/báo lỗi: <code>/gopy nội dung</code>\n"
+        "• Thiếu xu: mở <code>/naptien</code> và chọn gói.\n"
+        "• PayOS chưa cộng: chờ webhook hoặc gửi bill thủ công bằng <code>/thucong</code>.\n"
+        "• Gửi ảnh bill sau khi chuyển khoản thủ công.\n\n"
+        "Admin xem góp ý bằng <code>/admin_gopy</code>."
+    )
+
+def menu_hint_text(action: str) -> tuple[str, str]:
+    hints = {
+        "hint_film_blueprint": ("video_workflow", "🚀 <b>Film Blueprint</b>\n\nCopy lệnh:\n<code>/film_blueprint</code>"),
+        "hint_scene_pack": ("video_workflow", "📦 <b>Scene Pack</b>\n\nCopy lệnh:\n<code>/scene_pack job=&lt;JOB_ID&gt; scene=1</code>"),
+        "hint_growth_loop": ("video_workflow", "📈 <b>Growth Loop</b>\n\nCopy lệnh:\n<code>/growth_loop</code>"),
+        "hint_campaign_preset": ("affiliate", "🎯 <b>Campaign Preset</b>\n\nCopy lệnh:\n<code>/campaign_preset preset=tech platform=tiktok limit=3</code>"),
+        "hint_postback_setup": ("affiliate", "🔁 <b>Postback Setup</b>\n\nCopy lệnh:\n<code>/postback_setup network=trackfin platform=tiktok limit=12</code>"),
+        "hint_naptien": ("billing", "💳 <b>Nạp Xu</b>\n\nCopy lệnh:\n<code>/naptien</code>"),
+        "hint_profile": ("billing", "👤 <b>Tài khoản</b>\n\nCopy lệnh:\n<code>/profile</code>"),
+    }
+    return hints.get(action, ("main", "Chọn nhóm chức năng bên dưới."))
+
+def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup]:
+    if action in {"main", "back"}:
+        return menu_text_main(is_admin), main_menu_keyboard(is_admin)
+    if action == "ai_basic":
+        return menu_text_ai_basic(), menu_nav_keyboard("ai_basic", is_admin)
+    if action == "video_factory":
+        return menu_text_video_factory(is_admin), menu_nav_keyboard("video_factory", is_admin)
+    if action == "video_workflow":
+        return menu_text_video_workflow(is_admin), menu_nav_keyboard("video_workflow", is_admin)
+    if action == "affiliate":
+        return menu_text_affiliate(is_admin), menu_nav_keyboard("affiliate", is_admin)
+    if action == "operator":
+        return menu_text_operator(is_admin), menu_nav_keyboard("operator", is_admin)
+    if action == "admin":
+        return menu_text_admin(), menu_nav_keyboard("admin", is_admin)
+    if action == "system":
+        return menu_text_system(), menu_nav_keyboard("system", is_admin)
+    if action == "billing":
+        return menu_text_billing(is_admin), menu_nav_keyboard("billing", is_admin)
+    if action == "support":
+        return menu_text_support(), menu_nav_keyboard("support", is_admin)
+    if action.startswith("hint_"):
+        section, hint = menu_hint_text(action)
+        return hint, menu_nav_keyboard(section, is_admin)
+    return menu_text_main(is_admin), main_menu_keyboard(is_admin)
 
 def customer_start_surface_audit_data():
     public_text = build_start_message_text("__customer__")
     admin_text = build_start_message_text(ADMIN_ID or "__admin__")
     forbidden_public_markers = [
-        "/tools",
-        "/mmo",
-        "/operator_menu",
-        "/operator_contract",
-        "/brain",
-        "/mission_add",
-        "/telegram_takeover",
-        "/runtime",
-        "A_TOOLSX",
-        "A-TOOLS",
-        "A_TOOLS",
-        "join our channel",
-        "must join our channel",
-        "VIEW CHANNEL",
+        "/tools", "/mmo", "/operator_menu", "/operator_contract", "/brain", "/mission_add",
+        "/telegram_takeover", "/runtime", "A_TOOLSX", "A-TOOLS", "A_TOOLS", "join our channel",
+        "must join our channel", "VIEW CHANNEL",
     ]
     public_lower = public_text.lower()
-    leaked_markers = [
-        marker for marker in forbidden_public_markers
-        if marker.lower() in public_lower
-    ]
+    leaked_markers = [marker for marker in forbidden_public_markers if marker.lower() in public_lower]
     return {
         "ok": not leaked_markers,
         "public_message_length": len(public_text),
         "admin_message_length": len(admin_text),
         "leaked_markers": leaked_markers,
-        "public_has_payment": "/naptien" in public_text and "/thucong" in public_text,
-        "admin_has_operator": "/operator_menu" in admin_text and "/brain" in admin_text,
-        "rule": "Khách chỉ thấy lệnh dịch vụ/nạp tiền/góp ý. Tools, MMO, operator và chẩn đoán webhook chỉ hiện cho ADMIN_ID.",
+        "public_has_payment": "Nạp Xu" in public_text or "Billing" in public_text,
+        "admin_has_operator": "operator" in admin_text.lower() or "Quản trị" in admin_text,
+        "rule": "Khách chỉ thấy menu dịch vụ/nạp tiền/hỗ trợ. Tools, MMO, operator và chẩn đoán webhook chỉ hiện trong menu Admin.",
     }
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -19459,14 +19627,33 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"🎁 Đã ghi nhận mã giới thiệu. Người giới thiệu sẽ nhận {REFERRAL_BONUS_XU} Xu khi bạn nạp lần đầu."
             )
-    text = build_start_message_text(update.effective_user.id)
+    user_is_admin = is_admin_user(update.effective_user.id)
     await update.message.reply_text(
-        text, parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("🛸 MENU DỊCH VỤ TOAN DAAS")]],
-            resize_keyboard=True
-        )
+        build_start_message_text(update.effective_user.id),
+        parse_mode="HTML",
+        reply_markup=main_reply_keyboard(),
     )
+    await update.message.reply_text(
+        "Chọn nhóm chức năng:",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(user_is_admin),
+    )
+
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_start(update, context)
+
+async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
+    user_is_admin = is_admin_user(query.from_user.id)
+    admin_only = {"operator", "admin", "system"}
+    if action in admin_only and not user_is_admin:
+        return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    if action.startswith("hint_") and not user_is_admin and action not in {"hint_naptien", "hint_profile"}:
+        return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
+    text, keyboard = menu_content(action, user_is_admin)
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -19534,7 +19721,7 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
     }
     await update.message.reply_text(
-        "🧬 <b>TOAN DAAS RUNTIME</b>\n\n"
+        "🧬 <b>TOAN AAS RUNTIME</b>\n\n"
         f"<pre>{html_pre(json.dumps(payload, ensure_ascii=False, indent=2), 1900)}</pre>\n\n"
         f"<b>Telegram ownership:</b> <code>{html.escape(ownership.get('level') or '-')}</code>\n"
         f"• {html.escape(ownership.get('message') or '')}\n"
@@ -19569,7 +19756,7 @@ async def cmd_telegram_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         html.escape(diagnosis.get("message") or ""),
         f"Next: <code>{html.escape(diagnosis.get('next_action') or '')}</code>",
         "",
-        "Nếu <code>/start</code> vẫn ra A_TOOLSX nhưng dòng Telegram webhook ở đây đúng URL TOAN DAAS, hãy chụp lại <code>/runtime</code> và HTTP logs để kiểm tra update có vào endpoint không.",
+        "Nếu <code>/start</code> vẫn ra A_TOOLSX nhưng dòng Telegram webhook ở đây đúng URL TOAN AAS, hãy chụp lại <code>/runtime</code> và HTTP logs để kiểm tra update có vào endpoint không.",
     ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -19625,7 +19812,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     credits, _, _ = get_user(uid, update.effective_user.first_name)
     msg = (
-        f"💳 <b>NẠP SỐ DƯ TỰ ĐỘNG (QR ĐỘNG) — TOAN DAAS</b>\n\n"
+        f"💳 <b>NẠP SỐ DƯ TỰ ĐỘNG (QR ĐỘNG) — TOAN AAS</b>\n\n"
         f"👤 ID Telegram: <code>{uid}</code>\n"
         f"🪙 Số dư hiện tại: <b>{credits} Xu</b>\n\n"
         f"<b>🛒 BẢNG GIÁ (1 Xu = 100đ):</b>\n"
@@ -20580,7 +20767,7 @@ def parse_operator_brain(raw_text, owner_id):
     if not (gemini_client or openai_client):
         return fallback
     prompt = (
-        "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN DAAS AI Operator. "
+        "Bạn là bộ định tuyến lệnh cho Telegram bot TOAN AAS AI Operator. "
         "Chuyển câu lệnh tự nhiên của admin thành JSON thuần, không markdown. "
         "Chỉ chọn một intent trong: command_center, head_brain, head_run, operator_next_run, operator_daily_pack, operator_daily_run, operator_daily_cycle, goal_audit, pipeline_pack, money_pack, affiliate_cockpit, growth_loop, publish_cockpit, revenue_destinations, postback_setup, operator_commander_pack, operator_contract, campaign_preset, film_series, operator_launch, operator_director, operator_execute, make_video, affiliate_scale, autopilot, operator_auto, operator, operator_build, worker_next, next_task, task_handoff, compose_video, review_video, post_publish, job_ready, operator_daily, trend_search, publish_queue, performance, performance_add, publish_done, tracking_report, scale_plan, scale_execute, affiliate_report, affiliate_decisions, affiliate_import, reference_add, reference_scan, approve_publish, approve_ready, publisher_capabilities, platform_adapters, publisher_run, publisher_handoff, publish_queue_set, help.\n\n"
         "Quy tắc:\n"
@@ -21761,7 +21948,7 @@ def build_video_brief_prompt(campaign, topic, platforms, affiliate_url):
     target_platforms = platforms or campaign_platforms
     target_affiliate = affiliate_url or campaign_affiliate or pay_url
     return (
-        "Bạn là AI Operator trưởng cho hệ thống TOAN DAAS. "
+        "Bạn là AI Operator trưởng cho hệ thống TOAN AAS. "
         "Tạo kế hoạch video kiếm tiền hợp pháp, không spam, không giả mạo người thật, "
         "không hướng dẫn né kiểm duyệt nền tảng. Nếu có người mẫu/AI influencer thì chỉ dùng nhân vật tự tạo hoặc có consent 18+.\n\n"
         f"Chiến dịch: {name}\n"
@@ -24658,7 +24845,7 @@ async def cmd_goal_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audit = operator_goal_audit_data(update.effective_user.id, days=days, platform=platform, limit=limit)
     counts = audit.get("counts") or {}
     lines = [
-        "🎯 <b>TOAN DAAS GOAL AUDIT</b>",
+        "🎯 <b>TOAN AAS GOAL AUDIT</b>",
         f"• Level: <code>{html.escape(audit.get('level') or '-')}</code> | Score: <b>{audit.get('score', 0)}%</b>",
         f"• Platform: <code>{html.escape(platform)}</code> | Days: <b>{days}</b>",
         f"• Jobs: <b>{counts.get('recent_jobs', 0)}</b> | Tasks: <b>{counts.get('total_tasks', 0)}</b> | Final assets: <b>{counts.get('final_assets', 0)}</b>",
@@ -29636,7 +29823,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🎉 <b>NẠP TIỀN THÀNH CÔNG!</b>\n\n"
                 f"Admin đã xác nhận +<b>{amount} Xu</b>.\n"
                 f"🪙 Số dư mới: <b>{credits} Xu</b>\n\n"
-                f"Cảm ơn bạn đã tin dùng TOAN DAAS! 🙏"
+                f"Cảm ơn bạn đã tin dùng TOAN AAS! 🙏"
             ),
             parse_mode="HTML"
         )
@@ -29961,7 +30148,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     uid  = update.effective_user.id
 
-    if text == "🛸 MENU DỊCH VỤ TOAN DAAS":
+    if text in {"🏠 TOAN AAS MENU", "🛸 MENU DỊCH VỤ TOAN AAS"}:
         return await cmd_start(update, context)
 
     detected_video_url = extract_supported_video_url(text)
@@ -30061,7 +30248,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         reply = AgentGemini.chat(
-            "Bạn là Trợ Lý Ảo TOAN DAAS. Trả lời súc tích, thân thiện.",
+            "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời súc tích, thân thiện.",
             text, uid
         )
         if cost > 0:
@@ -30093,7 +30280,7 @@ async def run_polling_guarded():
                 await tg_app.bot.send_message(
                     chat_id=ADMIN_ID,
                     text=(
-                        "🚨 <b>TOAN DAAS POLLING BỊ CHẶN</b>\n\n"
+                        "🚨 <b>TOAN AAS POLLING BỊ CHẶN</b>\n\n"
                         "Có thể đang có process/deployment khác dùng cùng <code>TELEGRAM_TOKEN</code> "
                         "hoặc Railway chưa cấu hình <code>PUBLIC_BASE_URL</code> để bật webhook takeover.\n\n"
                         f"• Build: <code>{APP_BUILD}</code>\n"
@@ -30127,6 +30314,7 @@ async def lifespan(app: FastAPI):
         return
 
     tg_app.add_handler(CommandHandler("start",       cmd_start))
+    tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
@@ -30305,6 +30493,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_job_callback, pattern=r"^job\|"))
@@ -30340,7 +30529,7 @@ async def lifespan(app: FastAPI):
             ACTIVE_TELEGRAM_WEBHOOK_URL = webhook_url
             if TELEGRAM_TAKEOVER_INTERVAL_SECONDS > 0:
                 tg_webhook_watchdog_task = asyncio.create_task(telegram_webhook_watchdog())
-            logger.info(f"🚀 TOAN DAAS ONLINE WEBHOOK — build={APP_BUILD} webhook={webhook_url}")
+            logger.info(f"🚀 TOAN AAS ONLINE WEBHOOK — build={APP_BUILD} webhook={webhook_url}")
         else:
             active_update_mode = "polling"
             try:
@@ -30354,14 +30543,14 @@ async def lifespan(app: FastAPI):
             tg_polling_task = asyncio.create_task(run_polling_guarded())
             ACTIVE_TELEGRAM_UPDATE_MODE = "polling"
             ACTIVE_TELEGRAM_WEBHOOK_URL = ""
-            logger.info(f"🚀 TOAN DAAS ONLINE POLLING — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
+            logger.info(f"🚀 TOAN AAS ONLINE POLLING — build={APP_BUILD} deploy={APP_DEPLOY_ID or '-'}")
         ownership = telegram_update_ownership_diagnosis(webhook_info_payload, active_update_mode)
         if ADMIN_ID:
             try:
                 await tg_app.bot.send_message(
                     chat_id=ADMIN_ID,
                     text=(
-                        "🧬 <b>TOAN DAAS DEPLOYED</b>\n\n"
+                        "🧬 <b>TOAN AAS DEPLOYED</b>\n\n"
                         f"• Build: <code>{APP_BUILD}</code>\n"
                         f"• Deploy: <code>{APP_DEPLOY_ID or '-'}</code>\n"
                         f"• Update mode: <code>{html.escape(active_update_mode)}</code>\n"
@@ -30395,7 +30584,7 @@ async def lifespan(app: FastAPI):
         await tg_app.shutdown()
     logger.info("🛑 Bot đã dừng an toàn.")
 
-fastapi_app = FastAPI(title="TOAN DAAS V15.2", lifespan=lifespan)
+fastapi_app = FastAPI(title="TOAN AAS V15.2", lifespan=lifespan)
 
 # ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 @fastapi_app.get("/")
@@ -33590,7 +33779,7 @@ async def webhook_payos(request: Request):
                     f"💰 Số tiền giao dịch: <b>{amount_vnd:,}đ</b>\n"
                     f"🪙 Hạn mức cộng: <b>+{xu} Xu</b>\n"
                     f"💼 Số dư tài khoản hiện tại: <b>{credits_now} Xu</b>\n\n"
-                    f"Cảm ơn bạn đã tin dùng dịch vụ TOAN DAAS! 🙏"
+                    f"Cảm ơn bạn đã tin dùng dịch vụ TOAN AAS! 🙏"
                 ),
                 parse_mode="HTML"
             )

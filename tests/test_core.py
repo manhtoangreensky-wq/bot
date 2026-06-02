@@ -23,7 +23,27 @@ def test_health_and_runtime_endpoints():
     assert "db_ok" in health_payload
     runtime = client.get("/runtime")
     assert runtime.status_code == 200
-    assert runtime.json()["service"].startswith("TOAN DAAS")
+    assert runtime.json()["service"].startswith("TOAN AAS")
+
+
+def test_public_start_menu_does_not_leak_admin_commands():
+    text = bot.build_start_message_text("customer-test")
+    forbidden = ["/operator_menu", "/telegram_takeover", "/runtime", "/dashboard", "/stats", "/pending", "/duyet", "/tuchoi", "/add", "/setvip"]
+    assert "TOAN AAS" in text
+    assert not any(item in text for item in forbidden)
+    keyboard = bot.main_menu_keyboard(False)
+    button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
+    assert "🧠 Operator" not in button_texts
+    assert "📊 Quản Trị" not in button_texts
+
+
+def test_admin_menu_contains_grouped_operator_and_system():
+    text = bot.build_start_message_text(bot.ADMIN_ID)
+    assert "Runtime" in text
+    keyboard = bot.main_menu_keyboard(True)
+    button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
+    assert "🧠 Operator" in button_texts
+    assert "⚙️ Hệ Thống" in button_texts
 
 
 def test_lifespan_keeps_api_alive_without_telegram_token(monkeypatch):
