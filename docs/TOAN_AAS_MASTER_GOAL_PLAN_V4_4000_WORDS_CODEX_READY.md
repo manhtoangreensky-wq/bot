@@ -1,12 +1,12 @@
 # TOAN AAS — MASTER GOAL PLAN V4.1 CURRENT
 ## Bản chi tiết trên 4.000 từ · Codex Goal Ready · Living Document
 
-**Tên hệ sinh thái:** TOAN AAS — AI Automation System  
-**Tên bot hiện tại:** TOAN AAS Bot V1 — Stable Revenue Tool Bot  
-**Bot Telegram hiện tại:** @toanaasbot  
-**Trạng thái kế hoạch:** Đang xây thực tế, ưu tiên bot kiếm tiền trước, không chệch khỏi kế hoạch gốc  
-**Chủ sở hữu:** Toàn Nguyễn Mạnh  
-**Phiên bản:** V4.1 Current — Codex Goal Ready  
+**Tên hệ sinh thái:** TOAN AAS — AI Automation System
+**Tên bot hiện tại:** TOAN AAS Bot V1 — Stable Revenue Tool Bot
+**Bot Telegram hiện tại:** @toanaasbot
+**Trạng thái kế hoạch:** Đang xây thực tế, ưu tiên bot kiếm tiền trước, không chệch khỏi kế hoạch gốc
+**Chủ sở hữu:** Toàn Nguyễn Mạnh
+**Phiên bản:** V4.1 Current — Codex Goal Ready
 **Mục đích file:** Làm tài liệu mục tiêu chính để Codex, Claude, Gemini hoặc bất kỳ AI Coder nào đọc trước khi code, tránh làm lệch hướng, tránh nhồi tính năng quá sớm, tránh phá bot hiện tại.
 
 ---
