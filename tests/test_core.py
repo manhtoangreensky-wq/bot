@@ -105,3 +105,48 @@ def test_ai_video_factory_prompt_gate_and_manifest_builder(monkeypatch):
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
+
+
+def test_attach_telegram_video_asset_marks_job_ready_for_review(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    try:
+        bot.init_db()
+        job_id = bot.create_production_job(
+            "admin-only",
+            0,
+            0,
+            0,
+            0,
+            "tiktok",
+            "test video upload",
+            brief_text="brief",
+            note="test",
+        )
+
+        ok, result = bot.attach_telegram_video_asset(
+            "admin-only",
+            job_id,
+            "telegram-file-id",
+            asset_type="video",
+            content_type="video/mp4",
+            filename="final.mp4",
+            note="unit test",
+        )
+
+        assert ok is True
+        assert result["asset_type"] == "final_video"
+        assert result["asset_send_command"].startswith("/asset_send")
+        asset = bot.get_production_asset("admin-only", result["asset_id"])
+        assert asset[4] == ""
+        assert asset[5] == "telegram-file-id"
+        assert asset[8] == "video/mp4"
+        assert asset[9] == "final.mp4"
+        job = bot.get_production_job(job_id, "admin-only")
+        assert job[7] == "review"
+        assert job[8] == "ready"
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
