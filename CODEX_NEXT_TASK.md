@@ -1,34 +1,42 @@
-# NEXT TASK OPTIONS — STABLE REVENUE BOT ONLY
+# NEXT TASK OPTIONS - STABLE REVENUE BOT ONLY
 
-Chưa làm kế hoạch lớn.
+Chưa quay lại kế hoạch lớn TOAN AAS.
+Chưa làm app ngoài.
+Chưa làm dashboard web.
+Chưa làm ERP/Device Ops/SaaS.
 
-Admin chọn 1 trong các task sau:
+Sau Live Bot QA, admin chọn 1 task:
 
-## Option A — Extract config.py safely
+## Option A - AI Growth Coach Lite
+
+- Dựa trên performance, dùng AI gợi ý hook/caption/CTA mới.
+- Thu Xu nhẹ hoặc chỉ admin dùng.
+- Không auto publish.
+
+## Option B - Campaign Report Export
+
+- Xuất báo cáo campaign/performance thành `.txt` hoặc `.csv`.
+- Admin/user tải về.
+
+## Option C - Video Script Lite Polish
+
+- Cải thiện `/film` output.
+- Thêm template niche: affiliate, giáo dục, review, story.
+- Không render.
+
+## Option D - PayOS Real Payment Test Checklist
+
+- Tạo checklist test thanh toán thật 10k.
+- Không sửa code nếu không cần.
+
+## Option E - Extract config.py safely
 
 - Tách ENV/constants.
-- Không đổi tên ENV.
-- Bot vẫn chạy.
+- Không đổi behavior.
 
-## Option B — Extract db.py safely
+## Option F - Extract db.py safely
 
 - Tách DB helpers.
 - Không đổi schema.
-
-## Option C — Complete trial upsell
-
-- Chuẩn hóa thiếu xu ở tất cả flow.
-- Nút nạp 50k/100k/200k.
-
-## Option D — Complete refund audit
-
-- Sửa hoàn xu ở mọi flow trừ xu trước API.
-
-## Option E — Video Script Lite
-
-- Chỉ tạo script/prompt pack.
-- Không render.
-- Không publish.
-- Platforms: Facebook/TikTok/YouTube.
 
 Codex không tự làm task tiếp theo.

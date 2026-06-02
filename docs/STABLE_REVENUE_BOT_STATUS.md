@@ -3,14 +3,17 @@
 ## Compile
 
 - `py_compile`: PASS using Codex bundled Python on 2026-06-02.
+- `pytest -q`: PASS, 13 tests, 1 Starlette/httpx deprecation warning.
+- Import test: PASS, `cmd_help` and `help_text_for_user` exist.
 
 ## UI
 
 - Website TOAN AAS: `index.html` exists and `/landing` serves it.
 - Website index update: landing reworked for TOAN AAS V15.2 Stable Revenue Bot on 2026-06-02.
 - Website CTA: Telegram bot, PayOS Xu section, Video Script Lite, affiliate workflow, and `/lead` form.
-- `/start`: creates/loads user, handles referral payload, shows public menu.
+- `/start`: creates/loads user, handles referral payload, shows trial -> tool -> missing Xu -> `/naptien` funnel.
 - `/menu`: reuses start/menu flow.
+- `/help`: added in Step 6, registered with `/commands` alias.
 - User menu: public service/payment/profile/help surface.
 - Admin menu: operator/system/internal areas are gated.
 
@@ -93,3 +96,46 @@
 - `/dashboard`: includes video script, active campaign, affiliate link, and calendar counters.
 - DB: reused `affiliate_links`, `campaigns`, `content_calendar`.
 - Safety: no PayOS/billing changes, no auto publish, no render API.
+
+## Manual Publish + Performance Loop Status
+
+- `/publish_done`: user-facing manual post tracking when called with platform/link/topic.
+- `/publish_done queue=...` and `/publish_done job=...`: existing admin/operator flow preserved.
+- `/performance_add post_id=...`: user-facing manual metrics.
+- `/performance_add job=...`: existing admin/operator performance flow preserved.
+- `/performance_report`: aggregates manual posts by platform and top posts.
+- `/posts`: lists recent manually recorded posts.
+- `/growth_loop`: user-facing rule-based recommendations from manual metrics.
+- `/growth_loop manual=1`: admin can view manual loop; admin default remains operator growth loop.
+- DB: `published_posts`, `manual_performance_events`, `growth_recommendations`.
+- Dashboard: includes manual publish/performance/revenue counters.
+- Safety: no social API calls, no auto publish, no browser automation, no render API.
+
+## Live Website Status
+
+- `/`: PASS before Step 6; serves TOAN AAS landing HTML.
+- `/landing`: PASS before Step 6; serves TOAN AAS landing HTML.
+- `/health`: PASS before Step 6; returns JSON status.
+- `/banner.png`: PASS before Step 6; image route works.
+- `/LOGO.png`: PASS before Step 6; logo route works.
+
+## Bot QA Status
+
+- `/start`: updated in Step 6; needs live Telegram smoke test after deploy.
+- `/menu`: uses same surface as `/start`; needs live Telegram smoke test.
+- `/help`: added and registered; compile/pytest/import PASS.
+- `/commands`: alias to `/help`; compile/pytest/import PASS.
+- `/profile`: registered.
+- `/naptien`: registered; PayOS logic untouched in Step 6.
+- `/film`: registered in local `bot.py`; needs live AI/Xu test.
+- Affiliate commands: `/addlink`, `/links`, `/campaign`, `/addcal`, `/calendar` registered in local `bot.py`.
+- Performance commands: `/publish_done`, `/performance_add`, `/performance_report`, `/posts`, `/growth_loop` registered in local `bot.py`.
+- Admin commands: `/dashboard`, `/admin`, `/stats`, `/pending`, `/duyet`, `/tuchoi`, `/add`, `/setvip`, `/backup_db`, `/runtime`, `/checkpayos`, `/telegram_takeover`.
+
+## Ready For Next Revenue Step?
+
+- Status: YES after Railway deploy passes live Telegram smoke test.
+- Blockers:
+  1. Real Telegram verification for `/film`, `/addlink`, `/publish_done`, `/performance_report`.
+  2. Real PayOS 10k payment test.
+  3. Railway Volume persistence confirmation.

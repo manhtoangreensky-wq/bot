@@ -336,6 +336,26 @@ BACKUP_MAX_BYTES  = 45 * 1024 * 1024
 TRIAL_CREDITS     = 150
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
+FILM_SCRIPT_COST   = 50
+CONTENT_PLATFORM_ALIASES = {
+    "fb": "facebook",
+    "facebook": "facebook",
+    "meta": "facebook",
+    "tiktok": "tiktok",
+    "tt": "tiktok",
+    "yt": "youtube",
+    "youtube": "youtube",
+    "shorts": "youtube",
+    "instagram": "instagram",
+    "ig": "instagram",
+    "threads": "threads",
+    "thread": "threads",
+    "website": "website",
+    "web": "website",
+    "onlyfans": "onlyfans",
+}
+CONTENT_PLATFORM_DEFAULTS = ["facebook", "tiktok", "youtube"]
+MANUAL_PUBLISH_PLATFORMS = {"facebook", "tiktok", "youtube", "instagram", "threads", "website"}
 
 PAYOS_STATUS_PENDING   = "PENDING"
 PAYOS_STATUS_PAID      = "PAID"
@@ -452,6 +472,33 @@ def init_db():
         created_at DATETIME,
         approved_at DATETIME,
         published_at DATETIME
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS video_script_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        topic TEXT,
+        niche TEXT,
+        platforms TEXT,
+        episodes INTEGER DEFAULT 1,
+        scenes_per_episode INTEGER DEFAULT 5,
+        cost_xu INTEGER DEFAULT 50,
+        status TEXT DEFAULT 'created',
+        output_text TEXT,
+        output_json TEXT,
+        created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS video_script_outputs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER,
+        platform TEXT,
+        title TEXT,
+        caption TEXT,
+        description TEXT,
+        hashtags TEXT,
+        cta TEXT,
+        pinned_comment TEXT,
+        affiliate_disclosure TEXT,
+        created_at TEXT
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS social_channels (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -594,6 +641,50 @@ def init_db():
         note TEXT,
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS published_posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        campaign_id INTEGER DEFAULT 0,
+        calendar_id INTEGER DEFAULT 0,
+        script_job_id INTEGER DEFAULT 0,
+        affiliate_link_id INTEGER DEFAULT 0,
+        platform TEXT,
+        topic TEXT,
+        post_url TEXT,
+        caption TEXT,
+        status TEXT DEFAULT 'published',
+        published_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS manual_performance_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        published_post_id INTEGER,
+        platform TEXT,
+        views INTEGER DEFAULT 0,
+        likes INTEGER DEFAULT 0,
+        comments INTEGER DEFAULT 0,
+        shares INTEGER DEFAULT 0,
+        clicks INTEGER DEFAULT 0,
+        revenue REAL DEFAULT 0,
+        cost_xu INTEGER DEFAULT 0,
+        note TEXT,
+        created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS growth_recommendations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        published_post_id INTEGER DEFAULT 0,
+        campaign_id INTEGER DEFAULT 0,
+        recommendation_type TEXT,
+        score INTEGER DEFAULT 0,
+        title TEXT,
+        reason TEXT,
+        action TEXT,
+        status TEXT DEFAULT 'open',
+        created_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS tool_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -698,6 +789,10 @@ def init_db():
             "INSERT OR IGNORE INTO feature_flags (key, enabled, scope, note, updated_at) VALUES (?,?,?,?,?)",
             (key, int(enabled), "all", note, now_text())
         )
+    c.execute("CREATE INDEX IF NOT EXISTS idx_published_posts_user_id ON published_posts(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_published_posts_platform ON published_posts(platform)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_perf_post_id ON manual_performance_events(published_post_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_growth_user_id ON growth_recommendations(user_id)")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -2442,6 +2537,22 @@ def get_affiliate_link(affiliate_id, owner_id):
                   price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
         FROM affiliate_links WHERE id=? AND owner_id=?""",
         (affiliate_id, str(owner_id))
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def find_affiliate_link_by_url(owner_id, url):
+    clean_url = (url or "").strip()
+    if not clean_url:
+        return None
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, network, product_name, niche, url, commission_note, status,
+                  price_vnd, commission_rate, target_audience, allowed_claims, blocked_claims, product_score
+        FROM affiliate_links WHERE owner_id=? AND url=? ORDER BY id DESC LIMIT 1""",
+        (str(owner_id), clean_url)
     )
     row = c.fetchone()
     conn.close()
@@ -19145,11 +19256,14 @@ def build_topup_keyboard(uid: int) -> InlineKeyboardMarkup:
     ])
 
 def insufficient_credits_text(current_credits: int, required_credits: int) -> str:
+    need_more = max(0, int(required_credits or 0) - int(current_credits or 0))
     return (
-        "⚠️ <b>Bạn chưa đủ Xu để dùng tính năng này.</b>\n\n"
+        f"⚠️ <b>Cần thêm {need_more} Xu để dùng tính năng này.</b>\n\n"
         f"• Số dư hiện tại: <b>{int(current_credits or 0)} Xu</b>\n"
-        f"• Cần: <b>{int(required_credits or 0)} Xu</b>\n\n"
-        "Bạn có thể nạp thêm để tiếp tục dùng TOAN AAS."
+        f"• Cần: <b>{int(required_credits or 0)} Xu</b>\n"
+        f"• Thiếu: <b>{need_more} Xu</b>\n\n"
+        "💡 Nạp <b>50.000đ</b> nhận ngay <b>500 Xu</b> để tiếp tục dùng TOAN AAS.\n"
+        "👇 Chọn gói để tạo QR thanh toán tự động:"
     )
 
 async def reply_insufficient_credits(update: Update, current_credits: int, required_credits: int):
@@ -19628,14 +19742,23 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
 
 def menu_text_main(is_admin: bool) -> str:
     runtime_line = f"\n🧬 Runtime: <code>{APP_BUILD}</code>" if is_admin else ""
+    admin_line = "\n• Quản trị doanh thu, bill, backup và operator nội bộ" if is_admin else ""
     return (
         "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
-        "Trợ lý AI Automation cho nội dung, affiliate, video và vận hành.\n\n"
-        "Bạn có thể:\n"
+        "Bot AI giúp bạn:\n"
         "• Chat AI, đọc voice, bóc băng, tách nền\n"
-        "• Tạo kịch bản/video pack cho Facebook, TikTok, YouTube\n"
-        "• Vận hành affiliate và theo dõi tăng trưởng\n"
-        "• Quản trị task/operator nội bộ nếu là admin"
+        "• Tạo Video Script Lite cho Facebook, TikTok, YouTube\n"
+        "• Lưu link affiliate, lên lịch nội dung, theo dõi hiệu quả\n"
+        "• Nạp Xu tự động bằng PayOS QR động"
+        f"{admin_line}\n\n"
+        "🎁 Tài khoản mới có <b>150 Xu</b> dùng thử.\n"
+        "💳 Hết Xu thì dùng <code>/naptien</code> để nạp thêm.\n\n"
+        "<b>Bắt đầu nhanh:</b>\n"
+        "1. <code>/profile</code> — xem số dư\n"
+        "2. <code>/film &lt;chủ đề&gt;</code> — tạo script video\n"
+        "3. Mở nhóm <b>Kiếm Tiền</b> — lưu link affiliate\n"
+        "4. <code>/calendar</code> — xem lịch nội dung\n"
+        "5. <code>/naptien</code> — nạp Xu"
         f"{runtime_line}\n\n"
         "Chọn nhóm chức năng bên dưới:"
     )
@@ -19679,18 +19802,22 @@ def menu_text_video_factory(is_admin: bool) -> str:
         return (
             "🎬 <b>Multi-Platform AI Video Factory</b>\n\n"
             "Tạo ý tưởng, kịch bản, storyboard, scene prompt và content pack cho Facebook, TikTok, YouTube.\n\n"
-            "Khách hàng có thể gửi chủ đề để AI hỗ trợ lên ý tưởng/kịch bản. Các lệnh sản xuất nội bộ đang khóa cho admin để bảo vệ quy trình vận hành."
+            f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack, phí <b>{FILM_SCRIPT_COST} Xu</b>\n"
+            f"• <code>/film topic=\"review sản phẩm\" affiliate_id=1</code> — dùng link đã lưu trong kho affiliate.\n\n"
+            "Các lệnh sản xuất/render/publish nội bộ vẫn khóa cho admin để bảo vệ quy trình vận hành."
         )
     return (
         "🎬 <b>Multi-Platform AI Video Factory</b>\n\n"
         "Quy trình admin:\n"
-        "1. Ý tưởng/blueprint: <code>/film_blueprint</code>\n"
-        "2. Tạo series: <code>/film_series topic=...</code>\n"
-        "3. Storyboard: <code>/storyboard_crop</code>\n"
-        "4. Scene pack: <code>/scene_pack job=... scene=1</code>\n"
-        "5. Worker nhận task: <code>/worker_intake claim=1</code>\n"
-        "6. Publish: <code>/publish_done</code>\n"
-        "7. Growth: <code>/growth_loop</code>"
+        f"1. User-facing Script Lite: <code>/film &lt;chủ đề&gt;</code> ({FILM_SCRIPT_COST} Xu)\n"
+        "1b. Dùng affiliate đã lưu: <code>/film topic=... affiliate_id=1</code>\n"
+        "2. Ý tưởng/blueprint: <code>/film_blueprint</code>\n"
+        "3. Tạo series: <code>/film_series topic=...</code>\n"
+        "4. Storyboard: <code>/storyboard_crop</code>\n"
+        "5. Scene pack: <code>/scene_pack job=... scene=1</code>\n"
+        "6. Worker nhận task: <code>/worker_intake claim=1</code>\n"
+        "7. Publish: <code>/publish_done</code>\n"
+        "8. Growth: <code>/growth_loop</code>"
     )
 
 def menu_text_video_workflow(is_admin: bool) -> str:
@@ -19715,10 +19842,22 @@ def menu_text_affiliate(is_admin: bool) -> str:
         return (
             "💰 <b>Affiliate Automation</b>\n\n"
             "TOAN AAS hỗ trợ tạo nội dung bán hàng/affiliate cho Facebook, TikTok, YouTube và các nền tảng phụ như Instagram, Threads, Website, OnlyFans hợp pháp/có consent.\n\n"
+            "<b>Lệnh dùng ngay:</b>\n"
+            "• <code>/addlink url=https://... product=\"Tên sản phẩm\" niche=\"nhóm\"</code>\n"
+            "• <code>/links</code> — xem kho link đã lưu\n"
+            "• <code>/campaign</code> — tạo/xem campaign\n"
+            "• <code>/addcal date=tomorrow platform=tiktok topic=\"...\" affiliate_id=1</code>\n"
+            "• <code>/calendar</code> — xem lịch 7 ngày tới\n\n"
+            "<b>Theo dõi bài đã đăng:</b>\n"
+            "• <code>/publish_done tiktok https://... chủ đề...</code>\n"
+            "• <code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n"
+            "• <code>/performance_report</code> — xem hiệu quả\n"
+            "• <code>/growth_loop</code> — gợi ý scale/fix\n\n"
             "Quy tắc: không spam, không deepfake người thật không có consent, CTA/disclosure affiliate cần minh bạch."
         )
     return (
         "💰 <b>Affiliate Automation</b>\n\n"
+        "<b>User-facing</b>\n• <code>/addlink</code>\n• <code>/links</code>\n• <code>/campaign</code>\n• <code>/addcal</code>\n• <code>/calendar</code>\n• <code>/publish_done</code>\n• <code>/performance_add</code>\n• <code>/performance_report</code>\n• <code>/posts</code>\n\n"
         "<b>A. Setup chiến dịch</b>\n• <code>/campaign_preset</code>\n• <code>/postback_setup</code>\n\n"
         "<b>B. Tạo batch video</b>\n• <code>/affiliate_scale</code>\n\n"
         "<b>C. Ghi nhận bài đăng</b>\n• <code>/publish_done</code>\n\n"
@@ -19771,6 +19910,7 @@ def menu_text_billing(is_admin: bool) -> str:
 def menu_text_support() -> str:
     return (
         "🛟 <b>Hỗ Trợ</b>\n\n"
+        "• Hướng dẫn nhanh: <code>/help</code> hoặc <code>/commands</code>\n"
         "• Góp ý/báo lỗi: <code>/gopy nội dung</code>\n"
         "• Thiếu xu: mở <code>/naptien</code> và chọn gói.\n"
         "• PayOS chưa cộng: chờ webhook hoặc gửi bill thủ công bằng <code>/thucong</code>.\n"
@@ -19858,6 +19998,54 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_start(update, context)
+
+def help_text_for_user(user_id) -> str:
+    is_admin = is_admin_user(user_id)
+    text = (
+        "📘 <b>Hướng dẫn TOAN AAS</b>\n\n"
+        "<b>1. Tài khoản & nạp Xu</b>\n"
+        "• <code>/profile</code> — xem số dư, VIP, referral\n"
+        "• <code>/naptien</code> — tạo QR nạp Xu\n"
+        "• <code>/thucong</code> — gửi bill thủ công khi QR lỗi\n"
+        "• <code>/ref</code> hoặc <code>/invite</code> — lấy link giới thiệu\n\n"
+        "<b>2. Công cụ AI</b>\n"
+        "• Chat AI: gửi text trực tiếp\n"
+        "• Đọc voice: nhập <code>Đọc voice: nội dung</code>\n"
+        "• Bóc băng audio: gửi voice/mp3/m4a\n"
+        "• Tách nền ảnh: gửi ảnh vào bot\n"
+        "• Tải video sạch: gửi link TikTok/YouTube/Facebook\n\n"
+        "<b>3. Video kiếm tiền</b>\n"
+        f"• <code>/film &lt;chủ đề&gt;</code> — tạo script/prompt pack ({FILM_SCRIPT_COST} Xu)\n\n"
+        "<b>4. Affiliate & lịch nội dung</b>\n"
+        "• <code>/addlink url=https://... product=\"Tên sản phẩm\"</code>\n"
+        "• <code>/links</code> — xem kho link\n"
+        "• <code>/addcal date=tomorrow platform=tiktok topic=\"chủ đề\"</code>\n"
+        "• <code>/calendar</code> — xem lịch 7 ngày tới\n\n"
+        "<b>5. Theo dõi hiệu quả</b>\n"
+        "• <code>/publish_done tiktok https://... chủ đề</code>\n"
+        "• <code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n"
+        "• <code>/performance_report</code> — báo cáo hiệu quả\n"
+        "• <code>/growth_loop</code> — gợi ý scale/fix\n\n"
+        "<b>6. Hỗ trợ</b>\n"
+        "• <code>/gopy nội dung</code> — góp ý/báo lỗi"
+    )
+    if is_admin:
+        text += (
+            "\n\n<b>Admin</b>\n"
+            "• <code>/dashboard</code> hoặc <code>/admin</code>\n"
+            "• <code>/stats</code>, <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code>\n"
+            "• <code>/add</code>, <code>/setvip</code>, <code>/backup_db</code>\n"
+            "• <code>/runtime</code>, <code>/checkpayos</code>, <code>/telegram_takeover</code>"
+        )
+    return text
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    await update.message.reply_text(
+        help_text_for_user(uid),
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(is_admin_user(uid)),
+    )
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -22178,6 +22366,1007 @@ def build_video_brief_prompt(campaign, topic, platforms, affiliate_url):
         "Mỗi caption phải có vị trí gắn link/CTA rõ ràng."
     )
 
+def clean_arg_value(value: str) -> str:
+    value = (value or "").strip()
+    if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+        return value[1:-1].strip()
+    return value
+
+def parse_loose_kv_args(raw: str) -> tuple[dict, str]:
+    raw = (raw or "").strip()
+    data = {}
+    if not raw:
+        return data, ""
+    pattern = re.compile(r"(\w+)=('.*?'|\".*?\"|\S+)")
+    spans = []
+    for match in pattern.finditer(raw):
+        key = match.group(1).lower()
+        data[key] = clean_arg_value(match.group(2))
+        spans.append(match.span())
+    remainder = raw
+    for start, end in reversed(spans):
+        remainder = remainder[:start] + " " + remainder[end:]
+    return data, " ".join(remainder.split())
+
+def extract_first_url(text: str) -> str:
+    match = re.search(r"https?://[^\s<>\"]+", text or "", flags=re.I)
+    return match.group(0).rstrip(").,!?;\"'") if match else ""
+
+def is_valid_http_url(url: str) -> bool:
+    try:
+        parsed = urlparse((url or "").strip())
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    except Exception:
+        return False
+
+def short_url_display(url: str, limit: int = 64) -> str:
+    url = (url or "").strip()
+    if len(url) <= limit:
+        return url
+    return url[: max(10, limit - 3)] + "..."
+
+def normalize_platform_token(value: str) -> str:
+    key = (value or "").strip().lower()
+    return CONTENT_PLATFORM_ALIASES.get(key, key)
+
+def normalize_platforms_text(value: str, defaults=None) -> str:
+    defaults = defaults or CONTENT_PLATFORM_DEFAULTS
+    platforms = []
+    for token in re.split(r"[,/ ]+", (value or "").lower()):
+        platform = normalize_platform_token(token)
+        if platform in CONTENT_PLATFORM_ALIASES.values() and platform not in platforms:
+            platforms.append(platform)
+    if not platforms:
+        platforms = list(defaults)
+    return ",".join(platforms[:6])
+
+def normalize_calendar_date(value: str) -> str:
+    text = (value or "").strip().lower()
+    today = datetime.now().date()
+    if text in {"", "today", "homnay", "hômnay", "hôm nay", "nay"}:
+        return today.isoformat()
+    if text in {"tomorrow", "mai", "ngaymai", "ngàymai", "ngày mai"}:
+        return (today + timedelta(days=1)).isoformat()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    raise ValueError("invalid_date")
+
+def affiliate_row_to_context(row) -> str:
+    if not row:
+        return ""
+    (
+        aid, network, product, niche, url, note, status,
+        price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score
+    ) = row
+    parts = [
+        f"Affiliate ID: {aid}",
+        f"Network/brand: {network or '-'}",
+        f"Product: {product or '-'}",
+        f"Niche: {niche or '-'}",
+        f"URL: {url or '-'}",
+        f"Commission/note: {note or '-'}",
+        f"Target audience: {audience or '-'}",
+        f"Allowed claims: {allowed_claims or '-'}",
+        f"Blocked claims: {blocked_claims or '-'}",
+        f"Disclosure: cần nói rõ đây là link affiliate khi đăng caption/comment.",
+    ]
+    if price_vnd:
+        parts.append(f"Price VND: {int(price_vnd):,}")
+    if commission_rate:
+        parts.append(f"Commission rate: {float(commission_rate):g}%")
+    if product_score:
+        parts.append(f"Internal fit score: {product_score}/100")
+    return "\n".join(parts)
+
+def parse_affiliate_id_value(data: dict) -> int:
+    value = data.get("affiliate_id") or data.get("affiliate") or data.get("aff") or data.get("link_id") or data.get("id")
+    try:
+        return max(0, int(str(value or "0").lstrip("#")))
+    except ValueError:
+        return 0
+
+def normalize_manual_publish_platform(value: str) -> str:
+    platform = normalize_platform_token(value)
+    return platform if platform in MANUAL_PUBLISH_PLATFORMS else ""
+
+def manual_publish_usage_text() -> str:
+    return (
+        "📌 <b>Ghi nhận bài đã đăng</b>\n\n"
+        "Cách dùng:\n"
+        "<code>/publish_done tiktok https://... review máy lọc không khí</code>\n"
+        "<code>/publish_done platform=facebook url=https://... topic=\"camera gia đình\"</code>\n\n"
+        "Sau đó nhập số liệu:\n"
+        "<code>/performance_add post_id=&lt;ID&gt; views=1000 likes=50 clicks=10 revenue=20000</code>\n\n"
+        "Bot chỉ lưu tracking thủ công, không gọi social API và không tự đăng bài."
+    )
+
+def manual_performance_usage_text() -> str:
+    return (
+        "📊 <b>Nhập hiệu quả bài đã đăng</b>\n\n"
+        "Cách dùng:\n"
+        "<code>/performance_add post_id=1 views=1200 likes=80 comments=12 clicks=20 revenue=50000</code>\n"
+        "<code>/performance_add 1 views=5000 revenue=150000 note=\"hook tốt\"</code>"
+    )
+
+def parse_non_negative_int(value, default=0):
+    text = str(value if value is not None else "").strip().replace(",", "").replace(".", "")
+    if not text:
+        return default
+    try:
+        return max(0, int(float(text)))
+    except (TypeError, ValueError):
+        return default
+
+def parse_non_negative_money(value, default=0.0):
+    text = str(value if value is not None else "").strip().lower()
+    text = text.replace(",", "").replace("đ", "").replace("vnd", "").strip()
+    multiplier = 1
+    if text.endswith("k"):
+        multiplier = 1000
+        text = text[:-1]
+    elif text.endswith("m"):
+        multiplier = 1000000
+        text = text[:-1]
+    if not text:
+        return float(default)
+    try:
+        return max(0.0, float(text) * multiplier)
+    except (TypeError, ValueError):
+        return float(default)
+
+def parse_manual_publish_args(raw: str) -> dict:
+    data, remainder = parse_loose_kv_args(raw)
+    url = data.get("url") or data.get("link") or data.get("post_url") or extract_first_url(raw)
+    tokens = remainder.split()
+    platform = normalize_manual_publish_platform(data.get("platform") or data.get("nen") or "")
+    if not platform and tokens:
+        candidate = normalize_manual_publish_platform(tokens[0])
+        if candidate:
+            platform = candidate
+            tokens = tokens[1:]
+    if not url and tokens:
+        for idx, token in enumerate(list(tokens)):
+            if is_valid_http_url(token):
+                url = token.rstrip(").,!?;\"'")
+                tokens.pop(idx)
+                break
+    elif url:
+        tokens = [token for token in tokens if token != url]
+    topic = (data.get("topic") or data.get("chude") or " ".join(tokens)).strip()[:500]
+    caption = (data.get("caption") or data.get("mota") or data.get("description") or "").strip()[:3000]
+    return {
+        "platform": platform,
+        "url": (url or "").strip()[:2000],
+        "topic": topic,
+        "caption": caption,
+        "campaign_id": safe_int(data.get("campaign_id") or data.get("campaign") or data.get("camp"), 0),
+        "calendar_id": safe_int(data.get("calendar_id") or data.get("calendar") or data.get("cal"), 0),
+        "script_job_id": safe_int(data.get("script_job_id") or data.get("script") or data.get("film") or data.get("film_id"), 0),
+        "affiliate_id": safe_int(data.get("affiliate_id") or data.get("affiliate") or data.get("aff") or data.get("link_id"), 0),
+        "published_at": (data.get("published_at") or data.get("date") or data.get("ngay") or now_text()).strip()[:40],
+    }
+
+def parse_manual_performance_args(raw: str) -> dict:
+    data, remainder = parse_loose_kv_args(raw)
+    tokens = remainder.split()
+    post_id = safe_int(data.get("post_id") or data.get("post") or data.get("id"), 0)
+    if not post_id and tokens and re.fullmatch(r"#?\d+", tokens[0]):
+        post_id = safe_int(tokens[0].lstrip("#"), 0)
+        tokens = tokens[1:]
+    note = (data.get("note") or data.get("ghichu") or " ".join(tokens)).strip()[:1000]
+    return {
+        "post_id": post_id,
+        "views": parse_non_negative_int(data.get("views") or data.get("view"), 0),
+        "likes": parse_non_negative_int(data.get("likes") or data.get("like"), 0),
+        "comments": parse_non_negative_int(data.get("comments") or data.get("comment"), 0),
+        "shares": parse_non_negative_int(data.get("shares") or data.get("share"), 0),
+        "clicks": parse_non_negative_int(data.get("clicks") or data.get("click"), 0),
+        "revenue": parse_non_negative_money(data.get("revenue") or data.get("amount") or data.get("money") or data.get("vnd"), 0),
+        "cost_xu": parse_non_negative_int(data.get("cost_xu") or data.get("cost") or data.get("xu"), 0),
+        "note": note,
+    }
+
+def validate_manual_post_refs(user_id, parsed: dict) -> tuple[bool, str]:
+    if parsed.get("campaign_id") and not get_campaign(parsed["campaign_id"], user_id):
+        return False, "Không tìm thấy campaign của bạn."
+    if parsed.get("calendar_id") and not get_calendar_slot(parsed["calendar_id"], user_id):
+        return False, "Không tìm thấy lịch đăng của bạn."
+    if parsed.get("affiliate_id") and not get_affiliate_link(parsed["affiliate_id"], user_id):
+        return False, "Không tìm thấy affiliate link của bạn."
+    if parsed.get("script_job_id"):
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute("SELECT id FROM video_script_jobs WHERE id=? AND user_id=?", (int(parsed["script_job_id"]), str(user_id)))
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            return False, "Không tìm thấy Video Script Lite job của bạn."
+    return True, ""
+
+def create_published_post(user_id, parsed: dict) -> int:
+    now = now_text()
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO published_posts
+        (user_id, campaign_id, calendar_id, script_job_id, affiliate_link_id, platform, topic, post_url,
+         caption, status, published_at, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(user_id),
+            int(parsed.get("campaign_id") or 0),
+            int(parsed.get("calendar_id") or 0),
+            int(parsed.get("script_job_id") or 0),
+            int(parsed.get("affiliate_id") or 0),
+            parsed.get("platform") or "",
+            parsed.get("topic") or "",
+            parsed.get("url") or "",
+            parsed.get("caption") or "",
+            "published",
+            parsed.get("published_at") or now,
+            now,
+            now,
+        ),
+    )
+    post_id = c.lastrowid
+    if int(parsed.get("calendar_id") or 0):
+        c.execute(
+            "UPDATE content_calendar SET status=? WHERE id=? AND owner_id=?",
+            ("published", int(parsed.get("calendar_id") or 0), str(user_id)),
+        )
+    conn.commit()
+    conn.close()
+    return post_id
+
+def get_published_post(post_id, user_id):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, user_id, campaign_id, calendar_id, script_job_id, affiliate_link_id,
+                  platform, topic, post_url, caption, status, published_at, created_at, updated_at
+        FROM published_posts WHERE id=? AND user_id=?""",
+        (int(post_id), str(user_id)),
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def list_published_posts(user_id, platform="", limit=10):
+    platform = normalize_manual_publish_platform(platform)
+    conn = db_connect()
+    c = conn.cursor()
+    if platform:
+        c.execute(
+            """SELECT id, platform, topic, post_url, status, published_at, campaign_id, calendar_id, affiliate_link_id
+            FROM published_posts WHERE user_id=? AND platform=? ORDER BY id DESC LIMIT ?""",
+            (str(user_id), platform, int(limit)),
+        )
+    else:
+        c.execute(
+            """SELECT id, platform, topic, post_url, status, published_at, campaign_id, calendar_id, affiliate_link_id
+            FROM published_posts WHERE user_id=? ORDER BY id DESC LIMIT ?""",
+            (str(user_id), int(limit)),
+        )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def add_manual_performance_event(user_id, post_id, parsed: dict) -> int:
+    post = get_published_post(post_id, user_id)
+    if not post:
+        return 0
+    platform = post[6] or ""
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO manual_performance_events
+        (user_id, published_post_id, platform, views, likes, comments, shares, clicks, revenue, cost_xu, note, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(user_id),
+            int(post_id),
+            platform,
+            int(parsed.get("views") or 0),
+            int(parsed.get("likes") or 0),
+            int(parsed.get("comments") or 0),
+            int(parsed.get("shares") or 0),
+            int(parsed.get("clicks") or 0),
+            float(parsed.get("revenue") or 0),
+            int(parsed.get("cost_xu") or 0),
+            parsed.get("note") or "",
+            now_text(),
+        ),
+    )
+    event_id = c.lastrowid
+    calendar_id = int(post[3] or 0)
+    if calendar_id:
+        c.execute(
+            "UPDATE content_calendar SET status=? WHERE id=? AND owner_id=?",
+            ("measured", calendar_id, str(user_id)),
+        )
+    conn.commit()
+    conn.close()
+    return event_id
+
+def manual_post_performance_totals(user_id, post_id) -> dict:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """SELECT COALESCE(SUM(views),0), COALESCE(SUM(likes),0), COALESCE(SUM(comments),0),
+                  COALESCE(SUM(shares),0), COALESCE(SUM(clicks),0), COALESCE(SUM(revenue),0), COALESCE(SUM(cost_xu),0)
+        FROM manual_performance_events WHERE user_id=? AND published_post_id=?""",
+        (str(user_id), int(post_id)),
+    )
+    row = c.fetchone() or (0, 0, 0, 0, 0, 0, 0)
+    conn.close()
+    return {
+        "views": int(row[0] or 0),
+        "likes": int(row[1] or 0),
+        "comments": int(row[2] or 0),
+        "shares": int(row[3] or 0),
+        "clicks": int(row[4] or 0),
+        "revenue": float(row[5] or 0),
+        "cost_xu": int(row[6] or 0),
+    }
+
+def calculate_performance_score(views=0, likes=0, comments=0, shares=0, clicks=0, revenue=0) -> int:
+    views = int(views or 0)
+    engagement = int(likes or 0) + int(comments or 0) + int(shares or 0)
+    clicks = int(clicks or 0)
+    revenue = float(revenue or 0)
+    score = 0
+    if views >= 10000:
+        score += 30
+    elif views >= 5000:
+        score += 25
+    elif views >= 1000:
+        score += 15
+    elif views >= 300:
+        score += 8
+    if engagement > 100:
+        score += 20
+    elif engagement > 30:
+        score += 10
+    if clicks > 50:
+        score += 20
+    elif clicks > 10:
+        score += 10
+    elif clicks > 0:
+        score += 5
+    if revenue > 100000:
+        score += 35
+    elif revenue > 0:
+        score += 25
+    return min(100, score)
+
+def build_growth_recommendation(platform, views, likes, comments, shares, clicks, revenue) -> dict:
+    score = calculate_performance_score(views, likes, comments, shares, clicks, revenue)
+    platform = normalize_manual_publish_platform(platform) or "platform"
+    if float(revenue or 0) > 0 and int(clicks or 0) > 0:
+        rec_type = "scale"
+        title = "SCALE"
+        reason = "Bài đã có click và doanh thu, chứng minh offer/CTA có lực kéo."
+        action = f"Tạo thêm 3 biến thể cùng angle, giữ CTA hiện tại và đăng lại trên {platform}, Facebook Reels, TikTok, YouTube Shorts nếu phù hợp."
+    elif int(views or 0) >= 1000 and int(clicks or 0) <= 3:
+        rec_type = "fix_cta"
+        title = "FIX CTA"
+        reason = "View đã ổn nhưng click thấp, vấn đề có thể nằm ở caption, comment ghim hoặc lời kêu gọi hành động."
+        action = "Giữ hook, viết lại CTA, thêm disclosure affiliate rõ hơn và pin comment có link/offer dễ hiểu."
+    elif int(views or 0) < 300:
+        rec_type = "fix_hook"
+        title = "FIX HOOK"
+        reason = "View thấp, người xem chưa bị kéo vào vài giây đầu."
+        action = "Viết lại 3 hook đầu video, đổi thumbnail/text mở đầu và thử angle gây tò mò hơn."
+    elif (int(likes or 0) + int(comments or 0) + int(shares or 0)) >= 30 and float(revenue or 0) <= 0:
+        rec_type = "add_offer"
+        title = "ADD OFFER"
+        reason = "Có tương tác nhưng chưa ra tiền, cần làm rõ sản phẩm, lợi ích và vị trí link."
+        action = "Thêm offer/ưu đãi/link rõ hơn trong caption hoặc comment ghim, tạo phiên bản review trực diện hơn."
+    else:
+        rec_type = "pause_or_rewrite"
+        title = "PAUSE OR REWRITE"
+        reason = "Các chỉ số hiện chưa đủ mạnh để scale."
+        action = "Tạm dừng scale bài này, đổi topic/hook/platform hoặc thử niche khác trước khi đăng lại."
+    return {"type": rec_type, "score": score, "title": title, "reason": reason, "action": action}
+
+def save_growth_recommendation(user_id, post_id, campaign_id, recommendation: dict) -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO growth_recommendations
+        (user_id, published_post_id, campaign_id, recommendation_type, score, title, reason, action, status, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(user_id),
+            int(post_id or 0),
+            int(campaign_id or 0),
+            recommendation.get("type") or "",
+            int(recommendation.get("score") or 0),
+            recommendation.get("title") or "",
+            recommendation.get("reason") or "",
+            recommendation.get("action") or "",
+            "open",
+            now_text(),
+        ),
+    )
+    rec_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return rec_id
+
+def manual_performance_report(user_id, days=7, platform="", campaign_id=0) -> dict:
+    days = max(1, min(int(days or 7), 180))
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    platform = normalize_manual_publish_platform(platform)
+    params = [str(user_id), since]
+    filters = ["pp.user_id=?", "pp.created_at>=?"]
+    if platform:
+        filters.append("pp.platform=?")
+        params.append(platform)
+    if campaign_id:
+        filters.append("pp.campaign_id=?")
+        params.append(int(campaign_id))
+    where = " AND ".join(filters)
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(f"SELECT COUNT(*) FROM published_posts pp WHERE {where}", params)
+    post_count = int((c.fetchone() or [0])[0] or 0)
+    c.execute(
+        f"""SELECT pp.platform, COUNT(DISTINCT pp.id), COALESCE(SUM(mpe.views),0), COALESCE(SUM(mpe.clicks),0), COALESCE(SUM(mpe.revenue),0)
+        FROM published_posts pp
+        LEFT JOIN manual_performance_events mpe ON mpe.published_post_id=pp.id AND mpe.user_id=pp.user_id
+        WHERE {where}
+        GROUP BY pp.platform
+        ORDER BY COALESCE(SUM(mpe.revenue),0) DESC, COALESCE(SUM(mpe.views),0) DESC""",
+        params,
+    )
+    by_platform = c.fetchall()
+    c.execute(
+        f"""SELECT pp.id, pp.platform, pp.topic, pp.post_url,
+                  COALESCE(SUM(mpe.views),0), COALESCE(SUM(mpe.likes),0), COALESCE(SUM(mpe.comments),0),
+                  COALESCE(SUM(mpe.shares),0), COALESCE(SUM(mpe.clicks),0), COALESCE(SUM(mpe.revenue),0)
+        FROM published_posts pp
+        LEFT JOIN manual_performance_events mpe ON mpe.published_post_id=pp.id AND mpe.user_id=pp.user_id
+        WHERE {where}
+        GROUP BY pp.id, pp.platform, pp.topic, pp.post_url
+        ORDER BY COALESCE(SUM(mpe.revenue),0) DESC, COALESCE(SUM(mpe.clicks),0) DESC, COALESCE(SUM(mpe.views),0) DESC, pp.id DESC
+        LIMIT 5""",
+        params,
+    )
+    top_posts = c.fetchall()
+    c.execute(
+        f"""SELECT COALESCE(SUM(mpe.views),0), COALESCE(SUM(mpe.likes),0), COALESCE(SUM(mpe.comments),0),
+                  COALESCE(SUM(mpe.shares),0), COALESCE(SUM(mpe.clicks),0), COALESCE(SUM(mpe.revenue),0)
+        FROM published_posts pp
+        LEFT JOIN manual_performance_events mpe ON mpe.published_post_id=pp.id AND mpe.user_id=pp.user_id
+        WHERE {where}""",
+        params,
+    )
+    totals = c.fetchone() or (0, 0, 0, 0, 0, 0)
+    conn.close()
+    return {
+        "days": days,
+        "since": since,
+        "platform": platform,
+        "campaign_id": int(campaign_id or 0),
+        "post_count": post_count,
+        "totals": {
+            "views": int(totals[0] or 0),
+            "likes": int(totals[1] or 0),
+            "comments": int(totals[2] or 0),
+            "shares": int(totals[3] or 0),
+            "clicks": int(totals[4] or 0),
+            "revenue": float(totals[5] or 0),
+        },
+        "by_platform": by_platform,
+        "top_posts": top_posts,
+    }
+
+def manual_growth_loop_items(user_id, days=30, platform="", limit=5) -> list[dict]:
+    report = manual_performance_report(user_id, days=days, platform=platform)
+    items = []
+    for row in report["top_posts"]:
+        post_id, row_platform, topic, post_url, views, likes, comments, shares, clicks, revenue = row
+        rec = build_growth_recommendation(row_platform, views, likes, comments, shares, clicks, revenue)
+        rec_id = save_growth_recommendation(user_id, post_id, 0, rec)
+        items.append({
+            "post_id": post_id,
+            "platform": row_platform,
+            "topic": topic,
+            "url": post_url,
+            "views": int(views or 0),
+            "clicks": int(clicks or 0),
+            "revenue": float(revenue or 0),
+            "recommendation": rec,
+            "recommendation_id": rec_id,
+        })
+    return items[: max(1, min(int(limit or 5), 20))]
+
+def parse_video_script_args(raw: str) -> dict:
+    raw = (raw or "").strip()
+    data = {
+        "topic": "",
+        "niche": "general",
+        "episodes": 1,
+        "scenes": 5,
+        "platforms": "facebook,tiktok,youtube",
+        "affiliate": "",
+        "affiliate_id": 0,
+        "tone": "thực tế, dễ hiểu, có khả năng viral",
+        "language": "vi",
+    }
+    if not raw:
+        return data
+    pattern = re.compile(r"(\w+)=('.*?'|\".*?\"|\S+)")
+    spans = []
+    for match in pattern.finditer(raw):
+        key = match.group(1).lower()
+        value = clean_arg_value(match.group(2))
+        spans.append(match.span())
+        if key in {"topic", "niche", "platforms", "affiliate", "tone", "language"}:
+            data[key] = value
+        elif key in {"affiliate_id", "aff", "link_id"}:
+            try:
+                data["affiliate_id"] = max(0, int(str(value).lstrip("#")))
+            except ValueError:
+                data["affiliate_id"] = 0
+        elif key in {"episodes", "scene", "scenes", "scenes_per_episode"}:
+            try:
+                num = int(value)
+            except Exception:
+                num = data["episodes"] if key == "episodes" else data["scenes"]
+            if key == "episodes":
+                data["episodes"] = max(1, min(num, 5))
+            else:
+                data["scenes"] = max(3, min(num, 12))
+    cleaned = raw
+    for start, end in reversed(spans):
+        cleaned = cleaned[:start] + " " + cleaned[end:]
+    if not data["topic"]:
+        data["topic"] = cleaned.strip()
+    data["platforms"] = normalize_platforms_text(data["platforms"])
+    return data
+
+def video_script_usage_text(uid: int) -> tuple[str, InlineKeyboardMarkup]:
+    text = (
+        "🎬 <b>Tạo Video Script Lite</b>\n\n"
+        "Cách dùng:\n"
+        "<code>/film review máy lọc không khí cho phòng ngủ</code>\n"
+        "<code>/film topic=\"review tai nghe bluetooth\" niche=affiliate</code>\n"
+        "<code>/film topic=\"camera an ninh gia đình\" platforms=facebook,tiktok,youtube</code>\n\n"
+        "Kết quả gồm:\n"
+        "• Outline\n"
+        "• Scene prompts\n"
+        "• Caption riêng cho Facebook/TikTok/YouTube\n"
+        "• CTA/hashtag\n"
+        "• File .md tải về\n\n"
+        f"Chi phí: <b>{FILM_SCRIPT_COST} Xu/lần</b>"
+    )
+    return text, build_topup_keyboard(uid)
+
+def build_video_script_prompt(topic, niche, episodes, scenes, platforms, affiliate="", tone="", language="vi"):
+    affiliate_note = affiliate or "Không có link affiliate. Nếu phù hợp, hãy đề xuất CTA bán hàng mềm nhưng không bịa link."
+    return (
+        "Bạn là chuyên gia sản xuất video ngắn viral và affiliate content cho thị trường Việt Nam.\n"
+        "Tạo gói Video Script Lite dùng được ngay cho Facebook, TikTok và YouTube Shorts.\n\n"
+        f"Topic: {topic}\n"
+        f"Niche: {niche}\n"
+        f"Platforms: {platforms}\n"
+        f"Episodes: {episodes}\n"
+        f"Scenes per episode: {scenes}\n"
+        f"Tone: {tone or 'thực tế, dễ hiểu, có khả năng viral'}\n"
+        f"Language: {language or 'vi'}\n"
+        f"Affiliate link/context: {affiliate_note}\n\n"
+        "Output bằng tiếng Việt, format Markdown rõ ràng, gồm đúng các phần sau:\n\n"
+        "1. PROJECT SUMMARY\n"
+        "- title\n- target audience\n- angle\n- promise\n- content safety note\n\n"
+        "2. SERIES OUTLINE\n"
+        "Cho từng tập: episode title, hook, short summary, cliffhanger/CTA.\n\n"
+        "3. SCENE BREAKDOWN\n"
+        "Cho từng tập, từng cảnh: scene number, duration seconds, visual description, voice line, image prompt, video prompt, camera movement, mood, negative prompt.\n\n"
+        "4. PLATFORM OUTPUTS\n"
+        "Facebook: title, caption, hashtags, CTA, pinned comment, affiliate disclosure.\n"
+        "TikTok: hook text, short caption, hashtags, CTA, affiliate disclosure.\n"
+        "YouTube Shorts: title, description, hashtags/tags, pinned comment, long-form expansion idea, affiliate disclosure.\n\n"
+        "5. QUALITY CHECK\n"
+        "- hook_score 0-100\n- clarity_score 0-100\n- viral_score 0-100\n- affiliate_fit_score 0-100\n"
+        "- policy_risk 0-100\n- copyright_risk 0-100\n- recommendation: pass/rewrite/review\n\n"
+        "6. SAFETY RULES\n"
+        "- Không copy video người khác.\n- Không deepfake người thật.\n"
+        "- Không dùng brand/nhân vật có bản quyền nếu không có quyền.\n- Nếu affiliate, cần disclosure."
+    )
+
+def generate_video_script_pack(prompt: str, user_id) -> str:
+    result = AgentGemini.chat(
+        "Bạn là AI Video Script Lite của TOAN AAS. Chỉ tạo script/prompt pack, không render video, không auto publish.",
+        prompt,
+        f"film_{user_id}",
+    )
+    if not result or result.strip().startswith("❌"):
+        raise RuntimeError(result or "AI provider unavailable")
+    return result
+
+def create_video_script_job(user_id, parsed: dict, cost_xu: int, status: str = "processing") -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO video_script_jobs
+        (user_id, topic, niche, platforms, episodes, scenes_per_episode, cost_xu, status, output_text, output_json, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(user_id),
+            parsed.get("topic", ""),
+            parsed.get("niche", "general"),
+            parsed.get("platforms", "facebook,tiktok,youtube"),
+            int(parsed.get("episodes") or 1),
+            int(parsed.get("scenes") or 5),
+            int(cost_xu),
+            status,
+            "",
+            "",
+            now_text(),
+        ),
+    )
+    job_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return job_id
+
+def update_video_script_job(job_id: int, status: str, output_text: str = ""):
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE video_script_jobs SET status=?, output_text=? WHERE id=?",
+        (status, output_text or "", int(job_id)),
+    )
+    conn.commit()
+    conn.close()
+
+async def send_video_script_file(context: ContextTypes.DEFAULT_TYPE, chat_id: int, job_id: int, parsed: dict, output_text: str):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"toan_aas_video_script_{job_id}_{timestamp}.md"
+    tmp_path = ""
+    content = (
+        "# TOAN AAS Video Script Lite\n\n"
+        f"- Job ID: {job_id}\n"
+        f"- Created at: {now_text()}\n"
+        f"- Topic: {parsed.get('topic', '')}\n"
+        f"- Niche: {parsed.get('niche', '')}\n"
+        f"- Platforms: {parsed.get('platforms', '')}\n"
+        f"- Episodes: {parsed.get('episodes', 1)}\n"
+        f"- Scenes per episode: {parsed.get('scenes', 5)}\n\n"
+        "---\n\n"
+        f"{output_text}"
+    )
+    try:
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".md", encoding="utf-8") as f:
+            tmp_path = f.name
+            f.write(content)
+        with open(tmp_path, "rb") as f:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=f,
+                filename=filename,
+                caption=f"📎 TOAN AAS Video Script Lite #{job_id}",
+            )
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    raw = " ".join(context.args).strip()
+    if not raw:
+        text, keyboard = video_script_usage_text(uid)
+        return await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+    parsed = parse_video_script_args(raw)
+    if not parsed.get("topic"):
+        text, keyboard = video_script_usage_text(uid)
+        return await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+    affiliate_row = None
+    affiliate_id = int(parsed.get("affiliate_id") or 0)
+    if affiliate_id:
+        affiliate_row = get_affiliate_link(affiliate_id, uid)
+        if not affiliate_row:
+            return await update.message.reply_text(
+                f"❌ Không tìm thấy link affiliate <code>#{affiliate_id}</code> trong kho của bạn.\n"
+                "Dùng <code>/links</code> để xem ID link đang có.",
+                parse_mode="HTML",
+            )
+        if (affiliate_row[6] or "active").lower() != "active":
+            return await update.message.reply_text(
+                f"⚠️ Link affiliate <code>#{affiliate_id}</code> chưa ở trạng thái active.",
+                parse_mode="HTML",
+            )
+        affiliate_context = affiliate_row_to_context(affiliate_row)
+        if parsed.get("affiliate"):
+            affiliate_context += "\nExtra affiliate note: " + parsed.get("affiliate", "")
+        parsed["affiliate"] = affiliate_context
+
+    credits, _, is_vip = get_user(uid, update.effective_user.first_name)
+    is_admin = str(uid) == ADMIN_ID
+    cost = 0 if (is_admin or is_vip) else FILM_SCRIPT_COST
+    charged = False
+    if cost > 0:
+        if credits < cost:
+            return await reply_insufficient_credits(update, credits, cost)
+        charged = spend_fixed_credit(uid, cost, "spend_video_script", f"Video Script Lite: {parsed.get('topic', '')[:120]}")
+        if not charged:
+            credits_now, _, _ = get_user(uid)
+            return await reply_insufficient_credits(update, credits_now, cost)
+
+    job_id = 0
+    try:
+        job_id = create_video_script_job(uid, parsed, cost, "processing")
+        await update.message.reply_text(
+            f"🎬 <b>Đang tạo Video Script Lite #{job_id}...</b>\n\n"
+            f"Chủ đề: <b>{html.escape(parsed.get('topic', ''))}</b>\n"
+            f"Nền tảng: <b>{html.escape(parsed.get('platforms', ''))}</b>"
+            + (f"\nAffiliate: <code>#{affiliate_id}</code> {html.escape(affiliate_row[2] or '')}" if affiliate_row else ""),
+            parse_mode="HTML",
+        )
+        prompt = build_video_script_prompt(
+            parsed["topic"],
+            parsed["niche"],
+            parsed["episodes"],
+            parsed["scenes"],
+            parsed["platforms"],
+            parsed.get("affiliate", ""),
+            parsed.get("tone", ""),
+            parsed.get("language", "vi"),
+        )
+        output_text = generate_video_script_pack(prompt, uid)
+        update_video_script_job(job_id, "completed", output_text)
+        credits_after, _, _ = get_user(uid)
+        preview = html.escape(truncate_text(output_text, 1800))
+        await update.message.reply_text(
+            f"🎬 <b>TOAN AAS Video Script Lite đã hoàn thành</b>\n\n"
+            f"Chủ đề: <b>{html.escape(parsed.get('topic', ''))}</b>\n"
+            f"Nền tảng: <b>{html.escape(parsed.get('platforms', ''))}</b>\n"
+            + (f"Affiliate: <code>#{affiliate_id}</code> {html.escape(affiliate_row[2] or '')}\n" if affiliate_row else "")
+            + f"Số tập: <b>{parsed.get('episodes')}</b>\n"
+            f"Số cảnh/tập: <b>{parsed.get('scenes')}</b>\n"
+            f"Chi phí: <b>{cost} Xu</b>\n\n"
+            "✅ Đã tạo: outline, scene prompts, caption từng nền tảng, CTA/hashtag, quality check.\n\n"
+            f"<b>Preview:</b>\n<pre>{preview}</pre>\n\n"
+            f"💼 Số dư còn lại: <b>{credits_after} Xu</b>\n"
+            "Dùng /film để tạo tiếp hoặc /naptien để nạp thêm.",
+            parse_mode="HTML",
+        )
+        try:
+            await send_video_script_file(context, update.effective_chat.id, job_id, parsed, output_text)
+        except Exception as e:
+            logger.warning(f"Video script file export error: {e}")
+            await update.message.reply_text("⚠️ Không gửi được file export, nhưng preview/kết quả đã được tạo ở trên.")
+    except Exception as e:
+        logger.error(f"Video Script Lite error: {e}")
+        if job_id:
+            try:
+                update_video_script_job(job_id, "failed", "")
+            except Exception:
+                pass
+        refunded = refund_charged_credit(uid, cost, "video_script_refund", str(job_id or ""), "Hoàn phí Video Script Lite do AI lỗi", charged)
+        refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b>." if refunded else ""
+        return await update.message.reply_text(
+            "❌ AI đang lỗi hoặc quá tải. Vui lòng thử lại sau." + refund_line,
+            parse_mode="HTML",
+        )
+
+async def cmd_addlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    raw = " ".join(context.args).strip()
+    if not raw:
+        return await update.message.reply_text(
+            "🔗 <b>Thêm link affiliate</b>\n\n"
+            "Cú pháp:\n"
+            "<code>/addlink url=https://... product=\"Tên sản phẩm\" niche=\"công nghệ\" network=Shopee note=\"hoa hồng/ghi chú\"</code>\n\n"
+            "Viết nhanh:\n"
+            "<code>/addlink https://goeco.mobi/abc Tai nghe bluetooth niche=congnghe</code>",
+            parse_mode="HTML",
+        )
+    data, remainder = parse_loose_kv_args(raw)
+    url = data.get("url") or data.get("link") or extract_first_url(raw)
+    if not is_valid_http_url(url):
+        return await update.message.reply_text("❌ Link không hợp lệ. Link phải bắt đầu bằng http:// hoặc https://")
+
+    remainder_without_url = remainder.replace(url, "", 1).strip() if url in remainder else remainder
+    product = (
+        data.get("product") or data.get("sp") or data.get("name") or data.get("brand")
+        or remainder_without_url.strip()
+    )
+    product = (product or "").strip()[:120]
+    if not product:
+        return await update.message.reply_text(
+            "⚠️ Thiếu tên sản phẩm/thương hiệu.\n"
+            "Ví dụ: <code>/addlink url=https://... product=\"Shopee\" niche=shopping</code>",
+            parse_mode="HTML",
+        )
+
+    existing = find_affiliate_link_by_url(uid, url)
+    if existing:
+        return await update.message.reply_text(
+            f"ℹ️ Link này đã có trong kho của bạn: <code>#{existing[0]}</code> — <b>{html.escape(existing[2] or '-')}</b>\n"
+            f"Dùng: <code>/film topic=\"ý tưởng video\" affiliate_id={existing[0]}</code>",
+            parse_mode="HTML",
+        )
+
+    network = (data.get("network") or data.get("net") or infer_affiliate_network_from_url(url) or "manual").strip()[:60]
+    niche = (data.get("niche") or data.get("ngach") or data.get("category") or "affiliate").strip()[:120]
+    note = (data.get("note") or data.get("commission") or data.get("hh") or "").strip()[:240]
+    audience = (data.get("audience") or data.get("khach") or "").strip()[:240]
+    allowed_claims = (data.get("allowed") or data.get("claim_ok") or "").strip()[:240]
+    blocked_claims = (data.get("blocked") or data.get("claim_cam") or "").strip()[:240]
+    price_vnd = safe_int(data.get("price") or data.get("gia"), 0)
+    try:
+        commission_rate = float(data.get("rate") or data.get("commission_rate") or data.get("tile") or 0)
+    except ValueError:
+        commission_rate = 0
+    base_score = clamp_score(45 + (12 if note else 0) + (8 if audience else 0) + (8 if commission_rate else 0))
+    affiliate_id = create_affiliate_link(
+        uid, network, product, niche, url, note,
+        price_vnd, commission_rate, audience, allowed_claims, blocked_claims, base_score
+    )
+    await update.message.reply_text(
+        f"✅ <b>Đã lưu link affiliate #{affiliate_id}</b>\n"
+        f"• Sản phẩm: <b>{html.escape(product)}</b>\n"
+        f"• Nhóm: {html.escape(niche)} | Network: <code>{html.escape(network)}</code>\n"
+        f"• Link: <code>{html.escape(short_url_display(url))}</code>\n\n"
+        f"Dùng ngay:\n"
+        f"<code>/film topic=\"review {html.escape(product)}\" affiliate_id={affiliate_id}</code>\n"
+        f"<code>/addcal date=tomorrow platform=tiktok topic=\"video {html.escape(product)}\" affiliate_id={affiliate_id}</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    rows = list_affiliate_links(uid, limit=80)
+    active_rows = [row for row in rows if (row[6] or "active").lower() == "active"]
+    if not active_rows:
+        return await update.message.reply_text(
+            "📭 Bạn chưa có link affiliate active.\n\n"
+            "Thêm bằng:\n"
+            "<code>/addlink url=https://... product=\"Tên sản phẩm\" niche=\"công nghệ\"</code>",
+            parse_mode="HTML",
+        )
+    lines = ["🔗 <b>KHO LINK AFFILIATE CỦA BẠN</b>\n"]
+    for aid, network, product, niche, url, note, status, price_vnd, commission_rate, audience, allowed_claims, blocked_claims, product_score in active_rows[:20]:
+        lines.append(
+            f"• <code>#{aid}</code> | <b>{html.escape(product or '-')}</b> | {html.escape(niche or '-')}\n"
+            f"  Network: <code>{html.escape(network or '-')}</code> | score={product_score or 0}\n"
+            f"  Link: <code>{html.escape(short_url_display(url or ''))}</code>\n"
+            f"  Dùng: <code>/film topic=\"ý tưởng video\" affiliate_id={aid}</code>"
+        )
+    if len(active_rows) > 20:
+        lines.append(f"\n... còn {len(active_rows) - 20} link khác.")
+    lines.append("\nThêm link mới: <code>/addlink url=https://... product=\"Tên\" niche=\"nhóm\"</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_addcal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    raw = " ".join(context.args).strip()
+    if not raw:
+        return await update.message.reply_text(
+            "🗓️ <b>Thêm lịch đăng nội dung</b>\n\n"
+            "Cú pháp:\n"
+            "<code>/addcal date=tomorrow platform=tiktok topic=\"Review sản phẩm A\" affiliate_id=1</code>\n"
+            "<code>/addcal 2026-06-05 facebook video deal công nghệ aff=1</code>",
+            parse_mode="HTML",
+        )
+    data, remainder = parse_loose_kv_args(raw)
+    tokens = remainder.split()
+    date_value = data.get("date") or data.get("ngay") or ""
+    if not date_value and tokens:
+        candidate = tokens[0]
+        try:
+            normalize_calendar_date(candidate)
+            date_value = candidate
+            tokens = tokens[1:]
+        except ValueError:
+            date_value = "tomorrow"
+    if not date_value:
+        date_value = "tomorrow"
+    try:
+        post_date = normalize_calendar_date(date_value)
+    except ValueError:
+        return await update.message.reply_text(
+            "❌ Ngày không hợp lệ. Dùng <code>today</code>, <code>tomorrow</code> hoặc <code>YYYY-MM-DD</code>.",
+            parse_mode="HTML",
+        )
+
+    platform_value = data.get("platform") or data.get("nen") or ""
+    if not platform_value and tokens:
+        candidate_platform = normalize_platform_token(tokens[0])
+        if candidate_platform in CONTENT_PLATFORM_ALIASES.values():
+            platform_value = candidate_platform
+            tokens = tokens[1:]
+    platform = normalize_platforms_text(platform_value or "tiktok", defaults=["tiktok"]).split(",")[0]
+    topic = (data.get("topic") or data.get("chude") or " ".join(tokens)).strip()[:240]
+    if not topic:
+        return await update.message.reply_text(
+            "⚠️ Thiếu chủ đề lịch đăng.\n"
+            "Ví dụ: <code>/addcal date=tomorrow platform=tiktok topic=\"review tai nghe\" affiliate_id=1</code>",
+            parse_mode="HTML",
+        )
+
+    affiliate_id = safe_int(data.get("affiliate_id") or data.get("aff") or data.get("link_id"), 0)
+    campaign_id = safe_int(data.get("campaign") or data.get("campaign_id") or data.get("camp"), 0)
+    if affiliate_id and not get_affiliate_link(affiliate_id, uid):
+        return await update.message.reply_text("❌ Không tìm thấy affiliate_id trong kho của bạn.")
+    if campaign_id and not get_campaign(campaign_id, uid):
+        return await update.message.reply_text("❌ Không tìm thấy campaign trong kho của bạn.")
+
+    note = (data.get("note") or data.get("ghichu") or "manual_calendar").strip()[:240]
+    slot_id = create_calendar_slot(uid, 0, campaign_id, affiliate_id, post_date, platform, topic, note)
+    await update.message.reply_text(
+        f"✅ <b>Đã thêm lịch #{slot_id}</b>\n"
+        f"• Ngày: <code>{post_date}</code>\n"
+        f"• Platform: <code>{html.escape(platform)}</code>\n"
+        f"• Chủ đề: <b>{html.escape(topic)}</b>\n"
+        f"• Campaign: <code>{campaign_id or '-'}</code> | Affiliate: <code>{affiliate_id or '-'}</code>\n\n"
+        "Xem lịch: <code>/calendar</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    raw = " ".join(context.args).strip()
+    if not raw:
+        rows = list_campaigns(uid, limit=10)
+        lines = [
+            "📌 <b>CAMPAIGN CỦA BẠN</b>",
+            "",
+            "Tạo campaign mới:",
+            "<code>/campaign name=\"Tech Deals\" niche=\"đồ công nghệ\" platforms=facebook,tiktok,youtube affiliate_id=1</code>",
+        ]
+        if rows:
+            lines.append("\n<b>Đang có:</b>")
+            for cid, name, niche, platforms, affiliate_url, status in rows:
+                lines.append(f"• <code>#{cid}</code> | <b>{html.escape(name or '-')}</b> | {html.escape(niche or '-')} | <code>{html.escape(platforms or '-')}</code> | {status}")
+        else:
+            lines.append("\n📭 Chưa có campaign nào.")
+        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+    data, remainder = parse_loose_kv_args(raw)
+    name = (data.get("name") or data.get("ten") or remainder).strip()[:120]
+    niche = (data.get("niche") or data.get("ngach") or "affiliate").strip()[:120]
+    platforms = normalize_platforms_text(data.get("platforms") or data.get("nen") or "facebook,tiktok,youtube")
+    affiliate_id = safe_int(data.get("affiliate_id") or data.get("aff") or data.get("link_id"), 0)
+    affiliate_url = data.get("url") or data.get("link") or data.get("affiliate") or ""
+    if not name:
+        return await update.message.reply_text(
+            "⚠️ Thiếu tên campaign.\n"
+            "Ví dụ: <code>/campaign name=\"Tech Deals\" niche=\"đồ công nghệ\" platforms=tiktok,facebook affiliate_id=1</code>",
+            parse_mode="HTML",
+        )
+    if affiliate_id:
+        affiliate = get_affiliate_link(affiliate_id, uid)
+        if not affiliate:
+            return await update.message.reply_text("❌ Không tìm thấy affiliate_id trong kho của bạn.")
+        affiliate_url = affiliate[4] or affiliate_url
+    if affiliate_url and not is_valid_http_url(affiliate_url):
+        return await update.message.reply_text("❌ Link affiliate/pay URL của campaign không hợp lệ.")
+    campaign_id = create_campaign(uid, name, niche, platforms, affiliate_url, data.get("pay") or data.get("payos") or "")
+    affiliate_display = f"#{affiliate_id}" if affiliate_id else (short_url_display(affiliate_url) or "-")
+    await update.message.reply_text(
+        f"✅ <b>Đã tạo campaign #{campaign_id}</b>\n"
+        f"• Tên: <b>{html.escape(name)}</b>\n"
+        f"• Niche: {html.escape(niche)}\n"
+        f"• Platforms: <code>{html.escape(platforms)}</code>\n"
+        f"• Affiliate: <code>{html.escape(affiliate_display)}</code>\n\n"
+        "Bước tiếp theo:\n"
+        f"<code>/addcal date=tomorrow platform=tiktok topic=\"video mở màn {html.escape(name)}\" campaign={campaign_id} affiliate_id={affiliate_id or 0}</code>\n"
+        f"<code>/film topic=\"video mở màn {html.escape(name)}\" affiliate_id={affiliate_id or 0}</code>",
+        parse_mode="HTML",
+    )
+
 async def cmd_campaign_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -23190,19 +24379,55 @@ async def cmd_calendar_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
-        return
-    rows = list_calendar_slots(update.effective_user.id)
+    uid = update.effective_user.id
+    data, _ = parse_loose_kv_args(" ".join(context.args))
+    days = max(1, min(safe_int(data.get("days") or data.get("ngay"), 7), 30))
+    platform_filter = normalize_platform_token(data.get("platform") or data.get("nen") or "")
+    rows = list_calendar_slots(uid, limit=100)
+    today = datetime.now().date()
+    end_date = today + timedelta(days=days - 1)
+    filtered = []
+    for row in rows:
+        slot_id, post_date, platform, channel_name, topic, status, campaign_id, affiliate_id = row
+        try:
+            row_date = datetime.strptime((post_date or "")[:10], "%Y-%m-%d").date()
+        except ValueError:
+            row_date = today
+        if row_date < today or row_date > end_date:
+            continue
+        if platform_filter and normalize_platform_token(platform) != platform_filter:
+            continue
+        filtered.append(row)
     if not rows:
-        return await update.message.reply_text("📭 Chưa có lịch. Tạo bằng /calendar_plan.")
-    lines = ["🗓️ <b>LỊCH NỘI DUNG NỘI BỘ</b>\n"]
-    for slot_id, post_date, platform, channel_name, topic, status, campaign_id, affiliate_id in rows:
+        return await update.message.reply_text(
+            "📭 Bạn chưa có lịch nội dung.\n\n"
+            "Thêm lịch:\n"
+            "<code>/addcal date=tomorrow platform=tiktok topic=\"review sản phẩm\" affiliate_id=1</code>",
+            parse_mode="HTML",
+        )
+    if not filtered:
+        return await update.message.reply_text(
+            f"📭 Không có lịch trong {days} ngày tới"
+            + (f" cho platform <code>{html.escape(platform_filter)}</code>." if platform_filter else "."),
+            parse_mode="HTML",
+        )
+    lines = [
+        "🗓️ <b>LỊCH NỘI DUNG CỦA BẠN</b>",
+        f"• Khoảng xem: <b>{days} ngày tới</b>"
+        + (f" | Platform: <code>{html.escape(platform_filter)}</code>" if platform_filter else ""),
+        "",
+    ]
+    for slot_id, post_date, platform, channel_name, topic, status, campaign_id, affiliate_id in filtered[:30]:
+        channel_part = f" | {html.escape(channel_name)}" if channel_name else ""
         lines.append(
             f"• #{slot_id} | {post_date} | <code>{html.escape(platform or '-')}</code> | "
-            f"{html.escape(channel_name or '-') } | {status}\n"
+            f"{html.escape(status or '-')}{channel_part}\n"
             f"  {html.escape(topic or '-')}\n"
             f"  camp=<code>{campaign_id or '-'}</code> aff=<code>{affiliate_id or '-'}</code>"
         )
+    if len(filtered) > 30:
+        lines.append(f"\n... còn {len(filtered) - 30} lịch khác.")
+    lines.append("\nThêm lịch: <code>/addcal date=tomorrow platform=tiktok topic=\"...\" affiliate_id=1</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -26781,10 +28006,176 @@ async def handle_task_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode="HTML"
         )
 
+async def cmd_publish_done_manual(update: Update, context: ContextTypes.DEFAULT_TYPE, raw: str):
+    uid = update.effective_user.id
+    if not raw:
+        return await update.message.reply_text(manual_publish_usage_text(), parse_mode="HTML")
+    parsed = parse_manual_publish_args(raw)
+    if not parsed.get("platform"):
+        return await update.message.reply_text(
+            "❌ Platform chưa hợp lệ. Dùng: <code>facebook, tiktok, youtube, instagram, threads, website</code>.\n\n"
+            + manual_publish_usage_text(),
+            parse_mode="HTML",
+        )
+    if not is_valid_http_url(parsed.get("url")):
+        return await update.message.reply_text(
+            "❌ URL không hợp lệ. Link bài đăng phải bắt đầu bằng <code>http://</code> hoặc <code>https://</code>.\n\n"
+            + manual_publish_usage_text(),
+            parse_mode="HTML",
+        )
+    if not parsed.get("topic"):
+        return await update.message.reply_text(
+            "⚠️ Thiếu chủ đề bài đăng.\n\n" + manual_publish_usage_text(),
+            parse_mode="HTML",
+        )
+    ok, reason = validate_manual_post_refs(uid, parsed)
+    if not ok:
+        return await update.message.reply_text(f"❌ {html.escape(reason)}", parse_mode="HTML")
+    post_id = create_published_post(uid, parsed)
+    await update.message.reply_text(
+        f"✅ <b>Đã ghi nhận bài đăng #{post_id}</b>\n\n"
+        f"• Nền tảng: <code>{html.escape(parsed.get('platform') or '-')}</code>\n"
+        f"• Chủ đề: <b>{html.escape(parsed.get('topic') or '-')}</b>\n"
+        f"• Link: <code>{html.escape(short_url_display(parsed.get('url') or '', 90))}</code>\n"
+        f"• Campaign: <code>{parsed.get('campaign_id') or '-'}</code> | Calendar: <code>{parsed.get('calendar_id') or '-'}</code> | Affiliate: <code>{parsed.get('affiliate_id') or '-'}</code>\n\n"
+        "<b>Bước tiếp theo:</b>\n"
+        f"<code>/performance_add post_id={post_id} views=... likes=... clicks=... revenue=...</code>\n"
+        "<code>/performance_report</code> | <code>/growth_loop</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_performance_add_manual(update: Update, context: ContextTypes.DEFAULT_TYPE, raw: str):
+    uid = update.effective_user.id
+    if not raw:
+        return await update.message.reply_text(manual_performance_usage_text(), parse_mode="HTML")
+    parsed = parse_manual_performance_args(raw)
+    post_id = int(parsed.get("post_id") or 0)
+    post = get_published_post(post_id, uid) if post_id else None
+    if not post:
+        return await update.message.reply_text(
+            "❌ Không tìm thấy post_id thuộc tài khoản của bạn.\n\n" + manual_performance_usage_text(),
+            parse_mode="HTML",
+        )
+    event_id = add_manual_performance_event(uid, post_id, parsed)
+    if not event_id:
+        return await update.message.reply_text("❌ Không lưu được số liệu. Kiểm tra lại post_id.")
+    totals = manual_post_performance_totals(uid, post_id)
+    rec = build_growth_recommendation(
+        post[6],
+        totals["views"],
+        totals["likes"],
+        totals["comments"],
+        totals["shares"],
+        totals["clicks"],
+        totals["revenue"],
+    )
+    save_growth_recommendation(uid, post_id, post[2] or 0, rec)
+    await update.message.reply_text(
+        f"📊 <b>Đã lưu hiệu quả bài đăng #{post_id}</b>\n\n"
+        f"• Views: <b>{totals['views']:,}</b>\n"
+        f"• Likes: <b>{totals['likes']:,}</b> | Comments: <b>{totals['comments']:,}</b> | Shares: <b>{totals['shares']:,}</b>\n"
+        f"• Clicks: <b>{totals['clicks']:,}</b>\n"
+        f"• Revenue: <b>{totals['revenue']:,.0f}đ</b>\n\n"
+        f"<b>Đánh giá:</b> {rec['score']}/100 — <code>{html.escape(rec['title'])}</code>\n"
+        f"<b>Gợi ý:</b> {html.escape(rec['action'])}\n\n"
+        "Lệnh tiếp: <code>/performance_report</code> | <code>/growth_loop</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_performance_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = " ".join(context.args).strip()
+    data, remainder = parse_loose_kv_args(raw)
+    days = safe_int(data.get("days") or data.get("ngay") or (remainder.split()[0] if remainder.split() else 7), 7)
+    days = max(1, min(days, 180))
+    platform = normalize_manual_publish_platform(data.get("platform") or data.get("nen") or "")
+    campaign_id = safe_int(data.get("campaign_id") or data.get("campaign") or data.get("camp"), 0)
+    report = manual_performance_report(update.effective_user.id, days=days, platform=platform, campaign_id=campaign_id)
+    if report["post_count"] <= 0:
+        return await update.message.reply_text(
+            "📭 Bạn chưa có dữ liệu hiệu quả.\n\n"
+            "Bước 1: <code>/publish_done tiktok https://... chủ đề...</code>\n"
+            "Bước 2: <code>/performance_add post_id=1 views=... clicks=... revenue=...</code>",
+            parse_mode="HTML",
+        )
+    totals = report["totals"]
+    lines = [
+        f"📊 <b>Báo cáo hiệu quả {days} ngày</b>",
+        f"• Tổng bài đã đăng: <b>{report['post_count']}</b>",
+        f"• Tổng views: <b>{totals['views']:,}</b>",
+        f"• Tổng clicks: <b>{totals['clicks']:,}</b>",
+        f"• Tổng revenue: <b>{totals['revenue']:,.0f}đ</b>",
+        "",
+        "<b>Theo nền tảng:</b>",
+    ]
+    for row_platform, post_count, views, clicks, revenue in report["by_platform"]:
+        lines.append(
+            f"• <code>{html.escape(row_platform or '-')}</code>: <b>{post_count}</b> bài | "
+            f"{int(views or 0):,} views | {int(clicks or 0):,} clicks | {float(revenue or 0):,.0f}đ"
+        )
+    lines.append("\n<b>Top bài:</b>")
+    for idx, row in enumerate(report["top_posts"], 1):
+        post_id, row_platform, topic, post_url, views, likes, comments, shares, clicks, revenue = row
+        score = calculate_performance_score(views, likes, comments, shares, clicks, revenue)
+        lines.append(
+            f"{idx}. <code>#{post_id}</code> — <code>{html.escape(row_platform or '-')}</code> — {html.escape((topic or '-')[:90])}\n"
+            f"   Views: <b>{int(views or 0):,}</b> | Clicks: <b>{int(clicks or 0):,}</b> | Revenue: <b>{float(revenue or 0):,.0f}đ</b> | Score: <b>{score}</b>"
+        )
+    lines.append("\nGợi ý tiếp: <code>/growth_loop</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = " ".join(context.args).strip()
+    platform = normalize_manual_publish_platform(raw.split()[0]) if raw else ""
+    rows = list_published_posts(update.effective_user.id, platform=platform, limit=10)
+    if not rows:
+        return await update.message.reply_text(
+            "📭 Bạn chưa ghi nhận bài đăng nào.\n\n"
+            "Dùng: <code>/publish_done tiktok https://... chủ đề...</code>",
+            parse_mode="HTML",
+        )
+    lines = ["🗂 <b>Bài đã đăng gần đây</b>\n"]
+    for post_id, row_platform, topic, post_url, status, published_at, campaign_id, calendar_id, affiliate_id in rows:
+        lines.append(
+            f"<code>#{post_id}</code> <code>{html.escape(row_platform or '-')}</code> — {html.escape((topic or '-')[:90])}\n"
+            f"Link: <code>{html.escape(short_url_display(post_url or '', 90))}</code>\n"
+            f"Status: <b>{html.escape(status or '-')}</b> | Campaign: <code>{campaign_id or '-'}</code> | Affiliate: <code>{affiliate_id or '-'}</code>\n"
+            f"Dùng: <code>/performance_add post_id={post_id} views=... clicks=... revenue=...</code>\n"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_growth_loop_manual(update: Update, context: ContextTypes.DEFAULT_TYPE, raw: str):
+    data, remainder = parse_loose_kv_args(raw)
+    days = max(1, min(safe_int(data.get("days") or data.get("ngay") or (remainder.split()[0] if remainder.split() else 30), 30), 180))
+    platform = normalize_manual_publish_platform(data.get("platform") or data.get("nen") or "")
+    limit = max(1, min(safe_int(data.get("limit"), 5), 10))
+    items = manual_growth_loop_items(update.effective_user.id, days=days, platform=platform, limit=limit)
+    if not items:
+        return await update.message.reply_text(
+            "📭 Bạn cần ghi nhận bài đăng và số liệu trước:\n"
+            "<code>/publish_done tiktok https://... chủ đề...</code>\n"
+            "<code>/performance_add post_id=1 views=... clicks=... revenue=...</code>",
+            parse_mode="HTML",
+        )
+    lines = [f"📈 <b>Growth Loop — Gợi ý hành động {days} ngày</b>\n"]
+    for idx, item in enumerate(items, 1):
+        rec = item["recommendation"]
+        lines.append(
+            f"{idx}. <b>{html.escape(rec['title'])}</b>\n"
+            f"Bài <code>#{item['post_id']}</code> trên <code>{html.escape(item['platform'] or '-')}</code>: {html.escape((item['topic'] or '-')[:90])}\n"
+            f"Views: <b>{item['views']:,}</b> | Clicks: <b>{item['clicks']:,}</b> | Revenue: <b>{item['revenue']:,.0f}đ</b> | Score: <b>{rec['score']}</b>\n"
+            f"Lý do: {html.escape(rec['reason'])}\n"
+            f"Hành động: {html.escape(rec['action'])}\n"
+            f"Lệnh gợi ý: <code>/film topic=\"{html.escape((item['topic'] or 'ý tưởng video')[:80])}\" platforms=facebook,tiktok,youtube</code>\n"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = " ".join(context.args).strip()
     if str(update.effective_user.id) != ADMIN_ID:
-        return
-    data = parse_key_value_args(" ".join(context.args))
+        return await cmd_performance_add_manual(update, context, raw)
+    data = parse_key_value_args(raw)
+    if data.get("post_id") or data.get("post"):
+        return await cmd_performance_add_manual(update, context, raw)
     try:
         job_id = int(data.get("id") or data.get("job") or context.args[0])
     except (IndexError, TypeError, ValueError):
@@ -26874,9 +28265,10 @@ async def cmd_mark_published(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 async def cmd_publish_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = " ".join(context.args).strip()
     if str(update.effective_user.id) != ADMIN_ID:
-        return
-    data = parse_key_value_args(" ".join(context.args))
+        return await cmd_publish_done_manual(update, context, raw)
+    data = parse_key_value_args(raw)
     try:
         queue_id = int(data.get("queue") or data.get("qid") or data.get("id") or 0)
     except ValueError:
@@ -26886,11 +28278,7 @@ async def cmd_publish_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (TypeError, ValueError):
         job_id = 0
     if not queue_id and not job_id:
-        return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/publish_done queue=1 url=https://... views=1000 clicks=20 orders=1 revenue=50000 cost=0 source=tiktok_caption</code>\n"
-            "Có thể dùng <code>job=ID</code> nếu không có queue.",
-            parse_mode="HTML",
-        )
+        return await cmd_publish_done_manual(update, context, raw)
     result = complete_publish_tracking(
         update.effective_user.id,
         job_id=job_id,
@@ -29033,9 +30421,12 @@ async def cmd_scale_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_growth_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = " ".join(context.args).strip()
     if str(update.effective_user.id) != ADMIN_ID:
-        return
-    data = parse_key_value_args(" ".join(context.args))
+        return await cmd_growth_loop_manual(update, context, raw)
+    data = parse_key_value_args(raw)
+    if truthy_value(data.get("manual") or data.get("posts") or data.get("post"), False):
+        return await cmd_growth_loop_manual(update, context, raw)
     days = safe_int(data.get("days") or data.get("ngay") or (context.args[0] if context.args else 30), 30)
     days = max(1, min(days, 180))
     limit = max(1, min(safe_int(data.get("limit"), 5), 20))
@@ -29945,12 +31336,32 @@ async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     bot_name = context.bot.username or BOT_USERNAME
     link = f"https://t.me/{bot_name}?start=ref_{uid}"
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=?", (str(uid),))
+    total_count = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND bonus_paid=1", (str(uid),))
+    paid_count = c.fetchone()[0]
+    c.execute(
+        "SELECT COALESCE(SUM(delta),0) FROM credit_events WHERE user_id=? AND event_type='referral_bonus'",
+        (str(uid),)
+    )
+    total_bonus = c.fetchone()[0] or 0
+    conn.close()
     await update.message.reply_text(
-        f"🔗 <b>LINK GIỚI THIỆU CỦA BẠN</b>\n\n"
+        f"🎁 <b>GIỚI THIỆU BẠN BÈ — NHẬN XU THƯỞNG</b>\n\n"
+        f"Chia sẻ link của bạn cho bạn bè:\n"
         f"<code>{link}</code>\n\n"
-        f"🎁 Thưởng <b>{REFERRAL_BONUS_XU} Xu</b> khi người được giới thiệu nạp lần đầu.",
+        f"Khi bạn bè <b>nạp tiền lần đầu</b>, bạn nhận ngay <b>{REFERRAL_BONUS_XU} Xu</b> thưởng!\n\n"
+        f"📊 <b>Thống kê của bạn:</b>\n"
+        f"• Đã mời: <b>{total_count}</b> người\n"
+        f"• Đã nạp tiền: <b>{paid_count}</b> người\n"
+        f"• Tổng Xu thưởng đã nhận: <b>{total_bonus} Xu</b>",
         parse_mode="HTML"
     )
+
+async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_ref(update, context)
 
 async def cmd_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     content = " ".join(context.args)
@@ -30199,14 +31610,26 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
+    today = datetime.now().strftime("%Y-%m-%d")
+    month_prefix = datetime.now().strftime("%Y-%m")
     conn = db_connect()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM users")
     total_users = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE join_date >= ?", (today,))
+    new_today = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM users WHERE has_deposited=1")
     deposited_users = c.fetchone()[0]
     c.execute("SELECT COALESCE(SUM(credits),0) FROM users")
     circulating_credits = c.fetchone()[0] or 0
+    c.execute("SELECT COUNT(*), COALESCE(SUM(amount),0), COALESCE(SUM(xu),0) FROM payos_orders WHERE status=? AND DATE(paid_at)=?", (PAYOS_STATUS_PAID, today))
+    paid_today_count, revenue_today_vnd, xu_sold_today = c.fetchone()
+    c.execute("SELECT COALESCE(SUM(amount),0), COALESCE(SUM(xu),0) FROM payos_orders WHERE status=? AND paid_at LIKE ?", (PAYOS_STATUS_PAID, f"{month_prefix}%"))
+    revenue_month_vnd, xu_sold_month = c.fetchone()
+    c.execute("SELECT COALESCE(SUM(-delta),0) FROM credit_events WHERE delta < 0 AND created_at LIKE ?", (f"{month_prefix}%",))
+    xu_spent_month = c.fetchone()[0] or 0
+    c.execute("SELECT COUNT(*), COALESCE(SUM(delta),0) FROM credit_events WHERE event_type='referral_bonus'")
+    referral_rewards, referral_bonus_total = c.fetchone()
     c.execute("SELECT user_id, username, credits, total_spent, is_vip FROM users ORDER BY CAST(credits AS INTEGER) DESC LIMIT 8")
     top_users = c.fetchall()
     c.execute("SELECT order_code, user_id, amount, xu, status, created_at FROM payos_orders ORDER BY created_at DESC LIMIT 8")
@@ -30223,15 +31646,43 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     feedback_7d = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM audit_logs WHERE created_at >= ?", ((datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),))
     audit_24h = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM affiliate_links WHERE status='active'")
+    affiliate_active = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM affiliate_links WHERE created_at LIKE ?", (f"{today}%",))
+    affiliate_today = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM campaigns WHERE status='active'")
+    active_campaigns = c.fetchone()[0]
+    c.execute(
+        "SELECT COUNT(*) FROM content_calendar WHERE post_date BETWEEN ? AND ?",
+        (today, (datetime.now().date() + timedelta(days=6)).isoformat())
+    )
+    calendar_7d = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM video_script_jobs WHERE created_at LIKE ?", (f"{today}%",))
+    video_scripts_today = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM published_posts WHERE created_at LIKE ?", (f"{today}%",))
+    manual_posts_today = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM manual_performance_events WHERE created_at LIKE ?", (f"{today}%",))
+    manual_perf_today = c.fetchone()[0]
+    c.execute("SELECT COALESCE(SUM(revenue),0) FROM manual_performance_events WHERE created_at LIKE ?", (f"{today}%",))
+    manual_revenue_today = c.fetchone()[0] or 0
+    c.execute("SELECT COALESCE(SUM(revenue),0) FROM manual_performance_events WHERE created_at LIKE ?", (f"{month_prefix}%",))
+    manual_revenue_month = c.fetchone()[0] or 0
     conn.close()
 
     lines = [
-        "🧭 <b>ADMIN DASHBOARD</b>",
-        f"👥 User: <b>{total_users}</b> | Đã nạp: <b>{deposited_users}</b>",
-        f"💳 PayOS đã thanh toán: <b>{paid_count}</b> đơn / <b>{paid_amount:,}đ</b>",
-        f"🪙 Xu đang lưu hành: <b>{circulating_credits}</b>",
-        f"📋 Bill chờ: <b>{pending_count}</b> | Lead: <b>{lead_count}</b> | Góp ý 7 ngày: <b>{feedback_7d}</b>",
-        f"🧾 Audit 24h: <b>{audit_24h}</b>",
+        f"📊 <b>TOAN AAS — BÁO CÁO HÔM NAY</b>",
+        f"🗓 <code>{today}</code> | Uptime: <b>{int(time.time() - START_TIME) // 3600}h {(int(time.time() - START_TIME) % 3600) // 60}m</b>",
+        "",
+        f"👥 <b>Users:</b> tổng <b>{total_users}</b> | mới hôm nay <b>+{new_today}</b> | đã nạp <b>{deposited_users}</b>",
+        f"💰 <b>Doanh thu hôm nay:</b> <b>{revenue_today_vnd:,}đ</b> ({paid_today_count} giao dịch)",
+        f"💰 <b>Doanh thu tháng:</b> <b>{revenue_month_vnd:,}đ</b> / tổng PayOS <b>{paid_amount:,}đ</b>",
+        f"🪙 <b>Xu:</b> lưu hành <b>{circulating_credits:,}</b> | bán tháng <b>{xu_sold_month:,}</b> | dùng tháng <b>{xu_spent_month:,}</b>",
+        f"🎁 <b>Referral:</b> thưởng <b>{referral_rewards}</b> lượt / <b>{referral_bonus_total or 0} Xu</b>",
+        f"🎬 <b>Video/Affiliate:</b> script hôm nay <b>{video_scripts_today}</b> | campaign active <b>{active_campaigns}</b> | link active <b>{affiliate_active}</b> (+{affiliate_today} hôm nay) | lịch 7 ngày <b>{calendar_7d}</b>",
+        f"📈 <b>Publish tracking:</b> bài hôm nay <b>{manual_posts_today}</b> | nhập số liệu <b>{manual_perf_today}</b> | revenue tay hôm nay <b>{manual_revenue_today:,.0f}đ</b> | tháng <b>{manual_revenue_month:,.0f}đ</b>",
+        f"📋 <b>Cần chú ý:</b> bill chờ <b>{pending_count}</b> | lead <b>{lead_count}</b> | góp ý 7 ngày <b>{feedback_7d}</b> | audit 24h <b>{audit_24h}</b>",
+        "",
+        "<b>Lệnh nhanh:</b> /pending | /backup_db | /health | /naptien",
         "",
         "<b>Top user theo số dư:</b>",
     ]
@@ -30536,8 +31987,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if remaining <= 0:
                 await update.message.reply_text(
                     f"🚫 <b>Hết {FREE_CHAT_DAILY} lượt chat miễn phí hôm nay!</b>\n\n"
-                    f"⏰ Lượt mới reset lúc <b>00:00 ngày mai</b>\n"
-                    f"💡 Hoặc nạp tiền để chat <b>không giới hạn</b> ngay bây giờ.",
+                    f"⏰ Lượt mới reset lúc <b>00:00 ngày mai</b>\n\n"
+                    f"💡 Nạp <b>50.000đ</b> → chat <b>không giới hạn</b> + dùng các tính năng AI trả phí.\n"
+                    f"👇 Chọn gói để tạo QR thanh toán tự động:",
                     parse_mode="HTML",
                     reply_markup=build_topup_keyboard(uid),
                 )
@@ -30552,7 +32004,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not can_afford:
                 credits_now, _, _ = get_user(uid)
                 return await reply_insufficient_credits(update, credits_now, cost)
-            warn = ""
+            credits_after, _, _ = get_user(uid)
+            warn = (
+                f"\n\n💼 <i>Số dư còn lại: <b>{credits_after} Xu</b> | /naptien để nạp thêm</i>"
+                if credits_after < 200 else
+                f"\n\n💼 <i>Còn: {credits_after} Xu</i>"
+            )
     elif action_key == "chat" and (is_admin or is_vip):
         cost, discount, warn = 0, 0.0, ""
     else:
@@ -30600,10 +32057,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await AgentDownloader.download(data, context, update.effective_chat.id, cost, uid)
     else:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        reply = AgentGemini.chat(
-            "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời súc tích, thân thiện.",
-            text, uid
-        )
+        try:
+            reply = AgentGemini.chat(
+                "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời súc tích, thân thiện.",
+                text, uid
+            )
+        except Exception as e:
+            logger.error(f"Chat AI error: {e}")
+            refunded = refund_charged_credit(uid, cost, "chat_refund", "", "Hoàn phí chat do AI lỗi", cost > 0)
+            refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b> vì dịch vụ lỗi." if refunded else ""
+            return await update.message.reply_text(
+                "❌ AI đang lỗi tạm thời. Vui lòng thử lại sau." + refund_line,
+                parse_mode="HTML",
+            )
         if cost > 0:
             discount_text = " (Đã áp dụng VIP)" if discount > 0 else ""
             cost_line = f"\n\n<i>(-{cost} Xu){discount_text}</i>"
@@ -30618,6 +32084,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 tg_app: Application = None
 tg_polling_task: asyncio.Task | None = None
 tg_webhook_watchdog_task: asyncio.Task | None = None
+tg_auto_backup_task: asyncio.Task | None = None
 TELEGRAM_STARTUP_ERROR = ""
 
 async def run_polling_guarded():
@@ -30647,7 +32114,7 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, tg_webhook_watchdog_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR
     init_db()
     if not TELEGRAM_TOKEN:
         TELEGRAM_STARTUP_ERROR = "TELEGRAM_TOKEN chưa được set"
@@ -30668,6 +32135,8 @@ async def lifespan(app: FastAPI):
 
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
+    tg_app.add_handler(CommandHandler("help",        cmd_help))
+    tg_app.add_handler(CommandHandler("commands",    cmd_help))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
@@ -30676,8 +32145,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
+    tg_app.add_handler(CommandHandler("invite",      cmd_invite))
     tg_app.add_handler(CommandHandler("tools",       cmd_tools))
     tg_app.add_handler(CommandHandler("mmo",         cmd_mmo))
+    tg_app.add_handler(CommandHandler("campaign",    cmd_campaign))
     tg_app.add_handler(CommandHandler("campaign_new", cmd_campaign_new))
     tg_app.add_handler(CommandHandler("campaigns",   cmd_campaigns))
     tg_app.add_handler(CommandHandler("campaign_preset", cmd_campaign_preset))
@@ -30692,6 +32163,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("publisher_status", cmd_publisher_status))
     tg_app.add_handler(CommandHandler("publisher_capabilities", cmd_publisher_capabilities))
     tg_app.add_handler(CommandHandler("platform_adapters", cmd_platform_adapters))
+    tg_app.add_handler(CommandHandler("addlink",     cmd_addlink))
+    tg_app.add_handler(CommandHandler("links",       cmd_links))
     tg_app.add_handler(CommandHandler("affiliate_add", cmd_affiliate_add))
     tg_app.add_handler(CommandHandler("affiliate_seed", cmd_affiliate_seed))
     tg_app.add_handler(CommandHandler("affiliate_import", cmd_affiliate_import))
@@ -30701,6 +32174,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("affiliate_ideas", cmd_affiliate_ideas))
     tg_app.add_handler(CommandHandler("affiliate_related", cmd_affiliate_related))
     tg_app.add_handler(CommandHandler("affiliate_bundle", cmd_affiliate_bundle))
+    tg_app.add_handler(CommandHandler("addcal",      cmd_addcal))
     tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
     tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
     tg_app.add_handler(CommandHandler("operator",    cmd_operator))
@@ -30760,6 +32234,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("creative_select", cmd_creative_select))
     tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
     tg_app.add_handler(CommandHandler("video_patterns", cmd_video_patterns))
+    tg_app.add_handler(CommandHandler("film", cmd_film))
+    tg_app.add_handler(CommandHandler("video_script", cmd_film))
     tg_app.add_handler(CommandHandler("film_blueprint", cmd_film_blueprint))
     tg_app.add_handler(CommandHandler("film_project_pack", cmd_film_project_pack))
     tg_app.add_handler(CommandHandler("film_series", cmd_film_series))
@@ -30817,6 +32293,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
     tg_app.add_handler(CommandHandler("publish_done", cmd_publish_done))
     tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
+    tg_app.add_handler(CommandHandler("performance_report", cmd_performance_report))
+    tg_app.add_handler(CommandHandler("posts", cmd_posts))
     tg_app.add_handler(CommandHandler("performance", cmd_performance))
     tg_app.add_handler(CommandHandler("money_pack", cmd_money_pack))
     tg_app.add_handler(CommandHandler("affiliate_cockpit", cmd_affiliate_cockpit))
@@ -30843,6 +32321,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("pending",     cmd_pending))
     tg_app.add_handler(CommandHandler("stats",       cmd_stats))
     tg_app.add_handler(CommandHandler("dashboard",   cmd_dashboard))
+    tg_app.add_handler(CommandHandler("admin",       cmd_dashboard))
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
@@ -30919,6 +32398,67 @@ async def lifespan(app: FastAPI):
                 )
             except Exception as e:
                 logger.warning(f"Không gửi được thông báo deploy cho admin: {e}")
+        try:
+            payos_ok = bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY)
+            gemini_ok = bool(GEMINI_API_KEY)
+            openai_ok = bool(OPENAI_API_KEY)
+            db_status = "✅" if os.path.exists(DB_FILE) else "⚠️ CHƯA TÌM THẤY FILE"
+            await tg_app.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"🟢 <b>{APP_VERSION} ĐÃ KHỞI ĐỘNG</b>\n\n"
+                    f"🕐 Thời gian: <b>{now_text()}</b>\n"
+                    f"🗄️ DB: {db_status}\n"
+                    f"💳 PayOS: {'✅' if payos_ok else '❌ CHƯA CÀI KEY'}\n"
+                    f"🤖 Gemini: {'✅' if gemini_ok else '❌'} | OpenAI: {'✅' if openai_ok else '❌'}\n"
+                    f"🌐 Webhook: <code>{html.escape(ACTIVE_TELEGRAM_WEBHOOK_URL or PUBLIC_BASE_URL or 'chưa set')}</code>\n\n"
+                    f"Build: <code>{html.escape(APP_BUILD)}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Startup alert error: {e}")
+
+        async def auto_backup_loop():
+            await asyncio.sleep(60)
+            while True:
+                try:
+                    if os.path.exists(DB_FILE):
+                        try:
+                            conn = db_connect()
+                            try:
+                                conn.execute("PRAGMA wal_checkpoint(FULL)")
+                                conn.commit()
+                            finally:
+                                conn.close()
+                        except Exception as e:
+                            logger.warning(f"Auto backup checkpoint error: {e}")
+                        size = os.path.getsize(DB_FILE)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+                        backup_name = f"toan_aas_backup_{timestamp}.db"
+                        if size <= BACKUP_MAX_BYTES:
+                            with open(DB_FILE, "rb") as f:
+                                await tg_app.bot.send_document(
+                                    chat_id=ADMIN_ID,
+                                    document=f,
+                                    filename=backup_name,
+                                    caption=f"🗄️ Auto backup {now_text()} | Size: {size // 1024}KB",
+                                )
+                        else:
+                            await tg_app.bot.send_message(
+                                chat_id=ADMIN_ID,
+                                text=(
+                                    f"⚠️ DB quá lớn để backup qua Telegram ({size // 1024 // 1024}MB). "
+                                    "Backup thủ công bằng /backup_db."
+                                ),
+                            )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning(f"Auto backup error: {e}")
+                await asyncio.sleep(6 * 3600)
+
+        tg_auto_backup_task = asyncio.create_task(auto_backup_loop())
     except Exception as e:
         TELEGRAM_STARTUP_ERROR = str(e)
         ACTIVE_TELEGRAM_UPDATE_MODE = "telegram_startup_error"
@@ -30933,6 +32473,12 @@ async def lifespan(app: FastAPI):
         tg_polling_task.cancel()
     if tg_webhook_watchdog_task:
         tg_webhook_watchdog_task.cancel()
+    if tg_auto_backup_task:
+        tg_auto_backup_task.cancel()
+        try:
+            await tg_auto_backup_task
+        except asyncio.CancelledError:
+            pass
     if tg_app and telegram_started:
         await tg_app.stop()
         await tg_app.shutdown()
@@ -30994,7 +32540,13 @@ async def health_check():
         "db_file": db_file_health_label(),
         "db_error": db_error,
         "payos_configured": bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY),
+        "gemini_configured": bool(GEMINI_API_KEY),
+        "openai_configured": bool(OPENAI_API_KEY),
         "ai_provider_available": bool(GEMINI_API_KEY or OPENAI_API_KEY),
+        "deepgram_configured": bool(DEEPGRAM_API_KEY),
+        "fish_audio_configured": bool(FISH_AUDIO_KEY),
+        "removebg_configured": bool(REMOVEBG_API_KEY),
+        "cutout_configured": bool(CUTOUT_API_KEY),
         "telegram_configured": bool(TELEGRAM_TOKEN),
         "public_base_url_configured": bool(PUBLIC_BASE_URL),
         "timestamp": now_text(),
