@@ -10555,6 +10555,317 @@ def parse_job_brief_object(brief_text):
     except Exception:
         return {}
 
+def build_character_bible(topic, genre="", audience=""):
+    topic = (topic or "AI film series").strip()
+    genre = (genre or "drama cảm xúc").strip()
+    audience = (audience or "người lớn").strip()
+    base_negative = (
+        "real person likeness, celebrity likeness, non-consensual face, deepfake, watermark, logo, "
+        "brand asset, text, distorted anatomy, extra fingers, inconsistent face, underage, sexualized minor"
+    )
+    return {
+        "lead": {
+            "fixed_description": (
+                f"Fictional Vietnamese lead character for topic '{topic}', {genre}, created from scratch, "
+                "consistent face, age 25+, consistent outfit palette, cinematic realistic look, mobile-first framing"
+            ),
+            "wardrobe": "simple modern Vietnamese outfit, neutral colors, no visible brand logo",
+            "personality": "empathetic, curious, resilient, credible for the target audience",
+            "audience": audience,
+            "negative_prompt": base_negative,
+            "continuity_rules": [
+                "Keep the same face, age, outfit style and body proportions across every scene.",
+                "Do not imitate any real person, influencer, actor, customer, or competitor.",
+                "No copyrighted logo, watermark, copied text, or recognizable third-party asset.",
+            ],
+        },
+        "support": {
+            "fixed_description": (
+                "Fictional Vietnamese supporting character, age 25+, natural expression, consistent appearance, "
+                "realistic cinematic style"
+            ),
+            "wardrobe": "plain outfit, no brand marks",
+            "personality": "contrasting emotion that supports the story conflict",
+            "negative_prompt": base_negative,
+            "continuity_rules": [
+                "Support character must remain visually distinct from the lead.",
+                "Never clone a real person's face or voice without explicit consent.",
+            ],
+        },
+    }
+
+def build_scene_manifest(series_title, episode_no, scene_no, topic, character_bible, platform, duration):
+    series_title = (series_title or topic or "AI Film Series").strip()
+    topic = (topic or series_title).strip()
+    platform = (platform or "tiktok").strip().lower()
+    scene_no = max(1, int(scene_no or 1))
+    duration_seconds = max(4, min(int(duration or 8), 20))
+    bible = character_bible or build_character_bible(topic)
+    lead = ((bible.get("lead") or {}).get("fixed_description") or "fictional Vietnamese lead character")
+    negative = "; ".join(filter(None, [
+        (bible.get("lead") or {}).get("negative_prompt"),
+        (bible.get("support") or {}).get("negative_prompt"),
+        "watermark, copied video, copied voice, copied text",
+    ]))
+    hook = scene_no == 1
+    goal = "hook mở đầu tạo tò mò trong 1-3 giây" if hook else f"đẩy câu chuyện và cảm xúc cảnh {scene_no}"
+    affiliate_cta = "Disclosure affiliate nhẹ ở caption/comment, không phá mạch phim." if scene_no >= 7 else ""
+    visual_prompt = (
+        f"Vertical 9:16 cinematic Vietnamese AI short film for {platform}. Series '{series_title}', "
+        f"episode {episode_no}, scene {scene_no}. Topic: {topic}. Goal: {goal}. "
+        f"Lead continuity: {lead}. Natural lighting, clear emotion, realistic action, no logo, no watermark. "
+        f"Negative prompt: {negative}."
+    )
+    scene = {
+        "scene": scene_no,
+        "duration_seconds": duration_seconds,
+        "hook": hook,
+        "visual_prompt": visual_prompt,
+        "image_prompt": visual_prompt + " Generate one clean storyboard keyframe.",
+        "video_prompt": (
+            f"Animate for {duration_seconds}s, slow push-in camera, realistic Vietnamese drama pacing. "
+            f"Show {goal}. Keep all characters fictional and visually consistent."
+        ),
+        "voice_line": (
+            f"Không ai ngờ câu chuyện này lại bắt đầu từ một chi tiết nhỏ."
+            if hook else f"Cảnh {scene_no}: một lựa chọn mới làm câu chuyện đổi hướng."
+        ),
+        "caption": f"{series_title} - tập {episode_no}, cảnh {scene_no}. Nội dung AI có affiliate disclosure khi đăng.",
+        "negative_prompt": negative,
+        "camera": "slow push-in, subtle handheld, vertical close-up",
+        "emotion": "curious, tense, emotional",
+        "affiliate_cta_optional": affiliate_cta,
+        "status": "draft",
+    }
+    scene["quality_score"] = score_video_prompt_quality(scene)
+    return scene
+
+def score_video_prompt_quality(scene_manifest):
+    risk_blob = " ".join(str(scene_manifest.get(key) or "") for key in (
+        "visual_prompt", "image_prompt", "video_prompt", "voice_line", "caption", "affiliate_cta_optional"
+    )).lower()
+    risk_blob = re.sub(r"negative prompt\s*:\s*[^.。]+[.。]?", "", risk_blob)
+    risk_blob = re.sub(r"negative constraints\s*:\s*[^.。]+[.。]?", "", risk_blob)
+    full_blob = json.dumps(scene_manifest or {}, ensure_ascii=False).lower()
+    hook_score = 85 if scene_manifest.get("hook") or "hook" in full_blob or "tò mò" in full_blob else 65
+    viral_score = 78 if any(word in full_blob for word in ["bí mật", "twist", "cảm xúc", "tò mò", "cliffhanger", "viral"]) else 62
+    clarity_score = 85 if len((scene_manifest.get("video_prompt") or "")) >= 80 and len((scene_manifest.get("visual_prompt") or "")) >= 120 else 55
+    affiliate_fit_score = 76 if "affiliate" in full_blob or "cta" in full_blob or "link" in full_blob else 58
+    visual_feasibility_score = 82
+    risky_terms = ["clone real person", "celebrity likeness", "deepfake", "underage", "mạo danh người thật", "impersonate"]
+    copy_terms = ["copy nguyên", "reup", "download lại", "watermark thật", "brand asset thật"]
+    copyright_risk_score = 85 if any(term in risk_blob for term in copy_terms) else 20
+    policy_risk_score = 90 if any(term in risk_blob for term in risky_terms) else 25
+    if policy_risk_score > 70 or copyright_risk_score > 70:
+        decision = "block"
+    elif hook_score < 60 or visual_feasibility_score < 60 or clarity_score < 60:
+        decision = "rewrite"
+    else:
+        decision = "pass"
+    return {
+        "hook_score": hook_score,
+        "viral_score": viral_score,
+        "clarity_score": clarity_score,
+        "affiliate_fit_score": affiliate_fit_score,
+        "visual_feasibility_score": visual_feasibility_score,
+        "copyright_risk_score": copyright_risk_score,
+        "policy_risk_score": policy_risk_score,
+        "decision": decision,
+    }
+
+def rewrite_low_score_scene(scene_manifest, reason):
+    scene = dict(scene_manifest or {})
+    reason = (reason or "score_low").strip()
+    scene["hook"] = bool(scene.get("hook") or scene.get("scene") == 1)
+    scene["video_prompt"] = (
+        f"{scene.get('video_prompt') or ''} Rewrite for clarity and original execution. "
+        "Use one clear action, one visible emotion, no copied asset, no real-person likeness, no watermark."
+    ).strip()
+    scene["visual_prompt"] = (
+        f"{scene.get('visual_prompt') or ''} Original fictional characters only, stronger mobile framing, "
+        "clean background, consistent face/outfit, no brand logo."
+    ).strip()
+    scene["caption"] = (scene.get("caption") or "") + " #AIvideo #affiliate"
+    scene["rewrite_reason"] = reason
+    scene["quality_score"] = score_video_prompt_quality(scene)
+    return scene
+
+def build_film_series_manifest(owner_id, topic, platform="tiktok", episodes=3, scenes_per_episode=8, duration=60, affiliate_id=0, campaign_id=0):
+    topic = (topic or "").strip()
+    if not topic:
+        return {"ok": False, "reason": "missing_topic"}
+    episodes = max(1, min(int(episodes or 3), 8))
+    scenes_per_episode = max(3, min(int(scenes_per_episode or 8), 12))
+    duration = max(30, min(int(duration or 60), 180))
+    series_title = f"{topic[:80]} - TOAN AAS AI Series"
+    character_bible = build_character_bible(topic)
+    created = []
+    for ep in range(1, episodes + 1):
+        job_id = create_production_job(
+            owner_id,
+            0,
+            int(campaign_id or 0),
+            0,
+            int(affiliate_id or 0),
+            platform,
+            f"Tập {ep}/{episodes}: {topic}",
+            json.dumps({
+                "type": "ai_film_series_episode",
+                "series_title": series_title,
+                "topic": topic,
+                "episode_number": ep,
+                "episode_count": episodes,
+                "duration_seconds": duration,
+                "scenes_per_episode": scenes_per_episode,
+                "character_bible": character_bible,
+            }, ensure_ascii=False),
+            "build_film_series_manifest",
+        )
+        scene_duration = max(4, int(duration / scenes_per_episode))
+        scenes = [
+            build_scene_manifest(series_title, ep, scene_no, topic, character_bible, platform, scene_duration)
+            for scene_no in range(1, scenes_per_episode + 1)
+        ]
+        for scene in scenes:
+            score = scene.get("quality_score") or {}
+            if score.get("decision") == "rewrite":
+                scene.update(rewrite_low_score_scene(scene, "auto_rewrite_before_render"))
+            elif score.get("decision") == "block":
+                record_tool_event(owner_id, "prompt_gate", "policy_guard", "blocked", "critical", job_id, 0, "", "Prompt risk blocked before render")
+        manifest = {
+            "type": "film_series_episode",
+            "series_title": series_title,
+            "episode_number": ep,
+            "platform": platform,
+            "aspect_ratio": "9:16",
+            "duration_seconds": duration,
+            "character_bible": character_bible,
+            "scenes": scenes,
+            "review_gate": {
+                "required": True,
+                "status": "ready_for_review",
+                "approve_command": f"/film_approve job={job_id}",
+                "rewrite_command": f"/film_rewrite job={job_id} scene=<n>",
+            },
+            "compliance": [
+                "Fictional characters only unless consent is documented.",
+                "No copied reference video, voice, watermark, or brand asset.",
+                "Affiliate disclosure required before publish.",
+                "Admin approval required before publish_queue.",
+            ],
+        }
+        ok, manifest_id = save_production_manifest(owner_id, job_id, 0, json.dumps(manifest, ensure_ascii=False), status="ready_for_review")
+        task_ids = []
+        if ok:
+            task_ids = create_tasks_from_manifest(owner_id, get_production_manifest(owner_id, manifest_id))
+        update_production_job(job_id, owner_id, stage="review", status="ready_for_review", note=f"film_series_manifest manifest={manifest_id}")
+        created.append({"job_id": job_id, "episode": ep, "manifest_id": manifest_id, "task_ids": task_ids})
+    return {
+        "ok": True,
+        "series_title": series_title,
+        "topic": topic,
+        "platform": platform,
+        "episodes": episodes,
+        "scenes_per_episode": scenes_per_episode,
+        "duration_seconds": duration,
+        "character_bible": character_bible,
+        "created": created,
+        "rule": "Chỉ tạo manifest/task và review gate; không render/publish tự động.",
+    }
+
+def analyze_reference_video_structure(owner_id, reference_text_or_url, platform="tiktok"):
+    source = (reference_text_or_url or "").strip()
+    platform = (platform or "tiktok").strip().lower()
+    lower = source.lower()
+    scene_count = 8 if any(word in lower for word in ["series", "storyboard", "10 cảnh", "10 canh"]) else 5
+    hook_type = "curiosity_gap" if any(word in lower for word in ["đừng bấm", "dung bam", "bí mật", "bi mat", "cơ hội", "co hoi"]) else "problem_solution"
+    return {
+        "owner_id": str(owner_id),
+        "source": source,
+        "platform": platform,
+        "hook_type": hook_type,
+        "scene_count": scene_count,
+        "pacing": "fast mobile cuts, 1-3s hook, short proof blocks, clear CTA",
+        "emotion_curve": ["curiosity", "problem tension", "proof", "relief", "CTA"],
+        "cta_style": "soft affiliate CTA with disclosure in caption/comment/status",
+        "content_pattern": "learn structure only; create new characters, new setting, new wording, new assets",
+        "do_not_copy": ["face", "voice", "watermark", "caption text", "brand/logo asset", "exact scene order"],
+        "next": {
+            "build_original": f"/reference_build niche=<niche> platform={platform}",
+            "viral_remix": f"/viral_remix url={source} topic=<niche> platform={platform}" if source.startswith("http") else "/viral_remix topic=<niche>",
+        },
+    }
+
+def build_original_variation_from_reference(owner_id, reference_analysis, niche, affiliate_id=0):
+    analysis = reference_analysis or {}
+    niche = (niche or "affiliate sản phẩm phù hợp").strip()
+    character_bible = build_character_bible(niche, genre="affiliate short drama")
+    scenes = []
+    for scene_no in range(1, int(analysis.get("scene_count") or 5) + 1):
+        scene = build_scene_manifest(
+            f"{niche} - Original Variation",
+            1,
+            scene_no,
+            niche,
+            character_bible,
+            analysis.get("platform") or "tiktok",
+            8,
+        )
+        scene["learned_structure"] = analysis.get("hook_type") if scene_no == 1 else analysis.get("pacing")
+        scenes.append(scene)
+    return {
+        "owner_id": str(owner_id),
+        "niche": niche,
+        "affiliate_id": int(affiliate_id or 0),
+        "reference_learning": analysis,
+        "character_bible": character_bible,
+        "scenes": scenes,
+        "caption": f"Nội dung AI gợi ý lựa chọn trong ngách {niche}. Có thể có affiliate disclosure khi đăng.",
+        "rule": "Biến ý tưởng thành sản phẩm mới; không copy người/giọng/text/watermark/asset của video tham khảo.",
+    }
+
+def film_review_pack_data(owner_id, job_id):
+    job = get_production_job(job_id, owner_id)
+    if not job:
+        return {"ok": False, "reason": "job_not_found"}
+    manifests = list_production_manifests(owner_id, job_id, limit=1)
+    tasks = list_production_tasks(owner_id, job_id=job_id, limit=120)
+    manifest_obj = {}
+    if manifests:
+        try:
+            manifest_obj = json.loads(manifests[0][3] or "{}")
+        except Exception:
+            manifest_obj = {"raw": manifests[0][3]}
+    scene_scores = []
+    for scene in manifest_obj.get("scenes", []) if isinstance(manifest_obj, dict) else []:
+        scene_scores.append({
+            "scene": scene.get("scene"),
+            "score": scene.get("quality_score") or score_video_prompt_quality(scene),
+            "caption": scene.get("caption"),
+        })
+    review = {
+        "ok": True,
+        "job_id": job_id,
+        "job": serialize_production_job(job),
+        "manifest_id": manifests[0][0] if manifests else 0,
+        "manifest_status": manifests[0][2] if manifests else "missing",
+        "scene_scores": scene_scores,
+        "task_count": len(tasks),
+        "tasks": [serialize_operator_task(get_production_task(owner_id, row[0])) for row in tasks[:20]],
+        "risk_flags": [
+            score for score in scene_scores
+            if (score.get("score") or {}).get("decision") in {"rewrite", "block"}
+        ],
+        "commands": {
+            "approve": f"/film_approve job={job_id}",
+            "rewrite": f"/film_rewrite job={job_id} scene=<n>",
+            "review_video": f"/review_video job={job_id} send=1",
+            "approve_publish": f"/approve_publish job={job_id} queue=1 mode=manual",
+        },
+        "rule": "Admin review trước khi render/publish; publish vẫn qua approve gate.",
+    }
+    return review
+
 def film_series_manifest_from_brief(job, variant=None, duration=80):
     (
         jid, calendar_id, campaign_id, channel_id, affiliate_id, platform, topic, stage, status,
@@ -10980,6 +11291,29 @@ def create_tasks_from_manifest(owner_id, manifest_row):
         ))
     for scene in scenes:
         scene_no = int(scene.get("scene") or 0)
+        quality = scene.get("quality_score") or score_video_prompt_quality(scene)
+        if quality.get("decision") == "block":
+            created.append(create_production_task(
+                owner_id, job_id, manifest_id, "review", "review_gate", scene_no,
+                f"Blocked scene {scene_no}", json.dumps({
+                    "scene": scene_no,
+                    "quality_score": quality,
+                    "reason": "Prompt gate blocked render task before paid tool execution.",
+                    "scene_manifest": scene,
+                }, ensure_ascii=False), "blocked", "", "prompt_quality_gate"
+            ))
+            record_tool_event(
+                owner_id,
+                "prompt_gate",
+                "policy_guard",
+                "blocked",
+                "critical",
+                job_id,
+                0,
+                "",
+                f"Scene {scene_no} blocked before render: {json.dumps(quality, ensure_ascii=False)}",
+            )
+            continue
         tool = str(scene.get("video_tool") or "kling").split("|")[0].strip() or "kling"
         prompt = (
             f"Scene {scene_no} ({scene.get('start','?')}-{scene.get('end','?')}s, {scene.get('goal','-')})\n"
@@ -25115,9 +25449,14 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "filmblueprint": "/film_blueprint\nGET /api/operator/film-blueprint",
         "filmprojectpack": "/film_project_pack topic=đạo lý gia đình platform=tiktok episodes=5 scenes=10\nGET /api/operator/film-project-pack?topic=<TOPIC>&platform=tiktok",
         "filmseries": "/film_series topic=đạo lý gia đình episodes=5 scenes=10 platform=tiktok build=1 run=1\nPOST /api/operator/film-series",
+        "filmreview": "/film_review job=<JOB_ID>\nGET /api/operator/jobs/<JOB_ID>/film-review",
+        "filmrewrite": "/film_rewrite job=<JOB_ID> scene=<N> reason=hook_yeu",
+        "filmapprove": "/film_approve job=<JOB_ID> queue=1 mode=manual\nKhông publish nếu chưa qua approve gate.",
         "referencepack": "/reference_pack\nGET /api/operator/reference-pack",
         "referencevideos": "/reference_videos limit=20\nGET /api/operator/reference-videos?limit=40",
         "referenceadd": "/reference_add url=https://... title=video_mau platform=tiktok pattern=viral_prompt_affiliate tags=ai,affiliate note=hoc_hook_CTA\nPOST /api/operator/reference-videos",
+        "referenceanalyze": "/reference_analyze url=https://... platform=tiktok\nGET /api/operator/reference-analyze?url=<URL>&platform=tiktok",
+        "referencebuild": "/reference_build niche=công nghệ AI url=https://... platform=tiktok build=1\nGET /api/operator/reference-build?niche=<NICHE>&url=<URL>&build=1",
         "referencescan": "/reference_scan path=D:\\mybot\\video AI tham khảo platform=tiktok limit=200\n/brain quét video tham khảo path=D:\\mybot\\video AI tham khảo",
         "brainreference": "/brain học video này https://facebook.com/...\n/brain lưu mẫu TikTok affiliate này https://tiktok.com/...\n/brain quét video tham khảo path=D:\\mybot\\video AI tham khảo",
         "manifest": "/manifest job=<JOB_ID> duration=45\n/manifests <JOB_ID>",
@@ -25133,6 +25472,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
         "scenepack": "/scene_pack job=<JOB_ID> scene=1\n/scene_pack task=<TASK_ID>\nGET /api/operator/jobs/<JOB_ID>/scene-pack?scene=1",
         "outputacceptance": "/output_acceptance job=<JOB_ID>\n/output_acceptance task=<TASK_ID>\nGET /api/operator/output-acceptance?job_id=<JOB_ID>",
         "storyboardcrop": "/storyboard_crop\nPOST /api/operator/jobs/<JOB_ID>/storyboard-grid/upload\nform: file, episode=1, rows=2, cols=5",
+        "storyboarduploadhelp": "/storyboard_upload_help\nHướng dẫn upload storyboard 2x5, không nhầm với ảnh bill nạp tiền.",
         "composevideo": "/compose_video job=<JOB_ID> voice=1 force=0\nPOST /api/operator/jobs/<JOB_ID>/compose-video",
         "reviewvideo": "/review_video job=<JOB_ID> send=1\n/brain kiểm duyệt video job <JOB_ID>",
         "assets": "/asset_add job=<JOB_ID> type=final_video url=https://... note=...\n/assets <JOB_ID>\n/asset_send id=<ASSET_ID>\n/asset_send job=<JOB_ID> type=final_video",
@@ -25573,6 +25913,187 @@ async def cmd_film_series(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 + html.escape(str(review_report.get("errors")[:3])),
                 parse_mode="HTML",
             )
+
+async def cmd_film_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    job_id = safe_int(data.get("job") or data.get("id") or (context.args[0] if context.args else 0), 0)
+    if not job_id:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/film_review job=1</code>", parse_mode="HTML")
+    pack = film_review_pack_data(update.effective_user.id, job_id)
+    if not pack.get("ok"):
+        return await update.message.reply_text(f"❌ {html.escape(pack.get('reason') or 'film_review lỗi')}", parse_mode="HTML")
+    risk_flags = pack.get("risk_flags") or []
+    lines = [
+        f"🎞 <b>FILM REVIEW PACK — JOB #{job_id}</b>",
+        f"• Manifest: <code>#{pack.get('manifest_id') or '-'}</code> | status=<code>{html.escape(pack.get('manifest_status') or '-')}</code>",
+        f"• Tasks: <b>{pack.get('task_count') or 0}</b> | Risk flags: <b>{len(risk_flags)}</b>",
+        "",
+        "<b>Scene score:</b>",
+    ]
+    for item in (pack.get("scene_scores") or [])[:12]:
+        score = item.get("score") or {}
+        lines.append(
+            f"• Scene {item.get('scene')}: decision=<code>{html.escape(score.get('decision') or '-')}</code> "
+            f"hook={score.get('hook_score')} viral={score.get('viral_score')} clarity={score.get('clarity_score')} "
+            f"policy={score.get('policy_risk_score')}"
+        )
+    cmds = pack.get("commands") or {}
+    lines.extend([
+        "",
+        "<b>Lệnh tiếp:</b>",
+        f"<code>{html.escape(cmds.get('rewrite') or '')}</code>",
+        f"<code>{html.escape(cmds.get('approve') or '')}</code>",
+        f"<code>{html.escape(cmds.get('review_video') or '')}</code>",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_film_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    job_id = safe_int(data.get("job") or data.get("id"), 0)
+    scene_no = safe_int(data.get("scene") or data.get("canh"), 0)
+    if not job_id or not scene_no:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/film_rewrite job=1 scene=3 reason=hook_yếu</code>",
+            parse_mode="HTML",
+        )
+    manifest_row = latest_production_manifest(update.effective_user.id, job_id)
+    if not manifest_row:
+        return await update.message.reply_text("❌ Job chưa có manifest.")
+    mid, _job_id, variant_id, _status, manifest_json, _created, _updated = manifest_row
+    try:
+        manifest = json.loads(manifest_json or "{}")
+    except Exception:
+        return await update.message.reply_text("❌ Manifest JSON lỗi, chưa rewrite được.")
+    changed = False
+    scenes = manifest.get("scenes") or []
+    for idx, scene in enumerate(scenes):
+        if int(scene.get("scene") or idx + 1) == scene_no:
+            scenes[idx] = rewrite_low_score_scene(scene, data.get("reason") or "manual_rewrite")
+            changed = True
+            break
+    if not changed:
+        return await update.message.reply_text("❌ Không tìm thấy scene cần rewrite.")
+    manifest["scenes"] = scenes
+    manifest["rewrite_from_manifest_id"] = mid
+    manifest["review_gate"] = manifest.get("review_gate") or {}
+    manifest["review_gate"]["status"] = "ready_for_review"
+    ok, new_mid = save_production_manifest(
+        update.effective_user.id,
+        job_id,
+        variant_id,
+        json.dumps(manifest, ensure_ascii=False),
+        status="ready_for_review",
+    )
+    if ok:
+        update_production_job(job_id, update.effective_user.id, stage="review", status="ready_for_review", note=f"film_rewrite scene={scene_no} manifest={new_mid}")
+    await update.message.reply_text(
+        f"✅ Đã rewrite scene <b>{scene_no}</b> cho job <code>#{job_id}</code>.\n"
+        f"• Manifest mới: <code>#{new_mid}</code>\n"
+        f"• Review: <code>/film_review job={job_id}</code>\n"
+        f"• Duyệt: <code>/film_approve job={job_id}</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_film_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    job_id = safe_int(data.get("job") or data.get("id") or (context.args[0] if context.args else 0), 0)
+    if not job_id:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/film_approve job=1 queue=1 mode=manual</code>", parse_mode="HTML")
+    ok, reason, info = approve_publish_job(
+        update.effective_user.id,
+        job_id,
+        note=data.get("note") or "film_approve",
+        queue=truthy_value(data.get("queue"), True),
+        mode=data.get("mode") or "manual",
+        scheduled_at=data.get("time") or data.get("scheduled_at") or "",
+    )
+    if not ok:
+        return await update.message.reply_text(f"❌ Không duyệt được: <code>{html.escape(reason)}</code>", parse_mode="HTML")
+    await update.message.reply_text(
+        f"✅ <b>FILM APPROVED</b>\n"
+        f"• Job: <code>#{job_id}</code>\n"
+        f"• Queue: <code>#{info.get('queue_id') or '-'}</code>\n"
+        f"• Mode: <code>{html.escape(info.get('mode') or data.get('mode') or 'manual')}</code>\n"
+        f"• Handoff: <code>/publisher_handoff</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_storyboard_upload_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_storyboard_crop(update, context)
+
+async def cmd_reference_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    ref_id = safe_int(data.get("ref") or data.get("id"), 0)
+    source = data.get("url") or data.get("source") or " ".join(arg for arg in context.args if "=" not in arg)
+    if ref_id:
+        ref = get_reference_video(update.effective_user.id, ref_id)
+        source = (ref or {}).get("path_or_url") or source
+    if not source:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/reference_analyze url=https://... platform=tiktok</code>", parse_mode="HTML")
+    analysis = analyze_reference_video_structure(
+        update.effective_user.id,
+        source,
+        platform=data.get("platform") or "tiktok",
+    )
+    await update.message.reply_text(
+        "🔎 <b>REFERENCE STRUCTURE ANALYSIS</b>\n"
+        f"• Hook: <code>{html.escape(analysis.get('hook_type') or '-')}</code>\n"
+        f"• Scenes: <b>{analysis.get('scene_count')}</b>\n"
+        f"• Pacing: {html.escape(analysis.get('pacing') or '-')}\n"
+        f"• CTA: {html.escape(analysis.get('cta_style') or '-')}\n\n"
+        f"<pre>{html_pre(json.dumps(analysis, ensure_ascii=False, indent=2), 1800)}</pre>",
+        parse_mode="HTML",
+    )
+
+async def cmd_reference_build(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    niche = data.get("niche") or data.get("topic") or data.get("chu_de") or " ".join(arg for arg in context.args if "=" not in arg)
+    if not niche:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/reference_build niche=công nghệ AI url=https://...</code>", parse_mode="HTML")
+    source = data.get("url") or data.get("source") or niche
+    analysis = analyze_reference_video_structure(update.effective_user.id, source, platform=data.get("platform") or "tiktok")
+    variation = build_original_variation_from_reference(
+        update.effective_user.id,
+        analysis,
+        niche,
+        affiliate_id=safe_int(data.get("aff") or data.get("affiliate_id"), 0),
+    )
+    if truthy_value(data.get("build") or data.get("create"), False):
+        result = build_film_series_manifest(
+            update.effective_user.id,
+            niche,
+            platform=data.get("platform") or "tiktok",
+            episodes=safe_int(data.get("episodes") or data.get("tap"), 1),
+            scenes_per_episode=safe_int(data.get("scenes") or data.get("canh"), analysis.get("scene_count") or 5),
+            duration=safe_int(data.get("duration") or data.get("sec"), 60),
+            affiliate_id=safe_int(data.get("aff") or data.get("affiliate_id"), 0),
+            campaign_id=safe_int(data.get("campaign") or data.get("campaign_id"), 0),
+        )
+        return await update.message.reply_text(
+            "✅ <b>REFERENCE BUILD CREATED</b>\n"
+            f"• Series: <b>{html.escape(result.get('series_title') or '-')}</b>\n"
+            f"• Jobs: <b>{len(result.get('created') or [])}</b>\n"
+            f"• Review: <code>/film_review job=&lt;JOB_ID&gt;</code>",
+            parse_mode="HTML",
+        )
+    await update.message.reply_text(
+        "🧬 <b>ORIGINAL VARIATION PACK</b>\n"
+        f"• Niche: <b>{html.escape(niche)}</b>\n"
+        f"• Scenes: <b>{len(variation.get('scenes') or [])}</b>\n"
+        f"• Rule: {html.escape(variation.get('rule') or '-')}\n\n"
+        f"<pre>{html_pre(json.dumps(variation, ensure_ascii=False, indent=2), 2200)}</pre>",
+        parse_mode="HTML",
+    )
 
 
 async def cmd_reference_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29688,10 +30209,15 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("film_blueprint", cmd_film_blueprint))
     tg_app.add_handler(CommandHandler("film_project_pack", cmd_film_project_pack))
     tg_app.add_handler(CommandHandler("film_series", cmd_film_series))
+    tg_app.add_handler(CommandHandler("film_review", cmd_film_review))
+    tg_app.add_handler(CommandHandler("film_rewrite", cmd_film_rewrite))
+    tg_app.add_handler(CommandHandler("film_approve", cmd_film_approve))
     tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
     tg_app.add_handler(CommandHandler("reference_videos", cmd_reference_videos))
     tg_app.add_handler(CommandHandler("reference_add", cmd_reference_add))
     tg_app.add_handler(CommandHandler("viral_remix", cmd_viral_remix))
+    tg_app.add_handler(CommandHandler("reference_analyze", cmd_reference_analyze))
+    tg_app.add_handler(CommandHandler("reference_build", cmd_reference_build))
     tg_app.add_handler(CommandHandler("reference_scan", cmd_reference_scan))
     tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
     tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
@@ -29710,6 +30236,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
     tg_app.add_handler(CommandHandler("output_acceptance", cmd_output_acceptance))
     tg_app.add_handler(CommandHandler("storyboard_crop", cmd_storyboard_crop))
+    tg_app.add_handler(CommandHandler("storyboard_upload_help", cmd_storyboard_upload_help))
     tg_app.add_handler(CommandHandler("compose_video", cmd_compose_video))
     tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
     tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
@@ -30463,6 +30990,47 @@ async def api_operator_reference_pack(request: Request):
         "ok": True,
         "reference_pack": reference_learning_pack_data(),
     }
+
+@fastapi_app.get("/api/operator/reference-analyze")
+async def api_operator_reference_analyze(request: Request, url: str = "", ref: int = 0, platform: str = "tiktok"):
+    verify_operator_api_token(request)
+    source = (url or "").strip()
+    if ref:
+        row = get_reference_video(ADMIN_ID, ref)
+        source = (row or {}).get("path_or_url") or source
+    if not source:
+        raise HTTPException(status_code=400, detail="missing url or ref")
+    return {"ok": True, "analysis": analyze_reference_video_structure(ADMIN_ID, source, platform=platform)}
+
+@fastapi_app.get("/api/operator/reference-build")
+async def api_operator_reference_build(
+    request: Request,
+    niche: str,
+    url: str = "",
+    platform: str = "tiktok",
+    affiliate_id: int = 0,
+    build: bool = False,
+    episodes: int = 1,
+    scenes: int = 5,
+    duration: int = 60,
+    campaign_id: int = 0,
+):
+    verify_operator_api_token(request)
+    analysis = analyze_reference_video_structure(ADMIN_ID, url or niche, platform=platform)
+    variation = build_original_variation_from_reference(ADMIN_ID, analysis, niche, affiliate_id=affiliate_id)
+    created = None
+    if build:
+        created = build_film_series_manifest(
+            ADMIN_ID,
+            niche,
+            platform=platform,
+            episodes=episodes,
+            scenes_per_episode=scenes,
+            duration=duration,
+            affiliate_id=affiliate_id,
+            campaign_id=campaign_id,
+        )
+    return {"ok": True, "analysis": analysis, "variation": variation, "created": created}
 
 @fastapi_app.get("/api/operator/viral-remix")
 async def api_operator_viral_remix(
@@ -31298,6 +31866,14 @@ async def api_operator_film_series(payload: OperatorFilmSeriesRequest, request: 
         **result,
         "rule": "Film series tạo job/task nhiều tập; worker phải trả output thật rồi qua review gate trước khi publish.",
     }
+
+@fastapi_app.get("/api/operator/jobs/{job_id}/film-review")
+async def api_operator_film_review(job_id: int, request: Request):
+    verify_operator_api_token(request)
+    pack = film_review_pack_data(ADMIN_ID, job_id)
+    if not pack.get("ok"):
+        raise HTTPException(status_code=404, detail=pack.get("reason") or "job_not_found")
+    return pack
 
 @fastapi_app.post("/api/operator/campaign-preset")
 async def api_operator_campaign_preset(payload: OperatorCampaignPresetRequest, request: Request):
