@@ -30426,7 +30426,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
-    tg_app.add_handler(MessageHandler(telegram_video_upload_filter(), handle_video_upload))
+    tg_app.add_handler(MessageHandler(filters.VIDEO, handle_video_upload))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
