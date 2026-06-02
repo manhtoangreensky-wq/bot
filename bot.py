@@ -8390,6 +8390,15 @@ def attach_telegram_video_asset(owner_id, job_id, file_id, asset_type="final_vid
         "asset_send_command": f"/asset_send id={asset_id}",
     }
 
+def telegram_video_upload_filter():
+    video_filter = getattr(filters, "VIDEO", None)
+    document_video_filter = getattr(filters.Document, "VIDEO", None)
+    if video_filter is None:
+        video_filter = filters.ALL
+    if document_video_filter is None:
+        document_video_filter = getattr(filters.Document, "ALL", filters.ALL)
+    return video_filter | document_video_filter
+
 def get_production_asset(owner_id, asset_id):
     conn = db_connect()
     c = conn.cursor()
@@ -30017,6 +30026,14 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_video_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
+    file_obj = update.message.video or update.message.document
+    if not file_obj:
+        return
+    filename = getattr(file_obj, "file_name", "") or ""
+    content_type = getattr(file_obj, "mime_type", "") or ""
+    ext = os.path.splitext(filename or "")[1].lower()
+    if not update.message.video and not (content_type or "").lower().startswith("video/") and ext not in {".mp4", ".mov", ".mkv", ".webm"}:
+        return
     uid = update.effective_user.id
     if str(uid) != ADMIN_ID:
         return await update.message.reply_text(
@@ -30024,9 +30041,6 @@ async def handle_video_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Vui lòng gửi link thay vì gửi file video trực tiếp."
         )
 
-    file_obj = update.message.video or update.message.document
-    if not file_obj:
-        return
     caption = update.message.caption or ""
     data = parse_key_value_args(caption)
     job_id = safe_int(data.get("job") or data.get("job_id") or data.get("id"), 0)
@@ -30042,8 +30056,8 @@ async def handle_video_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     asset_type = data.get("type") or data.get("asset_type") or "final_video"
     note = data.get("note") or data.get("desc") or data.get("description") or ""
-    filename = getattr(file_obj, "file_name", "") or f"telegram-video-{job_id}.mp4"
-    content_type = getattr(file_obj, "mime_type", "") or "video/mp4"
+    filename = filename or f"telegram-video-{job_id}.mp4"
+    content_type = content_type or "video/mp4"
     ok, result = attach_telegram_video_asset(
         uid,
         job_id,
@@ -30412,7 +30426,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
-    tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video_upload))
+    tg_app.add_handler(MessageHandler(telegram_video_upload_filter(), handle_video_upload))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
