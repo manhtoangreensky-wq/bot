@@ -16,7 +16,7 @@
 
 - Website TOAN AAS: `index.html` exists and `/landing` serves it.
 - Website index update: landing reworked for TOAN AAS V15.2 Stable Revenue Bot on 2026-06-02.
-- Website CTA: Telegram bot, PayOS Xu section, Video Script Lite, affiliate workflow, and `/lead` form.
+- Website CTA: Telegram bot, PayOS Xu section, Video Script Lite, Content Pack self-post workflow, and `/lead` form.
 - `/start`: creates/loads user, handles referral payload, shows trial -> tool -> missing Xu -> `/naptien` funnel.
 - `/menu`: reuses start/menu flow.
 - `/help`: added in Step 6, registered with `/commands` alias.
@@ -164,32 +164,31 @@
 - Cost: 200 Xu basic, 500 Xu pro, 1,200 Xu series.
 - Scope: script, prompts, captions, CTA, hashtags, quality check.
 - Platforms: Facebook, TikTok, YouTube by default.
-- Affiliate integration: `/film topic="..." affiliate_id=1` validates owner link before charging.
+- Direct-link context: `/film topic="..." link="https://..."` can use a pasted link as caption/CTA context.
 - Output: Telegram preview plus Markdown file export.
 - DB: `video_script_jobs`, `video_script_outputs`.
 - Safety: no render, no auto publish, no browser automation.
 - Remaining tests: real Telegram command, insufficient-Xu account, AI quota failure/refund, file export.
 
-## Affiliate + Calendar MVP Status
+## Affiliate + Calendar Internal Status
 
-- `/addlink`: user-facing link storage, owner-scoped.
-- `/links`: user-facing active link list.
-- `/campaign`: user-facing campaign create/list.
-- `/addcal`: user-facing manual content calendar insert.
-- `/calendar`: user-facing next-7-days calendar view.
+- `/addlink`, `/links`, `/campaign`, `/addcal`, `/calendar`: admin/internal only after customer-scope cleanup.
+- Customer-facing affiliate vault/calendar is backlog, not current production scope.
+- Customers can paste a product/link directly into `/film`; TOAN AAS does not expose a public affiliate vault.
 - `/dashboard`: includes video script, active campaign, affiliate link, and calendar counters.
 - DB: reused `affiliate_links`, `campaigns`, `content_calendar`.
 - Safety: no PayOS/billing changes, no auto publish, no render API.
 
-## Manual Publish + Performance Loop Status
+## Manual Publish + Performance Loop Internal Status
 
-- `/publish_done`: user-facing manual post tracking when called with platform/link/topic.
+- `/publish_done`, `/performance_add`, `/performance_report`, `/posts`, `/growth_loop`: admin/internal only after customer-scope cleanup.
+- Customer-facing publish tracking is disabled by default.
 - `/publish_done queue=...` and `/publish_done job=...`: existing admin/operator flow preserved.
-- `/performance_add post_id=...`: user-facing manual metrics.
 - `/performance_add job=...`: existing admin/operator performance flow preserved.
 - `/performance_report`: aggregates manual posts by platform and top posts.
 - `/posts`: lists recent manually recorded posts.
-- `/growth_loop`: user-facing rule-based recommendations from manual metrics.
+- `/growth_loop`: admin/internal rule-based recommendations from manual metrics.
+- Customer access to `/growth_loop` is disabled; customers should use `/growth_ai` or `/film`.
 - `/growth_ai`: AI Growth Coach deep analysis, 120 Xu for normal users, admin/VIP free.
 - `/campaign_report`: TXT/CSV report export, 50 Xu for normal users.
 - `/export_report`: alias for `/campaign_report`.
@@ -200,7 +199,7 @@
 
 ## Growth Coach & Reports
 
-- `/growth_loop`: rule-based, fast, no AI charge.
+- `/growth_loop`: admin/internal rule-based loop, fast, no AI charge.
 - `/growth_ai`: Gemini/OpenAI text fallback through existing `AgentGemini.chat`.
 - `/growth_ai` pricing: 120 Xu; no charge when no data; refund on AI error.
 - `/campaign_report`: exports TXT or CSV using owner-scoped manual data.
@@ -224,8 +223,8 @@
 - `/profile`: registered.
 - `/naptien`: registered; PayOS logic untouched in Step 6.
 - `/film`: registered in local `bot.py`; needs live AI/Xu test.
-- Affiliate commands: `/addlink`, `/links`, `/campaign`, `/addcal`, `/calendar` registered in local `bot.py`.
-- Performance commands: `/publish_done`, `/performance_add`, `/performance_report`, `/posts`, `/growth_loop` registered in local `bot.py`.
+- Affiliate commands: `/addlink`, `/links`, `/campaign`, `/addcal`, `/calendar` registered and guarded admin/internal.
+- Performance commands: `/publish_done`, `/performance_add`, `/performance_report`, `/posts`, `/growth_loop` registered and guarded admin/internal.
 - Growth/report commands: `/growth_ai`, `/campaign_report`, `/export_report` registered in local `bot.py`.
 - Admin commands: `/dashboard`, `/admin`, `/stats`, `/pending`, `/duyet`, `/tuchoi`, `/add`, `/setvip`, `/backup_db`, `/runtime`, `/checkpayos`, `/telegram_takeover`.
 
@@ -233,7 +232,7 @@
 
 - Status: YES after Railway deploy passes live Telegram smoke test.
 - Blockers:
-  1. Real Telegram verification for `/film`, `/addlink`, `/publish_done`, `/performance_report`.
+  1. Real Telegram verification for `/film` plus non-admin internal locks on `/addlink`, `/publish_done`, `/performance_report`.
   2. Real PayOS 10k payment test.
   3. Railway Volume persistence confirmation.
 

@@ -30,14 +30,14 @@ Sell to the first 3-10 beta users to validate real demand, payment flow, and the
 - For creating script/caption content regularly.
 - Goal: user creates 5-10 content pieces.
 - First package eligible for public promo codes such as `FIRST30`.
-- Suggested commands: `/film`, `/addlink`, `/calendar`.
+- Suggested commands: `/film`, `/growth_ai`, `/campaign_report`.
 
-### Package 3 - Affiliate Builder - 100k
+### Package 3 - Creator Builder - 100k
 
 - 1,000 Xu base, plus 50 Xu Launch Bonus on the user's first 100k package purchase.
-- For a 7-day affiliate content test.
-- Goal: use `/film`, manual posting, `/performance_report`, and `/growth_ai`.
-- Suggested commands: `/publish_done`, `/performance_add`, `/growth_ai`, `/campaign_report`.
+- For a 7-day content pack test on Facebook/TikTok/YouTube.
+- Goal: use `/film`, self-post manually, then use `/growth_ai` or `/campaign_report` when there is enough manually supplied data.
+- Suggested commands: `/film`, `/growth_ai`, `/campaign_report`.
 
 ## Do not promise
 
@@ -51,6 +51,6 @@ Sell to the first 3-10 beta users to validate real demand, payment flow, and the
 
 - Faster content creation.
 - Clearer workflow.
-- Manual tracking of posts and results.
+- Manual tracking outside the public bot, or admin-assisted reporting when needed.
 - AI suggestions for improving hooks, captions, and CTA.
 - Promo codes are limited beta bonuses, not permanent package price changes.

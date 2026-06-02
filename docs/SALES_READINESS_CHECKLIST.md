@@ -40,17 +40,17 @@ Date: 2026-06-02
 - [ ] Background removal.
 - [ ] Downloader.
 
-## Revenue tools
+## Customer revenue tools
 
 - [ ] `/film`.
-- [ ] `/addlink`.
-- [ ] `/links`.
-- [ ] `/calendar`.
-- [ ] `/publish_done`.
-- [ ] `/performance_report`.
-- [ ] `/growth_loop`.
 - [ ] `/growth_ai`.
 - [ ] `/campaign_report`.
+
+## Internal/backlog locks
+
+- [ ] Normal user calling `/addlink`, `/links`, `/calendar` receives the internal/backlog message.
+- [ ] Normal user calling `/publish_done`, `/performance_report`, `/growth_loop` receives the internal/backlog message.
+- [ ] Admin can still test internal affiliate/calendar/publish commands.
 
 ## Admin
 

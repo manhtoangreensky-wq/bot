@@ -12,9 +12,8 @@ TOAN AAS giúp bạn:
 
 - Tạo script video ngắn.
 - Tạo caption/hashtag/CTA.
-- Lưu link affiliate.
-- Lên lịch nội dung.
-- Theo dõi view/click/doanh thu thủ công.
+- Tạo storyboard, scene prompt và content pack để bạn tự đăng.
+- Hỗ trợ audio/voice/ảnh/media trong bot.
 - Dùng AI gợi ý sửa hook/caption.
 
 Bot chạy trên Telegram, nạp Xu bằng QR PayOS. Gói test bắt đầu từ 10k.
@@ -25,4 +24,4 @@ Bạn có thể nạp thử gói 10k để test trước. Nếu thấy hợp, d�
 
 ## Important note
 
-Không cam kết doanh thu chắc chắn. Công cụ giúp làm nhanh hơn và có quy trình rõ hơn; kết quả phụ thuộc sản phẩm, nền tảng, nội dung và cách triển khai.
+Không cam kết doanh thu chắc chắn. Công cụ giúp làm nội dung nhanh hơn và rõ quy trình hơn; khách tự đăng lên kênh của mình. Kết quả phụ thuộc sản phẩm, nền tảng, nội dung và cách triển khai.

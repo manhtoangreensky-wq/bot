@@ -1,4 +1,4 @@
-# TOAN DAAS Bot
+# TOAN AAS Bot
 
 Bot Telegram + FastAPI cho dịch vụ AI tính phí bằng Xu: chat AI, bóc băng audio, đọc voice, tách nền ảnh, tải video sạch, PayOS QR động, referral và dashboard admin.
 
@@ -29,7 +29,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `REMOVEBG_API_KEY`, `CUTOUT_API_KEY`: tách nền ảnh.
 - `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`: PayOS QR động.
 - `COBALT_API_URL`, `COBALT_API_KEY`: API tải video sạch. Public `api.cobalt.tools` có bot protection, nên self-host Cobalt trên Railway để bot tải ổn định.
-- `BOT_USERNAME`: username bot, ví dụ `Httdhtoan`.
+- `BOT_USERNAME`: username bot, ví dụ `toanaasbot`.
 - `PUBLIC_BASE_URL`: domain public nếu cần dùng cho link ngoài.
 - `MANUAL_BANK_NAME`, `MANUAL_BANK_CODE`, `MANUAL_BANK_ACCOUNT`, `MANUAL_BANK_OWNER`: tài khoản và mã VietQR nạp thủ công khi PayOS lỗi.
 - `OPERATOR_API_TOKEN`: token riêng cho n8n/Claude/tool worker gọi Operator API Bridge. Không set thì bridge tự đóng.
@@ -186,7 +186,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `GET /api/operator/audit`: worker ngoài kiểm tra mức sẵn sàng end-to-end và blocker còn thiếu trước khi bật automation.
 - `GET /api/operator/worker-spec`: worker ngoài đọc runbook máy đọc được cho Director, Creative, Tool Worker, Publisher và Growth Analyst.
 - `GET /api/operator/toolchain`: worker ngoài đọc chính sách paid-first/fallback theo từng stage, gồm Claude/Gemini/OpenAI, Fish/Edge, RemoveBG/Cutout, Kling/Runway, CapCut/FFmpeg, publisher và payment.
-- `GET /api/operator/video-patterns`: worker ngoài đọc kho format video, proof asset cần có, hook formula, scene goals và CTA style để dựng video theo pattern riêng của TOAN DAAS.
+- `GET /api/operator/video-patterns`: worker ngoài đọc kho format video, proof asset cần có, hook formula, scene goals và CTA style để dựng video theo pattern riêng của TOAN AAS.
 - `GET /api/operator/reference-pack`: worker ngoài đọc gói học từ video tham khảo, gồm luật không copy, cấu trúc thường dùng, proof asset và output kỳ vọng theo từng task.
 - `GET /api/operator/tool-readiness`: worker ngoài kiểm tra tool nào thật sự đủ runtime/env để bật automation, đặc biệt Cobalt self-host, AI provider, voice, image, PayOS và Operator API.
 - `GET/POST /api/operator/tool-events`: worker ngoài báo tool lỗi/quota/hết tiền/fallback/recovered; bot lưu log và nhắn admin khi severity `warning|critical`.

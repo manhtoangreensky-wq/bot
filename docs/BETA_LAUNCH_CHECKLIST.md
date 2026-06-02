@@ -31,8 +31,8 @@ Date: 2026-06-02
 - [ ] Offer topup 10k/20k as trial packages, and 50k/100k when they want promo.
 - [ ] Ask users to check `/khuyenmai`; public first top-up offer is `FIRST30`.
 - [ ] If sending a free Xu reward, use `/gift <code>` instead of deposit promo codes.
-- [ ] Ask user to post manually, then record result with `/publish_done`.
-- [ ] Ask user to add metrics with `/performance_add`.
+- [ ] Ask user to post manually and keep basic metrics outside the public bot.
+- [ ] If reporting is needed, ask user to send metrics to admin for manual review.
 - [ ] Ask user to run `/growth_ai` after enough data.
 
 ## Stop Conditions

@@ -2,7 +2,9 @@
 
 ## Purpose
 
-Convert manual performance metrics into simple actions for one-person affiliate operations.
+Convert admin/internal manual performance metrics into simple actions for one-person content operations.
+
+Current customer scope: customers do not use `/growth_loop`. They receive Content Packs through `/film`, self-post manually, and can use `/growth_ai` when enough data is supplied manually.
 
 ## Command
 
@@ -12,7 +14,7 @@ Convert manual performance metrics into simple actions for one-person affiliate 
 /growth_ai
 ```
 
-For admin, the existing operator growth loop remains the default. To force the manual post loop as admin:
+`/growth_loop` is admin/internal. For admin, the existing operator growth loop remains the default. To force the manual post loop as admin:
 
 ```text
 /growth_loop manual=1
@@ -20,7 +22,7 @@ For admin, the existing operator growth loop remains the default. To force the m
 
 ## Rule-Based Recommendations
 
-`/growth_loop` uses deterministic rules:
+Internal `/growth_loop` uses deterministic rules:
 
 - `SCALE`: revenue and clicks exist.
 - `FIX CTA`: views are good but clicks are weak.

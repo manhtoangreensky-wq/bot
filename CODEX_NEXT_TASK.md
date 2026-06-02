@@ -4,25 +4,28 @@ Chưa quay lại kế hoạch lớn TOAN AAS.
 Chưa làm app ngoài.
 Chưa làm dashboard web.
 Chưa làm ERP/Device Ops/SaaS.
+Chưa mở customer affiliate vault, auto publish hoặc ads management.
 
-## Current priority
+## Current Priority
 
-Run the real PayOS payment test with Promotion Policy V2.1 before selling beta.
+1. PayOS dynamic QR debug.
+2. AAS payment content.
+3. Manual fallback correct Xu.
+4. Backup DB send file.
+5. Sales readiness.
+6. Then real payment test.
+7. Do not start big plan yet.
 
 Manual sequence:
-
-- MVP done: `/promo_seed_policy`, `/promo <code>`, `/khuyenmai`, admin list/create/disable, percent bonus on PayOS paid order.
-- `BETA50` is limited/internal only; public first top-up offer is `FIRST30`.
-- Bảng giá gốc hiện là base Xu; Launch Bonus được cộng riêng sau PayOS success nếu user còn lần đầu mua gói đó.
-- Không đụng PayOS packages nếu chưa cần.
 
 ```text
 /backup_db
 /providers
+/payos_debug_create
 /promo_seed_policy
 /promo FIRST30
 /naptien
-# choose 50k or higher and pay real QR
+# choose 50k or higher and pay real QR only after checkout URL works
 /checkpayos <order_code>   # only if webhook has not credited yet
 /mark_payos_test pass order=<order_code> note="FIRST30 OK"
 /sales_ready
@@ -36,73 +39,34 @@ Expected for 50k + FIRST30:
 - Total Xu added: 680 if Launch Bonus applies; 650 if the user already used 50k Launch Bonus
 - Duplicate webhook/checkpayos must not add base or bonus again.
 
-## Option A - Run real PayOS 10k test manually
+## Customer Scope Now
 
-- Test without promo if needed.
-- Test with `/promo FIRST30`.
-- Confirm dashboard and user balance.
-- Mark pass only after manual verification.
+- AI daily tools.
+- Video Script / Prompt Pack with `/film`.
+- STT/audio, voice/TTS, image utilities, downloader if provider works.
+- PayOS QR dynamic and manual QR fallback.
+- Customer self-posting only.
 
-## Option B - First customer beta launch
+## Backlog Later
 
-- Open beta for 3-10 users.
-- Offer: 200 Xu trial + FIRST30 for first top-up from 50k while active.
-- Watch `/dashboard`, `/performance_report`, `/sales_ready`.
+- Affiliate vault.
+- Auto publish.
+- Ads assistant.
+- Customer social account connection.
+- Risk keyword checker.
+- Compliance checker.
+- Paid service package for publish/ads management.
+- GitHub Copilot dev workflow.
+- Legal Docs Lite with OpenLaw/OpenLaws.
+- Legal templates for service contracts and warranty documents.
 
-## Option C - Sales copy/posts
+## Future Publish Rule - Admin First
 
-- Write Facebook/Zalo/TikTok launch posts.
-- Write direct-message closing scripts.
-- Write onboarding messages for first beta customers.
-
-## Option D - Video Script template packs
-
-- Improve `/film` output by niche.
-- Add templates for affiliate, product review, story, education, local service.
-- No render.
-
-## Option D2 - Head Brain Live Smoke
-
-- Run `/head_brain platform=tiktok days=30 limit=8`.
-- Run `/tao_video topic="công nghệ AI kiếm tiền" platform=tiktok limit=1 build=1`.
-- API smoke: `POST /api/operator/video-order` with the same topic and `notify_admin=false`.
-- Run `/operator_launch topic="công nghệ AI kiếm tiền" platform=tiktok limit=1 build=1`.
-- Run `/worker_intake claim=1 include_prompt=1`.
-- Submit one real worker output or uploaded asset.
-- Run `/review_video job=<JOB_ID> send=1`.
-- Queue manual publish with `/approve_publish job=<JOB_ID> queue=1 mode=manual`.
-- Do not enable auto publish.
-
-## Option E - AI Caption Variant Generator
-
-- Generate 5 hook/caption/CTA variants from winning posts.
-- Use `/growth_ai` and `/performance_report` data when available.
-- No auto publish.
-
-## Option F - Trial top-up migration for old users
-
-If admin wants to top up users who already received 150 Xu to 200 Xu:
-
-- Write a safe one-time migration.
-- Only top up users with old trial credit event.
-- Add exactly 50 Xu once.
-- Record clear credit event.
-- Admin approval required before running.
-
-## Option G - Extract config.py safely
-
-- Separate ENV/constants.
-- Do not change behavior.
-
-## Option H - Extract db.py safely
-
-- Separate DB helpers.
-- Do not change schema.
-
-## Future Backlog
-
-- GitHub Copilot dev workflow
-- Legal Docs Lite with OpenLaw/OpenLaws
-- Legal templates for service contracts and warranty documents
+- Publish workflow belongs to TOAN AAS Lab/admin sandbox, not the current customer bot.
+- Build and test publishing with admin-owned pages/accounts/channels first.
+- Required future flags stay OFF by default: `publish_workflow`, `customer_publish`, `auto_publish`, `ads_assistant`.
+- `admin_publish` is admin/internal only and requires explicit approval before live testing.
+- No customer social account connection, no customer auto publish, no customer ads management in the current bot.
+- If customer publish opens later, it must be a separate paid feature with account permission, approval gate, audit log, failure handling and admin disable switch.
 
 Codex không tự làm task tiếp theo.

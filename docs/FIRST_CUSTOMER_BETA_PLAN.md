@@ -20,11 +20,10 @@ Date: 2026-06-02
 6. If using a controlled beta promo, send the code privately and ask the user to run `/promo <code>`.
 7. Ask the user to generate first content with `/film`.
 8. Ask the user to top up 10k/20k for trial, or 50k+ if they want to use promo.
-9. User posts manually.
-10. User records post with `/publish_done`.
-11. User records metrics with `/performance_add`.
-12. User runs `/growth_ai` after there is enough data.
-13. Ask for feedback.
+9. User posts manually on their own channel.
+10. User keeps basic metrics outside the public bot or sends them to admin if manual reporting is needed.
+11. User runs `/growth_ai` after there is enough manually supplied data.
+12. Ask for feedback.
 
 ## Beta KPI
 

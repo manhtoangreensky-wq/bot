@@ -61,30 +61,22 @@
 - [ ] `/film` thiếu Xu hiện topup với giá đúng.
 - [ ] `/film` AI lỗi hoàn Xu.
 - [ ] `/film` gửi file `.md`.
-- [ ] `/film topic="..." affiliate_id=1` dùng link đã lưu.
+- [ ] `/film topic="..." link="https://..."` dùng link dán trực tiếp làm ngữ cảnh caption/CTA.
 - [ ] `/help` không gọi API ngoài và không lộ admin/operator commands cho user thường.
 
-## Affiliate + Calendar
+## Affiliate + Calendar Internal Backlog
 
-- [ ] `/addlink` lưu link affiliate mới.
-- [ ] `/addlink` không tạo trùng URL cùng user.
-- [ ] `/links` chỉ hiện link active của user hiện tại.
-- [ ] `/campaign` tạo campaign đơn giản.
-- [ ] `/addcal` thêm lịch với affiliate_id/campaign hợp lệ.
-- [ ] `/calendar` hiện lịch 7 ngày tới.
-- [ ] `/calendar days=14 platform=tiktok` lọc đúng.
-- [ ] Không có auto publish/render trong các flow này.
+- [ ] User thường gọi `/addlink`, `/links`, `/campaign`, `/addcal`, `/calendar` sẽ nhận thông báo internal/backlog.
+- [ ] Admin vẫn dùng được affiliate/calendar commands để test nội bộ.
+- [ ] Không có render hoặc publish automation trong customer flow.
 
-## Manual Publish + Performance
+## Manual Publish + Performance Internal Backlog
 
-- [ ] `/publish_done tiktok https://... topic` lưu bài vào `published_posts`.
-- [ ] `/publish_done platform=facebook url=https://... topic="..." affiliate_id=1` gắn affiliate đúng user.
-- [ ] `/posts` hiện bài đã đăng gần đây.
-- [ ] `/performance_add post_id=1 views=... clicks=... revenue=...` lưu vào `manual_performance_events`.
-- [ ] `/performance_report` tổng hợp views/clicks/revenue theo nền tảng.
-- [ ] `/growth_loop` cho user thường trả rule-based recommendation.
+- [ ] User thường gọi `/publish_done`, `/posts`, `/performance_add`, `/performance_report`, `/growth_loop` sẽ nhận thông báo internal/backlog.
+- [ ] Admin vẫn dùng được manual publish/performance commands để test nội bộ.
+- [ ] `/growth_ai` và `/campaign_report` không hướng dẫn user tự dùng publish tracking khi chưa có dữ liệu.
 - [ ] `/growth_ai` có data thì trừ 120 Xu với user thường.
-- [ ] `/growth_ai` không có data thì hướng dẫn `/publish_done` + `/performance_add` và không trừ Xu.
+- [ ] `/growth_ai` không có data thì hướng dẫn dùng `/film` hoặc gửi số liệu cho admin, không trừ Xu.
 - [ ] `/growth_ai` AI lỗi thì hoàn Xu.
 - [ ] `/campaign_report format=txt` trừ 50 Xu và gửi file TXT.
 - [ ] `/campaign_report format=csv` trừ 50 Xu và gửi file CSV.
@@ -92,7 +84,7 @@
 - [ ] `/export_report` alias hoạt động.
 - [ ] Admin `/growth_loop` vẫn giữ operator loop mặc định.
 - [ ] Admin `/growth_loop manual=1` xem manual post loop.
-- [ ] `/dashboard` có số bài publish/manual performance/revenue nhập tay.
+- [ ] `/dashboard` admin có số bài publish/manual performance/revenue nhập tay.
 - [ ] `/dashboard` có count AI Growth Coach tháng này.
 - [ ] Không gọi social API, không auto publish.
 

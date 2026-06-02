@@ -33,12 +33,12 @@ Domain: `https://bot-production-2dd7.up.railway.app`
 | `/naptien` | Package buttons | Need live Telegram verification | `pkg|` callback unchanged. |
 | `pkg|` callback | PayOS/manual fallback | Need real payment test | PayOS code not changed in Step 6. |
 | `/film` | Script Lite + file | Need live Telegram verification | Requires AI key and enough Xu. |
-| `/addlink` | Save affiliate URL | Need live Telegram verification | Owner-scoped. |
-| `/links` | List affiliate links | Need live Telegram verification | Active links only. |
-| `/calendar` | Content calendar | Need live Telegram verification | 7-day view. |
-| `/publish_done` | Record manual post | Need live Telegram verification | No social API call. |
-| `/performance_report` | Manual performance report | Need live Telegram verification | Uses stored manual metrics. |
-| `/growth_loop` | Scale/fix suggestions | Need live Telegram verification | Rule-based for user flow. |
+| `/addlink` as normal user | Internal/backlog lock message | Need live Telegram verification | Admin can still test internally. |
+| `/links` as normal user | Internal/backlog lock message | Need live Telegram verification | No public affiliate vault. |
+| `/calendar` as normal user | Internal/backlog lock message | Need live Telegram verification | No public calendar. |
+| `/publish_done` as normal user | Internal/backlog lock message | Need live Telegram verification | No public publish tracking. |
+| `/performance_report` as normal user | Internal/backlog lock message | Need live Telegram verification | Admin/internal only. |
+| `/growth_loop` as normal user | Internal/backlog lock message | Need live Telegram verification | Admin/internal only. |
 | `/dashboard` admin | Admin dashboard | Need admin verification | Admin-only. |
 | `/backup_db` admin | Send DB backup | Need admin verification | Requires DB file and Telegram. |
 
@@ -57,7 +57,7 @@ Domain: `https://bot-production-2dd7.up.railway.app`
 1. `/help` and `/commands` were missing before Step 6.
 2. `/start` text did not clearly show trial -> tool -> missing Xu -> `/naptien` funnel.
 3. Local `bot.py` contained Step 4/5 commands that must be committed for Railway to expose them.
-4. Existing public surface test treats `/addlink` as `/add`; `/start` avoids showing `/addlink` directly and keeps it in `/help`/money menu.
+4. Existing public surface test must treat `/addlink` as internal/backlog and verify normal users do not access it.
 
 ## Fixes Applied
 
@@ -65,6 +65,7 @@ Domain: `https://bot-production-2dd7.up.railway.app`
 2. Registered `/help` and `/commands`.
 3. Updated `/start` copy for the revenue/onboarding funnel.
 4. Updated support menu to point users to `/help`.
+5. Guarded affiliate/calendar/publish/operator lab commands for non-admin users.
 
 ## Manual Admin Checklist After Deploy
 

@@ -10,7 +10,7 @@ Move a new user from trial usage to a paid Xu top-up without exposing internal a
 2. Bot explains four value groups:
    - AI tools: chat, voice, audio transcript, background removal, downloader.
    - Video Script Lite: `/film` for Facebook/TikTok/YouTube script packs.
-   - Affiliate workflow: save links, plan content, track performance.
+   - Content Pack self-post workflow: paste topic/product/link context, receive script/caption/prompt/CTA, then post manually.
    - PayOS Xu: dynamic QR top-up and manual bill fallback.
 3. New user receives 200 Xu trải nghiệm.
 4. User checks `/profile`.
@@ -18,8 +18,8 @@ Move a new user from trial usage to a paid Xu top-up without exposing internal a
 6. When credits are missing, the bot shows current Xu, required Xu, missing Xu, and top-up buttons.
 7. User opens `/naptien` or clicks a package button.
 8. PayOS webhook or manual admin approval adds Xu.
-9. User returns to `/film`, AI tools, or affiliate workflow.
-10. Admin watches `/dashboard`, `/pending`, `/performance_report`, and `/backup_db`.
+9. User returns to `/film`, AI tools, or `/growth_ai`.
+10. Admin watches `/dashboard`, `/pending`, and `/backup_db`.
 
 ## Trial Strategy
 
@@ -36,12 +36,8 @@ Move a new user from trial usage to a paid Xu top-up without exposing internal a
 - `/profile`
 - `/naptien`
 - `/film`
-- `/addlink`
-- `/links`
-- `/calendar`
-- `/publish_done`
-- `/performance_report`
-- `/growth_loop`
+- `/growth_ai`
+- `/campaign_report`
 
 ## Conversion Points
 
@@ -54,6 +50,7 @@ Move a new user from trial usage to a paid Xu top-up without exposing internal a
 ## Do Not
 
 - Do not show admin/operator commands to normal users.
+- Do not expose affiliate vault, publish tracking, social-account connection or ads management to normal users.
 - Do not spam payment prompts.
 - Do not auto publish without admin approval.
 - Do not claim social platform API automation exists before it is implemented and tested.

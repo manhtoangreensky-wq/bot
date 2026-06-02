@@ -2,7 +2,9 @@
 
 ## Purpose
 
-Use manual data from `/publish_done` and `/performance_add` so AI can suggest what to scale, fix, pause, and remix.
+Use admin/internal manual data from `/publish_done` and `/performance_add` so AI can suggest what to scale, fix, pause, and remix.
+
+Normal customers do not use publish tracking in the current bot. They receive content packs through `/film`, self-post manually, and can request `/growth_ai` when enough data is supplied manually.
 
 ## Command
 

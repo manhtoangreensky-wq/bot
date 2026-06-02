@@ -45,28 +45,35 @@ Registered callback groups: 9
 | Background removal | Photo message | Provider choice | YES | RemoveBG/Cutout provider choice/fallback. |
 | Downloader | TikTok/YouTube/Facebook URL | Dynamic | YES | Existing downloader route. |
 
-## Video/Affiliate Commands
+## Video Customer Commands
 
 | Command | Handler | In `/menu`? | Notes |
 |---|---|---:|---|
 | `/film` | `cmd_film` | YES | Video Script Lite, no render, no auto publish. |
 | `/video_script` | `cmd_film` | YES | Alias for `/film`. |
-| `/addlink` | `cmd_addlink` | YES | Store affiliate URL for current user. |
-| `/links` | `cmd_links` | YES | List active affiliate links. |
-| `/campaign` | `cmd_campaign` | YES | User-facing campaign entry. |
-| `/campaign_new` | `cmd_campaign_new` | YES | Campaign creation helper. |
-| `/campaigns` | `cmd_campaigns` | YES | Campaign listing. |
-| `/addcal` | `cmd_addcal` | YES | Add manual content calendar item. |
-| `/calendar` | `cmd_calendar` | YES | View calendar. |
-| `/calendar_plan` | `cmd_calendar_plan` | Admin/Menu | Internal calendar planning. |
-| `/publish_done` | `cmd_publish_done` | YES | Manual record of published post. |
-| `/performance_add` | `cmd_performance_add` | YES | Manual metrics input. |
-| `/performance_report` | `cmd_performance_report` | YES | Manual performance rollup. |
 | `/growth_ai` | `cmd_growth_ai` | YES | AI Growth Coach, 120 Xu for normal users. |
 | `/campaign_report` | `cmd_campaign_report` | YES | TXT/CSV campaign report export. |
 | `/export_report` | `cmd_campaign_report` | YES | Alias for campaign report export. |
-| `/posts` | `cmd_posts` | YES | Recent published posts. |
-| `/growth_loop` | `cmd_growth_loop` | YES | User rule-based growth loop, admin can request manual mode. |
+
+## Internal Affiliate/Publish Backlog Commands
+
+These handlers remain in code for admin/internal testing but are blocked for normal users.
+
+| Command | Handler | Public? | Notes |
+|---|---|---:|---|
+| `/addlink` | `cmd_addlink` | NO | Internal affiliate vault/storage. |
+| `/links` | `cmd_links` | NO | Internal affiliate link listing. |
+| `/campaign` | `cmd_campaign` | NO | Internal campaign setup. |
+| `/campaign_new` | `cmd_campaign_new` | NO | Internal campaign helper. |
+| `/campaigns` | `cmd_campaigns` | NO | Internal campaign listing. |
+| `/addcal` | `cmd_addcal` | NO | Internal content calendar. |
+| `/calendar` | `cmd_calendar` | NO | Internal calendar listing. |
+| `/calendar_plan` | `cmd_calendar_plan` | NO | Internal calendar planning. |
+| `/publish_done` | `cmd_publish_done` | NO | Internal manual publish record. |
+| `/performance_add` | `cmd_performance_add` | NO | Internal manual metrics input. |
+| `/performance_report` | `cmd_performance_report` | NO | Internal manual performance rollup. |
+| `/posts` | `cmd_posts` | NO | Internal published post list. |
+| `/growth_loop` | `cmd_growth_loop` | NO | Internal rule-based growth loop. |
 
 ## Admin Commands
 

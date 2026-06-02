@@ -970,7 +970,11 @@ def init_db():
         ("youtube_output", 0, "YouTube output generation is gated."),
         ("affiliate_engine", 0, "Affiliate engine advanced automation is gated."),
         ("device_ops", 0, "Device Ops is out of first 90 day production scope."),
+        ("publish_workflow", 0, "Future publish workflow is admin-first and disabled by default."),
+        ("admin_publish", 0, "Admin publish testing requires explicit approval before enabling."),
+        ("customer_publish", 0, "Customer publish access is disabled by default."),
         ("auto_publish", 0, "Auto publish stays off until explicit approval."),
+        ("ads_assistant", 0, "Ads assistant is future optional backlog and disabled by default."),
         ("worker_queue", 0, "Worker queue stays off until reviewed."),
         ("dashboard", 0, "Dashboard expansion is gated."),
         ("trial_upsell", 1, "Trial upsell is safe to show when payment flow is stable."),
@@ -21131,6 +21135,31 @@ def sales_readiness_payload() -> dict:
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup([[KeyboardButton("🏠 TOAN AAS MENU")]], resize_keyboard=True)
 
+CURRENT_PRODUCT_SCOPE_TEXT = (
+    "TOAN AAS hiện tập trung tạo nội dung/video để khách tự đăng.\n"
+    "Hệ thống chưa kết nối tài khoản mạng xã hội, chưa đăng bài thay khách và chưa vận hành quảng cáo thay khách."
+)
+
+INTERNAL_CUSTOMER_FEATURE_TEXT = (
+    "⚠️ <b>Tính năng này đang ở chế độ nội bộ.</b>\n\n"
+    "Hiện tại TOAN AAS tập trung tạo nội dung/video để bạn tự đăng.\n"
+    "Kho link nội bộ, publish workflow, quản lý quảng cáo và kết nối tài khoản mạng xã hội sẽ được mở ở giai đoạn sau "
+    "khi có quy trình bảo mật, kiểm duyệt và phí dịch vụ riêng.\n\n"
+    "Bạn có thể dùng:\n"
+    "<code>/film &lt;chủ đề&gt;</code>\n"
+    "để tạo kịch bản, caption, prompt cảnh, hashtag và CTA."
+)
+
+async def reply_internal_customer_feature(update: Update):
+    return await update.message.reply_text(INTERNAL_CUSTOMER_FEATURE_TEXT, parse_mode="HTML")
+
+def admin_internal_command(handler):
+    async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not is_admin_user(update.effective_user.id):
+            return await reply_internal_customer_feature(update)
+        return await handler(update, context)
+    return wrapped
+
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     if is_admin:
         rows = [
@@ -21142,8 +21171,8 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     else:
         rows = [
             [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video AI", callback_data="menu|video_factory")],
-            [InlineKeyboardButton("💰 Kiếm Tiền", callback_data="menu|affiliate"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|billing")],
-            [InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing"), InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
+            [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|billing"), InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing")],
+            [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
         ]
     return InlineKeyboardMarkup(rows)
 
@@ -21171,11 +21200,14 @@ def menu_text_main(is_admin: bool) -> str:
     admin_line = "\n• Quản trị doanh thu, bill, backup và operator nội bộ" if is_admin else ""
     return (
         "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
-        "Bot AI giúp bạn:\n"
-        "• Chat AI, đọc voice, bóc băng, tách nền\n"
-        "• Tạo Video Script Lite cho Facebook, TikTok, YouTube\n"
-        "• Lưu link affiliate, lên lịch nội dung, theo dõi hiệu quả\n"
-        "• Nạp Xu tự động bằng PayOS QR động"
+        "Cỗ máy AI hỗ trợ tạo nội dung, video script, voice, media và công cụ AI hằng ngày trong một bot Telegram.\n\n"
+        "🤖 Trợ lý AI: viết kịch bản, ý tưởng, code, chiến lược.\n"
+        "🎬 Video Factory Lite: tạo kịch bản, storyboard, scene prompt, caption, hashtag, CTA cho Facebook, TikTok, YouTube.\n"
+        "🎤 Bóc Băng AI: chuyển âm thanh/video thành văn bản.\n"
+        "🔊 Voice-off/TTS: tạo voice tiếng Việt cho nội dung.\n"
+        "📥 Hút Media: tải video TikTok/YouTube/Facebook nếu công cụ khả dụng.\n"
+        "🖼 Studio Đồ Họa: tách nền, xử lý ảnh, prompt hình ảnh.\n"
+        "💳 Nạp Xu: PayOS QR động hoặc QR thủ công khi cổng tự động bận."
         f"{admin_line}\n\n"
         "🎁 Tài khoản mới được tặng <b>200 Xu trải nghiệm</b>.\n"
         "Bạn có thể dùng ngay 1 lượt <code>/film</code> Basic để thử quy trình tạo video script.\n"
@@ -21186,7 +21218,7 @@ def menu_text_main(is_admin: bool) -> str:
         "3. <code>/pricing</code> — xem bảng giá\n"
         "4. <code>/naptien</code> — nạp thêm Xu khi cần\n"
         "5. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
-        "6. Mở nhóm <b>Kiếm Tiền</b> — lưu link affiliate"
+        "6. Tự đăng nội dung đã tạo lên kênh của bạn"
         f"{runtime_line}\n\n"
         "Chọn nhóm chức năng bên dưới:"
     )
@@ -21233,14 +21265,17 @@ def menu_text_video_factory(is_admin: bool) -> str:
             "🎬 <b>Multi-Platform AI Video Factory</b>\n\n"
             "Tạo ý tưởng, kịch bản, storyboard, scene prompt và content pack cho Facebook, TikTok, YouTube.\n\n"
             f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack, phí <b>{FILM_SCRIPT_COST} Xu</b>\n"
-            f"• <code>/film topic=\"review sản phẩm\" affiliate_id=1</code> — dùng link đã lưu trong kho affiliate.\n\n"
-            "Các lệnh sản xuất/render/publish nội bộ vẫn khóa cho admin để bảo vệ quy trình vận hành."
+            "• <code>/film topic=\"review sản phẩm\"</code> — tạo nội dung review để bạn tự đăng\n"
+            "• <code>/film topic=\"sản phẩm A\" link=\"https://...\"</code> — dùng link bạn dán trực tiếp để viết caption/CTA tham khảo\n"
+            f"• <code>/growth_ai</code> — AI phân tích hook/caption/CTA, phí <b>{GROWTH_AI_COST} Xu</b>\n"
+            f"• <code>/campaign_report</code> — xuất báo cáo nội dung thủ công, phí <b>{CAMPAIGN_REPORT_COST} Xu</b>\n\n"
+            f"{CURRENT_PRODUCT_SCOPE_TEXT}"
         )
     return (
         "🎬 <b>Multi-Platform AI Video Factory</b>\n\n"
-        "Quy trình admin:\n"
+        "INTERNAL TEST ONLY — quy trình admin:\n"
         f"1. User-facing Script Lite: <code>/film &lt;chủ đề&gt;</code> ({FILM_SCRIPT_COST} Xu)\n"
-        "1b. Dùng affiliate đã lưu: <code>/film topic=... affiliate_id=1</code>\n"
+        "1b. INTERNAL TEST ONLY: dùng link đã lưu nội bộ khi admin truyền <code>aff=&lt;ID&gt;</code>\n"
         "2. Ý tưởng/blueprint: <code>/film_blueprint</code>\n"
         "3. Tạo series: <code>/film_series topic=...</code>\n"
         "4. Storyboard: <code>/storyboard_crop</code>\n"
@@ -21251,7 +21286,16 @@ def menu_text_video_factory(is_admin: bool) -> str:
     )
 
 def menu_text_video_workflow(is_admin: bool) -> str:
-    lock_note = "" if is_admin else "\n\n🔒 Các lệnh nội bộ chỉ mở cho admin. User thường xem workflow để hiểu quy trình."
+    if not is_admin:
+        return (
+            "🎬 <b>Quy trình tạo Content Pack TOAN AAS</b>\n\n"
+            "1. Chọn chủ đề/nền tảng: Facebook / TikTok / YouTube\n"
+            "2. Dùng <code>/film &lt;chủ đề&gt;</code> để tạo outline, storyboard, scene prompt, caption, hashtag và CTA.\n"
+            "3. Kiểm tra nội dung, chỉnh sửa theo thương hiệu của bạn.\n"
+            "4. Tự đăng lên kênh của bạn và ghi chú hiệu quả thủ công nếu cần.\n\n"
+            f"{CURRENT_PRODUCT_SCOPE_TEXT}"
+        )
+    lock_note = ""
     return (
         "🎬 <b>Quy trình tạo video AI chuẩn TOAN AAS</b>\n\n"
         "1. Chọn nền tảng: Facebook / TikTok / YouTube\n"
@@ -21270,31 +21314,26 @@ def menu_text_video_workflow(is_admin: bool) -> str:
 def menu_text_affiliate(is_admin: bool) -> str:
     if not is_admin:
         return (
-            "💰 <b>Affiliate Automation</b>\n\n"
-            "TOAN AAS hỗ trợ tạo nội dung bán hàng/affiliate cho Facebook, TikTok, YouTube và các nền tảng phụ như Instagram, Threads, Website, OnlyFans hợp pháp/có consent.\n\n"
-            "<b>Lệnh dùng ngay:</b>\n"
-            "• <code>/addlink url=https://... product=\"Tên sản phẩm\" niche=\"nhóm\"</code>\n"
-            "• <code>/links</code> — xem kho link đã lưu\n"
-            "• <code>/campaign</code> — tạo/xem campaign\n"
-            "• <code>/addcal date=tomorrow platform=tiktok topic=\"...\" affiliate_id=1</code>\n"
-            "• <code>/calendar</code> — xem lịch 7 ngày tới\n\n"
-            "<b>Theo dõi bài đã đăng:</b>\n"
-            "• <code>/publish_done tiktok https://... chủ đề...</code>\n"
-            "• <code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n"
-            "• <code>/performance_report</code> — xem hiệu quả\n"
-            "• <code>/growth_loop</code> — gợi ý scale/fix nhanh\n"
-            f"• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
-            "• <code>/campaign_report format=txt</code> — xuất báo cáo\n\n"
-            "Quy tắc: không spam, không deepfake người thật không có consent, CTA/disclosure affiliate cần minh bạch."
+            "🎬 <b>Content Pack tự đăng</b>\n\n"
+            "TOAN AAS hiện tập trung tạo nội dung/video để bạn tự đăng lên Facebook, TikTok, YouTube.\n\n"
+            "<b>Dùng ngay:</b>\n"
+            f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack ({FILM_SCRIPT_COST} Xu)\n"
+            f"• <code>/growth_ai</code> — phân tích hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
+            f"• <code>/campaign_report</code> — báo cáo thủ công khi có dữ liệu ({CAMPAIGN_REPORT_COST} Xu)\n\n"
+            "Nếu muốn dùng link sản phẩm, dán trực tiếp trong lệnh:\n"
+            "<code>/film topic=\"review sản phẩm A\" link=\"https://...\"</code>\n\n"
+            f"{CURRENT_PRODUCT_SCOPE_TEXT}\n\n"
+            "Affiliate Vault, Publish Workflow và Ads Assistant đang là khu nội bộ/backlog. "
+            "Admin sẽ test trong sandbox trước, khách chưa dùng các phần đó."
         )
     return (
-        "💰 <b>Affiliate Automation</b>\n\n"
-        "<b>User-facing</b>\n• <code>/addlink</code>\n• <code>/links</code>\n• <code>/campaign</code>\n• <code>/addcal</code>\n• <code>/calendar</code>\n• <code>/publish_done</code>\n• <code>/performance_add</code>\n• <code>/performance_report</code>\n• <code>/growth_ai</code>\n• <code>/campaign_report</code>\n• <code>/posts</code>\n\n"
+        "💰 <b>Affiliate / Publish Lab — INTERNAL TEST ONLY</b>\n\n"
+        "<b>Customer-facing hiện tại</b>\n• Chỉ dùng <code>/film</code> với link dán trực tiếp nếu cần.\n• Không public kho link nội bộ, publish workflow, ads hoặc kết nối tài khoản MXH.\n\n"
         "<b>A. Setup chiến dịch</b>\n• <code>/campaign_preset</code>\n• <code>/postback_setup</code>\n\n"
         "<b>B. Tạo batch video</b>\n• <code>/affiliate_scale</code>\n\n"
         "<b>C. Ghi nhận bài đăng</b>\n• <code>/publish_done</code>\n\n"
         "<b>D. Đọc số liệu và scale</b>\n• <code>/growth_loop</code>\n\n"
-        "Nền tảng chính: Facebook, TikTok, YouTube. Phụ: Instagram, Threads, Website, OnlyFans hợp pháp/có consent."
+        "Rule: admin-first. Customer publish OFF, auto publish OFF, ads assistant OFF cho đến khi admin duyệt riêng."
     )
 
 def menu_text_operator(is_admin: bool) -> str:
@@ -21454,23 +21493,17 @@ def help_text_for_user(user_id) -> str:
         "• Bóc băng audio: gửi voice/mp3/m4a\n"
         "• Tách nền ảnh: gửi ảnh vào bot\n"
         "• Tải video sạch: gửi link TikTok/YouTube/Facebook\n\n"
-        "<b>3. Video kiếm tiền</b>\n"
-        f"• <code>/film &lt;chủ đề&gt;</code> — tạo script/prompt pack ({FILM_SCRIPT_COST} Xu)\n\n"
-        "<b>4. Affiliate & lịch nội dung</b>\n"
-        "• <code>/addlink url=https://... product=\"Tên sản phẩm\"</code>\n"
-        "• <code>/links</code> — xem kho link\n"
-        "• <code>/addcal date=tomorrow platform=tiktok topic=\"chủ đề\"</code>\n"
-        "• <code>/calendar</code> — xem lịch 7 ngày tới\n\n"
-        "<b>5. Theo dõi hiệu quả</b>\n"
-        "• <code>/publish_done tiktok https://... chủ đề</code>\n"
-        "• <code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n"
-        "• <code>/performance_report</code> — báo cáo hiệu quả\n"
-        "• <code>/growth_loop</code> — gợi ý scale/fix nhanh\n"
+        "<b>3. Video Factory Lite</b>\n"
+        f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack ({FILM_SCRIPT_COST} Xu)\n"
+        "• Kết quả gồm outline, storyboard, scene prompt, caption, hashtag và CTA để bạn tự đăng.\n"
+        "• Có thể dán link trực tiếp trong prompt để bot viết caption/CTA tham khảo.\n\n"
+        "<b>4. Báo cáo/tối ưu thủ công</b>\n"
         f"• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
-        "• <code>/campaign_report format=txt</code> hoặc <code>format=csv</code> — xuất báo cáo\n\n"
-        "<b>6. Hỗ trợ</b>\n"
+        f"• <code>/campaign_report</code> — xuất báo cáo nội dung thủ công ({CAMPAIGN_REPORT_COST} Xu)\n"
+        f"• {CURRENT_PRODUCT_SCOPE_TEXT}\n\n"
+        "<b>5. Hỗ trợ</b>\n"
         "• <code>/gopy nội dung</code> — góp ý/báo lỗi\n\n"
-        "<b>7. Bán thử/Beta</b>\n"
+        "<b>6. Bán thử/Beta</b>\n"
         "• <code>/beta_offer</code> hoặc <code>/goi_beta</code> — xem gói dùng thử\n"
         "• <code>/pricing</code> hoặc <code>/banggia</code> — xem bảng giá\n"
         "• <code>/naptien</code> — nạp Xu\n"
@@ -21737,7 +21770,7 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "🚀 <b>TOAN AAS Beta Offer</b>",
         "",
-        "Dành cho người muốn dùng AI để tạo nội dung, affiliate và quản lý Xu ngay trong Telegram.",
+        "Dành cho người muốn dùng AI để tạo nội dung/video pack và quản lý Xu ngay trong Telegram.",
         "",
         "<b>Gói 1 — Dùng thử</b>",
         "• Nạp 10k nhận 100 Xu",
@@ -21749,26 +21782,26 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Nạp lần đầu từ 50k nên dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu mã còn hiệu lực",
         "• Gói 50k/100k/200k/500k có Launch Bonus lần đầu mua từng gói",
         "• <code>BETA50</code> chỉ dành cho nhóm test rất giới hạn hoặc nội bộ",
-        "• Khuyến nghị bắt đầu bằng gói 50k hoặc 100k để đủ Xu chạy video/affiliate",
+        "• Khuyến nghị bắt đầu bằng gói 50k hoặc 100k để đủ Xu tạo nhiều Content Pack",
         "• Không cam kết doanh thu, công cụ giúp tạo nội dung nhanh hơn và có quy trình rõ hơn",
         "",
         "<b>Gói 2 — Creator Start</b>",
         "• Nạp 50k nhận 500 Xu",
         "• Phù hợp tạo nhiều script/caption cho Facebook, TikTok, YouTube",
-        "• Gợi ý dùng: <code>/film</code>, <code>/addlink</code>, <code>/calendar</code>",
+        "• Gợi ý dùng: <code>/film</code>, <code>/growth_ai</code>, <code>/campaign_report</code>",
         "",
-        "<b>Gói 3 — Affiliate Builder</b>",
+        "<b>Gói 3 — Creator Builder</b>",
         "• Nạp 100k nhận 1.000 Xu gốc + 50 Xu Launch Bonus nếu lần đầu mua gói 100k",
-        "• Phù hợp test affiliate content 7 ngày",
-        "• Gồm: <code>/film</code>, <code>/publish_done</code>, <code>/performance_report</code>, <code>/growth_ai</code>",
+        "• Phù hợp test nội dung Facebook/TikTok/YouTube trong 7 ngày",
+        "• Gồm: <code>/film</code>, <code>/growth_ai</code>, <code>/campaign_report</code>",
         "",
         "<b>Quy trình</b>",
         "1. <code>/profile</code> xem Xu",
         "2. <code>/naptien</code> nạp Xu",
         "3. <code>/film &lt;chủ đề&gt;</code>",
-        "4. Đăng thủ công",
-        "5. <code>/performance_add</code> nhập số liệu",
-        "6. <code>/growth_ai</code> nhận gợi ý tối ưu",
+        "4. Tự đăng lên kênh của bạn",
+        "5. Ghi chú số liệu thủ công bên ngoài bot hoặc gửi admin nếu cần tổng hợp",
+        "6. <code>/growth_ai</code> nhận gợi ý tối ưu hook/caption/CTA",
         "",
         "Kết quả phụ thuộc nội dung, sản phẩm, nền tảng và cách triển khai. TOAN AAS không cam kết doanh thu chắc chắn và không auto publish.",
         "",
@@ -22228,16 +22261,16 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "🎬 <b>Video & Content</b>",
         f"• <code>/film</code> Basic: <b>{VIDEO_BASIC_COST} Xu</b>",
-        "  1 video, 5 cảnh, Facebook/TikTok/YouTube output",
+        "  Script/Prompt Pack 1 tập, 5 cảnh, output cho Facebook/TikTok/YouTube",
         f"• <code>/film tier=pro</code>: <b>{VIDEO_PRO_COST} Xu</b>",
         "  nhiều hook/caption/CTA hơn",
         f"• <code>/film tier=series</code>: <b>{VIDEO_SERIES_COST:,} Xu</b>",
         "  gói nhiều nội dung/chuỗi bài",
         "",
-        "📈 <b>Growth</b>",
-        "• <code>/growth_loop</code>: theo code hiện tại",
+        "📈 <b>Báo cáo/tối ưu thủ công</b>",
         f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>",
         f"• <code>/campaign_report</code>: <b>{CAMPAIGN_REPORT_COST} Xu</b>",
+        "  Dùng để phân tích hook/caption/CTA và báo cáo thủ công; không tự đăng bài.",
         "",
         "🤖 <b>AI Tools</b>",
         f"• Chat thường: model nhanh/tiết kiệm, fair-use hằng ngày ({CHAT_NORMAL_DAILY_LIMIT} lượt)",
@@ -25809,6 +25842,8 @@ def parse_video_script_args(raw: str) -> dict:
         spans.append(match.span())
         if key in {"topic", "niche", "platforms", "affiliate", "tone", "language"}:
             data[key] = value
+        elif key in {"link", "url"}:
+            data["affiliate"] = value
         elif key in {"tier", "goi", "package"}:
             tier_value = str(value or "basic").strip().lower()
             data["tier"] = tier_value if tier_value in {"basic", "pro", "series"} else "basic"
@@ -25839,8 +25874,9 @@ def video_script_usage_text(uid: int) -> tuple[str, InlineKeyboardMarkup]:
         "🎬 <b>Tạo Video Script Lite</b>\n\n"
         "Cách dùng:\n"
         "<code>/film review máy lọc không khí cho phòng ngủ</code>\n"
-        "<code>/film topic=\"review tai nghe bluetooth\" niche=affiliate</code>\n"
+        "<code>/film topic=\"review tai nghe bluetooth\"</code>\n"
         "<code>/film topic=\"camera an ninh gia đình\" platforms=facebook,tiktok,youtube</code>\n"
+        "<code>/film topic=\"sản phẩm A\" link=\"https://...\"</code>\n"
         "<code>/film topic=\"chuỗi review laptop\" episodes=3 scenes=5</code>\n"
         "<code>/film topic=\"kế hoạch 7 ngày\" tier=series</code>\n\n"
         "Kết quả gồm:\n"
@@ -25850,14 +25886,15 @@ def video_script_usage_text(uid: int) -> tuple[str, InlineKeyboardMarkup]:
         "• CTA/hashtag\n"
         "• File .md tải về\n\n"
         f"Chi phí: Basic <b>{VIDEO_BASIC_COST} Xu</b> | Pro <b>{VIDEO_PRO_COST} Xu</b> | Series <b>{VIDEO_SERIES_COST} Xu</b>\n"
-        "Basic gồm 1 tập/5 cảnh; thêm tập +100 Xu, thêm cảnh +20 Xu."
+        "Basic gồm 1 tập/5 cảnh; thêm tập +100 Xu, thêm cảnh +20 Xu.\n\n"
+        f"{CURRENT_PRODUCT_SCOPE_TEXT}"
     )
     return text, build_topup_keyboard(uid)
 
 def build_video_script_prompt(topic, niche, episodes, scenes, platforms, affiliate="", tone="", language="vi"):
-    affiliate_note = affiliate or "Không có link affiliate. Nếu phù hợp, hãy đề xuất CTA bán hàng mềm nhưng không bịa link."
+    link_note = affiliate or "Không có link sản phẩm. Nếu phù hợp, hãy đề xuất CTA mềm nhưng không bịa link."
     return (
-        "Bạn là chuyên gia sản xuất video ngắn viral và affiliate content cho thị trường Việt Nam.\n"
+        "Bạn là chuyên gia sản xuất video ngắn viral và content sản phẩm cho thị trường Việt Nam.\n"
         "Tạo gói Video Script Lite dùng được ngay cho Facebook, TikTok và YouTube Shorts.\n\n"
         f"Topic: {topic}\n"
         f"Niche: {niche}\n"
@@ -25866,7 +25903,7 @@ def build_video_script_prompt(topic, niche, episodes, scenes, platforms, affilia
         f"Scenes per episode: {scenes}\n"
         f"Tone: {tone or 'thực tế, dễ hiểu, có khả năng viral'}\n"
         f"Language: {language or 'vi'}\n"
-        f"Affiliate link/context: {affiliate_note}\n\n"
+        f"Product/link context: {link_note}\n\n"
         "Output bằng tiếng Việt, format Markdown rõ ràng, gồm đúng các phần sau:\n\n"
         "1. PROJECT SUMMARY\n"
         "- title\n- target audience\n- angle\n- promise\n- content safety note\n\n"
@@ -25875,15 +25912,15 @@ def build_video_script_prompt(topic, niche, episodes, scenes, platforms, affilia
         "3. SCENE BREAKDOWN\n"
         "Cho từng tập, từng cảnh: scene number, duration seconds, visual description, voice line, image prompt, video prompt, camera movement, mood, negative prompt.\n\n"
         "4. PLATFORM OUTPUTS\n"
-        "Facebook: title, caption, hashtags, CTA, pinned comment, affiliate disclosure.\n"
-        "TikTok: hook text, short caption, hashtags, CTA, affiliate disclosure.\n"
-        "YouTube Shorts: title, description, hashtags/tags, pinned comment, long-form expansion idea, affiliate disclosure.\n\n"
+        "Facebook: title, caption, hashtags, CTA, pinned comment, disclosure nếu có link bán hàng.\n"
+        "TikTok: hook text, short caption, hashtags, CTA, disclosure nếu có link bán hàng.\n"
+        "YouTube Shorts: title, description, hashtags/tags, pinned comment, long-form expansion idea, disclosure nếu có link bán hàng.\n\n"
         "5. QUALITY CHECK\n"
-        "- hook_score 0-100\n- clarity_score 0-100\n- viral_score 0-100\n- affiliate_fit_score 0-100\n"
+        "- hook_score 0-100\n- clarity_score 0-100\n- viral_score 0-100\n- product_fit_score 0-100\n"
         "- policy_risk 0-100\n- copyright_risk 0-100\n- recommendation: pass/rewrite/review\n\n"
         "6. SAFETY RULES\n"
         "- Không copy video người khác.\n- Không deepfake người thật.\n"
-        "- Không dùng brand/nhân vật có bản quyền nếu không có quyền.\n- Nếu affiliate, cần disclosure."
+        "- Không dùng brand/nhân vật có bản quyền nếu không có quyền.\n- Nếu có link bán hàng, cần disclosure."
     )
 
 def generate_video_script_pack(prompt: str, user_id) -> str:
@@ -26167,7 +26204,7 @@ async def cmd_addcal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "🗓️ <b>Thêm lịch đăng nội dung</b>\n\n"
             "Cú pháp:\n"
-            "<code>/addcal date=tomorrow platform=tiktok topic=\"Review sản phẩm A\" affiliate_id=1</code>\n"
+            "<code>/addcal date=tomorrow platform=tiktok topic=\"Review sản phẩm A\" aff=&lt;ID&gt;</code>\n"
             "<code>/addcal 2026-06-05 facebook video deal công nghệ aff=1</code>",
             parse_mode="HTML",
         )
@@ -26203,7 +26240,7 @@ async def cmd_addcal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not topic:
         return await update.message.reply_text(
             "⚠️ Thiếu chủ đề lịch đăng.\n"
-            "Ví dụ: <code>/addcal date=tomorrow platform=tiktok topic=\"review tai nghe\" affiliate_id=1</code>",
+            "Ví dụ: <code>/addcal date=tomorrow platform=tiktok topic=\"review tai nghe\" aff=&lt;ID&gt;</code>",
             parse_mode="HTML",
         )
 
@@ -26235,7 +26272,7 @@ async def cmd_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📌 <b>CAMPAIGN CỦA BẠN</b>",
             "",
             "Tạo campaign mới:",
-            "<code>/campaign name=\"Tech Deals\" niche=\"đồ công nghệ\" platforms=facebook,tiktok,youtube affiliate_id=1</code>",
+            "<code>/campaign name=\"Tech Deals\" niche=\"đồ công nghệ\" platforms=facebook,tiktok,youtube aff=&lt;ID&gt;</code>",
         ]
         if rows:
             lines.append("\n<b>Đang có:</b>")
@@ -26254,7 +26291,7 @@ async def cmd_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not name:
         return await update.message.reply_text(
             "⚠️ Thiếu tên campaign.\n"
-            "Ví dụ: <code>/campaign name=\"Tech Deals\" niche=\"đồ công nghệ\" platforms=tiktok,facebook affiliate_id=1</code>",
+            "Ví dụ: <code>/campaign name=\"Tech Deals\" niche=\"đồ công nghệ\" platforms=tiktok,facebook aff=&lt;ID&gt;</code>",
             parse_mode="HTML",
         )
     if affiliate_id:
@@ -27313,7 +27350,7 @@ async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "📭 Bạn chưa có lịch nội dung.\n\n"
             "Thêm lịch:\n"
-            "<code>/addcal date=tomorrow platform=tiktok topic=\"review sản phẩm\" affiliate_id=1</code>",
+            "<code>/addcal date=tomorrow platform=tiktok topic=\"review sản phẩm\" aff=&lt;ID&gt;</code>",
             parse_mode="HTML",
         )
     if not filtered:
@@ -27338,7 +27375,7 @@ async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     if len(filtered) > 30:
         lines.append(f"\n... còn {len(filtered) - 30} lịch khác.")
-    lines.append("\nThêm lịch: <code>/addcal date=tomorrow platform=tiktok topic=\"...\" affiliate_id=1</code>")
+    lines.append("\nThêm lịch: <code>/addcal date=tomorrow platform=tiktok topic=\"...\" aff=&lt;ID&gt;</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29929,7 +29966,7 @@ def operator_category_title(category):
 
 async def cmd_operator_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
-        return
+        return await reply_internal_customer_feature(update)
     text = (
         "🧠 <b>AI OPERATOR MENU</b>\n\n"
         "Quy trình chuẩn:\n"
@@ -30008,7 +30045,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Router chọn kênh: <code>GET {html.escape(base_url)}/api/operator/channel-router?platform=tiktok&amp;niche=công nghệ AI</code>",
         f"• Danh sách campaign: <code>GET {html.escape(base_url)}/api/operator/campaigns</code>",
         f"• Danh sách affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliates</code>",
-        f"• Bundle link affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-bundle?affiliate_id=1&amp;job_id=12</code>",
+        f"• Bundle link affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-bundle?affiliate_id=&lt;ID&gt;&amp;job_id=12</code>",
         f"• Báo cáo affiliate: <code>GET {html.escape(base_url)}/api/operator/affiliate-report</code>",
         f"• Tracking funnel: <code>GET {html.escape(base_url)}/api/operator/tracking-report</code>",
         f"• Postback setup: <code>GET {html.escape(base_url)}/api/operator/postback-setup?network=trackfin&amp;platform=tiktok</code>",
@@ -31439,9 +31476,8 @@ async def cmd_growth_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not summary.get("has_data"):
         return await update.message.reply_text(
             "📈 <b>AI Growth Coach cần dữ liệu trước.</b>\n\n"
-            "Bước 1:\n<code>/publish_done tiktok https://... chủ đề</code>\n\n"
-            "Bước 2:\n<code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n\n"
-            "Bước 3:\n<code>/growth_ai</code>\n\n"
+            "Bản hiện tại ưu tiên tạo nội dung/video để bạn tự đăng. Phần nhập số liệu bài đăng và tracking hiệu quả đang ở chế độ nội bộ.\n\n"
+            "Bạn có thể dùng <code>/film &lt;chủ đề&gt;</code> để tạo script/caption/prompt mới, hoặc gửi dữ liệu hiệu quả cho admin để hỗ trợ phân tích thủ công.\n\n"
             "Chưa có dữ liệu nên không trừ Xu.",
             parse_mode="HTML",
         )
@@ -31531,9 +31567,8 @@ async def cmd_campaign_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not summary.get("has_data"):
         return await update.message.reply_text(
             "📭 <b>Chưa có dữ liệu để xuất báo cáo.</b>\n\n"
-            "Bước 1: <code>/publish_done tiktok https://... chủ đề</code>\n"
-            "Bước 2: <code>/performance_add post_id=1 views=... clicks=... revenue=...</code>\n"
-            "Bước 3: <code>/campaign_report format=txt</code> hoặc <code>/campaign_report format=csv</code>",
+            "Bản hiện tại chưa mở phần khách tự nhập dữ liệu bài đăng. TOAN AAS tập trung tạo Script/Prompt Pack để bạn tự đăng.\n\n"
+            "Bạn có thể dùng <code>/film &lt;chủ đề&gt;</code> để tạo nội dung mới, hoặc gửi số liệu cho admin để tổng hợp thủ công.",
             parse_mode="HTML",
         )
     credits, _, is_vip = get_user(uid, update.effective_user.first_name)
@@ -31563,7 +31598,7 @@ async def cmd_campaign_report(update: Update, context: ContextTypes.DEFAULT_TYPE
             "✅ Đã xuất báo cáo chiến dịch.\n\n"
             f"Chi phí: <b>{cost} Xu</b>\n"
             f"💼 Số dư còn lại: <b>{credits_after} Xu</b>\n\n"
-            "Gợi ý tiếp: <code>/growth_loop</code> để xem rule nhanh hoặc <code>/growth_ai</code> để AI phân tích sâu.",
+            "Gợi ý tiếp: dùng <code>/growth_ai</code> để AI phân tích sâu, hoặc <code>/film</code> để tạo Content Pack mới.",
             parse_mode="HTML",
         )
     except Exception as e:
@@ -35703,143 +35738,143 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("invite",      cmd_invite))
     tg_app.add_handler(CommandHandler("tools",       cmd_tools))
     tg_app.add_handler(CommandHandler("mmo",         cmd_mmo))
-    tg_app.add_handler(CommandHandler("campaign",    cmd_campaign))
-    tg_app.add_handler(CommandHandler("campaign_new", cmd_campaign_new))
-    tg_app.add_handler(CommandHandler("campaigns",   cmd_campaigns))
-    tg_app.add_handler(CommandHandler("campaign_preset", cmd_campaign_preset))
-    tg_app.add_handler(CommandHandler("video_plan",  cmd_video_plan))
-    tg_app.add_handler(CommandHandler("video_job",   cmd_video_job))
-    tg_app.add_handler(CommandHandler("campaign_stats", cmd_campaign_stats))
-    tg_app.add_handler(CommandHandler("channel_add", cmd_channel_add))
-    tg_app.add_handler(CommandHandler("channels",    cmd_channels))
-    tg_app.add_handler(CommandHandler("channel_router", cmd_channel_router))
-    tg_app.add_handler(CommandHandler("channel_publish_set", cmd_channel_publish_set))
-    tg_app.add_handler(CommandHandler("publish_readiness", cmd_publish_readiness))
-    tg_app.add_handler(CommandHandler("publisher_status", cmd_publisher_status))
-    tg_app.add_handler(CommandHandler("publisher_capabilities", cmd_publisher_capabilities))
-    tg_app.add_handler(CommandHandler("platform_adapters", cmd_platform_adapters))
-    tg_app.add_handler(CommandHandler("addlink",     cmd_addlink))
-    tg_app.add_handler(CommandHandler("links",       cmd_links))
-    tg_app.add_handler(CommandHandler("affiliate_add", cmd_affiliate_add))
-    tg_app.add_handler(CommandHandler("affiliate_seed", cmd_affiliate_seed))
-    tg_app.add_handler(CommandHandler("affiliate_import", cmd_affiliate_import))
-    tg_app.add_handler(CommandHandler("affiliates",  cmd_affiliates))
-    tg_app.add_handler(CommandHandler("affiliate_profile", cmd_affiliate_profile))
-    tg_app.add_handler(CommandHandler("affiliate_match", cmd_affiliate_match))
-    tg_app.add_handler(CommandHandler("affiliate_ideas", cmd_affiliate_ideas))
-    tg_app.add_handler(CommandHandler("affiliate_related", cmd_affiliate_related))
-    tg_app.add_handler(CommandHandler("affiliate_bundle", cmd_affiliate_bundle))
-    tg_app.add_handler(CommandHandler("addcal",      cmd_addcal))
-    tg_app.add_handler(CommandHandler("calendar_plan", cmd_calendar_plan))
-    tg_app.add_handler(CommandHandler("calendar",    cmd_calendar))
-    tg_app.add_handler(CommandHandler("operator",    cmd_operator))
-    tg_app.add_handler(CommandHandler("operator_build", cmd_operator_build))
-    tg_app.add_handler(CommandHandler("operator_auto", cmd_operator_auto))
-    tg_app.add_handler(CommandHandler("operator_next", cmd_operator_next))
-    tg_app.add_handler(CommandHandler("operator_dashboard", cmd_operator_dashboard))
-    tg_app.add_handler(CommandHandler("operator_daily", cmd_operator_daily))
-    tg_app.add_handler(CommandHandler("operator_daily_pack", cmd_operator_daily_pack))
-    tg_app.add_handler(CommandHandler("operator_daily_run", cmd_operator_daily_run))
-    tg_app.add_handler(CommandHandler("operator_daily_cycle", cmd_operator_daily_cycle))
-    tg_app.add_handler(CommandHandler("operator_status", cmd_operator_status))
-    tg_app.add_handler(CommandHandler("operator_bootstrap", cmd_operator_bootstrap))
-    tg_app.add_handler(CommandHandler("operator_audit", cmd_operator_audit))
-    tg_app.add_handler(CommandHandler("goal_audit", cmd_goal_audit))
-    tg_app.add_handler(CommandHandler("operator_smoke", cmd_operator_smoke))
-    tg_app.add_handler(CommandHandler("operator_playbook", cmd_operator_playbook))
-    tg_app.add_handler(CommandHandler("operator_director", cmd_operator_director))
-    tg_app.add_handler(CommandHandler("operator_execute", cmd_operator_execute))
-    tg_app.add_handler(CommandHandler("operator_today", cmd_operator_today))
-    tg_app.add_handler(CommandHandler("operator_next_run", cmd_operator_next_run))
-    tg_app.add_handler(CommandHandler("operator_dispatch", cmd_operator_dispatch))
-    tg_app.add_handler(CommandHandler("operator_cycle", cmd_operator_cycle))
-    tg_app.add_handler(CommandHandler("operator_command", cmd_operator_command))
-    tg_app.add_handler(CommandHandler("operator_mission", cmd_operator_mission))
-    tg_app.add_handler(CommandHandler("head_brain", cmd_head_brain))
-    tg_app.add_handler(CommandHandler("head_run", cmd_head_run))
-    tg_app.add_handler(CommandHandler("tao_video", cmd_tao_video))
-    tg_app.add_handler(CommandHandler("boss_video", cmd_tao_video))
-    tg_app.add_handler(CommandHandler("mission_add", cmd_mission_add))
-    tg_app.add_handler(CommandHandler("missions", cmd_missions))
-    tg_app.add_handler(CommandHandler("mission_claim", cmd_mission_claim))
-    tg_app.add_handler(CommandHandler("mission_prompt", cmd_mission_prompt))
-    tg_app.add_handler(CommandHandler("mission_run", cmd_mission_run))
-    tg_app.add_handler(CommandHandler("mission_workorders", cmd_mission_workorders))
-    tg_app.add_handler(CommandHandler("mission_complete", cmd_mission_complete))
-    tg_app.add_handler(CommandHandler("operator_menu", cmd_operator_menu))
-    tg_app.add_handler(CommandHandler("operator_api", cmd_operator_api))
-    tg_app.add_handler(CommandHandler("operator_worker_spec", cmd_operator_worker_spec))
-    tg_app.add_handler(CommandHandler("operator_commander_pack", cmd_operator_commander_pack))
-    tg_app.add_handler(CommandHandler("operator_contract", cmd_operator_contract))
-    tg_app.add_handler(CommandHandler("operator_toolchain", cmd_operator_toolchain))
-    tg_app.add_handler(CommandHandler("operator_tool_readiness", cmd_operator_tool_readiness))
-    tg_app.add_handler(CommandHandler("operator_tool_events", cmd_operator_tool_events))
-    tg_app.add_handler(CommandHandler("operator_n8n_template", cmd_operator_n8n_template))
-    tg_app.add_handler(CommandHandler("operator_n8n_workflow", cmd_operator_n8n_workflow))
-    tg_app.add_handler(CommandHandler("operator_loop", cmd_operator_loop))
-    tg_app.add_handler(CommandHandler("brain", cmd_brain))
-    tg_app.add_handler(CommandHandler("autopilot", cmd_autopilot))
-    tg_app.add_handler(CommandHandler("operator_launch", cmd_operator_launch))
-    tg_app.add_handler(CommandHandler("make_video", cmd_make_video))
-    tg_app.add_handler(CommandHandler("trend_search", cmd_trend_search))
-    tg_app.add_handler(CommandHandler("trend_rank", cmd_trend_rank))
-    tg_app.add_handler(CommandHandler("handoff", cmd_handoff))
-    tg_app.add_handler(CommandHandler("publish_pack", cmd_publish_pack))
-    tg_app.add_handler(CommandHandler("review_gate", cmd_review_gate))
-    tg_app.add_handler(CommandHandler("creative_test", cmd_creative_test))
-    tg_app.add_handler(CommandHandler("creative_variants", cmd_creative_variants))
-    tg_app.add_handler(CommandHandler("creative_select", cmd_creative_select))
-    tg_app.add_handler(CommandHandler("creative_report", cmd_creative_report))
-    tg_app.add_handler(CommandHandler("video_patterns", cmd_video_patterns))
+    tg_app.add_handler(CommandHandler("campaign",    admin_internal_command(cmd_campaign)))
+    tg_app.add_handler(CommandHandler("campaign_new", admin_internal_command(cmd_campaign_new)))
+    tg_app.add_handler(CommandHandler("campaigns",   admin_internal_command(cmd_campaigns)))
+    tg_app.add_handler(CommandHandler("campaign_preset", admin_internal_command(cmd_campaign_preset)))
+    tg_app.add_handler(CommandHandler("video_plan",  admin_internal_command(cmd_video_plan)))
+    tg_app.add_handler(CommandHandler("video_job",   admin_internal_command(cmd_video_job)))
+    tg_app.add_handler(CommandHandler("campaign_stats", admin_internal_command(cmd_campaign_stats)))
+    tg_app.add_handler(CommandHandler("channel_add", admin_internal_command(cmd_channel_add)))
+    tg_app.add_handler(CommandHandler("channels",    admin_internal_command(cmd_channels)))
+    tg_app.add_handler(CommandHandler("channel_router", admin_internal_command(cmd_channel_router)))
+    tg_app.add_handler(CommandHandler("channel_publish_set", admin_internal_command(cmd_channel_publish_set)))
+    tg_app.add_handler(CommandHandler("publish_readiness", admin_internal_command(cmd_publish_readiness)))
+    tg_app.add_handler(CommandHandler("publisher_status", admin_internal_command(cmd_publisher_status)))
+    tg_app.add_handler(CommandHandler("publisher_capabilities", admin_internal_command(cmd_publisher_capabilities)))
+    tg_app.add_handler(CommandHandler("platform_adapters", admin_internal_command(cmd_platform_adapters)))
+    tg_app.add_handler(CommandHandler("addlink",     admin_internal_command(cmd_addlink)))
+    tg_app.add_handler(CommandHandler("links",       admin_internal_command(cmd_links)))
+    tg_app.add_handler(CommandHandler("affiliate_add", admin_internal_command(cmd_affiliate_add)))
+    tg_app.add_handler(CommandHandler("affiliate_seed", admin_internal_command(cmd_affiliate_seed)))
+    tg_app.add_handler(CommandHandler("affiliate_import", admin_internal_command(cmd_affiliate_import)))
+    tg_app.add_handler(CommandHandler("affiliates",  admin_internal_command(cmd_affiliates)))
+    tg_app.add_handler(CommandHandler("affiliate_profile", admin_internal_command(cmd_affiliate_profile)))
+    tg_app.add_handler(CommandHandler("affiliate_match", admin_internal_command(cmd_affiliate_match)))
+    tg_app.add_handler(CommandHandler("affiliate_ideas", admin_internal_command(cmd_affiliate_ideas)))
+    tg_app.add_handler(CommandHandler("affiliate_related", admin_internal_command(cmd_affiliate_related)))
+    tg_app.add_handler(CommandHandler("affiliate_bundle", admin_internal_command(cmd_affiliate_bundle)))
+    tg_app.add_handler(CommandHandler("addcal",      admin_internal_command(cmd_addcal)))
+    tg_app.add_handler(CommandHandler("calendar_plan", admin_internal_command(cmd_calendar_plan)))
+    tg_app.add_handler(CommandHandler("calendar",    admin_internal_command(cmd_calendar)))
+    tg_app.add_handler(CommandHandler("operator",    admin_internal_command(cmd_operator)))
+    tg_app.add_handler(CommandHandler("operator_build", admin_internal_command(cmd_operator_build)))
+    tg_app.add_handler(CommandHandler("operator_auto", admin_internal_command(cmd_operator_auto)))
+    tg_app.add_handler(CommandHandler("operator_next", admin_internal_command(cmd_operator_next)))
+    tg_app.add_handler(CommandHandler("operator_dashboard", admin_internal_command(cmd_operator_dashboard)))
+    tg_app.add_handler(CommandHandler("operator_daily", admin_internal_command(cmd_operator_daily)))
+    tg_app.add_handler(CommandHandler("operator_daily_pack", admin_internal_command(cmd_operator_daily_pack)))
+    tg_app.add_handler(CommandHandler("operator_daily_run", admin_internal_command(cmd_operator_daily_run)))
+    tg_app.add_handler(CommandHandler("operator_daily_cycle", admin_internal_command(cmd_operator_daily_cycle)))
+    tg_app.add_handler(CommandHandler("operator_status", admin_internal_command(cmd_operator_status)))
+    tg_app.add_handler(CommandHandler("operator_bootstrap", admin_internal_command(cmd_operator_bootstrap)))
+    tg_app.add_handler(CommandHandler("operator_audit", admin_internal_command(cmd_operator_audit)))
+    tg_app.add_handler(CommandHandler("goal_audit", admin_internal_command(cmd_goal_audit)))
+    tg_app.add_handler(CommandHandler("operator_smoke", admin_internal_command(cmd_operator_smoke)))
+    tg_app.add_handler(CommandHandler("operator_playbook", admin_internal_command(cmd_operator_playbook)))
+    tg_app.add_handler(CommandHandler("operator_director", admin_internal_command(cmd_operator_director)))
+    tg_app.add_handler(CommandHandler("operator_execute", admin_internal_command(cmd_operator_execute)))
+    tg_app.add_handler(CommandHandler("operator_today", admin_internal_command(cmd_operator_today)))
+    tg_app.add_handler(CommandHandler("operator_next_run", admin_internal_command(cmd_operator_next_run)))
+    tg_app.add_handler(CommandHandler("operator_dispatch", admin_internal_command(cmd_operator_dispatch)))
+    tg_app.add_handler(CommandHandler("operator_cycle", admin_internal_command(cmd_operator_cycle)))
+    tg_app.add_handler(CommandHandler("operator_command", admin_internal_command(cmd_operator_command)))
+    tg_app.add_handler(CommandHandler("operator_mission", admin_internal_command(cmd_operator_mission)))
+    tg_app.add_handler(CommandHandler("head_brain", admin_internal_command(cmd_head_brain)))
+    tg_app.add_handler(CommandHandler("head_run", admin_internal_command(cmd_head_run)))
+    tg_app.add_handler(CommandHandler("tao_video", admin_internal_command(cmd_tao_video)))
+    tg_app.add_handler(CommandHandler("boss_video", admin_internal_command(cmd_tao_video)))
+    tg_app.add_handler(CommandHandler("mission_add", admin_internal_command(cmd_mission_add)))
+    tg_app.add_handler(CommandHandler("missions", admin_internal_command(cmd_missions)))
+    tg_app.add_handler(CommandHandler("mission_claim", admin_internal_command(cmd_mission_claim)))
+    tg_app.add_handler(CommandHandler("mission_prompt", admin_internal_command(cmd_mission_prompt)))
+    tg_app.add_handler(CommandHandler("mission_run", admin_internal_command(cmd_mission_run)))
+    tg_app.add_handler(CommandHandler("mission_workorders", admin_internal_command(cmd_mission_workorders)))
+    tg_app.add_handler(CommandHandler("mission_complete", admin_internal_command(cmd_mission_complete)))
+    tg_app.add_handler(CommandHandler("operator_menu", admin_internal_command(cmd_operator_menu)))
+    tg_app.add_handler(CommandHandler("operator_api", admin_internal_command(cmd_operator_api)))
+    tg_app.add_handler(CommandHandler("operator_worker_spec", admin_internal_command(cmd_operator_worker_spec)))
+    tg_app.add_handler(CommandHandler("operator_commander_pack", admin_internal_command(cmd_operator_commander_pack)))
+    tg_app.add_handler(CommandHandler("operator_contract", admin_internal_command(cmd_operator_contract)))
+    tg_app.add_handler(CommandHandler("operator_toolchain", admin_internal_command(cmd_operator_toolchain)))
+    tg_app.add_handler(CommandHandler("operator_tool_readiness", admin_internal_command(cmd_operator_tool_readiness)))
+    tg_app.add_handler(CommandHandler("operator_tool_events", admin_internal_command(cmd_operator_tool_events)))
+    tg_app.add_handler(CommandHandler("operator_n8n_template", admin_internal_command(cmd_operator_n8n_template)))
+    tg_app.add_handler(CommandHandler("operator_n8n_workflow", admin_internal_command(cmd_operator_n8n_workflow)))
+    tg_app.add_handler(CommandHandler("operator_loop", admin_internal_command(cmd_operator_loop)))
+    tg_app.add_handler(CommandHandler("brain", admin_internal_command(cmd_brain)))
+    tg_app.add_handler(CommandHandler("autopilot", admin_internal_command(cmd_autopilot)))
+    tg_app.add_handler(CommandHandler("operator_launch", admin_internal_command(cmd_operator_launch)))
+    tg_app.add_handler(CommandHandler("make_video", admin_internal_command(cmd_make_video)))
+    tg_app.add_handler(CommandHandler("trend_search", admin_internal_command(cmd_trend_search)))
+    tg_app.add_handler(CommandHandler("trend_rank", admin_internal_command(cmd_trend_rank)))
+    tg_app.add_handler(CommandHandler("handoff", admin_internal_command(cmd_handoff)))
+    tg_app.add_handler(CommandHandler("publish_pack", admin_internal_command(cmd_publish_pack)))
+    tg_app.add_handler(CommandHandler("review_gate", admin_internal_command(cmd_review_gate)))
+    tg_app.add_handler(CommandHandler("creative_test", admin_internal_command(cmd_creative_test)))
+    tg_app.add_handler(CommandHandler("creative_variants", admin_internal_command(cmd_creative_variants)))
+    tg_app.add_handler(CommandHandler("creative_select", admin_internal_command(cmd_creative_select)))
+    tg_app.add_handler(CommandHandler("creative_report", admin_internal_command(cmd_creative_report)))
+    tg_app.add_handler(CommandHandler("video_patterns", admin_internal_command(cmd_video_patterns)))
     tg_app.add_handler(CommandHandler("film", cmd_film))
     tg_app.add_handler(CommandHandler("video_script", cmd_film))
-    tg_app.add_handler(CommandHandler("film_blueprint", cmd_film_blueprint))
-    tg_app.add_handler(CommandHandler("film_project_pack", cmd_film_project_pack))
-    tg_app.add_handler(CommandHandler("film_series", cmd_film_series))
-    tg_app.add_handler(CommandHandler("film_review", cmd_film_review))
-    tg_app.add_handler(CommandHandler("film_rewrite", cmd_film_rewrite))
-    tg_app.add_handler(CommandHandler("film_approve", cmd_film_approve))
-    tg_app.add_handler(CommandHandler("reference_pack", cmd_reference_pack))
-    tg_app.add_handler(CommandHandler("reference_videos", cmd_reference_videos))
-    tg_app.add_handler(CommandHandler("reference_add", cmd_reference_add))
-    tg_app.add_handler(CommandHandler("viral_remix", cmd_viral_remix))
-    tg_app.add_handler(CommandHandler("reference_analyze", cmd_reference_analyze))
-    tg_app.add_handler(CommandHandler("reference_build", cmd_reference_build))
-    tg_app.add_handler(CommandHandler("reference_scan", cmd_reference_scan))
-    tg_app.add_handler(CommandHandler("manifest", cmd_manifest))
-    tg_app.add_handler(CommandHandler("manifests", cmd_manifests))
-    tg_app.add_handler(CommandHandler("manifest_handoff", cmd_manifest_handoff))
-    tg_app.add_handler(CommandHandler("task_plan", cmd_task_plan))
-    tg_app.add_handler(CommandHandler("tasks", cmd_tasks))
-    tg_app.add_handler(CommandHandler("next_task", cmd_next_task))
-    tg_app.add_handler(CommandHandler("worker_next", cmd_worker_next))
-    tg_app.add_handler(CommandHandler("scene_pack", cmd_scene_pack))
-    tg_app.add_handler(CommandHandler("worker_intake", cmd_worker_intake))
-    tg_app.add_handler(CommandHandler("worker_autorun", cmd_worker_autorun))
-    tg_app.add_handler(CommandHandler("worker_pack", cmd_worker_pack))
-    tg_app.add_handler(CommandHandler("video_brief", cmd_video_brief))
-    tg_app.add_handler(CommandHandler("video_work_orders", cmd_video_work_orders))
-    tg_app.add_handler(CommandHandler("task_prompt", cmd_task_prompt))
-    tg_app.add_handler(CommandHandler("task_handoff", cmd_task_handoff))
-    tg_app.add_handler(CommandHandler("output_acceptance", cmd_output_acceptance))
-    tg_app.add_handler(CommandHandler("storyboard_crop", cmd_storyboard_crop))
-    tg_app.add_handler(CommandHandler("storyboard_upload_help", cmd_storyboard_upload_help))
-    tg_app.add_handler(CommandHandler("compose_video", cmd_compose_video))
-    tg_app.add_handler(CommandHandler("task_set", cmd_task_set))
-    tg_app.add_handler(CommandHandler("post_publish", cmd_post_publish))
-    tg_app.add_handler(CommandHandler("distribution_pack", cmd_distribution_pack))
-    tg_app.add_handler(CommandHandler("comment_pack", cmd_comment_pack))
-    tg_app.add_handler(CommandHandler("pipeline_pack", cmd_pipeline_pack))
-    tg_app.add_handler(CommandHandler("queue_publish", cmd_queue_publish))
-    tg_app.add_handler(CommandHandler("approve_publish", cmd_approve_publish))
-    tg_app.add_handler(CommandHandler("approve_ready", cmd_approve_ready))
-    tg_app.add_handler(CommandHandler("publish_queue", cmd_publish_queue))
-    tg_app.add_handler(CommandHandler("publish_cockpit", cmd_publish_cockpit))
-    tg_app.add_handler(CommandHandler("publisher_handoff", cmd_publisher_handoff))
-    tg_app.add_handler(CommandHandler("publisher_run", cmd_publisher_run))
-    tg_app.add_handler(CommandHandler("publisher_auto_check", cmd_publisher_auto_check))
-    tg_app.add_handler(CommandHandler("publisher_auto", cmd_publisher_auto))
-    tg_app.add_handler(CommandHandler("publish_queue_set", cmd_publish_queue_set))
+    tg_app.add_handler(CommandHandler("film_blueprint", admin_internal_command(cmd_film_blueprint)))
+    tg_app.add_handler(CommandHandler("film_project_pack", admin_internal_command(cmd_film_project_pack)))
+    tg_app.add_handler(CommandHandler("film_series", admin_internal_command(cmd_film_series)))
+    tg_app.add_handler(CommandHandler("film_review", admin_internal_command(cmd_film_review)))
+    tg_app.add_handler(CommandHandler("film_rewrite", admin_internal_command(cmd_film_rewrite)))
+    tg_app.add_handler(CommandHandler("film_approve", admin_internal_command(cmd_film_approve)))
+    tg_app.add_handler(CommandHandler("reference_pack", admin_internal_command(cmd_reference_pack)))
+    tg_app.add_handler(CommandHandler("reference_videos", admin_internal_command(cmd_reference_videos)))
+    tg_app.add_handler(CommandHandler("reference_add", admin_internal_command(cmd_reference_add)))
+    tg_app.add_handler(CommandHandler("viral_remix", admin_internal_command(cmd_viral_remix)))
+    tg_app.add_handler(CommandHandler("reference_analyze", admin_internal_command(cmd_reference_analyze)))
+    tg_app.add_handler(CommandHandler("reference_build", admin_internal_command(cmd_reference_build)))
+    tg_app.add_handler(CommandHandler("reference_scan", admin_internal_command(cmd_reference_scan)))
+    tg_app.add_handler(CommandHandler("manifest", admin_internal_command(cmd_manifest)))
+    tg_app.add_handler(CommandHandler("manifests", admin_internal_command(cmd_manifests)))
+    tg_app.add_handler(CommandHandler("manifest_handoff", admin_internal_command(cmd_manifest_handoff)))
+    tg_app.add_handler(CommandHandler("task_plan", admin_internal_command(cmd_task_plan)))
+    tg_app.add_handler(CommandHandler("tasks", admin_internal_command(cmd_tasks)))
+    tg_app.add_handler(CommandHandler("next_task", admin_internal_command(cmd_next_task)))
+    tg_app.add_handler(CommandHandler("worker_next", admin_internal_command(cmd_worker_next)))
+    tg_app.add_handler(CommandHandler("scene_pack", admin_internal_command(cmd_scene_pack)))
+    tg_app.add_handler(CommandHandler("worker_intake", admin_internal_command(cmd_worker_intake)))
+    tg_app.add_handler(CommandHandler("worker_autorun", admin_internal_command(cmd_worker_autorun)))
+    tg_app.add_handler(CommandHandler("worker_pack", admin_internal_command(cmd_worker_pack)))
+    tg_app.add_handler(CommandHandler("video_brief", admin_internal_command(cmd_video_brief)))
+    tg_app.add_handler(CommandHandler("video_work_orders", admin_internal_command(cmd_video_work_orders)))
+    tg_app.add_handler(CommandHandler("task_prompt", admin_internal_command(cmd_task_prompt)))
+    tg_app.add_handler(CommandHandler("task_handoff", admin_internal_command(cmd_task_handoff)))
+    tg_app.add_handler(CommandHandler("output_acceptance", admin_internal_command(cmd_output_acceptance)))
+    tg_app.add_handler(CommandHandler("storyboard_crop", admin_internal_command(cmd_storyboard_crop)))
+    tg_app.add_handler(CommandHandler("storyboard_upload_help", admin_internal_command(cmd_storyboard_upload_help)))
+    tg_app.add_handler(CommandHandler("compose_video", admin_internal_command(cmd_compose_video)))
+    tg_app.add_handler(CommandHandler("task_set", admin_internal_command(cmd_task_set)))
+    tg_app.add_handler(CommandHandler("post_publish", admin_internal_command(cmd_post_publish)))
+    tg_app.add_handler(CommandHandler("distribution_pack", admin_internal_command(cmd_distribution_pack)))
+    tg_app.add_handler(CommandHandler("comment_pack", admin_internal_command(cmd_comment_pack)))
+    tg_app.add_handler(CommandHandler("pipeline_pack", admin_internal_command(cmd_pipeline_pack)))
+    tg_app.add_handler(CommandHandler("queue_publish", admin_internal_command(cmd_queue_publish)))
+    tg_app.add_handler(CommandHandler("approve_publish", admin_internal_command(cmd_approve_publish)))
+    tg_app.add_handler(CommandHandler("approve_ready", admin_internal_command(cmd_approve_ready)))
+    tg_app.add_handler(CommandHandler("publish_queue", admin_internal_command(cmd_publish_queue)))
+    tg_app.add_handler(CommandHandler("publish_cockpit", admin_internal_command(cmd_publish_cockpit)))
+    tg_app.add_handler(CommandHandler("publisher_handoff", admin_internal_command(cmd_publisher_handoff)))
+    tg_app.add_handler(CommandHandler("publisher_run", admin_internal_command(cmd_publisher_run)))
+    tg_app.add_handler(CommandHandler("publisher_auto_check", admin_internal_command(cmd_publisher_auto_check)))
+    tg_app.add_handler(CommandHandler("publisher_auto", admin_internal_command(cmd_publisher_auto)))
+    tg_app.add_handler(CommandHandler("publish_queue_set", admin_internal_command(cmd_publish_queue_set)))
     tg_app.add_handler(CommandHandler("asset_add", cmd_asset_add))
     tg_app.add_handler(CommandHandler("assets", cmd_assets))
     tg_app.add_handler(CommandHandler("asset_send", cmd_asset_send))
@@ -35847,27 +35882,27 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("job_report", cmd_job_report))
     tg_app.add_handler(CommandHandler("job_context", cmd_job_context))
     tg_app.add_handler(CommandHandler("job_ready", cmd_job_ready))
-    tg_app.add_handler(CommandHandler("mark_published", cmd_mark_published))
-    tg_app.add_handler(CommandHandler("publish_done", cmd_publish_done))
-    tg_app.add_handler(CommandHandler("performance_add", cmd_performance_add))
-    tg_app.add_handler(CommandHandler("performance_report", cmd_performance_report))
+    tg_app.add_handler(CommandHandler("mark_published", admin_internal_command(cmd_mark_published)))
+    tg_app.add_handler(CommandHandler("publish_done", admin_internal_command(cmd_publish_done)))
+    tg_app.add_handler(CommandHandler("performance_add", admin_internal_command(cmd_performance_add)))
+    tg_app.add_handler(CommandHandler("performance_report", admin_internal_command(cmd_performance_report)))
     tg_app.add_handler(CommandHandler("growth_ai", cmd_growth_ai))
     tg_app.add_handler(CommandHandler("campaign_report", cmd_campaign_report))
     tg_app.add_handler(CommandHandler("export_report", cmd_campaign_report))
-    tg_app.add_handler(CommandHandler("posts", cmd_posts))
-    tg_app.add_handler(CommandHandler("performance", cmd_performance))
-    tg_app.add_handler(CommandHandler("money_pack", cmd_money_pack))
-    tg_app.add_handler(CommandHandler("affiliate_cockpit", cmd_affiliate_cockpit))
-    tg_app.add_handler(CommandHandler("revenue_destinations", cmd_revenue_destinations))
-    tg_app.add_handler(CommandHandler("tracking_report", cmd_tracking_report))
-    tg_app.add_handler(CommandHandler("postback_setup", cmd_postback_setup))
-    tg_app.add_handler(CommandHandler("scale_plan", cmd_scale_plan))
-    tg_app.add_handler(CommandHandler("scale_execute", cmd_scale_execute))
-    tg_app.add_handler(CommandHandler("growth_loop", cmd_growth_loop))
-    tg_app.add_handler(CommandHandler("affiliate_report", cmd_affiliate_report))
-    tg_app.add_handler(CommandHandler("affiliate_decisions", cmd_affiliate_decisions))
-    tg_app.add_handler(CommandHandler("affiliate_scale", cmd_affiliate_scale))
-    tg_app.add_handler(CommandHandler("growth", cmd_growth))
+    tg_app.add_handler(CommandHandler("posts", admin_internal_command(cmd_posts)))
+    tg_app.add_handler(CommandHandler("performance", admin_internal_command(cmd_performance)))
+    tg_app.add_handler(CommandHandler("money_pack", admin_internal_command(cmd_money_pack)))
+    tg_app.add_handler(CommandHandler("affiliate_cockpit", admin_internal_command(cmd_affiliate_cockpit)))
+    tg_app.add_handler(CommandHandler("revenue_destinations", admin_internal_command(cmd_revenue_destinations)))
+    tg_app.add_handler(CommandHandler("tracking_report", admin_internal_command(cmd_tracking_report)))
+    tg_app.add_handler(CommandHandler("postback_setup", admin_internal_command(cmd_postback_setup)))
+    tg_app.add_handler(CommandHandler("scale_plan", admin_internal_command(cmd_scale_plan)))
+    tg_app.add_handler(CommandHandler("scale_execute", admin_internal_command(cmd_scale_execute)))
+    tg_app.add_handler(CommandHandler("growth_loop", admin_internal_command(cmd_growth_loop)))
+    tg_app.add_handler(CommandHandler("affiliate_report", admin_internal_command(cmd_affiliate_report)))
+    tg_app.add_handler(CommandHandler("affiliate_decisions", admin_internal_command(cmd_affiliate_decisions)))
+    tg_app.add_handler(CommandHandler("affiliate_scale", admin_internal_command(cmd_affiliate_scale)))
+    tg_app.add_handler(CommandHandler("growth", admin_internal_command(cmd_growth)))
     tg_app.add_handler(CommandHandler("produce",     cmd_produce))
     tg_app.add_handler(CommandHandler("pipeline",    cmd_pipeline))
     tg_app.add_handler(CommandHandler("pipeline_set", cmd_pipeline_set))

@@ -15,7 +15,7 @@
 | File | Match | Used by route? | Action |
 | --- | --- | --- | --- |
 | `index.html` | Previous public landing content needed alignment with current TOAN AAS V15.2 bot | Yes, `/landing` serves this file | Replaced public landing text/UI |
-| `README.md` | Legacy `TOAN DAAS Bot` heading | No public landing route | Not changed in this task |
+| `README.md` | `TOAN AAS Bot` heading | No public landing route | Updated to match brand |
 | `docs/*` | Some historical references may exist | No public landing route | Not changed unless status docs needed |
 
 ## Served route
@@ -49,8 +49,8 @@ Checked on 2026-06-02 before adding banner:
 
 ## Telegram CTA Check
 
-- Website CTA uses `https://t.me/Httdhtoan`.
-- `BOT_USERNAME` default in `bot.py` and `.env.example` is `Httdhtoan`.
+- Website CTA uses `https://t.me/toanaasbot`.
+- `BOT_USERNAME` default in `bot.py` and `.env.example` is `toanaasbot`.
 - CTA copy now tells users to open Telegram bot and use `/naptien` to top up Xu.
 
 ## Decision
