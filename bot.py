@@ -342,6 +342,8 @@ BACKUP_MAX_BYTES  = 45 * 1024 * 1024
 TRIAL_CREDITS     = 200
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
+GUIDE_DOCX_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx"
+GUIDE_MD_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.md"
 LAUNCH_BONUS_BY_AMOUNT = {
     100000: 50,
     200000: 150,
@@ -628,6 +630,17 @@ def init_db():
         created_at TEXT,
         redeemed_at TEXT,
         note TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS gift_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        assigned_by TEXT,
+        status TEXT DEFAULT 'assigned',
+        assigned_at TEXT,
+        redeemed_at TEXT,
+        note TEXT,
+        UNIQUE(code, user_id)
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS user_promo_state (
         user_id TEXT PRIMARY KEY,
@@ -999,6 +1012,8 @@ def init_db():
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_launch_bonus_user_package ON launch_bonus_redemptions(user_id, package_amount_vnd)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_redemptions_code ON gift_redemptions(code)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_redemptions_user ON gift_redemptions(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_gift_assignments_user ON gift_assignments(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_gift_assignments_code ON gift_assignments(code)")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -1039,6 +1054,7 @@ def init_db():
         ("starts_at", "TEXT"),
         ("ends_at", "TEXT"),
         ("created_by", "TEXT"),
+        ("requires_assignment", "INTEGER DEFAULT 0"),
     ]:
         try:
             c.execute(f"ALTER TABLE promotion_codes ADD COLUMN {col} {col_type}")
@@ -1054,6 +1070,18 @@ def init_db():
             c.execute(f"ALTER TABLE promotion_redemptions ADD COLUMN {col} {col_type}")
         except Exception:
             pass
+    c.execute(
+        """UPDATE promotion_codes
+        SET requires_assignment=1
+        WHERE promo_type='gift_xu'
+          AND UPPER(code) LIKE 'BETA%'"""
+    )
+    c.execute(
+        """UPDATE promotion_codes
+        SET requires_assignment=0
+        WHERE promo_type='gift_xu'
+          AND UPPER(code) NOT LIKE 'BETA%'"""
+    )
     for col, col_type in [
         ("order_code", "TEXT"),
         ("amount", "INTEGER DEFAULT 0"),
@@ -1782,6 +1810,17 @@ def promo_public_label(promo: dict) -> str:
 def is_gift_promo(promo: dict) -> bool:
     return str((promo or {}).get("promo_type") or "").lower() == "gift_xu"
 
+def is_beta_gift_code(code: str) -> bool:
+    return normalize_promo_code(code).startswith("BETA")
+
+def gift_requires_assignment(promo: dict) -> bool:
+    if not is_gift_promo(promo):
+        return False
+    if is_beta_gift_code(promo.get("code") or ""):
+        return True
+    value = promo.get("requires_assignment")
+    return int(value or 0) == 1
+
 def promo_min_amount(promo: dict) -> int:
     return int(promo.get("min_amount_vnd") or promo.get("min_amount") or 0)
 
@@ -1805,7 +1844,7 @@ def get_promo_code_dict(conn, code: str) -> dict:
     c.execute(
         """SELECT code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note,
                   name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count,
-                  per_user_limit, starts_at, ends_at, created_at, updated_at
+                  per_user_limit, starts_at, ends_at, created_at, updated_at, requires_assignment
         FROM promotion_codes WHERE code=?""",
         (normalize_promo_code(code),),
     )
@@ -1815,7 +1854,7 @@ def get_promo_code_dict(conn, code: str) -> dict:
     keys = [
         "code", "bonus_xu", "discount_percent", "max_uses", "used_count", "min_amount", "status", "note",
         "name", "promo_type", "value", "min_amount_vnd", "max_bonus_xu", "usage_limit", "usage_count",
-        "per_user_limit", "starts_at", "ends_at", "created_at", "updated_at",
+        "per_user_limit", "starts_at", "ends_at", "created_at", "updated_at", "requires_assignment",
     ]
     promo = dict(zip(keys, row))
     if not promo.get("promo_type"):
@@ -1897,7 +1936,7 @@ DEFAULT_BETA_GIFT_CODES = [
     ("BETA1000", 1000, 20, 1, "Beta gift +1000 Xu"),
 ]
 
-def create_gift_code_record(conn, code: str, xu: int, usage_limit=1, per_user_limit=1, note="", created_by="") -> tuple[bool, str]:
+def create_gift_code_record(conn, code: str, xu: int, usage_limit=1, per_user_limit=1, note="", created_by="", requires_assignment=None) -> tuple[bool, str]:
     norm_code = normalize_promo_code(code)
     xu = int(xu or 0)
     if not norm_code:
@@ -1906,14 +1945,21 @@ def create_gift_code_record(conn, code: str, xu: int, usage_limit=1, per_user_li
         return False, "invalid_xu"
     c = conn.cursor()
     c.execute("SELECT promo_type FROM promotion_codes WHERE code=?", (norm_code,))
-    if c.fetchone():
+    existing = c.fetchone()
+    assignment_required = 1 if (is_beta_gift_code(norm_code) if requires_assignment is None else bool(requires_assignment)) else 0
+    if existing:
+        if is_beta_gift_code(norm_code):
+            c.execute(
+                "UPDATE promotion_codes SET requires_assignment=1, updated_at=? WHERE code=? AND promo_type='gift_xu'",
+                (now_text(), norm_code),
+            )
         return False, "exists"
     now = now_text()
     c.execute(
         """INSERT INTO promotion_codes
         (code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note, created_at, updated_at,
-         name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count, per_user_limit, created_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count, per_user_limit, created_by, requires_assignment)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             norm_code,
             xu,
@@ -1934,6 +1980,7 @@ def create_gift_code_record(conn, code: str, xu: int, usage_limit=1, per_user_li
             0,
             max(1, int(per_user_limit or 1)),
             str(created_by or ADMIN_ID),
+            assignment_required,
         ),
     )
     return True, "created"
@@ -1945,7 +1992,16 @@ def seed_beta_gift_codes(conn=None, created_by="") -> dict:
     seeded = {}
     try:
         for code, xu, limit, per_user, note in DEFAULT_BETA_GIFT_CODES:
-            ok, status = create_gift_code_record(conn, code, xu, usage_limit=limit, per_user_limit=per_user, note=note, created_by=created_by or ADMIN_ID)
+            ok, status = create_gift_code_record(
+                conn,
+                code,
+                xu,
+                usage_limit=limit,
+                per_user_limit=per_user,
+                note=note,
+                created_by=created_by or ADMIN_ID,
+                requires_assignment=True,
+            )
             seeded[code] = {"ok": ok, "status": status, "xu": xu, "limit": limit, "per_user": per_user}
         if own_conn:
             conn.commit()
@@ -1984,6 +2040,45 @@ def count_gift_usage(conn, code: str) -> int:
     )
     return int((c.fetchone() or [0])[0] or 0)
 
+def get_gift_assignment(conn, user_id, code: str) -> dict:
+    c = conn.cursor()
+    c.execute(
+        """SELECT id, code, user_id, assigned_by, status, assigned_at, redeemed_at, note
+        FROM gift_assignments WHERE code=? AND user_id=? LIMIT 1""",
+        (normalize_promo_code(code), str(user_id)),
+    )
+    row = c.fetchone()
+    if not row:
+        return {}
+    keys = ["id", "code", "user_id", "assigned_by", "status", "assigned_at", "redeemed_at", "note"]
+    return dict(zip(keys, row))
+
+def upsert_gift_assignment(conn, code: str, user_id, assigned_by, status="assigned", note="") -> dict:
+    norm_code = normalize_promo_code(code)
+    now = now_text()
+    conn.execute(
+        """INSERT INTO gift_assignments (code, user_id, assigned_by, status, assigned_at, note)
+        VALUES (?,?,?,?,?,?)
+        ON CONFLICT(code, user_id) DO UPDATE SET
+            assigned_by=excluded.assigned_by,
+            status=CASE WHEN gift_assignments.status='redeemed' THEN gift_assignments.status ELSE excluded.status END,
+            assigned_at=COALESCE(gift_assignments.assigned_at, excluded.assigned_at),
+            note=excluded.note""",
+        (norm_code, str(user_id), str(assigned_by or ""), status, now, str(note or "")),
+    )
+    return get_gift_assignment(conn, user_id, norm_code)
+
+def gift_needs_assignment_message(user_id, code: str) -> str:
+    safe_code = html.escape(normalize_promo_code(code) or str(code or "").strip().upper())
+    return (
+        "🎁 <b>Mã quà tặng cần admin kích hoạt</b>\n\n"
+        f"Mã <code>{safe_code}</code> chỉ áp dụng cho tài khoản đã được admin cấp quyền.\n"
+        "Vui lòng gửi ID Telegram của bạn cho admin/hỗ trợ để được kiểm tra.\n\n"
+        f"ID của bạn: <code>{html.escape(str(user_id))}</code>\n"
+        "Lệnh xem ID: <code>/myid</code>\n\n"
+        "Mã quà tặng chỉ dùng trong sự kiện đặc biệt, chương trình test hoặc khi admin hỗ trợ riêng."
+    )
+
 def validate_gift_code(user_id, code: str, conn=None) -> tuple[bool, dict, str]:
     norm_code = normalize_promo_code(code)
     if not norm_code:
@@ -2015,12 +2110,22 @@ def validate_gift_code(user_id, code: str, conn=None) -> tuple[bool, dict, str]:
         per_user_limit = max(1, int(promo.get("per_user_limit") or 1))
         if count_user_gift_usage(conn, user_id, norm_code) >= per_user_limit:
             return False, promo, "already_applied"
+        if gift_requires_assignment(promo):
+            assignment = get_gift_assignment(conn, user_id, norm_code)
+            if not assignment:
+                return False, promo, "assignment_required"
+            assign_status = str(assignment.get("status") or "").lower()
+            if assign_status == "redeemed":
+                return False, promo, "already_applied"
+            if assign_status not in {"assigned", "approved"}:
+                return False, promo, "assignment_inactive"
+            promo["assignment_id"] = assignment.get("id")
         return True, promo, "ok"
     finally:
         if own_conn:
             conn.close()
 
-def redeem_gift_code(user_id, code: str) -> tuple[bool, str, dict]:
+def redeem_gift_code(user_id, code: str, actor_id=None, actor_role: str = "user") -> tuple[bool, str, dict]:
     get_user(user_id)
     conn = db_connect()
     c = conn.cursor()
@@ -2049,16 +2154,22 @@ def redeem_gift_code(user_id, code: str) -> tuple[bool, str, dict]:
             WHERE code=?""",
             (now, norm_code),
         )
+        c.execute(
+            """UPDATE gift_assignments
+            SET status='redeemed', redeemed_at=?
+            WHERE code=? AND user_id=? AND status IN ('assigned','approved')""",
+            (now, norm_code, str(user_id)),
+        )
         record_credit_event(conn, user_id, xu, "gift_code", norm_code, note)
         record_audit(
             conn,
-            user_id,
-            "user",
-            "gift.redeemed",
+            actor_id or user_id,
+            actor_role or "user",
+            "gift.admin_grant" if str(actor_role or "").lower() == "admin" else "gift.redeemed",
             "promotion_code",
             norm_code,
             before=None,
-            after={"user_id": str(user_id), "xu": xu},
+            after={"user_id": str(user_id), "xu": xu, "actor_id": str(actor_id or user_id)},
             note=note,
         )
         emit_event(
@@ -2076,6 +2187,71 @@ def redeem_gift_code(user_id, code: str) -> tuple[bool, str, dict]:
         raise
     finally:
         conn.close()
+
+def grant_gift_code_to_user(admin_id, target_user_id, code: str) -> tuple[bool, str, dict]:
+    norm_code = normalize_promo_code(code)
+    if not norm_code:
+        return False, "missing_code", {"code": ""}
+    get_user(target_user_id)
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute("BEGIN IMMEDIATE")
+        promo = get_promo_code_dict(conn, norm_code)
+        if not promo:
+            conn.rollback()
+            return False, "not_found", {"code": norm_code}
+        if not is_gift_promo(promo):
+            conn.rollback()
+            return False, "not_gift", promo
+        status = str(promo.get("status") or "").lower()
+        if status != "active":
+            conn.rollback()
+            return False, "inactive", promo
+        value = int(promo.get("value") or promo.get("bonus_xu") or 0)
+        if value <= 0:
+            conn.rollback()
+            return False, "invalid_value", promo
+        limit = promo_usage_limit(promo)
+        total_used = max(promo_usage_count(promo), count_gift_usage(conn, norm_code))
+        if limit > 0 and total_used >= limit:
+            conn.rollback()
+            return False, "sold_out", promo
+        per_user_limit = max(1, int(promo.get("per_user_limit") or 1))
+        if count_user_gift_usage(conn, target_user_id, norm_code) >= per_user_limit:
+            conn.rollback()
+            return False, "already_applied", promo
+        if is_beta_gift_code(norm_code):
+            conn.execute(
+                "UPDATE promotion_codes SET requires_assignment=1, updated_at=? WHERE code=? AND promo_type='gift_xu'",
+                (now_text(), norm_code),
+            )
+        assignment = upsert_gift_assignment(
+            conn,
+            norm_code,
+            target_user_id,
+            admin_id,
+            status="assigned",
+            note=f"Admin {admin_id} assigned gift code",
+        )
+        record_audit(
+            conn,
+            admin_id,
+            "admin",
+            "gift.assigned",
+            "promotion_code",
+            norm_code,
+            before=None,
+            after={"user_id": str(target_user_id), "assignment_id": assignment.get("id")},
+            note="Admin assigned gift before redemption",
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return redeem_gift_code(target_user_id, norm_code, actor_id=admin_id, actor_role="admin")
 
 def promo_topup_sequence_allowed(conn, user_id, code: str, after_paid=False) -> tuple[bool, str]:
     paid_count = user_paid_payos_count(conn, user_id)
@@ -21354,6 +21530,12 @@ CUSTOMER_GUIDE_LOOKUP = {key: (idx + 1, title, body) for idx, (key, title, body)
 
 def guide_keyboard() -> InlineKeyboardMarkup:
     rows = []
+    public_base = (PUBLIC_BASE_URL or "").strip().rstrip("/")
+    if public_base:
+        rows.append([
+            InlineKeyboardButton("📄 Tải bản Word", url=f"{public_base}/download/huong-dan-toan-aas.docx"),
+            InlineKeyboardButton("📝 Tải bản Markdown", url=f"{public_base}/download/huong-dan-toan-aas.md"),
+        ])
     row = []
     for idx, (key, title, _body) in enumerate(CUSTOMER_GUIDE_SECTIONS, start=1):
         row.append(InlineKeyboardButton(str(idx), callback_data=f"menu|guide_{key}"))
@@ -21370,6 +21552,8 @@ def guide_index_text() -> str:
         "📘 <b>HƯỚNG DẪN SỬ DỤNG TOAN AAS</b>",
         "",
         "Bot tạo nội dung, script, prompt, caption, hashtag, CTA, voice/media pack để bạn tự đăng lên Facebook, TikTok, YouTube.",
+        "",
+        "Bạn có thể bấm nút bên dưới để tải bản Word/Markdown, hoặc mở từng phần ngay trong Telegram.",
         "",
         "<b>Mục lục:</b>",
     ]
@@ -21794,6 +21978,32 @@ async def cmd_huongdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         reply_markup=guide_keyboard(),
     )
+    if section or PUBLIC_BASE_URL:
+        return
+    guide_files = [
+        (GUIDE_DOCX_FILE, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        (GUIDE_MD_FILE, "text/markdown"),
+    ]
+    sent_any = False
+    for filename, _mime in guide_files:
+        path = os.path.join(os.path.dirname(__file__), filename)
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=f,
+                    filename=filename,
+                    caption=f"📘 {filename}",
+                )
+            sent_any = True
+        except Exception as e:
+            logger.warning(f"Cannot send guide document {filename}: {e}")
+    if not sent_any:
+        await update.message.reply_text(
+            "⚠️ Chưa có link tải hướng dẫn. Admin cần set PUBLIC_BASE_URL hoặc kiểm tra file hướng dẫn trong repo."
+        )
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -22197,6 +22407,13 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• Số dư mới: <b>{int(gift_info.get('balance') or 0)} Xu</b>",
                 parse_mode="HTML",
             )
+        if status == "assignment_required":
+            return await update.message.reply_text(gift_needs_assignment_message(uid, code), parse_mode="HTML")
+        if status == "already_applied":
+            return await update.message.reply_text(
+                "ℹ️ Mã quà tặng này đã được nhận trên tài khoản của bạn, hệ thống không cộng trùng.",
+                parse_mode="HTML",
+            )
         return await update.message.reply_text(
             "❌ Mã quà tặng không hợp lệ, đã hết lượt hoặc chưa được kích hoạt.\n\n"
             f"Lý do: <code>{html.escape(status)}</code>",
@@ -22402,18 +22619,65 @@ async def cmd_promo_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
     await update.message.reply_text(f"✅ Đã tắt mã <code>{html.escape(code)}</code>.", parse_mode="HTML")
 
+async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    uid = user.id if user else ""
+    username = f"@{user.username}" if user and user.username else "-"
+    await update.message.reply_text(
+        "🪪 <b>ID Telegram của bạn</b>\n\n"
+        f"• ID: <code>{html.escape(str(uid))}</code>\n"
+        f"• Username: <code>{html.escape(username)}</code>\n\n"
+        "Nếu admin/hỗ trợ yêu cầu cấp mã quà tặng sự kiện, hãy gửi đúng ID này.",
+        parse_mode="HTML",
+    )
+
 async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         return await update.message.reply_text(
             "🎁 <b>Nhận quà TOAN AAS</b>\n\n"
-            "Nhập mã quà tặng do admin gửi:\n"
-            "<code>/gift BETA100</code>\n"
+            "Nhập mã quà tặng public do admin công bố:\n"
+            "<code>/gift THANK100</code>\n"
             "<code>/nhanqua SORRY100</code>\n\n"
-            "Mã quà tặng có thể dùng để nhận Xu trải nghiệm, thưởng VIP, bù lỗi hoặc test tính năng.\n\n"
-            "Lưu ý: mỗi mã có giới hạn lượt dùng, có thể hết hạn/hết lượt.",
+            "Mã BETA là mã sự kiện/test nội bộ, chỉ dùng khi admin cấp riêng cho ID Telegram của bạn.\n"
+            "Xem ID của bạn: <code>/myid</code>\n\n"
+            "Admin cấp BETA cho user bằng: <code>/gift BETA100 USER_ID</code>",
             parse_mode="HTML",
         )
     code = context.args[0]
+    if is_admin_user(update.effective_user.id) and len(context.args) >= 2:
+        target_user_id = context.args[1].strip()
+        ok, status, info = grant_gift_code_to_user(update.effective_user.id, target_user_id, code)
+        if ok:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(target_user_id),
+                    text=(
+                        "🎁 <b>Admin đã cấp quà TOAN AAS cho bạn</b>\n\n"
+                        f"• Mã: <code>{html.escape(info.get('code') or normalize_promo_code(code))}</code>\n"
+                        f"• Xu nhận: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
+                        f"• Số dư mới: <b>{int(info.get('balance') or 0)} Xu</b>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+            return await update.message.reply_text(
+                "✅ <b>Đã cấp gift code cho user</b>\n\n"
+                f"• User ID: <code>{html.escape(str(target_user_id))}</code>\n"
+                f"• Mã: <code>{html.escape(info.get('code') or normalize_promo_code(code))}</code>\n"
+                f"• Xu: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
+                f"• Số dư user: <b>{int(info.get('balance') or 0)} Xu</b>",
+                parse_mode="HTML",
+            )
+        message = "Không cấp được mã quà tặng."
+        if status == "already_applied":
+            message = "User này đã nhận mã này rồi, hệ thống không cộng trùng."
+        elif status == "not_found":
+            message = "Mã gift chưa tồn tại. Hãy seed/tạo mã trước."
+        return await update.message.reply_text(
+            f"⚠️ {message}\nLý do: <code>{html.escape(status)}</code>",
+            parse_mode="HTML",
+        )
     ok, status, info = redeem_gift_code(update.effective_user.id, code)
     if ok:
         return await update.message.reply_text(
@@ -22421,6 +22685,13 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Mã: <code>{html.escape(info.get('code') or normalize_promo_code(code))}</code>\n"
             f"• Xu nhận: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
             f"• Số dư mới: <b>{int(info.get('balance') or 0)} Xu</b>",
+            parse_mode="HTML",
+        )
+    if status == "assignment_required":
+        return await update.message.reply_text(gift_needs_assignment_message(update.effective_user.id, code), parse_mode="HTML")
+    if status == "already_applied":
+        return await update.message.reply_text(
+            "ℹ️ Mã quà tặng này đã được nhận trên tài khoản của bạn, hệ thống không cộng trùng.",
             parse_mode="HTML",
         )
     return await update.message.reply_text(
@@ -22438,16 +22709,36 @@ async def cmd_gift_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
     usage_limit = safe_int(data.get("limit") or data.get("usage_limit"), 1)
     per_user = max(1, safe_int(data.get("per_user") or data.get("per_user_limit"), 1))
     note = (data.get("note") or "").strip()[:300]
+    mode = normalize_promo_code(data.get("mode") or data.get("scope") or data.get("type") or "")
+    requires_assignment = is_beta_gift_code(code) or mode in {"ASSIGNED", "PRIVATE", "INTERNAL"}
     if not code or xu <= 0:
         return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/gift_create code=BETA100 xu=100 limit=100 per_user=1 note=\"Tặng trải nghiệm\"</code>",
+            "⚠️ Cú pháp: <code>/gift_create code=THANK100 xu=100 limit=100 per_user=1 mode=public note=\"Tặng trải nghiệm\"</code>",
             parse_mode="HTML",
         )
     conn = db_connect()
     try:
-        ok, status = create_gift_code_record(conn, code, xu, usage_limit=usage_limit, per_user_limit=per_user, note=note, created_by=update.effective_user.id)
+        ok, status = create_gift_code_record(
+            conn,
+            code,
+            xu,
+            usage_limit=usage_limit,
+            per_user_limit=per_user,
+            note=note,
+            created_by=update.effective_user.id,
+            requires_assignment=requires_assignment,
+        )
         if ok:
-            record_audit(conn, update.effective_user.id, "admin", "gift.created", "promotion_code", code, after={"xu": xu, "limit": usage_limit, "per_user": per_user}, note=note)
+            record_audit(
+                conn,
+                update.effective_user.id,
+                "admin",
+                "gift.created",
+                "promotion_code",
+                code,
+                after={"xu": xu, "limit": usage_limit, "per_user": per_user, "requires_assignment": int(requires_assignment)},
+                note=note,
+            )
             conn.commit()
         else:
             conn.rollback()
@@ -22461,8 +22752,10 @@ async def cmd_gift_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Xu: <b>+{xu}</b>\n"
         f"Limit: <b>{usage_limit}</b> lượt\n"
         f"Per user: <b>{per_user}</b> lần\n"
+        f"Scope: <b>{'assigned/private' if requires_assignment else 'public'}</b>\n"
         f"Note: {html.escape(note or '-')}\n\n"
-        f"User dùng: <code>/gift {html.escape(code)}</code> hoặc <code>/promo {html.escape(code)}</code>",
+        f"User dùng: <code>/gift {html.escape(code)}</code> hoặc <code>/promo {html.escape(code)}</code>\n"
+        f"Admin cấp riêng: <code>/gift {html.escape(code)} USER_ID</code>",
         parse_mode="HTML",
     )
 
@@ -22476,11 +22769,11 @@ async def cmd_gift_seed_beta(update: Update, context: ContextTypes.DEFAULT_TYPE)
         conn.commit()
     finally:
         conn.close()
-    lines = ["✅ <b>Đã seed gift beta codes</b>", ""]
+    lines = ["✅ <b>Đã seed gift beta codes</b>", "", "Các mã BETA là INTERNAL/ASSIGNED, user không tự claim nếu admin chưa cấp."]
     for code, data in seeded.items():
         status = "created" if data.get("ok") else data.get("status")
         lines.append(f"• <code>{html.escape(code)}</code> +{int(data.get('xu') or 0)} Xu — <code>{html.escape(str(status))}</code>")
-    lines.extend(["", "Dùng: <code>/gift_list</code>"])
+    lines.extend(["", "Admin cấp: <code>/gift BETA100 USER_ID</code>", "Dùng: <code>/gift_list</code>"])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_gift_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -22489,7 +22782,7 @@ async def cmd_gift_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = db_connect()
     try:
         rows = conn.execute(
-            """SELECT code, status, value, usage_count, used_count, usage_limit, max_uses, per_user_limit, note
+            """SELECT code, status, value, usage_count, used_count, usage_limit, max_uses, per_user_limit, requires_assignment, note
             FROM promotion_codes
             WHERE promo_type='gift_xu'
             ORDER BY updated_at DESC, created_at DESC
@@ -22500,17 +22793,21 @@ async def cmd_gift_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         return await update.message.reply_text("Chưa có gift code.")
     lines = ["🎁 <b>Gift Codes</b>"]
-    for code, status, value, usage_count, used_count, usage_limit, max_uses, per_user, note in rows:
+    for code, status, value, usage_count, used_count, usage_limit, max_uses, per_user, requires_assignment, note in rows:
         usage = max(int(usage_count or 0), int(used_count or 0))
         limit = int(usage_limit or max_uses or 0)
+        scope = "assigned/private" if int(requires_assignment or 0) else "public"
         lines.extend([
             "",
             f"<code>{html.escape(str(code))}</code> — <b>{html.escape(str(status or '-'))}</b>",
             f"Xu: <b>+{int(value or 0)}</b>",
+            f"Scope: <b>{scope}</b>",
             f"Usage: <b>{usage}/{limit if limit else '∞'}</b>",
             f"Per user: <b>{int(per_user or 1)}</b>",
             f"Note: {html.escape(str(note or '-'))}",
         ])
+        if int(requires_assignment or 0):
+            lines.append(f"Admin cấp: <code>/gift {html.escape(str(code))} USER_ID</code>")
     await update.message.reply_text("\n".join(lines[:120]), parse_mode="HTML")
 
 async def cmd_gift_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -36056,6 +36353,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("payos_test_plan", cmd_payos_test_plan))
     tg_app.add_handler(CommandHandler("mark_payos_test", cmd_mark_payos_test))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
+    tg_app.add_handler(CommandHandler("myid",        cmd_myid))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
     tg_app.add_handler(CommandHandler("pricing",     cmd_pricing))
     tg_app.add_handler(CommandHandler("banggia",     cmd_pricing))
@@ -36462,6 +36760,34 @@ async def status_page():
         "health": "/health",
         "landing": "/",
     }
+
+def customer_guide_file_path(filename: str) -> str:
+    return os.path.join(os.path.dirname(__file__), filename)
+
+def customer_guide_missing_response():
+    return JSONResponse({"ok": False, "error": "guide_file_missing"}, status_code=404)
+
+@fastapi_app.get("/download/huong-dan-toan-aas.docx")
+async def download_customer_guide_docx():
+    path = customer_guide_file_path(GUIDE_DOCX_FILE)
+    if not os.path.exists(path):
+        return customer_guide_missing_response()
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=GUIDE_DOCX_FILE,
+    )
+
+@fastapi_app.get("/download/huong-dan-toan-aas.md")
+async def download_customer_guide_md():
+    path = customer_guide_file_path(GUIDE_MD_FILE)
+    if not os.path.exists(path):
+        return customer_guide_missing_response()
+    return FileResponse(
+        path,
+        media_type="text/markdown; charset=utf-8",
+        filename=GUIDE_MD_FILE,
+    )
 
 @fastapi_app.get("/health")
 async def health_check():

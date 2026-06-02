@@ -36,6 +36,16 @@ def test_health_status_and_runtime_endpoints(monkeypatch):
     assert runtime.json()["service"].startswith("TOAN AAS")
 
 
+def test_customer_guide_download_routes_exist():
+    client = TestClient(bot.fastapi_app)
+    docx = client.get("/download/huong-dan-toan-aas.docx")
+    md = client.get("/download/huong-dan-toan-aas.md")
+    assert docx.status_code == 200
+    assert md.status_code == 200
+    assert "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx" in docx.headers["content-disposition"]
+    assert "TOAN AAS" in md.text
+
+
 def test_public_start_menu_does_not_leak_admin_commands():
     text = bot.build_start_message_text("customer-test")
     forbidden = ["/operator_menu", "/telegram_takeover", "/runtime", "/dashboard", "/stats", "/pending", "/duyet", "/tuchoi", "/add", "/setvip"]
@@ -63,6 +73,21 @@ def test_topup_keyboard_preserves_package_callbacks():
     assert "pkg|100k|123" in callbacks
     assert "pkg|200k|123" in callbacks
     assert "menu|billing" in callbacks
+
+
+def test_customer_guide_is_public_and_policy_aligned():
+    guide_index = bot.guide_index_text()
+    guide_credit = bot.guide_section_text("credits")
+    keyboard = bot.main_menu_keyboard(False)
+    button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
+
+    assert "/huongdan 1" in guide_index
+    assert "📘 Hướng Dẫn" in button_texts
+    assert "50.000đ → 500 Xu" in guide_credit
+    assert "100.000đ → 1.000 Xu + 50 Xu Launch Bonus" in guide_credit
+    assert "50.000đ → 500 Xu + 30 Xu Launch Bonus" not in guide_credit
+    assert bot.package_launch_bonus_xu(50000) == 0
+    assert bot.package_launch_bonus_xu(100000) == 50
 
 
 def test_launch_bonus_once_per_user_package(monkeypatch):
@@ -292,7 +317,7 @@ def test_launch_bonus_once_per_user_package(monkeypatch):
             os.unlink(db_path)
 
 
-def test_gift_code_redeems_direct_xu_once(monkeypatch):
+def test_beta_gift_requires_admin_assignment_and_grants_once(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setattr(bot, "DB_FILE", db_path)
@@ -311,13 +336,56 @@ def test_gift_code_redeems_direct_xu_once(monkeypatch):
         user_id = "gift-user"
         initial_credits, _, _ = bot.get_user(user_id)
         ok, status, info = bot.redeem_gift_code(user_id, "BETA100")
+        assert ok is False
+        assert status == "assignment_required"
+        credits_locked, _, _ = bot.get_user(user_id)
+        assert credits_locked == initial_credits
+
+        ok, status, info = bot.grant_gift_code_to_user("admin-only", user_id, "BETA100")
         assert ok is True
         assert status == "redeemed"
         assert info["xu"] == 100
         credits_after, _, _ = bot.get_user(user_id)
         assert credits_after == initial_credits + 100
 
-        ok, status, _info = bot.redeem_gift_code(user_id, "BETA100")
+        ok, status, _info = bot.grant_gift_code_to_user("admin-only", user_id, "BETA100")
+        assert ok is False
+        assert status == "already_applied"
+        credits_replay, _, _ = bot.get_user(user_id)
+        assert credits_replay == credits_after
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_public_non_beta_gift_redeems_without_assignment(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    try:
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            ok, status = bot.create_gift_code_record(conn, "GIFT100", 100, usage_limit=10, per_user_limit=1, note="public gift")
+            assert ok is True
+            assert status == "created"
+            promo = bot.get_promo_code_dict(conn, "GIFT100")
+            assert bot.gift_requires_assignment(promo) is False
+            conn.commit()
+        finally:
+            conn.close()
+
+        user_id = "gift-public-user"
+        initial_credits, _, _ = bot.get_user(user_id)
+        ok, status, info = bot.redeem_gift_code(user_id, "GIFT100")
+        assert ok is True
+        assert status == "redeemed"
+        assert info["xu"] == 100
+        credits_after, _, _ = bot.get_user(user_id)
+        assert credits_after == initial_credits + 100
+
+        ok, status, _info = bot.redeem_gift_code(user_id, "GIFT100")
         assert ok is False
         assert status == "already_applied"
         credits_replay, _, _ = bot.get_user(user_id)

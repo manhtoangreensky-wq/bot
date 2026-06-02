@@ -43,6 +43,7 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 ## Lệnh người dùng
 
 - `/start`: menu chính.
+- `/huongdan`, `/guide`, `/hdsd`: xem hướng dẫn sử dụng từng bước và tải tài liệu Word/Markdown.
 - `/profile`: xem số dư, hạng, tổng chi.
 - `/naptien`: tạo hóa đơn PayOS QR động.
 - `/khuyenmai`, `/uudai`, `/promos`: xem ưu đãi đang có và thứ tự nên dùng.
@@ -50,6 +51,17 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 - `/thucong`: nạp thủ công khi QR tự động lỗi.
 - `/ref`: lấy link giới thiệu nhận thưởng.
 - `/gopy <nội dung>`: góp ý hoặc báo lỗi.
+
+## Customer Guide
+
+Download:
+
+- `/download/huong-dan-toan-aas.docx`
+- `/download/huong-dan-toan-aas.md`
+
+Telegram command:
+
+- `/huongdan`
 
 ## Lệnh admin
 
