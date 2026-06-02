@@ -4,6 +4,21 @@ Do not implement new Video Factory logic in this documentation task.
 
 Video Factory should start only after the Stable Revenue Bot is healthy.
 
+Module name: Multi-Platform AI Video & Affiliate Factory.
+
+Primary platforms:
+
+- Facebook
+- TikTok
+- YouTube
+
+Secondary platforms:
+
+- Instagram
+- Threads
+- OnlyFans or paid fan platform only when legal, consent-based, and manually reviewed
+- Website/Landing
+
 ## MVP Tables
 
 The MVP should use:
@@ -66,12 +81,35 @@ The MVP should produce:
 
 - campaign plan
 - affiliate product match
+- outline
+- episode list
+- image prompt
+- video prompt
+- voice line
+- caption
+- CTA
+- affiliate disclosure
+- platform-specific output
 - video brief
 - scene manifest
 - worker task list
 - review packet
 - publish packet
 - performance report
+
+Export formats:
+
+- JSON
+- Markdown
+
+Future commands:
+
+- `/film`
+- `/video_script`
+- `/scene_prompt`
+- `/film_review`
+- `/film_approve`
+- `/export_video_pack`
 
 ## Not In First MVP
 

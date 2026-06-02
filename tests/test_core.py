@@ -16,6 +16,11 @@ def test_env_loader_default(monkeypatch):
 def test_health_and_runtime_endpoints():
     client = TestClient(bot.fastapi_app)
     assert client.get("/").status_code == 200
+    health = client.get("/health")
+    assert health.status_code == 200
+    health_payload = health.json()
+    assert health_payload["service"] == "TOAN AAS"
+    assert "db_ok" in health_payload
     runtime = client.get("/runtime")
     assert runtime.status_code == 200
     assert runtime.json()["service"].startswith("TOAN DAAS")

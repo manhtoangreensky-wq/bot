@@ -4,7 +4,7 @@
 
 - App version in code: `TOAN DAAS V15.2`
 - Main file: `bot.py`
-- Current line count: `32609`
+- Current line count after this pass: `33620`
 
 ## Compile Status
 
@@ -74,6 +74,7 @@ Commented future ENV references exist for `CLAUDE_API_KEY`, `GROQ_KEY`, and othe
 Core routes currently include:
 
 - `GET /`
+- `GET /health`
 - `GET /runtime`
 - `POST /api/telegram/takeover`
 - `POST <TELEGRAM_WEBHOOK_PATH>`
@@ -232,11 +233,25 @@ Current `init_db()` creates these tables:
 - Cobalt config exists through `COBALT_API_URL` and `COBALT_API_KEY`.
 - Failed paid media tasks should preserve refund behavior.
 
+## Updated by Codex: Stabilize + Health Check Pass
+
+| Area | Current State | Risk | Recommendation |
+| --- | --- | --- | --- |
+| Version | `APP_VERSION = TOAN DAAS V15.2` | Branding is still mixed between DAAS and AAS in some surfaces. | Rename gradually only after stability tasks pass. |
+| Entrypoint | `bot.py`, FastAPI object `fastapi_app` | Monolith is large; one syntax error can crash all runtime. | Extract gradually, starting with config and DB helpers. |
+| Routes | `GET /`, `GET /runtime`, `GET /health`, Telegram webhook, landing, lead, affiliate, operator APIs, PayOS webhook. | Many operator routes exist but are not fully verified end to end. | Keep admin/API-token guards and test route groups in phases. |
+| Database | SQLite file `toandaas_system.db` with revenue, affiliate, operator, and Video Factory foundation tables. | Railway storage can be ephemeral without volume. | Configure Railway Volume or backup before relying on production SQLite. |
+| PayOS | Dynamic QR, webhook signature verification, duplicate table, manual fallback. | Real payment still needs production verification. | Do not change PayOS without focused tests. |
+| AI | Gemini and OpenAI clients exist; Deepgram exists; media fallback pattern exists. | API quota/key failures can interrupt paid flows. | Preserve refund behavior and add clear admin alerts for quota failures. |
+| Media | Voice, image background removal, downloader paths exist. | Some tool integrations still need real-world test. | Test paid-first/free-fallback behavior one tool at a time. |
+| Video Factory | Operator/video/affiliate/publish foundations exist. | Not a proven automatic production system yet. | Start with script/output generation, review gate, then manual publish. |
+| Device Ops | Not in current near-term runtime scope. | Expanding too early dilutes revenue bot work. | Keep as Lite plan only until there is a paying customer. |
+
 ## Current Gaps / Not Fully Verified
 
 - Railway production public domain is currently not reachable from local checks.
 - SQLite persistence on Railway is risky unless a persistent volume is configured.
-- `/health` is not currently listed as a route; `GET /` and `GET /runtime` exist.
+- `/health` now exists as a local-only status endpoint; production monitoring still needs manual setup.
 - Operator/Video Factory tables and commands exist, but the full automatic workflow is not verified end-to-end.
 - Real video generation API integration is not yet proven.
 - Auto-publish for TikTok/YouTube/Instagram/Facebook is not proven end-to-end.
@@ -248,4 +263,4 @@ Current `init_db()` creates these tables:
 
 The current codebase is more than a simple revenue bot: it already contains operator, affiliate, publish, and Video Factory foundations. The near-term priority should still be stability and revenue, not adding more broad modules.
 
-The next approved task should be TASK 2: document and reduce data persistence risk on Railway without changing PayOS logic.
+The next approved task should be Railway persistence hardening: configure Railway Volume/backup or add `DB_FILE` ENV support with a tested migration plan.

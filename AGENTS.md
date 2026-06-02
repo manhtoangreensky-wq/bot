@@ -52,3 +52,14 @@ Every task must go through:
 3. Document the current system before extracting modules.
 4. Add migrations safely, one phase at a time.
 5. Build Video Factory only after the revenue bot is stable.
+
+## 30 Day Operating Target
+
+1. Protect the current revenue bot.
+2. Verify database persistence and backup.
+3. Keep PayOS and manual bill fallback trustworthy.
+4. Add trial upsell only after payment flow is stable.
+5. Build Video Factory Lite for Facebook, TikTok, and YouTube only after the bot foundation is healthy.
+6. Do not render or auto-publish without an explicit approval gate.
+
+Do not start the next task without approval.

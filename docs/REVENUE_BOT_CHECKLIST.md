@@ -79,6 +79,14 @@ Recommended:
 ## Production Check
 
 - `GET /` returns OK.
+- `GET /health` returns status, app version, uptime, `db_ok`, `payos_configured`, and `ai_provider_available`.
 - `GET /runtime` returns current build.
 - Telegram webhook URL points to current Railway service.
 - No other deployment uses the same Telegram token.
+
+## Railway Persistence Check
+
+- Confirm Railway Volume exists before trusting SQLite for production money data.
+- Confirm current DB path is inside the persistent volume if `DB_FILE` support is enabled in a future task.
+- Until `DB_FILE` ENV is supported, back up `toandaas_system.db` manually before redeploys.
+- Never disable PayOS/manual bill logs while testing storage.

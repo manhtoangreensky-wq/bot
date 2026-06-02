@@ -80,3 +80,16 @@ The safe extraction order is:
 6. `app/modules/video_factory/`
 
 Each phase must compile and pass tests before the next phase starts.
+
+## Long Term Platform Model
+
+TOAN AAS is not only a Telegram bot. The long-term architecture is an AI Automation System:
+
+- Telegram Command Bot: fast control, admin approval, alerts, reports, customer commands.
+- Core Backend: FastAPI, config, database, auth, user, billing, approval, audit, jobs, reports.
+- Worker System: script worker, prompt worker, video worker, CRM/report worker, future device-ops worker.
+- Dashboard: admin dashboard, customer portal, video factory, affiliate reports, project tracking.
+- Automation Connectors: Telegram, PayOS, Facebook, TikTok, YouTube, Google Drive/Sheets, n8n/Make, email.
+- Data Layer: SQLite temporarily, Railway Volume or backup required, PostgreSQL later, object storage later.
+
+Refactor rule: use a gradual Strangler Fig pattern. Keep `bot.py` running while extracting config, DB, billing, AI providers, Telegram commands, and Video Factory modules one phase at a time.

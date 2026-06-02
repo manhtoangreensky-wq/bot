@@ -102,6 +102,7 @@ def detect_public_base_url() -> tuple[str, str]:
 TELEGRAM_TOKEN      = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
 ADMIN_ID            = _env("ADMIN_ID", "7126457028")
 APP_VERSION         = "TOAN DAAS V15.2"
+START_TIME          = time.time()
 APP_BUILD_SHA       = (
     _env("RAILWAY_GIT_COMMIT_SHA")
     or _env("GIT_COMMIT_SHA")
@@ -30414,6 +30415,27 @@ async def health():
         "telegram_startup_error": TELEGRAM_STARTUP_ERROR or "",
         "public_base_url": PUBLIC_BASE_URL or "",
         "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
+    }
+
+@fastapi_app.get("/health")
+async def health_check():
+    db_ok = False
+    try:
+        conn = db_connect()
+        conn.execute("SELECT 1")
+        conn.close()
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "service": "TOAN AAS",
+        "app_version": APP_VERSION,
+        "build": APP_BUILD,
+        "uptime_seconds": int(time.time() - START_TIME),
+        "db_ok": db_ok,
+        "payos_configured": bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY),
+        "ai_provider_available": bool(GEMINI_API_KEY or OPENAI_API_KEY),
     }
 
 @fastapi_app.get("/runtime")
