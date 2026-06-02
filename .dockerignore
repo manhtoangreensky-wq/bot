@@ -1,0 +1,21 @@
+.git
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+.env
+*.env
+toandaas_system.db
+*.sqlite
+*.sqlite3
+operator_uploads
+
+token tele.txt
+admin ID.txt
+*.docx
+*.mp4
+video AI
+toan-daas-updated-files
