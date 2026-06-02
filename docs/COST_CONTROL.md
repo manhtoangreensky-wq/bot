@@ -14,7 +14,7 @@ Date: 2026-06-02
 
 | Provider | Feature | User cost in Xu | Refund on fail? | Risk |
 |---|---|---:|---:|---|
-| Gemini/OpenAI | Chat AI, `/film`, `/growth_ai` | Dynamic, `/film` 50, `/growth_ai` 30 | YES for paid command failures | Token/quota cost. |
+| Gemini/OpenAI | Chat AI, `/film`, `/growth_ai` | Dynamic, `/film` 200+, `/growth_ai` 120 | YES for paid command failures | Token/quota cost. |
 | Deepgram | STT/audio transcription | Dynamic per existing code | YES where charged flow supports refund | Audio length/quota. |
 | Fish Audio | HD TTS | Provider choice per existing code | YES where charged flow supports refund/fallback | Character/voice cost. |
 | RemoveBG/Cutout | Background removal | Provider choice per existing code | YES where charged flow supports refund/fallback | Image/quota cost. |
@@ -27,8 +27,11 @@ Date: 2026-06-02
 |---|---:|
 | Trial credits | 150 Xu |
 | Free chat daily | 20 messages/day |
-| `/film` | 50 Xu |
-| `/growth_ai` | 30 Xu |
+| `/film` | 200 Xu basic; 500 Xu pro; 1,200 Xu series |
+| `/growth_ai` | 120 Xu |
+| `/campaign_report` | 50 Xu |
+| Audio/STT | from 80 Xu, MB-based |
+| Downloader/video | from 100 Xu, MB-based |
 | Popular upsell packages | 50k / 100k / 200k |
 
 ## Before public launch

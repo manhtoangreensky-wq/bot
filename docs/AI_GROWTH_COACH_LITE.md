@@ -15,7 +15,7 @@ Use manual data from `/publish_done` and `/performance_add` so AI can suggest wh
 
 ## Pricing
 
-- MVP: 30 Xu per AI analysis.
+- Pricing Engine V2: 120 Xu per AI analysis.
 - Admin/VIP: free under current bot logic.
 - No charge when there is no performance data.
 - Refund if AI fails after credits were charged.
@@ -44,4 +44,3 @@ Use manual data from `/publish_done` and `/performance_add` so AI can suggest wh
 - No guaranteed revenue claims.
 - No spam recommendations.
 - Affiliate disclosure is required.
-

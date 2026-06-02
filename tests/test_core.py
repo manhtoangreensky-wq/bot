@@ -113,8 +113,15 @@ def test_lifespan_keeps_api_alive_when_telegram_builder_fails(monkeypatch):
 
 
 def test_cost_and_discount_rules():
-    assert bot.calculate_dynamic_cost("chat", 0) == 2
-    assert bot.calculate_dynamic_cost("download", 0) == 5
+    assert bot.calculate_dynamic_cost("chat", 0) == bot.CHAT_SHORT_COST
+    assert bot.calculate_dynamic_cost("download", 0) == bot.VIDEO_DOWNLOAD_MIN_COST
+    assert bot.calculate_audio_cost(1) == bot.AUDIO_MIN_COST
+    assert bot.calculate_video_download_cost(1) == bot.VIDEO_DOWNLOAD_MIN_COST
+    assert bot.calculate_film_cost() == bot.VIDEO_BASIC_COST
+    assert bot.calculate_film_cost(episodes=3, scenes=5) == 400
+    assert bot.calculate_film_cost(episodes=1, scenes=10) == 300
+    assert bot.calculate_film_cost(tier="pro") == bot.VIDEO_PRO_COST
+    assert bot.calculate_film_cost(tier="series") == bot.VIDEO_SERIES_COST
     assert bot.apply_discount(0, 100) == (100, 0.0)
     assert bot.apply_discount(5000, 100) == (90, 0.10)
     assert bot.apply_discount(20000, 100) == (80, 0.20)

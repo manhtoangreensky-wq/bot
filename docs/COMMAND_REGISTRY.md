@@ -1,8 +1,8 @@
 # COMMAND REGISTRY - TOAN AAS
 
 Date: 2026-06-02
-Source: `bot.py` local audit after Step 9
-Registered Telegram commands: 200
+Source: `bot.py` local audit after Step 10
+Registered Telegram commands: 203
 Registered callback groups: 9
 
 ## User Commands
@@ -15,6 +15,8 @@ Registered callback groups: 9
 | `/commands` | `cmd_help` | YES | Alias for `/help`. |
 | `/profile` | `cmd_profile` | YES | Balance, VIP, referral status. |
 | `/naptien` | `cmd_naptien` | YES | PayOS package selection. |
+| `/pricing` | `cmd_pricing` | YES | User-facing Pricing Engine V2 table. |
+| `/banggia` | `cmd_pricing` | YES | Vietnamese alias for `/pricing`. |
 | `/thucong` | `cmd_thanhtoan_thucong` | YES | Manual bill fallback. |
 | `/beta_offer` | `cmd_beta_offer` | YES | Shows beta packages and customer workflow. |
 | `/goi_beta` | `cmd_beta_offer` | YES | Vietnamese alias for `/beta_offer`. |
@@ -49,7 +51,7 @@ Registered callback groups: 9
 | `/publish_done` | `cmd_publish_done` | YES | Manual record of published post. |
 | `/performance_add` | `cmd_performance_add` | YES | Manual metrics input. |
 | `/performance_report` | `cmd_performance_report` | YES | Manual performance rollup. |
-| `/growth_ai` | `cmd_growth_ai` | YES | AI Growth Coach, 30 Xu for normal users. |
+| `/growth_ai` | `cmd_growth_ai` | YES | AI Growth Coach, 120 Xu for normal users. |
 | `/campaign_report` | `cmd_campaign_report` | YES | TXT/CSV campaign report export. |
 | `/export_report` | `cmd_campaign_report` | YES | Alias for campaign report export. |
 | `/posts` | `cmd_posts` | YES | Recent published posts. |
@@ -74,6 +76,7 @@ Registered callback groups: 9
 | `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
 | `/payos_test_plan` | `cmd_payos_test_plan` | YES | YES | Real PayOS 10k manual test checklist. |
 | `/mark_payos_test` | `cmd_mark_payos_test` | YES | YES | Admin records PayOS real test PASS/FAIL/NOT_TESTED; does not alter payments. |
+| `/pricing_admin` | `cmd_pricing_admin` | YES | YES | Admin-only formula/constants for Pricing Engine V2. |
 | `/runtime` | `cmd_runtime` | YES | System menu | Runtime/webhook diagnostics. |
 | `/checkpayos` | `cmd_checkpayos` | YES | System menu | PayOS order check. |
 | `/telegram_status` | `cmd_telegram_status` | YES | System menu | Telegram update mode. |

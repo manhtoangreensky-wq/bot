@@ -5,30 +5,28 @@ Chưa làm app ngoài.
 Chưa làm dashboard web.
 Chưa làm ERP/Device Ops/SaaS.
 
-Sau Step 9 Sales Hardening + Beta Offer, admin chọn 1 task:
+Sau Step 10 Pricing Engine V2, admin chọn 1 task:
 
-## Option A - PayOS Real Payment Manual Test
+## Option A - Promotion/Discount Code System
+
+- Tạo mã giảm giá theo % hoặc tặng Xu.
+- Không đổi bảng giá gốc.
+- Không đụng PayOS packages nếu chưa cần.
+
+## Option B - Beta Launch Offer
 
 - Test gói 10k thật.
 - Nếu PASS, chạy `/mark_payos_test pass order=<order_code> note="Test 10k OK"`.
+- Mở bán thử cho 3-10 user.
+
+## Option C - PayOS Real Payment Manual Test
+
+- Làm đúng `docs/PAYOS_REAL_PAYMENT_TEST.md`.
 - Không sửa code nếu không phát hiện lỗi rõ.
 
-## Option B - First Customer Beta Launch
+## Option D - Video Script template packs
 
-- Chọn 3-10 user đầu tiên.
-- Cho chạy `/beta_offer`, `/naptien`, `/film`, `/publish_done`, `/performance_add`, `/growth_ai`.
-- Ghi feedback thật.
-
-## Option C - Sales Page Copy Polish
-
-- Chỉnh nội dung landing để bán thử beta.
-- Không show tên provider/công cụ bí mật.
-- Không đổi PayOS/billing.
-
-## Option D - Video Script Lite Templates
-
-- Cải thiện `/film` output.
-- Thêm template niche: affiliate, giáo dục, review, story.
+- Cải thiện `/film` output theo niche.
 - Không render.
 
 ## Option E - AI Caption Variant Generator

@@ -32,8 +32,10 @@ post_id,platform,topic,post_url,views,likes,comments,shares,clicks,revenue,score
 
 ## Pricing
 
-- MVP: free.
-- Purpose: show value and help users manage affiliate performance.
+- Pricing Engine V2: 50 Xu per report export for normal users.
+- Admin/VIP: free under current bot logic.
+- No charge when there is no performance data.
+- Refund if file export fails after Xu was charged.
 
 ## Boundaries
 
@@ -41,4 +43,3 @@ post_id,platform,topic,post_url,views,likes,comments,shares,clicks,revenue,score
 - No empty report file if user has no data.
 - No social API calls.
 - No auto publish.
-

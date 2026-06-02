@@ -338,8 +338,31 @@ BACKUP_MAX_BYTES  = 45 * 1024 * 1024
 TRIAL_CREDITS     = 150
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
-FILM_SCRIPT_COST   = 50
-GROWTH_AI_COST     = 30
+
+# Pricing Engine V2: default prices are intentionally high enough to cover
+# provider cost, server cost, support, refund risk, and future promotions.
+PRICING_MARKUP_MULTIPLIER = 3
+FILM_SCRIPT_COST   = 200
+GROWTH_AI_COST     = 120
+CAMPAIGN_REPORT_COST = 50
+VIDEO_BASIC_COST   = 200
+VIDEO_PRO_COST     = 500
+VIDEO_SERIES_COST  = 1200
+AUDIO_BASE_COST    = 30
+AUDIO_COST_PER_MB  = 20
+AUDIO_MIN_COST     = 80
+VIDEO_DOWNLOAD_BASE_COST = 50
+VIDEO_DOWNLOAD_COST_PER_MB = 15
+VIDEO_DOWNLOAD_MIN_COST = 100
+IMAGE_REMOVE_BG_BASE_COST = 80
+IMAGE_REMOVE_BG_PREMIUM_COST = 150
+VOICE_BASE_COST    = 50
+VOICE_COST_PER_BLOCK = 30
+VOICE_BLOCK_CHARS  = 500
+CHAT_SHORT_COST    = 5
+CHAT_LONG_COST     = 15
+CHAT_HEAVY_COST    = 30
+REPORT_EXPORT_COST = CAMPAIGN_REPORT_COST
 CONTENT_PLATFORM_ALIASES = {
     "fb": "facebook",
     "facebook": "facebook",
@@ -18342,18 +18365,69 @@ def content_topic_for_slot(niche, channel_focus, platform, day_index, slot_index
     template = templates[(day_index + slot_index) % len(templates)]
     return f"{template.format(focus=focus)} ({platform})"
 
+def safe_positive_int(value, default=1):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+def ceil_mb(size_bytes: int) -> int:
+    size = safe_positive_int(size_bytes, 1)
+    return max(1, math.ceil(size / (1024 * 1024)))
+
+def calculate_mb_cost(size_bytes: int, base_cost: int, cost_per_mb: int, min_cost: int) -> int:
+    mb = ceil_mb(size_bytes)
+    return max(int(min_cost), int(base_cost) + mb * int(cost_per_mb))
+
+def calculate_audio_cost(size_bytes: int) -> int:
+    return calculate_mb_cost(size_bytes, AUDIO_BASE_COST, AUDIO_COST_PER_MB, AUDIO_MIN_COST)
+
+def calculate_video_download_cost(size_bytes: int) -> int:
+    return calculate_mb_cost(size_bytes, VIDEO_DOWNLOAD_BASE_COST, VIDEO_DOWNLOAD_COST_PER_MB, VIDEO_DOWNLOAD_MIN_COST)
+
+def calculate_voice_cost(text: str) -> int:
+    chars = len(text or "")
+    blocks = max(1, math.ceil(chars / VOICE_BLOCK_CHARS))
+    return VOICE_BASE_COST + blocks * VOICE_COST_PER_BLOCK
+
+def calculate_voice_cost_by_length(chars) -> int:
+    length = safe_positive_int(chars, 1)
+    blocks = max(1, math.ceil(length / VOICE_BLOCK_CHARS))
+    return VOICE_BASE_COST + blocks * VOICE_COST_PER_BLOCK
+
+def calculate_chat_cost(size_or_length) -> int:
+    length = safe_positive_int(size_or_length, 1)
+    if length <= 500:
+        return CHAT_SHORT_COST
+    if length <= 2000:
+        return CHAT_LONG_COST
+    return CHAT_HEAVY_COST
+
+def calculate_film_cost(episodes=1, scenes=5, tier="basic") -> int:
+    tier_norm = str(tier or "basic").strip().lower()
+    if tier_norm == "pro":
+        return VIDEO_PRO_COST
+    if tier_norm == "series":
+        return VIDEO_SERIES_COST
+    episode_count = safe_positive_int(episodes, 1)
+    scene_count = safe_positive_int(scenes, 5)
+    extra_episode_cost = max(0, episode_count - 1) * 100
+    extra_scene_cost = max(0, scene_count - 5) * 20
+    return max(VIDEO_BASIC_COST, VIDEO_BASIC_COST + extra_episode_cost + extra_scene_cost)
+
 def calculate_dynamic_cost(action_type, size_or_length):
     if action_type == "chat":
-        return 2 + math.ceil(size_or_length / 500) * 1
+        return calculate_chat_cost(size_or_length)
     elif action_type == "whisper":
-        return 5 + math.ceil(size_or_length / (1024 * 1024)) * 10
+        return calculate_audio_cost(size_or_length)
     elif action_type == "image":
-        return 40 + math.ceil(size_or_length / (1024 * 1024)) * 5
+        return IMAGE_REMOVE_BG_PREMIUM_COST
     elif action_type == "voice":
-        return 10 + math.ceil(size_or_length / 50) * 5
+        return calculate_voice_cost_by_length(size_or_length)
     elif action_type == "download":
-        return 5
-    return 2
+        return calculate_video_download_cost(size_or_length)
+    return CHAT_SHORT_COST
 
 def apply_discount(total_spent, raw_cost):
     if total_spent >= 20000:
@@ -19209,8 +19283,8 @@ class AgentDownloader:
 USER_BILL_STATE: dict = {}
 USER_PENDING: dict = {}
 
-VOICE_FREE_COST  = 5
-IMAGE_FREE_COST  = 5
+VOICE_FREE_COST  = VOICE_BASE_COST
+IMAGE_FREE_COST  = IMAGE_REMOVE_BG_BASE_COST
 
 def is_trial_account(user_id) -> bool:
     conn = db_connect()
@@ -20060,6 +20134,7 @@ def menu_text_billing(is_admin: bool) -> str:
     text = (
         "💳 <b>Billing & Tài khoản</b>\n\n"
         "• <code>/profile</code> — xem số dư, VIP và referral.\n"
+        "• <code>/pricing</code> hoặc <code>/banggia</code> — xem bảng giá.\n"
         "• <code>/naptien</code> — chọn gói PayOS QR động.\n"
         "• <code>/thucong</code> — nạp thủ công khi QR tự động lỗi.\n"
         "• <code>/ref</code> — lấy link giới thiệu.\n\n"
@@ -20195,6 +20270,7 @@ def help_text_for_user(user_id) -> str:
         "• <code>/gopy nội dung</code> — góp ý/báo lỗi\n\n"
         "<b>7. Bán thử/Beta</b>\n"
         "• <code>/beta_offer</code> hoặc <code>/goi_beta</code> — xem gói dùng thử\n"
+        "• <code>/pricing</code> hoặc <code>/banggia</code> — xem bảng giá\n"
         "• <code>/naptien</code> — nạp Xu\n"
         "• <code>/film &lt;chủ đề&gt;</code> — tạo nội dung\n"
         "• <code>/growth_ai</code> — AI gợi ý tối ưu"
@@ -20206,6 +20282,7 @@ def help_text_for_user(user_id) -> str:
             "• <code>/stats</code>, <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code>\n"
             "• <code>/add</code>, <code>/setvip</code>, <code>/backup_db</code>\n"
             "• <code>/providers</code>, <code>/sales_ready</code>, <code>/costs</code>, <code>/payos_test_plan</code>\n"
+            "• <code>/pricing_admin</code> — xem công thức Pricing Engine V2\n"
             "• <code>/mark_payos_test</code> — ghi nhận PayOS real test PASS/FAIL\n"
             "• <code>/runtime</code>, <code>/checkpayos</code>, <code>/telegram_takeover</code>"
         )
@@ -20308,8 +20385,12 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         f"• <code>/film</code>: <b>{FILM_SCRIPT_COST} Xu</b>/lần",
         f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>/lần",
+        f"• <code>/campaign_report</code>: <b>{CAMPAIGN_REPORT_COST} Xu</b>/lần",
         "• Chat AI: theo dynamic cost/free trial trong code hiện tại",
-        "• Voice/STT/Image/Downloader: theo provider choice và dynamic cost hiện tại",
+        f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + block {VOICE_BLOCK_CHARS} ký tự",
+        f"• STT/audio: từ <b>{AUDIO_MIN_COST} Xu</b>, +{AUDIO_COST_PER_MB} Xu/MB",
+        f"• Image: từ <b>{IMAGE_REMOVE_BG_BASE_COST}-{IMAGE_REMOVE_BG_PREMIUM_COST} Xu</b>",
+        f"• Downloader: từ <b>{VIDEO_DOWNLOAD_MIN_COST} Xu</b>, +{VIDEO_DOWNLOAD_COST_PER_MB} Xu/MB",
         f"• Trial credits: <b>{TRIAL_CREDITS} Xu</b>",
         f"• Free chat daily: <b>{FREE_CHAT_DAILY}</b> lượt/ngày",
         "",
@@ -20464,6 +20545,71 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Kết quả phụ thuộc nội dung, sản phẩm, nền tảng và cách triển khai. TOAN AAS không cam kết doanh thu chắc chắn và không auto publish.",
         "",
         "Lệnh nhanh: <code>/naptien</code> | <code>/film chủ đề</code> | <code>/help</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lines = [
+        "💎 <b>BẢNG GIÁ TOAN AAS</b>",
+        "",
+        "🎬 <b>Video & Content</b>",
+        f"• <code>/film</code> Basic: <b>{VIDEO_BASIC_COST} Xu</b>",
+        "  1 video, 5 cảnh, Facebook/TikTok/YouTube output",
+        f"• <code>/film tier=pro</code>: <b>{VIDEO_PRO_COST} Xu</b>",
+        "  nhiều hook/caption/CTA hơn",
+        f"• <code>/film tier=series</code>: <b>{VIDEO_SERIES_COST:,} Xu</b>",
+        "  gói nhiều nội dung/chuỗi bài",
+        "",
+        "📈 <b>Growth</b>",
+        "• <code>/growth_loop</code>: theo code hiện tại",
+        f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>",
+        f"• <code>/campaign_report</code>: <b>{CAMPAIGN_REPORT_COST} Xu</b>",
+        "",
+        "🤖 <b>AI Tools</b>",
+        f"• Chat ngắn: từ <b>{CHAT_SHORT_COST} Xu</b>",
+        f"• Chat dài/nặng: từ <b>{CHAT_LONG_COST}-{CHAT_HEAVY_COST} Xu</b>",
+        f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + theo độ dài",
+        f"• Bóc băng audio: từ <b>{AUDIO_MIN_COST} Xu</b>, tính theo MB",
+        f"• Tách nền ảnh: từ <b>{IMAGE_REMOVE_BG_BASE_COST}-{IMAGE_REMOVE_BG_PREMIUM_COST} Xu</b>",
+        f"• Tải/xử lý video: từ <b>{VIDEO_DOWNLOAD_MIN_COST} Xu</b>, tính theo MB",
+        "",
+        "💳 <b>Nạp Xu:</b> <code>/naptien</code>",
+        "",
+        "Giá đã bao gồm chi phí AI, server, xử lý lỗi và vận hành hệ thống. Admin có thể tạo khuyến mãi theo từng thời điểm.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    lines = [
+        "🧮 <b>TOAN AAS Pricing Engine V2</b>",
+        "",
+        "<b>Formula</b>",
+        f"Giá bán = (AI cost + server cost + processing cost + risk buffer) x {PRICING_MARKUP_MULTIPLIER}",
+        "",
+        "<b>Constants</b>",
+        f"• PRICING_MARKUP_MULTIPLIER = <b>{PRICING_MARKUP_MULTIPLIER}</b>",
+        f"• FILM_SCRIPT_COST = <b>{FILM_SCRIPT_COST}</b>",
+        f"• GROWTH_AI_COST = <b>{GROWTH_AI_COST}</b>",
+        f"• CAMPAIGN_REPORT_COST = <b>{CAMPAIGN_REPORT_COST}</b>",
+        f"• AUDIO_BASE_COST = <b>{AUDIO_BASE_COST}</b>",
+        f"• AUDIO_COST_PER_MB = <b>{AUDIO_COST_PER_MB}</b>",
+        f"• AUDIO_MIN_COST = <b>{AUDIO_MIN_COST}</b>",
+        f"• VIDEO_DOWNLOAD_BASE_COST = <b>{VIDEO_DOWNLOAD_BASE_COST}</b>",
+        f"• VIDEO_DOWNLOAD_COST_PER_MB = <b>{VIDEO_DOWNLOAD_COST_PER_MB}</b>",
+        f"• VIDEO_DOWNLOAD_MIN_COST = <b>{VIDEO_DOWNLOAD_MIN_COST}</b>",
+        f"• IMAGE_REMOVE_BG_BASE_COST = <b>{IMAGE_REMOVE_BG_BASE_COST}</b>",
+        f"• IMAGE_REMOVE_BG_PREMIUM_COST = <b>{IMAGE_REMOVE_BG_PREMIUM_COST}</b>",
+        f"• VOICE_BASE_COST = <b>{VOICE_BASE_COST}</b>",
+        f"• VOICE_COST_PER_BLOCK = <b>{VOICE_COST_PER_BLOCK}</b>",
+        f"• VOICE_BLOCK_CHARS = <b>{VOICE_BLOCK_CHARS}</b>",
+        "",
+        "<b>Strategy</b>",
+        "• Giá mặc định đặt cao.",
+        "• Khuyến mãi dùng % giảm hoặc tặng Xu.",
+        "• Không bán dưới giá vốn.",
+        "• Video/render thật sau này phải có bảng giá riêng.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -23619,6 +23765,7 @@ def parse_video_script_args(raw: str) -> dict:
         "affiliate_id": 0,
         "tone": "thực tế, dễ hiểu, có khả năng viral",
         "language": "vi",
+        "tier": "basic",
     }
     if not raw:
         return data
@@ -23630,6 +23777,9 @@ def parse_video_script_args(raw: str) -> dict:
         spans.append(match.span())
         if key in {"topic", "niche", "platforms", "affiliate", "tone", "language"}:
             data[key] = value
+        elif key in {"tier", "goi", "package"}:
+            tier_value = str(value or "basic").strip().lower()
+            data["tier"] = tier_value if tier_value in {"basic", "pro", "series"} else "basic"
         elif key in {"affiliate_id", "aff", "link_id"}:
             try:
                 data["affiliate_id"] = max(0, int(str(value).lstrip("#")))
@@ -23658,14 +23808,17 @@ def video_script_usage_text(uid: int) -> tuple[str, InlineKeyboardMarkup]:
         "Cách dùng:\n"
         "<code>/film review máy lọc không khí cho phòng ngủ</code>\n"
         "<code>/film topic=\"review tai nghe bluetooth\" niche=affiliate</code>\n"
-        "<code>/film topic=\"camera an ninh gia đình\" platforms=facebook,tiktok,youtube</code>\n\n"
+        "<code>/film topic=\"camera an ninh gia đình\" platforms=facebook,tiktok,youtube</code>\n"
+        "<code>/film topic=\"chuỗi review laptop\" episodes=3 scenes=5</code>\n"
+        "<code>/film topic=\"kế hoạch 7 ngày\" tier=series</code>\n\n"
         "Kết quả gồm:\n"
         "• Outline\n"
         "• Scene prompts\n"
         "• Caption riêng cho Facebook/TikTok/YouTube\n"
         "• CTA/hashtag\n"
         "• File .md tải về\n\n"
-        f"Chi phí: <b>{FILM_SCRIPT_COST} Xu/lần</b>"
+        f"Chi phí: Basic <b>{VIDEO_BASIC_COST} Xu</b> | Pro <b>{VIDEO_PRO_COST} Xu</b> | Series <b>{VIDEO_SERIES_COST} Xu</b>\n"
+        "Basic gồm 1 tập/5 cảnh; thêm tập +100 Xu, thêm cảnh +20 Xu."
     )
     return text, build_topup_keyboard(uid)
 
@@ -23758,6 +23911,7 @@ async def send_video_script_file(context: ContextTypes.DEFAULT_TYPE, chat_id: in
         f"- Topic: {parsed.get('topic', '')}\n"
         f"- Niche: {parsed.get('niche', '')}\n"
         f"- Platforms: {parsed.get('platforms', '')}\n"
+        f"- Tier: {parsed.get('tier', 'basic')}\n"
         f"- Episodes: {parsed.get('episodes', 1)}\n"
         f"- Scenes per episode: {parsed.get('scenes', 5)}\n\n"
         "---\n\n"
@@ -23815,7 +23969,8 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     credits, _, is_vip = get_user(uid, update.effective_user.first_name)
     is_admin = str(uid) == ADMIN_ID
-    cost = 0 if (is_admin or is_vip) else FILM_SCRIPT_COST
+    calculated_cost = calculate_film_cost(parsed.get("episodes", 1), parsed.get("scenes", 5), parsed.get("tier", "basic"))
+    cost = 0 if (is_admin or is_vip) else calculated_cost
     charged = False
     if cost > 0:
         if credits < cost:
@@ -23831,7 +23986,8 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"🎬 <b>Đang tạo Video Script Lite #{job_id}...</b>\n\n"
             f"Chủ đề: <b>{html.escape(parsed.get('topic', ''))}</b>\n"
-            f"Nền tảng: <b>{html.escape(parsed.get('platforms', ''))}</b>"
+            f"Nền tảng: <b>{html.escape(parsed.get('platforms', ''))}</b>\n"
+            f"Gói: <b>{html.escape(str(parsed.get('tier') or 'basic'))}</b> | Chi phí: <b>{cost} Xu</b>"
             + (f"\nAffiliate: <code>#{affiliate_id}</code> {html.escape(affiliate_row[2] or '')}" if affiliate_row else ""),
             parse_mode="HTML",
         )
@@ -23856,6 +24012,7 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + (f"Affiliate: <code>#{affiliate_id}</code> {html.escape(affiliate_row[2] or '')}\n" if affiliate_row else "")
             + f"Số tập: <b>{parsed.get('episodes')}</b>\n"
             f"Số cảnh/tập: <b>{parsed.get('scenes')}</b>\n"
+            f"Gói: <b>{html.escape(str(parsed.get('tier') or 'basic'))}</b>\n"
             f"Chi phí: <b>{cost} Xu</b>\n\n"
             "✅ Đã tạo: outline, scene prompts, caption từng nền tảng, CTA/hashtag, quality check.\n\n"
             f"<b>Preview:</b>\n<pre>{preview}</pre>\n\n"
@@ -28976,27 +29133,45 @@ async def cmd_campaign_report(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Bước 3: <code>/campaign_report format=txt</code> hoặc <code>/campaign_report format=csv</code>",
             parse_mode="HTML",
         )
+    credits, _, is_vip = get_user(uid, update.effective_user.first_name)
+    is_admin = str(uid) == ADMIN_ID
+    cost = 0 if (is_admin or is_vip) else CAMPAIGN_REPORT_COST
+    charged = False
+    if cost > 0:
+        if credits < cost:
+            return await reply_insufficient_credits(update, credits, cost)
+        charged = spend_fixed_credit(uid, cost, "spend_campaign_report", f"Campaign report {args['days']}d {args['platform'] or 'all'}")
+        if not charged:
+            credits_now, _, _ = get_user(uid)
+            return await reply_insufficient_credits(update, credits_now, cost)
     fmt = args["format"]
-    content = build_campaign_report_csv(summary) if fmt == "csv" else build_campaign_report_txt(summary)
     totals = summary["totals"]
     caption = (
         f"📊 TOAN AAS Campaign Report ({fmt.upper()})\n"
         f"{summary['post_count']} bài | {int(totals['views']):,} views | "
         f"{int(totals['clicks']):,} clicks | {money_vnd(totals['revenue'])}"
     )
+    content = ""
     try:
+        content = build_campaign_report_csv(summary) if fmt == "csv" else build_campaign_report_txt(summary)
         await send_report_file(context, update.effective_chat.id, uid, content, fmt, caption)
+        credits_after, _, _ = get_user(uid)
         await update.message.reply_text(
             "✅ Đã xuất báo cáo chiến dịch.\n\n"
+            f"Chi phí: <b>{cost} Xu</b>\n"
+            f"💼 Số dư còn lại: <b>{credits_after} Xu</b>\n\n"
             "Gợi ý tiếp: <code>/growth_loop</code> để xem rule nhanh hoặc <code>/growth_ai</code> để AI phân tích sâu.",
             parse_mode="HTML",
         )
     except Exception as e:
         logger.warning(f"Campaign report export error: {type(e).__name__}")
+        refunded = refund_charged_credit(uid, cost, "campaign_report_refund", "", "Hoàn phí campaign report do lỗi export", charged)
+        refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b>." if refunded else ""
         fallback = html.escape(truncate_text(content, 3200))
         await update.message.reply_text(
-            "⚠️ Không gửi được file, gửi bản rút gọn:\n\n"
-            f"<pre>{fallback}</pre>",
+            "⚠️ Không gửi được file report, gửi bản rút gọn miễn phí:\n\n"
+            f"<pre>{fallback}</pre>"
+            + refund_line,
             parse_mode="HTML",
         )
 
@@ -33010,6 +33185,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("mark_payos_test", cmd_mark_payos_test))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
+    tg_app.add_handler(CommandHandler("pricing",     cmd_pricing))
+    tg_app.add_handler(CommandHandler("banggia",     cmd_pricing))
+    tg_app.add_handler(CommandHandler("pricing_admin", cmd_pricing_admin))
     tg_app.add_handler(CommandHandler("beta_offer",  cmd_beta_offer))
     tg_app.add_handler(CommandHandler("goi_beta",    cmd_beta_offer))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))

@@ -42,8 +42,11 @@
 - [ ] STT Deepgram.
 - [ ] Background removal RemoveBG/Cutout fallback.
 - [ ] Downloader trả file/kết quả đúng.
-- [ ] `/film` tạo Video Script Lite.
-- [ ] `/film` thiếu Xu hiện topup.
+- [ ] `/film` tạo Video Script Lite với giá Basic 200 Xu.
+- [ ] `/film episodes=3 scenes=5` tính 400 Xu.
+- [ ] `/film tier=pro` tính 500 Xu.
+- [ ] `/film tier=series` tính 1,200 Xu.
+- [ ] `/film` thiếu Xu hiện topup với giá đúng.
 - [ ] `/film` AI lỗi hoàn Xu.
 - [ ] `/film` gửi file `.md`.
 - [ ] `/film topic="..." affiliate_id=1` dùng link đã lưu.
@@ -68,11 +71,12 @@
 - [ ] `/performance_add post_id=1 views=... clicks=... revenue=...` lưu vào `manual_performance_events`.
 - [ ] `/performance_report` tổng hợp views/clicks/revenue theo nền tảng.
 - [ ] `/growth_loop` cho user thường trả rule-based recommendation.
-- [ ] `/growth_ai` có data thì trừ 30 Xu với user thường.
+- [ ] `/growth_ai` có data thì trừ 120 Xu với user thường.
 - [ ] `/growth_ai` không có data thì hướng dẫn `/publish_done` + `/performance_add` và không trừ Xu.
 - [ ] `/growth_ai` AI lỗi thì hoàn Xu.
-- [ ] `/campaign_report format=txt` gửi file TXT.
-- [ ] `/campaign_report format=csv` gửi file CSV.
+- [ ] `/campaign_report format=txt` trừ 50 Xu và gửi file TXT.
+- [ ] `/campaign_report format=csv` trừ 50 Xu và gửi file CSV.
+- [ ] `/campaign_report` lỗi export thì hoàn 50 Xu.
 - [ ] `/export_report` alias hoạt động.
 - [ ] Admin `/growth_loop` vẫn giữ operator loop mặc định.
 - [ ] Admin `/growth_loop manual=1` xem manual post loop.
@@ -144,8 +148,10 @@
 ## Provider and sales readiness
 
 - [ ] `/providers` shows configured/missing only.
+- [ ] `/pricing` và `/banggia` hiển thị bảng giá user.
+- [ ] `/pricing_admin` admin-only.
 - [ ] `/providers` does not reveal key suffixes, tokens, checksum, or raw secret values.
-- [ ] `/costs` matches current Xu pricing: `/film` 50, `/growth_ai` 30, trial 150, free chat daily 20.
+- [ ] `/costs` matches current Xu pricing: `/film` 200/500/1,200, `/growth_ai` 120, `/campaign_report` 50, trial 150, free chat daily 20.
 - [ ] `/sales_ready` returns NOT READY or BETA READY only.
 - [ ] `/payos_test_plan` is available to admin.
 - [ ] `docs/API_KEYS_SETUP.md` reviewed before adding new provider keys.

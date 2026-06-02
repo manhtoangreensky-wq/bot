@@ -8,7 +8,7 @@ Scope: TOAN AAS Phase 1 Step 7
 - `py_compile`: PASS before implementation.
 - `py_compile`: PASS after implementation.
 - `pytest -q`: PASS, 13 tests.
-- Import test: PASS, `GROWTH_AI_COST=30`, `cmd_growth_ai` and `cmd_campaign_report` exist.
+- Import test: PASS, `cmd_growth_ai` and `cmd_campaign_report` exist.
 - Local route smoke: PASS for `/`, `/landing`, `/health`, `/banner.png`.
 
 ## Existing Data Tables

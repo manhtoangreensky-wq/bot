@@ -5,9 +5,10 @@
 - `py_compile`: PASS using Codex bundled Python on 2026-06-02.
 - `pytest -q`: PASS, 13 tests, 1 Starlette/httpx deprecation warning.
 - Import test: PASS, `cmd_help` and `help_text_for_user` exist.
-- Step 7 import test: PASS, `GROWTH_AI_COST=30`, `cmd_growth_ai`, `cmd_campaign_report`, and report CSV helper exist.
+- Step 7 import test: PASS, `cmd_growth_ai`, `cmd_campaign_report`, and report CSV helper exist.
 - Step 8 compile: PASS after provider status and sales readiness commands.
 - Step 9 compile: PASS after sales hardening, `/mark_payos_test`, and beta offer commands.
+- Step 10 compile: PASS after Pricing Engine V2 and higher Xu defaults.
 
 ## UI
 
@@ -50,6 +51,7 @@
 - `/dashboard`: exists.
 - `/stats`: exists.
 - `/backup_db`: exists.
+- `/pricing_admin`: exists, admin-only Pricing Engine V2 constants/formula.
 - `/pending`, `/duyet`, `/tuchoi`, `/checkpayos`: exist.
 - `/providers`: exists, admin-only, shows configured/missing only.
 - `/costs`: exists, admin-only, summarizes Xu pricing and provider cost risk.
@@ -61,7 +63,7 @@
 
 - `/providers`: added in Step 8; no key suffixes or secret values are printed.
 - `/sales_ready`: Step 9 logic supports NOT READY, BETA READY, and SALES READY after PayOS real test PASS.
-- `/costs`: added in Step 8; documents `/film` 50 Xu, `/growth_ai` 30 Xu, trial 150 Xu, free chat daily 20.
+- `/costs`: added in Step 8 and updated in Step 10; documents `/film` 200/500/1,200 Xu, `/growth_ai` 120 Xu, `/campaign_report` 50 Xu, trial 150 Xu, free chat daily 20.
 - `/payos_test_plan`: added in Step 8; guides real 10k payment validation.
 - PayOS real payment test: still manual and required before public selling.
 - API key setup docs: `docs/API_KEYS_SETUP.md`.
@@ -79,6 +81,16 @@
 - `/beta_offer` and `/goi_beta`: user-facing beta package commands.
 - Sales docs: `docs/BETA_SALES_PACKAGE.md`, `docs/FIRST_CUSTOMER_BETA_PLAN.md`, `docs/SALES_SCRIPT.md`.
 - Safety: PayOS packages/webhook/billing callbacks untouched in Step 9.
+
+## Pricing Engine V2 Status
+
+- `/pricing` and `/banggia`: user-facing price table.
+- `/pricing_admin`: admin-only formula/constants.
+- `/film`: 200 Xu basic, 500 Xu pro, 1,200 Xu series.
+- `/growth_ai`: 120 Xu.
+- `/campaign_report`: 50 Xu for normal users; no data means no charge; export errors refund.
+- MB helpers: `calculate_audio_cost`, `calculate_video_download_cost`, `calculate_mb_cost`.
+- Safety: PayOS packages and payment callbacks untouched in Step 10.
 
 ## Next risk to fix
 
@@ -108,7 +120,7 @@
 ## Video Script Lite Status
 
 - Commands: `/film`, `/video_script`.
-- Cost: 50 Xu/script pack.
+- Cost: 200 Xu basic, 500 Xu pro, 1,200 Xu series.
 - Scope: script, prompts, captions, CTA, hashtags, quality check.
 - Platforms: Facebook, TikTok, YouTube by default.
 - Affiliate integration: `/film topic="..." affiliate_id=1` validates owner link before charging.
@@ -137,8 +149,8 @@
 - `/performance_report`: aggregates manual posts by platform and top posts.
 - `/posts`: lists recent manually recorded posts.
 - `/growth_loop`: user-facing rule-based recommendations from manual metrics.
-- `/growth_ai`: AI Growth Coach deep analysis, 30 Xu for normal users, admin/VIP free.
-- `/campaign_report`: TXT/CSV report export, free MVP.
+- `/growth_ai`: AI Growth Coach deep analysis, 120 Xu for normal users, admin/VIP free.
+- `/campaign_report`: TXT/CSV report export, 50 Xu for normal users.
 - `/export_report`: alias for `/campaign_report`.
 - `/growth_loop manual=1`: admin can view manual loop; admin default remains operator growth loop.
 - DB: `published_posts`, `manual_performance_events`, `growth_recommendations`.
@@ -149,7 +161,7 @@
 
 - `/growth_loop`: rule-based, fast, no AI charge.
 - `/growth_ai`: Gemini/OpenAI text fallback through existing `AgentGemini.chat`.
-- `/growth_ai` pricing: 30 Xu; no charge when no data; refund on AI error.
+- `/growth_ai` pricing: 120 Xu; no charge when no data; refund on AI error.
 - `/campaign_report`: exports TXT or CSV using owner-scoped manual data.
 - Report export: temp file only, deleted after Telegram send.
 - Local route smoke after Step 7: PASS for `/`, `/landing`, `/health`, `/banner.png`.
