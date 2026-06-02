@@ -414,3 +414,18 @@ def test_head_brain_contract_keeps_review_and_publish_gates(monkeypatch):
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
+
+
+def test_boss_video_launch_parser_clamps_and_keeps_manual_gate():
+    plan = bot.parse_boss_video_launch_args(
+        'topic="AI kiếm tiền affiliate" platform=onlyfans limit=99 duration=999 variants=1 build=0 run=1 tasks=100'
+    )
+    assert plan["topic"] == "AI kiếm tiền affiliate"
+    assert plan["platform"] == "onlyfans"
+    assert plan["limit"] == 8
+    assert plan["duration"] == 120
+    assert plan["variants"] == 3
+    assert plan["build"] is False
+    assert plan["autorun"] is True
+    assert plan["autorun_max_tasks"] == 40
+    assert "không tự đăng" in bot.boss_video_usage_text().lower()

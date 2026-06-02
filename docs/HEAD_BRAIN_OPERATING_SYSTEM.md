@@ -18,6 +18,8 @@ The current system is not a fully autonomous social posting bot. It is an approv
 
 ## Main Telegram Commands
 
+- `/tao_video topic="..." platform=tiktok limit=3 build=1`
+- `/boss_video topic="..." platform=facebook limit=2`
 - `/head_brain platform=tiktok days=30 limit=8`
 - `/head_run platform=tiktok topic="..." execute=0`
 - `/operator_contract platform=tiktok`
@@ -52,16 +54,17 @@ All operator APIs require `OPERATOR_API_TOKEN`.
 ## Standard Loop
 
 1. Admin sends a topic or money objective in Telegram.
-2. AI commander reads `/head_brain` or `GET /api/operator/head-brain`.
-3. If setup is missing, run bootstrap or ask admin for missing ENV/channel/link.
-4. Create job batch with `/operator_launch` or `/make_video`.
-5. Worker claims tasks with `/worker_intake` or task API.
-6. Worker returns real outputs by task complete/upload.
-7. Admin/AI runs `/review_video`.
-8. Admin approves with `/approve_publish`.
-9. Publisher posts manually or through an official `api_ready` adapter.
-10. Result URL and performance are recorded.
-11. AI reads affiliate decisions and creates the next scale/fix batch.
+2. Fast path: admin uses `/tao_video topic="..." platform=tiktok limit=3 build=1`.
+3. AI commander reads `/head_brain` or `GET /api/operator/head-brain`.
+4. If setup is missing, run bootstrap or ask admin for missing ENV/channel/link.
+5. Create job batch with `/operator_launch` or `/make_video`.
+6. Worker claims tasks with `/worker_intake` or task API.
+7. Worker returns real outputs by task complete/upload.
+8. Admin/AI runs `/review_video`.
+9. Admin approves with `/approve_publish`.
+10. Publisher posts manually or through an official `api_ready` adapter.
+11. Result URL and performance are recorded.
+12. AI reads affiliate decisions and creates the next scale/fix batch.
 
 ## Platform Rules
 
@@ -105,7 +108,8 @@ OnlyFans and adult-oriented workflows require:
 ## Next Implementation Priority
 
 1. Live Telegram test: `/head_brain`, `/operator_launch`, `/worker_intake`, `/review_video`.
-2. Add or connect one real video generation worker.
-3. Add one official publishing adapter at a time, starting with the safest platform/account.
-4. Keep OnlyFans manual until a compliant official workflow is confirmed.
-5. Use performance tracking before scaling spend or output volume.
+2. Live Telegram test: `/tao_video topic="công nghệ AI kiếm tiền" platform=tiktok limit=1 build=1`.
+3. Add or connect one real video generation worker.
+4. Add one official publishing adapter at a time, starting with the safest platform/account.
+5. Keep OnlyFans manual until a compliant official workflow is confirmed.
+6. Use performance tracking before scaling spend or output volume.

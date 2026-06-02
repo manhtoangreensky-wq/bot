@@ -2,7 +2,7 @@
 
 Date: 2026-06-02
 Source: `bot.py` local audit after Step 11
-Registered Telegram commands: 222
+Registered Telegram commands: 224
 Registered callback groups: 9
 
 ## User Commands
@@ -109,6 +109,7 @@ Registered callback groups: 9
 |---|---|---:|---|
 | Operator core | `/operator`, `/operator_menu`, `/operator_contract`, `/operator_status`, `/operator_dashboard`, `/operator_audit`, `/operator_smoke` | YES | Internal admin/operator surface. |
 | Autopilot | `/brain`, `/autopilot`, `/operator_loop`, `/operator_launch`, `/operator_auto`, `/operator_build` | YES | No customer exposure. |
+| Head brain launch | `/tao_video`, `/boss_video`, `/head_brain`, `/head_run`, `/operator_contract`, `/goal_audit` | YES | Admin gives a simple topic/platform order; bot creates gated video jobs/tasks and returns worker/review/publish handoff. |
 | Missions | `/mission_add`, `/missions`, `/mission_claim`, `/mission_prompt`, `/mission_run`, `/mission_workorders`, `/mission_complete` | YES | Internal work order flow. |
 | Workers | `/worker_next`, `/worker_intake`, `/worker_autorun`, `/worker_pack`, `/operator_worker_spec` | YES | Internal worker handoff. |
 | Film factory internal | `/film_blueprint`, `/film_series`, `/film_review`, `/film_rewrite`, `/film_approve`, `/film_project_pack`, `/scene_pack`, `/storyboard_crop`, `/compose_video` | YES | No render API added in Step 6. |

@@ -27673,6 +27673,155 @@ async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
 
+def clean_command_arg(value, default=""):
+    if value is None:
+        return default
+    return str(value).strip().strip('"').strip("'").strip()
+
+def parse_boss_video_launch_args(raw: str) -> dict:
+    raw = (raw or "").strip()
+    data = parse_key_value_args(raw)
+    topic = (
+        clean_command_arg(data.get("topic"))
+        or clean_command_arg(data.get("chude"))
+        or clean_command_arg(data.get("chủđề"))
+        or clean_command_arg(data.get("niche"))
+        or clean_command_arg(data.get("ngach"))
+        or clean_command_arg(raw if "=" not in raw else "")
+    )
+    platform = clean_command_arg(data.get("platform") or data.get("nen") or data.get("nền") or "tiktok").lower()
+    channel = clean_command_arg(data.get("channel") or data.get("kenh") or data.get("kênh") or "all").lower()
+    return {
+        "topic": topic,
+        "platform": platform or "tiktok",
+        "channel": channel or "all",
+        "affiliate_id": safe_int(data.get("affiliate_id") or data.get("aff") or data.get("link"), 0),
+        "campaign_id": safe_int(data.get("campaign") or data.get("camp") or data.get("campaign_id"), 0),
+        "limit": max(1, min(safe_int(data.get("limit") or data.get("max"), 3), 8)),
+        "duration": max(15, min(safe_int(data.get("duration") or data.get("sec"), 45), 120)),
+        "variants": max(3, min(safe_int(data.get("variants") or data.get("n"), 5), 8)),
+        "build": truthy_value(data.get("build") or data.get("autobuild"), True),
+        "bootstrap": truthy_value(data.get("bootstrap"), True),
+        "autorun": truthy_value(data.get("autorun") or data.get("run") or data.get("execute"), False),
+        "autorun_max_tasks": max(1, min(safe_int(data.get("max_tasks") or data.get("tasks"), 24), 40)),
+    }
+
+def boss_video_usage_text() -> str:
+    return (
+        "⚠️ Cú pháp:\n"
+        "<code>/tao_video topic=\"công nghệ AI kiếm tiền\" platform=tiktok limit=3 build=1</code>\n\n"
+        "Alias:\n"
+        "<code>/boss_video topic=\"review điện thoại AI\" platform=facebook limit=2</code>\n\n"
+        "Nền tảng: <code>tiktok</code>, <code>facebook</code>, <code>youtube</code>, <code>instagram</code>, <code>threads</code>, <code>onlyfans</code>, hoặc <code>all</code>.\n"
+        "Rule: lệnh này chỉ tạo job/task/brief và dừng ở review/publish gate; không tự đăng nếu chưa approve."
+    )
+
+async def cmd_tao_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args).strip()
+    plan = parse_boss_video_launch_args(raw)
+    topic = plan["topic"]
+    if not topic:
+        return await update.message.reply_text(boss_video_usage_text(), parse_mode="HTML")
+    platform = plan["platform"]
+    msg = await update.message.reply_text(
+        "🧠 <b>HEAD BRAIN NHẬN LỆNH VIDEO</b>\n\n"
+        f"• Chủ đề: <b>{html.escape(topic)}</b>\n"
+        f"• Platform: <code>{html.escape(platform)}</code>\n"
+        "• Đang tạo job/task và chuẩn bị worker handoff...",
+        parse_mode="HTML",
+    )
+    try:
+        ok, reason, result = await operator_launch_pipeline(
+            update.effective_user.id,
+            topic,
+            platform=platform,
+            channel=plan["channel"],
+            affiliate_id=plan["affiliate_id"],
+            campaign_id=plan["campaign_id"],
+            limit=plan["limit"],
+            build=plan["build"],
+            duration=plan["duration"],
+            variants=plan["variants"],
+            bootstrap=plan["bootstrap"],
+            autorun=plan["autorun"],
+            autorun_max_tasks=plan["autorun_max_tasks"],
+        )
+    except Exception as e:
+        await alert_admin(context, "Tao Video Head Brain", f"{str(e)} | topic={topic} platform={platform}")
+        return await msg.edit_text("❌ Lệnh tạo video lỗi. Đã báo admin.")
+
+    if not ok:
+        after = (result or {}).get("audit_after") or {}
+        return await msg.edit_text(
+            "❌ <b>Chưa tạo được video job</b>\n\n"
+            f"• Lý do: <code>{html.escape(str(reason))}</code>\n"
+            f"• Audit: <code>{html.escape(after.get('level') or '-')}</code> score={after.get('score') or 0}\n"
+            f"• Bước tiếp: <code>{html.escape(after.get('next_command') or '/head_brain')}</code>",
+            parse_mode="HTML",
+        )
+
+    created_jobs = result.get("created_jobs") or []
+    built_jobs = result.get("built_jobs") or []
+    affiliate = result.get("affiliate") or {}
+    campaign = result.get("campaign") or {}
+    launch_next = result.get("launch_next") or {}
+    telegram_next = launch_next.get("telegram") or {}
+    first_job_id = launch_next.get("first_job_id") or (created_jobs[0]["job_id"] if created_jobs else 0)
+    automation_next = result.get("automation_next") or {}
+    video_orders = (result.get("video_work_orders") or {}).get("orders") or []
+    platform_note = ""
+    if platform == "onlyfans":
+        platform_note = "\n⚠️ OnlyFans: manual-only, 18+, consent rõ ràng, không auto publish."
+    lines = [
+        "✅ <b>HEAD BRAIN ĐÃ TẠO VIDEO ORDER</b>",
+        f"• Chủ đề: <b>{html.escape(topic)}</b>",
+        f"• Platform/channel: <code>{html.escape(platform)}</code> / <code>{html.escape(plan['channel'])}</code>",
+        f"• Jobs tạo/build: <b>{len(created_jobs)}</b>/<b>{len(built_jobs)}</b>",
+        f"• Affiliate: <code>#{affiliate.get('id') or '-'}</code> {html.escape(affiliate.get('product') or '-')}",
+        f"• Campaign: <code>#{campaign.get('id') or '-'}</code> {html.escape(campaign.get('name') or '-')}",
+    ]
+    if created_jobs:
+        lines.append("\n<b>Job đầu tiên:</b>")
+        first = created_jobs[0]
+        lines.append(
+            f"• job <code>#{first.get('job_id')}</code> | <code>{html.escape(first.get('platform') or platform)}</code>\n"
+            f"  {html.escape(first.get('title') or first.get('topic') or topic)}"
+        )
+    if video_orders:
+        first_order = video_orders[0]
+        first_order_job_id = first_order.get("job_id")
+        first_order_tg = first_order.get("telegram") or {}
+        first_order_brief = first_order_tg.get("video_brief") or f"/video_brief job={first_order_job_id}"
+        lines.append(
+            "\n<b>Worker handoff:</b>\n"
+            f"• Work orders: <b>{len(video_orders)}</b>\n"
+            f"• Brief: <code>{html.escape(first_order_brief)}</code>\n"
+            f"• Worker pack: <code>/worker_pack job={first_order_job_id}</code>"
+        )
+    if first_job_id:
+        worker_autorun_cmd = automation_next.get("worker_autorun") or f"/worker_intake claim=1 include_prompt=1 job={first_job_id}"
+        review_cmd = telegram_next.get("review") or f"/review_video job={first_job_id} send=1"
+        approve_cmd = telegram_next.get("approve") or f"/approve_publish job={first_job_id} queue=1 mode=manual"
+        post_publish_cmd = telegram_next.get("post_publish") or f"/post_publish job={first_job_id}"
+        lines.extend([
+            "",
+            "<b>Chuỗi lệnh tiếp theo:</b>",
+            f"1. <code>{html.escape(worker_autorun_cmd)}</code>",
+            f"2. <code>{html.escape(review_cmd)}</code>",
+            f"3. <code>{html.escape(approve_cmd)}</code>",
+            f"4. <code>/publisher_handoff queue=&lt;QUEUE_ID&gt;</code>",
+            f"5. <code>{html.escape(post_publish_cmd)}</code>",
+            "6. <code>/affiliate_decisions days=30</code>",
+        ])
+    lines.append(
+        "\n<b>Gate:</b> chưa tự publish. Phải có output thật → review → approve → handoff/API chính thức."
+        + platform_note
+        + "\nAPI cho Claude/n8n: <code>POST /api/operator/launch</code>"
+    )
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -35161,6 +35310,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("operator_mission", cmd_operator_mission))
     tg_app.add_handler(CommandHandler("head_brain", cmd_head_brain))
     tg_app.add_handler(CommandHandler("head_run", cmd_head_run))
+    tg_app.add_handler(CommandHandler("tao_video", cmd_tao_video))
+    tg_app.add_handler(CommandHandler("boss_video", cmd_tao_video))
     tg_app.add_handler(CommandHandler("mission_add", cmd_mission_add))
     tg_app.add_handler(CommandHandler("missions", cmd_missions))
     tg_app.add_handler(CommandHandler("mission_claim", cmd_mission_claim))
