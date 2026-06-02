@@ -57,7 +57,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     level=logging.INFO
 )
-logger = logging.getLogger("TOAN_DAAS")
+logger = logging.getLogger("TOAN_AAS")
 
 # ─── BIẾN MÔI TRƯỜNG ─────────────────────────────────────────────────────────
 def _env(key: str, default: str = "") -> str:
@@ -96,10 +96,10 @@ def detect_public_base_url() -> tuple[str, str]:
     ]
     if any(_env(key) for key in railway_markers):
         fallback = normalize_public_base_url(
-            _env("TOAN_DAAS_FALLBACK_PUBLIC_URL", "https://bot-production-2dd7.up.railway.app")
+            _env("TOAN_AAS_FALLBACK_PUBLIC_URL", "https://bot-production-2dd7.up.railway.app")
         )
         if fallback:
-            return fallback, "TOAN_DAAS_FALLBACK_PUBLIC_URL"
+            return fallback, "TOAN_AAS_FALLBACK_PUBLIC_URL"
     return "", ""
 
 TELEGRAM_TOKEN      = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
@@ -6387,7 +6387,7 @@ def operator_n8n_template_data():
                     "duration": 45,
                     "notify_admin": True,
                 },
-                "note": "Chỉ chạy action an toàn: scale/build/queue manual; không auto publish ngoài MXH.",
+                "note": "Chỉ chạy action an toàn: scale/build/queue manual; không publish tự động ngoài MXH.",
             },
             {
                 "node": "Peek Worker Next",
@@ -8897,7 +8897,7 @@ def operator_control_contract_data(owner_id, days=30, platform="tiktok", limit=8
         },
         "non_negotiable_gates": [
             "Không publish nếu chưa có final asset thật.",
-            "Không auto publish nếu adapter/publisher không api_ready.",
+            "Không publish tự động nếu adapter/publisher không api_ready.",
             "Không dùng ảnh/giọng người thật thiếu consent; nội dung người lớn phải 18+.",
             "Không copy nguyên video/thương hiệu/claim từ nguồn tham khảo.",
             "Không hứa lợi nhuận, duyệt vay/thẻ, hoặc kết quả tài chính chắc chắn.",
@@ -12344,7 +12344,7 @@ def film_series_manifest_from_brief(job, variant=None, duration=80):
         },
         "publish": {
             "caption": caption,
-            "hashtags": "#phimAI #AIvideo #affiliate #TOANDAAS",
+            "hashtags": "#phimAI #AIvideo #affiliate #TOANAAS",
             "affiliate_placement": "caption/comment/status/bio theo distribution_pack",
             "cta": "Xem link gợi ý nếu phù hợp nhu cầu.",
         },
@@ -16408,7 +16408,7 @@ def publisher_capability_pack_data(owner_id, platform=""):
             "complete": "POST /api/operator/publish/<QUEUE_ID>/complete",
         },
         "safe_rules": [
-            "Chỉ auto publish bằng API chính thức và token hợp lệ.",
+            "Chỉ publish tự động bằng API chính thức và token hợp lệ.",
             "Không đăng nếu thiếu final_video, review gate hoặc approve queue.",
             "OnlyFans/AI influencer giữ manual consent gate và yêu cầu nội dung 18+ có quyền thương mại.",
             "Sau đăng bắt buộc submit publish_url và ghi performance để quyết định scale/fix/pause.",
@@ -16931,7 +16931,7 @@ async def publish_facebook_page_video(queue_payload: dict):
             "raw": payload,
         }
     except Exception as e:
-        logger.error(f"Facebook auto publish error: {e}")
+        logger.error(f"Facebook official publish error: {e}")
         return False, "exception", {"error": str(e)}
 
 async def official_auto_publish_queue_item(owner_id, queue_id):
@@ -17244,7 +17244,7 @@ async def fetch_google_news_trends(niche, platform="", limit=5):
     query = quote(" ".join(query_parts))
     url = f"https://news.google.com/rss/search?q={query}&hl=vi&gl=VN&ceid=VN:vi"
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        res = await client.get(url, headers={"User-Agent": "TOAN-DAAS-Bot/1.0"})
+        res = await client.get(url, headers={"User-Agent": "TOAN-AAS-Bot/1.0"})
     if res.status_code != 200:
         raise RuntimeError(f"Google News RSS HTTP {res.status_code}")
     root = ET.fromstring(res.content)
@@ -17301,7 +17301,7 @@ def fallback_operator_trends(niche, platform="", affiliate=None, limit=5):
         items.append({
             "title": title,
             "url": f"internal://fallback-trend/{quote(topic)}/{idx}",
-            "source": "TOAN_DAAS_FALLBACK",
+            "source": "TOAN_AAS_FALLBACK",
             "summary": (
                 f"{summary} Network={network or '-'}; platform={platform}. "
                 "Dùng khi nguồn trend ngoài không có dữ liệu, vẫn phải qua review/approve gate."
@@ -18738,7 +18738,7 @@ def build_distribution_pack(owner_id, job_id):
                 "performance": "/api/operator/performance",
             },
         },
-        "rule": "Distribution pack là hợp đồng đăng và đo hiệu quả cho một job. Không auto publish nếu review_gate chưa APPROVE hoặc channel không api_ready; manual/API đều phải giữ disclosure affiliate.",
+        "rule": "Distribution pack là hợp đồng đăng và đo hiệu quả cho một job. Không publish tự động nếu review_gate chưa APPROVE hoặc channel không api_ready; manual/API đều phải giữ disclosure affiliate.",
     }
 
 def build_video_review_summary(owner_id, job_id):
@@ -20253,7 +20253,7 @@ class AgentDownloader:
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp_path = tmp.name
             async with httpx.AsyncClient(follow_redirects=True, timeout=120.0) as client:
-                async with client.stream("GET", media_url, headers={"User-Agent": "TOAN-DAAS-Bot/1.0"}) as res:
+                async with client.stream("GET", media_url, headers={"User-Agent": "TOAN-AAS-Bot/1.0"}) as res:
                     if res.status_code >= 400:
                         return False, f"media_http_{res.status_code}"
                     content_length = int(res.headers.get("content-length") or 0)
@@ -21333,7 +21333,7 @@ def menu_text_affiliate(is_admin: bool) -> str:
         "<b>B. Tạo batch video</b>\n• <code>/affiliate_scale</code>\n\n"
         "<b>C. Ghi nhận bài đăng</b>\n• <code>/publish_done</code>\n\n"
         "<b>D. Đọc số liệu và scale</b>\n• <code>/growth_loop</code>\n\n"
-        "Rule: admin-first. Customer publish OFF, auto publish OFF, ads assistant OFF cho đến khi admin duyệt riêng."
+        "Rule: admin-first. Customer publish OFF, publish tự động OFF, ads assistant OFF cho đến khi admin duyệt riêng."
     )
 
 def menu_text_operator(is_admin: bool) -> str:
@@ -28175,7 +28175,7 @@ async def cmd_tao_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     video_orders = (result.get("video_work_orders") or {}).get("orders") or []
     platform_note = ""
     if platform == "onlyfans":
-        platform_note = "\n⚠️ OnlyFans: manual-only, 18+, consent rõ ràng, không auto publish."
+        platform_note = "\n⚠️ OnlyFans: manual-only, 18+, consent rõ ràng, không publish tự động."
     lines = [
         "✅ <b>HEAD BRAIN ĐÃ TẠO VIDEO ORDER</b>",
         f"• Chủ đề: <b>{html.escape(topic)}</b>",
@@ -33407,11 +33407,11 @@ async def cmd_publisher_auto(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "Hiện chỉ bật auto chính thức cho Facebook Page api_ready.",
             parse_mode="HTML"
         )
-    msg = await update.message.reply_text(f"⏳ Đang thử auto publish queue #{queue_id} qua API chính thức...")
+    msg = await update.message.reply_text(f"⏳ Đang thử publish tự động queue #{queue_id} qua API chính thức...")
     ok, reason, info = await official_auto_publish_queue_item(update.effective_user.id, queue_id)
     if ok:
         await msg.edit_text(
-            f"✅ <b>Đã auto publish queue #{queue_id}</b>\n"
+            f"✅ <b>Đã publish tự động queue #{queue_id}</b>\n"
             f"• URL: <code>{html.escape(info.get('publish_url') or '-')}</code>\n"
             f"• Video ID: <code>{html.escape(info.get('video_id') or '-')}</code>\n\n"
             "Bot đã tự chuyển queue/job sang published và ghi performance publish.",
@@ -33420,7 +33420,7 @@ async def cmd_publisher_auto(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         detail = json.dumps(info, ensure_ascii=False)[:1200] if info else "-"
         await msg.edit_text(
-            f"⚠️ <b>Không auto publish được queue #{queue_id}</b>\n"
+            f"⚠️ <b>Không publish tự động được queue #{queue_id}</b>\n"
             f"• Lý do: <code>{html.escape(reason)}</code>\n"
             f"• Chi tiết: <pre>{html_pre(detail, 1200)}</pre>\n\n"
             f"Chuyển manual: <code>/publisher_handoff queue={queue_id}</code>",
@@ -39199,12 +39199,12 @@ async def api_operator_publish_auto(queue_id: int, request: Request):
                 )
             await tg_app.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="HTML")
         except Exception as e:
-            logger.error(f"Official auto publish notify error: {e}")
+            logger.error(f"Official publish notify error: {e}")
     return {
         "ok": ok,
         "reason": reason,
         "result": info,
-        "rule": "Currently only Facebook Page api_ready is supported for official auto publish. Other platforms return manual handoff.",
+        "rule": "Currently only Facebook Page api_ready is supported for official publisher. Other platforms return manual handoff.",
     }
 
 @fastapi_app.post("/api/operator/publish/{queue_id}/complete")
