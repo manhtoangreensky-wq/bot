@@ -198,6 +198,13 @@ APP_DEPLOY_ID       = (
     or ""
 )[:12]
 PUBLIC_BASE_URL, PUBLIC_BASE_URL_SOURCE = detect_public_base_url()
+TOAN_AAS_FALLBACK_PUBLIC_URL = normalize_public_base_url(
+    _env("TOAN_AAS_FALLBACK_PUBLIC_URL", "https://bot-production-2dd7.up.railway.app")
+)
+
+def effective_public_base_url() -> str:
+    return (PUBLIC_BASE_URL or TOAN_AAS_FALLBACK_PUBLIC_URL or "").strip().rstrip("/")
+
 ACTIVE_TELEGRAM_UPDATE_MODE = ""
 ACTIVE_TELEGRAM_WEBHOOK_URL = ""
 ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG = ""
@@ -228,7 +235,7 @@ PAYOS_CHECKSUM_KEY  = _env("PAYOS_CHECKSUM_KEY")
 RAPIDAPI_KEY        = _env("RAPIDAPI_KEY")
 RAPIDAPI_HOST       = _env("RAPIDAPI_HOST")
 COBALT_API_URL_RAW  = _env("COBALT_API_URL")
-COBALT_API_URL      = COBALT_API_URL_RAW or "https://api.cobalt.tools"
+COBALT_API_URL      = COBALT_API_URL_RAW
 COBALT_API_KEY      = _env("COBALT_API_KEY")
 PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "toanaasbot")
@@ -20926,18 +20933,79 @@ class AgentDeepgram:
                     timeout=60.0
                 )
             if res.status_code == 200:
-                return (
+                transcript = (
                     res.json()
                     .get("results", {})
                     .get("channels", [{}])[0]
                     .get("alternatives", [{}])[0]
                     .get("transcript", "Không nhận diện được lời nói.")
                 )
+                transcript = (transcript or "").strip()
+                if not transcript:
+                    return "❌ Deepgram empty transcript."
+                return transcript
             error_preview = res.text[:240]
             await alert_admin(context, "Deepgram", f"HTTP {res.status_code}: {error_preview[:160]}")
             return f"❌ Deepgram HTTP {res.status_code}: {error_preview}"
         except Exception as e:
             return f"❌ Lỗi: {str(e)}"
+
+def detect_image_format(data: bytes) -> str:
+    data = data or b""
+    if data.startswith(b"\x89PNG"):
+        return "png"
+    if data.startswith(b"\xff\xd8"):
+        return "jpeg"
+    if data.startswith(b"RIFF") and b"WEBP" in data[:16]:
+        return "webp"
+    return ""
+
+def normalize_image_png_bytes(data: bytes) -> tuple[bool, bytes, str]:
+    if not data:
+        return False, b"", "empty_response"
+    image_format = detect_image_format(data)
+    if not image_format:
+        return False, b"", "invalid_image_magic"
+    if Image is None:
+        if image_format == "png":
+            return True, data, "png"
+        return False, b"", f"PIL_unavailable_for_{image_format}"
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            if img.mode not in {"RGB", "RGBA"}:
+                img = img.convert("RGBA")
+            out = io.BytesIO()
+            img.save(out, format="PNG")
+            return True, out.getvalue(), image_format
+    except Exception as e:
+        return False, b"", f"image_decode_failed: {str(e)[:180]}"
+
+def normalize_provider_image_response(res, provider_name: str) -> tuple[bool, bytes, str]:
+    status_code = int(getattr(res, "status_code", 0) or 0)
+    content_type = str(getattr(res, "headers", {}).get("content-type", "") or "").lower()
+    if status_code != 200:
+        preview = ""
+        try:
+            preview = str(getattr(res, "text", "") or "")[:180]
+        except Exception:
+            preview = ""
+        return False, b"", f"{provider_name} HTTP {status_code}: {preview}"
+    if "json" in content_type or content_type.startswith("text/"):
+        preview = ""
+        try:
+            preview = str(getattr(res, "text", "") or "")[:180]
+        except Exception:
+            preview = ""
+        return False, b"", f"{provider_name} returned {content_type or 'text/json'}: {preview}"
+    ok, png_bytes, detail = normalize_image_png_bytes(bytes(getattr(res, "content", b"") or b""))
+    if not ok:
+        return False, b"", f"{provider_name} invalid image: {detail}"
+    return True, png_bytes, f"{provider_name} {detail}->png"
+
+def telegram_png_document(data: bytes, filename: str = "no_bg.png") -> io.BytesIO:
+    out = io.BytesIO(data)
+    out.name = filename
+    return out
 
 class AgentVoice:
     @staticmethod
@@ -21122,8 +21190,24 @@ class AgentDownloader:
             parse_mode="HTML"
         )
         try:
-            api_base = (COBALT_API_URL or "https://api.cobalt.tools").rstrip("/")
+            api_base = (COBALT_API_URL or "").rstrip("/")
             is_admin = AgentDownloader._is_admin_target(user_id, chat_id)
+            if not api_base:
+                if user_id and cost > 0:
+                    refund_charged_credit(user_id, cost, "download_refund", "", "Cobalt self-host missing", True)
+                admin_hint = (
+                    "\n\n⚠️ Admin: self-host Cobalt trên Railway/VPS rồi set <code>COBALT_API_URL</code>."
+                    if is_admin else
+                    ""
+                )
+                await msg.edit_text(
+                    "❌ Tải video qua link đang tạm khóa vì chưa cấu hình Cobalt self-host.\n"
+                    + AgentDownloader._refund_line(cost)
+                    + "Bạn có thể gửi file video trực tiếp để bot xử lý tiếp."
+                    + admin_hint,
+                    parse_mode="HTML"
+                )
+                return
             if AgentDownloader._uses_public_cobalt(api_base):
                 if user_id and cost > 0:
                     refund_charged_credit(user_id, cost, "download_refund", "", "Public Cobalt bị tắt để tránh quảng cáo/join channel ngoài", True)
@@ -21539,9 +21623,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                             files={"file": img_bytes},
                             timeout=30.0
                         )
-                    if res.status_code == 200:
+                    image_ok, png_bytes, image_detail = normalize_provider_image_response(res, "Cutout")
+                    if image_ok:
                         await context.bot.send_document(
-                            chat_id=chat_id, document=res.content,
+                            chat_id=chat_id, document=telegram_png_document(png_bytes),
                             filename="no_bg.png",
                             caption=f"✂️ Gói Tiết Kiệm — Tách nền thành công! (-{IMAGE_FREE_COST} Xu)"
                         )
@@ -21550,12 +21635,17 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         await query.delete_message()
                         ok = True
                     else:
-                        logger.warning(f"Cutout {res.status_code}")
+                        logger.warning(f"Cutout invalid output: {image_detail}")
+                        save_tool_test_result("image_remove_bg", "FAIL", f"provider=cutout; {image_detail}", uid)
                 except Exception as e:
                     logger.error(f"Cutout error: {e}")
             if not ok:
                 refund_charged_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền tiết kiệm do lỗi", True)
-                await query.edit_message_text("❌ Cutout.pro lỗi hoặc chưa cấu hình CUTOUT_API_KEY.")
+                await query.edit_message_text(
+                    "❌ Provider trả lỗi hoặc file không phải ảnh hợp lệ.\n"
+                    "✅ Xu đã hoàn lại.\n"
+                    "Admin kiểm tra quota/API key/provider."
+                )
         else:
             await query.edit_message_text("⏳ <i>Đang tách nền (Gói Cao Cấp)...</i>", parse_mode="HTML")
             ok = False
@@ -21575,9 +21665,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                             data={"size": "auto"},
                             timeout=30.0
                         )
-                    if res.status_code == 200:
+                    image_ok, png_bytes, image_detail = normalize_provider_image_response(res, "RemoveBG")
+                    if image_ok:
                         await context.bot.send_document(
-                            chat_id=chat_id, document=res.content,
+                            chat_id=chat_id, document=telegram_png_document(png_bytes),
                             filename="no_bg.png",
                             caption=f"✂️ Gói Cao Cấp — Tách nền HD thành công! (-{cost} Xu)"
                         )
@@ -21586,11 +21677,12 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         await query.delete_message()
                         ok = True
                     else:
-                        logger.warning(f"RemoveBG {res.status_code} → fallback Cutout")
+                        logger.warning(f"RemoveBG invalid output: {image_detail} → fallback Cutout")
+                        save_tool_test_result("image_remove_bg", "FAIL", f"provider=removebg; {image_detail}", uid)
                         await alert_admin(
                             context,
                             "RemoveBG HD",
-                            f"HTTP {res.status_code}. Đã fallback Cutout.pro cho user={uid}. Kiểm tra quota/số dư/API key."
+                            f"{image_detail}. Đã fallback Cutout.pro cho user={uid}. Kiểm tra quota/số dư/API key."
                         )
                 except Exception as e:
                     logger.error(f"RemoveBG error: {e}")
@@ -21628,9 +21720,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                                 files={"file": img_bytes},
                                 timeout=30.0
                             )
-                        if res.status_code == 200:
+                        image_ok, png_bytes, image_detail = normalize_provider_image_response(res, "Cutout")
+                        if image_ok:
                             await context.bot.send_document(
-                                chat_id=chat_id, document=res.content,
+                                chat_id=chat_id, document=telegram_png_document(png_bytes),
                                 filename="no_bg.png",
                                 caption=f"✂️ Gói Tiết Kiệm — Hoàn thành! (-{IMAGE_FREE_COST} Xu)"
                             )
@@ -21638,13 +21731,20 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                             save_tool_test_result("image", "PASS", "provider=cutout; cost_level=low; remove_bg fallback success", uid)
                             await query.delete_message()
                             cutout_ok = True
+                        else:
+                            logger.warning(f"Cutout fallback invalid output: {image_detail}")
+                            save_tool_test_result("image_remove_bg", "FAIL", f"provider=cutout; {image_detail}", uid)
                     except Exception as e:
                         logger.error(f"Cutout fallback error: {e}")
                 if not cutout_ok:
                     refund_charged_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền fallback do lỗi", True)
                     if not premium_refunded:
                         refund_charged_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp do lỗi", premium_charged)
-                    await query.edit_message_text("❌ Cả 2 dịch vụ đều lỗi. Xu đã hoàn lại.")
+                    await query.edit_message_text(
+                        "❌ Provider trả lỗi hoặc file không phải ảnh hợp lệ.\n"
+                        "✅ Xu đã hoàn lại.\n"
+                        "Admin kiểm tra quota/API key/provider."
+                    )
 
 
 async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -22309,13 +22409,46 @@ CUSTOMER_GUIDE_LOOKUP = {key: (idx + 1, title, body) for idx, (key, title, body)
 
 def guide_keyboard() -> InlineKeyboardMarkup:
     rows = []
-    public_base = (PUBLIC_BASE_URL or "").strip().rstrip("/")
+    public_base = effective_public_base_url()
     if public_base:
         rows.append([
             InlineKeyboardButton("📄 Tải bản Word", url=f"{public_base}/download/huong-dan-toan-aas.docx"),
         ])
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+def find_asset_path(filename: str) -> str:
+    safe_name = os.path.basename(str(filename or "").strip())
+    if not safe_name:
+        return ""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        safe_name,
+        os.path.join(os.getcwd(), safe_name),
+        os.path.join(base_dir, safe_name),
+        os.path.join(base_dir, "docs", safe_name),
+        os.path.join(base_dir, "static", safe_name),
+        os.path.join(base_dir, "assets", safe_name),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    search_dirs = [
+        os.getcwd(),
+        base_dir,
+        os.path.join(base_dir, "docs"),
+        os.path.join(base_dir, "static"),
+        os.path.join(base_dir, "assets"),
+    ]
+    target = safe_name.lower()
+    for directory in search_dirs:
+        try:
+            for item in os.listdir(directory):
+                if item.lower() == target:
+                    return os.path.join(directory, item)
+        except Exception:
+            pass
+    return ""
 
 def guide_docx_candidates() -> list[str]:
     base_dir = os.path.dirname(__file__)
@@ -22329,10 +22462,7 @@ def guide_docx_candidates() -> list[str]:
     ]
 
 def find_guide_docx_path() -> str:
-    for path in guide_docx_candidates():
-        if os.path.exists(path):
-            return path
-    return ""
+    return find_asset_path(GUIDE_DOCX_FILE)
 
 def terms_pdf_candidates() -> list[str]:
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -22346,13 +22476,10 @@ def terms_pdf_candidates() -> list[str]:
     ]
 
 def find_terms_pdf_path() -> str:
-    for path in terms_pdf_candidates():
-        if os.path.exists(path):
-            return path
-    return ""
+    return find_asset_path(TERMS_PDF_FILE)
 
 def terms_pdf_download_url() -> str:
-    public_base = (PUBLIC_BASE_URL or "").strip().rstrip("/")
+    public_base = effective_public_base_url()
     if not public_base:
         return ""
     return f"{public_base}/download/dieu-khoan-su-dung-toan-aas.pdf"
@@ -23648,12 +23775,14 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
                     files={"image_file": ("tool-test.png", img_bytes, "image/png")},
                     data={"size": "auto"},
                 )
-            remove_status = "PASS" if res.status_code == 200 and res.content else f"FAIL HTTP {res.status_code}"
-            if remove_status == "PASS":
-                output_bytes = res.content
+            image_ok, png_bytes, image_detail = normalize_provider_image_response(res, "RemoveBG")
+            if image_ok:
+                remove_status = "PASS"
+                output_bytes = png_bytes
                 output_provider = "RemoveBG"
             else:
-                detail = res.text[:180]
+                remove_status = "FAIL"
+                detail = image_detail
         except Exception as e:
             remove_status = "FAIL"
             detail = str(e)[:180]
@@ -23666,12 +23795,14 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
                     headers={"APIKEY": CUTOUT_API_KEY},
                     files={"file": ("tool-test.png", img_bytes, "image/png")},
                 )
-            cutout_status = "PASS" if res.status_code == 200 and res.content else f"FAIL HTTP {res.status_code}"
-            if cutout_status == "PASS":
-                output_bytes = res.content
+            image_ok, png_bytes, image_detail = normalize_provider_image_response(res, "Cutout")
+            if image_ok:
+                cutout_status = "PASS"
+                output_bytes = png_bytes
                 output_provider = "Cutout"
             else:
-                detail = detail or res.text[:180]
+                cutout_status = "FAIL"
+                detail = detail or image_detail
         except Exception as e:
             cutout_status = "FAIL"
             detail = detail or str(e)[:180]
@@ -23680,9 +23811,10 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
     save_tool_test_result("image", overall, f"RemoveBG={remove_status}; Cutout={cutout_status}; {detail}", update.effective_user.id)
     if output_bytes:
         save_tool_test_result("image_remove_bg", "PASS", f"provider={output_provider.lower()}; cost_level=low; tool_test_image success", update.effective_user.id)
+    elif overall == "FAIL":
+        save_tool_test_result("image_remove_bg", "FAIL", f"RemoveBG={remove_status}; Cutout={cutout_status}; {detail}", update.effective_user.id)
     if output_bytes:
-        out = io.BytesIO(output_bytes)
-        out.name = "toan_aas_tool_test_no_bg.png"
+        out = telegram_png_document(output_bytes, "toan_aas_tool_test_no_bg.png")
         await update.message.reply_document(
             document=out,
             filename=out.name,
@@ -23758,17 +23890,26 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⚠️ File quá lớn để smoke test. Hãy dùng audio ngắn dưới 15MB.")
     try:
         file_bytes = bytes(await (await media.get_file()).download_as_bytearray())
-        transcript = await AgentDeepgram.transcribe(file_bytes, context)
+        transcript = (await AgentDeepgram.transcribe(file_bytes, context) or "").strip()
         passed = bool(transcript and not transcript.startswith("❌"))
         status = "PASS" if passed else "FAIL"
-        save_tool_test_result("stt", status, transcript[:500], update.effective_user.id)
-        detail_label = "Transcript preview" if passed else "Error"
-        await update.message.reply_text(
-            "🎤 <b>STT Smoke Test</b>\n\n"
-            f"• Deepgram: <code>{status}</code>\n"
-            f"• {detail_label}: <code>{html.escape(transcript[:500] or '-')}</code>",
-            parse_mode="HTML",
-        )
+        detail = transcript if transcript else "empty_transcript"
+        save_tool_test_result("stt", status, f"provider=deepgram; cost_level=low; {detail[:450]}", update.effective_user.id)
+        if passed:
+            await update.message.reply_text(
+                "🎙 <b>STT PASS</b>\n\n"
+                "• Provider: <code>Deepgram</code>\n"
+                f"• Transcript:\n<code>{html.escape(transcript[:900])}</code>",
+                parse_mode="HTML",
+            )
+        else:
+            await update.message.reply_text(
+                "❌ <b>STT không nhận được transcript.</b>\n\n"
+                "• Provider: <code>Deepgram</code>\n"
+                "• Gợi ý: dùng audio có tiếng nói rõ, file ngắn hơn, hoặc kiểm tra định dạng.\n"
+                f"• Error: <code>{html.escape(detail[:240])}</code>",
+                parse_mode="HTML",
+            )
     except Exception as e:
         save_tool_test_result("stt", "FAIL", str(e)[:500], update.effective_user.id)
         await update.message.reply_text(
@@ -39583,6 +39724,17 @@ async def download_terms_pdf():
         filename=TERMS_PDF_FILE,
     )
 
+@fastapi_app.get("/asset_check")
+async def asset_check():
+    return {
+        "ok": True,
+        "public_base_url": effective_public_base_url(),
+        "logo": bool(find_asset_path("LOGO.png")),
+        "banner": bool(find_asset_path("banner.png")),
+        "guide_docx": bool(find_guide_docx_path()),
+        "terms_pdf": bool(find_terms_pdf_path()),
+    }
+
 @fastapi_app.get("/health")
 async def health_check():
     db_status = db_status_payload()
@@ -39717,17 +39869,17 @@ async def landing_page():
 @fastapi_app.get("/LOGO.png")
 @fastapi_app.get("/logo.png")
 async def logo_image():
-    logo_path = os.path.join(os.path.dirname(__file__), "LOGO.png")
+    logo_path = find_asset_path("LOGO.png")
     if not os.path.exists(logo_path):
-        raise HTTPException(status_code=404, detail="Logo not found")
-    return FileResponse(logo_path, media_type="image/png")
+        return JSONResponse({"ok": False, "error": "logo_missing"}, status_code=404)
+    return FileResponse(logo_path, media_type="image/png", filename="LOGO.png")
 
 @fastapi_app.get("/banner.png")
 async def landing_banner_image():
-    banner_path = os.path.join(os.path.dirname(__file__), "banner.png")
+    banner_path = find_asset_path("banner.png")
     if not os.path.exists(banner_path):
-        raise HTTPException(status_code=404, detail="Banner not found")
-    return FileResponse(banner_path, media_type="image/png")
+        return JSONResponse({"ok": False, "error": "banner_missing"}, status_code=404)
+    return FileResponse(banner_path, media_type="image/png", filename="banner.png")
 
 @fastapi_app.get("/r/{affiliate_id}")
 async def affiliate_redirect(affiliate_id: int, request: Request, job: int = 0, src: str = ""):
