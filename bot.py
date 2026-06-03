@@ -19963,6 +19963,11 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
         c.execute("SELECT user_id FROM users WHERE user_id=?", (str(target_id),))
         if not c.fetchone():
             c.execute(
+                """INSERT OR IGNORE INTO trial_grants (user_id, granted_xu, granted_at, username, note)
+                VALUES (?,?,?,?,?)""",
+                (str(target_id), TRIAL_CREDITS, now_text(), "PayOS user", "Backfilled before PayOS paid credit; no extra trial grant"),
+            )
+            c.execute(
                 "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent, has_deposited) VALUES (?,?,?,?,?,?,?)",
                 (str(target_id), "PayOS user", 0, 0, now_text(), 0, 1)
             )
@@ -35681,8 +35686,11 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         pending_order = c.fetchone()
         launch_recorded = 0
+        promo_result = {"bonus_xu": 0, "code": "", "status": "none"}
         pending_order_code = str(pending_order[0]) if pending_order and pending_order[0] else ""
         expected_order_xu = int(pending_order[2] or 0) if pending_order and pending_order[2] else 0
+        order_amount = int(pending_order[1] or 0) if pending_order and pending_order[1] else 0
+        order_base_xu = package_base_xu(order_amount) if order_amount else 0
         if pending_order_code:
             c.execute(
                 "SELECT amount, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code=? LIMIT 1",
@@ -35714,7 +35722,11 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), pending_order_code)
             )
+            if order_amount and order_base_xu:
+                promo_result = redeem_promo_for_order(conn, target_id, pending_order_code, order_amount, order_base_xu)
         c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
+        promo_bonus = int(promo_result.get("bonus_xu") or 0)
+        promo_code = promo_result.get("code") or ""
         record_audit(
             conn,
             ADMIN_ID,
@@ -35723,7 +35735,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "pending_deposit",
             str(target_id),
             before={"status": "pending", "order_code": pending_order_code},
-            after={"status": "approved", "user_id": str(target_id), "xu": int(amount), "launch_bonus_recorded": int(launch_recorded or 0)},
+            after={"status": "approved", "user_id": str(target_id), "xu": int(amount), "launch_bonus_recorded": int(launch_recorded or 0), "promo_code": promo_code, "promo_bonus": promo_bonus},
             note="Admin approved manual bill",
         )
         conn.commit()
@@ -35735,18 +35747,23 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"\n⚠️ Lưu ý: pending order dự kiến <b>{expected_order_xu} Xu</b>, "
                 f"admin vừa duyệt <b>{amount} Xu</b>."
             )
+        promo_user_line = f"🎁 Mã {html.escape(promo_code)}: +<b>{promo_bonus} Xu</b>.\n" if promo_bonus else ""
+        promo_admin_line = f" | Promo {html.escape(promo_code)} +{promo_bonus} Xu" if promo_bonus else ""
         await context.bot.send_message(
             chat_id=target_id,
             text=(
                 f"🎉 <b>NẠP TIỀN THÀNH CÔNG!</b>\n\n"
                 f"Admin đã xác nhận +<b>{amount} Xu</b>.\n"
+                f"{promo_user_line}"
                 f"🪙 Số dư mới: <b>{credits} Xu</b>\n\n"
                 f"Cảm ơn bạn đã tin dùng TOAN AAS! 🙏"
             ),
             parse_mode="HTML"
         )
         await update.message.reply_text(
-            f"✅ Đã duyệt {amount} Xu cho ID: {target_id}{mismatch_line}",
+            f"✅ Đã duyệt {amount} Xu cho ID: {target_id}"
+            f"{promo_admin_line}"
+            f"{mismatch_line}",
             parse_mode="HTML",
         )
     except (IndexError, ValueError):
