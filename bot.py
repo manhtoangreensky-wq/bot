@@ -25091,7 +25091,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_is_admin = is_admin_user(uid)
     member_profile = get_member_profile(uid)
     member_line = (
-        f"\n\n👑 Thành viên: <b>{html.escape(member_profile.get('tier_badge') or member_profile['tier_label'])}</b>\n"
+        f"\n\n🪪 Thành viên: <b>{html.escape(member_profile.get('tier_badge') or member_profile['tier_label'])}</b>\n"
         "🎁 Giới thiệu bạn bè: <code>/referral</code>\n"
         "🎂 Thêm ngày sinh tại <code>/birthday</code> để nhận quà bí mật theo hạng thành viên.\n"
         "📋 Quyền lợi thành viên: <code>/vip_policy</code>"
@@ -28966,7 +28966,7 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Launch Bonus không phải promo code. Mỗi order chỉ có 1 promo code, nhưng Launch Bonus có thể cộng cùng promo nếu đủ điều kiện.",
         "",
-        "👑 <b>Thành viên & giới thiệu:</b>",
+        "🪪 <b>Thành viên & giới thiệu:</b>",
         "• Cấp thành viên tính theo tổng nạp thành công.",
         "• Cấp càng cao, thưởng giới thiệu và quyền lợi càng tốt.",
         "• Platinum, Diamond và VIP được miễn phí Chat thường và Chat Pro.",
@@ -29317,7 +29317,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "🤖 <b>Chế độ AI hiện tại</b>",
         "",
-        f"• Cấp thành viên: <b>{html.escape(badge)}</b>",
+        f"• 🪪 Thành viên: <b>{html.escape(badge)}</b>",
         f"• Chat mode: <code>{html.escape(modes.get('chat_mode') or 'normal')}</code>",
         f"• AI level: <code>{html.escape(modes.get('ai_level') or 'normal')}</code>",
         f"• Voice mode: <code>{html.escape(modes.get('voice_mode') or '-')}</code>",
@@ -29649,7 +29649,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{user_id}</code>\n"
-        f"• Hạng: <b>{tier}</b>\n"
+        f"• 🪪 Thành viên: <b>{tier}</b>\n"
         f"• Số dư: <b>{credit_display}</b>\n"
         f"• Tổng nạp thành công: <b>{vnd_text(member['total_paid_vnd'])}</b>\n"
         f"• Tổng Xu dịch vụ đã dùng: <b>{total_spent} Xu</b>\n"
@@ -41882,7 +41882,7 @@ async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Bạn nhận Xu thưởng theo cấp thành viên của bạn.\n"
         "• Mỗi người được mời chỉ tạo thưởng một lần.\n"
         "• Không thưởng tài khoản ảo/spam/tự mời.\n\n"
-        f"👑 Cấp hiện tại: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
+        f"🪪 Cấp hiện tại: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
         f"🎯 Tỷ lệ thưởng: <b>{member_referral_policy_text(profile)}</b>\n\n"
         "📊 <b>Thống kê nhanh:</b>\n"
         f"• Đã bấm link: <b>{stats['total']}</b>\n"
@@ -41956,8 +41956,8 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Normal Chat: 5 Xu\n• Chat Pro: 10 Xu\n🎯 Lên Platinum để mở Free Normal Chat và Free Chat Pro."
     )
     text = (
-        "👑 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
-        f"• Cấp hiện tại: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
+        "🪪 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
+        f"• 🪪 Cấp hiện tại: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
         f"• Tổng nạp thành công: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
         f"• {next_line}\n\n"
         "<b>Quyền lợi hiện tại</b>\n"
@@ -41980,7 +41980,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
-        "👑 <b>CHÍNH SÁCH THÀNH VIÊN TOAN AAS</b>",
+        "🪪 <b>CHÍNH SÁCH THÀNH VIÊN TOAN AAS</b>",
         "",
         "<b>🌱 Newbie — dưới 100.000đ</b>",
         "• Trial 200 Xu nếu đủ điều kiện",
@@ -42119,7 +42119,7 @@ async def cmd_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🎂 <b>SINH NHẬT CỦA BẠN</b>\n\n"
         f"• Ngày sinh đã lưu: <b>{html.escape(birthday.get('birthday_mmdd') or '-')}</b>\n"
-        f"• Cấp thành viên hiện tại: <b>{html.escape(status.get('badge') or '-')}</b>\n"
+        f"• 🪪 Thành viên hiện tại: <b>{html.escape(status.get('badge') or '-')}</b>\n"
         f"• Quà sinh nhật năm nay: <b>{int(status.get('gift_xu') or 0)} Xu</b>\n"
         f"• Đã lưu được: <b>{int(status.get('days_since_set') or 0)} ngày</b>\n"
         f"• Trạng thái: <b>{html.escape(state_labels.get(status.get('state'), status.get('state') or '-'))}</b>\n\n"
