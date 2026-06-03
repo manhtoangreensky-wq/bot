@@ -123,6 +123,15 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
    - `/mode`
    - `/chat_pro_on`, send one normal chat message, then `/chat_pro_off`
    - `/chat_deep_on`, send one normal chat message, then `/chat_deep_off`
+0.1. Test final provider diagnostics:
+   - `/report_ai_today` and `/report_ai_week`: must show offline fallback if Gemini/OpenAI quota fails.
+   - `/tool_test_translate`, then `/tool_status`: Translation should show PASS after DeepL pass.
+   - Send voice/audio, then run `/tool_test_stt` within 2 minutes without reply.
+   - Reply voice/audio with `/tool_test_stt_debug`.
+   - Reply image with `/tool_test_image_debug`.
+   - `/payos_key_fingerprint`.
+   - `/payos_official_debug`.
+   - `/payos_debug_create`.
 1. Test `/legal` and the Legal button in `/start`.
 2. Test `/terms`, `/privacy`, `/dieukhoan_xu`, `/refund_policy`, `/content_policy`, `/affiliate_policy`, `/ads_policy`.
 3. Test website `/`, `/landing`, `/LOGO.png`, `/banner.png` and the legal footer.

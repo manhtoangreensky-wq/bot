@@ -2119,6 +2119,14 @@ def mask_payos_signature(signature: str) -> str:
         return "***" if signature else "missing"
     return signature[:8] + "***" + signature[-8:]
 
+def mask_key_fingerprint(value: str) -> str:
+    value = str(value or "")
+    if not value:
+        return "missing"
+    if len(value) <= 8:
+        return value[:2] + "***" + value[-2:]
+    return value[:4] + "***" + value[-4:]
+
 def env_strip_diagnostic(name: str, value: str) -> dict:
     raw = os.environ.get(name, "")
     stripped = str(raw or "").strip()
@@ -25293,6 +25301,73 @@ def admin_report_plain(payload: dict) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     return html.unescape(text)
 
+def offline_admin_insight(payload: dict, ai_error: str = "") -> str:
+    users = payload.get("users") or {}
+    money = payload.get("money") or {}
+    tools = payload.get("tools") or {}
+    providers = payload.get("providers") or {}
+    growth = payload.get("growth") or {}
+    requested = int(tools.get("requested") or 0)
+    success = int(tools.get("success") or 0)
+    fail = int(tools.get("fail") or 0)
+    provider_errors = int(providers.get("errors") or 0)
+    revenue = int(money.get("total_amount") or 0)
+    active = int(users.get("active") or 0)
+    new_users = int(users.get("new") or 0)
+    success_rate = 0.0
+    if success + fail > 0:
+        success_rate = round(success / (success + fail) * 100, 1)
+    good_points = []
+    if active > 0:
+        good_points.append("Bot có hoạt động thực tế trong kỳ.")
+    if success_rate >= 80:
+        good_points.append(f"Tỷ lệ tool thành công đang khá ổn ({success_rate}%).")
+    if revenue > 0:
+        good_points.append(f"Đã có doanh thu: {vnd_text(revenue)}.")
+    if int(growth.get("trial_grants") or 0) > 0 or new_users > 0:
+        good_points.append("Có user mới/trial mới, onboarding vẫn có tín hiệu.")
+    if not good_points:
+        good_points.append("Chưa có tín hiệu mạnh; cần test thực tế và kéo user dùng lại.")
+    risks = []
+    if provider_errors > 0 or fail > 0:
+        risks.append("Có lỗi provider/tool, cần ưu tiên kiểm tra tool lỗi nhiều nhất.")
+    if revenue <= 0:
+        risks.append("Doanh thu bằng 0, cần thúc đẩy nạp Xu/manual QR hoặc ưu đãi hợp lệ.")
+    if active <= 1:
+        risks.append("Active user thấp, cần cải thiện onboarding và nhắc user dùng thử.")
+    if int(money.get("pending_deposits") or 0) > 0:
+        risks.append("Có bill chờ duyệt, cần xử lý để không mất niềm tin khách.")
+    if not risks:
+        risks.append("Chưa thấy rủi ro lớn từ số liệu hiện có; tiếp tục theo dõi provider và thanh toán.")
+    actions = [
+        "Fix hoặc khóa provider đang lỗi nhiều nhất trước khi mở cho khách.",
+        "Test lại flow nạp Xu: manual QR trước, PayOS debug sau.",
+        "Theo dõi user mới/active ngày mai và nhắc dùng /film hoặc công cụ đã PASS.",
+    ]
+    if revenue <= 0:
+        actions.insert(0, "Đăng/tư vấn gói dùng thử và hướng khách nạp 50k/100k nếu tool đã ổn.")
+    return "\n".join([
+        "⚠️ AI provider đang hết quota/tạm lỗi, hệ thống dùng đánh giá nội bộ tạm thời.",
+        (f"<i>Lỗi AI: {html.escape(str(ai_error)[:180])}</i>" if ai_error else ""),
+        "",
+        "<b>1. Tổng quan</b>",
+        f"• Users: <b>{int(users.get('total') or 0)}</b>",
+        f"• Active users: <b>{active}</b>",
+        f"• User mới: <b>{new_users}</b>",
+        f"• Doanh thu: <b>{vnd_text(revenue)}</b>",
+        f"• Tool calls: <b>{requested}</b> | success <b>{success}</b> | fail <b>{fail}</b>",
+        f"• Provider errors: <b>{provider_errors}</b>",
+        "",
+        "<b>2. Điểm tốt</b>",
+        *[f"• {item}" for item in good_points],
+        "",
+        "<b>3. Rủi ro</b>",
+        *[f"• {item}" for item in risks],
+        "",
+        "<b>4. Hành động ưu tiên</b>",
+        *[f"{idx}. {item}" for idx, item in enumerate(actions[:4], 1)],
+    ])
+
 def report_chart_payload(start_at: str, end_at: str, label: str) -> str:
     conn = db_connect()
     try:
@@ -25391,9 +25466,22 @@ async def send_ai_admin_report(update: Update, period: str):
     try:
         insight = AgentGemini.chat(prompt, base_report, update.effective_user.id)
     except Exception as e:
-        insight = f"AI insight unavailable: {str(e)[:160]}"
+        insight = ""
+        ai_error = str(e)[:240]
+    else:
+        ai_error = str(insight or "")[:240] if (
+            not insight
+            or str(insight).strip().startswith("❌")
+            or is_quota_error_text(str(insight))
+            or "không có ai provider" in str(insight).lower()
+            or "lỗi cả gemini" in str(insight).lower()
+        ) else ""
+    if ai_error:
+        body = offline_admin_insight(payload, ai_error)
+    else:
+        body = html.escape(str(insight)[:3200])
     await update.message.reply_text(
-        f"🧠 <b>AI Daily Insight — {html.escape(label)}</b>\n\n{html.escape(str(insight)[:3200])}",
+        f"🧠 <b>AI Daily Insight — {html.escape(label)}</b>\n\n{body}",
         parse_mode="HTML",
     )
 
@@ -40010,7 +40098,16 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
             "❌ <b>PayOS debug create FAIL</b>",
             "",
             "Tất cả signature variants đều bị từ chối hoặc lỗi.",
-            "Nếu vẫn lỗi, kiểm tra lại bộ PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY cùng môi trường Railway, trạng thái merchant PayOS và domain return/cancel URL.",
+            "Vì nhiều cách ký đều bị PayOS từ chối, khả năng cao không phải chỉ do thứ tự field.",
+            "",
+            "<b>Nguyên nhân khả nghi:</b>",
+            "• PAYOS_CHECKSUM_KEY không cùng bộ với PAYOS_CLIENT_ID/PAYOS_API_KEY.",
+            "• Nhầm môi trường/kênh/app PayOS.",
+            "• Merchant/app PayOS chưa active đúng.",
+            "• Đang dùng nhầm Webhook Secret hoặc checksum của app khác.",
+            "• Cần test bằng SDK chính thức/official sample ngoài bot.",
+            "",
+            "Dùng thêm: <code>/payos_key_fingerprint</code> và <code>/payos_official_debug</code>.",
         ])
     lines.extend(["", "<b>Headers sent</b>"])
     lines.extend(payos_header_debug_summary())
@@ -40058,6 +40155,40 @@ async def cmd_payos_env_check(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"Active signature variant: <code>{html.escape(get_payos_create_signature_variant())}</code>",
         "",
         "Không hiển thị key/token/checksum trong log hoặc Telegram.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_payos_key_fingerprint(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+
+    def key_line(name: str, value: str) -> str:
+        info = env_strip_diagnostic(name, value)
+        stripped = str(os.environ.get(name, "") or "").strip()
+        return (
+            f"• <code>{name}</code>: "
+            f"configured=<code>{'yes' if info['configured'] else 'no'}</code> "
+            f"len=<code>{info['stripped_len']}</code> "
+            f"fingerprint=<code>{html.escape(mask_key_fingerprint(stripped))}</code> "
+            f"raw_len=<code>{info['raw_len']}</code> "
+            f"stripped_differs=<code>{'yes' if info['stripped_differs'] else 'no'}</code>"
+        )
+
+    lines = [
+        "🔎 <b>PayOS Key Fingerprint</b>",
+        "",
+        key_line("PAYOS_CLIENT_ID", PAYOS_CLIENT_ID),
+        key_line("PAYOS_API_KEY", PAYOS_API_KEY),
+        key_line("PAYOS_CHECKSUM_KEY", PAYOS_CHECKSUM_KEY),
+        "",
+        "Dùng fingerprint first4/last4 để đối chiếu với dashboard PayOS mà không lộ full key.",
+        "Nếu <code>/payos_debug_create</code> vẫn signature invalid với mọi variant, ưu tiên kiểm tra:",
+        "1. 3 key có cùng một kênh/app PayOS không.",
+        "2. Có dùng nhầm Webhook Secret hoặc checksum app khác không.",
+        "3. Merchant/app PayOS đã active đúng chưa.",
+        "4. Regenerate bộ key mới và cập nhật Railway nếu vẫn lỗi.",
+        "",
+        "Không hiển thị full key/token/checksum.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -40150,9 +40281,17 @@ async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT
         "",
     ])
     if sdk_ok:
-        lines.append("Note: SDK có trong môi trường, nhưng lệnh này không gọi SDK để tránh tạo đơn ngoài ý muốn.")
+        lines.append("Note: SDK có trong môi trường, nhưng lệnh này không gọi SDK để tránh tạo đơn ngoài ý muốn. Nếu cần test SDK thật, chạy official sample riêng với cùng bộ key.")
     else:
-        lines.append("Note: PayOS SDK not installed. Vì mọi variant đều fail, cần kiểm tra Checksum Key cùng bộ Client/API trong PayOS dashboard hoặc test bằng SDK chính thức ngoài bot.")
+        lines.extend([
+            "Note: PayOS SDK not installed.",
+            "Nếu mọi variant đều signature invalid, hãy kiểm tra theo thứ tự:",
+            "1. PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY có cùng một kênh/app PayOS không.",
+            "2. Không dùng nhầm Webhook Secret hoặc checksum của app khác.",
+            "3. Regenerate bộ key mới trong PayOS dashboard rồi cập nhật Railway.",
+            "4. Nếu vẫn lỗi, test bằng SDK chính thức/official sample ngoài bot.",
+            "Dùng thêm: <code>/payos_key_fingerprint</code>.",
+        ])
     lines.append("Lệnh này không tạo đơn thanh toán.")
     await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
 
@@ -41134,6 +41273,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("checkpayos",  cmd_checkpayos))
     tg_app.add_handler(CommandHandler("payos_debug_create", cmd_payos_debug_create))
     tg_app.add_handler(CommandHandler("payos_env_check", cmd_payos_env_check))
+    tg_app.add_handler(CommandHandler("payos_key_fingerprint", cmd_payos_key_fingerprint))
     tg_app.add_handler(CommandHandler("tuchoi",      cmd_tuchoi))
     tg_app.add_handler(CommandHandler("pending",     cmd_pending))
     tg_app.add_handler(CommandHandler("stats",       cmd_stats))
