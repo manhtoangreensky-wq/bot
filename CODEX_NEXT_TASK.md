@@ -7,6 +7,104 @@
 - Do not implement the future trend-to-video-to-publish pipeline in the public customer bot yet.
 - Current work remains limited to making the Stable Revenue Bot reliable, sellable and easy to operate.
 
+## Strategic Direction After Current Bot
+
+TOAN AAS is following this model:
+
+`AI Tools SaaS + Pay-as-you-go Credits + Automation Platform`
+
+The current phase is not the large app/dashboard phase. Priority number one is to finish the existing Telegram bot so it runs reliably and starts generating real revenue.
+
+### Current Phase - Bot Revenue Phase
+
+Goals:
+
+1. Telegram bot runs stably.
+2. Service Xu top-up works reliably with manual QR first; PayOS dynamic checkout is debugged later.
+3. User balances are managed by Telegram ID.
+4. Trial 200 Xu can be claimed only once.
+5. Only tools that pass smoke tests can be opened to customers.
+6. Broken tools stay hidden/admin-only; customers must not use broken flows.
+7. Provider failures must refund Xu when Xu was charged.
+8. Legal terms, privacy policy and Xu service rules are present.
+9. Website, landing page, guide and terms downloads are stable.
+10. The bot starts producing real revenue.
+
+### Locked Strategy
+
+- Do not jump to app/dashboard while the bot is not stable.
+- Do not open customer publishing before admin testing is complete.
+- Do not open ads assistant before there is a clear workflow.
+- Do not run the Big Plan while basic tools/API providers still fail.
+- Do not make broad changes to parts already stable.
+
+### Next Phase - Big Plan / TOAN AAS SaaS Platform
+
+Only start this after the current bot is stable.
+
+The TOAN AAS Big Plan becomes a SaaS platform with:
+
+1. Web app / Dashboard:
+   - Customer accounts.
+   - Order history.
+   - Xu service history.
+   - Tool/project history.
+   - File/media management.
+   - Video/content project management.
+
+2. SaaS Billing:
+   - Monthly/subscription packages.
+   - Pay-as-you-go with Xu service credits.
+   - Invoices/bills.
+   - Revenue dashboard.
+   - API/provider cost reports.
+
+3. AI Tool Hub:
+   - AI chat/script.
+   - Image tools.
+   - STT/transcription.
+   - Translation/dubbing.
+   - TTS/voice.
+   - Video script/storyboard.
+   - Image-to-video prompt pack.
+   - AI Story Video Factory.
+   - Trend/content research.
+
+4. Automation Platform:
+   - Content creation workflows.
+   - Trend -> idea -> script -> image -> voice -> video -> review.
+   - Admin review.
+   - Export/download.
+   - Admin-only publish.
+   - Customer publish only after safety is proven.
+
+5. Content / Affiliate / Ads Expansion:
+   - Affiliate content workflow.
+   - Proper disclosure and lawful sources.
+   - Ads assistant admin-first.
+   - TikTok/YouTube/Facebook publish tested admin-only first.
+   - No viral/revenue guarantees.
+
+6. ERP / Ops / Device / Backend Expansion:
+   - Operations dashboard.
+   - Backup/health.
+   - Provider monitor.
+   - API cost monitor.
+   - Automation jobs.
+   - Internal operator panel.
+
+### Core Principle
+
+TOAN AAS starts with the revenue bot first, then expands into the larger SaaS platform.
+
+- The current bot is the revenue MVP.
+- The Big Plan is the later phase after the MVP is stable.
+- If the bot is not stable, return to fixing the bot.
+- If a tool has not passed, do not sell/open that tool.
+- If PayOS is not stable, use manual QR.
+- If publish/ads is not safe, keep it admin-only or disabled.
+- If an API provider fails, replace the provider or hide the tool.
+
 Chưa quay lại kế hoạch lớn TOAN AAS.
 Chưa làm app ngoài.
 Chưa làm dashboard web.
