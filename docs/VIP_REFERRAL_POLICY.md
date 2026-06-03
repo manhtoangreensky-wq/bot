@@ -98,20 +98,22 @@ Birthday gifts are service Xu only.
 | Tier | Birthday gift |
 |---|---:|
 | Newbie | 0 Xu |
-| Silver | 100 Xu |
-| Gold | 150 Xu |
-| Platinum | 250 Xu |
-| Diamond | 350 Xu |
-| VIP | 500 Xu |
+| Silver | 111 Xu |
+| Gold | 333 Xu |
+| Platinum | 555 Xu |
+| Diamond | 666 Xu |
+| VIP | 888 Xu |
 
 Rules:
 
 - User must save birthday with `/set_birthday DD-MM`.
+- If birthday is not saved, the system does not automatically grant a gift.
 - No birth year is required.
 - User cannot self-change birthday after saving.
 - Birthday must be saved at least 30 days before the birthday for automatic gift.
 - If birthday is within 30 days after saving, admin manual review is required.
 - One gift per account per year.
+- Birthday gifts are internal service Xu only, not withdrawable, transferable, or redeemable back to cash.
 - Admin can grant manually with `/birthday_gift_grant USER_ID`.
 - Admin can inspect with `/birthday_gift_check USER_ID`.
 

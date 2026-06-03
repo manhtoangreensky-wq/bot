@@ -2433,11 +2433,11 @@ MEMBER_TIER_PROMO_POLICY = {
 }
 MEMBER_BIRTHDAY_GIFT_XU = {
     "newbie": 0,
-    "silver": 100,
-    "gold": 150,
-    "platinum": 250,
-    "diamond": 350,
-    "vip": 500,
+    "silver": 111,
+    "gold": 333,
+    "platinum": 555,
+    "diamond": 666,
+    "vip": 888,
 }
 MEMBER_TIER_ALIASES = {
     "tan_thu": "newbie",
@@ -3104,6 +3104,9 @@ def parse_birthday_mmdd(value: str) -> str:
 
 def birthday_gift_xu_for_tier(tier: str) -> int:
     return int(MEMBER_BIRTHDAY_GIFT_XU.get(normalize_member_tier(tier) or "newbie", 0) or 0)
+
+def get_birthday_gift_xu(tier: str) -> int:
+    return birthday_gift_xu_for_tier(tier)
 
 def parse_datetime_text(value: str):
     try:
@@ -29028,8 +29031,10 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tier = member.get("tier_badge") or member["tier_label"]
     credit_display = "Vô Hạn (∞)" if is_admin_user(user_id) or is_vip else f"{credits} Xu dịch vụ"
     ref_link = referral_link_for_user(user_id)
-    birthday = get_user_birthday(user_id)
-    birthday_line = birthday.get("birthday_mmdd") if birthday else "chưa lưu (/birthday)"
+    birthday_status = birthday_gift_status(user_id)
+    birthday = birthday_status.get("birthday") or {}
+    birthday_date = birthday.get("birthday_mmdd") if birthday else "chưa lưu (/birthday)"
+    birthday_line = f"{birthday_date}; quà hạng hiện tại {int(birthday_status.get('gift_xu') or 0)} Xu"
     chat_privilege = "Free Normal + Pro; Deep vẫn tính Xu" if has_free_normal_chat(member.get("tier")) else "Normal 5 Xu, Pro 10 Xu; lên Platinum để free Normal/Pro"
     msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
@@ -41317,8 +41322,16 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if promos else "• Chưa có mã ưu đãi cá nhân đang hoạt động."
     )
-    birthday = get_user_birthday(uid)
-    birthday_line = f"• Đã lưu: <b>{html.escape(birthday.get('birthday_mmdd') or '-')}</b>" if birthday else "• Chưa lưu. Gõ <code>/birthday</code> để thêm ngày sinh và nhận quà bí mật theo hạng."
+    birthday_status = birthday_gift_status(uid)
+    birthday = birthday_status.get("birthday") or {}
+    gift_xu = int(birthday_status.get("gift_xu") or 0)
+    birthday_line = (
+        f"• Đã lưu: <b>{html.escape(birthday.get('birthday_mmdd') or '-')}</b>\n"
+        f"• Quà theo hạng hiện tại: <b>{gift_xu} Xu</b>"
+    ) if birthday else (
+        f"• Chưa lưu. Gõ <code>/birthday</code> để thêm ngày sinh.\n"
+        f"• Quà theo hạng hiện tại: <b>{gift_xu} Xu</b>"
+    )
     chat_line = (
         "• Free Normal Chat\n• Free Chat Pro\n• Chat Deep vẫn tính Xu"
         if has_free_normal_chat(profile["tier"]) else
@@ -41399,12 +41412,19 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Mã lên hạng chỉ dùng cho chính tài khoản nhận mã, mỗi mốc 1 lần, không cộng dồn mã khác.",
         "",
         "🎂 <b>Quà sinh nhật thành viên</b>",
-        "• Silver: +100 Xu",
-        "• Gold: +150 Xu",
-        "• Platinum: +250 Xu",
-        "• Diamond: +350 Xu",
-        "• VIP: +500 Xu",
-        "Điều kiện: lưu ngày sinh bằng /birthday, lưu trước ít nhất 30 ngày để tự động xét, mỗi tài khoản nhận 1 lần/năm.",
+        "• Silver: +111 Xu",
+        "• Gold: +333 Xu",
+        "• Platinum: +555 Xu",
+        "• Diamond: +666 Xu",
+        "• VIP: +888 Xu",
+        "",
+        "Điều kiện:",
+        "• Bạn phải tự lưu ngày sinh bằng /birthday.",
+        "• Nếu không lưu ngày sinh, hệ thống sẽ không tự động tặng quà.",
+        "• Ngày sinh cần được lưu trước ít nhất 30 ngày để tự động xét quà.",
+        "• Nếu sinh nhật nằm trong vòng 30 ngày sau khi lưu, bạn cần nhắn admin để được duyệt thủ công.",
+        "• Mỗi tài khoản chỉ nhận quà sinh nhật 1 lần/năm.",
+        "• Quà là Xu dịch vụ nội bộ, không rút tiền, không chuyển nhượng.",
         "",
         "<b>Lưu ý pháp lý</b>",
         "• Tất cả ưu đãi là Xu dịch vụ nội bộ.",
@@ -41451,6 +41471,12 @@ async def cmd_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "🎂 <b>QUÀ SINH NHẬT TOAN AAS</b>\n\n"
             "Nếu bạn thêm ngày sinh vào hệ thống, TOAN AAS sẽ tặng bạn một món quà bí mật theo hạng thành viên.\n\n"
+            "Mức quà hiện tại:\n"
+            "• Silver: +111 Xu\n"
+            "• Gold: +333 Xu\n"
+            "• Platinum: +555 Xu\n"
+            "• Diamond: +666 Xu\n"
+            "• VIP: +888 Xu\n\n"
             "Lưu ngày sinh:\n"
             "<code>/set_birthday DD-MM</code>\n\n"
             "Ví dụ:\n"
