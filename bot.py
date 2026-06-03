@@ -853,6 +853,20 @@ def init_db():
         note TEXT,
         UNIQUE(user_id, birthday_year)
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS birthday_review_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        username TEXT,
+        full_name TEXT,
+        birthday_mmdd TEXT,
+        tier TEXT,
+        status TEXT DEFAULT 'pending',
+        reason TEXT,
+        admin_id TEXT,
+        admin_note TEXT,
+        created_at TEXT,
+        decided_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS promotion_codes (
         code TEXT PRIMARY KEY,
         bonus_xu INTEGER DEFAULT 0,
@@ -1338,6 +1352,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_member_tier_rewards_user ON member_tier_rewards(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_member_tier_rewards_code ON member_tier_rewards(promo_code)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_birthday_gifts_user_year ON birthday_gifts(user_id, birthday_year)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_birthday_review_status ON birthday_review_requests(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_birthday_review_user_status ON birthday_review_requests(user_id, status)")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -3251,6 +3267,147 @@ def birthday_gift_status(user_id, conn=None) -> dict:
     finally:
         if close_conn:
             conn.close()
+
+def serialize_birthday_review_request(row) -> dict:
+    if not row:
+        return {}
+    return {
+        "id": int(row[0] or 0),
+        "user_id": row[1] or "",
+        "username": row[2] or "",
+        "full_name": row[3] or "",
+        "birthday_mmdd": row[4] or "",
+        "tier": row[5] or "",
+        "status": row[6] or "",
+        "reason": row[7] or "",
+        "admin_id": row[8] or "",
+        "admin_note": row[9] or "",
+        "created_at": row[10] or "",
+        "decided_at": row[11] or "",
+    }
+
+def get_birthday_review_request(conn, request_id) -> dict:
+    row = conn.execute(
+        """SELECT id, user_id, username, full_name, birthday_mmdd, tier, status, reason,
+        admin_id, admin_note, created_at, decided_at
+        FROM birthday_review_requests WHERE id=?""",
+        (int(request_id),),
+    ).fetchone()
+    return serialize_birthday_review_request(row)
+
+def get_pending_birthday_review_request(conn, user_id) -> dict:
+    row = conn.execute(
+        """SELECT id, user_id, username, full_name, birthday_mmdd, tier, status, reason,
+        admin_id, admin_note, created_at, decided_at
+        FROM birthday_review_requests
+        WHERE user_id=? AND status='pending'
+        ORDER BY id DESC LIMIT 1""",
+        (str(user_id),),
+    ).fetchone()
+    return serialize_birthday_review_request(row)
+
+def create_birthday_review_request(conn, user, birthday_mmdd: str, reason="birthday_within_30_days") -> dict:
+    uid = str(getattr(user, "id", "") or "")
+    existing = get_pending_birthday_review_request(conn, uid)
+    if existing:
+        return {"created": False, "request": existing}
+    username = getattr(user, "username", "") or ""
+    full_name = getattr(user, "full_name", "") or " ".join(
+        x for x in [getattr(user, "first_name", "") or "", getattr(user, "last_name", "") or ""] if x
+    ).strip()
+    profile = get_member_profile(uid, conn=conn)
+    tier = normalize_member_tier(profile.get("tier") or "newbie") or "newbie"
+    created_at = now_text()
+    cur = conn.execute(
+        """INSERT INTO birthday_review_requests
+        (user_id, username, full_name, birthday_mmdd, tier, status, reason, created_at)
+        VALUES (?,?,?,?,?,?,?,?)""",
+        (uid, username, full_name, birthday_mmdd, tier, "pending", reason, created_at),
+    )
+    request_id = int(cur.lastrowid or 0)
+    record_usage_event_conn(
+        conn,
+        uid,
+        username=username,
+        event_type="birthday_review_requested",
+        tool_name="member",
+        command="/set_birthday",
+        status="pending",
+        provider="internal",
+        detail=f"request_id={request_id}; reason={reason}; birthday={birthday_mmdd}; tier={tier}",
+    )
+    return {"created": True, "request": get_birthday_review_request(conn, request_id)}
+
+def list_pending_birthday_review_requests(conn, limit=20) -> tuple[list[dict], int]:
+    safe_limit = max(1, min(int(limit or 20), 20))
+    rows = conn.execute(
+        """SELECT id, user_id, username, full_name, birthday_mmdd, tier, status, reason,
+        admin_id, admin_note, created_at, decided_at
+        FROM birthday_review_requests
+        WHERE status='pending'
+        ORDER BY id DESC
+        LIMIT ?""",
+        (safe_limit,),
+    ).fetchall()
+    total = int(conn.execute(
+        "SELECT COUNT(*) FROM birthday_review_requests WHERE status='pending'"
+    ).fetchone()[0] or 0)
+    return [serialize_birthday_review_request(row) for row in rows], total
+
+def birthday_review_pending_count(conn=None) -> int:
+    close_conn = False
+    if conn is None:
+        conn = db_connect()
+        close_conn = True
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM birthday_review_requests WHERE status='pending'").fetchone()
+        return int(row[0] or 0) if row else 0
+    except Exception:
+        return 0
+    finally:
+        if close_conn:
+            conn.close()
+
+def birthday_review_admin_message(request: dict) -> str:
+    badge = get_member_badge(request.get("tier") or "newbie")
+    username = request.get("username") or ""
+    username_text = f"@{username}" if username else "-"
+    request_id = int(request.get("id") or 0)
+    return (
+        "🎂 <b>YÊU CẦU DUYỆT QUÀ SINH NHẬT</b>\n\n"
+        "User vừa thêm ngày sinh nhưng nằm trong vòng 30 ngày, cần admin xét duyệt thủ công.\n\n"
+        "<b>Thông tin user:</b>\n"
+        f"• User ID: <code>{html.escape(str(request.get('user_id') or '-'))}</code>\n"
+        f"• Username: <b>{html.escape(username_text)}</b>\n"
+        f"• Tên: <b>{html.escape(request.get('full_name') or '-')}</b>\n"
+        f"• Hạng hiện tại: <b>{html.escape(badge)}</b>\n"
+        f"• Ngày sinh đã lưu: <b>{html.escape(request.get('birthday_mmdd') or '-')}</b>\n"
+        f"• Lý do: <code>{html.escape(request.get('reason') or '-')}</code>\n"
+        f"• Request ID: <code>{request_id}</code>\n\n"
+        "Nếu cần, yêu cầu user gửi hình ảnh/thông tin chứng minh ngày sinh qua chat hỗ trợ.\n\n"
+        "<b>Lệnh admin:</b>\n"
+        f"✅ Duyệt: <code>/birthday_approve {request_id}</code>\n"
+        f"❌ Từ chối: <code>/birthday_reject {request_id} lý do</code>\n\n"
+        "Ví dụ:\n"
+        f"<code>/birthday_approve {request_id}</code>\n"
+        f"<code>/birthday_reject {request_id} không đủ thông tin xác minh</code>\n\n"
+        "Danh sách chờ:\n"
+        "<code>/birthday_pending</code>\n\n"
+        "Quan trọng:\n"
+        "• Duyệt sẽ cộng quà sinh nhật theo hạng hiện tại.\n"
+        "• Không cấp trùng nếu user đã nhận quà sinh nhật trong năm.\n"
+        "• Không xóa dữ liệu."
+    )
+
+async def notify_admin_birthday_review_request(context: ContextTypes.DEFAULT_TYPE, request: dict):
+    if not request:
+        return
+    text = birthday_review_admin_message(request)
+    for admin_id in owner_and_admin_ids():
+        try:
+            await context.bot.send_message(chat_id=int(admin_id), text=text, parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"Birthday review admin notify failed for {admin_id}: {e}")
 
 def grant_birthday_gift(conn, user_id, actor_id="system", admin_override=False) -> dict:
     uid = str(user_id)
@@ -26689,6 +26846,11 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
             (start_at, end_at),
             0,
         ) or 0)
+        birthday_pending = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM birthday_review_requests WHERE status='pending'",
+            default=0,
+        ) or 0)
         provider_errors = int(sql_scalar(
             conn,
             "SELECT COUNT(*) FROM api_debug_events WHERE UPPER(status) NOT IN ('PASS','OK','SUCCESS') AND created_at BETWEEN ? AND ?",
@@ -26782,6 +26944,7 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
                 "tier_promo_xu": tier_promo_xu,
                 "birthday_gifts": birthday_gifts,
                 "birthday_xu": birthday_xu,
+                "birthday_pending": birthday_pending,
             },
         }
     finally:
@@ -26847,6 +27010,7 @@ def format_admin_report(payload: dict) -> str:
         f"• Tier ups: <b>{growth.get('tier_ups', 0)}</b>",
         f"• Tier promo created/used: <b>{growth.get('tier_promos_created', 0)}</b>/<b>{growth.get('tier_promos_used', 0)}</b>",
         f"• Tier promo Xu bonus: <b>{xu_text(growth.get('tier_promo_xu', 0))}</b>",
+        f"• Birthday pending review: <b>{growth.get('birthday_pending', 0)}</b>",
         f"• Birthday gifts: <b>{growth.get('birthday_gifts', 0)}</b>",
         f"• Birthday Xu gifted: <b>{xu_text(growth.get('birthday_xu', 0))}</b>",
         "",
@@ -29644,7 +29808,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     birthday_status = birthday_gift_status(user_id)
     birthday = birthday_status.get("birthday") or {}
     birthday_date = birthday.get("birthday_mmdd") if birthday else "chưa lưu (/birthday)"
-    birthday_line = f"{birthday_date}; quà hạng hiện tại {int(birthday_status.get('gift_xu') or 0)} Xu"
+    birthday_line = f"{birthday_date}; quà bí mật theo hạng thành viên"
     chat_privilege = "Free Normal + Pro; Deep vẫn tính Xu" if has_free_normal_chat(member.get("tier")) else "Normal 5 Xu, Pro 10 Xu; lên Platinum để free Normal/Pro"
     msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
@@ -41942,13 +42106,12 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     birthday_status = birthday_gift_status(uid)
     birthday = birthday_status.get("birthday") or {}
-    gift_xu = int(birthday_status.get("gift_xu") or 0)
     birthday_line = (
         f"• Đã lưu: <b>{html.escape(birthday.get('birthday_mmdd') or '-')}</b>\n"
-        f"• Quà theo hạng hiện tại: <b>{gift_xu} Xu</b>"
+        "• Quà sinh nhật: <b>quà bí mật theo hạng thành viên</b>"
     ) if birthday else (
         f"• Chưa lưu. Gõ <code>/birthday</code> để thêm ngày sinh.\n"
-        f"• Quà theo hạng hiện tại: <b>{gift_xu} Xu</b>"
+        "• Quà sinh nhật: <b>quà bí mật theo hạng thành viên</b>"
     )
     chat_line = (
         "• Free Normal Chat\n• Free Chat Pro\n• Chat Deep vẫn tính Xu"
@@ -42030,6 +42193,10 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Mã lên hạng chỉ dùng cho chính tài khoản nhận mã, mỗi mốc 1 lần, không cộng dồn mã khác.",
         "",
         "🎂 <b>Quà sinh nhật thành viên</b>",
+        "",
+        "Quà sinh nhật là món quà tri ân theo hạng thành viên. Số Xu có thể được cập nhật theo chính sách từng thời kỳ.",
+        "",
+        "Hiện tại:",
         "• Silver: +111 Xu",
         "• Gold: +333 Xu",
         "• Platinum: +555 Xu",
@@ -42041,6 +42208,7 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Nếu không lưu ngày sinh, hệ thống sẽ không tự động tặng quà.",
         "• Ngày sinh cần được lưu trước ít nhất 30 ngày để tự động xét quà.",
         "• Nếu sinh nhật nằm trong vòng 30 ngày sau khi lưu, bạn cần nhắn admin để được duyệt thủ công.",
+        "• Admin có thể yêu cầu hình ảnh/thông tin chứng minh ngày sinh nếu cần.",
         "• Mỗi tài khoản chỉ nhận quà sinh nhật 1 lần/năm.",
         "• Quà là Xu dịch vụ nội bộ, không rút tiền, không chuyển nhượng.",
         "",
@@ -42089,18 +42257,14 @@ async def cmd_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "🎂 <b>QUÀ SINH NHẬT TOAN AAS</b>\n\n"
             "Nếu bạn thêm ngày sinh vào hệ thống, TOAN AAS sẽ tặng bạn một món quà bí mật theo hạng thành viên.\n\n"
-            "Mức quà hiện tại:\n"
-            "• Silver: +111 Xu\n"
-            "• Gold: +333 Xu\n"
-            "• Platinum: +555 Xu\n"
-            "• Diamond: +666 Xu\n"
-            "• VIP: +888 Xu\n\n"
+            "Cấp thành viên càng cao, quà sinh nhật càng tốt.\n\n"
             "Lưu ngày sinh:\n"
             "<code>/set_birthday DD-MM</code>\n\n"
             "Ví dụ:\n"
             "<code>/set_birthday 20-11</code>\n\n"
             "Lưu ý quan trọng:\n"
             "• Chỉ tài khoản đã lưu ngày sinh mới được xét quà sinh nhật.\n"
+            "• Nếu bạn không lưu ngày sinh, hệ thống sẽ không tự động tặng quà.\n"
             "• Quà sinh nhật áp dụng từ hạng Silver trở lên.\n"
             "• Ngày sinh cần được lưu trước ít nhất 30 ngày để hệ thống tự động xét quà.\n"
             "• Nếu sinh nhật nằm trong vòng 30 ngày sau khi thêm ngày sinh, vui lòng nhắn admin/hỗ trợ để được duyệt thủ công.\n"
@@ -42120,7 +42284,7 @@ async def cmd_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎂 <b>SINH NHẬT CỦA BẠN</b>\n\n"
         f"• Ngày sinh đã lưu: <b>{html.escape(birthday.get('birthday_mmdd') or '-')}</b>\n"
         f"• 🪪 Thành viên hiện tại: <b>{html.escape(status.get('badge') or '-')}</b>\n"
-        f"• Quà sinh nhật năm nay: <b>{int(status.get('gift_xu') or 0)} Xu</b>\n"
+        "• Quà sinh nhật: <b>quà bí mật theo hạng thành viên</b>\n"
         f"• Đã lưu được: <b>{int(status.get('days_since_set') or 0)} ngày</b>\n"
         f"• Trạng thái: <b>{html.escape(state_labels.get(status.get('state'), status.get('state') or '-'))}</b>\n\n"
         f"Nếu cần đổi ngày sinh, vui lòng nhắn admin/hỗ trợ: {html.escape(SUPPORT_TELEGRAM_URL)}",
@@ -42135,9 +42299,20 @@ async def cmd_set_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not mmdd:
         return await update.message.reply_text("❌ Ngày sinh không hợp lệ. Dùng định dạng <code>DD-MM</code>, ví dụ <code>20-11</code>.", parse_mode="HTML")
     conn = db_connect()
+    review_result = None
     try:
+        conn.execute("BEGIN IMMEDIATE")
         existing = get_user_birthday(uid, conn=conn)
         if existing:
+            pending = get_pending_birthday_review_request(conn, uid)
+            conn.rollback()
+            if pending:
+                return await update.message.reply_text(
+                    "⏳ Yêu cầu xét duyệt sinh nhật của bạn đang chờ admin kiểm tra.\n\n"
+                    "Vui lòng không gửi lại nhiều lần để tránh trùng yêu cầu.\n"
+                    f"Hỗ trợ: {html.escape(SUPPORT_TELEGRAM_URL)}",
+                    parse_mode="HTML",
+                )
             return await update.message.reply_text(
                 "⚠️ Ngày sinh đã được lưu.\n\n"
                 f"• Ngày sinh hiện tại: <b>{html.escape(existing.get('birthday_mmdd') or '-')}</b>\n"
@@ -42150,15 +42325,35 @@ async def cmd_set_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
             VALUES (?,?,?,?,?,?)""",
             (str(uid), mmdd, now_text(), now_text(), 1, "Set by user"),
         )
+        if days_until_birthday(mmdd) <= 30:
+            review_result = create_birthday_review_request(conn, update.effective_user, mmdd, "birthday_within_30_days")
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
-    warning = ""
-    if days_until_birthday(mmdd) <= 30:
-        warning = (
-            "\n\n⚠️ Sinh nhật của bạn nằm trong vòng 30 ngày kể từ ngày lưu.\n"
+    if review_result:
+        if not review_result.get("created"):
+            return await update.message.reply_text(
+                "⏳ Yêu cầu xét duyệt sinh nhật của bạn đang chờ admin kiểm tra.\n\n"
+                "Vui lòng không gửi lại nhiều lần để tránh trùng yêu cầu.\n"
+                f"Hỗ trợ: {html.escape(SUPPORT_TELEGRAM_URL)}",
+                parse_mode="HTML",
+            )
+        await notify_admin_birthday_review_request(context, review_result.get("request") or {})
+        return await update.message.reply_text(
+            f"🎂 Đã lưu ngày sinh của bạn: <b>{html.escape(mmdd)}</b>\n\n"
+            "⚠️ Sinh nhật của bạn nằm trong vòng 30 ngày kể từ ngày lưu.\n\n"
             "Để tránh lạm dụng, hệ thống chưa tự động tặng quà cho lần này.\n"
-            f"Bạn có thể nhắn admin/hỗ trợ để được xét duyệt thủ công: {html.escape(SUPPORT_TELEGRAM_URL)}"
+            "Yêu cầu xét duyệt thủ công đã được gửi cho admin.\n\n"
+            "Bạn có thể nhắn admin/hỗ trợ và gửi hình ảnh/thông tin chứng minh ngày sinh nếu cần:\n"
+            f"{html.escape(SUPPORT_TELEGRAM_URL)}\n\n"
+            "Lưu ý:\n"
+            "• Nếu được duyệt, admin sẽ cấp quà sinh nhật theo hạng thành viên.\n"
+            "• Nếu không đủ điều kiện, hệ thống sẽ xét tự động từ năm sau nếu ngày sinh đã được lưu đủ 30 ngày.\n"
+            "• Không cần gửi lại nhiều lần để tránh trùng yêu cầu.",
+            parse_mode="HTML",
         )
     await update.message.reply_text(
         f"🎂 Đã lưu ngày sinh của bạn: <b>{html.escape(mmdd)}</b>\n\n"
@@ -42166,8 +42361,7 @@ async def cmd_set_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Lưu ý:\n"
         "• Chỉ tài khoản đã lưu ngày sinh mới được xét quà.\n"
         "• Ngày sinh cần được lưu trước ít nhất 30 ngày để hệ thống tự động tặng quà.\n"
-        "• Nếu cần đổi ngày sinh, vui lòng nhắn admin/hỗ trợ."
-        f"{warning}",
+        f"• Nếu cần đổi ngày sinh, vui lòng nhắn admin/hỗ trợ: {html.escape(SUPPORT_TELEGRAM_URL)}",
         parse_mode="HTML",
     )
 
@@ -42208,6 +42402,22 @@ async def cmd_birthday_gift_check(update: Update, context: ContextTypes.DEFAULT_
         return await update.message.reply_text("⚠️ Cú pháp: <code>/birthday_gift_check USER_ID</code>", parse_mode="HTML")
     status = birthday_gift_status(target_id)
     birthday = status.get("birthday") or {}
+    conn = db_connect()
+    try:
+        pending = get_pending_birthday_review_request(conn, target_id)
+    finally:
+        conn.close()
+    pending_text = (
+        f"\n• Pending request: <code>#{int(pending.get('id') or 0)}</code>\n"
+        f"  Gợi ý: <code>/birthday_approve {int(pending.get('id') or 0)}</code>"
+        if pending else
+        "\n• Pending request: <b>không có</b>"
+    )
+    manual_hint = (
+        f"\n\nNếu user đang cần duyệt thủ công, ưu tiên dùng: <code>/birthday_approve {int(pending.get('id') or 0)}</code>"
+        if pending else
+        "\n\nNếu cần duyệt thủ công: <code>/birthday_gift_grant USER_ID</code>"
+    )
     await update.message.reply_text(
         "🎂 <b>BIRTHDAY GIFT CHECK</b>\n\n"
         f"• User: <code>{html.escape(str(target_id))}</code>\n"
@@ -42218,8 +42428,9 @@ async def cmd_birthday_gift_check(update: Update, context: ContextTypes.DEFAULT_
         f"• Tier: <b>{html.escape(status.get('badge') or '-')}</b>\n"
         f"• Gift Xu: <b>{int(status.get('gift_xu') or 0)}</b>\n"
         f"• Already received this year: <b>{'yes' if status.get('already_received_this_year') else 'no'}</b>\n"
-        f"• State: <code>{html.escape(status.get('state') or '-')}</code>\n\n"
-        "Nếu cần duyệt thủ công: <code>/birthday_gift_grant USER_ID</code>",
+        f"• State: <code>{html.escape(status.get('state') or '-')}</code>"
+        f"{pending_text}"
+        f"{manual_hint}",
         parse_mode="HTML",
     )
 
@@ -42251,6 +42462,179 @@ async def cmd_birthday_gift_grant(update: Update, context: ContextTypes.DEFAULT_
             parse_mode="HTML",
         )
     await update.message.reply_text(f"⚠️ Không cấp được: <code>{html.escape(result.get('status') or '-')}</code>", parse_mode="HTML")
+
+async def cmd_birthday_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    conn = db_connect()
+    try:
+        requests, total = list_pending_birthday_review_requests(conn, limit=20)
+    finally:
+        conn.close()
+    if not requests:
+        return await update.message.reply_text("✅ Không có yêu cầu sinh nhật nào đang chờ duyệt.")
+    lines = ["🎂 <b>BIRTHDAY REVIEW PENDING</b>"]
+    for idx, request in enumerate(requests, start=1):
+        request_id = int(request.get("id") or 0)
+        username = request.get("username") or ""
+        username_text = f"@{username}" if username else "-"
+        lines.extend([
+            "",
+            f"{idx}. <b>#{request_id}</b> — {html.escape(get_member_badge(request.get('tier') or 'newbie'))} — User <code>{html.escape(str(request.get('user_id') or '-'))}</code> {html.escape(username_text)} — <b>{html.escape(request.get('birthday_mmdd') or '-')}</b> — <code>{html.escape(request.get('created_at') or '-')}</code>",
+            f"   ✅ <code>/birthday_approve {request_id}</code>",
+            f"   ❌ <code>/birthday_reject {request_id} lý do</code>",
+        ])
+    remaining = max(0, int(total or 0) - len(requests))
+    if remaining:
+        lines.extend(["", f"Còn <b>{remaining}</b> request khác."])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_birthday_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        request_id = int(context.args[0])
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/birthday_approve REQUEST_ID</code>", parse_mode="HTML")
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        request = get_birthday_review_request(conn, request_id)
+        if not request or request.get("status") != "pending":
+            conn.rollback()
+            return await update.message.reply_text("⚠️ Request không tồn tại hoặc không còn pending.")
+        target_id = str(request.get("user_id") or "")
+        user_row = conn.execute("SELECT 1 FROM users WHERE user_id=? LIMIT 1", (target_id,)).fetchone()
+        if not user_row:
+            conn.execute(
+                "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
+                (target_id, request.get("username") or "Unknown", 0, 0, now_text(), 0),
+            )
+        year = vn_now().year
+        if birthday_received_this_year(conn, target_id, year):
+            conn.rollback()
+            return await update.message.reply_text(
+                "⚠️ User đã nhận quà sinh nhật năm nay, không cấp trùng.\n"
+                f"Nếu muốn đóng request, dùng: <code>/birthday_reject {request_id} đã nhận quà năm nay</code>",
+                parse_mode="HTML",
+            )
+        profile = get_member_profile(target_id, conn=conn)
+        tier = normalize_member_tier(profile.get("tier") or "newbie") or "newbie"
+        gift_xu = birthday_gift_xu_for_tier(tier)
+        if gift_xu <= 0:
+            conn.rollback()
+            return await update.message.reply_text(
+                f"⚠️ User chưa đủ hạng Silver để nhận quà sinh nhật.\n"
+                f"• Tier hiện tại: <b>{html.escape(get_member_badge(tier))}</b>\n"
+                f"Nếu muốn đóng request, dùng: <code>/birthday_reject {request_id} chưa đủ hạng Silver</code>",
+                parse_mode="HTML",
+            )
+        result = grant_birthday_gift(conn, target_id, actor_id=update.effective_user.id, admin_override=True)
+        if not result.get("granted"):
+            conn.rollback()
+            return await update.message.reply_text(
+                f"⚠️ Không cấp được: <code>{html.escape(result.get('status') or '-')}</code>",
+                parse_mode="HTML",
+            )
+        conn.execute(
+            """UPDATE birthday_review_requests
+            SET status='approved', admin_id=?, decided_at=?
+            WHERE id=? AND status='pending'""",
+            (str(update.effective_user.id), now_text(), request_id),
+        )
+        record_usage_event_conn(
+            conn,
+            target_id,
+            username=request.get("username") or "",
+            event_type="birthday_gift_manual_approved",
+            tool_name="member",
+            command="/birthday_approve",
+            status="approved",
+            xu_delta=int(result.get("gift_xu") or 0),
+            provider="internal",
+            detail=f"request_id={request_id}; tier={result.get('tier') or tier}",
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    user_text = (
+        "🎂 <b>QUÀ SINH NHẬT ĐÃ ĐƯỢC DUYỆT</b>\n\n"
+        "Admin đã duyệt quà sinh nhật cho bạn.\n\n"
+        f"• Cấp thành viên: <b>{html.escape(result.get('badge') or get_member_badge(result.get('tier')))}</b>\n"
+        f"• Quà sinh nhật: +<b>{int(result.get('gift_xu') or 0)} Xu dịch vụ</b>\n"
+        f"• Số dư mới: <b>{int(result.get('balance') or 0)} Xu</b>\n\n"
+        "Chúc bạn một ngày thật nhiều năng lượng cùng TOAN AAS!"
+    )
+    try:
+        await context.bot.send_message(chat_id=str(target_id), text=user_text, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Birthday approve user notify failed: {e}")
+    await update.message.reply_text(
+        "✅ <b>Đã duyệt quà sinh nhật</b>\n\n"
+        f"• Request: <code>#{request_id}</code>\n"
+        f"• User: <code>{html.escape(str(target_id))}</code>\n"
+        f"• Gift: +<b>{int(result.get('gift_xu') or 0)} Xu</b>\n"
+        f"• Tier: <b>{html.escape(result.get('badge') or get_member_badge(result.get('tier')))}</b>",
+        parse_mode="HTML",
+    )
+
+async def cmd_birthday_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        request_id = int(context.args[0])
+        reason = " ".join(context.args[1:]).strip()
+        if not reason:
+            raise ValueError("missing_reason")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/birthday_reject REQUEST_ID lý do</code>", parse_mode="HTML")
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        request = get_birthday_review_request(conn, request_id)
+        if not request or request.get("status") != "pending":
+            conn.rollback()
+            return await update.message.reply_text("⚠️ Request không tồn tại hoặc không còn pending.")
+        target_id = str(request.get("user_id") or "")
+        conn.execute(
+            """UPDATE birthday_review_requests
+            SET status='rejected', admin_id=?, admin_note=?, decided_at=?
+            WHERE id=? AND status='pending'""",
+            (str(update.effective_user.id), reason, now_text(), request_id),
+        )
+        record_usage_event_conn(
+            conn,
+            target_id,
+            username=request.get("username") or "",
+            event_type="birthday_gift_rejected",
+            tool_name="member",
+            command="/birthday_reject",
+            status="rejected",
+            provider="internal",
+            detail=f"request_id={request_id}; reason={reason}",
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    user_text = (
+        "🎂 <b>YÊU CẦU QUÀ SINH NHẬT CHƯA ĐƯỢC DUYỆT</b>\n\n"
+        "Admin chưa thể duyệt quà sinh nhật cho lần này.\n\n"
+        "Lý do:\n"
+        f"{html.escape(reason)}\n\n"
+        "Bạn vẫn có thể được hệ thống tự động xét quà từ năm sau nếu ngày sinh đã được lưu đủ điều kiện.\n\n"
+        f"Hỗ trợ: {html.escape(SUPPORT_TELEGRAM_URL)}"
+    )
+    try:
+        await context.bot.send_message(chat_id=str(target_id), text=user_text, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Birthday reject user notify failed: {e}")
+    await update.message.reply_text(f"❌ Đã từ chối request <code>#{request_id}</code>.", parse_mode="HTML")
 
 async def cmd_grant_tier_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -43801,6 +44185,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("my_promos",   cmd_my_promos))
     tg_app.add_handler(CommandHandler("birthday",    cmd_birthday))
     tg_app.add_handler(CommandHandler("set_birthday", cmd_set_birthday))
+    tg_app.add_handler(CommandHandler("birthday_pending", cmd_birthday_pending))
+    tg_app.add_handler(CommandHandler("birthday_approve", cmd_birthday_approve))
+    tg_app.add_handler(CommandHandler("birthday_reject", cmd_birthday_reject))
     tg_app.add_handler(CommandHandler("myid",        cmd_myid))
     tg_app.add_handler(CommandHandler("trial_status", cmd_trial_status))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))

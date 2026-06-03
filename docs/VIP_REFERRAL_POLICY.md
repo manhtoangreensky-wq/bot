@@ -117,6 +117,25 @@ Rules:
 - Admin can grant manually with `/birthday_gift_grant USER_ID`.
 - Admin can inspect with `/birthday_gift_check USER_ID`.
 
+### Birthday Manual Review Flow
+
+When a birthday is saved too close to the birthday date, the bot creates a manual review request instead of granting automatically.
+
+Flow:
+
+1. User saves birthday with `/set_birthday DD-MM`.
+2. If the birthday has been saved for at least 30 days before the birthday date, the user can be auto eligible on the birthday.
+3. If the birthday is within 30 days after saving, the bot creates one pending review request.
+4. Admin reviews pending requests with `/birthday_pending`.
+5. Admin approves with `/birthday_approve REQUEST_ID` or rejects with `/birthday_reject REQUEST_ID reason`.
+6. The bot must not grant duplicate birthday gifts in the same year.
+7. Each user can have only one pending birthday review request at a time.
+
+Privacy:
+
+- Public `/birthday`, `/profile`, and `/member` should describe this as a secret birthday gift by member tier.
+- Detailed Xu amounts can stay in `/vip_policy` as policy reference.
+
 ## Tool Discount
 
 Eligible tools can use member discounts when base cost is at least 50 Xu and the tool is not disabled/admin-only/provider-failing.
@@ -155,5 +174,8 @@ Not eligible:
 - `/ref_admin USER_ID`
 - `/grant_tier_promo USER_ID silver|gold|platinum|diamond|vip`
 - `/set_birthday_admin USER_ID DD-MM`
+- `/birthday_pending`
+- `/birthday_approve REQUEST_ID`
+- `/birthday_reject REQUEST_ID reason`
 - `/birthday_gift_check USER_ID`
 - `/birthday_gift_grant USER_ID`
