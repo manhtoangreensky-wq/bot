@@ -1977,6 +1977,22 @@ def env_strip_diagnostic(name: str, value: str) -> dict:
         "stripped_differs": str(raw or "") != stripped,
     }
 
+def payos_header_debug_summary() -> list[str]:
+    return [
+        f"• x-client-id: <code>{'yes' if PAYOS_CLIENT_ID else 'no'}</code>",
+        f"• x-api-key: <code>{'yes' if PAYOS_API_KEY else 'no'}</code>",
+        "• Content-Type: <code>application/json</code>",
+    ]
+
+def payos_sdk_availability() -> tuple[bool, str]:
+    for module_name in ("payos", "payos_sdk"):
+        try:
+            __import__(module_name)
+            return True, module_name
+        except Exception:
+            continue
+    return False, ""
+
 def get_payos_create_signature_variant() -> str:
     # Customer payment creation must always use the PayOS documented order.
     # Debug variants are admin-only and must not override live /naptien.
@@ -20986,6 +21002,15 @@ class AgentGemini:
         return "❌ Không có AI Provider nào hoạt động."
 
 class AgentDeepgram:
+    REQUEST_PARAMS = {
+        "model": "nova-2",
+        "smart_format": "true",
+        "detect_language": "true",
+        "punctuate": "true",
+        "filler_words": "false",
+        "utterances": "false",
+    }
+
     @staticmethod
     def _result_summary(data: dict) -> tuple[str, str]:
         try:
@@ -20999,6 +21024,39 @@ class AgentDeepgram:
             return str(duration), detected_language or "-"
         except Exception:
             return "-", "-"
+
+    @staticmethod
+    def _result_stats(data: dict, transcript: str = "") -> dict:
+        try:
+            metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
+            results = data.get("results", {}) if isinstance(data, dict) else {}
+            channels = results.get("channels") or []
+            alt = {}
+            if channels:
+                alternatives = channels[0].get("alternatives") or []
+                alt = alternatives[0] if alternatives else {}
+            words = alt.get("words") or []
+            confidence = alt.get("confidence")
+            return {
+                "duration": metadata.get("duration") or metadata.get("audio_duration") or "-",
+                "detected_language": (channels[0].get("detected_language") or channels[0].get("language") or "-") if channels else "-",
+                "confidence": "-" if confidence is None else str(confidence),
+                "response_keys": ",".join(list(data.keys())[:8]) if isinstance(data, dict) else "-",
+                "alternatives_count": len((channels[0].get("alternatives") or [])) if channels else 0,
+                "words_count": len(words),
+                "transcript_length": len(transcript or ""),
+            }
+        except Exception as e:
+            return {
+                "duration": "-",
+                "detected_language": "-",
+                "confidence": "-",
+                "response_keys": "-",
+                "alternatives_count": 0,
+                "words_count": 0,
+                "transcript_length": len(transcript or ""),
+                "error": str(e)[:120],
+            }
 
     @staticmethod
     def _extract_transcript(data: dict) -> str:
@@ -21034,14 +21092,54 @@ class AgentDeepgram:
             detected_language = ""
             if channels:
                 detected_language = str((channels[0].get("detected_language") or channels[0].get("language") or ""))
+            stats = AgentDeepgram._result_stats(data, AgentDeepgram._extract_transcript(data))
             return (
-                f"keys={keys}; duration={metadata.get('duration') or '-'}; "
-                f"detected_language={detected_language or '-'}; "
+                f"response_keys={keys}; duration={stats.get('duration') or metadata.get('duration') or '-'}; "
+                f"lang={detected_language or stats.get('detected_language') or '-'}; "
+                f"confidence={stats.get('confidence') or '-'}; "
                 f"error={data.get('error') or data.get('message') or '-'}; "
                 f"body={body_preview[:500]}"
             )
         except Exception as e:
             return f"debug_parse_failed={str(e)[:120]}; body={body_preview[:500]}"
+
+    @staticmethod
+    async def diagnostic(file_bytes: bytes, content_type: str = "application/octet-stream") -> dict:
+        if not DEEPGRAM_API_KEY:
+            return {"status": "MISSING", "http_status": 0, "error": "DEEPGRAM_API_KEY missing"}
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(
+                    "https://api.deepgram.com/v1/listen",
+                    params=AgentDeepgram.REQUEST_PARAMS,
+                    headers={
+                        "Authorization": f"Token {DEEPGRAM_API_KEY}",
+                        "Content-Type": content_type or "application/octet-stream",
+                    },
+                    content=file_bytes,
+                    timeout=60.0,
+                )
+            body_preview = sanitize_log_text(res.text or "")[:500]
+            data = {}
+            if "json" in str(res.headers.get("content-type", "")).lower():
+                try:
+                    data = res.json()
+                except Exception:
+                    data = {}
+            transcript = AgentDeepgram._extract_transcript(data) if data else ""
+            stats = AgentDeepgram._result_stats(data, transcript)
+            status = "PASS" if res.status_code == 200 and transcript else ("EMPTY_TRANSCRIPT" if res.status_code == 200 else "FAIL")
+            return {
+                "status": status,
+                "http_status": int(res.status_code or 0),
+                "content_type": str(res.headers.get("content-type", "") or ""),
+                "body_preview": body_preview[:300],
+                "transcript": transcript,
+                "stats": stats,
+                "error": str((data or {}).get("error") or (data or {}).get("message") or "")[:240],
+            }
+        except Exception as e:
+            return {"status": "FAIL", "http_status": 0, "error": str(e)[:240], "stats": {}, "body_preview": ""}
 
     @staticmethod
     async def transcribe(file_bytes: bytes, context: ContextTypes.DEFAULT_TYPE, content_type: str = "application/octet-stream") -> str:
@@ -21051,14 +21149,7 @@ class AgentDeepgram:
             async with httpx.AsyncClient() as client:
                 res = await client.post(
                     "https://api.deepgram.com/v1/listen",
-                    params={
-                        "model": "nova-2",
-                        "smart_format": "true",
-                        "detect_language": "true",
-                        "punctuate": "true",
-                        "filler_words": "false",
-                        "utterances": "false",
-                    },
+                    params=AgentDeepgram.REQUEST_PARAMS,
                     headers={
                         "Authorization": f"Token {DEEPGRAM_API_KEY}",
                         "Content-Type": content_type or "application/octet-stream",
@@ -21075,7 +21166,9 @@ class AgentDeepgram:
                 transcript = AgentDeepgram._extract_transcript(data)
                 if not transcript:
                     debug = AgentDeepgram._debug_payload(data, body_preview)
-                    duration, detected_language = AgentDeepgram._result_summary(data)
+                    stats = AgentDeepgram._result_stats(data, transcript)
+                    duration = stats.get("duration") or "-"
+                    detected_language = stats.get("detected_language") or "-"
                     record_api_debug("deepgram", "stt", "EMPTY_TRANSCRIPT", res.status_code, debug[:500])
                     await alert_admin(context, "Deepgram empty transcript", debug[:300])
                     return (
@@ -21160,6 +21253,99 @@ def format_image_provider_status(provider_name: str, status: str, detail: str = 
         return f"FAIL HTTP {code} {content_type} — {body or '-'}"
     compact_detail = re.sub(r"\s+", " ", detail)[:300]
     return f"FAIL — {compact_detail or '-'}"
+
+def image_provider_detail_parts(provider_name: str, status: str, detail: str = "") -> dict:
+    detail = sanitize_log_text(str(detail or "")).strip()
+    result = {"status": str(status or "MISSING").upper(), "http": "-", "content_type": "-", "detail": "-"}
+    if result["status"] == "PASS":
+        result["detail"] = detail or "PNG hợp lệ"
+        return result
+    if result["status"] == "MISSING":
+        result["detail"] = "Chưa cấu hình API key."
+        return result
+    pattern = rf"{re.escape(provider_name)}\s+HTTP\s+(\d+);\s*content_type=([^;]+);\s*(?:body|invalid_image)=(.*)"
+    match = re.search(pattern, detail, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        result["http"] = match.group(1)
+        result["content_type"] = (match.group(2) or "-").strip()
+        result["detail"] = re.sub(r"\s+", " ", (match.group(3) or "").strip())[:300] or "-"
+    else:
+        result["detail"] = re.sub(r"\s+", " ", detail)[:300] or "-"
+    return result
+
+def image_provider_block(provider_name: str, info: dict) -> list[str]:
+    parts = image_provider_detail_parts(provider_name, info.get("status"), info.get("detail"))
+    return [
+        f"• {provider_name}: <code>{html.escape(parts['status'])}</code>",
+        f"  HTTP: <code>{html.escape(str(parts['http']))}</code>",
+        f"  Content-Type: <code>{html.escape(str(parts['content_type']))}</code>",
+        f"  Detail: <code>{html.escape(str(parts['detail'])[:300])}</code>",
+    ]
+
+def inspect_image_bytes(img_bytes: bytes) -> dict:
+    result = {"size": len(img_bytes or b""), "pil_ok": False, "format": "-", "mode": "-", "dimensions": "-", "error": ""}
+    if Image is None:
+        result["error"] = "PIL unavailable"
+        return result
+    try:
+        with Image.open(io.BytesIO(img_bytes or b"")) as img:
+            result.update({
+                "pil_ok": True,
+                "format": str(img.format or "-"),
+                "mode": str(img.mode or "-"),
+                "dimensions": f"{img.width}x{img.height}",
+            })
+    except Exception as e:
+        result["error"] = str(e)[:180]
+    return result
+
+async def run_image_provider_tests(img_bytes: bytes) -> dict:
+    result = {
+        "removebg": {"status": "MISSING", "detail": "", "http": 0},
+        "cutout": {"status": "MISSING", "detail": "", "http": 0},
+        "output_bytes": b"",
+        "output_provider": "",
+    }
+    if REMOVEBG_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                res = await client.post(
+                    "https://api.remove.bg/v1.0/removebg",
+                    headers={"X-Api-Key": REMOVEBG_API_KEY},
+                    files={"image_file": ("tool-test.png", img_bytes, "image/png")},
+                    data={"size": "auto"},
+                )
+            image_ok, png_bytes, image_detail = normalize_provider_image_response(res, "RemoveBG")
+            status = "PASS" if image_ok else "FAIL"
+            result["removebg"] = {"status": status, "detail": image_detail, "http": int(getattr(res, "status_code", 0) or 0)}
+            record_api_debug("removebg", "remove_bg", status, getattr(res, "status_code", 0), image_detail)
+            if image_ok:
+                result["output_bytes"] = png_bytes
+                result["output_provider"] = "RemoveBG"
+        except Exception as e:
+            detail = str(e)[:300]
+            result["removebg"] = {"status": "FAIL", "detail": detail, "http": 0}
+            record_api_debug("removebg", "remove_bg", "FAIL", 0, detail)
+    if not result["output_bytes"] and CUTOUT_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                res = await client.post(
+                    "https://www.cutout.pro/api/v1/matting2?mattingType=2&crop=true",
+                    headers={"APIKEY": CUTOUT_API_KEY},
+                    files={"file": ("tool-test.png", img_bytes, "image/png")},
+                )
+            image_ok, png_bytes, image_detail = normalize_provider_image_response(res, "Cutout")
+            status = "PASS" if image_ok else "FAIL"
+            result["cutout"] = {"status": status, "detail": image_detail, "http": int(getattr(res, "status_code", 0) or 0)}
+            record_api_debug("cutout", "remove_bg", status, getattr(res, "status_code", 0), image_detail)
+            if image_ok:
+                result["output_bytes"] = png_bytes
+                result["output_provider"] = "Cutout"
+        except Exception as e:
+            detail = str(e)[:300]
+            result["cutout"] = {"status": "FAIL", "detail": detail, "http": 0}
+            record_api_debug("cutout", "remove_bg", "FAIL", 0, detail)
+    return result
 
 def telegram_png_document(data: bytes, filename: str = "no_bg.png") -> io.BytesIO:
     out = io.BytesIO(data)
@@ -21477,9 +21663,97 @@ class AgentDownloader:
 # ─── STATE ───────────────────────────────────────────────────────────────────
 USER_BILL_STATE: dict = {}
 USER_PENDING: dict = {}
+LAST_MEDIA_CACHE_TTL_SECONDS = 120
+LAST_MEDIA_BY_USER: dict = {}
 
 VOICE_FREE_COST  = VOICE_BASE_COST
 IMAGE_FREE_COST  = IMAGE_REMOVE_BG_BASE_COST
+
+def message_media_candidate(message) -> tuple[object | None, str]:
+    if not message:
+        return None, ""
+    for attr, file_type in (
+        ("voice", "voice"),
+        ("audio", "audio"),
+        ("video", "video"),
+    ):
+        media = getattr(message, attr, None)
+        if media:
+            return media, file_type
+    doc = getattr(message, "document", None)
+    if doc:
+        mime = str(getattr(doc, "mime_type", "") or "")
+        file_name = str(getattr(doc, "file_name", "") or "")
+        guessed = mimetypes.guess_type(file_name)[0] or ""
+        if mime.startswith(("audio/", "video/")) or guessed.startswith(("audio/", "video/")):
+            return doc, "document"
+    return None, ""
+
+def media_content_type(media, file_type: str = "") -> str:
+    content_type = str(getattr(media, "mime_type", "") or "")
+    file_name = str(getattr(media, "file_name", "") or "")
+    if not content_type and file_name:
+        content_type = mimetypes.guess_type(file_name)[0] or ""
+    if not content_type:
+        content_type = "audio/ogg" if file_type == "voice" else "application/octet-stream"
+    return content_type
+
+def remember_last_media(update: Update):
+    try:
+        message = update.message
+        if not message or not update.effective_user:
+            return
+        media, file_type = message_media_candidate(message)
+        if not media:
+            return
+        LAST_MEDIA_BY_USER[str(update.effective_user.id)] = {
+            "file_id": str(getattr(media, "file_id", "") or ""),
+            "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
+            "file_type": file_type,
+            "mime_type": media_content_type(media, file_type),
+            "file_name": str(getattr(media, "file_name", "") or ""),
+            "file_size": int(getattr(media, "file_size", 0) or 0),
+            "created_at_ts": time.time(),
+            "created_at": now_text(),
+        }
+    except Exception as e:
+        logger.warning(f"last media cache write failed: {e}")
+
+async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict | None:
+    reply = update.message.reply_to_message if update.message else None
+    media, file_type = message_media_candidate(reply)
+    source = "reply"
+    meta = {}
+    if media:
+        meta = {
+            "file_id": str(getattr(media, "file_id", "") or ""),
+            "file_type": file_type,
+            "mime_type": media_content_type(media, file_type),
+            "file_name": str(getattr(media, "file_name", "") or ""),
+            "file_size": int(getattr(media, "file_size", 0) or 0),
+            "created_at": "",
+        }
+        file_obj = await media.get_file()
+    else:
+        cache = LAST_MEDIA_BY_USER.get(str(update.effective_user.id if update.effective_user else ""))
+        if not cache:
+            return None
+        age = time.time() - float(cache.get("created_at_ts") or 0)
+        if age > LAST_MEDIA_CACHE_TTL_SECONDS:
+            return None
+        source = "last_media"
+        meta = dict(cache)
+        file_obj = await context.bot.get_file(meta.get("file_id") or "")
+    meta.update({
+        "source": source,
+        "content_type": meta.get("mime_type") or "application/octet-stream",
+    })
+    if int(meta.get("file_size", 0) or 0) > 15 * 1024 * 1024:
+        meta["bytes"] = b""
+        return meta
+    file_bytes = bytes(await file_obj.download_as_bytearray())
+    meta["bytes"] = file_bytes
+    return meta
 
 def is_trial_account(user_id) -> bool:
     conn = db_connect()
@@ -23988,65 +24262,14 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     photo_size = reply.photo[-1]
     img_bytes = bytes(await (await photo_size.get_file()).download_as_bytearray())
-    remove_status = "MISSING"
-    cutout_status = "MISSING"
-    output_bytes = b""
-    output_provider = ""
-    remove_detail = ""
-    cutout_detail = ""
-
-    if REMOVEBG_API_KEY:
-        try:
-            async with httpx.AsyncClient(timeout=45.0) as client:
-                res = await client.post(
-                    "https://api.remove.bg/v1.0/removebg",
-                    headers={"X-Api-Key": REMOVEBG_API_KEY},
-                    files={"image_file": ("tool-test.png", img_bytes, "image/png")},
-                    data={"size": "auto"},
-                )
-            image_ok, png_bytes, image_detail = normalize_provider_image_response(res, "RemoveBG")
-            if image_ok:
-                remove_status = "PASS"
-                output_bytes = png_bytes
-                output_provider = "RemoveBG"
-                remove_detail = image_detail
-                record_api_debug("removebg", "remove_bg", "PASS", getattr(res, "status_code", 0), image_detail)
-            else:
-                remove_status = "FAIL"
-                remove_detail = image_detail
-                record_api_debug("removebg", "remove_bg", "FAIL", getattr(res, "status_code", 0), image_detail)
-        except Exception as e:
-            remove_status = "FAIL"
-            remove_detail = str(e)[:300]
-            record_api_debug("removebg", "remove_bg", "FAIL", 0, remove_detail)
-
-    if not output_bytes and CUTOUT_API_KEY:
-        try:
-            async with httpx.AsyncClient(timeout=45.0) as client:
-                res = await client.post(
-                    "https://www.cutout.pro/api/v1/matting2?mattingType=2&crop=true",
-                    headers={"APIKEY": CUTOUT_API_KEY},
-                    files={"file": ("tool-test.png", img_bytes, "image/png")},
-                )
-            image_ok, png_bytes, image_detail = normalize_provider_image_response(res, "Cutout")
-            if image_ok:
-                cutout_status = "PASS"
-                output_bytes = png_bytes
-                output_provider = "Cutout"
-                cutout_detail = image_detail
-                record_api_debug("cutout", "remove_bg", "PASS", getattr(res, "status_code", 0), image_detail)
-            else:
-                cutout_status = "FAIL"
-                cutout_detail = image_detail
-                record_api_debug("cutout", "remove_bg", "FAIL", getattr(res, "status_code", 0), image_detail)
-        except Exception as e:
-            cutout_status = "FAIL"
-            cutout_detail = str(e)[:300]
-            record_api_debug("cutout", "remove_bg", "FAIL", 0, cutout_detail)
-
-    overall = "PASS" if output_bytes else ("MISSING" if remove_status == "MISSING" and cutout_status == "MISSING" else "FAIL")
-    remove_line = format_image_provider_status("RemoveBG", remove_status, remove_detail)
-    cutout_line = format_image_provider_status("Cutout", cutout_status, cutout_detail)
+    test_result = await run_image_provider_tests(img_bytes)
+    output_bytes = test_result["output_bytes"]
+    output_provider = test_result["output_provider"]
+    remove_info = test_result["removebg"]
+    cutout_info = test_result["cutout"]
+    overall = "PASS" if output_bytes else ("MISSING" if remove_info["status"] == "MISSING" and cutout_info["status"] == "MISSING" else "FAIL")
+    remove_line = format_image_provider_status("RemoveBG", remove_info["status"], remove_info["detail"])
+    cutout_line = format_image_provider_status("Cutout", cutout_info["status"], cutout_info["detail"])
     detail = f"RemoveBG={remove_line}; Cutout={cutout_line}"
     save_tool_test_result("image", overall, detail, update.effective_user.id)
     if output_bytes:
@@ -24062,8 +24285,8 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     await update.message.reply_text(
         ("✅ <b>Image provider PASS</b>\n\n" if output_bytes else "❌ <b>Image provider FAIL</b>\n\n")
-        + f"• RemoveBG: <code>{html.escape(remove_line)}</code>\n"
-        f"• Cutout: <code>{html.escape(cutout_line)}</code>\n"
+        + "\n".join(image_provider_block("RemoveBG", remove_info)) + "\n"
+        + "\n".join(image_provider_block("Cutout", cutout_info)) + "\n"
         f"• Output sent: <code>{'yes' if output_bytes else 'no'}</code>\n"
         + (f"• Provider: <code>{html.escape(output_provider)}</code>\n" if output_bytes else "")
         + (f"• Error: <code>{html.escape(detail[:500])}</code>\n" if detail and not output_bytes else "")
@@ -24071,6 +24294,60 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
         + "\nKhông hiển thị API key.",
         parse_mode="HTML",
     )
+
+async def cmd_tool_test_image_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    reply = update.message.reply_to_message if update.message else None
+    if not (reply and getattr(reply, "photo", None)):
+        return await update.message.reply_text(
+            "⚠️ Vui lòng gửi ảnh nhỏ trước, sau đó reply ảnh bằng <code>/tool_test_image_debug</code>.",
+            parse_mode="HTML",
+        )
+    photo_size = reply.photo[-1]
+    img_bytes = bytes(await (await photo_size.get_file()).download_as_bytearray())
+    local = inspect_image_bytes(img_bytes)
+    test_result = await run_image_provider_tests(img_bytes)
+    output_bytes = test_result["output_bytes"]
+    output_provider = test_result["output_provider"]
+    remove_info = test_result["removebg"]
+    cutout_info = test_result["cutout"]
+    overall = "PASS" if output_bytes else ("MISSING" if remove_info["status"] == "MISSING" and cutout_info["status"] == "MISSING" else "FAIL")
+    detail = (
+        f"local_size={local['size']}; pil_ok={local['pil_ok']}; format={local['format']}; "
+        f"removebg={format_image_provider_status('RemoveBG', remove_info['status'], remove_info['detail'])}; "
+        f"cutout={format_image_provider_status('Cutout', cutout_info['status'], cutout_info['detail'])}"
+    )
+    save_tool_test_result("image_debug", overall, detail, update.effective_user.id)
+    if output_bytes:
+        out = telegram_png_document(output_bytes, "toan_aas_tool_test_debug_no_bg.png")
+        await update.message.reply_document(
+            document=out,
+            filename=out.name,
+            caption=f"🖼 Image Debug Output: {output_provider} PASS",
+        )
+    lines = [
+        ("✅ <b>Image provider PASS</b>" if output_bytes else "❌ <b>Image provider FAIL</b>"),
+        "",
+        "<b>Local Telegram image</b>",
+        f"• Size: <code>{local['size']}</code> bytes",
+        f"• PIL open: <code>{'OK' if local['pil_ok'] else 'FAIL'}</code>",
+        f"• Format: <code>{html.escape(str(local['format']))}</code>",
+        f"• Mode: <code>{html.escape(str(local['mode']))}</code>",
+        f"• Dimensions: <code>{html.escape(str(local['dimensions']))}</code>",
+    ]
+    if local.get("error"):
+        lines.append(f"• PIL error: <code>{html.escape(str(local['error'])[:240])}</code>")
+    lines.extend(["", "<b>Providers</b>"])
+    lines.extend(image_provider_block("RemoveBG", remove_info))
+    lines.extend(image_provider_block("Cutout", cutout_info))
+    lines.extend([
+        "",
+        f"• Output sent: <code>{'yes' if output_bytes else 'no'}</code>",
+        f"• Provider: <code>{html.escape(output_provider or '-')}</code>",
+        "Không hiển thị API key.",
+    ])
+    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -24117,36 +24394,33 @@ async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
-    reply = update.message.reply_to_message if update.message else None
-    media = None
-    if reply:
-        media = getattr(reply, "voice", None) or getattr(reply, "audio", None) or getattr(reply, "video", None) or getattr(reply, "document", None)
-    if not media:
-        return await update.message.reply_text("⚠️ Reply audio/voice/video ngắn rồi gõ <code>/tool_test_stt</code>.", parse_mode="HTML")
     if not DEEPGRAM_API_KEY:
         save_tool_test_result("stt", "MISSING", "DEEPGRAM_API_KEY missing", update.effective_user.id)
         return await update.message.reply_text("🎤 <b>STT Smoke Test</b>\n\n• Deepgram: <code>MISSING</code>", parse_mode="HTML")
-    file_size = int(getattr(media, "file_size", 0) or 0)
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info:
+        return await update.message.reply_text(
+            "⚠️ Gửi voice/audio/video ngắn rồi reply <code>/tool_test_stt</code>, "
+            "hoặc gửi file xong gõ <code>/tool_test_stt</code> trong vòng 2 phút.",
+            parse_mode="HTML",
+        )
+    file_size = int(media_info.get("file_size", 0) or 0)
     if file_size > 15 * 1024 * 1024:
         save_tool_test_result("stt", "FAIL", f"file_too_large={file_size}", update.effective_user.id)
         return await update.message.reply_text("⚠️ File quá lớn để smoke test. Hãy dùng audio ngắn dưới 15MB.")
     try:
-        file_bytes = bytes(await (await media.get_file()).download_as_bytearray())
-        content_type = getattr(media, "mime_type", "") or ""
-        file_name = getattr(media, "file_name", "") or ""
-        if not content_type and file_name:
-            content_type = mimetypes.guess_type(file_name)[0] or ""
-        if not content_type:
-            content_type = "audio/ogg" if getattr(reply, "voice", None) else "application/octet-stream"
+        file_bytes = media_info["bytes"]
+        content_type = media_info.get("content_type") or "application/octet-stream"
         transcript = (await AgentDeepgram.transcribe(file_bytes, context, content_type=content_type) or "").strip()
         passed = bool(transcript and not transcript.startswith("❌"))
         status = "PASS" if passed else "FAIL"
         detail = transcript if transcript else "empty_transcript"
-        save_tool_test_result("stt", status, f"provider=deepgram; cost_level=low; {detail[:450]}", update.effective_user.id)
+        save_tool_test_result("stt", status, f"source={media_info.get('source')}; type={media_info.get('file_type')}; mime={content_type}; provider=deepgram; cost_level=low; {detail[:450]}", update.effective_user.id)
         if passed:
             await update.message.reply_text(
                 "🎙 <b>STT PASS</b>\n\n"
                 "• Provider: <code>Deepgram</code>\n"
+                f"• Source: <code>{html.escape(str(media_info.get('source') or '-'))}</code>\n"
                 f"• Transcript:\n<code>{html.escape(transcript[:900])}</code>",
                 parse_mode="HTML",
             )
@@ -24170,6 +24444,65 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Error: <code>{html.escape(str(e)[:240])}</code>",
             parse_mode="HTML",
         )
+
+async def cmd_tool_test_stt_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info:
+        return await update.message.reply_text(
+            "⚠️ Gửi voice/audio/video ngắn rồi reply <code>/tool_test_stt_debug</code>, "
+            "hoặc gửi file xong gõ <code>/tool_test_stt_debug</code> trong vòng 2 phút.",
+            parse_mode="HTML",
+        )
+    if not DEEPGRAM_API_KEY:
+        return await update.message.reply_text("🎤 <b>STT Debug</b>\n\n• Deepgram: <code>MISSING</code>", parse_mode="HTML")
+    file_size = int(media_info.get("file_size", 0) or 0)
+    if file_size > 15 * 1024 * 1024:
+        save_tool_test_result("stt_debug", "FAIL", f"file_too_large={file_size}", update.effective_user.id)
+        return await update.message.reply_text("⚠️ File quá lớn để debug. Hãy dùng audio ngắn dưới 15MB.")
+    diagnostic = await AgentDeepgram.diagnostic(media_info["bytes"], media_info.get("content_type") or "application/octet-stream")
+    stats = diagnostic.get("stats") or {}
+    status = str(diagnostic.get("status") or "FAIL")
+    record_api_debug(
+        "deepgram",
+        "stt_debug",
+        status,
+        int(diagnostic.get("http_status") or 0),
+        (
+            f"source={media_info.get('source')}; type={media_info.get('file_type')}; "
+            f"mime={media_info.get('content_type')}; duration={stats.get('duration')}; "
+            f"lang={stats.get('detected_language')}; transcript_length={stats.get('transcript_length')}; "
+            f"words={stats.get('words_count')}; error={diagnostic.get('error') or diagnostic.get('body_preview')}"
+        ),
+    )
+    save_tool_test_result("stt_debug", status, f"http={diagnostic.get('http_status')}; {stats}; error={diagnostic.get('error') or diagnostic.get('body_preview')}", update.effective_user.id)
+    lines = [
+        "🎤 <b>STT Debug</b>",
+        "",
+        f"• Source: <code>{html.escape(str(media_info.get('source') or '-'))}</code>",
+        f"• File type: <code>{html.escape(str(media_info.get('file_type') or '-'))}</code>",
+        f"• MIME: <code>{html.escape(str(media_info.get('content_type') or '-'))}</code>",
+        f"• Filename: <code>{html.escape(str(media_info.get('file_name') or '-'))}</code>",
+        f"• Telegram file size: <code>{int(media_info.get('file_size') or len(media_info.get('bytes') or b''))}</code>",
+        "",
+        f"• Deepgram HTTP: <code>{html.escape(str(diagnostic.get('http_status') or 0))}</code>",
+        f"• Status: <code>{html.escape(status)}</code>",
+        f"• Duration: <code>{html.escape(str(stats.get('duration') or '-'))}</code>",
+        f"• Detected language: <code>{html.escape(str(stats.get('detected_language') or '-'))}</code>",
+        f"• Confidence: <code>{html.escape(str(stats.get('confidence') or '-'))}</code>",
+        f"• Transcript length: <code>{html.escape(str(stats.get('transcript_length') or 0))}</code>",
+        f"• Alternatives count: <code>{html.escape(str(stats.get('alternatives_count') or 0))}</code>",
+        f"• First words count: <code>{html.escape(str(stats.get('words_count') or 0))}</code>",
+    ]
+    error_short = diagnostic.get("error") or diagnostic.get("body_preview") or ""
+    if error_short:
+        lines.append(f"• Error short: <code>{html.escape(str(error_short)[:300])}</code>")
+    transcript = diagnostic.get("transcript") or ""
+    if transcript:
+        lines.append(f"\nTranscript preview:\n<code>{html.escape(transcript[:700])}</code>")
+    lines.append("\nKhông hiển thị API key.")
+    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_tool_test_downloader(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -38822,6 +39155,8 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
             "Tất cả signature variants đều bị từ chối hoặc lỗi.",
             "Nếu vẫn lỗi, kiểm tra lại bộ PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY cùng môi trường Railway, trạng thái merchant PayOS và domain return/cancel URL.",
         ])
+    lines.extend(["", "<b>Headers sent</b>"])
+    lines.extend(payos_header_debug_summary())
     lines.extend(["", "<b>Variant results</b>"])
     for item in results:
         ok_icon = "✅" if item["pass"] else "❌"
@@ -38908,6 +39243,60 @@ async def cmd_payos_signature_debug(update: Update, context: ContextTypes.DEFAUL
         "",
         "Lệnh này không gọi PayOS và không tạo đơn thanh toán.",
     ]
+    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
+
+async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    sdk_ok, sdk_name = payos_sdk_availability()
+    amount = 10000
+    order_code = generate_order_code()
+    return_url = make_payos_return_url(context)
+    payload = {
+        "orderCode": int(order_code),
+        "amount": int(amount),
+        "description": make_payos_description("10k"),
+        "cancelUrl": return_url,
+        "returnUrl": return_url,
+    }
+    signature, signature_data = sign_payos_payment_request(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT) if PAYOS_CHECKSUM_KEY else ("", build_payos_signature_data(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT))
+    record_api_debug(
+        "payos",
+        "official_debug",
+        "SDK_AVAILABLE" if sdk_ok else "SDK_NOT_INSTALLED",
+        0,
+        f"sdk={sdk_name or '-'}; {payos_payload_type_summary(payload)}; signature_data={signature_data}",
+    )
+    lines = [
+        "💳 <b>PayOS Official Debug</b>",
+        "",
+        f"• SDK available: <code>{'yes' if sdk_ok else 'no'}</code>" + (f" (<code>{html.escape(sdk_name)}</code>)" if sdk_ok else ""),
+        f"• Endpoint: <code>{html.escape(PAYOS_CREATE_PAYMENT_ENDPOINT)}</code>",
+        f"• Client ID configured: <code>{'yes' if PAYOS_CLIENT_ID else 'no'}</code> len=<code>{len(PAYOS_CLIENT_ID or '')}</code>",
+        f"• API Key configured: <code>{'yes' if PAYOS_API_KEY else 'no'}</code> len=<code>{len(PAYOS_API_KEY or '')}</code>",
+        f"• Checksum configured: <code>{'yes' if PAYOS_CHECKSUM_KEY else 'no'}</code> len=<code>{len(PAYOS_CHECKSUM_KEY or '')}</code>",
+        "",
+        "<b>Headers sent by current bot</b>",
+    ]
+    lines.extend(payos_header_debug_summary())
+    lines.extend([
+        "",
+        "<b>Payload</b>",
+        f"• orderCode: <code>{payload['orderCode']}</code>",
+        f"• amount: <code>{payload['amount']}</code>",
+        f"• description: <code>{html.escape(payload['description'])}</code>",
+        f"• returnUrl: <code>{html.escape(payload['returnUrl'])}</code>",
+        f"• cancelUrl: <code>{html.escape(payload['cancelUrl'])}</code>",
+        "",
+        f"• Canonical data current: <code>{html.escape(signature_data)}</code>",
+        f"• Signature current masked: <code>{html.escape(mask_payos_signature(signature))}</code>",
+        "",
+    ])
+    if sdk_ok:
+        lines.append("Note: SDK có trong môi trường, nhưng lệnh này không gọi SDK để tránh tạo đơn ngoài ý muốn.")
+    else:
+        lines.append("Note: PayOS SDK not installed. Vì mọi variant đều fail, cần kiểm tra Checksum Key cùng bộ Client/API trong PayOS dashboard hoặc test bằng SDK chính thức ngoài bot.")
+    lines.append("Lệnh này không tạo đơn thanh toán.")
     await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -39321,6 +39710,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(img_desc, parse_mode="HTML", reply_markup=kb)
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    remember_last_media(update)
     file_obj = update.message.voice or update.message.audio
     if not file_obj:
         return
@@ -39356,6 +39746,9 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         refund_charged_credit(uid, cost, "refund", "", "Hoàn phí bóc băng do lỗi xử lý file", True)
         await update.message.reply_text("❌ Lỗi xử lý audio." + (" Xu đã hoàn lại." if cost > 0 and str(uid) != ADMIN_ID else ""))
+
+async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    remember_last_media(update)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -39596,8 +39989,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_ai", cmd_tool_test_ai))
     tg_app.add_handler(CommandHandler("tool_test_translate", cmd_tool_test_translate))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
+    tg_app.add_handler(CommandHandler("tool_test_image_debug", cmd_tool_test_image_debug))
     tg_app.add_handler(CommandHandler("tool_test_tts", cmd_tool_test_tts))
     tg_app.add_handler(CommandHandler("tool_test_stt", cmd_tool_test_stt))
+    tg_app.add_handler(CommandHandler("tool_test_stt_debug", cmd_tool_test_stt_debug))
     tg_app.add_handler(CommandHandler("tool_test_downloader", cmd_tool_test_downloader))
     tg_app.add_handler(CommandHandler("translate_text", cmd_translate_text))
     tg_app.add_handler(CommandHandler("costs",       cmd_costs))
@@ -39605,6 +40000,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("payos_test_plan", cmd_payos_test_plan))
     tg_app.add_handler(CommandHandler("mark_payos_test", cmd_mark_payos_test))
     tg_app.add_handler(CommandHandler("payos_signature_debug", cmd_payos_signature_debug))
+    tg_app.add_handler(CommandHandler("payos_official_debug", cmd_payos_official_debug))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("myid",        cmd_myid))
     tg_app.add_handler(CommandHandler("trial_status", cmd_trial_status))
@@ -39837,6 +40233,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
+    tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.Document.MP3 | filters.Document.MP4 | filters.Document.WAV, handle_media_cache_only))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
