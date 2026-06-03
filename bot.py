@@ -569,12 +569,14 @@ CHAT_LONG_COST     = 15
 CHAT_HEAVY_COST    = 30
 REPORT_EXPORT_COST = CAMPAIGN_REPORT_COST
 
-# Chat AI Tier System. Normal chat keeps the existing fair-use flow; Pro/Deep
-# are explicit paid commands so customers can choose higher-value answers.
-CHAT_NORMAL_COST = 0
-CHAT_PRO_BASE_COST = 10
-CHAT_PRO_STANDARD_COST = 20
-CHAT_PRO_DEEP_COST = 50
+# Chat AI Tier System. Chat is charged only after AI returns successfully.
+CHAT_COST_NORMAL = 5
+CHAT_COST_PRO = 10
+CHAT_COST_DEEP_BASE = 20
+CHAT_NORMAL_COST = CHAT_COST_NORMAL
+CHAT_PRO_BASE_COST = CHAT_COST_PRO
+CHAT_PRO_STANDARD_COST = CHAT_COST_PRO
+CHAT_PRO_DEEP_COST = CHAT_COST_DEEP_BASE
 CHAT_PRO_MAX_COST = 200
 CHAT_PRO_MB_UNIT_COST = 20
 CHAT_PRO_MIN_COST = 10
@@ -22754,14 +22756,15 @@ def preferred_tool_test_status_text(*tool_names: str) -> str:
 def customer_tool_readiness_payload() -> dict:
     providers = provider_status_payload()
     tests = {name: get_tool_test_result(name) for name in ["ai", "image", "tts", "stt", "downloader"]}
+    ai_test = preferred_tool_test_result("ai_chat", "ai")
     image_test = preferred_tool_test_result("image_remove_bg", "image")
     public_cobalt = bool(providers["downloader"].get("cobalt_public"))
     cobalt_self_host = bool(providers["downloader"].get("cobalt_self_host"))
     return {
         "ai": {
             "configured": bool(providers["ai"]["ready"]),
-            "tested": tests["ai"]["status"] == "PASS",
-            "label": "ready" if tests["ai"]["status"] == "PASS" else ("configured/not tested" if providers["ai"]["ready"] else "missing"),
+            "tested": ai_test["status"] == "PASS",
+            "label": "ready" if ai_test["status"] == "PASS" else ("configured/not tested" if providers["ai"]["ready"] else "missing"),
         },
         "image_remove_bg": {
             "configured": bool(providers["image"]["ready"]),
@@ -24121,7 +24124,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Claude Sonnet/Opus: <code>planned/missing</code>",
         "• Grok cao cấp: <code>planned/missing</code>",
         f"• Router normal/pro/deep: <code>{'configured' if providers['ai']['ready'] else 'missing'}</code>",
-        f"• AI tested: <code>{html.escape(tool_test_status_text('ai'))}</code>",
+        f"• AI tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -24206,7 +24209,7 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>AI</b>",
         f"• Gemini: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
         f"• OpenAI: <code>{provider_status_text(providers['ai']['openai'])}</code>",
-        f"• Tested: <code>{html.escape(tool_test_status_text('ai'))}</code>",
+        f"• Tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
         "• Smoke test: <code>/tool_test_ai</code>",
         "",
         "<b>Image utilities</b>",
@@ -24857,8 +24860,9 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     providers = provider_status_payload()
     image_result = preferred_tool_test_result("image_remove_bg", "image")
+    ai_result = preferred_tool_test_result("ai_chat", "ai")
     items = [
-        ("AI", "ai", get_tool_test_result("ai"), "Gemini/OpenAI"),
+        ("AI", "ai", ai_result, "Gemini/OpenAI chat"),
         ("Translation", "translation", get_tool_test_result("translation"), "DeepL/Gemini/OpenAI"),
         ("TTS", "tts", get_tool_test_result("tts"), "Edge/Fish"),
         ("STT Deepgram", "stt", get_tool_test_result("stt"), "configured" if providers["audio"]["deepgram"] else "missing"),
@@ -24937,16 +24941,16 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/media_factory</code>: <b>{MEDIA_FACTORY_PACK_COST} Xu</b>/lần",
         f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>/lần",
         f"• <code>/campaign_report</code>: <b>{CAMPAIGN_REPORT_COST} Xu</b>/lần",
-        f"• Chat thường: <b>{CHAT_NORMAL_COST} Xu</b> trong fair-use hằng ngày ({CHAT_NORMAL_DAILY_LIMIT} lượt)",
-        f"• <code>/chat_pro</code> Pro: từ <b>{CHAT_PRO_STANDARD_COST} Xu</b>",
-        f"• <code>/chat_pro tier=deep</code>: từ <b>{CHAT_PRO_DEEP_COST} Xu</b>",
-        f"• Chat Pro nội dung dài: +<b>{CHAT_PRO_MB_UNIT_COST} Xu</b>/đơn vị, cap <b>{CHAT_PRO_MAX_COST} Xu</b>",
+        f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công",
+        f"• <code>/chat_pro</code> Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công",
+        f"• <code>/chat_deep</code> Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công",
+        "• Chat AI lỗi/quota/provider fail: không trừ Xu",
         f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + block {VOICE_BLOCK_CHARS} ký tự",
         f"• STT/audio: từ <b>{AUDIO_MIN_COST} Xu</b>, +{AUDIO_COST_PER_MB} Xu/MB",
         f"• Image: từ <b>{IMAGE_REMOVE_BG_BASE_COST}-{IMAGE_REMOVE_BG_PREMIUM_COST} Xu</b>",
         f"• Downloader: từ <b>{VIDEO_DOWNLOAD_MIN_COST} Xu</b>, +{VIDEO_DOWNLOAD_COST_PER_MB} Xu/MB",
         f"• Trial credits: <b>{TRIAL_CREDITS} Xu</b>",
-        f"• Free chat daily: <b>{FREE_CHAT_DAILY}</b> lượt/ngày",
+        f"• Free chat daily constant cũ: <b>{FREE_CHAT_DAILY}</b> lượt/ngày (giữ schema, chat live dùng bảng giá Xu)",
         "",
         "<b>Provider rủi ro</b>",
         f"• Gemini/OpenAI: {'READY' if providers['ai']['ready'] else 'MISSING'} — tốn token khi gọi AI",
@@ -25139,6 +25143,30 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
             (start_at, end_at),
             0,
         ) or 0)
+        ai_chat_total = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE tool_name='ai_chat' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        ai_chat_success = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE tool_name='ai_chat' AND event_type='tool_success' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        ai_chat_fail = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE tool_name='ai_chat' AND event_type IN ('tool_fail','provider_error') AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        ai_chat_xu_spent = abs(int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(xu_delta),0) FROM usage_events WHERE tool_name='ai_chat' AND xu_delta<0 AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0))
         trial_grants = int(sql_scalar(
             conn,
             "SELECT COUNT(*) FROM usage_events WHERE event_type='trial_granted' AND created_at BETWEEN ? AND ?",
@@ -25222,6 +25250,10 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
                 "requested": tool_requested,
                 "success": tool_success,
                 "fail": tool_fail,
+                "ai_chat_total": ai_chat_total,
+                "ai_chat_success": ai_chat_success,
+                "ai_chat_fail": ai_chat_fail,
+                "ai_chat_xu_spent": ai_chat_xu_spent,
                 "top_tools": top_tools,
                 "top_commands": top_commands,
             },
@@ -25278,6 +25310,10 @@ def format_admin_report(payload: dict) -> str:
         f"• Thành công: <b>{tools['success']}</b>",
         f"• Lỗi: <b>{tools['fail']}</b>",
         f"• Tỷ lệ thành công: <b>{success_rate}%</b>",
+        f"• AI chat lượt: <b>{tools.get('ai_chat_total', 0)}</b>",
+        f"• AI chat success: <b>{tools.get('ai_chat_success', 0)}</b>",
+        f"• AI chat fail: <b>{tools.get('ai_chat_fail', 0)}</b>",
+        f"• Xu chat đã trừ: <b>{xu_text(tools.get('ai_chat_xu_spent', 0))}</b>",
         "",
         "<b>Trial / Promo</b>",
         f"• Trial đã cấp: <b>{growth['trial_grants']}</b>",
@@ -25579,7 +25615,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Money</b>",
         f"• Packages: <b>{data['packages']}</b>",
         f"• Trial credits: <b>{data['trial_credits']}</b>",
-        f"• Free chat daily: <b>{data['free_chat_daily']}</b>",
+        f"• Chat pricing: <b>{CHAT_COST_NORMAL}/{CHAT_COST_PRO}/{CHAT_COST_DEEP_BASE} Xu</b> normal/pro/deep khi AI trả lời thành công",
         f"• Promo BETA50: <code>{'seeded' if promo.get('beta50_seeded') else promo.get('status', 'missing')}</code>"
         f" | <b>{html.escape(promo.get('label') or 'limited')}</b>"
         f" | used <b>{int(promo.get('used_count', 0) or 0)}/{int(promo.get('max_uses', 0) or 0)}</b>",
@@ -27035,10 +27071,10 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  Dùng để phân tích hook/caption/CTA và báo cáo thủ công; không tự đăng bài.",
         "",
         "🤖 <b>AI Tools</b>",
-        f"• Chat thường: model nhanh/tiết kiệm, fair-use hằng ngày ({CHAT_NORMAL_DAILY_LIMIT} lượt)",
-        f"• <code>/chat_pro</code> Pro: từ <b>{CHAT_PRO_STANDARD_COST} Xu</b>",
-        f"• <code>/chat_pro tier=deep</code>: từ <b>{CHAT_PRO_DEEP_COST} Xu</b>",
-        f"• Nội dung dài: +<b>{CHAT_PRO_MB_UNIT_COST} Xu</b>/đơn vị nội dung, không tính theo đơn vị kỹ thuật lắt nhắt",
+        f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công",
+        f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công (<code>/chat_pro</code> hoặc <code>/chat_pro_on</code>)",
+        f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công (<code>/chat_deep</code> hoặc <code>/chat_deep_on</code>)",
+        "• AI lỗi/quota/provider fail: không trừ Xu",
         f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + theo độ dài",
         f"• Bóc băng audio: từ <b>{AUDIO_MIN_COST} Xu</b>, tính theo MB",
         f"• Tách nền ảnh: từ <b>{IMAGE_REMOVE_BG_BASE_COST}-{IMAGE_REMOVE_BG_PREMIUM_COST} Xu</b>",
@@ -27089,9 +27125,9 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• FILM_SCRIPT_COST = <b>{FILM_SCRIPT_COST}</b>",
         f"• GROWTH_AI_COST = <b>{GROWTH_AI_COST}</b>",
         f"• CAMPAIGN_REPORT_COST = <b>{CAMPAIGN_REPORT_COST}</b>",
-        f"• CHAT_NORMAL_DAILY_LIMIT = <b>{CHAT_NORMAL_DAILY_LIMIT}</b>",
-        f"• CHAT_PRO_STANDARD_COST = <b>{CHAT_PRO_STANDARD_COST}</b>",
-        f"• CHAT_PRO_DEEP_COST = <b>{CHAT_PRO_DEEP_COST}</b>",
+        f"• CHAT_COST_NORMAL = <b>{CHAT_COST_NORMAL}</b>",
+        f"• CHAT_COST_PRO = <b>{CHAT_COST_PRO}</b>",
+        f"• CHAT_COST_DEEP_BASE = <b>{CHAT_COST_DEEP_BASE}</b>",
         f"• CHAT_PRO_MB_UNIT_COST = <b>{CHAT_PRO_MB_UNIT_COST}</b>",
         f"• CHAT_PRO_MAX_COST = <b>{CHAT_PRO_MAX_COST}</b>",
         f"• AUDIO_BASE_COST = <b>{AUDIO_BASE_COST}</b>",
@@ -27141,13 +27177,12 @@ def chat_pro_usage_text() -> str:
         "• tài liệu nhiều nội dung\n\n"
         "Cách dùng:\n"
         "<code>/chat_pro phân tích kế hoạch bán hàng trong 7 ngày</code>\n"
-        "<code>/chat_pro tier=deep model=gemini_pro topic=\"...\"</code>\n"
-        "<code>/chat_pro model=openai ...</code>\n\n"
+        "<code>/chat_deep lập kế hoạch ra mắt beta</code>\n\n"
         "Giá:\n"
-        f"• Pro: từ <b>{CHAT_PRO_STANDARD_COST} Xu</b>\n"
-        f"• Deep/model cao cấp: từ <b>{CHAT_PRO_DEEP_COST} Xu</b>\n"
-        f"• Nội dung dài: +<b>{CHAT_PRO_MB_UNIT_COST} Xu</b>/đơn vị nội dung\n"
-        "Không trừ Xu nếu chỉ xem hướng dẫn."
+        f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công\n"
+        f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công\n"
+        f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công\n"
+        "AI lỗi/quota/provider fail: không trừ Xu."
     )
 
 def build_chat_pro_prompt(user_prompt, tier=CHAT_TIER_PRO, model_level="standard"):
@@ -27203,6 +27238,165 @@ def call_chat_pro_ai(user_prompt: str, provider_payload: dict, user_id=None) -> 
         raise RuntimeError(output or "AI không trả kết quả")
     return output
 
+def chat_mode_cost(mode: str) -> int:
+    mode_norm = normalize_chat_tier(mode or CHAT_TIER_NORMAL)
+    if mode_norm == CHAT_TIER_DEEP:
+        return CHAT_COST_DEEP_BASE
+    if mode_norm == CHAT_TIER_PRO:
+        return CHAT_COST_PRO
+    return CHAT_COST_NORMAL
+
+def chat_mode_instruction(mode: str) -> str:
+    mode_norm = normalize_chat_tier(mode or CHAT_TIER_NORMAL)
+    if mode_norm == CHAT_TIER_PRO:
+        return (
+            "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Pro. "
+            "Trả lời chi tiết hơn, có phân tích, checklist thực tế và bước hành động rõ ràng."
+        )
+    if mode_norm == CHAT_TIER_DEEP:
+        return (
+            "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Deep. "
+            "Phân tích sâu, có cấu trúc, chỉ ra rủi ro, giả định, kế hoạch triển khai và hành động ưu tiên."
+        )
+    return "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời ngắn gọn, thực dụng, thân thiện."
+
+def ai_failure_user_text(statuses: dict, errors: dict) -> str:
+    def line(provider: str) -> str:
+        status = str((statuses or {}).get(provider) or "MISSING").upper()
+        detail = str((errors or {}).get(provider) or "").strip()
+        if status == "MISSING":
+            return "thiếu cấu hình"
+        if is_quota_error_text(detail):
+            return "hết quota/tạm lỗi"
+        if status == "FAIL":
+            return "tạm lỗi"
+        return status.lower()
+    return (
+        "❌ AI đang tạm quá tải hoặc hết quota provider.\n"
+        f"• Gemini: {line('gemini')}\n"
+        f"• OpenAI: {line('openai')}\n"
+        "Không có Xu nào bị trừ cho lần chat này.\n"
+        "Bạn có thể thử lại sau hoặc dùng các công cụ không cần AI provider."
+    )
+
+def ai_failure_detail(statuses: dict, errors: dict) -> str:
+    gemini = f"Gemini={str((statuses or {}).get('gemini') or 'MISSING').upper()}"
+    openai = f"OpenAI={str((statuses or {}).get('openai') or 'MISSING').upper()}"
+    details = []
+    for key in ("gemini", "openai"):
+        err = str((errors or {}).get(key) or "").strip()
+        if err:
+            details.append(f"{key}:{err[:180]}")
+    return "; ".join([gemini, openai, *details])[:900]
+
+def is_ai_failure_text(value: str) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return True
+    return any(marker in text for marker in (
+        "lỗi cả gemini lẫn openai",
+        "không có ai provider",
+        "chưa cấu hình ai provider",
+    ))
+
+async def call_ai_chat_with_fallback(system_prompt: str, user_text: str, user_id, max_tokens: int = 1200) -> dict:
+    statuses = {"gemini": "MISSING", "openai": "MISSING"}
+    errors = {}
+    uid_key = user_id
+
+    if gemini_client:
+        statuses["gemini"] = "TRYING"
+        try:
+            if uid_key not in user_memory:
+                user_memory[uid_key] = []
+            user_memory[uid_key].append(types.Content(role="user", parts=[types.Part(text=user_text)]))
+            if len(user_memory[uid_key]) > 10:
+                user_memory[uid_key] = user_memory[uid_key][-10:]
+
+            def run_gemini():
+                return gemini_client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    config=types.GenerateContentConfig(system_instruction=system_prompt),
+                    contents=user_memory[uid_key],
+                )
+
+            res = await asyncio.to_thread(run_gemini)
+            output = (getattr(res, "text", "") or "").strip()
+            if is_ai_failure_text(output):
+                raise RuntimeError(output or "Gemini empty_response")
+            user_memory[uid_key].append(types.Content(role="model", parts=[types.Part(text=output)]))
+            statuses["gemini"] = "PASS"
+            return {"ok": True, "provider": "gemini", "text": output, "statuses": statuses, "errors": errors}
+        except Exception as e:
+            statuses["gemini"] = "FAIL"
+            errors["gemini"] = provider_error_summary(e)
+            logger.warning(f"AI chat Gemini fallback: {errors['gemini']}")
+
+    if openai_client:
+        statuses["openai"] = "TRYING"
+        try:
+            messages = [{"role": "system", "content": system_prompt}]
+            if uid_key in user_memory:
+                for item in user_memory[uid_key][-6:]:
+                    try:
+                        role = "user" if getattr(item, "role", "") == "user" else "assistant"
+                        content = item.parts[0].text
+                    except Exception:
+                        continue
+                    if content:
+                        messages.append({"role": role, "content": content})
+            messages.append({"role": "user", "content": user_text})
+
+            def run_openai():
+                return openai_client.chat.completions.create(
+                    model=OPENAI_TEXT_MODEL,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                )
+
+            res = await asyncio.to_thread(run_openai)
+            output = ((res.choices[0].message.content if res and res.choices else "") or "").strip()
+            if is_ai_failure_text(output):
+                raise RuntimeError(output or "OpenAI empty_response")
+            statuses["openai"] = "PASS"
+            return {"ok": True, "provider": "openai", "text": output, "statuses": statuses, "errors": errors}
+        except Exception as e:
+            statuses["openai"] = "FAIL"
+            errors["openai"] = provider_error_summary(e)
+            logger.warning(f"AI chat OpenAI error: {errors['openai']}")
+
+    return {
+        "ok": False,
+        "provider": "",
+        "text": "",
+        "statuses": statuses,
+        "errors": errors,
+        "message": ai_failure_user_text(statuses, errors),
+    }
+
+def chat_charge_line(cost: int, mode: str, is_free: bool = False) -> str:
+    if is_free:
+        return "(-0 Xu) (VIP/Admin)"
+    mode_norm = normalize_chat_tier(mode)
+    if mode_norm == CHAT_TIER_DEEP:
+        return f"(-{cost} Xu Chat Deep)"
+    if mode_norm == CHAT_TIER_PRO:
+        return f"(-{cost} Xu Chat Pro)"
+    return f"(-{cost} Xu)"
+
+def chat_insufficient_credits_text(mode: str, cost: int, credits: int) -> str:
+    mode_norm = normalize_chat_tier(mode or CHAT_TIER_NORMAL)
+    mode_label = user_mode_label({"chat_mode": mode_norm})
+    off_hint = "\n• Có thể gõ /chat_pro_off hoặc /chat_deep_off để về chat thường." if mode_norm != CHAT_TIER_NORMAL else ""
+    return (
+        "❌ Bạn không đủ Xu để chat.\n"
+        f"• Chế độ hiện tại: {mode_label}\n"
+        f"• Chi phí: {int(cost)} Xu/lượt\n"
+        f"• Số dư: {int(credits or 0)} Xu\n"
+        "Gõ /naptien để nạp thêm."
+        f"{off_hint}"
+    )
+
 def create_temp_chat_pro_file(user_id, content: str):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"toan_aas_chat_pro_{user_id}_{timestamp}.md"
@@ -27239,6 +27433,12 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Media mode: <code>{html.escape(modes.get('media_mode') or '-')}</code>",
         f"• Updated: <code>{html.escape(modes.get('updated_at') or '-')}</code>",
         "",
+        "<b>Chi phí chat</b>",
+        f"• Normal Chat: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công",
+        f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công",
+        f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công",
+        "• AI lỗi/quota/provider fail: không trừ Xu",
+        "",
         "<b>Lệnh đổi chế độ</b>",
         "• <code>/chat_pro_on</code> — bật Chat Pro persistent",
         "• <code>/chat_pro_off</code> — tắt Chat Pro về normal",
@@ -27263,12 +27463,16 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
     if mode == "pro":
         text = (
             "✅ <b>Đã bật Chat Pro.</b>\n\n"
-            "Bot sẽ ưu tiên trả lời sâu hơn cho các cuộc trò chuyện sau cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
+            f"• Chi phí: <b>{CHAT_COST_PRO} Xu</b> / lượt AI trả lời thành công.\n"
+            "• Nếu AI lỗi hoặc provider hết quota, không trừ Xu.\n\n"
+            "Bot sẽ dùng Chat Pro cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
         )
     elif mode == "deep":
         text = (
             "✅ <b>Đã bật Chat Deep.</b>\n\n"
-            "⚠️ Chế độ Deep có thể tốn nhiều Xu/API hơn nếu áp dụng cho tác vụ tính phí.\n"
+            f"⚠️ Chi phí: từ <b>{CHAT_COST_DEEP_BASE} Xu</b> / lượt AI trả lời thành công.\n"
+            "Tác vụ dài/sâu có thể tốn nhiều Xu hơn khi hệ thống mở tính theo dữ liệu.\n"
+            "Nếu AI lỗi hoặc provider hết quota, không trừ Xu.\n\n"
             "Gõ <code>/chat_deep_off</code> để tắt."
         )
     else:
@@ -27288,49 +27492,65 @@ async def cmd_chat_deep_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await set_chat_mode_command(update, "normal", "/chat_deep_off", "User disabled Chat Deep")
 
 async def cmd_chat_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await run_one_shot_chat_command(update, context, CHAT_TIER_PRO, "/chat_pro")
+
+async def cmd_chat_deep(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await run_one_shot_chat_command(update, context, CHAT_TIER_DEEP, "/chat_deep")
+
+async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str, command: str):
     uid = update.effective_user.id
-    record_usage_event(uid, username=update.effective_user.username or "", event_type="tool_use", tool_name="chat_pro", command="/chat_pro", status="requested")
+    username = update.effective_user.username or update.effective_user.first_name or ""
+    record_usage_event(uid, username=username, event_type="tool_use", tool_name="ai_chat", command=command, status=mode)
     parsed = parse_chat_pro_args(" ".join(context.args or []))
     prompt = parsed["prompt"]
     if not prompt:
+        if mode == CHAT_TIER_DEEP:
+            return await update.message.reply_text("Cú pháp: /chat_deep <nội dung>")
         return await update.message.reply_text(chat_pro_usage_text(), parse_mode="HTML")
-
-    provider = choose_chat_provider(parsed["tier"], parsed["model"])
-    if not provider.get("ready"):
-        return await update.message.reply_text(
-            "⚠️ Chat Pro chưa chạy được provider bạn chọn.\n\n"
-            f"Model: {provider.get('model_label')}\n"
-            f"Lý do: {provider.get('reason')}\n\n"
-            "Gợi ý: dùng <code>/chat_pro model=auto nội dung...</code> hoặc kiểm tra <code>/models</code>.",
-            parse_mode="HTML",
-        )
 
     credits, _, is_vip = get_user(uid, update.effective_user.first_name)
     is_admin = str(uid) == ADMIN_ID
-    cost = 0 if (is_admin or is_vip) else calculate_chat_pro_cost(prompt, parsed["tier"], parsed["model"])
+    cost = 0 if (is_admin or is_vip) else chat_mode_cost(mode)
     if cost > 0 and credits < cost:
-        return await reply_insufficient_credits(update, credits, cost)
-    charged = False
-    if cost > 0:
-        charged = spend_fixed_credit(uid, cost, "spend_chat_pro", f"Chat Pro {parsed['tier']} {parsed['model']}")
-        if not charged:
-            credits_now, _, _ = get_user(uid)
-            return await reply_insufficient_credits(update, credits_now, cost)
+        return await update.message.reply_text(chat_insufficient_credits_text(mode, cost, credits))
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    try:
-        output = call_chat_pro_ai(prompt, provider, uid)
-        credits_after, _, _ = get_user(uid)
-        caption = (
-            f"Model: {provider.get('model_label')} | Tier: {parsed['tier']} | "
-            f"Chi phí: {cost} Xu | Còn lại: {credits_after} Xu"
+    result = await call_ai_chat_with_fallback(chat_mode_instruction(mode), prompt, uid, max_tokens=1800 if mode == CHAT_TIER_DEEP else 1400)
+    if not result.get("ok"):
+        detail = ai_failure_detail(result.get("statuses") or {}, result.get("errors") or {})
+        record_usage_event(
+            uid,
+            username=username,
+            event_type="tool_fail",
+            tool_name="ai_chat",
+            command=command,
+            status="provider_fail",
+            provider="ai_router",
+            detail=detail,
         )
-        await send_chat_pro_output(context, update.effective_chat.id, uid, output, caption)
-    except Exception as e:
-        logger.warning(f"Chat Pro AI error: {type(e).__name__}")
-        refunded = refund_charged_credit(uid, cost, "refund_chat_pro", "", "Hoàn phí Chat Pro do AI lỗi", charged)
-        refund_line = f"\n\n✅ Đã hoàn lại {cost} Xu." if refunded else ""
-        await update.message.reply_text("❌ Chat Pro đang lỗi tạm thời. Vui lòng thử lại sau." + refund_line)
+        save_tool_test_result("ai_chat", "FAIL", detail, uid)
+        return await update.message.reply_text(result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {}))
+
+    if cost > 0 and not spend_fixed_credit(uid, cost, f"spend_ai_chat_{mode}", f"AI chat {mode}"):
+        credits_now, _, _ = get_user(uid)
+        return await update.message.reply_text(chat_insufficient_credits_text(mode, cost, credits_now))
+
+    provider = result.get("provider") or "ai_router"
+    output = result.get("text") or ""
+    credits_after, _, _ = get_user(uid)
+    record_usage_event(
+        uid,
+        username=username,
+        event_type="tool_success",
+        tool_name="ai_chat",
+        command=command,
+        status=mode,
+        provider=provider,
+        xu_delta=-int(cost or 0),
+    )
+    save_tool_test_result("ai_chat", "PASS", f"provider={provider}; mode={mode}; cost={cost}", uid)
+    caption = f"Provider: {provider} | {chat_charge_line(cost, mode, is_admin or bool(is_vip))} | Còn lại: {credits_after} Xu"
+    await send_chat_pro_output(context, update.effective_chat.id, uid, output, caption)
 
 async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
     providers = provider_status_payload()
@@ -27340,19 +27560,22 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Chat thường</b>",
         "• Auto Fast AI — dùng model nhanh/tiết kiệm.",
         "• Phù hợp hỏi đáp, caption, sửa nội dung, ý tưởng nhanh.",
+        f"• Giá: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công.",
         "",
         "<b>Chat Pro</b>",
         f"• Gemini Pro style: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
         f"• OpenAI Pro style: <code>{provider_status_text(providers['ai']['openai'])}</code>",
-        f"• Giá từ <b>{CHAT_PRO_STANDARD_COST} Xu</b>.",
+        f"• Giá: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công.",
         "",
         "<b>Chat Deep</b>",
         "• Dùng cho chiến lược, hệ thống, code/debug, nội dung lớn.",
-        f"• Giá từ <b>{CHAT_PRO_DEEP_COST} Xu</b> trở lên.",
+        f"• Giá từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công.",
         "• Claude/Grok: planned / pending provider setup.",
+        "• AI lỗi/quota/provider fail: không trừ Xu.",
         "",
         "Kiểm tra giá: <code>/pricing</code>",
         "Dùng Chat Pro: <code>/chat_pro nội dung...</code>",
+        "Dùng Chat Deep: <code>/chat_deep nội dung...</code>",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -40775,44 +40998,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     size_calc = len(data) if act != "download" else 0
     action_key = act if act in ("voice", "download") else "chat"
 
-    # ── LOGIC CHAT MIỄN PHÍ / TRẢ PHÍ ───────────────────────────────────────
+    # ── LOGIC CHAT / TOOL CREDIT CHECK ───────────────────────────────────────
     is_admin = str(uid) == ADMIN_ID
     credits, total_spent, is_vip = get_user(uid)
-    trial = is_trial_account(uid)
 
-    if action_key == "chat" and not is_admin and not is_vip:
-        used_today, remaining = get_free_chat_status(uid)
-
-        if trial:
-            # Tài khoản chưa nạp: dùng lượt miễn phí, hết thì khoá đến hôm sau
-            if remaining <= 0:
-                await update.message.reply_text(
-                    f"🚫 <b>Hết {FREE_CHAT_DAILY} lượt chat miễn phí hôm nay!</b>\n\n"
-                    f"⏰ Lượt mới reset lúc <b>00:00 ngày mai</b>\n\n"
-                    f"💡 Nạp <b>50.000đ</b> → chat <b>không giới hạn</b> + dùng các tính năng AI trả phí.\n"
-                    f"👇 Chọn gói để tạo QR thanh toán tự động:",
-                    parse_mode="HTML",
-                    reply_markup=build_topup_keyboard(uid),
-                )
-                return
-            # Còn lượt — dùng miễn phí, không trừ Xu
-            consume_free_chat(uid)
-            cost, discount = 0, 0.0
-            warn = f"\n\n<i>🆓 Lượt miễn phí: còn {remaining - 1}/{FREE_CHAT_DAILY} hôm nay</i>" if remaining <= 5 else ""
-        else:
-            # Đã nạp tiền: trừ Xu bình thường, không giới hạn lượt
-            can_afford, cost, discount = deduct_dynamic_credit(uid, action_key, size_calc)
-            if not can_afford:
-                credits_now, _, _ = get_user(uid)
-                return await reply_insufficient_credits(update, credits_now, cost)
-            credits_after, _, _ = get_user(uid)
-            warn = (
-                f"\n\n💼 <i>Số dư còn lại: <b>{credits_after} Xu</b> | /naptien để nạp thêm</i>"
-                if credits_after < 200 else
-                f"\n\n💼 <i>Còn: {credits_after} Xu</i>"
-            )
-    elif action_key == "chat" and (is_admin or is_vip):
-        cost, discount, warn = 0, 0.0, ""
+    if action_key == "chat":
+        modes = ensure_user_modes(uid)
+        mode_name = modes.get("chat_mode") or CHAT_TIER_NORMAL
+        mode_name = normalize_chat_tier(mode_name or CHAT_TIER_NORMAL)
+        cost = 0 if (is_admin or is_vip) else chat_mode_cost(mode_name)
+        discount = 0.0
+        warn = ""
+        if cost > 0 and credits < cost:
+            return await update.message.reply_text(chat_insufficient_credits_text(mode_name, cost, credits))
     else:
         # voice / download — voice được chọn provider trước; download trừ Xu trực tiếp.
         if action_key == "voice":
@@ -40859,60 +41057,62 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         modes = ensure_user_modes(uid)
-        mode_name = modes.get("chat_mode") or "normal"
-        mode_instruction = "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời súc tích, thân thiện."
-        if mode_name == "pro":
-            mode_instruction = "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Pro. Trả lời sâu hơn, có cấu trúc, đưa bước hành động rõ ràng."
-        elif mode_name == "deep":
-            mode_instruction = "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Deep. Phân tích kỹ, nêu rủi ro, giả định và kế hoạch hành động cụ thể."
+        mode_name = normalize_chat_tier((modes.get("chat_mode") or CHAT_TIER_NORMAL))
+        mode_instruction = chat_mode_instruction(mode_name)
+        username = update.effective_user.username or update.effective_user.first_name or ""
         record_usage_event(
             uid,
-            username=update.effective_user.username or update.effective_user.first_name or "",
+            username=username,
             event_type="tool_use",
-            tool_name="chat",
-            command="text",
+            tool_name="ai_chat",
+            command="text_chat",
             status=mode_name,
         )
-        try:
-            reply = AgentGemini.chat(
-                mode_instruction,
-                text, uid
-            )
-        except Exception as e:
-            logger.error(f"Chat AI error: {e}")
+        result = await call_ai_chat_with_fallback(mode_instruction, text, uid, max_tokens=1800 if mode_name == CHAT_TIER_DEEP else 1200)
+        if not result.get("ok"):
+            detail = ai_failure_detail(result.get("statuses") or {}, result.get("errors") or {})
             record_usage_event(
                 uid,
-                username=update.effective_user.username or update.effective_user.first_name or "",
+                username=username,
                 event_type="tool_fail",
-                tool_name="chat",
-                command="text",
-                status="ai_error",
+                tool_name="ai_chat",
+                command="text_chat",
+                status="provider_fail",
                 provider="ai_router",
-                detail=str(e)[:300],
+                detail=detail,
             )
-            refunded = refund_charged_credit(uid, cost, "chat_refund", "", "Hoàn phí chat do AI lỗi", cost > 0)
-            refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b> vì dịch vụ lỗi." if refunded else ""
-            return await update.message.reply_text(
-                "❌ AI đang lỗi tạm thời. Vui lòng thử lại sau." + refund_line,
-                parse_mode="HTML",
-            )
+            save_tool_test_result("ai_chat", "FAIL", detail, uid)
+            return await update.message.reply_text(result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {}))
+
+        if cost > 0 and not spend_fixed_credit(uid, cost, f"spend_ai_chat_{mode_name}", f"AI chat {mode_name}"):
+            credits_now, _, _ = get_user(uid)
+            return await update.message.reply_text(chat_insufficient_credits_text(mode_name, cost, credits_now))
+
+        provider = result.get("provider") or "ai_router"
+        reply = result.get("text") or ""
+        credits_after, _, _ = get_user(uid)
         if cost > 0:
-            discount_text = " (Đã áp dụng VIP)" if discount > 0 else ""
-            cost_line = f"\n\n<i>(-{cost} Xu){discount_text}</i>"
+            cost_line = f"\n\n<i>{chat_charge_line(cost, mode_name)}</i>"
+            warn = (
+                f"\n\n💼 <i>Số dư còn lại: <b>{credits_after} Xu</b> | /naptien để nạp thêm</i>"
+                if credits_after < 200 else
+                f"\n\n💼 <i>Còn: {credits_after} Xu</i>"
+            )
         else:
-            cost_line = ""
+            cost_line = f"\n\n<i>{chat_charge_line(cost, mode_name, is_admin or bool(is_vip))}</i>"
         record_usage_event(
             uid,
-            username=update.effective_user.username or update.effective_user.first_name or "",
+            username=username,
             event_type="tool_success",
-            tool_name="chat",
-            command="text",
+            tool_name="ai_chat",
+            command="text_chat",
             status=mode_name,
-            provider="ai_router",
+            provider=provider,
             xu_delta=-int(cost or 0),
         )
+        save_tool_test_result("ai_chat", "PASS", f"provider={provider}; mode={mode_name}; cost={cost}", uid)
         await update.message.reply_text(
-            f"🤖 {reply}{cost_line}{warn}{active_mode_hint(uid)}",
+            f"🤖 {html.escape(reply)}{cost_line}{warn}{active_mode_hint(uid)}",
             parse_mode="HTML"
         )
 
@@ -41057,6 +41257,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("chat_deep_on", cmd_chat_deep_on))
     tg_app.add_handler(CommandHandler("chat_deep_off", cmd_chat_deep_off))
     tg_app.add_handler(CommandHandler("chat_pro",    cmd_chat_pro))
+    tg_app.add_handler(CommandHandler("chat_deep",   cmd_chat_deep))
     tg_app.add_handler(CommandHandler("models",      cmd_models))
     tg_app.add_handler(CommandHandler("ai_models",   cmd_models))
     tg_app.add_handler(CommandHandler("beta_offer",  cmd_beta_offer))
