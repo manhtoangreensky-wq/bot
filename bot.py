@@ -157,7 +157,17 @@ PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "toanaasbot")
 OFFICIAL_TELEGRAM_URL = _env("OFFICIAL_TELEGRAM_URL", "https://t.me/toanaasbot")
 SUPPORT_TELEGRAM_URL  = _env("SUPPORT_TELEGRAM_URL", "https://t.me/toanaas")
+if SUPPORT_TELEGRAM_URL.rstrip("/").lower() in {
+    "https://t.me/toanaasbot",
+    OFFICIAL_TELEGRAM_URL.rstrip("/").lower(),
+}:
+    SUPPORT_TELEGRAM_URL = "https://t.me/toanaas"
 ADMIN_TELEGRAM_URL    = _env("ADMIN_TELEGRAM_URL", SUPPORT_TELEGRAM_URL)
+if ADMIN_TELEGRAM_URL.rstrip("/").lower() in {
+    "https://t.me/toanaasbot",
+    OFFICIAL_TELEGRAM_URL.rstrip("/").lower(),
+}:
+    ADMIN_TELEGRAM_URL = SUPPORT_TELEGRAM_URL
 TELEGRAM_UPDATE_MODE_RAW = _env("TELEGRAM_UPDATE_MODE")
 TELEGRAM_UPDATE_MODE = (TELEGRAM_UPDATE_MODE_RAW or ("webhook" if PUBLIC_BASE_URL else "polling")).lower()
 TELEGRAM_FORCE_POLLING = _env("TELEGRAM_FORCE_POLLING", "0").lower() in {"1", "true", "yes", "on"}
@@ -664,6 +674,20 @@ def init_db():
         note TEXT,
         UNIQUE(code, user_id)
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS gift_beta_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        username TEXT,
+        full_name TEXT,
+        contact_url TEXT,
+        status TEXT DEFAULT 'pending',
+        first_requested_at TEXT,
+        last_requested_at TEXT,
+        notify_count INTEGER DEFAULT 1,
+        note TEXT,
+        UNIQUE(code, user_id, status)
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS user_promo_state (
         user_id TEXT PRIMARY KEY,
         code TEXT,
@@ -1066,6 +1090,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_redemptions_user ON gift_redemptions(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_assignments_user ON gift_assignments(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_assignments_code ON gift_assignments(code)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_gift_beta_requests_status ON gift_beta_requests(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_gift_beta_requests_user ON gift_beta_requests(user_id)")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -2074,6 +2100,9 @@ DEFAULT_BETA_GIFT_CODES = [
     ("BETA200", 200, 100, 1, "Beta gift +200 Xu"),
     ("BETA500", 500, 50, 1, "Beta gift +500 Xu"),
     ("BETA1000", 1000, 20, 1, "Beta gift +1000 Xu"),
+    ("BETA2000", 2000, 10, 1, "Beta VIP/partner gift +2000 Xu"),
+    ("BETA5000", 5000, 5, 1, "Beta VIP/partner gift +5000 Xu"),
+    ("BETA10000", 10000, 3, 1, "Beta super VIP/partner gift +10000 Xu"),
 ]
 
 gift_beta_request_notify_cache = {}
@@ -2222,6 +2251,65 @@ def telegram_user_contact_text(user) -> tuple[str, str, str]:
     contact_url = f"https://t.me/{username}" if username else ""
     return username, full_name, contact_url
 
+def record_beta_gift_request(user, code: str) -> dict:
+    norm_code = normalize_promo_code(code)
+    if not user or not norm_code or not is_beta_gift_code(norm_code):
+        return {"status": "ignored", "notify_admin": False}
+    uid = str(getattr(user, "id", ""))
+    username, full_name, contact_url = telegram_user_contact_text(user)
+    now = now_text()
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """SELECT id, notify_count, first_requested_at
+            FROM gift_beta_requests
+            WHERE code=? AND user_id=? AND status='pending'
+            LIMIT 1""",
+            (norm_code, uid),
+        )
+        row = c.fetchone()
+        if row:
+            request_id, notify_count, first_requested_at = row
+            c.execute(
+                """UPDATE gift_beta_requests
+                SET last_requested_at=?, notify_count=COALESCE(notify_count,0)+1,
+                    username=?, full_name=?, contact_url=?
+                WHERE id=?""",
+                (now, username, full_name, contact_url, request_id),
+            )
+            conn.commit()
+            return {
+                "status": "pending",
+                "notify_admin": False,
+                "id": request_id,
+                "notify_count": int(notify_count or 0) + 1,
+                "first_requested_at": first_requested_at or "",
+            }
+        c.execute(
+            """INSERT INTO gift_beta_requests
+            (code, user_id, username, full_name, contact_url, status, first_requested_at, last_requested_at, notify_count, note)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (norm_code, uid, username, full_name, contact_url, "pending", now, now, 1, "User requested assigned beta gift code"),
+        )
+        request_id = c.lastrowid
+        conn.commit()
+        return {"status": "created", "notify_admin": True, "id": request_id, "notify_count": 1, "first_requested_at": now}
+    finally:
+        conn.close()
+
+def mark_beta_gift_request_approved(conn, code: str, user_id) -> int:
+    norm_code = normalize_promo_code(code)
+    if not norm_code or not is_beta_gift_code(norm_code):
+        return 0
+    cur = conn.execute(
+        """UPDATE gift_beta_requests
+        SET status='approved', last_requested_at=?, note='Approved by admin gift grant'
+        WHERE code=? AND user_id=? AND status='pending'""",
+        (now_text(), norm_code, str(user_id)),
+    )
+    return int(cur.rowcount or 0)
+
 def gift_needs_assignment_message(user_or_id, code: str) -> str:
     user_id = getattr(user_or_id, "id", user_or_id)
     username, _, _ = telegram_user_contact_text(user_or_id)
@@ -2239,24 +2327,34 @@ def gift_needs_assignment_message(user_or_id, code: str) -> str:
         "Mã quà tặng chỉ dùng trong sự kiện đặc biệt, chương trình test hoặc khi admin hỗ trợ riêng."
     )
 
+def gift_beta_request_pending_message(user_or_id, code: str) -> str:
+    user_id = getattr(user_or_id, "id", user_or_id)
+    safe_code = html.escape(normalize_promo_code(code) or str(code or "").strip().upper())
+    support_url = html.escape(SUPPORT_TELEGRAM_URL)
+    return (
+        "⏳ <b>Yêu cầu mã BETA đã được gửi trước đó</b>\n\n"
+        f"Yêu cầu mã <code>{safe_code}</code> của bạn đã được gửi cho admin trước đó. "
+        "Vui lòng chờ admin kiểm tra.\n\n"
+        "Nếu cần, hãy nhắn admin/hỗ trợ và gửi ID Telegram của bạn:\n"
+        f"• ID Telegram: <code>{html.escape(str(user_id))}</code>\n"
+        f"• Hỗ trợ: {support_url}"
+    )
+
 def beta_gift_support_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💬 Nhắn admin/hỗ trợ", url=SUPPORT_TELEGRAM_URL)]
     ])
 
-async def notify_admin_beta_gift_request(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str) -> bool:
+async def notify_admin_beta_gift_request(update: Update, context: ContextTypes.DEFAULT_TYPE, code: str) -> str:
     user = update.effective_user
     if not user or not ADMIN_ID:
-        return False
+        return "ignored"
     norm_code = normalize_promo_code(code)
     if not is_beta_gift_code(norm_code):
-        return False
-    cache_key = f"{user.id}:{norm_code}"
-    now_ts = time.time()
-    last_ts = float(gift_beta_request_notify_cache.get(cache_key) or 0)
-    if now_ts - last_ts < 300:
-        return False
-    gift_beta_request_notify_cache[cache_key] = now_ts
+        return "ignored"
+    request = record_beta_gift_request(user, norm_code)
+    if not request.get("notify_admin"):
+        return str(request.get("status") or "pending")
     username, full_name, contact_url = telegram_user_contact_text(user)
     username_line = f"@{html.escape(username)}" if username else "không có"
     full_name_line = html.escape(full_name or "không có")
@@ -2264,6 +2362,7 @@ async def notify_admin_beta_gift_request(update: Update, context: ContextTypes.D
     text = (
         "🎁 <b>USER YÊU CẦU MÃ BETA</b>\n\n"
         "User vừa nhập mã nhưng chưa được cấp quyền.\n\n"
+        f"• Request ID: <code>{html.escape(str(request.get('id') or '-'))}</code>\n"
         f"• Mã user nhập: <code>{html.escape(norm_code)}</code>\n"
         f"• User ID: <code>{html.escape(str(user.id))}</code>\n"
         f"• Username: {username_line}\n"
@@ -2275,10 +2374,10 @@ async def notify_admin_beta_gift_request(update: Update, context: ContextTypes.D
     )
     try:
         await context.bot.send_message(chat_id=int(ADMIN_ID), text=text, parse_mode="HTML")
-        return True
+        return "created"
     except Exception as e:
         logger.warning(f"Could not notify admin about beta gift request: {e}")
-        return False
+        return "created_notify_failed"
 
 def validate_gift_code(user_id, code: str, conn=None) -> tuple[bool, dict, str]:
     norm_code = normalize_promo_code(code)
@@ -2361,6 +2460,7 @@ def redeem_gift_code(user_id, code: str, actor_id=None, actor_role: str = "user"
             WHERE code=? AND user_id=? AND status IN ('assigned','approved')""",
             (now, norm_code, str(user_id)),
         )
+        mark_beta_gift_request_approved(conn, norm_code, user_id)
         record_credit_event(conn, user_id, xu, "gift_code", norm_code, note)
         record_audit(
             conn,
@@ -21609,7 +21709,7 @@ CUSTOMER_GUIDE_SECTIONS = [
             "• Xem bảng giá: <code>/pricing</code> hoặc <code>/banggia</code>\n"
             "• Xem ưu đãi: <code>/khuyenmai</code>, <code>/uudai</code>, <code>/promos</code>\n"
             "• Nhập mã ưu đãi nạp: <code>/promo FIRST30</code>\n"
-            "• Nhận mã quà tặng: <code>/gift BETA100</code> hoặc <code>/nhanqua BETA100</code>\n"
+            "• Nhận mã quà tặng admin gửi: <code>/gift MÃ_ADMIN_GỬI</code> hoặc <code>/nhanqua MÃ_ADMIN_GỬI</code>\n"
             "• Nạp Xu: <code>/naptien</code>\n"
             "• Tạo script/prompt/caption video: <code>/film &lt;chủ đề&gt;</code>\n"
             "• Phân tích hook/caption/CTA: <code>/growth_ai</code>\n"
@@ -21770,6 +21870,23 @@ def guide_keyboard() -> InlineKeyboardMarkup:
         ])
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+def guide_docx_candidates() -> list[str]:
+    base_dir = os.path.dirname(__file__)
+    return [
+        GUIDE_DOCX_FILE,
+        os.path.join(os.getcwd(), GUIDE_DOCX_FILE),
+        os.path.join(base_dir, GUIDE_DOCX_FILE),
+        os.path.join(base_dir, "docs", GUIDE_DOCX_FILE),
+        os.path.join(base_dir, "static", GUIDE_DOCX_FILE),
+        os.path.join(base_dir, "assets", GUIDE_DOCX_FILE),
+    ]
+
+def find_guide_docx_path() -> str:
+    for path in guide_docx_candidates():
+        if os.path.exists(path):
+            return path
+    return ""
 
 def guide_index_text() -> str:
     lines = [
@@ -22241,7 +22358,7 @@ async def cmd_huongdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     sent_any = False
     filename = GUIDE_DOCX_FILE
-    path = os.path.join(os.path.dirname(__file__), filename)
+    path = find_guide_docx_path()
     if os.path.exists(path):
         try:
             with open(path, "rb") as f:
@@ -22258,6 +22375,23 @@ async def cmd_huongdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ Chưa có file Word hướng dẫn. Admin cần set PUBLIC_BASE_URL hoặc kiểm tra file hướng dẫn trong repo."
         )
+
+async def cmd_guide_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    found = find_guide_docx_path()
+    candidates = guide_docx_candidates()
+    lines = [
+        "📘 <b>Guide Debug</b>",
+        f"• Found: <code>{'YES' if found else 'NO'}</code>",
+        f"• File: <code>{html.escape(GUIDE_DOCX_FILE)}</code>",
+        f"• CWD: <code>{html.escape(os.getcwd())}</code>",
+        "",
+        "<b>Candidates</b>",
+    ]
+    for idx, path in enumerate(candidates, 1):
+        lines.append(f"{idx}. <code>{html.escape(os.path.basename(path))}</code> — <code>{'exists' if os.path.exists(path) else 'missing'}</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -22297,6 +22431,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     providers = provider_status_payload()
     db_status = db_status_payload()
+    payos_debug_status = (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper()
+    payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
+    payos_dynamic_status = "working" if payos_debug_status == "PASS" and payos_checkout_url else "NEED DEBUG"
     lines = [
         "🔐 <b>TOAN AAS Provider Status</b>",
         "",
@@ -22307,6 +22444,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• PayOS Client ID: <code>{provider_status_text(providers['payos']['client_id'])}</code>",
         f"• PayOS API Key: <code>{provider_status_text(providers['payos']['api_key'])}</code>",
         f"• PayOS Checksum: <code>{provider_status_text(providers['payos']['checksum_key'])}</code>",
+        f"• PayOS dynamic checkout: <code>{html.escape(payos_dynamic_status)}</code>",
+        "• Manual QR fallback: <code>working/available</code>",
         "",
         "<b>AI</b>",
         f"• Gemini: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
@@ -22352,6 +22491,56 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     if not db_status["ok"]:
         lines.append(f"DB error: <code>{html.escape(db_status.get('error') or '-')}</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    providers = provider_status_payload()
+    db_status = db_status_payload()
+    payos_debug_status = (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper()
+    payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
+    public_cobalt = str(COBALT_API_URL or "").rstrip("/").lower() == "https://api.cobalt.tools"
+    lines = [
+        "🧪 <b>TOAN AAS Tool Audit</b>",
+        "",
+        "<b>Core</b>",
+        f"• DB: <code>{'OK' if db_status['ok'] else 'FAIL'}</code>",
+        f"• Public URL: <code>{provider_status_text(providers['core']['public_base_url'])}</code>",
+        f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
+        "",
+        "<b>AI</b>",
+        f"• Gemini: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
+        f"• OpenAI: <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        "• Smoke test: <code>/tool_test_ai</code> nếu đã có; nếu chưa, test bằng lệnh AI ngắn.",
+        "",
+        "<b>Image utilities</b>",
+        f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
+        f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
+        "",
+        "<b>Image / Media</b>",
+        f"• Image Prompt Factory: <code>{'ready' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
+        f"• Image-to-Video Prompt Pack: <code>{'ready' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
+        f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code>",
+        f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code>",
+        "",
+        "<b>Downloader</b>",
+        f"• Cobalt URL: <code>{html.escape(COBALT_API_URL or '-')}</code>",
+        f"• Public Cobalt: <code>{'yes - disabled for production safety' if public_cobalt else 'no/self-host or custom'}</code>",
+        f"• RapidAPI: <code>{provider_status_text(providers['downloader']['rapidapi'])}</code>",
+        "",
+        "<b>Audio</b>",
+        f"• Deepgram STT: <code>{provider_status_text(providers['audio']['deepgram'])}</code>",
+        f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
+        "• Edge TTS: <code>built-in/fallback</code>",
+        "",
+        "<b>Payment</b>",
+        f"• PayOS env: <code>{'configured' if providers['payos']['ready'] else 'missing'}</code>",
+        f"• PayOS dynamic checkout: <code>{'working' if payos_debug_status == 'PASS' and payos_checkout_url else 'NEED DEBUG'}</code>",
+        "• Manual QR fallback: <code>working/available</code>",
+        "",
+        "Không gọi API tốn tiền và không hiển thị secret.",
+    ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -22469,7 +22658,9 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Backup command: <code>{'available' if commands['backup_db'] else 'missing'}</code>",
         "",
         "<b>Providers</b>",
-        f"• PayOS: <code>{'READY' if providers['payos']['ready'] else 'NOT READY'}</code>",
+        f"• PayOS env: <code>{'configured' if providers['payos']['ready'] else 'missing'}</code>",
+        f"• PayOS dynamic checkout: <code>{'working' if payos_debug.get('status') == 'PASS' and payos_debug.get('checkout_url') else 'NEED DEBUG / signature fail possible'}</code>",
+        "• Manual QR fallback: <code>working/available</code>",
         f"• AI: <code>{'READY' if providers['ai']['ready'] else 'NOT READY'}</code>",
         f"• STT: <code>{'READY' if providers['audio']['deepgram'] else 'MISSING'}</code>",
         f"• Image: <code>{'READY' if providers['image']['ready'] else 'MISSING'}</code>",
@@ -22540,7 +22731,7 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Có thể thử 1 video basic trước khi nạp thêm",
         "• Nạp lần đầu từ 50k nên dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu mã còn hiệu lực",
         "• Gói 100k/200k/500k có Launch Bonus lần đầu mua từng gói",
-        "• <code>BETA50</code> chỉ dành cho nhóm test rất giới hạn hoặc nội bộ",
+        "• Mã beta/internal chỉ dùng khi admin gửi riêng, không public cho user",
         "• Khuyến nghị bắt đầu bằng gói 50k hoặc 100k để đủ Xu tạo nhiều Content Pack",
         "• Không cam kết doanh thu, công cụ giúp tạo nội dung nhanh hơn và có quy trình rõ hơn",
         "",
@@ -22682,9 +22873,14 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
         if status == "assignment_required":
-            await notify_admin_beta_gift_request(update, context, code)
+            request_status = await notify_admin_beta_gift_request(update, context, code)
+            message = (
+                gift_beta_request_pending_message(update.effective_user, code)
+                if request_status == "pending"
+                else gift_needs_assignment_message(update.effective_user, code)
+            )
             return await update.message.reply_text(
-                gift_needs_assignment_message(update.effective_user, code),
+                message,
                 parse_mode="HTML",
                 reply_markup=beta_gift_support_keyboard(),
             )
@@ -22934,16 +23130,17 @@ async def cmd_trial_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        return await update.message.reply_text(
+        text = (
             "🎁 <b>Nhận quà TOAN AAS</b>\n\n"
-            "Nhập mã quà tặng public do admin công bố:\n"
-            "<code>/gift THANK100</code>\n"
-            "<code>/nhanqua SORRY100</code>\n\n"
-            "Mã BETA là mã sự kiện/test nội bộ, chỉ dùng khi admin cấp riêng cho ID Telegram của bạn.\n"
-            "Nếu bạn nhập mã BETA khi chưa được cấp, bot sẽ hiện ID Telegram để bạn gửi admin kiểm tra.\n\n"
-            "Admin cấp BETA cho user bằng: <code>/gift BETA100 USER_ID</code>",
-            parse_mode="HTML",
+            "Nếu admin gửi mã quà tặng cho bạn, dùng:\n"
+            "<code>/gift MÃ_ADMIN_GỬI</code>\n"
+            "<code>/nhanqua MÃ_ADMIN_GỬI</code>\n\n"
+            "Mã quà tặng sự kiện/hỗ trợ riêng chỉ dùng khi admin gửi mã cho bạn. "
+            "Không cần tự thử nhiều mã vì hệ thống sẽ không cộng Xu nếu mã chưa được cấp cho ID Telegram của bạn."
         )
+        if is_admin_user(update.effective_user.id):
+            text += "\n\nAdmin cấp BETA cho user bằng: <code>/gift BETA100 USER_ID</code>\nXem request: <code>/gift_request_list</code>"
+        return await update.message.reply_text(text, parse_mode="HTML")
     code = context.args[0]
     if is_admin_user(update.effective_user.id) and len(context.args) >= 2:
         target_user_id = context.args[1].strip()
@@ -22989,9 +23186,14 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
     if status == "assignment_required":
-        await notify_admin_beta_gift_request(update, context, code)
+        request_status = await notify_admin_beta_gift_request(update, context, code)
+        message = (
+            gift_beta_request_pending_message(update.effective_user, code)
+            if request_status == "pending"
+            else gift_needs_assignment_message(update.effective_user, code)
+        )
         return await update.message.reply_text(
-            gift_needs_assignment_message(update.effective_user, code),
+            message,
             parse_mode="HTML",
             reply_markup=beta_gift_support_keyboard(),
         )
@@ -23075,11 +23277,18 @@ async def cmd_gift_seed_beta(update: Update, context: ContextTypes.DEFAULT_TYPE)
         conn.commit()
     finally:
         conn.close()
-    lines = ["✅ <b>Đã seed gift beta codes</b>", "", "Các mã BETA là INTERNAL/ASSIGNED, user không tự claim nếu admin chưa cấp."]
+    lines = ["✅ <b>Đã seed gift beta codes</b>", "", "Các mã BETA là INTERNAL/ASSIGNED, không public cho user và user không tự claim nếu admin chưa cấp."]
     for code, data in seeded.items():
         status = "created" if data.get("ok") else data.get("status")
         lines.append(f"• <code>{html.escape(code)}</code> +{int(data.get('xu') or 0)} Xu — <code>{html.escape(str(status))}</code>")
-    lines.extend(["", "Admin cấp: <code>/gift BETA100 USER_ID</code>", "Dùng: <code>/gift_list</code>"])
+    lines.extend([
+        "",
+        "Admin cấp ví dụ:",
+        "<code>/gift BETA100 USER_ID</code>",
+        "<code>/gift BETA2000 USER_ID</code>",
+        "<code>/gift BETA10000 USER_ID</code>",
+        "Dùng: <code>/gift_list</code> | <code>/gift_request_list</code>",
+    ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_gift_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -23115,6 +23324,39 @@ async def cmd_gift_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if int(requires_assignment or 0):
             lines.append(f"Admin cấp: <code>/gift {html.escape(str(code))} USER_ID</code>")
     await update.message.reply_text("\n".join(lines[:120]), parse_mode="HTML")
+
+async def cmd_gift_request_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT id, code, user_id, username, full_name, contact_url, first_requested_at, last_requested_at, notify_count
+            FROM gift_beta_requests
+            WHERE status='pending'
+            ORDER BY last_requested_at DESC
+            LIMIT 30"""
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return await update.message.reply_text("✅ Không có BETA gift request đang chờ.")
+    lines = ["🎁 <b>Pending BETA Gift Requests</b>", "", "INTERNAL/ASSIGNED ONLY — không public cho user."]
+    for request_id, code, user_id, username, full_name, contact_url, first_at, last_at, notify_count in rows:
+        user_label = f"@{html.escape(str(username))}" if username else html.escape(str(full_name or "-"))
+        contact = html.escape(str(contact_url or "-"))
+        lines.extend([
+            "",
+            f"#{int(request_id)} — <code>{html.escape(str(code))}</code>",
+            f"• User ID: <code>{html.escape(str(user_id))}</code>",
+            f"• User: {user_label}",
+            f"• Contact: {contact}",
+            f"• First: <code>{html.escape(str(first_at or '-'))}</code>",
+            f"• Last: <code>{html.escape(str(last_at or '-'))}</code>",
+            f"• Repeat count: <b>{int(notify_count or 0)}</b>",
+            f"• Cấp: <code>/gift {html.escape(str(code))} {html.escape(str(user_id))}</code>",
+        ])
+    await update.message.reply_text("\n".join(lines[:140]), parse_mode="HTML")
 
 async def cmd_gift_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -37230,12 +37472,14 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("huongdan",    cmd_huongdan))
     tg_app.add_handler(CommandHandler("guide",       cmd_huongdan))
     tg_app.add_handler(CommandHandler("hdsd",        cmd_huongdan))
+    tg_app.add_handler(CommandHandler("guide_debug", cmd_guide_debug))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
     tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
     tg_app.add_handler(CommandHandler("providers",   cmd_providers))
+    tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
     tg_app.add_handler(CommandHandler("costs",       cmd_costs))
     tg_app.add_handler(CommandHandler("sales_ready", cmd_sales_ready))
     tg_app.add_handler(CommandHandler("payos_test_plan", cmd_payos_test_plan))
@@ -37267,6 +37511,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("gift_create", cmd_gift_create))
     tg_app.add_handler(CommandHandler("gift_seed_beta", cmd_gift_seed_beta))
     tg_app.add_handler(CommandHandler("gift_list",   cmd_gift_list))
+    tg_app.add_handler(CommandHandler("gift_request_list", cmd_gift_request_list))
     tg_app.add_handler(CommandHandler("gift_disable", cmd_gift_disable))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
     tg_app.add_handler(CommandHandler("invite",      cmd_invite))
@@ -37665,15 +37910,24 @@ async def status_page():
     }
 
 def customer_guide_file_path(filename: str) -> str:
-    return os.path.join(os.path.dirname(__file__), filename)
+    if filename == GUIDE_DOCX_FILE:
+        return find_guide_docx_path()
+    return ""
 
 def customer_guide_missing_response():
-    return JSONResponse({"ok": False, "error": "guide_file_missing"}, status_code=404)
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": "guide_file_missing",
+            "message": "File hướng dẫn đang được cập nhật, vui lòng thử lại sau hoặc nhắn admin/hỗ trợ.",
+        },
+        status_code=404,
+    )
 
 @fastapi_app.get("/download/huong-dan-toan-aas.docx")
 async def download_customer_guide_docx():
     path = customer_guide_file_path(GUIDE_DOCX_FILE)
-    if not os.path.exists(path):
+    if not path or not os.path.exists(path):
         return customer_guide_missing_response()
     return FileResponse(
         path,
