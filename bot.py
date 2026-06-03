@@ -194,6 +194,9 @@ PUBLIC_BASE_URL, PUBLIC_BASE_URL_SOURCE = detect_public_base_url()
 ACTIVE_TELEGRAM_UPDATE_MODE = ""
 ACTIVE_TELEGRAM_WEBHOOK_URL = ""
 ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG = ""
+ACTIVE_TELEGRAM_BOT_ID = ""
+ACTIVE_TELEGRAM_BOT_USERNAME = ""
+TELEGRAM_HANDLERS_REGISTERED = 0
 
 # AI Providers
 GEMINI_API_KEY      = _env("GEMINI_API_KEY")
@@ -604,6 +607,33 @@ def db_connect():
     conn = sqlite3.connect(DB_FILE, timeout=30)
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
+
+def telegram_token_runtime_summary() -> dict:
+    token = TELEGRAM_TOKEN or ""
+    return {
+        "configured": bool(token),
+        "len": len(token),
+        "masked": mask_secret(token) if token else "",
+    }
+
+def runtime_db_status() -> dict:
+    base = os.path.basename(str(DB_FILE or ""))
+    db_label = base if str(DB_FILE) == base else f"configured:{base}"
+    try:
+        conn = db_connect()
+        try:
+            conn.execute("SELECT 1")
+            return {"ok": True, "status": "OK", "file": db_label}
+        finally:
+            conn.close()
+    except Exception as e:
+        return {"ok": False, "status": "FAIL", "file": db_label, "error": str(e)[:300]}
+
+def telegram_handler_count(application) -> int:
+    try:
+        return sum(len(handlers) for handlers in getattr(application, "handlers", {}).values())
+    except Exception:
+        return 0
 
 def init_db():
     conn = db_connect()
@@ -25296,6 +25326,8 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     bot_info = {}
     expected_webhook = expected_telegram_webhook_url()
+    token_summary = telegram_token_runtime_summary()
+    db_summary = runtime_db_status()
     webhook_info = {"ok": False, "reason": "not_checked"}
     try:
         me = await context.bot.get_me()
@@ -25320,6 +25352,12 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "deploy_id": APP_DEPLOY_ID or "-",
         "bot_username_env": BOT_USERNAME,
         "bot_info": bot_info,
+        "token_configured": token_summary["configured"],
+        "token_len": token_summary["len"],
+        "token_masked": token_summary["masked"] or "-",
+        "db": db_summary,
+        "handlers_registered": TELEGRAM_HANDLERS_REGISTERED,
+        "startup_error": TELEGRAM_STARTUP_ERROR or "-",
         "public_base_url": PUBLIC_BASE_URL or "-",
         "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "-",
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
@@ -38540,11 +38578,26 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED
     init_db()
+    token_summary = telegram_token_runtime_summary()
+    db_summary = runtime_db_status()
+    logger.info(
+        "TOAN AAS STARTUP | build=%s | deploy=%s | public_base_url=%s | public_base_url_source=%s | telegram_update_mode=%s | force_polling=%s | token=%s len=%s masked=%s | db=%s",
+        APP_BUILD,
+        APP_DEPLOY_ID or "-",
+        PUBLIC_BASE_URL or "missing",
+        PUBLIC_BASE_URL_SOURCE or "missing",
+        TELEGRAM_UPDATE_MODE,
+        str(TELEGRAM_FORCE_POLLING).lower(),
+        "configured" if token_summary["configured"] else "missing",
+        token_summary["len"],
+        token_summary["masked"] or "-",
+        db_summary.get("status") or "FAIL",
+    )
     if not TELEGRAM_TOKEN:
         TELEGRAM_STARTUP_ERROR = "TELEGRAM_TOKEN chưa được set"
-        logger.error("❌ TELEGRAM_TOKEN chưa được set!")
+        logger.error("TELEGRAM_TOKEN: missing")
         yield
         return
     TELEGRAM_STARTUP_ERROR = ""
@@ -38559,6 +38612,7 @@ async def lifespan(app: FastAPI):
         yield
         return
 
+    tg_app.add_handler(CommandHandler("ping",        cmd_ping))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("help",        cmd_help))
@@ -38580,7 +38634,6 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("guide_debug", cmd_guide_debug))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
-    tg_app.add_handler(CommandHandler("ping",        cmd_ping))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
     tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
@@ -38837,12 +38890,30 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_task_callback, pattern=r"^task\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
     tg_app.add_error_handler(on_telegram_error)
+    TELEGRAM_HANDLERS_REGISTERED = telegram_handler_count(tg_app)
+    logger.info("Telegram handlers registered OK | handlers_registered=%s", TELEGRAM_HANDLERS_REGISTERED)
 
     telegram_started = False
     try:
         await tg_app.initialize()
         await tg_app.start()
         telegram_started = True
+        try:
+            me = await tg_app.bot.get_me()
+            ACTIVE_TELEGRAM_BOT_ID = str(getattr(me, "id", "") or "")
+            ACTIVE_TELEGRAM_BOT_USERNAME = str(getattr(me, "username", "") or "")
+            logger.info(
+                "Telegram getMe OK | id=%s | username=%s",
+                ACTIVE_TELEGRAM_BOT_ID or "-",
+                ACTIVE_TELEGRAM_BOT_USERNAME or "-",
+            )
+        except Exception as e:
+            error_text = sanitize_log_text(str(e))
+            TELEGRAM_STARTUP_ERROR = f"Telegram getMe failed: {type(e).__name__}: {error_text}"
+            if "Unauthorized" in type(e).__name__ or "Unauthorized" in error_text:
+                logger.error("TELEGRAM_TOKEN invalid or revoked. Update Railway TELEGRAM_TOKEN.")
+            else:
+                logger.exception("Telegram getMe failed during startup")
         active_update_mode = TELEGRAM_UPDATE_MODE
         webhook_url = ""
         webhook_info_payload = {"ok": False, "reason": "not_checked", "expected_url": expected_telegram_webhook_url()}
@@ -38868,7 +38939,9 @@ async def lifespan(app: FastAPI):
         else:
             active_update_mode = "polling"
             try:
-                await tg_app.bot.delete_webhook(drop_pending_updates=True)
+                if TELEGRAM_FORCE_POLLING:
+                    logger.info("FORCE POLLING ENABLED")
+                await tg_app.bot.delete_webhook(drop_pending_updates=not TELEGRAM_FORCE_POLLING)
             except Exception as e:
                 logger.warning(f"Không xóa được webhook cũ trước khi polling: {e}")
             try:
@@ -39099,6 +39172,8 @@ async def health_check():
 async def runtime_health(request: Request):
     verify_runtime_access(request)
     expected_webhook = expected_telegram_webhook_url()
+    token_summary = telegram_token_runtime_summary()
+    db_summary = runtime_db_status()
     webhook_info = {"ok": False, "reason": "telegram_app_not_ready", "expected_url": expected_webhook}
     if tg_app:
         try:
@@ -39107,13 +39182,30 @@ async def runtime_health(request: Request):
             webhook_info = {"ok": False, "error": str(e), "expected_url": expected_webhook}
     ownership = telegram_update_ownership_diagnosis(webhook_info)
     return {
+        "ok": True,
         "status": "ok",
         "service": APP_VERSION,
+        "app_version": APP_VERSION,
         "build": APP_BUILD,
         "deploy_id": APP_DEPLOY_ID or "",
+        "time": now_text(),
+        "db": db_summary,
         "bot_username_env": BOT_USERNAME,
         "public_base_url": PUBLIC_BASE_URL or "",
         "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
+        "telegram": {
+            "token_configured": token_summary["configured"],
+            "token_len": token_summary["len"],
+            "token_masked": token_summary["masked"] or "",
+            "bot_id": ACTIVE_TELEGRAM_BOT_ID or "",
+            "bot_username": ACTIVE_TELEGRAM_BOT_USERNAME or "",
+            "handlers_registered": TELEGRAM_HANDLERS_REGISTERED,
+            "update_mode": TELEGRAM_UPDATE_MODE,
+            "active_mode": ACTIVE_TELEGRAM_UPDATE_MODE or "",
+            "webhook_expected": expected_webhook,
+            "webhook_actual": webhook_info.get("url") or "",
+            "last_error": TELEGRAM_STARTUP_ERROR or webhook_info.get("last_error_message") or "",
+        },
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
         "telegram_update_mode_active": ACTIVE_TELEGRAM_UPDATE_MODE or "",
         "telegram_update_mode_raw": TELEGRAM_UPDATE_MODE_RAW or "",
@@ -39122,6 +39214,9 @@ async def runtime_health(request: Request):
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "",
         "telegram_webhook_watchdog": ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG or "",
         "telegram_startup_error": TELEGRAM_STARTUP_ERROR or "",
+        "telegram_bot_id": ACTIVE_TELEGRAM_BOT_ID or "",
+        "telegram_bot_username": ACTIVE_TELEGRAM_BOT_USERNAME or "",
+        "telegram_handlers_registered": TELEGRAM_HANDLERS_REGISTERED,
         "telegram_takeover_interval_seconds": TELEGRAM_TAKEOVER_INTERVAL_SECONDS,
         "telegram_webhook_info": webhook_info,
         "telegram_ownership": ownership,
