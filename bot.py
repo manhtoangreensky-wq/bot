@@ -11,7 +11,6 @@ import os
 import logging
 import asyncio
 import base64
-import edge_tts
 import json
 import sqlite3
 import httpx
@@ -50,6 +49,13 @@ from telegram.ext import (
     CallbackQueryHandler, filters, ContextTypes, ApplicationHandlerStop
 )
 try:
+    import edge_tts
+    EDGE_TTS_IMPORT_ERROR = ""
+except Exception as e:
+    edge_tts = None
+    EDGE_TTS_IMPORT_ERROR = str(e)[:240]
+
+try:
     from PIL import Image, ImageDraw, ImageFont
 except Exception:
     Image = None
@@ -85,6 +91,15 @@ def _log_secret_values() -> list[str]:
         "DEEPGRAM_API_KEY",
         "DEEPL_API_KEY",
         "FISH_AUDIO_KEY",
+        "ELEVENLABS_API_KEY",
+        "AUPHONIC_API_KEY",
+        "SERPAPI_API_KEY",
+        "STABILITY_API_KEY",
+        "KLING_ACCESS_KEY",
+        "KLING_SECRET_KEY",
+        "KLING_API_KEY",
+        "RUNWAY_API_KEY",
+        "HEYGEN_API_KEY",
         "REMOVEBG_API_KEY",
         "CUTOUT_API_KEY",
         "RAPIDAPI_KEY",
@@ -238,16 +253,25 @@ ADMIN_TEST_OPENAI_IMAGE = env_flag("ADMIN_TEST_OPENAI_IMAGE", "1")
 ADMIN_TEST_OPENAI_IMAGE_EDIT = env_flag("ADMIN_TEST_OPENAI_IMAGE_EDIT", "1")
 ADMIN_TEST_REAL_VIDEO = env_flag("ADMIN_TEST_REAL_VIDEO", "0")
 ADMIN_TEST_TREND_LIVE = env_flag("ADMIN_TEST_TREND_LIVE", "0")
+ADMIN_TEST_STABILITY = env_flag("ADMIN_TEST_STABILITY", "0")
+ADMIN_TEST_AUPHONIC = env_flag("ADMIN_TEST_AUPHONIC", "0")
+ADMIN_TEST_KLING = env_flag("ADMIN_TEST_KLING", "0")
+ADMIN_TEST_RUNWAY = env_flag("ADMIN_TEST_RUNWAY", "0")
+ADMIN_TEST_HEYGEN = env_flag("ADMIN_TEST_HEYGEN", "0")
 
 # Audio
 DEEPGRAM_API_KEY    = env_any("DEEPGRAM_API_KEY", "Deepgram_API_KEY", "DEEPGRAM_KEY", "DEEPGRAM_TOKEN")
 DEEPL_API_KEY       = env_any("DEEPL_API_KEY", "DeepL_API_KEY", "DEEPL_KEY", "DEEPL_AUTH_KEY")
 DEEPL_API_URL       = env_any("DEEPL_API_URL", default="https://api-free.deepl.com/v2/translate")
 FISH_AUDIO_KEY      = _env("FISH_AUDIO_KEY")
+ELEVENLABS_API_KEY  = _env("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+AUPHONIC_API_KEY    = _env("AUPHONIC_API_KEY")
 
 # Image
 REMOVEBG_API_KEY    = _env("REMOVEBG_API_KEY")
 CUTOUT_API_KEY      = _env("CUTOUT_API_KEY")
+STABILITY_API_KEY   = _env("STABILITY_API_KEY")
 
 # Payment
 PAYOS_CLIENT_ID     = _env("PAYOS_CLIENT_ID")
@@ -255,6 +279,11 @@ PAYOS_API_KEY       = _env("PAYOS_API_KEY")
 PAYOS_CHECKSUM_KEY  = _env("PAYOS_CHECKSUM_KEY")
 
 # Misc
+SERPAPI_API_KEY     = _env("SERPAPI_API_KEY")
+KLING_ACCESS_KEY    = _env("KLING_ACCESS_KEY") or _env("KLING_API_KEY")
+KLING_SECRET_KEY    = _env("KLING_SECRET_KEY")
+RUNWAY_API_KEY      = _env("RUNWAY_API_KEY")
+HEYGEN_API_KEY      = _env("HEYGEN_API_KEY")
 RAPIDAPI_KEY        = _env("RAPIDAPI_KEY")
 RAPIDAPI_HOST       = _env("RAPIDAPI_HOST")
 COBALT_API_URL_RAW  = _env("COBALT_API_URL")
@@ -16277,6 +16306,8 @@ async def synthesize_operator_voice_task(owner_id, task, job):
             record_tool_event(owner_id, "voice", "Fish Audio HD", "error", "warning", row_job_id, task_id, "Edge TTS", fish_error)
     if not used_tool:
         try:
+            if not edge_tts:
+                raise RuntimeError(f"edge-tts package missing: {EDGE_TTS_IMPORT_ERROR or 'import failed'}")
             communicate = edge_tts.Communicate(script, "vi-VN-NamMinhNeural")
             await communicate.save(out_path)
             used_tool = "Edge TTS"
@@ -22801,6 +22832,8 @@ class AgentVoice:
                 else:
                     logger.warning(f"Fish Audio lỗi {res.status_code} — fallback Edge TTS")
 
+            if not edge_tts:
+                raise RuntimeError(f"edge-tts package missing: {EDGE_TTS_IMPORT_ERROR or 'import failed'}")
             communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
             await communicate.save(out)
             if os.path.exists(out) and os.path.getsize(out) > 0:
@@ -23517,6 +23550,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Tiết Kiệm)...</i>", parse_mode="HTML")
             out = f"v_{uid}.mp3"
             try:
+                if not edge_tts:
+                    raise RuntimeError(f"edge-tts package missing: {EDGE_TTS_IMPORT_ERROR or 'import failed'}")
                 communicate = edge_tts.Communicate(data, "vi-VN-NamMinhNeural")
                 await communicate.save(out)
                 with open(out, "rb") as f:
@@ -23598,6 +23633,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         return
                     fallback_charged = True
                     try:
+                        if not edge_tts:
+                            raise RuntimeError(f"edge-tts package missing: {EDGE_TTS_IMPORT_ERROR or 'import failed'}")
                         communicate = edge_tts.Communicate(data, "vi-VN-NamMinhNeural")
                         await communicate.save(out)
                         with open(out, "rb") as f:
@@ -24247,6 +24284,9 @@ def db_status_payload() -> dict:
     except Exception as e:
         return {"ok": False, "error": str(e)[:160]}
 
+def admin_only_stage_if_configured(configured: bool) -> str:
+    return "ADMIN_ONLY" if configured else "DISABLED"
+
 def provider_status_payload() -> dict:
     cobalt_url = (COBALT_API_URL or "").rstrip("/")
     cobalt_raw = (COBALT_API_URL_RAW or "").rstrip("/")
@@ -24254,6 +24294,8 @@ def provider_status_payload() -> dict:
     cobalt_self_host = bool(cobalt_raw) and not cobalt_public
     payos_ready = bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY)
     ai_ready = bool(GEMINI_API_KEY or OPENAI_API_KEY)
+    kling_ready = bool(KLING_ACCESS_KEY and KLING_SECRET_KEY)
+    video_provider_ready = bool(kling_ready or RUNWAY_API_KEY or HEYGEN_API_KEY)
     return {
         "core": {
             "telegram": bool(TELEGRAM_TOKEN),
@@ -24277,8 +24319,11 @@ def provider_status_payload() -> dict:
         },
         "audio": {
             "deepgram": bool(DEEPGRAM_API_KEY),
+            "elevenlabs": bool(ELEVENLABS_API_KEY),
             "fish_audio": bool(FISH_AUDIO_KEY),
-            "edge_tts": True,
+            "auphonic": bool(AUPHONIC_API_KEY),
+            "edge_tts": bool(edge_tts),
+            "edge_tts_error": EDGE_TTS_IMPORT_ERROR,
         },
         "translation": {
             "deepl": bool(DEEPL_API_KEY),
@@ -24289,7 +24334,18 @@ def provider_status_payload() -> dict:
         "image": {
             "removebg": bool(REMOVEBG_API_KEY),
             "cutout": bool(CUTOUT_API_KEY),
+            "stability": bool(STABILITY_API_KEY),
+            "upscale": bool(STABILITY_API_KEY),
             "ready": bool(REMOVEBG_API_KEY or CUTOUT_API_KEY),
+        },
+        "search": {
+            "serpapi": bool(SERPAPI_API_KEY),
+        },
+        "video": {
+            "kling": kling_ready,
+            "runway": bool(RUNWAY_API_KEY),
+            "heygen": bool(HEYGEN_API_KEY),
+            "ready": video_provider_ready,
         },
         "downloader": {
             "cobalt_url": bool(cobalt_raw),
@@ -24301,8 +24357,8 @@ def provider_status_payload() -> dict:
         },
         "media_factory": {
             "trend_finder": is_feature_enabled("trend_finder", default=True),
-            "trend_live_env": ENABLE_TREND_LIVE,
-            "trend_live": ENABLE_TREND_LIVE and is_feature_enabled("trend_live", default=False),
+            "trend_live_env": bool(SERPAPI_API_KEY),
+            "trend_live": bool(SERPAPI_API_KEY) and is_feature_enabled("trend_live", default=False),
             "trend_live_stage": configured_release_stage("trend_live"),
             "image_tools": is_feature_enabled("image_tools", default=True),
             "image_prompt_factory": is_feature_enabled("image_prompt_factory", default=True),
@@ -24317,6 +24373,13 @@ def provider_status_payload() -> dict:
             "image_to_video": ENABLE_REAL_VIDEO and is_feature_enabled("image_to_video", default=False),
             "real_video_env": ENABLE_REAL_VIDEO,
             "real_video_stage": configured_release_stage("real_video"),
+            "stability_image_stage": configured_release_stage("stability_image"),
+            "image_upscale_stage": configured_release_stage("image_upscale"),
+            "elevenlabs_tts_stage": configured_release_stage("elevenlabs_tts"),
+            "auphonic_audio_enhance_stage": configured_release_stage("auphonic_audio_enhance"),
+            "kling_video_stage": configured_release_stage("kling_video"),
+            "runway_video_stage": configured_release_stage("runway_video"),
+            "heygen_avatar_stage": configured_release_stage("heygen_avatar"),
             "admin_publish": is_feature_enabled("admin_publish", default=False),
             "customer_publish": ENABLE_CUSTOMER_PUBLISH and is_feature_enabled("customer_publish", default=False),
             "customer_publish_stage": configured_release_stage("customer_publish"),
@@ -24342,6 +24405,21 @@ def provider_status_text(value) -> str:
     if isinstance(value, bool):
         return "configured" if value else "missing"
     return bool_env_status(value)
+
+async def reply_html_lines(update: Update, lines: list[str], limit: int = 3600):
+    chunk = []
+    current_len = 0
+    for line in lines:
+        line = str(line)
+        add_len = len(line) + 1
+        if chunk and current_len + add_len > limit:
+            await update.message.reply_text("\n".join(chunk), parse_mode="HTML")
+            chunk = []
+            current_len = 0
+        chunk.append(line)
+        current_len += add_len
+    if chunk:
+        await update.message.reply_text("\n".join(chunk), parse_mode="HTML")
 
 def tool_test_setting_key(tool_name: str, field: str) -> str:
     clean_tool = re.sub(r"[^a-z0-9_:-]", "_", str(tool_name or "").strip().lower())
@@ -24394,6 +24472,13 @@ FEATURE_RELEASE_DEFAULTS = {
     "trend_live": "DISABLED",
     "downloader": "DISABLED",
     "remove_bg": "ADMIN_ONLY",
+    "stability_image": "DISABLED",
+    "image_upscale": "DISABLED",
+    "elevenlabs_tts": "DISABLED",
+    "auphonic_audio_enhance": "DISABLED",
+    "kling_video": "DISABLED",
+    "runway_video": "DISABLED",
+    "heygen_avatar": "DISABLED",
     "auto_publish": "DISABLED",
     "customer_publish": "DISABLED",
     "ads_assistant": "DISABLED",
@@ -24410,6 +24495,19 @@ def normalize_feature_key(value: str) -> str:
         "video_generation": "real_video",
         "trend": "trend_live",
         "trend_realtime": "trend_live",
+        "serpapi": "trend_live",
+        "stability": "stability_image",
+        "upscale": "image_upscale",
+        "upscale_image": "image_upscale",
+        "tts": "elevenlabs_tts",
+        "voiceover": "elevenlabs_tts",
+        "elevenlabs": "elevenlabs_tts",
+        "auphonic": "auphonic_audio_enhance",
+        "audio_enhance": "auphonic_audio_enhance",
+        "kling": "kling_video",
+        "runway": "runway_video",
+        "heygen": "heygen_avatar",
+        "avatar": "heygen_avatar",
         "cobalt": "downloader",
         "download": "downloader",
         "removebg": "remove_bg",
@@ -24433,9 +24531,23 @@ def configured_release_stage(feature: str) -> str:
     if key == "ai_image_edit":
         return "ADMIN_ONLY" if ENABLE_OPENAI_IMAGE_EDIT and ADMIN_TEST_OPENAI_IMAGE_EDIT else FEATURE_RELEASE_DEFAULTS[key]
     if key == "real_video":
-        return "ADMIN_ONLY" if ENABLE_REAL_VIDEO and ADMIN_TEST_REAL_VIDEO else FEATURE_RELEASE_DEFAULTS[key]
+        return "ADMIN_ONLY" if (ENABLE_REAL_VIDEO and ADMIN_TEST_REAL_VIDEO) or (KLING_ACCESS_KEY and KLING_SECRET_KEY) or RUNWAY_API_KEY else FEATURE_RELEASE_DEFAULTS[key]
     if key == "trend_live":
-        return "ADMIN_ONLY" if ENABLE_TREND_LIVE and ADMIN_TEST_TREND_LIVE else FEATURE_RELEASE_DEFAULTS[key]
+        return "ADMIN_ONLY" if SERPAPI_API_KEY else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "stability_image":
+        return "ADMIN_ONLY" if STABILITY_API_KEY else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "image_upscale":
+        return "ADMIN_ONLY" if STABILITY_API_KEY else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "elevenlabs_tts":
+        return "ADMIN_ONLY" if ELEVENLABS_API_KEY else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "auphonic_audio_enhance":
+        return "ADMIN_ONLY" if AUPHONIC_API_KEY else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "kling_video":
+        return "ADMIN_ONLY" if KLING_ACCESS_KEY and KLING_SECRET_KEY else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "runway_video":
+        return "ADMIN_ONLY" if RUNWAY_API_KEY else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "heygen_avatar":
+        return "ADMIN_ONLY" if HEYGEN_API_KEY else FEATURE_RELEASE_DEFAULTS[key]
     if key == "downloader":
         return "PUBLIC_READY" if ENABLE_DOWNLOADER_PUBLIC else FEATURE_RELEASE_DEFAULTS[key]
     if key == "remove_bg":
@@ -24479,9 +24591,9 @@ def customer_tool_readiness_payload() -> dict:
             "label": "ready" if image_test["status"] == "PASS" else ("thử nghiệm" if providers["image"]["ready"] else "missing"),
         },
         "tts": {
-            "configured": True,
+            "configured": bool(providers["audio"].get("elevenlabs") or providers["audio"].get("fish_audio") or providers["audio"].get("edge_tts")),
             "tested": tests["tts"]["status"] == "PASS",
-            "label": "ready" if tests["tts"]["status"] == "PASS" else "built-in/not tested",
+            "label": "ready" if tests["tts"]["status"] == "PASS" else ("admin-only/not tested" if (providers["audio"].get("elevenlabs") or providers["audio"].get("fish_audio") or providers["audio"].get("edge_tts")) else "missing"),
         },
         "stt": {
             "configured": bool(providers["audio"]["deepgram"]),
@@ -25015,7 +25127,8 @@ EMERGENCY_ALLOWED_PUBLIC_COMMANDS = {
 }
 EMERGENCY_ALLOWED_ADMIN_COMMANDS = {
     "backup_db", "emergency_status", "emergency_unlock", "ops_plan",
-    "admin_whoami", "providers", "tool_status", "tool_audit", "sales_ready",
+    "admin_whoami", "providers", "tool_status", "tool_audit", "tool_catalog",
+    "admin_api_roadmap", "api_recommend", "sales_ready",
 }
 PAYMENT_FREEZE_COMMANDS = {
     "duyet", "tuchoi", "checkpayos", "payos_debug_create", "mark_payos_test",
@@ -25030,7 +25143,10 @@ TOOL_FREEZE_COMMANDS = {
     "campaign_report", "produce", "pipeline", "tool_test_ai", "tool_test_translate",
     "tool_test_image", "tool_test_image_debug", "tool_test_ai_image",
     "tool_test_ai_image_edit", "tool_test_tts", "tool_test_stt",
-    "tool_test_stt_debug", "tool_test_downloader",
+    "tool_test_stt_debug", "tool_test_downloader", "tool_test_trend_live",
+    "tool_test_stability_image", "tool_test_upscale_image", "tool_test_audio_enhance",
+    "tool_test_kling_video", "tool_test_runway_video", "tool_test_heygen_avatar",
+    "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
 }
 PROVIDER_FREEZE_COMMANDS = set(TOOL_FREEZE_COMMANDS)
 
@@ -26002,8 +26118,10 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
+        f"• ElevenLabs TTS: <code>{provider_status_text(providers['audio']['elevenlabs'])}</code> | tested <code>{html.escape(tool_test_status_text('tts:elevenlabs'))}</code>",
         f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
-        "• Edge TTS: <code>built-in/fallback</code>",
+        f"• Edge TTS: <code>{'built-in/fallback' if providers['audio']['edge_tts'] else 'package missing'}</code>",
+        f"• Auphonic enhance: <code>{provider_status_text(providers['audio']['auphonic'])}</code> | stage <code>{html.escape(providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED')}</code>",
         f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
         f"• STT tested: <code>{html.escape(tool_test_status_text('stt'))}</code>",
         "",
@@ -26022,17 +26140,23 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Trend Finder: <code>{'enabled/content-only' if providers['media_factory']['trend_finder'] else 'disabled'}</code>",
         f"• Trend AI: <code>enabled/content-only</code> | tested <code>{html.escape(tool_test_status_text('trend_ai'))}</code>",
         f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code> | configured <code>{'yes' if providers['media_factory'].get('trend_live_env') else 'no'}</code> | tested <code>{html.escape(tool_test_status_text('trend_live'))}</code>",
+        f"• SerpAPI search: <code>{provider_status_text(providers['search']['serpapi'])}</code>",
         "• Google Trends/API: <code>not configured</code>",
         "• TikTok trend API: <code>not configured</code>",
         "• YouTube trend API: <code>not configured</code>",
         "• Facebook trend API: <code>not configured</code>",
-        "• Web search provider: <code>not configured</code>",
+        f"• Web search provider: <code>{'SerpAPI/admin-only' if providers['search']['serpapi'] else 'not configured'}</code>",
         f"• Image Tools Menu: <code>{'enabled/menu' if providers['media_factory']['image_tools'] else 'disabled'}</code>",
         f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
         f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
         f"• OpenAI Image Generation: configured <code>{provider_status_text(providers['ai']['openai'])}</code> | tested <code>{html.escape(tool_test_status_text('ai_image'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_generation_stage') or 'DISABLED')}</code>",
         f"• OpenAI Image Edit: configured <code>{provider_status_text(providers['ai']['openai'])}</code> | tested <code>{html.escape(tool_test_status_text('ai_image_edit'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image_edit') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_edit_stage') or 'DISABLED')}</code>",
-        f"• Real Video Generation: configured <code>no</code> | tested <code>{html.escape(tool_test_status_text('real_video'))}</code> | public <code>{'ON' if is_feature_public_ready('real_video') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('real_video_stage') or 'DISABLED')}</code>",
+        f"• Stability Image: configured <code>{provider_status_text(providers['image']['stability'])}</code> | tested <code>{html.escape(tool_test_status_text('stability_image'))}</code> | stage <code>{html.escape(providers['media_factory'].get('stability_image_stage') or 'DISABLED')}</code>",
+        f"• Image Upscale: configured <code>{provider_status_text(providers['image']['upscale'])}</code> | tested <code>{html.escape(tool_test_status_text('image_upscale'))}</code> | stage <code>{html.escape(providers['media_factory'].get('image_upscale_stage') or 'DISABLED')}</code>",
+        f"• Kling Video: configured <code>{provider_status_text(providers['video']['kling'])}</code> | tested <code>{html.escape(tool_test_status_text('kling_video'))}</code> | stage <code>{html.escape(providers['media_factory'].get('kling_video_stage') or 'DISABLED')}</code>",
+        f"• Runway Video: configured <code>{provider_status_text(providers['video']['runway'])}</code> | tested <code>{html.escape(tool_test_status_text('runway_video'))}</code> | stage <code>{html.escape(providers['media_factory'].get('runway_video_stage') or 'DISABLED')}</code>",
+        f"• HeyGen Avatar: configured <code>{provider_status_text(providers['video']['heygen'])}</code> | tested <code>{html.escape(tool_test_status_text('heygen_avatar'))}</code> | stage <code>{html.escape(providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED')}</code>",
+        f"• Real Video Generation: configured <code>{'yes' if providers['video']['ready'] else 'no'}</code> | tested <code>{html.escape(tool_test_status_text('real_video'))}</code> | public <code>{'ON' if is_feature_public_ready('real_video') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('real_video_stage') or 'DISABLED')}</code>",
         f"• Admin Publish: <code>{'enabled/internal' if providers['media_factory']['admin_publish'] else 'disabled/internal'}</code>",
         f"• YouTube Publish: <code>{'enabled/admin-only' if providers['media_factory']['youtube_publish_admin'] else 'planned/admin-only/disabled'}</code>",
         f"• TikTok Publish: <code>{'enabled/admin-only' if providers['media_factory']['tiktok_publish_admin'] else 'planned/admin-only/disabled'}</code>",
@@ -26060,7 +26184,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     if not db_status["ok"]:
         lines.append(f"DB error: <code>{html.escape(db_status.get('error') or '-')}</code>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await reply_html_lines(update, lines)
 
 async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -26110,11 +26234,16 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Image / Media</b>",
         "• Trend AI: <code>READY/content-only</code>",
-        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}/provider missing</code>",
+        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code> | SerpAPI <code>{provider_status_text(providers['search']['serpapi'])}</code>",
         f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
         f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
         f"• OpenAI Image Generation: <code>{html.escape(providers['media_factory'].get('image_openai_generation_stage') or 'DISABLED')}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_generation_env') else 'off'}</code>",
         f"• OpenAI Image Edit: <code>{html.escape(providers['media_factory'].get('image_openai_edit_stage') or 'DISABLED')}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_edit_env') else 'off'}</code>",
+        f"• Stability Image: <code>{html.escape(providers['media_factory'].get('stability_image_stage') or 'DISABLED')}</code> | env <code>{provider_status_text(providers['image']['stability'])}</code>",
+        f"• Image Upscale: <code>{html.escape(providers['media_factory'].get('image_upscale_stage') or 'DISABLED')}</code> | env <code>{provider_status_text(providers['image']['upscale'])}</code>",
+        f"• Kling Video: <code>{html.escape(providers['media_factory'].get('kling_video_stage') or 'DISABLED')}</code>",
+        f"• Runway Video: <code>{html.escape(providers['media_factory'].get('runway_video_stage') or 'DISABLED')}</code>",
+        f"• HeyGen Avatar: <code>{html.escape(providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED')}</code>",
         f"• Real Video Generation: <code>{html.escape(providers['media_factory'].get('real_video_stage') or 'DISABLED')}</code>",
         f"• Customer publish: <code>{'enabled' if providers['media_factory']['customer_publish'] else 'disabled'}</code>",
         f"• Auto publish: <code>{'enabled' if providers['media_factory']['auto_publish'] else 'disabled'}</code>",
@@ -26130,8 +26259,10 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_readiness)}</code>",
+        f"• ElevenLabs TTS: <code>{provider_status_text(providers['audio']['elevenlabs'])}</code> | tested <code>{html.escape(tool_test_status_text('tts:elevenlabs'))}</code>",
         f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
-        "• Edge TTS: <code>built-in/fallback</code>",
+        f"• Edge TTS: <code>{'built-in/fallback' if providers['audio']['edge_tts'] else 'package missing'}</code>",
+        f"• Auphonic enhance: <code>{provider_status_text(providers['audio']['auphonic'])}</code> | stage <code>{html.escape(providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED')}</code>",
         f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
         f"• STT tested: <code>{html.escape(tool_test_status_text('stt'))}</code>",
         "• Smoke test: <code>/tool_test_tts Xin chào TOAN AAS</code>; reply audio rồi gõ <code>/tool_test_stt</code>",
@@ -26143,7 +26274,7 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Không gọi API tốn tiền và không hiển thị secret.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await reply_html_lines(update, lines)
 
 async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -26614,47 +26745,123 @@ async def cmd_tool_test_image_debug(update: Update, context: ContextTypes.DEFAUL
     ])
     await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
 
-async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
-    text = " ".join(context.args or []).strip() or "Xin chào TOAN AAS"
-    text = text[:240]
+async def tts_elevenlabs_bytes(text: str) -> tuple[str, bytes, str, int]:
+    if not ELEVENLABS_API_KEY:
+        return "MISSING", b"", "ELEVENLABS_API_KEY missing", 0
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            res = await client.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+                headers={
+                    "xi-api-key": ELEVENLABS_API_KEY,
+                    "Content-Type": "application/json",
+                    "Accept": "audio/mpeg",
+                },
+                json={
+                    "text": text,
+                    "model_id": "eleven_multilingual_v2",
+                    "voice_settings": {"stability": 0.45, "similarity_boost": 0.75},
+                },
+            )
+        if res.status_code < 400 and res.content:
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}", int(res.status_code)
+        detail = sanitize_log_text(res.text[:300] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        return "FAIL", b"", detail, int(res.status_code)
+    except Exception as e:
+        return "FAIL", b"", provider_error_summary(e), 0
+
+async def tts_fish_audio_bytes(text: str) -> tuple[str, bytes, str, int]:
+    if not FISH_AUDIO_KEY:
+        return "MISSING", b"", "FISH_AUDIO_KEY missing", 0
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            res = await client.post(
+                "https://api.fish.audio/v1/tts",
+                headers={"Authorization": f"Bearer {FISH_AUDIO_KEY}", "Content-Type": "application/json"},
+                json={"text": text, "reference_id": "7f0955e88846433e9ecb241357608bf8", "format": "mp3"},
+            )
+        if res.status_code < 400 and res.content:
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}", int(res.status_code)
+        detail = sanitize_log_text(res.text[:300] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        return "FAIL", b"", detail, int(res.status_code)
+    except Exception as e:
+        return "FAIL", b"", provider_error_summary(e), 0
+
+async def tts_edge_bytes(text: str) -> tuple[str, bytes, str, int]:
+    if not edge_tts:
+        return "MISSING", b"", f"edge-tts package missing: {EDGE_TTS_IMPORT_ERROR or 'import failed'}", 0
     tmp_path = ""
-    edge_status = "FAIL"
-    detail = ""
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
             tmp_path = tmp.name
         communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
         await communicate.save(tmp_path)
         if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
-            edge_status = "PASS"
             with open(tmp_path, "rb") as f:
-                await context.bot.send_audio(
-                    chat_id=update.effective_chat.id,
-                    audio=f,
-                    caption="🔊 TTS Smoke Test — Edge TTS PASS",
-                )
-        else:
-            detail = "empty_audio"
+                audio_bytes = f.read()
+            return "PASS", audio_bytes, f"bytes={len(audio_bytes)}", 0
+        return "FAIL", b"", "empty_audio", 0
     except Exception as e:
-        detail = str(e)[:240]
+        return "FAIL", b"", provider_error_summary(e), 0
     finally:
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
             except Exception:
                 pass
-    overall = "PASS" if edge_status == "PASS" else "FAIL"
-    save_tool_test_result("tts", overall, f"Edge={edge_status}; Fish={'configured/not_tested' if FISH_AUDIO_KEY else 'missing'}; {detail}", update.effective_user.id)
-    await update.message.reply_text(
-        "🔊 <b>TTS Smoke Test</b>\n\n"
-        f"• Edge TTS: <code>{html.escape(edge_status)}</code>\n"
-        f"• Fish Audio: <code>{'configured/not_tested' if FISH_AUDIO_KEY else 'missing'}</code>\n"
-        f"• Output sent: <code>{'yes' if edge_status == 'PASS' else 'no'}</code>"
-        + (f"\n• Error: <code>{html.escape(detail)}</code>" if detail else ""),
-        parse_mode="HTML",
-    )
+
+async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    text = " ".join(context.args or []).strip() or "Xin chào TOAN AAS"
+    text = text[:240]
+    uid = update.effective_user.id
+    providers = [
+        ("ElevenLabs", "tts:elevenlabs", tts_elevenlabs_bytes),
+        ("Fish Audio", "tts:fish", tts_fish_audio_bytes),
+        ("Edge TTS", "tts:edge", tts_edge_bytes),
+    ]
+    results = []
+    output_provider = ""
+    output_bytes = b""
+    for idx, (label, tool_name, func) in enumerate(providers):
+        status, data, detail, http_status = await func(text)
+        save_tool_test_result(tool_name, status, detail, uid)
+        record_api_debug(label.lower().replace(" ", "_"), "tool_test_tts", status, http_status, detail)
+        results.append((label, status, detail))
+        if status == "PASS" and data:
+            output_provider = label
+            output_bytes = data
+            for skipped_label, skipped_tool, _ in providers[idx + 1:]:
+                save_tool_test_result(skipped_tool, "NOT_USED", f"Skipped because {label} passed", uid)
+                results.append((skipped_label, "NOT_USED", f"Skipped because {label} passed"))
+            break
+    overall = "PASS" if output_bytes else ("MISSING" if all(status == "MISSING" for _, status, _ in results) else "FAIL")
+    detail = "; ".join(f"{label}={status}" for label, status, _ in results)
+    save_tool_test_result("tts", overall, detail, uid)
+    output_sent = False
+    if output_bytes:
+        audio = io.BytesIO(output_bytes)
+        audio.name = f"toan_aas_tts_{output_provider.lower().replace(' ', '_')}.mp3"
+        await context.bot.send_audio(
+            chat_id=update.effective_chat.id,
+            audio=audio,
+            caption=f"🔊 TTS Smoke Test — {output_provider} PASS",
+        )
+        output_sent = True
+    lines = [
+        "🔊 <b>TTS Smoke Test</b>",
+        "",
+        f"• ElevenLabs: <code>{html.escape(provider_line_status(results[0][1], results[0][2]))}</code>",
+        f"• Fish Audio fallback: <code>{html.escape(provider_line_status(results[1][1], results[1][2]))}</code>",
+        f"• Edge TTS fallback: <code>{html.escape(provider_line_status(results[2][1], results[2][2]))}</code>",
+        f"• Provider used: <code>{html.escape(output_provider or '-')}</code>",
+        f"• Overall: <code>{html.escape(overall)}</code>",
+        f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>",
+        "",
+        "Không hiển thị API key và không trừ Xu nếu provider lỗi.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -26845,6 +27052,210 @@ async def cmd_tool_test_downloader(update: Update, context: ContextTypes.DEFAULT
         parse_mode="HTML",
     )
 
+async def cmd_tool_test_trend_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    query = " ".join(context.args or []).strip()
+    if not query:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/tool_test_trend_live từ khóa</code>", parse_mode="HTML")
+    if not SERPAPI_API_KEY:
+        save_tool_test_result("trend_live", "MISSING", "SERPAPI_API_KEY missing", update.effective_user.id)
+        return await update.message.reply_text(
+            "📡 <b>Trend Live Smoke Test</b>\n\n• SerpAPI: <code>MISSING</code>\n• Không gọi provider.",
+            parse_mode="HTML",
+        )
+    status = "FAIL"
+    detail = ""
+    preview = ""
+    http_status = 0
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.get(
+                "https://serpapi.com/search.json",
+                params={"engine": "google", "q": query, "api_key": SERPAPI_API_KEY, "num": 3, "hl": "vi"},
+            )
+        http_status = int(res.status_code)
+        data = res.json()
+        organic = data.get("organic_results") or []
+        titles = [str(item.get("title") or "").strip() for item in organic[:3] if item.get("title")]
+        if res.status_code < 400 and titles:
+            status = "PASS"
+            preview = " | ".join(titles)
+            detail = f"http={res.status_code}; results={len(titles)}"
+        else:
+            detail = sanitize_log_text(str(data.get("error") or data)[:350])
+    except Exception as e:
+        detail = provider_error_summary(e)
+    save_tool_test_result("trend_live", status, f"query={query[:80]}; {detail}", update.effective_user.id)
+    record_api_debug("serpapi", "tool_test_trend_live", status, http_status, detail)
+    await update.message.reply_text(
+        "📡 <b>Trend Live Smoke Test</b>\n\n"
+        f"• Query: <code>{html.escape(query[:120])}</code>\n"
+        f"• SerpAPI: <code>{html.escape(status)}</code>\n"
+        f"• Detail: <code>{html.escape(detail[:350])}</code>"
+        + (f"\n• Preview: <code>{html.escape(preview[:500])}</code>" if preview else "")
+        + "\n\nKhông hiển thị API key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_stability_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    prompt = " ".join(context.args or []).strip() or "TOAN AAS clean technology logo background"
+    if not STABILITY_API_KEY:
+        save_tool_test_result("stability_image", "MISSING", "STABILITY_API_KEY missing", update.effective_user.id)
+        return await update.message.reply_text("🖼 <b>Stability Image Test</b>\n\n• Status: <code>MISSING</code>", parse_mode="HTML")
+    if not ADMIN_TEST_STABILITY:
+        save_tool_test_result("stability_image", "DISABLED", "Configured, but ADMIN_TEST_STABILITY=0; no paid API call", update.effective_user.id)
+        return await update.message.reply_text(
+            "🖼 <b>Stability Image Test</b>\n\n"
+            "• Status: <code>CONFIGURED / TEST DISABLED</code>\n"
+            "• Reason: <code>ADMIN_TEST_STABILITY=0</code>\n"
+            "• Không gọi API và không fake PASS.",
+            parse_mode="HTML",
+        )
+    save_tool_test_result("stability_image", "NOT_IMPLEMENTED", f"prompt={prompt[:120]}; integration placeholder", update.effective_user.id)
+    await update.message.reply_text(
+        "🖼 <b>Stability Image Test</b>\n\n"
+        "• Status: <code>NOT_IMPLEMENTED</code>\n"
+        "• Provider đã configured nhưng chưa tích hợp production call trong bot.py.\n"
+        "• Không fake PASS.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_upscale_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not STABILITY_API_KEY:
+        save_tool_test_result("image_upscale", "MISSING", "STABILITY_API_KEY missing", update.effective_user.id)
+        return await update.message.reply_text("🪄 <b>Image Upscale Test</b>\n\n• Status: <code>MISSING</code>", parse_mode="HTML")
+    if not update.message.reply_to_message:
+        return await update.message.reply_text("⚠️ Reply một ảnh rồi dùng <code>/tool_test_upscale_image</code>.", parse_mode="HTML")
+    save_tool_test_result("image_upscale", "NOT_IMPLEMENTED", "Stability configured; upscale integration placeholder", update.effective_user.id)
+    await update.message.reply_text(
+        "🪄 <b>Image Upscale Test</b>\n\n"
+        "• Status: <code>ADMIN_ONLY / NOT_IMPLEMENTED</code>\n"
+        "• Provider configured nhưng chưa gọi API thật. Không trừ Xu, không fake PASS.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_audio_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not AUPHONIC_API_KEY:
+        save_tool_test_result("audio_enhance", "MISSING", "AUPHONIC_API_KEY missing", update.effective_user.id)
+        return await update.message.reply_text("🎚 <b>Audio Enhance Test</b>\n\n• Auphonic: <code>MISSING</code>", parse_mode="HTML")
+    if not update.message.reply_to_message:
+        return await update.message.reply_text("⚠️ Reply audio/voice rồi dùng <code>/tool_test_audio_enhance</code>.", parse_mode="HTML")
+    save_tool_test_result("audio_enhance", "NOT_IMPLEMENTED", "Auphonic configured; integration placeholder", update.effective_user.id)
+    await update.message.reply_text(
+        "🎚 <b>Audio Enhance Test</b>\n\n"
+        "• Auphonic: <code>CONFIGURED / ADMIN_ONLY / NOT_IMPLEMENTED</code>\n"
+        "• Không gọi API thật và không fake PASS.",
+        parse_mode="HTML",
+    )
+
+async def admin_video_provider_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE, label: str, tool_name: str, configured: bool):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    prompt = " ".join(context.args or []).strip()
+    if not prompt:
+        return await update.message.reply_text(f"⚠️ Cú pháp: <code>/{tool_name} &lt;prompt/script&gt;</code>", parse_mode="HTML")
+    if not configured:
+        save_tool_test_result(tool_name, "MISSING", f"{label} env missing", update.effective_user.id)
+        return await update.message.reply_text(
+            f"🎬 <b>{html.escape(label)} Test</b>\n\n• Status: <code>MISSING</code>\n• Không gọi provider.",
+            parse_mode="HTML",
+        )
+    save_tool_test_result(tool_name, "NOT_IMPLEMENTED", f"configured; prompt_len={len(prompt)}; admin-only placeholder", update.effective_user.id)
+    await update.message.reply_text(
+        f"🎬 <b>{html.escape(label)} Test</b>\n\n"
+        "• Status: <code>CONFIGURED / ADMIN_ONLY / NOT_IMPLEMENTED</code>\n"
+        "• Bot chỉ ghi nhận cấu hình. Chưa gọi API tạo video/avatar thật.\n"
+        "• Không fake PASS, không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_kling_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await admin_video_provider_placeholder(update, context, "Kling Video", "kling_video", bool(KLING_ACCESS_KEY and KLING_SECRET_KEY))
+
+async def cmd_tool_test_runway_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await admin_video_provider_placeholder(update, context, "Runway Video", "runway_video", bool(RUNWAY_API_KEY))
+
+async def cmd_tool_test_heygen_avatar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await admin_video_provider_placeholder(update, context, "HeyGen Avatar", "heygen_avatar", bool(HEYGEN_API_KEY))
+
+async def cmd_voiceover(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(admin_first_guard_message("Voiceover/TTS", "/film <chủ đề>"), parse_mode="HTML")
+    return await cmd_tool_test_tts(update, context)
+
+async def cmd_public_admin_first_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE, label: str, fallback: str = "/film <chủ đề>"):
+    return await update.message.reply_text(admin_first_guard_message(label, fallback), parse_mode="HTML")
+
+async def cmd_upscale_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_public_admin_first_placeholder(update, context, "Image Upscale", "/image_prompt <chủ đề>")
+
+async def cmd_audio_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_public_admin_first_placeholder(update, context, "Audio Enhance", "/tool_test_tts Xin chào TOAN AAS" if is_admin_user(update.effective_user.id) else "/film <chủ đề>")
+
+async def cmd_real_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_public_admin_first_placeholder(update, context, "Real Video Generation", "/image_to_video_pack <chủ đề>")
+
+async def cmd_avatar_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_public_admin_first_placeholder(update, context, "Avatar Video", "/film <chủ đề>")
+
+async def cmd_tool_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    providers = provider_status_payload()
+    admin = is_admin_user(update.effective_user.id)
+    lines = [
+        "🧰 <b>TOAN AAS Tool Catalog</b>",
+        "",
+        "<b>Khách hàng đang dùng</b>",
+        "• AI chat/script/caption/prompt: <code>public</code>",
+        "• Video Factory Lite: <code>/film</code>, <code>/image_prompt</code>, <code>/image_to_video_pack</code>",
+        "• STT/TTS/Image utility: chỉ mở khi provider smoke test PASS.",
+        "",
+        "<b>Admin/Internal test</b>",
+        f"• Trend Live/SerpAPI: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code>",
+        f"• ElevenLabs/Fish/Edge TTS: <code>{html.escape(tool_test_status_text('tts'))}</code>",
+        f"• Stability Image/Upscale: <code>{html.escape(providers['media_factory'].get('stability_image_stage') or 'DISABLED')}</code> / <code>{html.escape(providers['media_factory'].get('image_upscale_stage') or 'DISABLED')}</code>",
+        f"• Auphonic Audio Enhance: <code>{html.escape(providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED')}</code>",
+        f"• Kling/Runway/HeyGen: <code>{html.escape(providers['media_factory'].get('kling_video_stage') or 'DISABLED')}</code> / <code>{html.escape(providers['media_factory'].get('runway_video_stage') or 'DISABLED')}</code> / <code>{html.escape(providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED')}</code>",
+        "",
+        "Customer publish, auto publish và ads assistant vẫn OFF.",
+    ]
+    if admin:
+        lines.extend([
+            "",
+            "<b>Lệnh admin test</b>",
+            "• <code>/tool_audit</code> | <code>/providers</code> | <code>/tool_status</code>",
+            "• <code>/tool_test_trend_live từ khóa</code>",
+            "• <code>/tool_test_tts Xin chào TOAN AAS</code>",
+            "• <code>/tool_test_stability_image prompt</code>",
+            "• <code>/tool_test_upscale_image</code> reply ảnh",
+            "• <code>/tool_test_audio_enhance</code> reply audio",
+            "• <code>/tool_test_kling_video prompt</code> | <code>/tool_test_runway_video prompt</code> | <code>/tool_test_heygen_avatar script</code>",
+        ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_admin_api_roadmap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    lines = [
+        "🧭 <b>TOAN AAS Admin API Roadmap</b>",
+        "",
+        "1. Chỉ detect ENV và smoke test admin-first.",
+        "2. Provider nào chưa PASS thì không mở cho khách.",
+        "3. TTS order: ElevenLabs → Fish Audio → Edge TTS fallback.",
+        "4. Trend Live dùng SerpAPI admin-only nếu có key.",
+        "5. Stability/Auphonic/Kling/Runway/HeyGen hiện là configured/admin-only/placeholder, không fake PASS.",
+        "6. Customer publish, auto publish, ads assistant vẫn OFF.",
+        "",
+        "Lệnh kiểm tra: <code>/tool_audit</code>, <code>/providers</code>, <code>/tool_status</code>, <code>/tool_catalog</code>.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -26854,16 +27265,22 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     items = [
         ("AI", "ai", ai_result, "Gemini/OpenAI chat"),
         ("Translation", "translation", get_tool_test_result("translation"), "DeepL/Gemini/OpenAI"),
-        ("TTS", "tts", get_tool_test_result("tts"), "Edge/Fish"),
+        ("TTS", "tts", get_tool_test_result("tts"), "ElevenLabs/Fish/Edge fallback"),
         ("STT Deepgram", "stt", get_tool_test_result("stt"), "configured" if providers["audio"]["deepgram"] else "missing"),
         ("Image RemoveBG/Cutout", "image_remove_bg", image_result, "configured" if providers["image"]["ready"] else "missing"),
         ("Trend AI", "trend_ai", {"status": "READY", "tested_at": "content-only", "detail": "Prompt/content-only trend angle generator"}, "READY/content-only"),
-        ("Trend Live", "trend_live", get_tool_test_result("trend_live"), f"{providers['media_factory'].get('trend_live_stage') or 'DISABLED'} provider missing"),
+        ("Trend Live", "trend_live", get_tool_test_result("trend_live"), f"{providers['media_factory'].get('trend_live_stage') or 'DISABLED'} SerpAPI={provider_status_text(providers['search']['serpapi'])}"),
         ("Image Prompt", "image_prompt", {"status": "READY", "tested_at": "prompt-only", "detail": "Image prompt factory"}, "READY/prompt-only"),
         ("OpenAI Image", "ai_image", get_tool_test_result("ai_image"), "env ON" if ENABLE_OPENAI_IMAGE else "DISABLED env"),
         ("OpenAI Image Edit", "ai_image_edit", get_tool_test_result("ai_image_edit"), "env ON" if ENABLE_OPENAI_IMAGE_EDIT else "DISABLED env"),
+        ("Stability Image", "stability_image", get_tool_test_result("stability_image"), f"{providers['media_factory'].get('stability_image_stage') or 'DISABLED'}"),
+        ("Image Upscale", "image_upscale", get_tool_test_result("image_upscale"), f"{providers['media_factory'].get('image_upscale_stage') or 'DISABLED'}"),
         ("Video Prompt Pack", "video_prompt_pack", {"status": "READY", "tested_at": "prompt-only", "detail": "Image-to-video prompt pack"}, "READY/prompt-only"),
         ("Real Video", "real_video", get_tool_test_result("real_video"), f"{providers['media_factory'].get('real_video_stage') or 'DISABLED'} planned"),
+        ("Kling Video", "kling_video", get_tool_test_result("kling_video"), f"{providers['media_factory'].get('kling_video_stage') or 'DISABLED'}"),
+        ("Runway Video", "runway_video", get_tool_test_result("runway_video"), f"{providers['media_factory'].get('runway_video_stage') or 'DISABLED'}"),
+        ("HeyGen Avatar", "heygen_avatar", get_tool_test_result("heygen_avatar"), f"{providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED'}"),
+        ("Auphonic Enhance", "audio_enhance", get_tool_test_result("audio_enhance"), f"{providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED'}"),
         ("Downloader", "downloader", get_tool_test_result("downloader"), "Cobalt self-host" if providers["downloader"].get("cobalt_self_host") else "MISSING Cobalt"),
     ]
     lines = ["🧪 <b>Tool Test Status</b>", ""]
@@ -26877,7 +27294,7 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + (f"\n  detail=<code>{html.escape(detail[:180])}</code>" if detail else "")
         )
     lines.append("\nKhông hiển thị API key/token/secret.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await reply_html_lines(update, lines)
 
 async def cmd_api_debug_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -27707,19 +28124,24 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Manual QR fallback: <code>working/available</code>",
         f"• AI: <code>{'READY' if providers['ai']['ready'] else 'NOT READY'}</code>",
         f"• STT: <code>{'READY' if providers['audio']['deepgram'] else 'MISSING'}</code>",
+        f"• TTS: <code>{'READY' if providers['audio']['elevenlabs'] or providers['audio']['fish_audio'] or providers['audio']['edge_tts'] else 'MISSING'}</code> — ElevenLabs/Fish/Edge",
         f"• Image: <code>{'READY' if providers['image']['ready'] else 'MISSING'}</code>",
         "",
         "<b>Creative Tools</b>",
         "• Trend AI: <code>READY/content-only</code>",
-        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}/provider missing</code>",
+        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code> | SerpAPI <code>{provider_status_text(providers['search']['serpapi'])}</code>",
         "• Image Prompt: <code>READY/prompt-only</code>",
         f"• RemoveBG: <code>{'NEED TEST/PUBLIC OFF' if not is_feature_public_ready('remove_bg') else 'PUBLIC FLAG ON'}</code>",
         f"• AI Image Real: <code>{html.escape(configured_release_stage('ai_image'))}</code>",
         f"• AI Image Edit: <code>{html.escape(configured_release_stage('ai_image_edit'))}</code>",
+        f"• Stability Image: <code>{html.escape(configured_release_stage('stability_image'))}</code>",
+        f"• Image Upscale: <code>{html.escape(configured_release_stage('image_upscale'))}</code>",
         "• Video Prompt Pack: <code>READY/prompt-only</code>",
-        f"• Real Video Generation: <code>{html.escape(configured_release_stage('real_video'))}/planned</code>",
+        f"• Real Video Generation: <code>{html.escape(configured_release_stage('real_video'))}</code> | Kling <code>{provider_status_text(providers['video']['kling'])}</code> | Runway <code>{provider_status_text(providers['video']['runway'])}</code>",
+        f"• Avatar Video: <code>{html.escape(configured_release_stage('heygen_avatar'))}</code> | HeyGen <code>{provider_status_text(providers['video']['heygen'])}</code>",
+        f"• Audio Enhance: <code>{html.escape(configured_release_stage('auphonic_audio_enhance'))}</code> | Auphonic <code>{provider_status_text(providers['audio']['auphonic'])}</code>",
         f"• Downloader: <code>{'Cobalt self-host configured' if bool(COBALT_API_URL) else 'missing Cobalt/self-host'}</code>",
-        "• Status: <code>Image Prompt READY | Image Provider NEED TEST</code>",
+        "• Status: <code>Prompt tools READY | API tools admin-only until smoke test PASS</code>",
         "",
         "<b>Money</b>",
         f"• Packages: <b>{data['packages']}</b>",
@@ -29093,17 +29515,30 @@ async def cmd_trend_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
     topic = media_factory_topic_from_args(context)
     if not topic:
         return await update.message.reply_text("⚠️ Cú pháp: /trend_live <ngách hoặc chủ đề>")
-    save_tool_test_result("trend_live", "DISABLED", "Trend Live provider missing; no realtime search provider configured", update.effective_user.id)
+    if is_admin_user(update.effective_user.id) and SERPAPI_API_KEY:
+        return await cmd_tool_test_trend_live(update, context)
+    status = "MISSING" if not SERPAPI_API_KEY else "ADMIN_ONLY"
+    save_tool_test_result("trend_live", status, "Trend Live is admin/internal test only; no public customer access", update.effective_user.id)
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(
+            "📡 <b>TREND LIVE — TOAN AAS</b>\n\n"
+            f"Ngách/chủ đề: <b>{html.escape(topic)}</b>\n\n"
+            "Trend Live đang được admin kiểm thử nội bộ. Hiện tại khách dùng <code>/trend_ai</code> để lấy ý tưởng và tự kiểm tra xu hướng trước khi đăng.\n\n"
+            "Không có Xu nào bị trừ.",
+            parse_mode="HTML",
+        )
     await update.message.reply_text(
         "📡 <b>TREND LIVE — TOAN AAS</b>\n\n"
         f"Ngách/chủ đề: <b>{html.escape(topic)}</b>\n\n"
-        "Trend Live chưa bật provider tìm kiếm realtime. Hiện bot chỉ có <code>/trend_ai</code> để gợi ý ý tưởng và <code>/trend_research</code> để lập checklist nghiên cứu.\n\n"
+        "Trend Live chưa có provider live hoạt động hoặc đang ở admin-only. Hiện bot chỉ có <code>/trend_ai</code> để gợi ý ý tưởng và <code>/trend_research</code> để lập checklist nghiên cứu.\n\n"
         "Trạng thái:\n"
+        f"• SerpAPI: <code>{provider_status_text(bool(SERPAPI_API_KEY))}</code>\n"
         "• Google Trends/API: <code>not configured</code>\n"
         "• TikTok trend API: <code>not configured</code>\n"
         "• YouTube trend API: <code>not configured</code>\n"
         "• Facebook trend API: <code>not configured</code>\n"
-        "• Web search provider: <code>not configured</code>\n\n"
+        f"• Web search provider: <code>{'SerpAPI/admin-only' if SERPAPI_API_KEY else 'not configured'}</code>\n\n"
+        "Admin smoke test: <code>/tool_test_trend_live &lt;query&gt;</code>\n\n"
         "Không có Xu nào bị trừ.",
         parse_mode="HTML",
     )
@@ -29632,6 +30067,13 @@ async def cmd_feature_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ("ai_image_edit", "AI Image Edit", providers["media_factory"].get("image_openai_edit_env")),
         ("real_video", "Real Video", providers["media_factory"].get("real_video_env")),
         ("trend_live", "Trend Live", providers["media_factory"].get("trend_live_env")),
+        ("stability_image", "Stability Image", providers["image"].get("stability")),
+        ("image_upscale", "Image Upscale", providers["image"].get("upscale")),
+        ("elevenlabs_tts", "ElevenLabs TTS", providers["audio"].get("elevenlabs")),
+        ("auphonic_audio_enhance", "Auphonic Audio Enhance", providers["audio"].get("auphonic")),
+        ("kling_video", "Kling Video", providers["video"].get("kling")),
+        ("runway_video", "Runway Video", providers["video"].get("runway")),
+        ("heygen_avatar", "HeyGen Avatar", providers["video"].get("heygen")),
         ("downloader", "Downloader", ENABLE_DOWNLOADER_PUBLIC),
         ("remove_bg", "RemoveBG/Cutout", providers["image"].get("ready")),
         ("auto_publish", "Auto Publish", ENABLE_AUTO_PUBLISH),
@@ -38080,7 +38522,9 @@ async def cmd_api_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     translation_gemini = get_tool_test_result("translation:gemini")
     translation_openai = get_tool_test_result("translation:openai")
     stt_result = get_tool_test_result("stt")
+    tts_result = get_tool_test_result("tts")
     image_result = preferred_tool_test_result("image_remove_bg", "image")
+    providers = provider_status_payload()
     lines = [
         "🧭 <b>TOAN AAS API RECOMMEND</b>",
         "",
@@ -38097,16 +38541,24 @@ async def cmd_api_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tested: <code>{html.escape((stt_result.get('status') or 'NOT_TESTED') + (' — ' + (stt_result.get('detail') or '')[:180] if stt_result.get('detail') else ''))}</code>",
         f"• Next: <code>{html.escape(stt.get('next') or '/tool_test_stt')}</code>",
         "",
+        "<b>TTS / ElevenLabs → Fish → Edge</b>",
+        f"• ElevenLabs: <code>{provider_status_text(providers['audio']['elevenlabs'])}</code>",
+        f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
+        f"• Edge TTS: <code>{'available' if providers['audio']['edge_tts'] else 'package missing'}</code>",
+        f"• Tested: <code>{html.escape((tts_result.get('status') or 'NOT_TESTED') + (' — ' + (tts_result.get('detail') or '')[:180] if tts_result.get('detail') else ''))}</code>",
+        "• Next: <code>/tool_test_tts Xin chào TOAN AAS</code>",
+        "",
         "<b>Image / RemoveBG + Cutout</b>",
         f"• Config: <code>{'configured' if (REMOVEBG_API_KEY or CUTOUT_API_KEY) else 'missing'}</code>",
         f"• Tested: <code>{html.escape((image_result.get('status') or 'NOT_TESTED') + (' — ' + (image_result.get('detail') or '')[:180] if image_result.get('detail') else ''))}</code>",
         "• Next: <code>Reply ảnh nhỏ rồi chạy /tool_test_image; nếu fail kiểm tra quota/API key/provider RemoveBG/Cutout.</code>",
         "",
         "<b>Trend Live / Realtime Search</b>",
-        "• Status: <code>missing/provider not configured</code>",
+        f"• Status: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code>",
+        f"• SerpAPI: <code>{provider_status_text(providers['search']['serpapi'])}</code>",
         "• Current: <code>/trend_ai content-only</code> và <code>/trend_research checklist thủ công</code>",
-        "• Provider gợi ý sau này: <code>Google Trends unofficial, SerpAPI, DataForSEO, Tavily, Brave Search, YouTube Data API</code>",
-        "• Next: <code>Chưa gọi API live trong task này; chọn provider và test admin-first sau.</code>",
+        "• Provider gợi ý sau này: <code>Google Trends unofficial, DataForSEO, Tavily, Brave Search, YouTube Data API</code>",
+        "• Next: <code>/tool_test_trend_live từ khóa</code> nếu SERPAPI_API_KEY đã có.",
         "",
         "<b>Image Generation / OpenAI Image</b>",
         f"• Generation stage: <code>{html.escape(configured_release_stage('ai_image'))}</code> | env <code>{'ON' if ENABLE_OPENAI_IMAGE else 'OFF'}</code>",
@@ -38115,7 +38567,7 @@ async def cmd_api_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Video Generation</b>",
         f"• Real video stage: <code>{html.escape(configured_release_stage('real_video'))}</code>",
-        "• Provider: <code>not selected/not configured</code>",
+        f"• Kling: <code>{provider_status_text(providers['video']['kling'])}</code> | Runway: <code>{provider_status_text(providers['video']['runway'])}</code> | HeyGen: <code>{provider_status_text(providers['video']['heygen'])}</code>",
         "• Current: <code>/image_to_video_pack prompt-only</code> và <code>/media_factory content pack</code>",
         "• Next: <code>Chọn provider video sau, test chi phí/quota trước khi mở.</code>",
         "",
@@ -44948,6 +45400,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("api_recommend", cmd_api_recommend))
     tg_app.add_handler(CommandHandler("feature_status", cmd_feature_status))
     tg_app.add_handler(CommandHandler("feature_set", cmd_feature_set))
+    tg_app.add_handler(CommandHandler("tool_catalog", cmd_tool_catalog))
+    tg_app.add_handler(CommandHandler("admin_api_roadmap", cmd_admin_api_roadmap))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
     tg_app.add_handler(CommandHandler("tool_status", cmd_tool_status))
     tg_app.add_handler(CommandHandler("api_debug_status", cmd_api_debug_status))
@@ -44958,9 +45412,22 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_ai_image", cmd_tool_test_ai_image))
     tg_app.add_handler(CommandHandler("tool_test_ai_image_edit", cmd_tool_test_ai_image_edit))
     tg_app.add_handler(CommandHandler("tool_test_tts", cmd_tool_test_tts))
+    tg_app.add_handler(CommandHandler("tool_test_trend_live", cmd_tool_test_trend_live))
+    tg_app.add_handler(CommandHandler("tool_test_stability_image", cmd_tool_test_stability_image))
+    tg_app.add_handler(CommandHandler("tool_test_upscale_image", cmd_tool_test_upscale_image))
+    tg_app.add_handler(CommandHandler("tool_test_audio_enhance", cmd_tool_test_audio_enhance))
+    tg_app.add_handler(CommandHandler("tool_test_kling_video", cmd_tool_test_kling_video))
+    tg_app.add_handler(CommandHandler("tool_test_runway_video", cmd_tool_test_runway_video))
+    tg_app.add_handler(CommandHandler("tool_test_heygen_avatar", cmd_tool_test_heygen_avatar))
     tg_app.add_handler(CommandHandler("tool_test_stt", cmd_tool_test_stt))
     tg_app.add_handler(CommandHandler("tool_test_stt_debug", cmd_tool_test_stt_debug))
     tg_app.add_handler(CommandHandler("tool_test_downloader", cmd_tool_test_downloader))
+    tg_app.add_handler(CommandHandler("voiceover", cmd_voiceover))
+    tg_app.add_handler(CommandHandler("tts", cmd_voiceover))
+    tg_app.add_handler(CommandHandler("upscale_image", cmd_upscale_image))
+    tg_app.add_handler(CommandHandler("audio_enhance", cmd_audio_enhance))
+    tg_app.add_handler(CommandHandler("real_video", cmd_real_video))
+    tg_app.add_handler(CommandHandler("avatar_video", cmd_avatar_video))
     tg_app.add_handler(CommandHandler("translate_text", cmd_translate_text))
     tg_app.add_handler(CommandHandler("translate_mode", cmd_translate_mode))
     tg_app.add_handler(CommandHandler("translate_mode_off", cmd_translate_mode_off))
