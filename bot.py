@@ -1706,11 +1706,9 @@ def build_payos_signature_data(payload: dict, variant: str | None = None) -> str
     return "&".join(f"{key}={payload[key]}" for key in fields)
 
 def get_payos_create_signature_variant() -> str:
-    try:
-        configured = get_system_setting("payos_create_signature_variant", PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT)
-    except Exception:
-        configured = PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT
-    return normalize_payos_signature_variant(configured)
+    # Customer payment creation must always use the PayOS documented order.
+    # Debug variants are admin-only and must not override live /naptien.
+    return PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT
 
 def sign_payos_payment_request(data: dict, variant: str | None = None) -> tuple[str, str]:
     raw_str = build_payos_signature_data(data, variant or PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT)
@@ -1775,7 +1773,7 @@ def format_payos_create_debug(
     )
 
 async def create_payos_payment_request(payos_body: dict, signature_variant: str | None = None) -> tuple[object, dict, str, str]:
-    active_variant = normalize_payos_signature_variant(signature_variant or get_payos_create_signature_variant())
+    active_variant = normalize_payos_signature_variant(signature_variant) if signature_variant else PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT
     signature, raw_str = sign_payos_payment_request(payos_body, active_variant)
     request_body = {**payos_body, "signature": signature}
     headers = {
@@ -22658,6 +22656,7 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "5. <code>DAILY5</code> — ưu đãi ngày từ 50k: +5% Xu",
         "",
         "🎁 <b>Launch Bonus theo gói:</b>",
+        "• Lần đầu mua gói 50k: +30 Xu",
         "• Lần đầu mua gói 100k: +50 Xu",
         "• Lần đầu mua gói 200k: +150 Xu",
         "• Lần đầu mua gói 500k: +500 Xu",
@@ -22674,12 +22673,10 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Bonus Xu chỉ cộng sau khi PayOS thanh toán thành công",
         "• Launch Bonus không phải promo code",
         "• Mã có thể hết lượt/hết hạn/không đủ điều kiện",
-        "• <code>BETA50</code> chỉ dành cho nhóm test rất giới hạn",
         "",
         "🎁 <b>Mã quà tặng:</b>",
-        "• <code>/gift BETA100</code>",
-        "• <code>/nhanqua BETA100</code>",
-        "• <code>/promo BETA100</code> nếu mã là gift code",
+        "• Nếu admin gửi mã quà public, dùng <code>/gift MÃ</code> hoặc <code>/nhanqua MÃ</code>",
+        "• Mã sự kiện/private chỉ dùng khi admin cấp riêng theo ID Telegram",
         "",
         "<b>Cách dùng:</b>",
         "<code>/promo FIRST30</code>",
@@ -35893,7 +35890,6 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
         set_system_setting("payos_debug_create_at", now, f"order={first_pass['order_code']}", update.effective_user.id)
         set_system_setting("payos_debug_create_order", str(first_pass["order_code"]), "PayOS debug checkout created", update.effective_user.id)
         set_system_setting("payos_debug_create_variant", str(first_pass["variant"]), "PayOS debug checkout created", update.effective_user.id)
-        set_system_setting("payos_create_signature_variant", str(first_pass["variant"]), "PayOS create signature variant selected by debug", update.effective_user.id)
         set_system_setting("payos_debug_create_checkout_url", str(first_pass["checkout_url"]), "PayOS debug checkout created", update.effective_user.id)
         set_system_setting("payos_debug_create_payment_link_id", str(first_pass["payment_link_id"]), "PayOS debug checkout created", update.effective_user.id)
         set_system_setting("payos_debug_create_http_status", str(first_pass["http_status"]), "PayOS debug checkout created", update.effective_user.id)
