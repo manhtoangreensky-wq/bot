@@ -130,6 +130,13 @@ for _log_name in ("TOAN_AAS", "httpx", "telegram", "telegram.ext"):
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
 
+def env_any(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.environ.get(str(name or ""), "")
+        if value and str(value).strip():
+            return str(value).strip()
+    return default
+
 def normalize_public_base_url(value: str = "") -> str:
     value = (value or "").strip().rstrip("/")
     if not value:
@@ -204,8 +211,8 @@ OPENAI_API_KEY      = _env("OPENAI_API_KEY")
 OPENAI_IMAGE_MODEL  = _env("OPENAI_IMAGE_MODEL", "gpt-image-1")
 
 # Audio
-DEEPGRAM_API_KEY    = _env("DEEPGRAM_API_KEY")
-DEEPL_API_KEY       = _env("DEEPL_API_KEY")
+DEEPGRAM_API_KEY    = env_any("DEEPGRAM_API_KEY", "Deepgram_API_KEY", "DEEPGRAM_KEY", "DEEPGRAM_TOKEN")
+DEEPL_API_KEY       = env_any("DEEPL_API_KEY", "DeepL_API_KEY", "DEEPL_KEY", "DEEPL_AUTH_KEY")
 FISH_AUDIO_KEY      = _env("FISH_AUDIO_KEY")
 
 # Image
@@ -20926,8 +20933,9 @@ class AgentDeepgram:
                     .get("alternatives", [{}])[0]
                     .get("transcript", "Không nhận diện được lời nói.")
                 )
-            await alert_admin(context, "Deepgram", f"HTTP {res.status_code}")
-            return "❌ Cổng bóc băng lỗi."
+            error_preview = res.text[:240]
+            await alert_admin(context, "Deepgram", f"HTTP {res.status_code}: {error_preview[:160]}")
+            return f"❌ Deepgram HTTP {res.status_code}: {error_preview}"
         except Exception as e:
             return f"❌ Lỗi: {str(e)}"
 
@@ -21537,6 +21545,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                             filename="no_bg.png",
                             caption=f"✂️ Gói Tiết Kiệm — Tách nền thành công! (-{IMAGE_FREE_COST} Xu)"
                         )
+                        save_tool_test_result("image_remove_bg", "PASS", "provider=cutout; cost_level=low; remove_bg command success", uid)
+                        save_tool_test_result("image", "PASS", "provider=cutout; cost_level=low; remove_bg command success", uid)
                         await query.delete_message()
                         ok = True
                     else:
@@ -21571,6 +21581,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                             filename="no_bg.png",
                             caption=f"✂️ Gói Cao Cấp — Tách nền HD thành công! (-{cost} Xu)"
                         )
+                        save_tool_test_result("image_remove_bg", "PASS", "provider=removebg; cost_level=medium; remove_bg command success", uid)
+                        save_tool_test_result("image", "PASS", "provider=removebg; cost_level=medium; remove_bg command success", uid)
                         await query.delete_message()
                         ok = True
                     else:
@@ -21622,6 +21634,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                                 filename="no_bg.png",
                                 caption=f"✂️ Gói Tiết Kiệm — Hoàn thành! (-{IMAGE_FREE_COST} Xu)"
                             )
+                            save_tool_test_result("image_remove_bg", "PASS", "provider=cutout; cost_level=low; remove_bg fallback success", uid)
+                            save_tool_test_result("image", "PASS", "provider=cutout; cost_level=low; remove_bg fallback success", uid)
                             await query.delete_message()
                             cutout_ok = True
                     except Exception as e:
@@ -21848,6 +21862,12 @@ def provider_status_payload() -> dict:
             "fish_audio": bool(FISH_AUDIO_KEY),
             "edge_tts": True,
         },
+        "translation": {
+            "deepl": bool(DEEPL_API_KEY),
+            "gemini": bool(GEMINI_API_KEY),
+            "openai": bool(OPENAI_API_KEY),
+            "ready": bool(DEEPL_API_KEY or GEMINI_API_KEY or OPENAI_API_KEY),
+        },
         "image": {
             "removebg": bool(REMOVEBG_API_KEY),
             "cutout": bool(CUTOUT_API_KEY),
@@ -21918,9 +21938,26 @@ def tool_test_status_text(tool_name: str) -> str:
     tested_at = result.get("tested_at") or ""
     return f"{status}" + (f" at {tested_at}" if tested_at else "")
 
+def preferred_tool_test_result(*tool_names: str) -> dict:
+    fallback = None
+    for tool_name in tool_names:
+        result = get_tool_test_result(tool_name)
+        if fallback is None:
+            fallback = result
+        if str(result.get("status") or "").upper() not in {"", "NOT_TESTED"}:
+            return result
+    return fallback or {"status": "NOT_TESTED", "tested_at": "", "detail": ""}
+
+def preferred_tool_test_status_text(*tool_names: str) -> str:
+    result = preferred_tool_test_result(*tool_names)
+    status = str(result.get("status") or "NOT_TESTED").upper()
+    tested_at = result.get("tested_at") or ""
+    return f"{status}" + (f" at {tested_at}" if tested_at else "")
+
 def customer_tool_readiness_payload() -> dict:
     providers = provider_status_payload()
     tests = {name: get_tool_test_result(name) for name in ["ai", "image", "tts", "stt", "downloader"]}
+    image_test = preferred_tool_test_result("image_remove_bg", "image")
     public_cobalt = bool(providers["downloader"].get("cobalt_public"))
     cobalt_self_host = bool(providers["downloader"].get("cobalt_self_host"))
     return {
@@ -21931,8 +21968,8 @@ def customer_tool_readiness_payload() -> dict:
         },
         "image_remove_bg": {
             "configured": bool(providers["image"]["ready"]),
-            "tested": tests["image"]["status"] == "PASS",
-            "label": "ready" if tests["image"]["status"] == "PASS" else ("thử nghiệm" if providers["image"]["ready"] else "missing"),
+            "tested": image_test["status"] == "PASS",
+            "label": "ready" if image_test["status"] == "PASS" else ("thử nghiệm" if providers["image"]["ready"] else "missing"),
         },
         "tts": {
             "configured": True,
@@ -23241,10 +23278,16 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
         f"• STT tested: <code>{html.escape(tool_test_status_text('stt'))}</code>",
         "",
+        "<b>Translation</b>",
+        f"• DeepL: <code>{provider_status_text(providers['translation']['deepl'])}</code>",
+        f"• Gemini fallback: <code>{provider_status_text(providers['translation']['gemini'])}</code>",
+        f"• OpenAI fallback: <code>{provider_status_text(providers['translation']['openai'])}</code>",
+        f"• Translation tested: <code>{html.escape(tool_test_status_text('translation'))}</code>",
+        "",
         "<b>Image Utilities</b>",
         f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
         f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
-        f"• Image provider tested: <code>{html.escape(tool_test_status_text('image'))}</code>",
+        f"• Image provider tested: <code>{html.escape(preferred_tool_test_status_text('image_remove_bg', 'image'))}</code>",
         "",
         "<b>Image / Media</b>",
         f"• Trend Finder: <code>{'enabled/content-only' if providers['media_factory']['trend_finder'] else 'disabled'}</code>",
@@ -23298,7 +23341,7 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cobalt_readiness = "public Cobalt configured — disabled_by_policy"
     else:
         cobalt_readiness = "Cobalt self-host missing"
-    deepgram_readiness = "ready_for_smoke_test" if providers["audio"]["deepgram"] else "missing"
+    deepgram_readiness = "configured — ready_for_smoke_test" if providers["audio"]["deepgram"] else "missing"
     lines = [
         "🧪 <b>TOAN AAS Tool Audit</b>",
         "Audit này chỉ kiểm tra cấu hình/trạng thái. Muốn xác nhận provider chạy thật, dùng các lệnh /tool_test_*.",
@@ -23317,8 +23360,15 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Image utilities</b>",
         f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
         f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
-        f"• Tested: <code>{html.escape(tool_test_status_text('image'))}</code>",
+        f"• Tested: <code>{html.escape(preferred_tool_test_status_text('image_remove_bg', 'image'))}</code>",
         "• Smoke test: reply ảnh rồi gõ <code>/tool_test_image</code>",
+        "",
+        "<b>Translation</b>",
+        f"• DeepL: <code>{provider_status_text(providers['translation']['deepl'])}</code>",
+        f"• Gemini fallback: <code>{provider_status_text(providers['translation']['gemini'])}</code>",
+        f"• OpenAI fallback: <code>{provider_status_text(providers['translation']['openai'])}</code>",
+        f"• Tested: <code>{html.escape(tool_test_status_text('translation'))}</code>",
+        "• Smoke test: <code>/tool_test_translate</code>",
         "",
         "<b>Image / Media</b>",
         f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
@@ -23414,12 +23464,173 @@ async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
     )
 
+async def translate_with_deepl(text: str) -> str:
+    if not DEEPL_API_KEY:
+        raise RuntimeError("DEEPL_API_KEY missing")
+    endpoint = "https://api-free.deepl.com/v2/translate" if DEEPL_API_KEY.endswith(":fx") else "https://api.deepl.com/v2/translate"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        res = await client.post(
+            endpoint,
+            data={
+                "auth_key": DEEPL_API_KEY,
+                "text": text,
+                "target_lang": "VI",
+            },
+        )
+    if res.status_code != 200:
+        raise RuntimeError(f"DeepL HTTP {res.status_code}: {res.text[:180]}")
+    data = res.json()
+    translated = ((data.get("translations") or [{}])[0].get("text") or "").strip()
+    if not translated:
+        raise RuntimeError("DeepL empty_response")
+    return translated
+
+async def translate_with_gemini(text: str) -> str:
+    if not gemini_client:
+        raise RuntimeError("Gemini missing")
+    prompt = (
+        "Dịch nội dung sau sang tiếng Việt tự nhiên, rõ nghĩa. "
+        "Chỉ trả bản dịch, không giải thích thêm."
+    )
+    def run_gemini():
+        return gemini_client.models.generate_content(
+            model="gemini-2.0-flash",
+            config=types.GenerateContentConfig(system_instruction=prompt),
+            contents=text,
+        )
+    res = await asyncio.to_thread(run_gemini)
+    translated = (getattr(res, "text", "") or "").strip()
+    if not translated:
+        raise RuntimeError("Gemini empty_response")
+    return translated
+
+async def translate_with_openai(text: str) -> str:
+    if not openai_client:
+        raise RuntimeError("OpenAI missing")
+    def run_openai():
+        return openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Dịch nội dung sang tiếng Việt tự nhiên. Chỉ trả bản dịch."},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=800,
+        )
+    res = await asyncio.to_thread(run_openai)
+    translated = (res.choices[0].message.content or "").strip()
+    if not translated:
+        raise RuntimeError("OpenAI empty_response")
+    return translated
+
+async def translate_to_vietnamese(text: str) -> dict:
+    statuses = {"deepl": "MISSING", "gemini": "MISSING", "openai": "MISSING"}
+    errors = {}
+    if DEEPL_API_KEY:
+        try:
+            return {"provider": "deepl", "text": await translate_with_deepl(text), "statuses": {**statuses, "deepl": "PASS"}, "errors": errors}
+        except Exception as e:
+            statuses["deepl"] = "FAIL"
+            errors["deepl"] = str(e)[:240]
+    if gemini_client:
+        try:
+            return {"provider": "gemini", "text": await translate_with_gemini(text), "statuses": {**statuses, "gemini": "PASS"}, "errors": errors}
+        except Exception as e:
+            statuses["gemini"] = "FAIL"
+            errors["gemini"] = str(e)[:240]
+    if openai_client:
+        try:
+            return {"provider": "openai", "text": await translate_with_openai(text), "statuses": {**statuses, "openai": "PASS"}, "errors": errors}
+        except Exception as e:
+            statuses["openai"] = "FAIL"
+            errors["openai"] = str(e)[:240]
+    raise RuntimeError("; ".join(f"{k}={v}" for k, v in errors.items()) or "No translation provider configured")
+
+async def cmd_tool_test_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    source_text = "こんにちは、今日は新しい動画を紹介します。"
+    deepl_status = "MISSING"
+    gemini_status = "MISSING"
+    openai_status = "MISSING"
+    results = {}
+    errors = {}
+    if DEEPL_API_KEY:
+        try:
+            results["deepl"] = await translate_with_deepl(source_text)
+            deepl_status = "PASS"
+        except Exception as e:
+            deepl_status = "FAIL"
+            errors["deepl"] = str(e)[:180]
+    if gemini_client:
+        try:
+            results["gemini"] = await translate_with_gemini(source_text)
+            gemini_status = "PASS"
+        except Exception as e:
+            gemini_status = "FAIL"
+            errors["gemini"] = str(e)[:180]
+    if openai_client:
+        try:
+            results["openai"] = await translate_with_openai(source_text)
+            openai_status = "PASS"
+        except Exception as e:
+            openai_status = "FAIL"
+            errors["openai"] = str(e)[:180]
+    provider = next((name for name in ("deepl", "gemini", "openai") if results.get(name)), "")
+    best_result = results.get(provider, "")
+    if provider:
+        overall = "PASS" if provider == "deepl" else "PASS_WITH_FALLBACK"
+        detail = f"provider={provider}; cost_level=low; result={best_result[:200]}"
+    else:
+        overall = "FAIL" if any(v == "FAIL" for v in [deepl_status, gemini_status, openai_status]) else "MISSING"
+        detail = "; ".join(f"{k}={v}" for k, v in errors.items()) or "No translation provider configured"
+    save_tool_test_result("translation", overall, detail, update.effective_user.id)
+    await update.message.reply_text(
+        "🌐 <b>Translation Smoke Test</b>\n\n"
+        f"• DeepL: <code>{html.escape(deepl_status)}</code>\n"
+        f"• Gemini: <code>{html.escape(gemini_status)}</code>\n"
+        f"• OpenAI: <code>{html.escape(openai_status)}</code>\n"
+        f"• Overall: <code>{html.escape(overall)}</code>\n"
+        f"• Provider: <code>{html.escape(provider or '-')}</code>\n"
+        f"• Best result: <code>{html.escape(best_result[:500] or '-')}</code>"
+        + (f"\n• Error: <code>{html.escape(detail[:240])}</code>" if overall == "FAIL" else ""),
+        parse_mode="HTML",
+    )
+
+async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = " ".join(context.args or []).strip()
+    if not text:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/translate_text &lt;nội dung cần dịch&gt;</code>", parse_mode="HTML")
+    text = text[:1800]
+    try:
+        result = await translate_to_vietnamese(text)
+        save_tool_test_result("translation", "PASS", f"provider={result.get('provider')}; translate_text success", update.effective_user.id)
+        await update.message.reply_text(
+            "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
+            "• Nguồn: <code>auto</code>\n"
+            "• Đích: <code>Tiếng Việt</code>\n"
+            f"• Provider: <code>{html.escape(result.get('provider') or '-')}</code>\n\n"
+            f"{html.escape(result.get('text') or '')}",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        save_tool_test_result("translation", "FAIL", str(e)[:500], update.effective_user.id)
+        await update.message.reply_text(
+            "❌ Dịch văn bản đang lỗi tạm thời.\n\n"
+            f"• Error: <code>{html.escape(str(e)[:240])}</code>\n"
+            "Không có Xu nào bị trừ cho lần thử này.",
+            parse_mode="HTML",
+        )
+
 async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     reply = update.message.reply_to_message if update.message else None
     if not (reply and getattr(reply, "photo", None)):
-        return await update.message.reply_text("⚠️ Reply một ảnh rồi gõ <code>/tool_test_image</code>.", parse_mode="HTML")
+        return await update.message.reply_text(
+            "⚠️ Vui lòng gửi ảnh nhỏ trước, sau đó reply ảnh bằng <code>/tool_test_image</code>.\n"
+            "Nếu muốn xử lý thật cho khách, dùng luồng tách nền ảnh hiện tại của bot.",
+            parse_mode="HTML",
+        )
     photo_size = reply.photo[-1]
     img_bytes = bytes(await (await photo_size.get_file()).download_as_bytearray())
     remove_status = "MISSING"
@@ -23467,6 +23678,8 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     overall = "PASS" if output_bytes else ("MISSING" if remove_status == "MISSING" and cutout_status == "MISSING" else "FAIL")
     save_tool_test_result("image", overall, f"RemoveBG={remove_status}; Cutout={cutout_status}; {detail}", update.effective_user.id)
+    if output_bytes:
+        save_tool_test_result("image_remove_bg", "PASS", f"provider={output_provider.lower()}; cost_level=low; tool_test_image success", update.effective_user.id)
     if output_bytes:
         out = io.BytesIO(output_bytes)
         out.name = "toan_aas_tool_test_no_bg.png"
@@ -23640,6 +23853,32 @@ async def cmd_tool_test_downloader(update: Update, context: ContextTypes.DEFAULT
         "Smoke test chỉ kiểm tra provider trả media URL, không gửi video và không trừ Xu.",
         parse_mode="HTML",
     )
+
+async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    providers = provider_status_payload()
+    image_result = preferred_tool_test_result("image_remove_bg", "image")
+    items = [
+        ("AI", "ai", get_tool_test_result("ai"), "Gemini/OpenAI"),
+        ("Translation", "translation", get_tool_test_result("translation"), "DeepL/Gemini/OpenAI"),
+        ("TTS", "tts", get_tool_test_result("tts"), "Edge/Fish"),
+        ("STT Deepgram", "stt", get_tool_test_result("stt"), "configured" if providers["audio"]["deepgram"] else "missing"),
+        ("Image RemoveBG/Cutout", "image_remove_bg", image_result, "configured" if providers["image"]["ready"] else "missing"),
+        ("Downloader", "downloader", get_tool_test_result("downloader"), "Cobalt self-host" if providers["downloader"].get("cobalt_self_host") else "MISSING Cobalt"),
+    ]
+    lines = ["🧪 <b>Tool Test Status</b>", ""]
+    for label, _, result, note in items:
+        status = str(result.get("status") or "NOT_TESTED").upper()
+        tested_at = result.get("tested_at") or "-"
+        detail = result.get("detail") or ""
+        lines.append(
+            f"• <b>{html.escape(label)}</b>: <code>{html.escape(status)}</code> at <code>{html.escape(tested_at)}</code>\n"
+            f"  note=<code>{html.escape(str(note))}</code>"
+            + (f"\n  detail=<code>{html.escape(detail[:180])}</code>" if detail else "")
+        )
+    lines.append("\nKhông hiển thị API key/token/secret.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -38840,11 +39079,14 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("providers",   cmd_providers))
     tg_app.add_handler(CommandHandler("api_recommend", cmd_api_recommend))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
+    tg_app.add_handler(CommandHandler("tool_status", cmd_tool_status))
     tg_app.add_handler(CommandHandler("tool_test_ai", cmd_tool_test_ai))
+    tg_app.add_handler(CommandHandler("tool_test_translate", cmd_tool_test_translate))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
     tg_app.add_handler(CommandHandler("tool_test_tts", cmd_tool_test_tts))
     tg_app.add_handler(CommandHandler("tool_test_stt", cmd_tool_test_stt))
     tg_app.add_handler(CommandHandler("tool_test_downloader", cmd_tool_test_downloader))
+    tg_app.add_handler(CommandHandler("translate_text", cmd_translate_text))
     tg_app.add_handler(CommandHandler("costs",       cmd_costs))
     tg_app.add_handler(CommandHandler("sales_ready", cmd_sales_ready))
     tg_app.add_handler(CommandHandler("payos_test_plan", cmd_payos_test_plan))
