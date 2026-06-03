@@ -780,10 +780,26 @@ def init_db():
         created_at DATETIME
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS referrals (
-        referred_user_id TEXT PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         referrer_user_id TEXT,
+        referred_user_id TEXT UNIQUE,
+        ref_code TEXT,
+        status TEXT DEFAULT 'pending',
+        first_start_at TEXT,
+        first_deposit_order_id TEXT,
+        first_deposit_amount_vnd INTEGER DEFAULT 0,
+        first_deposit_base_xu INTEGER DEFAULT 0,
+        reward_xu INTEGER DEFAULT 0,
+        rewarded_at TEXT,
         bonus_paid INTEGER DEFAULT 0,
-        created_at DATETIME
+        note TEXT,
+        created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS member_tier_overrides (
+        user_id TEXT PRIMARY KEY,
+        tier TEXT,
+        reason TEXT,
+        updated_at TEXT
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS promotion_codes (
         code TEXT PRIMARY KEY,
@@ -1273,6 +1289,33 @@ def init_db():
             c.execute(f"ALTER TABLE users ADD COLUMN {col} {'INTEGER' if 'count' in col or 'spent' in col or 'vip' in col or 'deposited' in col else 'TEXT'} DEFAULT {defval}")
         except Exception:
             pass
+    for col, col_type in [
+        ("total_paid_vnd", "INTEGER DEFAULT 0"),
+        ("vip_tier_override", "TEXT DEFAULT ''"),
+        ("referred_by", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    for col, col_type in [
+        ("ref_code", "TEXT"),
+        ("status", "TEXT DEFAULT 'pending'"),
+        ("first_start_at", "TEXT"),
+        ("first_deposit_order_id", "TEXT"),
+        ("first_deposit_amount_vnd", "INTEGER DEFAULT 0"),
+        ("first_deposit_base_xu", "INTEGER DEFAULT 0"),
+        ("reward_xu", "INTEGER DEFAULT 0"),
+        ("rewarded_at", "TEXT"),
+        ("note", "TEXT"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE referrals ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    c.execute("CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_referrals_status ON referrals(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_referrals_rewarded_at ON referrals(rewarded_at)")
     for col, col_type in [
         ("expires_at", "DATETIME"),
         ("paid_at", "DATETIME"),
@@ -2304,36 +2347,442 @@ def expire_old_payos_orders():
     conn.commit()
     conn.close()
 
-def register_referral(referred_user_id, referrer_user_id) -> bool:
-    if str(referred_user_id) == str(referrer_user_id):
+MEMBER_TIER_ORDER = ["none", "bac", "vang", "bach_kim", "kim_cuong", "vip"]
+MEMBER_TIER_LABELS = {
+    "none": "Tân thủ",
+    "bac": "Bạc",
+    "vang": "Vàng",
+    "bach_kim": "Bạch Kim",
+    "kim_cuong": "Kim Cương",
+    "vip": "VIP",
+}
+MEMBER_TIER_THRESHOLDS = {
+    "none": 0,
+    "bac": 100_000,
+    "vang": 1_000_000,
+    "bach_kim": 10_000_000,
+    "kim_cuong": 50_000_000,
+    "vip": 100_000_000,
+}
+MEMBER_REFERRAL_POLICY = {
+    "none": {"percent": 0, "cap": 0},
+    "bac": {"percent": 3, "cap": 100},
+    "vang": {"percent": 6, "cap": 150},
+    "bach_kim": {"percent": 8, "cap": 200},
+    "kim_cuong": {"percent": 10, "cap": 250},
+    "vip": {"percent": 12, "cap": 300},
+}
+MEMBER_TOOL_DISCOUNT_POLICY = {
+    "none": 0,
+    "bac": 0,
+    "vang": 3,
+    "bach_kim": 5,
+    "kim_cuong": 8,
+    "vip": 10,
+}
+MEMBER_TIER_ALIASES = {
+    "tan_thu": "none",
+    "tân_thủ": "none",
+    "none": "none",
+    "0": "none",
+    "bac": "bac",
+    "bạc": "bac",
+    "silver": "bac",
+    "vang": "vang",
+    "vàng": "vang",
+    "gold": "vang",
+    "bach_kim": "bach_kim",
+    "bạch_kim": "bach_kim",
+    "bachkim": "bach_kim",
+    "platinum": "bach_kim",
+    "kim_cuong": "kim_cuong",
+    "kim_cương": "kim_cuong",
+    "kimcuong": "kim_cuong",
+    "diamond": "kim_cuong",
+    "vip": "vip",
+}
+
+def normalize_member_tier(value: str) -> str:
+    raw = str(value or "").strip().lower().replace(" ", "_")
+    return MEMBER_TIER_ALIASES.get(raw, raw if raw in MEMBER_TIER_ORDER else "")
+
+def member_tier_label(tier: str) -> str:
+    return MEMBER_TIER_LABELS.get(normalize_member_tier(tier) or "none", "Tân thủ")
+
+def member_tier_by_total_paid(total_paid_vnd: int) -> str:
+    paid = int(total_paid_vnd or 0)
+    for tier in ["vip", "kim_cuong", "bach_kim", "vang", "bac"]:
+        if paid >= MEMBER_TIER_THRESHOLDS[tier]:
+            return tier
+    return "none"
+
+def member_next_tier(total_paid_vnd: int, tier: str) -> tuple[str, int]:
+    paid = int(total_paid_vnd or 0)
+    current_index = MEMBER_TIER_ORDER.index(normalize_member_tier(tier) or "none")
+    for next_tier in MEMBER_TIER_ORDER[current_index + 1:]:
+        needed = MEMBER_TIER_THRESHOLDS[next_tier] - paid
+        if needed > 0:
+            return next_tier, needed
+    return "", 0
+
+def member_referral_reward(base_xu: int, tier: str) -> int:
+    policy = MEMBER_REFERRAL_POLICY.get(normalize_member_tier(tier) or "none", MEMBER_REFERRAL_POLICY["none"])
+    percent = int(policy.get("percent") or 0)
+    cap = int(policy.get("cap") or 0)
+    if percent <= 0 or cap <= 0 or int(base_xu or 0) <= 0:
+        return 0
+    return min(int(int(base_xu) * percent / 100), cap)
+
+def get_member_benefits(tier: str) -> list[str]:
+    tier = normalize_member_tier(tier) or "none"
+    benefits = {
+        "none": [
+            "Trial 200 Xu nếu đủ điều kiện.",
+            "Dùng các công cụ public đã được mở.",
+            "Referral được ghi nhận nhưng chưa có thưởng Xu trong MVP.",
+        ],
+        "bac": [
+            "Referral 3%, tối đa 100 Xu / khách nạp lần đầu.",
+            "Hỗ trợ thành viên.",
+            "Tham gia ưu đãi cơ bản.",
+        ],
+        "vang": [
+            "Referral 6%, tối đa 150 Xu / khách nạp lần đầu.",
+            "Ưu tiên hỗ trợ hơn Bạc.",
+            "Giảm tối đa 3% phí Xu cho tool đủ điều kiện.",
+        ],
+        "bach_kim": [
+            "Referral 8%, tối đa 200 Xu / khách nạp lần đầu.",
+            "Ưu tiên hỗ trợ cao.",
+            "Được mời test một số công cụ mới khi phù hợp.",
+            "Giảm tối đa 5% phí Xu cho tool đủ điều kiện.",
+        ],
+        "kim_cuong": [
+            "Referral 10%, tối đa 250 Xu / khách nạp lần đầu.",
+            "Ưu tiên hỗ trợ rất cao.",
+            "Có thể được cấp quota test tool mới khi phù hợp.",
+            "Giảm tối đa 8% phí Xu cho tool đủ điều kiện.",
+        ],
+        "vip": [
+            "Referral 12%, tối đa 300 Xu / khách nạp lần đầu.",
+            "Ưu tiên hỗ trợ cao nhất.",
+            "Có thể được cấu hình/quy trình riêng theo nhu cầu.",
+            "Được trải nghiệm sớm tính năng beta khi đủ điều kiện.",
+            "Giảm tối đa 10% phí Xu cho tool đủ điều kiện.",
+        ],
+    }
+    return benefits.get(tier, benefits["none"])
+
+def eligible_for_member_discount(tool_name: str, base_cost: int) -> bool:
+    blocked = {"payment", "payos", "manual_qr", "promo", "gift", "trial", "admin", "provider_fail"}
+    name = str(tool_name or "").strip().lower()
+    if int(base_cost or 0) < 50:
         return False
+    return not any(marker in name for marker in blocked)
+
+def calculate_member_discounted_cost(user_id, tool_name: str, base_cost: int) -> dict:
+    base = int(base_cost or 0)
+    profile = get_member_profile(user_id)
+    tier = profile.get("tier") or "none"
+    percent = int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0)
+    if not eligible_for_member_discount(tool_name, base):
+        percent = 0
+    discounted = max(0, math.ceil(base * (1 - percent / 100))) if percent else base
+    return {
+        "base_cost": base,
+        "discount_percent": percent,
+        "discounted_cost": discounted,
+        "tier": tier,
+        "tier_label": member_tier_label(tier),
+    }
+
+def user_exists(user_id, conn=None) -> bool:
+    close_conn = False
+    if conn is None:
+        conn = db_connect()
+        close_conn = True
+    try:
+        row = conn.execute("SELECT 1 FROM users WHERE user_id=?", (str(user_id),)).fetchone()
+        return bool(row)
+    finally:
+        if close_conn:
+            conn.close()
+
+def user_has_successful_deposit_conn(conn, user_id) -> bool:
+    row = conn.execute("SELECT COALESCE(has_deposited,0) FROM users WHERE user_id=?", (str(user_id),)).fetchone()
+    if row and int(row[0] or 0) > 0:
+        return True
+    paid_count = conn.execute(
+        "SELECT COUNT(*) FROM payos_orders WHERE user_id=? AND status=?",
+        (str(user_id), PAYOS_STATUS_PAID),
+    ).fetchone()[0]
+    if int(paid_count or 0) > 0:
+        return True
+    manual_count = conn.execute(
+        "SELECT COUNT(*) FROM usage_events WHERE user_id=? AND event_type='payment_manual_approved'",
+        (str(user_id),),
+    ).fetchone()[0]
+    return int(manual_count or 0) > 0
+
+def member_total_paid_vnd(user_id, conn=None) -> int:
+    close_conn = False
+    if conn is None:
+        conn = db_connect()
+        close_conn = True
+    try:
+        stored = 0
+        row = conn.execute("SELECT COALESCE(total_paid_vnd,0) FROM users WHERE user_id=?", (str(user_id),)).fetchone()
+        if row:
+            stored = int(row[0] or 0)
+        payos_paid = int(conn.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM payos_orders WHERE user_id=? AND status=?",
+            (str(user_id), PAYOS_STATUS_PAID),
+        ).fetchone()[0] or 0)
+        manual_paid = int(conn.execute(
+            "SELECT COALESCE(SUM(amount_vnd),0) FROM usage_events WHERE user_id=? AND event_type='payment_manual_approved'",
+            (str(user_id),),
+        ).fetchone()[0] or 0)
+        return max(stored, payos_paid + manual_paid)
+    finally:
+        if close_conn:
+            conn.close()
+
+def get_member_profile(user_id, conn=None) -> dict:
+    close_conn = False
+    if conn is None:
+        conn = db_connect()
+        close_conn = True
+    try:
+        uid = str(user_id)
+        row = conn.execute(
+            "SELECT COALESCE(is_vip,0), COALESCE(vip_tier_override,''), COALESCE(username,'') FROM users WHERE user_id=?",
+            (uid,),
+        ).fetchone()
+        is_vip_flag = int(row[0] or 0) if row else 0
+        user_override = normalize_member_tier(row[1] if row else "")
+        table_row = conn.execute("SELECT tier FROM member_tier_overrides WHERE user_id=?", (uid,)).fetchone()
+        table_override = normalize_member_tier(table_row[0] if table_row else "")
+        override = table_override or user_override
+        has_override = bool(override)
+        total_paid = member_total_paid_vnd(uid, conn=conn)
+        tier = override or ("vip" if is_vip_flag == 1 else member_tier_by_total_paid(total_paid))
+        if tier == "none" and is_vip_flag == 1 and not has_override:
+            tier = "vip"
+        policy = MEMBER_REFERRAL_POLICY.get(tier, MEMBER_REFERRAL_POLICY["none"])
+        next_tier, needed = member_next_tier(total_paid, tier)
+        return {
+            "user_id": uid,
+            "tier": tier,
+            "tier_label": member_tier_label(tier),
+            "total_paid_vnd": total_paid,
+            "override": override,
+            "is_vip": is_vip_flag,
+            "next_tier": next_tier,
+            "next_tier_label": member_tier_label(next_tier) if next_tier else "",
+            "amount_to_next": max(0, int(needed or 0)),
+            "ref_percent": int(policy.get("percent") or 0),
+            "ref_cap": int(policy.get("cap") or 0),
+            "discount_percent": int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0),
+        }
+    finally:
+        if close_conn:
+            conn.close()
+
+def referral_link_for_user(user_id, bot_username: str = "") -> str:
+    bot_name = str(bot_username or BOT_USERNAME or "toanaasbot").lstrip("@")
+    return f"https://t.me/{bot_name}?start=ref_{str(user_id)}"
+
+def referral_stats_for_user(user_id, conn=None) -> dict:
+    close_conn = False
+    if conn is None:
+        conn = db_connect()
+        close_conn = True
+    try:
+        uid = str(user_id)
+        total = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=?", (uid,)).fetchone()[0] or 0)
+        pending = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND COALESCE(status,'pending')='pending'", (uid,)).fetchone()[0] or 0)
+        rewarded = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND COALESCE(status,'')='rewarded'", (uid,)).fetchone()[0] or 0)
+        qualified_no_reward = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND COALESCE(status,'')='qualified_no_reward'", (uid,)).fetchone()[0] or 0)
+        reward_xu = int(conn.execute("SELECT COALESCE(SUM(reward_xu),0) FROM referrals WHERE referrer_user_id=?", (uid,)).fetchone()[0] or 0)
+        recent = conn.execute(
+            """SELECT referred_user_id, COALESCE(status,'pending'), COALESCE(reward_xu,0), COALESCE(created_at,'')
+            FROM referrals WHERE referrer_user_id=? ORDER BY COALESCE(created_at,'') DESC LIMIT 5""",
+            (uid,),
+        ).fetchall()
+        return {
+            "total": total,
+            "pending": pending,
+            "rewarded": rewarded,
+            "qualified_no_reward": qualified_no_reward,
+            "reward_xu": reward_xu,
+            "recent": recent,
+        }
+    finally:
+        if close_conn:
+            conn.close()
+
+def register_referral(referred_user_id, referrer_user_id, user_existed_before: bool = False) -> dict:
+    result = {"registered": False, "reason": "", "referrer_user_id": str(referrer_user_id or "")}
+    if not str(referrer_user_id or "").isdigit():
+        result["reason"] = "invalid_referrer"
+        return result
+    if str(referred_user_id) == str(referrer_user_id):
+        result["reason"] = "self_ref"
+        return result
+    if user_existed_before:
+        result["reason"] = "existing_user"
+        return result
     get_user(referrer_user_id)
     get_user(referred_user_id)
     conn = db_connect()
     c = conn.cursor()
-    c.execute(
-        "INSERT OR IGNORE INTO referrals (referred_user_id, referrer_user_id, bonus_paid, created_at) VALUES (?,?,0,?)",
-        (str(referred_user_id), str(referrer_user_id), now_text())
-    )
-    inserted = c.rowcount > 0
-    conn.commit()
-    conn.close()
-    return inserted
+    try:
+        if user_has_successful_deposit_conn(conn, referred_user_id):
+            result["reason"] = "already_deposited"
+            return result
+        existing = c.execute(
+            "SELECT referrer_user_id FROM referrals WHERE referred_user_id=?",
+            (str(referred_user_id),),
+        ).fetchone()
+        if existing:
+            result["reason"] = "existing_referral"
+            result["referrer_user_id"] = str(existing[0] or "")
+            return result
+        c.execute(
+            """INSERT OR IGNORE INTO referrals
+            (referred_user_id, referrer_user_id, ref_code, status, first_start_at, bonus_paid, created_at, note)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                str(referred_user_id),
+                str(referrer_user_id),
+                f"ref_{referrer_user_id}",
+                "pending",
+                now_text(),
+                0,
+                now_text(),
+                "Registered from /start referral link",
+            )
+        )
+        inserted = c.rowcount > 0
+        if inserted:
+            c.execute(
+                "UPDATE users SET referred_by=? WHERE user_id=? AND COALESCE(referred_by,'')=''",
+                (str(referrer_user_id), str(referred_user_id)),
+            )
+            result["registered"] = True
+            result["reason"] = "registered"
+        else:
+            result["reason"] = "insert_ignored"
+        conn.commit()
+        return result
+    finally:
+        conn.close()
 
-def award_referral_bonus_if_needed(conn, referred_user_id) -> int:
+def award_referral_bonus_if_needed(conn, referred_user_id, order_code="", amount_vnd=0, base_xu=0, is_first_deposit=False) -> dict:
+    empty = {
+        "status": "none",
+        "reward_xu": 0,
+        "referrer_user_id": "",
+        "tier": "none",
+        "tier_label": "Tân thủ",
+    }
     c = conn.cursor()
     c.execute(
-        "SELECT referrer_user_id FROM referrals WHERE referred_user_id=? AND bonus_paid=0",
+        """SELECT referrer_user_id, COALESCE(status,'pending'), COALESCE(bonus_paid,0)
+        FROM referrals WHERE referred_user_id=?""",
         (str(referred_user_id),)
     )
     row = c.fetchone()
     if not row:
-        return 0
-    referrer_id = row[0]
-    c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (REFERRAL_BONUS_XU, str(referrer_id)))
-    c.execute("UPDATE referrals SET bonus_paid=1 WHERE referred_user_id=?", (str(referred_user_id),))
-    record_credit_event(conn, referrer_id, REFERRAL_BONUS_XU, "referral_bonus", referred_user_id, "Thưởng giới thiệu khách nạp lần đầu")
-    return REFERRAL_BONUS_XU
+        return empty
+    referrer_id, status, bonus_paid = row
+    result = dict(empty)
+    result["referrer_user_id"] = str(referrer_id or "")
+    if not referrer_id or str(referrer_id) == str(referred_user_id):
+        c.execute(
+            "UPDATE referrals SET status='rejected', note=? WHERE referred_user_id=? AND COALESCE(status,'pending')='pending'",
+            ("Rejected self-ref/invalid referrer", str(referred_user_id)),
+        )
+        result["status"] = "rejected"
+        return result
+    if int(bonus_paid or 0) == 1 or str(status) == "rewarded":
+        result["status"] = "duplicate"
+        return result
+    if not is_first_deposit:
+        c.execute(
+            """UPDATE referrals SET status='rejected', note=?
+            WHERE referred_user_id=? AND COALESCE(status,'pending')='pending'""",
+            ("No reward because this was not the first successful deposit", str(referred_user_id)),
+        )
+        result["status"] = "rejected"
+        return result
+
+    c.execute(
+        "INSERT OR IGNORE INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
+        (str(referrer_id), "Referral user", 0, 0, now_text(), 0),
+    )
+    profile = get_member_profile(referrer_id, conn=conn)
+    tier = profile.get("tier") or "none"
+    reward_xu = member_referral_reward(int(base_xu or 0), tier)
+    final_status = "rewarded" if reward_xu > 0 else "qualified_no_reward"
+    if reward_xu > 0:
+        c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (int(reward_xu), str(referrer_id)))
+        record_credit_event(
+            conn,
+            referrer_id,
+            reward_xu,
+            "referral_reward",
+            order_code or referred_user_id,
+            "Thưởng giới thiệu khách nạp lần đầu",
+        )
+    record_usage_event_conn(
+        conn,
+        referrer_id,
+        event_type="referral_reward",
+        tool_name="referral",
+        command="/start ref",
+        status=final_status,
+        xu_delta=int(reward_xu or 0),
+        amount_vnd=int(amount_vnd or 0),
+        provider="internal",
+        detail=f"referred={referred_user_id}; order={order_code}; tier={tier}; base_xu={int(base_xu or 0)}",
+    )
+    c.execute(
+        """UPDATE referrals
+        SET status=?, bonus_paid=?, first_deposit_order_id=?, first_deposit_amount_vnd=?,
+            first_deposit_base_xu=?, reward_xu=?, rewarded_at=?, note=?
+        WHERE referred_user_id=?""",
+        (
+            final_status,
+            1 if reward_xu > 0 else 0,
+            str(order_code or ""),
+            int(amount_vnd or 0),
+            int(base_xu or 0),
+            int(reward_xu or 0),
+            now_text(),
+            f"Referral reward policy tier={tier}",
+            str(referred_user_id),
+        ),
+    )
+    record_audit(
+        conn,
+        "system",
+        "system",
+        "referral.reward_evaluated",
+        "referral",
+        str(referred_user_id),
+        before={"status": status, "bonus_paid": bonus_paid},
+        after={"status": final_status, "referrer_user_id": str(referrer_id), "reward_xu": int(reward_xu or 0), "tier": tier},
+        note="Referral evaluated after first successful deposit",
+    )
+    result.update({
+        "status": final_status,
+        "reward_xu": int(reward_xu or 0),
+        "tier": tier,
+        "tier_label": profile.get("tier_label") or member_tier_label(tier),
+        "referrer_user_id": str(referrer_id),
+    })
+    return result
 
 def normalize_promo_code(code: str) -> str:
     return re.sub(r"[^A-Z0-9_-]", "", str(code or "").strip().upper())[:32]
@@ -20698,8 +21147,10 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             conn.rollback()
             return False, "duplicate", info
 
-        c.execute("SELECT user_id FROM users WHERE user_id=?", (str(target_id),))
-        if not c.fetchone():
+        c.execute("SELECT COALESCE(has_deposited,0) FROM users WHERE user_id=?", (str(target_id),))
+        user_deposit_row = c.fetchone()
+        is_first_deposit = not (user_deposit_row and int(user_deposit_row[0] or 0) > 0)
+        if not user_deposit_row:
             c.execute(
                 """INSERT OR IGNORE INTO trial_grants (user_id, granted_xu, granted_at, username, note)
                 VALUES (?,?,?,?,?)""",
@@ -20707,14 +21158,14 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             )
             c.execute(
                 "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent, has_deposited) VALUES (?,?,?,?,?,?,?)",
-                (str(target_id), "PayOS user", 0, 0, now_text(), 0, 1)
+                (str(target_id), "PayOS user", 0, 0, now_text(), 0, 0)
             )
 
         launch_bonus = redeem_launch_bonus_for_order(conn, target_id, order_code, amount_vnd)
         total_credit = base_xu + launch_bonus
         c.execute(
-            "UPDATE users SET credits = credits + ?, has_deposited=1 WHERE user_id=?",
-            (int(total_credit), str(target_id))
+            "UPDATE users SET credits = credits + ?, has_deposited=1, total_paid_vnd = COALESCE(total_paid_vnd,0) + ? WHERE user_id=?",
+            (int(total_credit), int(amount_vnd or 0), str(target_id))
         )
         c.execute(
             "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
@@ -20742,14 +21193,22 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             provider="payos",
             detail=f"order={order_code}; promo={promo_result.get('code') or ''}",
         )
-        referral_bonus = award_referral_bonus_if_needed(conn, target_id)
+        referral_result = award_referral_bonus_if_needed(
+            conn,
+            target_id,
+            order_code=str(order_code),
+            amount_vnd=int(amount_vnd or 0),
+            base_xu=int(base_xu or 0),
+            is_first_deposit=is_first_deposit,
+        )
         info["promo_bonus"] = promo_bonus
         info["promo_code"] = promo_result.get("code") or ""
         info["promo_status"] = promo_result.get("status") or ""
         info["launch_bonus"] = launch_bonus
         info["base_xu"] = base_xu
         info["total_credit_without_promo"] = total_credit
-        info["referral_bonus"] = referral_bonus
+        info["referral_bonus"] = int(referral_result.get("reward_xu") or 0)
+        info["referral_result"] = referral_result
         record_audit(
             conn,
             "payos",
@@ -23658,9 +24117,11 @@ def customer_start_surface_audit_data():
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
-    get_user(update.effective_user.id, update.effective_user.first_name)
+    uid = update.effective_user.id
+    user_existed_before = user_exists(uid)
+    get_user(uid, update.effective_user.first_name)
     record_usage_event(
-        update.effective_user.id,
+        uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
         event_type="start",
         tool_name="core",
@@ -23669,13 +24130,23 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if context.args and context.args[0].startswith("ref_"):
         referrer = context.args[0].replace("ref_", "", 1)
-        if register_referral(update.effective_user.id, referrer):
+        ref_result = register_referral(uid, referrer, user_existed_before=user_existed_before)
+        if ref_result.get("registered"):
             await update.message.reply_text(
-                f"🎁 Đã ghi nhận mã giới thiệu. Người giới thiệu sẽ nhận {REFERRAL_BONUS_XU} Xu khi bạn nạp lần đầu."
+                "🎁 Đã ghi nhận mã giới thiệu.\n"
+                "Người giới thiệu chỉ nhận Xu thưởng khi bạn nạp Xu lần đầu thành công."
             )
-    user_is_admin = is_admin_user(update.effective_user.id)
+        elif ref_result.get("reason") == "self_ref":
+            await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
+    user_is_admin = is_admin_user(uid)
+    member_profile = get_member_profile(uid)
+    member_line = (
+        f"\n\n👑 Thành viên: <b>{html.escape(member_profile['tier_label'])}</b>\n"
+        "🎁 Giới thiệu bạn bè: <code>/referral</code>\n"
+        "📋 Quyền lợi thành viên: <code>/vip_policy</code>"
+    )
     await update.message.reply_text(
-        build_start_message_text(update.effective_user.id) + mode_start_notice(update.effective_user.id),
+        build_start_message_text(uid) + mode_start_notice(uid) + member_line,
         parse_mode="HTML",
         reply_markup=main_reply_keyboard(),
     )
@@ -23696,7 +24167,8 @@ def help_text_for_user(user_id) -> str:
         "🎁 Tài khoản mới nhận <b>200 Xu trải nghiệm</b>, đủ để thử 1 lượt <code>/film</code> Basic.\n"
         "Mỗi ID Telegram chỉ nhận 200 Xu trải nghiệm một lần. Xóa chat/start lại không cấp lại 200 Xu.\n\n"
         "<b>1. Tài khoản & Xu dịch vụ</b>\n"
-        "• <code>/profile</code> — xem số dư, VIP, referral\n"
+        "• <code>/profile</code> — xem số dư, hạng thành viên, referral\n"
+        "• <code>/member</code>, <code>/vip_policy</code> — xem quyền lợi thành viên\n"
         "• <code>/trial_status</code> — kiểm tra trạng thái 200 Xu trải nghiệm\n"
         "• <code>/huongdan</code> hoặc <code>/guide</code> — xem hướng dẫn sử dụng chi tiết\n"
         "• <code>/legal</code> — xem điều khoản/pháp lý đầy đủ\n"
@@ -23704,7 +24176,7 @@ def help_text_for_user(user_id) -> str:
         "• <code>/khuyenmai</code> hoặc <code>/uudai</code> — xem ưu đãi nên dùng\n"
         "• <code>/promo &lt;mã&gt;</code> hoặc <code>/magiamgia &lt;mã&gt;</code> — lưu mã ưu đãi cho lần nạp tiếp theo\n"
         "• <code>/thucong</code> — gửi bill thủ công khi QR lỗi\n"
-        "• <code>/ref</code> hoặc <code>/invite</code> — lấy link giới thiệu\n\n"
+        "• <code>/referral</code> hoặc <code>/invite</code> — lấy link giới thiệu\n\n"
         "<b>2. Công cụ AI</b>\n"
         "• Chat AI: gửi text trực tiếp\n"
         "• Đọc voice: nhập <code>Đọc voice: nội dung</code>\n"
@@ -25202,6 +25674,30 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
             (start_at, end_at),
             0,
         ) or 0)
+        ref_starts = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM referrals WHERE created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        ref_qualified = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM referrals WHERE status IN ('rewarded','qualified_no_reward') AND rewarded_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        ref_rewards_paid = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM referrals WHERE status='rewarded' AND rewarded_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        ref_xu_rewarded = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(reward_xu),0) FROM referrals WHERE status='rewarded' AND rewarded_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
         provider_errors = int(sql_scalar(
             conn,
             "SELECT COUNT(*) FROM api_debug_events WHERE UPPER(status) NOT IN ('PASS','OK','SUCCESS') AND created_at BETWEEN ? AND ?",
@@ -25285,6 +25781,10 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
             "growth": {
                 "trial_grants": trial_grants,
                 "promo_events": promo_events,
+                "ref_starts": ref_starts,
+                "ref_qualified": ref_qualified,
+                "ref_rewards_paid": ref_rewards_paid,
+                "ref_xu_rewarded": ref_xu_rewarded,
             },
         }
     finally:
@@ -25339,6 +25839,12 @@ def format_admin_report(payload: dict) -> str:
         "<b>Trial / Promo</b>",
         f"• Trial đã cấp: <b>{growth['trial_grants']}</b>",
         f"• Promo/Gift/Launch events: <b>{growth['promo_events']}</b>",
+        "",
+        "<b>Referral</b>",
+        f"• Ref starts: <b>{growth.get('ref_starts', 0)}</b>",
+        f"• Qualified first deposits: <b>{growth.get('ref_qualified', 0)}</b>",
+        f"• Referral rewards paid: <b>{growth.get('ref_rewards_paid', 0)}</b>",
+        f"• Referral Xu rewarded: <b>{xu_text(growth.get('ref_xu_rewarded', 0))}</b>",
         "",
         "<b>Provider</b>",
         f"• Provider error/debug fail: <b>{providers['errors']}</b>",
@@ -25672,6 +26178,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• /khuyenmai: <code>{'available' if commands.get('promo_guide') else 'missing'}</code>",
         f"• /promo_seed_policy: <code>{'available' if commands.get('promo_seed_policy') else 'missing'}</code>",
         f"• /promo_seed_beta: <code>{'available' if commands.get('promo_seed_beta') else 'missing'}</code>",
+        "• /member /referral /vip_policy: <code>available</code>",
         "",
         f"<b>Status:</b> <code>{data['status']}</code>",
         "",
@@ -27256,6 +27763,14 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Launch Bonus không phải promo code. Mỗi order chỉ có 1 promo code, nhưng Launch Bonus có thể cộng cùng promo nếu đủ điều kiện.",
         "",
+        "👑 <b>Thành viên & giới thiệu:</b>",
+        "• Cấp thành viên tính theo tổng nạp thành công.",
+        "• Cấp càng cao, thưởng giới thiệu và quyền lợi càng tốt.",
+        "• Referral chỉ thưởng khi người được mời nạp lần đầu thành công.",
+        "• Tất cả ưu đãi là cộng thêm Xu dịch vụ, không phải chiết khấu tiền/rút tiền.",
+        "• Xem chi tiết: <code>/vip_policy</code>",
+        "• Link giới thiệu của bạn: <code>/referral</code>",
+        "",
         "Giá đã bao gồm chi phí AI, server, xử lý lỗi và vận hành hệ thống. Admin có thể tạo khuyến mãi theo từng thời điểm.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -27889,23 +28404,25 @@ async def cmd_telegram_takeover(update: Update, context: ContextTypes.DEFAULT_TY
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     credits, total_spent, is_vip = get_user(user_id, update.effective_user.first_name)
+    member = get_member_profile(user_id)
+    ref_stats = referral_stats_for_user(user_id)
     if is_admin_user(user_id):
-        tier = "👑 ADMIN (Miễn phí 100%)"
-    elif is_vip == 1:
-        tier = "💎 VIP (Miễn phí 100%)"
-    elif total_spent >= 20000:
-        tier = "🥇 VÀNG (Giảm 20%)"
-    elif total_spent >= 5000:
-        tier = "🥈 BẠC (Giảm 10%)"
+        tier = "👑 ADMIN"
     else:
-        tier = "🥉 Tiêu Chuẩn"
+        tier = member["tier_label"]
     credit_display = "Vô Hạn (∞)" if is_admin_user(user_id) or is_vip else f"{credits} Xu dịch vụ"
+    ref_link = referral_link_for_user(user_id)
     msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{user_id}</code>\n"
         f"• Hạng: <b>{tier}</b>\n"
         f"• Số dư: <b>{credit_display}</b>\n"
-        f"• Tổng Xu dịch vụ đã dùng/nạp: {total_spent} Xu\n\n"
+        f"• Tổng nạp thành công: <b>{vnd_text(member['total_paid_vnd'])}</b>\n"
+        f"• Tổng Xu dịch vụ đã dùng: <b>{total_spent} Xu</b>\n"
+        f"• Referral pending/rewarded: <b>{ref_stats['pending']}/{ref_stats['rewarded']}</b>\n"
+        f"• Xu referral đã nhận: <b>{ref_stats['reward_xu']} Xu</b>\n"
+        f"• Link giới thiệu: <code>{html.escape(ref_link)}</code>\n\n"
+        f"👉 /member để xem quyền lợi đầy đủ.\n"
         f"👉 /naptien để mua/nạp thêm Xu dịch vụ."
     )
     await update.message.reply_text(msg, parse_mode="HTML")
@@ -40097,36 +40614,220 @@ async def handle_video_job_callback(update: Update, context: ContextTypes.DEFAUL
         update_video_job_status(job_id, "cancelled")
         return await query.edit_message_text(f"❌ Đã hủy VIDEO JOB #{job_id}")
 
+def member_referral_policy_text(profile: dict) -> str:
+    percent = int(profile.get("ref_percent") or 0)
+    cap = int(profile.get("ref_cap") or 0)
+    if percent <= 0 or cap <= 0:
+        return "Tân thủ: chưa có thưởng Xu trong MVP, hệ thống chỉ ghi nhận referral."
+    return f"{percent}% Xu gốc gói nạp đầu tiên, tối đa {cap} Xu / khách."
+
 async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     bot_name = context.bot.username or BOT_USERNAME
-    link = f"https://t.me/{bot_name}?start=ref_{uid}"
-    conn = db_connect()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=?", (str(uid),))
-    total_count = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND bonus_paid=1", (str(uid),))
-    paid_count = c.fetchone()[0]
-    c.execute(
-        "SELECT COALESCE(SUM(delta),0) FROM credit_events WHERE user_id=? AND event_type='referral_bonus'",
-        (str(uid),)
-    )
-    total_bonus = c.fetchone()[0] or 0
-    conn.close()
+    link = referral_link_for_user(uid, bot_name)
+    profile = get_member_profile(uid)
+    stats = referral_stats_for_user(uid)
     await update.message.reply_text(
-        f"🎁 <b>GIỚI THIỆU BẠN BÈ — NHẬN XU THƯỞNG</b>\n\n"
-        f"Chia sẻ link của bạn cho bạn bè:\n"
-        f"<code>{link}</code>\n\n"
-        f"Khi bạn bè <b>nạp tiền lần đầu</b>, bạn nhận ngay <b>{REFERRAL_BONUS_XU} Xu</b> thưởng!\n\n"
-        f"📊 <b>Thống kê của bạn:</b>\n"
-        f"• Đã mời: <b>{total_count}</b> người\n"
-        f"• Đã nạp tiền: <b>{paid_count}</b> người\n"
-        f"• Tổng Xu thưởng đã nhận: <b>{total_bonus} Xu</b>",
+        "🎁 <b>GIỚI THIỆU BẠN BÈ TOAN AAS</b>\n\n"
+        "Link giới thiệu của bạn:\n"
+        f"<code>{html.escape(link)}</code>\n\n"
+        "<b>Cách nhận thưởng:</b>\n"
+        "• Bạn bè phải là tài khoản mới.\n"
+        "• Bạn bè cần nạp Xu lần đầu thành công.\n"
+        "• Bạn nhận Xu thưởng theo cấp thành viên của bạn.\n"
+        "• Mỗi người được mời chỉ tạo thưởng một lần.\n"
+        "• Không thưởng tài khoản ảo/spam/tự mời.\n\n"
+        f"👑 Cấp hiện tại: <b>{html.escape(profile['tier_label'])}</b>\n"
+        f"🎯 Tỷ lệ thưởng: <b>{member_referral_policy_text(profile)}</b>\n\n"
+        "📊 <b>Thống kê nhanh:</b>\n"
+        f"• Đã bấm link: <b>{stats['total']}</b>\n"
+        f"• Pending: <b>{stats['pending']}</b>\n"
+        f"• Đã thưởng: <b>{stats['rewarded']}</b>\n"
+        f"• Tổng Xu thưởng: <b>{stats['reward_xu']} Xu</b>\n\n"
+        "Xem chi tiết: <code>/ref_stats</code>",
         parse_mode="HTML"
     )
 
 async def cmd_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_ref(update, context)
+
+async def cmd_ref_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    bot_name = context.bot.username or BOT_USERNAME
+    await update.message.reply_text(
+        f"🎁 Link giới thiệu của bạn:\n<code>{html.escape(referral_link_for_user(uid, bot_name))}</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_ref_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    stats = referral_stats_for_user(uid)
+    lines = [
+        "📊 <b>THỐNG KÊ GIỚI THIỆU</b>",
+        "",
+        f"• Đã bấm link: <b>{stats['total']}</b>",
+        f"• Pending: <b>{stats['pending']}</b>",
+        f"• Đã nạp lần đầu và có thưởng: <b>{stats['rewarded']}</b>",
+        f"• Đủ điều kiện nhưng hạng chưa có thưởng: <b>{stats['qualified_no_reward']}</b>",
+        f"• Tổng Xu thưởng đã nhận: <b>{stats['reward_xu']} Xu</b>",
+    ]
+    if stats["recent"]:
+        lines.extend(["", "<b>5 referral gần nhất</b>"])
+        for referred_id, status, reward_xu, created_at in stats["recent"]:
+            safe_referred = str(referred_id or "")
+            masked = safe_referred[:4] + "..." + safe_referred[-3:] if len(safe_referred) > 7 else safe_referred
+            lines.append(f"• <code>{html.escape(masked)}</code> | {html.escape(str(status))} | +{int(reward_xu or 0)} Xu | {html.escape(str(created_at or '-')[:16])}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    profile = get_member_profile(uid)
+    link = referral_link_for_user(uid, context.bot.username or BOT_USERNAME)
+    next_line = "Bạn đang ở cấp cao nhất." if not profile["next_tier"] else (
+        f"Cấp tiếp theo: <b>{html.escape(profile['next_tier_label'])}</b> — còn cần <b>{vnd_text(profile['amount_to_next'])}</b>."
+    )
+    benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(profile["tier"]))
+    text = (
+        "👑 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
+        f"• Cấp hiện tại: <b>{html.escape(profile['tier_label'])}</b>\n"
+        f"• Tổng nạp thành công: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
+        f"• {next_line}\n\n"
+        "<b>Quyền lợi hiện tại</b>\n"
+        f"{benefits}\n\n"
+        "<b>Thưởng giới thiệu hiện tại</b>\n"
+        f"• {html.escape(member_referral_policy_text(profile))}\n\n"
+        "Link giới thiệu:\n"
+        f"<code>{html.escape(link)}</code>\n\n"
+        "Xem thống kê: <code>/ref_stats</code>\n"
+        "Bảng quyền lợi: <code>/vip_policy</code>"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lines = [
+        "👑 <b>CHÍNH SÁCH THÀNH VIÊN TOAN AAS</b>",
+        "",
+        "<b>Bạc — từ 100.000đ</b>",
+        "• Referral 3%, cap 100 Xu",
+        "• Hỗ trợ thành viên",
+        "• Ưu đãi cơ bản",
+        "",
+        "<b>Vàng — từ 1.000.000đ</b>",
+        "• Referral 6%, cap 150 Xu",
+        "• Ưu tiên hỗ trợ hơn Bạc",
+        "• Giảm tối đa 3% phí tool đủ điều kiện",
+        "",
+        "<b>Bạch Kim — từ 10.000.000đ</b>",
+        "• Referral 8%, cap 200 Xu",
+        "• Ưu tiên hỗ trợ cao",
+        "• Beta tools khi phù hợp",
+        "• Giảm tối đa 5%",
+        "",
+        "<b>Kim Cương — từ 50.000.000đ</b>",
+        "• Referral 10%, cap 250 Xu",
+        "• Ưu tiên hỗ trợ rất cao",
+        "• Quota test tool mới khi phù hợp",
+        "• Giảm tối đa 8%",
+        "",
+        "<b>VIP — từ 100.000.000đ hoặc admin duyệt</b>",
+        "• Referral 12%, cap 300 Xu",
+        "• Ưu tiên hỗ trợ cao nhất",
+        "• Cấu hình/quy trình riêng khi phù hợp",
+        "• Giảm tối đa 10%",
+        "",
+        "<b>Lưu ý pháp lý</b>",
+        "• Tất cả ưu đãi là Xu dịch vụ nội bộ.",
+        "• Không rút tiền, không chuyển nhượng, không quy đổi ngược thành tiền.",
+        "• Referral chỉ thưởng sau khi người được mời nạp lần đầu thành công.",
+        "• TOAN AAS có quyền từ chối thưởng nếu phát hiện spam/tài khoản ảo/gian lận.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+        tier = normalize_member_tier(context.args[1])
+        if tier not in MEMBER_TIER_ORDER:
+            raise ValueError("invalid_tier")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: /set_vip <USER_ID> <none|bac|vang|bach_kim|kim_cuong|vip>")
+    get_user(target_id)
+    conn = db_connect()
+    try:
+        before = get_member_profile(target_id, conn=conn)
+        conn.execute(
+            """INSERT OR REPLACE INTO member_tier_overrides (user_id, tier, reason, updated_at)
+            VALUES (?,?,?,?)""",
+            (str(target_id), tier, f"Admin override by {update.effective_user.id}", now_text()),
+        )
+        conn.execute("UPDATE users SET vip_tier_override=? WHERE user_id=?", (tier, str(target_id)))
+        record_audit(
+            conn,
+            update.effective_user.id,
+            "admin",
+            "member.tier_override_set",
+            "user",
+            str(target_id),
+            before={"tier": before.get("tier")},
+            after={"tier": tier},
+            note="Admin set member tier override",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    await update.message.reply_text(f"✅ Đã set hạng <b>{html.escape(member_tier_label(tier))}</b> cho ID <code>{html.escape(str(target_id))}</code>.", parse_mode="HTML")
+
+async def cmd_clear_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: /clear_vip <USER_ID>")
+    conn = db_connect()
+    try:
+        before = get_member_profile(target_id, conn=conn)
+        conn.execute("DELETE FROM member_tier_overrides WHERE user_id=?", (str(target_id),))
+        conn.execute("UPDATE users SET vip_tier_override='' WHERE user_id=?", (str(target_id),))
+        record_audit(
+            conn,
+            update.effective_user.id,
+            "admin",
+            "member.tier_override_cleared",
+            "user",
+            str(target_id),
+            before={"tier": before.get("tier")},
+            after={"tier": member_tier_by_total_paid(member_total_paid_vnd(target_id, conn=conn))},
+            note="Admin cleared member tier override",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    await update.message.reply_text(f"✅ Đã xóa override hạng cho ID <code>{html.escape(str(target_id))}</code>.", parse_mode="HTML")
+
+async def cmd_ref_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: /ref_admin <USER_ID>")
+    profile = get_member_profile(target_id)
+    stats = referral_stats_for_user(target_id)
+    await update.message.reply_text(
+        "🧾 <b>REFERRAL ADMIN VIEW</b>\n\n"
+        f"• User: <code>{html.escape(str(target_id))}</code>\n"
+        f"• Tier: <b>{html.escape(profile['tier_label'])}</b>\n"
+        f"• Total paid: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
+        f"• Ref total: <b>{stats['total']}</b>\n"
+        f"• Pending: <b>{stats['pending']}</b>\n"
+        f"• Rewarded: <b>{stats['rewarded']}</b>\n"
+        f"• Qualified no reward: <b>{stats['qualified_no_reward']}</b>\n"
+        f"• Reward Xu: <b>{stats['reward_xu']} Xu</b>",
+        parse_mode="HTML",
+    )
 
 async def cmd_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     content = " ".join(context.args)
@@ -40203,6 +40904,8 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expected_order_xu = int(pending_order[2] or 0) if pending_order and pending_order[2] else 0
         order_amount = int(pending_order[1] or 0) if pending_order and pending_order[1] else 0
         order_base_xu = package_base_xu(order_amount) if order_amount else 0
+        is_first_deposit = not user_has_successful_deposit_conn(conn, target_id)
+        referral_result = {"reward_xu": 0, "status": "none", "referrer_user_id": ""}
         if pending_order_code:
             c.execute(
                 "SELECT amount, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code=? LIMIT 1",
@@ -40236,7 +40939,21 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             if order_amount and order_base_xu:
                 promo_result = redeem_promo_for_order(conn, target_id, pending_order_code, order_amount, order_base_xu)
-        c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
+        if order_amount:
+            c.execute(
+                "UPDATE users SET has_deposited=1, total_paid_vnd=COALESCE(total_paid_vnd,0)+? WHERE user_id=?",
+                (int(order_amount or 0), str(target_id)),
+            )
+        else:
+            c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
+        referral_result = award_referral_bonus_if_needed(
+            conn,
+            target_id,
+            order_code=pending_order_code or f"manual:{target_id}",
+            amount_vnd=int(order_amount or 0),
+            base_xu=int(order_base_xu or amount or 0),
+            is_first_deposit=is_first_deposit,
+        )
         promo_bonus = int(promo_result.get("bonus_xu") or 0)
         promo_code = promo_result.get("code") or ""
         record_audit(
@@ -40274,6 +40991,28 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         promo_user_line = f"🎁 Mã {html.escape(promo_code)}: +<b>{promo_bonus} Xu</b>.\n" if promo_bonus else ""
         promo_admin_line = f" | Promo {html.escape(promo_code)} +{promo_bonus} Xu" if promo_bonus else ""
+        referral_admin_line = ""
+        if int(referral_result.get("reward_xu") or 0) > 0:
+            referral_admin_line = (
+                f" | Referral {html.escape(str(referral_result.get('referrer_user_id') or ''))} "
+                f"+{int(referral_result.get('reward_xu') or 0)} Xu"
+            )
+            try:
+                referrer_id = str(referral_result.get("referrer_user_id") or "")
+                ref_credits, _, _ = get_user(referrer_id)
+                await context.bot.send_message(
+                    chat_id=referrer_id,
+                    text=(
+                        "🎉 <b>Bạn vừa nhận thưởng giới thiệu TOAN AAS</b>\n\n"
+                        "• Người được mời đã nạp Xu lần đầu thành công.\n"
+                        f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_label') or '')}</b>\n"
+                        f"• Thưởng giới thiệu: +<b>{int(referral_result.get('reward_xu') or 0)} Xu dịch vụ</b>\n"
+                        f"• Số dư mới: <b>{ref_credits} Xu</b>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as notify_error:
+                logger.warning(f"Referral reward notify failed: {notify_error}")
         await context.bot.send_message(
             chat_id=target_id,
             text=(
@@ -40288,6 +41027,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"✅ Đã duyệt {amount} Xu cho ID: {target_id}"
             f"{promo_admin_line}"
+            f"{referral_admin_line}"
             f"{mismatch_line}",
             parse_mode="HTML",
         )
@@ -40353,6 +41093,21 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ),
                     parse_mode="HTML"
                 )
+                referral_result = info.get("referral_result") or {}
+                if int(referral_result.get("reward_xu") or 0) > 0:
+                    referrer_id = str(referral_result.get("referrer_user_id") or "")
+                    ref_credits, _, _ = get_user(referrer_id)
+                    await context.bot.send_message(
+                        chat_id=referrer_id,
+                        text=(
+                            "🎉 <b>Bạn vừa nhận thưởng giới thiệu TOAN AAS</b>\n\n"
+                            "• Người được mời đã nạp Xu lần đầu thành công.\n"
+                            f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_label') or '')}</b>\n"
+                            f"• Thưởng giới thiệu: +<b>{int(referral_result.get('reward_xu') or 0)} Xu dịch vụ</b>\n"
+                            f"• Số dư mới: <b>{ref_credits} Xu</b>"
+                        ),
+                        parse_mode="HTML",
+                    )
             return await update.message.reply_text(f"✅ Check PayOS: {desc} | status={status}")
         await update.message.reply_text(f"ℹ️ PayOS trả về status=<b>{status or 'UNKNOWN'}</b> cho đơn <code>{order_code}</code>.", parse_mode="HTML")
     except Exception as e:
@@ -40791,7 +41546,7 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     revenue_month_vnd, xu_sold_month = c.fetchone()
     c.execute("SELECT COALESCE(SUM(-delta),0) FROM credit_events WHERE delta < 0 AND created_at LIKE ?", (f"{month_prefix}%",))
     xu_spent_month = c.fetchone()[0] or 0
-    c.execute("SELECT COUNT(*), COALESCE(SUM(delta),0) FROM credit_events WHERE event_type='referral_bonus'")
+    c.execute("SELECT COUNT(*), COALESCE(SUM(delta),0) FROM credit_events WHERE event_type='referral_reward'")
     referral_rewards, referral_bonus_total = c.fetchone()
     c.execute("SELECT user_id, username, credits, total_spent, is_vip FROM users ORDER BY CAST(credits AS INTEGER) DESC LIMIT 8")
     top_users = c.fetchall()
@@ -41420,6 +42175,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("payos_signature_debug", cmd_payos_signature_debug))
     tg_app.add_handler(CommandHandler("payos_official_debug", cmd_payos_official_debug))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
+    tg_app.add_handler(CommandHandler("member",      cmd_member))
+    tg_app.add_handler(CommandHandler("vip",         cmd_member))
+    tg_app.add_handler(CommandHandler("rank",        cmd_member))
+    tg_app.add_handler(CommandHandler("vip_policy",  cmd_vip_policy))
     tg_app.add_handler(CommandHandler("myid",        cmd_myid))
     tg_app.add_handler(CommandHandler("trial_status", cmd_trial_status))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
@@ -41457,6 +42216,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("gift_disable", cmd_gift_disable))
     tg_app.add_handler(CommandHandler("thucong",     cmd_thanhtoan_thucong))
     tg_app.add_handler(CommandHandler("invite",      cmd_invite))
+    tg_app.add_handler(CommandHandler("referral",    cmd_ref))
+    tg_app.add_handler(CommandHandler("ref_link",    cmd_ref_link))
+    tg_app.add_handler(CommandHandler("ref_stats",   cmd_ref_stats))
     tg_app.add_handler(CommandHandler("tools",       cmd_tools))
     tg_app.add_handler(CommandHandler("mmo",         cmd_mmo))
     tg_app.add_handler(CommandHandler("campaign",    admin_internal_command(cmd_campaign)))
@@ -41657,6 +42419,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("dashboard",   cmd_dashboard))
     tg_app.add_handler(CommandHandler("admin",       cmd_dashboard))
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
+    tg_app.add_handler(CommandHandler("set_vip",     cmd_set_vip))
+    tg_app.add_handler(CommandHandler("clear_vip",   cmd_clear_vip))
+    tg_app.add_handler(CommandHandler("ref_admin",   cmd_ref_admin))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
     tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.Document.MP3 | filters.Document.MP4 | filters.Document.WAV, handle_media_cache_only))
@@ -45198,6 +45963,7 @@ async def webhook_payos(request: Request):
     promo_bonus = int(info.get("promo_bonus", 0) or 0)
     promo_code = info.get("promo_code") or ""
     referral_bonus = info.get("referral_bonus", 0)
+    referral_result = info.get("referral_result") or {}
     credits_now, _, _ = get_user(target_id)
     launch_line = f"🎁 Launch Bonus: <b>+{launch_bonus} Xu</b>\n" if launch_bonus else ""
     promo_line = (
@@ -45224,6 +45990,20 @@ async def webhook_payos(request: Request):
                 ),
                 parse_mode="HTML"
             )
+            if int(referral_result.get("reward_xu") or 0) > 0:
+                referrer_id = str(referral_result.get("referrer_user_id") or "")
+                ref_credits, _, _ = get_user(referrer_id)
+                await tg_app.bot.send_message(
+                    chat_id=referrer_id,
+                    text=(
+                        "🎉 <b>Bạn vừa nhận thưởng giới thiệu TOAN AAS</b>\n\n"
+                        "• Người được mời đã nạp Xu lần đầu thành công.\n"
+                        f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_label') or '')}</b>\n"
+                        f"• Thưởng giới thiệu: +<b>{int(referral_result.get('reward_xu') or 0)} Xu dịch vụ</b>\n"
+                        f"• Số dư mới: <b>{ref_credits} Xu</b>"
+                    ),
+                    parse_mode="HTML",
+                )
             await tg_app.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(

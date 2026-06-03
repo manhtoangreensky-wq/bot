@@ -113,6 +113,17 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
 
 ## Current Priority
 
+0. Test VIP/member/referral policy:
+   - `/vip_policy`
+   - `/member`
+   - `/referral`
+   - `/ref_stats`
+   - `/start ref_<admin_or_test_user_id>` with a secondary new Telegram user if available
+   - Approve that user's first bill with `/duyet <USER_ID> <Xu>` and confirm referral reward is based on base Xu only
+   - `/set_vip <USER_ID> vip`
+   - `/clear_vip <USER_ID>`
+   - `/ref_admin <USER_ID>`
+   - `/report_today` must include referral starts, qualified first deposits and Xu rewarded
 0. Test admin reporting and persistent modes:
    - `/admin_dashboard`
    - `/report_today`
