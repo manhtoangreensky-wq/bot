@@ -195,16 +195,17 @@ def detect_public_base_url() -> tuple[str, str]:
             return fallback, "TOAN_AAS_FALLBACK_PUBLIC_URL"
     return "", ""
 
+def parse_id_set(raw: str) -> set[str]:
+    return {x.strip() for x in str(raw or "").replace(";", ",").split(",") if x.strip()}
+
 TELEGRAM_TOKEN      = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
 ADMIN_ID            = _env("ADMIN_ID", "7126457028")
 ADMIN_IDS_RAW       = _env("ADMIN_IDS", ADMIN_ID)
-ADMIN_IDS           = {x.strip() for x in ADMIN_IDS_RAW.replace(";", ",").split(",") if x.strip()}
+ADMIN_IDS           = parse_id_set(ADMIN_IDS_RAW)
 if ADMIN_ID:
     ADMIN_IDS.add(str(ADMIN_ID))
-OWNER_IDS_RAW       = _env("OWNER_IDS", "7817576663")
-OWNER_IDS           = {x.strip() for x in OWNER_IDS_RAW.replace(";", ",").split(",") if x.strip()}
-if not OWNER_IDS:
-    OWNER_IDS = set(ADMIN_IDS)
+OWNER_IDS_RAW       = _env("OWNER_IDS", "")
+OWNER_IDS           = parse_id_set(OWNER_IDS_RAW)
 APP_VERSION         = "TOAN AAS V15.2"
 START_TIME          = time.time()
 APP_BUILD_SHA       = (
@@ -23994,7 +23995,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 def is_admin_user(user_id) -> bool:
     uid = str(user_id)
-    return uid in OWNER_IDS or uid in ADMIN_IDS or uid == str(ADMIN_ID)
+    return uid in OWNER_IDS or uid in ADMIN_IDS
 
 def is_owner_user(user_id) -> bool:
     return str(user_id) in OWNER_IDS
@@ -24004,20 +24005,33 @@ def owner_and_admin_ids() -> list[str]:
     ids.update(str(x) for x in ADMIN_IDS if str(x).strip())
     return sorted(ids)
 
-def effective_admin_role(user_id) -> str:
+def get_system_role(user_id) -> str:
     if is_owner_user(user_id):
         return "owner"
-    if is_admin_user(user_id):
+    if str(user_id) in ADMIN_IDS:
         return "admin"
     return "user"
 
+def effective_admin_role(user_id) -> str:
+    return get_system_role(user_id)
+
 def admin_display_badge(user_id) -> str:
-    role = effective_admin_role(user_id)
+    role = get_system_role(user_id)
     if role == "owner":
         return "👑 OWNER"
     if role == "admin":
-        return "👑 ADMIN"
+        return "🛡 ADMIN"
     return ""
+
+def get_role_badge(user_id) -> str:
+    badge = admin_display_badge(user_id)
+    if badge:
+        return badge
+    try:
+        profile = get_member_profile(user_id)
+        return profile.get("tier_badge") or get_member_badge(profile.get("tier"))
+    except Exception:
+        return get_member_badge("newbie")
 
 def owner_required_text(user_id) -> str:
     return (
@@ -24057,7 +24071,7 @@ async def handle_unknown_or_unmatched_command(update: Update, context: ContextTy
 async def cmd_admin_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     username = update.effective_user.username or ""
-    role = effective_admin_role(uid)
+    role = get_system_role(uid)
     owner_ids_count = len([x for x in OWNER_IDS if str(x).strip()])
     admin_ids_count = len([x for x in ADMIN_IDS if str(x).strip()])
     warnings = []
@@ -24072,7 +24086,7 @@ async def cmd_admin_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Username: <b>{html.escape('@' + username if username else '-')}</b>\n"
         f"• is_owner: <code>{'yes' if is_owner_user(uid) else 'no'}</code>\n"
         f"• is_admin: <code>{'yes' if is_admin_user(uid) else 'no'}</code>\n"
-        f"• Effective role: <b>{html.escape(role)}</b>\n"
+        f"• Effective role: <code>{html.escape(role)}</code>\n"
         f"• Can emergency_lock: <code>{'yes' if is_owner_user(uid) else 'no'}</code>\n"
         f"• Can set_vip: <code>{'yes' if is_admin_user(uid) else 'no'}</code>\n"
         f"• Can approve birthday: <code>{'yes' if is_admin_user(uid) else 'no'}</code>\n\n"
@@ -25639,8 +25653,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif ref_result.get("reason") == "self_ref":
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
     user_is_admin = is_admin_user(uid)
-    member_profile = get_member_profile(uid)
-    member_badge = admin_display_badge(uid) or member_profile.get("tier_badge") or member_profile["tier_label"]
+    member_badge = get_role_badge(uid)
     member_line = (
         f"\n\n🪪 Thành viên: <b>{html.escape(member_badge)}</b>\n"
         "🎁 Giới thiệu bạn bè: <code>/referral</code>\n"
@@ -30592,10 +30605,10 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     modes = ensure_user_modes(uid)
     profile = get_member_profile(uid)
     admin_badge = admin_display_badge(uid)
-    badge = admin_badge or profile.get("tier_badge") or get_member_badge(profile.get("tier"))
+    badge = get_role_badge(uid)
     if admin_badge:
         member_note = (
-            f"👑 Đặc quyền {html.escape(admin_badge)}:\n"
+            f"🛡 Đặc quyền {html.escape(admin_badge)}:\n"
             "• Normal Chat: miễn phí nội bộ\n"
             "• Chat Pro: miễn phí nội bộ\n"
             "• Chat Deep: miễn phí nội bộ admin"
@@ -30934,8 +30947,8 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     member = get_member_profile(user_id)
     ref_stats = referral_stats_for_user(user_id)
     admin_badge = admin_display_badge(user_id)
-    tier = admin_badge or member.get("tier_badge") or member["tier_label"]
-    credit_display = "Vô Hạn (∞)" if admin_badge or is_vip else f"{credits} Xu dịch vụ"
+    tier = get_role_badge(user_id)
+    credit_display = "Vô Hạn (∞)" if admin_badge else f"{credits} Xu dịch vụ"
     ref_link = referral_link_for_user(user_id)
     birthday_status = birthday_gift_status(user_id)
     birthday = birthday_status.get("birthday") or {}
@@ -43254,6 +43267,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     profile = get_member_profile(uid)
     admin_badge = admin_display_badge(uid)
+    current_badge = get_role_badge(uid)
     link = referral_link_for_user(uid, context.bot.username or BOT_USERNAME)
     next_line = "Bạn đang ở cấp cao nhất." if not profile["next_tier"] else (
         f"Cấp tiếp theo: <b>{html.escape(get_member_badge(profile['next_tier']))}</b> — còn cần <b>{vnd_text(profile['amount_to_next'])}</b>."
@@ -43298,7 +43312,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     text = (
         "🪪 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
-        f"• 🪪 Cấp hiện tại: <b>{html.escape(admin_badge or profile.get('tier_badge') or profile['tier_label'])}</b>\n"
+        f"• 🪪 Cấp hiện tại: <b>{html.escape(current_badge)}</b>\n"
         + (f"• {admin_note}\n" if admin_note else "")
         + f"• Tổng nạp thành công: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
         f"• {next_line}\n\n"

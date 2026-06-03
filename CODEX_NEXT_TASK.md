@@ -55,6 +55,14 @@ Do not modify the sections below unless the admin gives a direct request for tha
    - Tested slash commands no longer fall into AI chat.
    - Keep the guard: text starting with `/` must not be sent into AI chat.
 
+7. System role vs member tier
+   - System role and member tier are separated.
+   - OWNER only comes from `OWNER_IDS`.
+   - ADMIN comes from `ADMIN_IDS`.
+   - Member tier `vip` never becomes OWNER.
+   - Balance display such as `Vô hạn` must never be used to infer OWNER.
+   - Keep this separation unchanged.
+
 Operational note:
 
 - Telegram ID `7126457028` is currently admin but not owner.
