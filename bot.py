@@ -787,6 +787,7 @@ def init_db():
         ai_level TEXT DEFAULT 'normal',
         voice_mode TEXT DEFAULT '',
         media_mode TEXT DEFAULT '',
+        translate_mode_target TEXT DEFAULT '',
         updated_at TEXT,
         note TEXT
     )""")
@@ -1367,6 +1368,13 @@ def init_db():
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    for col, col_type in [
+        ("translate_mode_target", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE user_modes ADD COLUMN {col} {col_type}")
         except Exception:
             pass
     for col, col_type in [
@@ -23154,28 +23162,34 @@ def ensure_user_modes(user_id) -> dict:
             ai_level TEXT DEFAULT 'normal',
             voice_mode TEXT DEFAULT '',
             media_mode TEXT DEFAULT '',
+            translate_mode_target TEXT DEFAULT '',
             updated_at TEXT,
             note TEXT
         )""")
+        try:
+            conn.execute("ALTER TABLE user_modes ADD COLUMN translate_mode_target TEXT DEFAULT ''")
+        except Exception:
+            pass
         row = conn.execute(
-            "SELECT chat_mode, ai_level, voice_mode, media_mode, updated_at, note FROM user_modes WHERE user_id=?",
+            "SELECT chat_mode, ai_level, voice_mode, media_mode, COALESCE(translate_mode_target,''), updated_at, note FROM user_modes WHERE user_id=?",
             (uid,),
         ).fetchone()
         if not row:
             conn.execute(
-                "INSERT OR IGNORE INTO user_modes (user_id, chat_mode, ai_level, voice_mode, media_mode, updated_at, note) VALUES (?,?,?,?,?,?,?)",
-                (uid, "normal", "normal", "", "", now_text(), "default"),
+                "INSERT OR IGNORE INTO user_modes (user_id, chat_mode, ai_level, voice_mode, media_mode, translate_mode_target, updated_at, note) VALUES (?,?,?,?,?,?,?,?)",
+                (uid, "normal", "normal", "", "", "", now_text(), "default"),
             )
             conn.commit()
-            row = ("normal", "normal", "", "", now_text(), "default")
+            row = ("normal", "normal", "", "", "", now_text(), "default")
         return {
             "user_id": uid,
             "chat_mode": row[0] or "normal",
             "ai_level": row[1] or "normal",
             "voice_mode": row[2] or "",
             "media_mode": row[3] or "",
-            "updated_at": row[4] or "",
-            "note": row[5] or "",
+            "translate_mode_target": row[4] or "",
+            "updated_at": row[5] or "",
+            "note": row[6] or "",
         }
     finally:
         conn.close()
@@ -23215,6 +23229,82 @@ def set_user_chat_mode(user_id, mode: str, username="", note="") -> tuple[bool, 
         conn.close()
     return True, ensure_user_modes(user_id)
 
+TRANSLATE_LANGUAGE_OPTIONS = {
+    "vi": {"name": "Vietnamese", "deepl": "VI"},
+    "en": {"name": "English", "deepl": "EN-US"},
+    "ja": {"name": "Japanese", "deepl": "JA"},
+    "ko": {"name": "Korean", "deepl": "KO"},
+    "zh": {"name": "Chinese", "deepl": "ZH"},
+}
+
+def normalize_translate_target(value: str) -> str:
+    raw = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "": "vi",
+        "vn": "vi",
+        "vie": "vi",
+        "vietnamese": "vi",
+        "english": "en",
+        "eng": "en",
+        "jp": "ja",
+        "japanese": "ja",
+        "kr": "ko",
+        "korean": "ko",
+        "cn": "zh",
+        "china": "zh",
+        "chinese": "zh",
+        "zh_cn": "zh",
+    }
+    return aliases.get(raw, raw if raw in TRANSLATE_LANGUAGE_OPTIONS else "")
+
+def translate_target_label(target: str) -> str:
+    key = normalize_translate_target(target)
+    return TRANSLATE_LANGUAGE_OPTIONS.get(key, TRANSLATE_LANGUAGE_OPTIONS["vi"])["name"]
+
+def set_user_translate_mode(user_id, target_lang: str, username="", note="") -> tuple[bool, dict]:
+    target = normalize_translate_target(target_lang)
+    if target and target not in TRANSLATE_LANGUAGE_OPTIONS:
+        target = ""
+    current = ensure_user_modes(user_id)
+    changed = (current.get("translate_mode_target") or "") != target
+    if not changed:
+        return False, current
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO user_modes (user_id, chat_mode, ai_level, voice_mode, media_mode, translate_mode_target, updated_at, note)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                translate_mode_target=excluded.translate_mode_target,
+                updated_at=excluded.updated_at,
+                note=excluded.note""",
+            (
+                str(user_id),
+                current.get("chat_mode", "normal"),
+                current.get("ai_level", "normal"),
+                current.get("voice_mode", ""),
+                current.get("media_mode", ""),
+                target,
+                now_text(),
+                note,
+            ),
+        )
+        record_usage_event_conn(
+            conn,
+            user_id,
+            username=username,
+            event_type="translate_mode_enabled" if target else "translate_mode_disabled",
+            tool_name="translation",
+            command="/translate_mode" if target else "/translate_mode_off",
+            status=target or "off",
+            provider="internal",
+            detail=note,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return True, ensure_user_modes(user_id)
+
 def user_mode_label(modes: dict) -> str:
     chat_mode = (modes or {}).get("chat_mode") or "normal"
     if chat_mode == "deep":
@@ -23225,15 +23315,22 @@ def user_mode_label(modes: dict) -> str:
 
 def mode_start_notice(user_id) -> str:
     modes = ensure_user_modes(user_id)
-    if (modes.get("chat_mode") or "normal") == "normal":
+    notices = []
+    if (modes.get("chat_mode") or "normal") != "normal":
+        notices.append(f"bật <b>{html.escape(user_mode_label(modes))}</b>")
+    if modes.get("translate_mode_target"):
+        notices.append(f"bật dịch tự động sang <b>{html.escape(translate_target_label(modes.get('translate_mode_target')))}</b>")
+    if not notices:
         return ""
-    return f"\n\n⚙️ Bạn đang bật <b>{html.escape(user_mode_label(modes))}</b>. Gõ <code>/mode</code> để xem hoặc tắt."
+    return f"\n\n⚙️ Bạn đang {' và '.join(notices)}. Gõ <code>/mode</code> để xem hoặc tắt."
 
 def active_mode_hint(user_id) -> str:
     modes = ensure_user_modes(user_id)
-    if (modes.get("chat_mode") or "normal") == "normal":
-        return ""
-    return f"\n\n⚙️ Bạn đang bật <b>{html.escape(user_mode_label(modes))}</b>. Tác vụ chat sẽ dùng cấu hình này nếu có. Gõ <code>/mode</code> để đổi/tắt."
+    if modes.get("translate_mode_target"):
+        return f"\n\n🌐 Bạn đang bật dịch tự động sang <b>{html.escape(translate_target_label(modes.get('translate_mode_target')))}</b>. Gõ <code>/translate_mode_off</code> để tắt."
+    if (modes.get("chat_mode") or "normal") != "normal":
+        return f"\n\n⚙️ Bạn đang bật <b>{html.escape(user_mode_label(modes))}</b>. Tác vụ chat sẽ dùng cấu hình này nếu có. Gõ <code>/mode</code> để đổi/tắt."
+    return ""
 
 def is_trial_account(user_id) -> bool:
     conn = db_connect()
@@ -23847,7 +23944,8 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 def is_admin_user(user_id) -> bool:
-    return str(user_id) in ADMIN_IDS or str(user_id) == str(ADMIN_ID)
+    uid = str(user_id)
+    return uid in OWNER_IDS or uid in ADMIN_IDS or uid == str(ADMIN_ID)
 
 def is_owner_user(user_id) -> bool:
     return str(user_id) in OWNER_IDS
@@ -23856,6 +23954,79 @@ def owner_and_admin_ids() -> list[str]:
     ids = set(str(x) for x in OWNER_IDS if str(x).strip())
     ids.update(str(x) for x in ADMIN_IDS if str(x).strip())
     return sorted(ids)
+
+def effective_admin_role(user_id) -> str:
+    if is_owner_user(user_id):
+        return "owner"
+    if is_admin_user(user_id):
+        return "admin"
+    return "user"
+
+def admin_display_badge(user_id) -> str:
+    role = effective_admin_role(user_id)
+    if role == "owner":
+        return "👑 OWNER"
+    if role == "admin":
+        return "👑 ADMIN"
+    return ""
+
+def owner_required_text(user_id) -> str:
+    return (
+        "⛔ Lệnh này chỉ dành cho Owner.\n\n"
+        f"ID Telegram hiện tại của bạn: <code>{html.escape(str(user_id))}</code>\n"
+        "Hãy thêm ID này vào <code>OWNER_IDS</code> trên Railway nếu đây là tài khoản chủ.\n"
+        "Gõ <code>/admin_whoami</code> để kiểm tra quyền hiện tại."
+    )
+
+UNKNOWN_COMMAND_SUGGESTIONS = {
+    "birthady": "birthday",
+    "birhday": "birthday",
+    "bithday": "birthday",
+    "birthday": "birthday",
+    "vip": "vip_policy",
+    "member": "member",
+    "profile": "profile",
+    "start": "start",
+    "naptien": "naptien",
+    "nap_tien": "naptien",
+    "pricing": "pricing",
+}
+
+async def handle_unknown_or_unmatched_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+    text = (update.message.text or update.message.caption or "").strip()
+    command = text.split()[0].lstrip("/").split("@", 1)[0].lower() if text else ""
+    suggestion = UNKNOWN_COMMAND_SUGGESTIONS.get(command)
+    extra = f"\nCó phải bạn muốn <code>/{html.escape(suggestion)}</code> không?" if suggestion and suggestion != command else ""
+    await update.message.reply_text(
+        "⚠️ Lệnh chưa được hỗ trợ hoặc sai cú pháp. Gõ <code>/start</code> để xem menu."
+        f"{extra}",
+        parse_mode="HTML",
+    )
+
+async def cmd_admin_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    username = update.effective_user.username or ""
+    role = effective_admin_role(uid)
+    owner_ids_count = len([x for x in OWNER_IDS if str(x).strip()])
+    admin_ids_count = len([x for x in ADMIN_IDS if str(x).strip()])
+    owner_fallback_note = "yes" if not str(OWNER_IDS_RAW or "").strip() else "no"
+    await update.message.reply_text(
+        "🛡 <b>ADMIN DEBUG</b>\n\n"
+        f"• Telegram ID: <code>{html.escape(str(uid))}</code>\n"
+        f"• Username: <b>{html.escape('@' + username if username else '-')}</b>\n"
+        f"• is_owner: <code>{'yes' if is_owner_user(uid) else 'no'}</code>\n"
+        f"• is_admin: <code>{'yes' if is_admin_user(uid) else 'no'}</code>\n"
+        f"• OWNER_IDS loaded: <code>{owner_ids_count}</code>\n"
+        f"• ADMIN_IDS loaded: <code>{admin_ids_count}</code>\n"
+        f"• OWNER fallback to admin: <code>{owner_fallback_note}</code>\n"
+        f"• Effective role: <b>{html.escape(role)}</b>\n"
+        f"• Can emergency_lock: <code>{'yes' if is_owner_user(uid) else 'no'}</code>\n"
+        f"• Can set_vip: <code>{'yes' if is_admin_user(uid) else 'no'}</code>\n"
+        f"• Can approve birthday: <code>{'yes' if is_admin_user(uid) else 'no'}</code>",
+        parse_mode="HTML",
+    )
 
 def get_system_flag(key, default=""):
     try:
@@ -25247,8 +25418,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
     user_is_admin = is_admin_user(uid)
     member_profile = get_member_profile(uid)
+    member_badge = admin_display_badge(uid) or member_profile.get("tier_badge") or member_profile["tier_label"]
     member_line = (
-        f"\n\n🪪 Thành viên: <b>{html.escape(member_profile.get('tier_badge') or member_profile['tier_label'])}</b>\n"
+        f"\n\n🪪 Thành viên: <b>{html.escape(member_badge)}</b>\n"
         "🎁 Giới thiệu bạn bè: <code>/referral</code>\n"
         "🎂 Thêm ngày sinh tại <code>/birthday</code> để nhận quà bí mật theo hạng thành viên.\n"
         "📋 Quyền lợi thành viên: <code>/vip_policy</code>"
@@ -25940,10 +26112,12 @@ def provider_line_status(status: str, detail: str = "") -> str:
     detail = (detail or "").strip()
     return status + (f" — {detail[:180]}" if detail else "")
 
-async def translate_with_deepl(text: str) -> str:
+async def translate_with_deepl(text: str, target_lang: str = "vi") -> str:
     if not DEEPL_API_KEY:
         raise RuntimeError("DEEPL_API_KEY missing")
     endpoint = (DEEPL_API_URL or "https://api-free.deepl.com/v2/translate").strip()
+    target = normalize_translate_target(target_lang)
+    target_code = TRANSLATE_LANGUAGE_OPTIONS.get(target, TRANSLATE_LANGUAGE_OPTIONS["vi"])["deepl"]
     async with httpx.AsyncClient(timeout=30.0) as client:
         res = await client.post(
             endpoint,
@@ -25953,7 +26127,7 @@ async def translate_with_deepl(text: str) -> str:
             },
             json={
                 "text": [text],
-                "target_lang": "VI",
+                "target_lang": target_code,
             },
         )
     if res.status_code != 200:
@@ -25964,11 +26138,12 @@ async def translate_with_deepl(text: str) -> str:
         raise RuntimeError("DeepL empty_response")
     return translated
 
-async def translate_with_gemini(text: str) -> str:
+async def translate_with_gemini(text: str, target_lang: str = "vi") -> str:
     if not gemini_client:
         raise RuntimeError("Gemini missing")
+    label = translate_target_label(target_lang)
     prompt = (
-        "Dịch nội dung sau sang tiếng Việt tự nhiên, rõ nghĩa. "
+        f"Translate the following content to natural {label}. "
         "Chỉ trả bản dịch, không giải thích thêm."
     )
     def run_gemini():
@@ -25983,14 +26158,15 @@ async def translate_with_gemini(text: str) -> str:
         raise RuntimeError("Gemini empty_response")
     return translated
 
-async def translate_with_openai(text: str) -> str:
+async def translate_with_openai(text: str, target_lang: str = "vi") -> str:
     if not openai_client:
         raise RuntimeError("OpenAI missing")
+    label = translate_target_label(target_lang)
     def run_openai():
         return openai_client.chat.completions.create(
             model=OPENAI_TEXT_MODEL,
             messages=[
-                {"role": "system", "content": "Translate the following text to natural Vietnamese. Return only the translation."},
+                {"role": "system", "content": f"Translate the following text to natural {label}. Return only the translation."},
                 {"role": "user", "content": text},
             ],
             max_tokens=800,
@@ -26001,29 +26177,32 @@ async def translate_with_openai(text: str) -> str:
         raise RuntimeError("OpenAI empty_response")
     return translated
 
-async def translate_to_vietnamese(text: str) -> dict:
+async def translate_to_language(text: str, target_lang: str = "vi") -> dict:
+    target = normalize_translate_target(target_lang) or "vi"
     statuses = {"deepl": "MISSING", "gemini": "MISSING", "openai": "MISSING"}
     errors = {}
     if DEEPL_API_KEY:
         try:
-            return {"provider": "deepl", "text": await translate_with_deepl(text), "statuses": {**statuses, "deepl": "PASS"}, "errors": errors}
+            return {"provider": "deepl", "text": await translate_with_deepl(text, target), "target": target, "statuses": {**statuses, "deepl": "PASS"}, "errors": errors}
         except Exception as e:
             statuses["deepl"] = "FAIL"
             errors["deepl"] = provider_error_summary(e)
     if gemini_client:
         try:
-            return {"provider": "gemini", "text": await translate_with_gemini(text), "statuses": {**statuses, "gemini": "PASS"}, "errors": errors}
+            return {"provider": "gemini", "text": await translate_with_gemini(text, target), "target": target, "statuses": {**statuses, "gemini": "PASS"}, "errors": errors}
         except Exception as e:
             statuses["gemini"] = "FAIL"
             errors["gemini"] = provider_error_summary(e)
     if openai_client:
         try:
-            return {"provider": "openai", "text": await translate_with_openai(text), "statuses": {**statuses, "openai": "PASS"}, "errors": errors}
+            return {"provider": "openai", "text": await translate_with_openai(text, target), "target": target, "statuses": {**statuses, "openai": "PASS"}, "errors": errors}
         except Exception as e:
             statuses["openai"] = "FAIL"
             errors["openai"] = provider_error_summary(e)
-            logger.warning("OpenAI translation fallback failed | %s", errors["openai"])
     raise TranslationProviderError(statuses, errors)
+
+async def translate_to_vietnamese(text: str) -> dict:
+    return await translate_to_language(text, "vi")
 
 async def cmd_tool_test_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -26126,6 +26305,93 @@ async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"• Error: <code>{html.escape(error_text[:240])}</code>\n"
             "Không có Xu nào bị trừ cho lần thử này.",
             parse_mode="HTML",
+        )
+
+async def cmd_translate_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name or ""
+    target = normalize_translate_target(context.args[0] if context.args else "vi")
+    if not target:
+        supported = ", ".join(sorted(TRANSLATE_LANGUAGE_OPTIONS.keys()))
+        return await update.message.reply_text(
+            f"⚠️ Ngôn ngữ chưa hỗ trợ. Dùng: <code>/translate_mode vi|en|ja|ko|zh</code>\n"
+            f"Hiện hỗ trợ: <code>{html.escape(supported)}</code>",
+            parse_mode="HTML",
+        )
+    set_user_translate_mode(uid, target, username=username, note=f"User enabled translate mode target={target}")
+    await update.message.reply_text(
+        f"✅ Đã bật chế độ dịch tự động sang <b>{html.escape(translate_target_label(target))}</b>.\n\n"
+        "Từ bây giờ, tin nhắn văn bản thường sẽ được dịch thay vì chat AI.\n"
+        "Tắt bằng <code>/translate_mode_off</code>.",
+        parse_mode="HTML",
+    )
+
+async def cmd_translate_mode_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name or ""
+    changed, _ = set_user_translate_mode(uid, "", username=username, note="User disabled translate mode")
+    msg = "✅ Đã tắt chế độ dịch tự động. Tin nhắn thường sẽ quay về AI chat." if changed else "ℹ️ Chế độ dịch tự động đang tắt sẵn."
+    await update.message.reply_text(msg)
+
+async def cmd_translate_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    modes = ensure_user_modes(uid)
+    target = modes.get("translate_mode_target") or ""
+    await update.message.reply_text(
+        "🌐 <b>TRẠNG THÁI DỊCH TỰ ĐỘNG</b>\n\n"
+        f"• Translate mode: <code>{'on' if target else 'off'}</code>\n"
+        f"• Target: <b>{html.escape(translate_target_label(target)) if target else '-'}</b>\n"
+        f"• DeepL: <code>{'configured' if DEEPL_API_KEY else 'missing'}</code>\n"
+        f"• Gemini: <code>{'configured' if gemini_client else 'missing'}</code>\n"
+        f"• OpenAI: <code>{'configured' if openai_client else 'missing'}</code>\n\n"
+        "Bật: <code>/translate_mode en</code>\n"
+        "Tắt: <code>/translate_mode_off</code>",
+        parse_mode="HTML",
+    )
+
+async def handle_auto_translate_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, target: str):
+    uid = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name or ""
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    try:
+        result = await translate_to_language(text[:1800], target)
+        provider = result.get("provider") or "translation"
+        translated = result.get("text") or ""
+        record_usage_event(
+            uid,
+            username=username,
+            event_type="tool_success",
+            tool_name="auto_translate",
+            command="translate_mode",
+            status=target,
+            provider=provider,
+            detail=f"target={target}",
+        )
+        await update.message.reply_text(
+            f"🌐 <b>Dịch sang {html.escape(translate_target_label(target))}</b>\n\n"
+            f"{html.escape(translated)}\n\n"
+            f"<i>Provider: {html.escape(provider)} | /translate_mode_off để tắt</i>",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        statuses = getattr(e, "statuses", {}) if isinstance(e, TranslationProviderError) else {}
+        errors = getattr(e, "errors", {}) if isinstance(e, TranslationProviderError) else {"error": provider_error_summary(e)}
+        detail = ai_failure_detail(statuses, errors) if statuses else provider_error_summary(e)
+        record_usage_event(
+            uid,
+            username=username,
+            event_type="tool_fail",
+            tool_name="auto_translate",
+            command="translate_mode",
+            status="provider_fail",
+            provider="translation_router",
+            detail=detail,
+        )
+        await update.message.reply_text(
+            "❌ Dịch tự động đang tạm lỗi hoặc hết quota provider.\n"
+            f"• Chi tiết: {html.escape(detail[:240])}\n"
+            "Không có Xu nào bị trừ.\n"
+            "Tắt dịch: /translate_mode_off",
         )
 
 async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -27407,7 +27673,7 @@ async def cmd_emergency_status(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def cmd_emergency_lock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner_user(update.effective_user.id):
-        return await update.message.reply_text("⛔ Chỉ owner được bật emergency lock.")
+        return await update.message.reply_text(owner_required_text(update.effective_user.id), parse_mode="HTML")
     reason = " ".join(context.args or []).strip() or "Owner enabled emergency lock"
     set_system_flags(
         {
@@ -27444,7 +27710,7 @@ async def cmd_emergency_lock(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cmd_emergency_unlock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner_user(update.effective_user.id):
-        return await update.message.reply_text("⛔ Chỉ owner được tắt emergency lock.")
+        return await update.message.reply_text(owner_required_text(update.effective_user.id), parse_mode="HTML")
     note = " ".join(context.args or []).strip() or "Owner disabled emergency lock"
     set_system_flags(
         {
@@ -27478,7 +27744,7 @@ async def cmd_emergency_unlock(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def set_single_flag_command(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, value: str, command: str, title: str, owner_only: bool = False):
     if owner_only and not is_owner_user(update.effective_user.id):
-        return await update.message.reply_text("⛔ Chỉ owner được dùng lệnh này.")
+        return await update.message.reply_text(owner_required_text(update.effective_user.id), parse_mode="HTML")
     if not owner_only and not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     reason = " ".join(context.args or []).strip() or title
@@ -29468,8 +29734,16 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     modes = ensure_user_modes(uid)
     profile = get_member_profile(uid)
-    badge = profile.get("tier_badge") or get_member_badge(profile.get("tier"))
-    if has_free_normal_chat(profile.get("tier")):
+    admin_badge = admin_display_badge(uid)
+    badge = admin_badge or profile.get("tier_badge") or get_member_badge(profile.get("tier"))
+    if admin_badge:
+        member_note = (
+            f"👑 Đặc quyền {html.escape(admin_badge)}:\n"
+            "• Normal Chat: miễn phí nội bộ\n"
+            "• Chat Pro: miễn phí nội bộ\n"
+            "• Chat Deep: miễn phí nội bộ admin"
+        )
+    elif has_free_normal_chat(profile.get("tier")):
         member_note = (
             f"🎁 Đặc quyền {html.escape(badge)}:\n"
             "• Normal Chat: miễn phí\n"
@@ -29486,6 +29760,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• AI level: <code>{html.escape(modes.get('ai_level') or 'normal')}</code>",
         f"• Voice mode: <code>{html.escape(modes.get('voice_mode') or '-')}</code>",
         f"• Media mode: <code>{html.escape(modes.get('media_mode') or '-')}</code>",
+        f"• Translate mode: <code>{html.escape(modes.get('translate_mode_target') or 'off')}</code>",
         f"• Updated: <code>{html.escape(modes.get('updated_at') or '-')}</code>",
         "",
         "<b>Chi phí chat</b>",
@@ -29501,6 +29776,8 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>/chat_pro_off</code> — tắt Chat Pro về normal",
         "• <code>/chat_deep_on</code> — bật Chat Deep persistent",
         "• <code>/chat_deep_off</code> — tắt Chat Deep về normal",
+        "• <code>/translate_mode en</code> — bật dịch tự động",
+        "• <code>/translate_mode_off</code> — tắt dịch tự động",
         "",
         "Mode giữ nguyên cho đến khi bạn đổi/tắt; <code>/start</code> không reset mode.",
     ]
@@ -29566,7 +29843,7 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
         return await update.message.reply_text(chat_pro_usage_text(), parse_mode="HTML")
 
     credits, _, is_vip = get_user(uid, update.effective_user.first_name)
-    is_admin = str(uid) == ADMIN_ID
+    is_admin = is_admin_user(uid)
     base_cost = chat_mode_cost(mode)
     charge = effective_chat_charge(uid, mode, base_cost, is_admin=is_admin, is_legacy_vip=bool(is_vip))
     cost = int(charge["cost"])
@@ -29799,17 +30076,18 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     credits, total_spent, is_vip = get_user(user_id, update.effective_user.first_name)
     member = get_member_profile(user_id)
     ref_stats = referral_stats_for_user(user_id)
-    if is_admin_user(user_id):
-        tier = "👑 ADMIN"
-    else:
-        tier = member.get("tier_badge") or member["tier_label"]
-    credit_display = "Vô Hạn (∞)" if is_admin_user(user_id) or is_vip else f"{credits} Xu dịch vụ"
+    admin_badge = admin_display_badge(user_id)
+    tier = admin_badge or member.get("tier_badge") or member["tier_label"]
+    credit_display = "Vô Hạn (∞)" if admin_badge or is_vip else f"{credits} Xu dịch vụ"
     ref_link = referral_link_for_user(user_id)
     birthday_status = birthday_gift_status(user_id)
     birthday = birthday_status.get("birthday") or {}
     birthday_date = birthday.get("birthday_mmdd") if birthday else "chưa lưu (/birthday)"
     birthday_line = f"{birthday_date}; quà bí mật theo hạng thành viên"
-    chat_privilege = "Free Normal + Pro; Deep vẫn tính Xu" if has_free_normal_chat(member.get("tier")) else "Normal 5 Xu, Pro 10 Xu; lên Platinum để free Normal/Pro"
+    if admin_badge:
+        chat_privilege = "Free Normal Chat, Free Chat Pro, Free Chat Deep nội bộ admin"
+    else:
+        chat_privilege = "Free Normal + Pro; Deep vẫn tính Xu" if has_free_normal_chat(member.get("tier")) else "Normal 5 Xu, Pro 10 Xu; lên Platinum để free Normal/Pro"
     msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{user_id}</code>\n"
@@ -33191,7 +33469,7 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parsed["affiliate"] = affiliate_context
 
     credits, _, is_vip = get_user(uid, update.effective_user.first_name)
-    is_admin = str(uid) == ADMIN_ID
+    is_admin = is_admin_user(uid)
     calculated_cost = calculate_film_cost(parsed.get("episodes", 1), parsed.get("scenes", 5), parsed.get("tier", "basic"))
     cost = 0 if (is_admin or is_vip) else calculated_cost
     charged = False
@@ -38703,7 +38981,7 @@ async def cmd_growth_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     credits, _, is_vip = get_user(uid, update.effective_user.first_name)
-    is_admin = str(uid) == ADMIN_ID
+    is_admin = is_admin_user(uid)
     cost = 0 if (is_admin or is_vip) else GROWTH_AI_COST
     charged = False
     if cost > 0:
@@ -38792,7 +39070,7 @@ async def cmd_campaign_report(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode="HTML",
         )
     credits, _, is_vip = get_user(uid, update.effective_user.first_name)
-    is_admin = str(uid) == ADMIN_ID
+    is_admin = is_admin_user(uid)
     cost = 0 if (is_admin or is_vip) else CAMPAIGN_REPORT_COST
     charged = False
     if cost > 0:
@@ -42028,7 +42306,7 @@ def member_referral_policy_text(profile: dict) -> str:
     cap = int(profile.get("ref_cap") or 0)
     if percent <= 0 or cap <= 0:
         return "Newbie: chưa mở thưởng Xu, hệ thống chỉ ghi nhận referral."
-    return f"{percent}% Xu gốc gói nạp đầu tiên, tối đa {cap} Xu / khách."
+    return f"{percent}% Xu gốc gói nạp đầu tiên, tối đa {cap} Xu cho mỗi khách được giới thiệu nạp lần đầu."
 
 async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -42091,11 +42369,24 @@ async def cmd_ref_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     profile = get_member_profile(uid)
+    admin_badge = admin_display_badge(uid)
     link = referral_link_for_user(uid, context.bot.username or BOT_USERNAME)
     next_line = "Bạn đang ở cấp cao nhất." if not profile["next_tier"] else (
         f"Cấp tiếp theo: <b>{html.escape(get_member_badge(profile['next_tier']))}</b> — còn cần <b>{vnd_text(profile['amount_to_next'])}</b>."
     )
     benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(profile["tier"]))
+    admin_note = ""
+    if admin_badge:
+        admin_note = (
+            f"{html.escape(admin_badge)} — quyền vận hành nội bộ. "
+            "Hạng khách hàng vẫn tính riêng theo tổng nạp nếu cần."
+        )
+        benefits = (
+            "• Free Normal Chat nội bộ\n"
+            "• Free Chat Pro nội bộ\n"
+            "• Free Chat Deep nội bộ admin\n"
+            "• Quyền vận hành/admin tùy theo OWNER_IDS/ADMIN_IDS"
+        )
     promos = get_member_personal_promos(uid, include_used=False)
     promo_line = (
         "\n".join(
@@ -42113,15 +42404,19 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Chưa lưu. Gõ <code>/birthday</code> để thêm ngày sinh.\n"
         "• Quà sinh nhật: <b>quà bí mật theo hạng thành viên</b>"
     )
-    chat_line = (
-        "• Free Normal Chat\n• Free Chat Pro\n• Chat Deep vẫn tính Xu"
-        if has_free_normal_chat(profile["tier"]) else
-        "• Normal Chat: 5 Xu\n• Chat Pro: 10 Xu\n🎯 Lên Platinum để mở Free Normal Chat và Free Chat Pro."
-    )
+    if admin_badge:
+        chat_line = "• Free Normal Chat\n• Free Chat Pro\n• Free Chat Deep nội bộ admin"
+    else:
+        chat_line = (
+            "• Free Normal Chat\n• Free Chat Pro\n• Chat Deep vẫn tính Xu"
+            if has_free_normal_chat(profile["tier"]) else
+            "• Normal Chat: 5 Xu\n• Chat Pro: 10 Xu\n🎯 Lên Platinum để mở Free Normal Chat và Free Chat Pro."
+        )
     text = (
         "🪪 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
-        f"• 🪪 Cấp hiện tại: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
-        f"• Tổng nạp thành công: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
+        f"• 🪪 Cấp hiện tại: <b>{html.escape(admin_badge or profile.get('tier_badge') or profile['tier_label'])}</b>\n"
+        + (f"• {admin_note}\n" if admin_note else "")
+        + f"• Tổng nạp thành công: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
         f"• {next_line}\n\n"
         "<b>Quyền lợi hiện tại</b>\n"
         f"{benefits}\n\n"
@@ -42148,20 +42443,20 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>🌱 Newbie — dưới 100.000đ</b>",
         "• Trial 200 Xu nếu đủ điều kiện",
         "• Dùng công cụ public",
-        "• Referral reward: chưa mở",
+        "• Thưởng giới thiệu: chưa mở",
         "",
         "<b>🥈 Silver — từ 100.000đ</b>",
-        "• Referral 3%, cap 100 Xu",
+        "• Thưởng giới thiệu: 3%, tối đa 100 Xu cho mỗi khách được giới thiệu nạp lần đầu",
         "• Hỗ trợ thành viên",
         "• Ưu đãi cơ bản",
         "",
         "<b>🥇 Gold — từ 1.000.000đ</b>",
-        "• Referral 6%, cap 150 Xu",
+        "• Thưởng giới thiệu: 6%, tối đa 150 Xu cho mỗi khách được giới thiệu nạp lần đầu",
         "• Ưu tiên hỗ trợ hơn Silver",
         "• Giảm tối đa 3% phí tool đủ điều kiện",
         "",
         "<b>💠 Platinum — từ 10.000.000đ</b>",
-        "• Referral 8%, cap 200 Xu",
+        "• Thưởng giới thiệu: 8%, tối đa 200 Xu cho mỗi khách được giới thiệu nạp lần đầu",
         "• Free Normal Chat",
         "• Free Chat Pro",
         "• Ưu tiên hỗ trợ cao",
@@ -42169,7 +42464,7 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Giảm tối đa 5%",
         "",
         "<b>💎 Diamond — từ 50.000.000đ</b>",
-        "• Referral 10%, cap 250 Xu",
+        "• Thưởng giới thiệu: 10%, tối đa 250 Xu cho mỗi khách được giới thiệu nạp lần đầu",
         "• Free Normal Chat",
         "• Free Chat Pro",
         "• Ưu tiên hỗ trợ rất cao",
@@ -42177,20 +42472,29 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Giảm tối đa 8%",
         "",
         "<b>👑 VIP — từ 100.000.000đ hoặc admin duyệt</b>",
-        "• Referral 12%, cap 300 Xu",
+        "• Thưởng giới thiệu: 12%, tối đa 300 Xu cho mỗi khách được giới thiệu nạp lần đầu",
         "• Free Normal Chat",
         "• Free Chat Pro",
         "• Ưu tiên hỗ trợ cao nhất",
         "• Cấu hình/quy trình riêng khi phù hợp",
         "• Giảm tối đa 10%",
         "",
-        "🎉 <b>Thưởng khi lên hạng</b>",
-        "• Silver: +10%, tối đa 100 Xu",
-        "• Gold: +12%, tối đa 150 Xu",
-        "• Platinum: +15%, tối đa 250 Xu",
-        "• Diamond: +18%, tối đa 400 Xu",
-        "• VIP: +20%, tối đa 600 Xu",
-        "Mã lên hạng chỉ dùng cho chính tài khoản nhận mã, mỗi mốc 1 lần, không cộng dồn mã khác.",
+        "🎉 <b>Mã ưu đãi khi lên hạng</b>",
+        "",
+        "Khi bạn đạt mốc hạng mới, TOAN AAS có thể gửi mã ưu đãi cá nhân cho <b>đơn nạp tiếp theo</b> sau khi lên hạng.",
+        "",
+        "• Silver: +10% Xu dịch vụ cho đơn nạp tiếp theo, tối đa 100 Xu",
+        "• Gold: +12% Xu dịch vụ cho đơn nạp tiếp theo, tối đa 150 Xu",
+        "• Platinum: +15% Xu dịch vụ cho đơn nạp tiếp theo, tối đa 250 Xu",
+        "• Diamond: +18% Xu dịch vụ cho đơn nạp tiếp theo, tối đa 400 Xu",
+        "• VIP: +20% Xu dịch vụ cho đơn nạp tiếp theo, tối đa 600 Xu",
+        "",
+        "Điều kiện:",
+        "• Mã chỉ dùng cho chính tài khoản nhận mã.",
+        "• Mỗi mốc hạng nhận 1 lần.",
+        "• Mỗi mã chỉ dùng 1 lần.",
+        "• Không cộng dồn với mã khuyến mãi khác.",
+        "• Đây là cộng thêm Xu dịch vụ, không giảm tiền mặt.",
         "",
         "🎂 <b>Quà sinh nhật thành viên</b>",
         "",
@@ -42357,7 +42661,7 @@ async def cmd_set_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await update.message.reply_text(
         f"🎂 Đã lưu ngày sinh của bạn: <b>{html.escape(mmdd)}</b>\n\n"
-        "Từ bây giờ, TOAN AAS sẽ dùng ngày sinh này để xét quà sinh nhật theo hạng thành viên.\n\n"
+        "Ngày sinh đã lưu. Hệ thống sẽ tự động xét quà vào sinh nhật tiếp theo nếu đủ điều kiện.\n\n"
         "Lưu ý:\n"
         "• Chỉ tài khoản đã lưu ngày sinh mới được xét quà.\n"
         "• Ngày sinh cần được lưu trước ít nhất 30 ngày để hệ thống tự động tặng quà.\n"
@@ -42502,7 +42806,17 @@ async def cmd_birthday_approve(update: Update, context: ContextTypes.DEFAULT_TYP
         request = get_birthday_review_request(conn, request_id)
         if not request or request.get("status") != "pending":
             conn.rollback()
-            return await update.message.reply_text("⚠️ Request không tồn tại hoặc không còn pending.")
+            return await update.message.reply_text(
+                f"❌ Không tìm thấy yêu cầu sinh nhật <code>#{request_id}</code> đang chờ duyệt.\n\n"
+                "Lưu ý:\n"
+                "• <code>/birthday_approve</code> dùng <b>REQUEST_ID</b>, không phải USER_ID.\n"
+                "• Xem danh sách chờ bằng <code>/birthday_pending</code>.\n"
+                "• Nếu muốn cấp quà thủ công theo USER_ID, dùng <code>/birthday_gift_grant USER_ID</code>.\n\n"
+                "Cú pháp:\n"
+                "✅ <code>/birthday_approve REQUEST_ID</code>\n"
+                "❌ <code>/birthday_reject REQUEST_ID lý do</code>",
+                parse_mode="HTML",
+            )
         target_id = str(request.get("user_id") or "")
         user_row = conn.execute("SELECT 1 FROM users WHERE user_id=? LIMIT 1", (target_id,)).fetchone()
         if not user_row:
@@ -42597,7 +42911,14 @@ async def cmd_birthday_reject(update: Update, context: ContextTypes.DEFAULT_TYPE
         request = get_birthday_review_request(conn, request_id)
         if not request or request.get("status") != "pending":
             conn.rollback()
-            return await update.message.reply_text("⚠️ Request không tồn tại hoặc không còn pending.")
+            return await update.message.reply_text(
+                f"❌ Không tìm thấy yêu cầu sinh nhật <code>#{request_id}</code> đang chờ duyệt.\n\n"
+                "Lưu ý:\n"
+                "• <code>/birthday_reject</code> dùng <b>REQUEST_ID</b>, không phải USER_ID.\n"
+                "• Xem danh sách chờ bằng <code>/birthday_pending</code>.\n\n"
+                "Cú pháp: <code>/birthday_reject REQUEST_ID lý do</code>",
+                parse_mode="HTML",
+            )
         target_id = str(request.get("user_id") or "")
         conn.execute(
             """UPDATE birthday_review_requests
@@ -42712,7 +43033,41 @@ async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
     finally:
         conn.close()
-    await update.message.reply_text(f"✅ Đã set hạng <b>{html.escape(get_member_badge(tier))}</b> cho ID <code>{html.escape(str(target_id))}</code>.", parse_mode="HTML")
+    badge = get_member_badge(tier)
+    benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(tier))
+    unlocked = ""
+    if has_free_normal_chat(tier):
+        unlocked = (
+            "\n\n🎁 <b>Bạn đã mở:</b>\n"
+            "• Free Normal Chat\n"
+            "• Free Chat Pro\n"
+            "• Chat Deep vẫn tính Xu theo chính sách"
+        )
+    notify_warning = ""
+    try:
+        await context.bot.send_message(
+            chat_id=str(target_id),
+            text=(
+                f"🎉 <b>CHÚC MỪNG BẠN ĐÃ ĐƯỢC THĂNG HẠNG {html.escape(badge)}</b>\n\n"
+                "Admin TOAN AAS đã nâng cấp hạng thành viên cho bạn.\n\n"
+                f"• Hạng mới: <b>{html.escape(badge)}</b>\n\n"
+                "<b>Quyền lợi mới</b>\n"
+                f"{benefits}"
+                f"{unlocked}\n\n"
+                "Xem chi tiết: <code>/member</code> hoặc <code>/vip_policy</code>"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        notify_warning = f"\n\n⚠️ Không gửi được thông báo cho user: <code>{html.escape(provider_error_summary(e))}</code>"
+        logger.warning(f"Set VIP target notify failed: {e}")
+    await update.message.reply_text(
+        f"✅ Đã set hạng <b>{html.escape(badge)}</b> cho ID <code>{html.escape(str(target_id))}</code>.\n"
+        f"• Admin hiện tại: <code>{html.escape(str(update.effective_user.id))}</code>\n"
+        "• Lưu ý: hạng chỉ áp dụng cho ID được set. Không tự tạo mã ưu đãi lên hạng trong lệnh này."
+        f"{notify_warning}",
+        parse_mode="HTML",
+    )
 
 async def cmd_clear_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -43888,8 +44243,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     uid  = update.effective_user.id
 
+    if text.startswith("/"):
+        return await handle_unknown_or_unmatched_command(update, context)
+
     if text in {"🏠 TOAN AAS MENU", "🛸 MENU DỊCH VỤ TOAN AAS"}:
         return await cmd_start(update, context)
+
+    modes = ensure_user_modes(uid)
+    translate_target = modes.get("translate_mode_target") or ""
+    if translate_target:
+        return await handle_auto_translate_message(update, context, text, translate_target)
 
     detected_video_url = extract_supported_video_url(text)
     if detected_video_url:
@@ -43912,11 +44275,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action_key = act if act in ("voice", "download") else "chat"
 
     # ── LOGIC CHAT / TOOL CREDIT CHECK ───────────────────────────────────────
-    is_admin = str(uid) == ADMIN_ID
+    is_admin = is_admin_user(uid)
     credits, total_spent, is_vip = get_user(uid)
 
     if action_key == "chat":
-        modes = ensure_user_modes(uid)
         mode_name = modes.get("chat_mode") or CHAT_TIER_NORMAL
         mode_name = normalize_chat_tier(mode_name or CHAT_TIER_NORMAL)
         base_cost = chat_mode_cost(mode_name)
@@ -43971,7 +44333,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await AgentDownloader.download(data, context, update.effective_chat.id, cost, uid)
     else:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        modes = ensure_user_modes(uid)
         mode_name = normalize_chat_tier((modes.get("chat_mode") or CHAT_TIER_NORMAL))
         mode_instruction = chat_mode_instruction(mode_name)
         username = update.effective_user.username or update.effective_user.first_name or ""
@@ -44130,6 +44491,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("guide_debug", cmd_guide_debug))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
+    tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
     tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
@@ -44159,6 +44521,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_stt_debug", cmd_tool_test_stt_debug))
     tg_app.add_handler(CommandHandler("tool_test_downloader", cmd_tool_test_downloader))
     tg_app.add_handler(CommandHandler("translate_text", cmd_translate_text))
+    tg_app.add_handler(CommandHandler("translate_mode", cmd_translate_mode))
+    tg_app.add_handler(CommandHandler("translate_mode_off", cmd_translate_mode_off))
+    tg_app.add_handler(CommandHandler("translate_status", cmd_translate_status))
     tg_app.add_handler(CommandHandler("costs",       cmd_costs))
     tg_app.add_handler(CommandHandler("sales_ready", cmd_sales_ready))
     tg_app.add_handler(CommandHandler("admin_dashboard", cmd_admin_dashboard))
@@ -44435,6 +44800,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("birthday_gift_check", cmd_birthday_gift_check))
     tg_app.add_handler(CommandHandler("birthday_gift_grant", cmd_birthday_gift_grant))
     tg_app.add_handler(CommandHandler("ref_admin",   cmd_ref_admin))
+    tg_app.add_handler(MessageHandler(filters.COMMAND, handle_unknown_or_unmatched_command))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
     tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.Document.MP3 | filters.Document.MP4 | filters.Document.WAV, handle_media_cache_only))
