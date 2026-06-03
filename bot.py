@@ -47,7 +47,7 @@ from telegram import (
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, filters, ContextTypes
+    CallbackQueryHandler, filters, ContextTypes, ApplicationHandlerStop
 )
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -186,6 +186,10 @@ ADMIN_IDS_RAW       = _env("ADMIN_IDS", ADMIN_ID)
 ADMIN_IDS           = {x.strip() for x in ADMIN_IDS_RAW.replace(";", ",").split(",") if x.strip()}
 if ADMIN_ID:
     ADMIN_IDS.add(str(ADMIN_ID))
+OWNER_IDS_RAW       = _env("OWNER_IDS", "7817576663")
+OWNER_IDS           = {x.strip() for x in OWNER_IDS_RAW.replace(";", ",").split(",") if x.strip()}
+if not OWNER_IDS:
+    OWNER_IDS = set(ADMIN_IDS)
 APP_VERSION         = "TOAN AAS V15.2"
 START_TIME          = time.time()
 APP_BUILD_SHA       = (
@@ -758,6 +762,22 @@ def init_db():
         xu_delta INTEGER DEFAULT 0,
         amount_vnd INTEGER DEFAULT 0,
         provider TEXT,
+        detail TEXT,
+        created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS system_flags (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TEXT,
+        updated_by TEXT,
+        note TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS security_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT,
+        severity TEXT,
+        user_id TEXT,
+        username TEXT,
         detail TEXT,
         created_at TEXT
     )""")
@@ -1674,6 +1694,15 @@ def record_api_debug(provider: str, action: str, status: str, http_status: int =
             detail TEXT,
             created_at TEXT
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS security_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT,
+            severity TEXT,
+            user_id TEXT,
+            username TEXT,
+            detail TEXT,
+            created_at TEXT
+        )""")
         conn.execute(
             "INSERT INTO api_debug_events (provider, action, status, http_status, detail, created_at) VALUES (?,?,?,?,?,?)",
             (
@@ -1685,6 +1714,28 @@ def record_api_debug(provider: str, action: str, status: str, http_status: int =
                 now_text(),
             ),
         )
+        status_upper = str(status or "").upper()
+        if status_upper not in {"PASS", "OK", "SUCCESS"}:
+            since = (vn_now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+            row = conn.execute(
+                """SELECT COUNT(*) FROM api_debug_events
+                WHERE provider=? AND UPPER(status) NOT IN ('PASS','OK','SUCCESS') AND created_at>=?""",
+                (str(provider or "")[:60], since),
+            ).fetchone()
+            fail_count = int(row[0] or 0) if row else 0
+            if fail_count in {10, 20, 50}:
+                conn.execute(
+                    """INSERT INTO security_events (event_type, severity, user_id, username, detail, created_at)
+                    VALUES (?,?,?,?,?,?)""",
+                    (
+                        "provider_error_spike",
+                        "medium",
+                        "",
+                        "",
+                        f"provider={sanitize_log_text(str(provider or ''))[:60]}; fail_count_10m={fail_count}; last_action={sanitize_log_text(str(action or ''))[:80]}",
+                        now_text(),
+                    ),
+                )
         conn.commit()
     except Exception as e:
         logger.warning(f"API debug event write failed: {e}")
@@ -21630,6 +21681,8 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
     """
     if not order_code:
         return False, "missing_order_code", {}
+    if flag_on("emergency_lock") or flag_on("payment_freeze"):
+        return False, "payment_frozen", {"order_code": str(order_code), "amount": int(amount_vnd or 0)}
 
     conn = db_connect()
     c = conn.cursor()
@@ -23499,6 +23552,19 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         "pkg_key": pkg_key,
     }
 
+    if flag_on("payment_freeze"):
+        await query.edit_message_text("💳 PayOS QR động đang được khóa an toàn. Bot sẽ gửi QR thủ công cho gói này.")
+        await send_manual_payment(
+            context,
+            update.effective_chat.id,
+            uid,
+            amount,
+            xu,
+            order_code,
+            "PayOS QR động đang được khóa an toàn, vui lòng nạp thủ công theo mã QR dưới đây."
+        )
+        return
+
     if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
         await query.edit_message_text("⚠️ Cổng QR tự động đang bảo trì. Bot đã gửi mã QR nạp thủ công bên dưới.")
@@ -23625,6 +23691,203 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 def is_admin_user(user_id) -> bool:
     return str(user_id) in ADMIN_IDS or str(user_id) == str(ADMIN_ID)
+
+def is_owner_user(user_id) -> bool:
+    return str(user_id) in OWNER_IDS
+
+def owner_and_admin_ids() -> list[str]:
+    ids = set(str(x) for x in OWNER_IDS if str(x).strip())
+    ids.update(str(x) for x in ADMIN_IDS if str(x).strip())
+    return sorted(ids)
+
+def get_system_flag(key, default=""):
+    try:
+        conn = db_connect()
+        row = conn.execute("SELECT value FROM system_flags WHERE key=?", (str(key),)).fetchone()
+        conn.close()
+        if not row:
+            return default
+        return row[0] if row[0] is not None else default
+    except Exception:
+        return default
+
+def set_system_flag(key, value, updated_by="", note=""):
+    conn = db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS system_flags (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT,
+            updated_by TEXT,
+            note TEXT
+        )""")
+        conn.execute(
+            """INSERT INTO system_flags (key, value, updated_at, updated_by, note)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(key) DO UPDATE SET
+                value=excluded.value,
+                updated_at=excluded.updated_at,
+                updated_by=excluded.updated_by,
+                note=excluded.note""",
+            (str(key), str(value), now_text(), str(updated_by or ""), str(note or "")[:1000]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def set_system_flags(values: dict, updated_by="", note=""):
+    conn = db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS system_flags (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT,
+            updated_by TEXT,
+            note TEXT
+        )""")
+        for key, value in (values or {}).items():
+            conn.execute(
+                """INSERT INTO system_flags (key, value, updated_at, updated_by, note)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value=excluded.value,
+                    updated_at=excluded.updated_at,
+                    updated_by=excluded.updated_by,
+                    note=excluded.note""",
+                (str(key), str(value), now_text(), str(updated_by or ""), str(note or "")[:1000]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+def system_flag_row(key: str) -> dict:
+    try:
+        conn = db_connect()
+        row = conn.execute(
+            "SELECT value, updated_at, updated_by, note FROM system_flags WHERE key=?",
+            (str(key),),
+        ).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    if not row:
+        return {"key": str(key), "value": "", "updated_at": "", "updated_by": "", "note": ""}
+    return {"key": str(key), "value": row[0] or "", "updated_at": row[1] or "", "updated_by": row[2] or "", "note": row[3] or ""}
+
+def flag_on(key: str) -> bool:
+    return str(get_system_flag(key, "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
+
+def current_system_mode() -> dict:
+    keys = ["emergency_lock", "maintenance_mode", "payment_freeze", "tool_freeze", "provider_freeze", "safe_mode_reason", "last_emergency_at"]
+    rows = {key: system_flag_row(key) for key in keys}
+    emergency = str(rows["emergency_lock"]["value"]).strip() in {"1", "true", "on", "yes"}
+    maintenance = str(rows["maintenance_mode"]["value"]).strip() in {"1", "true", "on", "yes"}
+    payment = str(rows["payment_freeze"]["value"]).strip() in {"1", "true", "on", "yes"}
+    tools = str(rows["tool_freeze"]["value"]).strip() in {"1", "true", "on", "yes"}
+    providers = str(rows["provider_freeze"]["value"]).strip() in {"1", "true", "on", "yes"}
+    if emergency:
+        label = "EMERGENCY LOCK"
+    elif maintenance:
+        label = "MAINTENANCE"
+    else:
+        label = "NORMAL"
+    return {
+        "label": label,
+        "emergency_lock": emergency,
+        "maintenance_mode": maintenance,
+        "payment_freeze": payment,
+        "tool_freeze": tools,
+        "provider_freeze": providers,
+        "safe_mode_reason": rows["safe_mode_reason"]["value"] or "",
+        "last_emergency_at": rows["last_emergency_at"]["value"] or "",
+        "rows": rows,
+    }
+
+def latest_security_event() -> dict:
+    try:
+        conn = db_connect()
+        row = conn.execute(
+            "SELECT event_type, severity, user_id, username, detail, created_at FROM security_events ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    if not row:
+        return {}
+    return {
+        "event_type": row[0] or "",
+        "severity": row[1] or "",
+        "user_id": row[2] or "",
+        "username": row[3] or "",
+        "detail": row[4] or "",
+        "created_at": row[5] or "",
+    }
+
+def record_anomaly(kind, severity, detail, user_id="", username="", auto_lock=True) -> dict:
+    severity_clean = str(severity or "low").lower()
+    detail_clean = sanitize_log_text(str(detail or ""))[:1500]
+    conn = db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS security_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT,
+            severity TEXT,
+            user_id TEXT,
+            username TEXT,
+            detail TEXT,
+            created_at TEXT
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS system_flags (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT,
+            updated_by TEXT,
+            note TEXT
+        )""")
+        conn.execute(
+            """INSERT INTO security_events (event_type, severity, user_id, username, detail, created_at)
+            VALUES (?,?,?,?,?,?)""",
+            (str(kind or "unknown"), severity_clean, str(user_id or ""), str(username or ""), detail_clean, now_text()),
+        )
+        if auto_lock and severity_clean == "critical":
+            conn.execute(
+                """INSERT INTO system_flags (key, value, updated_at, updated_by, note)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by, note=excluded.note""",
+                ("emergency_lock", "1", now_text(), "auto_anomaly", detail_clean),
+            )
+            for key in ("payment_freeze", "tool_freeze", "provider_freeze"):
+                conn.execute(
+                    """INSERT INTO system_flags (key, value, updated_at, updated_by, note)
+                    VALUES (?,?,?,?,?)
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by, note=excluded.note""",
+                    (key, "1", now_text(), "auto_anomaly", detail_clean),
+                )
+            conn.execute(
+                """INSERT INTO system_flags (key, value, updated_at, updated_by, note)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by, note=excluded.note""",
+                ("safe_mode_reason", detail_clean, now_text(), "auto_anomaly", detail_clean),
+            )
+            conn.execute(
+                """INSERT INTO system_flags (key, value, updated_at, updated_by, note)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by, note=excluded.note""",
+                ("last_emergency_at", now_text(), now_text(), "auto_anomaly", detail_clean),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"event_type": str(kind or "unknown"), "severity": severity_clean, "detail": detail_clean, "auto_locked": bool(auto_lock and severity_clean == "critical")}
+
+def emergency_user_message() -> str:
+    return (
+        "🚧 <b>TOAN AAS đang ở chế độ bảo trì an toàn.</b>\n\n"
+        "Hệ thống đang tạm khóa tác vụ để kiểm tra vận hành và bảo vệ dữ liệu người dùng.\n"
+        "Số dư, lịch sử nạp và dữ liệu của bạn không bị xóa.\n\n"
+        "Vui lòng quay lại sau hoặc liên hệ hỗ trợ:\n"
+        f"{html.escape(SUPPORT_TELEGRAM_URL)}"
+    )
 
 def bool_env_status(value) -> str:
     return "configured" if bool(value) else "missing"
@@ -23829,6 +24092,8 @@ def promo_readiness_payload() -> dict:
 def sales_readiness_payload() -> dict:
     providers = provider_status_payload()
     db_status = db_status_payload()
+    state = current_system_mode()
+    ops_mode = current_system_mode()
     commands = {
         "naptien": callable(globals().get("cmd_naptien")),
         "backup_db": callable(globals().get("cmd_backup_db")),
@@ -23840,6 +24105,8 @@ def sales_readiness_payload() -> dict:
         "promo_guide": callable(globals().get("cmd_promo_guide")),
         "promo_seed_policy": callable(globals().get("cmd_promo_seed_policy")),
         "promo_seed_beta": callable(globals().get("cmd_promo_seed_beta")),
+        "emergency_status": callable(globals().get("cmd_emergency_status")),
+        "ops_plan": callable(globals().get("cmd_ops_plan")),
     }
     blockers = []
     if not db_status["ok"]:
@@ -23874,7 +24141,11 @@ def sales_readiness_payload() -> dict:
     base_ready = not blockers
     checkout_ready = payos_debug["status"] == "PASS" and bool(payos_debug.get("checkout_url"))
     sales_ready = base_ready and checkout_ready and payos_test["status"] == "PASS"
-    if sales_ready:
+    if ops_mode.get("emergency_lock"):
+        status = "LOCKED / EMERGENCY SAFE MODE"
+    elif ops_mode.get("maintenance_mode"):
+        status = "MAINTENANCE MODE"
+    elif sales_ready:
         status = "SALES READY"
     elif base_ready and checkout_ready:
         status = "BETA READY"
@@ -23893,6 +24164,7 @@ def sales_readiness_payload() -> dict:
         "payos_debug_create": payos_debug,
         "payos_real_test": payos_test,
         "promo": promo_readiness_payload(),
+        "ops": ops_mode,
         "blockers": blockers,
         "note": "SALES READY chỉ bật khi /payos_debug_create PASS và admin đã mark PayOS real payment test PASS.",
     }
@@ -24305,9 +24577,145 @@ def guide_section_text(section_key_or_number: str) -> str:
 async def reply_internal_customer_feature(update: Update):
     return await update.message.reply_text(INTERNAL_CUSTOMER_FEATURE_TEXT, parse_mode="HTML")
 
+EMERGENCY_ALLOWED_PUBLIC_COMMANDS = {
+    "ping", "status", "support", "legal", "terms", "privacy", "profile",
+    "emergency_status", "ops_plan",
+}
+EMERGENCY_ALLOWED_ADMIN_COMMANDS = {
+    "backup_db", "emergency_status", "emergency_unlock", "ops_plan",
+    "providers", "tool_status", "tool_audit", "sales_ready",
+}
+PAYMENT_FREEZE_COMMANDS = {
+    "duyet", "tuchoi", "checkpayos", "payos_debug_create", "mark_payos_test",
+}
+TOOL_FREEZE_COMMANDS = {
+    "film", "video_script", "trend_ai", "image_tools", "image_prompt", "image_pack",
+    "video_from_image", "image_to_video_pack", "ai_image", "ai_image_edit",
+    "media_factory", "video_factory_flow", "remove_bg", "translate_text",
+    "chat_pro", "chat_deep", "chat_pro_on", "chat_deep_on", "growth_ai",
+    "campaign_report", "produce", "pipeline", "tool_test_ai", "tool_test_translate",
+    "tool_test_image", "tool_test_image_debug", "tool_test_ai_image",
+    "tool_test_ai_image_edit", "tool_test_tts", "tool_test_stt",
+    "tool_test_stt_debug", "tool_test_downloader",
+}
+PROVIDER_FREEZE_COMMANDS = set(TOOL_FREEZE_COMMANDS)
+
+def extract_command_name(update: Update) -> str:
+    message = update.effective_message
+    text = (getattr(message, "text", "") or getattr(message, "caption", "") or "").strip()
+    if not text.startswith("/"):
+        return ""
+    command = text.split()[0][1:]
+    command = command.split("@", 1)[0]
+    return command.lower()
+
+def safe_mode_command_block_reason(command: str, user_id, state: dict) -> str:
+    command = (command or "").lower()
+    if not command:
+        return ""
+    if state.get("emergency_lock"):
+        if command in EMERGENCY_ALLOWED_PUBLIC_COMMANDS:
+            return ""
+        if command in EMERGENCY_ALLOWED_ADMIN_COMMANDS and is_admin_user(user_id):
+            return ""
+        return "emergency"
+    if state.get("maintenance_mode") and command in TOOL_FREEZE_COMMANDS:
+        return "maintenance"
+    if state.get("payment_freeze") and command in PAYMENT_FREEZE_COMMANDS and not is_owner_user(user_id):
+        return "payment_freeze"
+    if state.get("tool_freeze") and command in TOOL_FREEZE_COMMANDS:
+        return "tool_freeze"
+    if state.get("provider_freeze") and command in PROVIDER_FREEZE_COMMANDS:
+        return "provider_freeze"
+    return ""
+
+def freeze_block_message(reason: str, state: dict) -> str:
+    if reason == "emergency":
+        return emergency_user_message()
+    if reason == "payment_freeze":
+        return (
+            "💳 <b>Thanh toán đang được khóa an toàn.</b>\n\n"
+            "Hệ thống đang kiểm tra vận hành thanh toán. Số dư và lịch sử nạp của bạn không bị xóa.\n"
+            "Vui lòng liên hệ hỗ trợ nếu cần xử lý bill gấp."
+        )
+    if reason == "maintenance":
+        return (
+            "🚧 <b>TOAN AAS đang bảo trì nhẹ.</b>\n\n"
+            "Các tác vụ tốn phí/provider đang tạm dừng để kiểm tra. Bạn vẫn có thể xem /profile, /pricing, /legal."
+        )
+    if reason in {"tool_freeze", "provider_freeze"}:
+        return (
+            "🧰 <b>Công cụ AI đang tạm khóa an toàn.</b>\n\n"
+            "TOAN AAS đang kiểm tra provider/API. Bot không trừ Xu cho tác vụ bị khóa. Vui lòng quay lại sau."
+        )
+    return emergency_user_message()
+
+async def notify_ops_alert(context: ContextTypes.DEFAULT_TYPE, title: str, lines: list[str]):
+    if not context or not getattr(context, "bot", None):
+        return
+    body = "\n".join([title, "", *lines])[:3800]
+    for chat_id in owner_and_admin_ids():
+        try:
+            await context.bot.send_message(chat_id=str(chat_id), text=body, parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"Ops alert send failed chat_id={chat_id}: {e}")
+
+async def safe_mode_message_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message:
+        return
+    uid = update.effective_user.id if update.effective_user else ""
+    command = extract_command_name(update)
+    state = current_system_mode()
+    if not any([state.get("emergency_lock"), state.get("maintenance_mode"), state.get("payment_freeze"), state.get("tool_freeze"), state.get("provider_freeze")]):
+        return
+    if command:
+        reason = safe_mode_command_block_reason(command, uid, state)
+        if reason:
+            await message.reply_text(freeze_block_message(reason, state), parse_mode="HTML")
+            raise ApplicationHandlerStop
+        return
+    if state.get("emergency_lock"):
+        await message.reply_text(emergency_user_message(), parse_mode="HTML")
+        raise ApplicationHandlerStop
+    if state.get("maintenance_mode") or state.get("tool_freeze") or state.get("provider_freeze"):
+        await message.reply_text(freeze_block_message("maintenance" if state.get("maintenance_mode") else "tool_freeze", state), parse_mode="HTML")
+        raise ApplicationHandlerStop
+
+async def safe_mode_callback_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    state = current_system_mode()
+    if not any([state.get("emergency_lock"), state.get("payment_freeze"), state.get("tool_freeze"), state.get("provider_freeze"), state.get("maintenance_mode")]):
+        return
+    data = query.data or ""
+    reason = ""
+    if state.get("emergency_lock"):
+        reason = "emergency"
+    elif state.get("payment_freeze") and data.startswith("pkg|"):
+        reason = ""
+    elif (state.get("tool_freeze") or state.get("provider_freeze") or state.get("maintenance_mode")) and data.startswith(("prov|", "job|", "pipe|", "trend|", "creative|", "task|")):
+        reason = "tool_freeze"
+    if reason:
+        await query.answer("TOAN AAS đang khóa an toàn để bảo vệ dữ liệu.", show_alert=True)
+        try:
+            await query.edit_message_text(freeze_block_message(reason, state), parse_mode="HTML")
+        except Exception:
+            pass
+        raise ApplicationHandlerStop
+
 def admin_internal_command(handler):
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_admin_user(update.effective_user.id):
+            record_anomaly(
+                "unauthorized_admin_command",
+                "medium",
+                f"command={extract_command_name(update) or '-'}",
+                user_id=update.effective_user.id,
+                username=update.effective_user.username or update.effective_user.first_name or "",
+                auto_lock=False,
+            )
             return await reply_internal_customer_feature(update)
         return await handler(update, context)
     return wrapped
@@ -24363,7 +24771,9 @@ def menu_text_main(is_admin: bool) -> str:
         "• <code>/promo_list</code> — xem mã ưu đãi\n"
         "• <code>/gift_seed_beta</code> — tạo mã BETA\n"
         "• <code>/gift_list</code> — xem mã quà\n"
-        "• <code>/gift BETA100 USER_ID</code> — cấp quà cho user"
+        "• <code>/gift BETA100 USER_ID</code> — cấp quà cho user\n"
+        "• <code>/emergency_status</code> — trạng thái khóa an toàn\n"
+        "• <code>/ops_plan</code> — kế hoạch vận hành khẩn cấp"
         if is_admin else ""
     )
     return (
@@ -25118,6 +25528,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     providers = provider_status_payload()
     db_status = db_status_payload()
+    state = current_system_mode()
     payos_debug_status = (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper()
     payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
     payos_dynamic_status = "working" if payos_debug_status == "PASS" and payos_checkout_url else "NEED DEBUG"
@@ -25134,6 +25545,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "🔐 <b>TOAN AAS Provider Status</b>",
         "configured = có ENV/key. tested = đã smoke test bằng /tool_test_*; configured không đồng nghĩa provider hoạt động.",
+        f"System mode: <code>{html.escape(state.get('label') or 'NORMAL')}</code> | payment_freeze=<code>{'on' if state.get('payment_freeze') else 'off'}</code> | tool_freeze=<code>{'on' if state.get('tool_freeze') else 'off'}</code> | provider_freeze=<code>{'on' if state.get('provider_freeze') else 'off'}</code>",
         "",
         "<b>Core</b>",
         f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
@@ -25227,6 +25639,7 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "🧪 <b>TOAN AAS Tool Audit</b>",
         "Audit này chỉ kiểm tra cấu hình/trạng thái. Muốn xác nhận provider chạy thật, dùng các lệnh /tool_test_*.",
+        f"System mode: <code>{html.escape(state.get('label') or 'NORMAL')}</code>",
         "",
         "<b>Core</b>",
         f"• DB: <code>{'OK' if db_status['ok'] else 'FAIL'}</code>",
@@ -26709,6 +27122,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payos_test = data["payos_real_test"]
     payos_debug = data.get("payos_debug_create") or {}
     promo = data.get("promo") or {}
+    ops = data.get("ops") or current_system_mode()
     blockers = data["blockers"] or []
     lines = [
         "🚀 <b>TOAN AAS Sales Readiness</b>",
@@ -26721,6 +27135,15 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• DB: <code>{'OK' if data['db_ok'] else 'FAIL'}</code>",
         "• Health: <code>OK if /health returns JSON</code>",
         f"• Backup command: <code>{'available' if commands['backup_db'] else 'missing'}</code>",
+        "",
+        "<b>Operations/Safety</b>",
+        f"• System mode: <code>{html.escape(ops.get('label') or 'NORMAL')}</code>",
+        f"• Emergency lock: <code>{'ON' if ops.get('emergency_lock') else 'available/off'}</code>",
+        f"• Maintenance mode: <code>{'ON' if ops.get('maintenance_mode') else 'available/off'}</code>",
+        f"• Payment freeze: <code>{'ON' if ops.get('payment_freeze') else 'available/off'}</code>",
+        f"• Tool freeze: <code>{'ON' if ops.get('tool_freeze') else 'available/off'}</code>",
+        f"• Backup command: <code>{'available' if commands.get('backup_db') else 'missing'}</code>",
+        f"• Ops plan: <code>{'available' if commands.get('ops_plan') else 'missing'}</code> — <code>/ops_plan</code>",
         "",
         "<b>Providers</b>",
         f"• PayOS env: <code>{'configured' if providers['payos']['ready'] else 'missing'}</code>",
@@ -26788,6 +27211,193 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data["status"] == "SALES READY":
         lines.append("• ✅ Có thể bắt đầu bán thử Beta cho nhóm nhỏ 3–10 khách.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+def format_emergency_status() -> str:
+    state = current_system_mode()
+    latest = latest_security_event()
+    return (
+        "🚨 <b>Emergency Status</b>\n\n"
+        f"• System mode: <code>{html.escape(state.get('label') or 'NORMAL')}</code>\n"
+        f"• emergency_lock: <code>{'on' if state.get('emergency_lock') else 'off'}</code>\n"
+        f"• maintenance_mode: <code>{'on' if state.get('maintenance_mode') else 'off'}</code>\n"
+        f"• payment_freeze: <code>{'on' if state.get('payment_freeze') else 'off'}</code>\n"
+        f"• tool_freeze: <code>{'on' if state.get('tool_freeze') else 'off'}</code>\n"
+        f"• provider_freeze: <code>{'on' if state.get('provider_freeze') else 'off'}</code>\n"
+        f"• reason: <code>{html.escape(state.get('safe_mode_reason') or '-')}</code>\n"
+        f"• last emergency: <code>{html.escape(state.get('last_emergency_at') or '-')}</code>\n"
+        f"• last anomaly: <code>{html.escape((latest.get('event_type') or '-') + '/' + (latest.get('severity') or '-'))}</code>\n"
+        f"• detail: <code>{html.escape((latest.get('detail') or '-')[:260])}</code>\n\n"
+        "<b>Nếu nghi ngờ bot/token/Railway bị chiếm:</b>\n"
+        "1. Vào Railway dashboard và Pause/Stop service.\n"
+        "2. Rotate Telegram Bot Token trong BotFather.\n"
+        "3. Cập nhật TELEGRAM_TOKEN mới trên Railway.\n"
+        "4. Rotate API keys nếu cần.\n"
+        "5. Chạy /backup_db trước khi mở lại.\n"
+        "6. Chỉ /emergency_unlock sau khi xác minh an toàn."
+    )
+
+async def cmd_emergency_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(format_emergency_status(), parse_mode="HTML")
+
+async def cmd_emergency_lock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Chỉ owner được bật emergency lock.")
+    reason = " ".join(context.args or []).strip() or "Owner enabled emergency lock"
+    set_system_flags(
+        {
+            "emergency_lock": "1",
+            "payment_freeze": "1",
+            "tool_freeze": "1",
+            "provider_freeze": "1",
+            "safe_mode_reason": reason,
+            "last_emergency_at": now_text(),
+        },
+        updated_by=update.effective_user.id,
+        note=reason,
+    )
+    record_usage_event(
+        update.effective_user.id,
+        username=update.effective_user.username or update.effective_user.first_name or "",
+        event_type="emergency_lock",
+        tool_name="ops",
+        command="/emergency_lock",
+        status="enabled",
+        detail=reason,
+    )
+    record_anomaly("manual_emergency_lock", "high", reason, update.effective_user.id, update.effective_user.username or "", auto_lock=False)
+    lines = [
+        "• Payments: <b>frozen</b>",
+        "• Tools: <b>frozen</b>",
+        "• Providers: <b>frozen</b>",
+        "• Data deletion: <b>NO</b>",
+        "• DB: <b>preserved</b>",
+        f"• Reason: <code>{html.escape(reason)}</code>",
+    ]
+    await notify_ops_alert(context, "🚨 <b>EMERGENCY LOCK ENABLED</b>", lines)
+    await update.message.reply_text("🚨 <b>EMERGENCY LOCK ENABLED</b>\n\n" + "\n".join(lines), parse_mode="HTML")
+
+async def cmd_emergency_unlock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Chỉ owner được tắt emergency lock.")
+    note = " ".join(context.args or []).strip() or "Owner disabled emergency lock"
+    set_system_flags(
+        {
+            "emergency_lock": "0",
+            "payment_freeze": "0",
+            "tool_freeze": "0",
+            "provider_freeze": "0",
+            "safe_mode_reason": note,
+        },
+        updated_by=update.effective_user.id,
+        note=note,
+    )
+    record_usage_event(
+        update.effective_user.id,
+        username=update.effective_user.username or update.effective_user.first_name or "",
+        event_type="emergency_unlock",
+        tool_name="ops",
+        command="/emergency_unlock",
+        status="disabled",
+        detail=note,
+    )
+    await notify_ops_alert(
+        context,
+        "✅ <b>Emergency lock disabled</b>",
+        ["Hãy kiểm tra /providers, /tool_status, /sales_ready trước khi mở bán lại."],
+    )
+    await update.message.reply_text(
+        "✅ Emergency lock disabled.\n\nHãy kiểm tra <code>/providers</code>, <code>/tool_status</code>, <code>/sales_ready</code> trước khi mở bán lại.",
+        parse_mode="HTML",
+    )
+
+async def set_single_flag_command(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, value: str, command: str, title: str, owner_only: bool = False):
+    if owner_only and not is_owner_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Chỉ owner được dùng lệnh này.")
+    if not owner_only and not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    reason = " ".join(context.args or []).strip() or title
+    set_system_flag(key, value, updated_by=update.effective_user.id, note=reason)
+    if key == "maintenance_mode" and value == "1":
+        set_system_flag("safe_mode_reason", reason, updated_by=update.effective_user.id, note=reason)
+    record_usage_event(
+        update.effective_user.id,
+        username=update.effective_user.username or update.effective_user.first_name or "",
+        event_type=key,
+        tool_name="ops",
+        command=command,
+        status="on" if str(value) == "1" else "off",
+        detail=reason,
+    )
+    await update.message.reply_text(
+        f"✅ <b>{html.escape(title)}</b>\n\n• <code>{html.escape(key)}</code>: <b>{'ON' if str(value) == '1' else 'OFF'}</b>\n• Note: <code>{html.escape(reason)}</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_maintenance_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await set_single_flag_command(update, context, "maintenance_mode", "1", "/maintenance_on", "Maintenance mode enabled")
+
+async def cmd_maintenance_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await set_single_flag_command(update, context, "maintenance_mode", "0", "/maintenance_off", "Maintenance mode disabled")
+
+async def cmd_freeze_payments(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await set_single_flag_command(update, context, "payment_freeze", "1", "/freeze_payments", "Payment freeze enabled")
+
+async def cmd_unfreeze_payments(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await set_single_flag_command(update, context, "payment_freeze", "0", "/unfreeze_payments", "Payment freeze disabled")
+
+async def cmd_freeze_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await set_single_flag_command(update, context, "tool_freeze", "1", "/freeze_tools", "Tool freeze enabled")
+
+async def cmd_unfreeze_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await set_single_flag_command(update, context, "tool_freeze", "0", "/unfreeze_tools", "Tool freeze disabled")
+
+async def cmd_ops_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(
+        "📘 <b>TOAN AAS OPS RISK PLAN</b>\n\n"
+        "Tài liệu kế hoạch rủi ro/vận hành dự phòng đã được lưu trong repo:\n"
+        "<code>docs/OPERATION_RISK_PLAN.md</code>\n\n"
+        "<b>Nhóm rủi ro:</b>\n"
+        "1. Admin account risk\n"
+        "2. Telegram/bot risk\n"
+        "3. Payment/Xu/DB risk\n"
+        "4. Provider/API risk\n"
+        "5. Customer/fraud risk\n"
+        "6. One-person operation risk\n"
+        "7. Emergency recovery\n\n"
+        "<b>Lệnh khẩn cấp:</b>\n"
+        "• <code>/emergency_lock &lt;lý do&gt;</code>\n"
+        "• <code>/emergency_status</code>\n"
+        "• <code>/backup_db</code>\n"
+        "• <code>/freeze_payments &lt;lý do&gt;</code>\n"
+        "• <code>/freeze_tools &lt;lý do&gt;</code>\n"
+        "• <code>/maintenance_on &lt;lý do&gt;</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    state = current_system_mode()
+    db_status = db_status_payload()
+    text = (
+        "📡 <b>TOAN AAS STATUS</b>\n\n"
+        f"• System mode: <code>{html.escape(state.get('label') or 'NORMAL')}</code>\n"
+        f"• DB: <code>{'OK' if db_status.get('ok') else 'FAIL'}</code>\n"
+        f"• Payment freeze: <code>{'on' if state.get('payment_freeze') else 'off'}</code>\n"
+        f"• Tool freeze: <code>{'on' if state.get('tool_freeze') else 'off'}</code>\n"
+        f"• Provider freeze: <code>{'on' if state.get('provider_freeze') else 'off'}</code>\n"
+        f"• Support: {html.escape(SUPPORT_TELEGRAM_URL)}"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🛟 <b>HỖ TRỢ TOAN AAS</b>\n\n"
+        f"Liên hệ hỗ trợ/admin: {html.escape(SUPPORT_TELEGRAM_URL)}",
+        parse_mode="HTML",
+    )
 
 async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
@@ -29074,8 +29684,16 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Lưu ý: mã chỉ áp dụng nếu đơn nạp đủ điều kiện từ 50k.\n"
             "Lưu ý: nếu nhập mã khác, mã mới sẽ thay mã này.\n\n"
         )
+    payment_freeze_on = flag_on("payment_freeze")
+    payment_title = "MUA/NẠP GÓI XU DỊCH VỤ — QR THỦ CÔNG AN TOÀN" if payment_freeze_on else "MUA/NẠP GÓI XU DỊCH VỤ (QR ĐỘNG) — TOAN AAS"
+    payment_mode_note = (
+        "🚧 <b>PayOS QR động đang khóa an toàn.</b>\n"
+        "Chọn gói bên dưới để nhận QR thủ công; admin/owner sẽ kiểm tra bill và cộng Xu sau khi xác minh.\n\n"
+        if payment_freeze_on else
+        "⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. Không lo điền sai nội dung chuyển khoản.\n\n"
+    )
     msg = (
-        f"💳 <b>MUA/NẠP GÓI XU DỊCH VỤ (QR ĐỘNG) — TOAN AAS</b>\n\n"
+        f"💳 <b>{payment_title}</b>\n\n"
         f"👤 ID Telegram: <code>{uid}</code>\n"
         f"🪙 Số dư hiện tại: <b>{credits} Xu dịch vụ</b>\n\n"
         f"🎁 <b>Có mã ưu đãi?</b>\n"
@@ -29097,7 +29715,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎁 Trial {TRIAL_CREDITS} Xu chỉ cấp 1 lần theo ID Telegram. Xóa chat hoặc start lại không làm nhận lại trial.\n\n"
         f"{service_credit_legal_note()}\n\n"
         f"🏦 Nếu phải nạp thủ công, nội dung chuyển khoản sẽ là: <code>AAS {uid} &lt;order_code&gt;</code>\n\n"
-        f"⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. Không lo điền sai nội dung chuyển khoản.\n\n"
+        f"{payment_mode_note}"
         f"👇 <b>Vui lòng click chọn gói cước mong muốn dưới đây:</b>"
     )
     buttons = [
@@ -41785,6 +42403,22 @@ async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         target_id, amount = context.args[0], int(context.args[1])
+        if amount >= 10000 and not is_owner_user(update.effective_user.id):
+            reason = f"large_admin_credit_attempt admin={update.effective_user.id} target={target_id} amount={amount}"
+            record_anomaly("large_admin_credit_attempt", "high", reason, update.effective_user.id, update.effective_user.username or "", auto_lock=False)
+            set_system_flag("payment_freeze", "1", updated_by=update.effective_user.id, note=reason)
+            await notify_ops_alert(
+                context,
+                "⚠️ <b>Large admin credit attempt blocked</b>",
+                [
+                    f"• Admin: <code>{html.escape(str(update.effective_user.id))}</code>",
+                    f"• Target: <code>{html.escape(str(target_id))}</code>",
+                    f"• Amount: <b>{amount} Xu</b>",
+                    "• Action: payment_freeze=ON",
+                    "• Owner must review before large manual credit.",
+                ],
+            )
+            return await update.message.reply_text("⛔ Cộng Xu lớn cần owner duyệt. Đã bật payment_freeze để kiểm tra an toàn.")
         add_credit(target_id, amount, "admin_add", "", "Admin cộng xu thủ công")
         conn = db_connect()
         c = conn.cursor()
@@ -42625,6 +43259,8 @@ async def cmd_setvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return
+    if flag_on("emergency_lock") and not is_owner_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Emergency mode: chỉ owner được chạy /backup_db.")
     db_path = str(DB_FILE or "")
     db_name = os.path.basename(db_path) or "toandaas_system.db"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -43081,7 +43717,11 @@ async def lifespan(app: FastAPI):
         yield
         return
 
+    tg_app.add_handler(MessageHandler(filters.ALL, safe_mode_message_guard), group=-10)
+    tg_app.add_handler(CallbackQueryHandler(safe_mode_callback_guard), group=-10)
     tg_app.add_handler(CommandHandler("ping",        cmd_ping))
+    tg_app.add_handler(CommandHandler("status",      cmd_status))
+    tg_app.add_handler(CommandHandler("support",     cmd_support))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("help",        cmd_help))
@@ -43109,6 +43749,16 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
     tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
+    tg_app.add_handler(CommandHandler("emergency_lock", cmd_emergency_lock))
+    tg_app.add_handler(CommandHandler("emergency_unlock", cmd_emergency_unlock))
+    tg_app.add_handler(CommandHandler("emergency_status", cmd_emergency_status))
+    tg_app.add_handler(CommandHandler("maintenance_on", cmd_maintenance_on))
+    tg_app.add_handler(CommandHandler("maintenance_off", cmd_maintenance_off))
+    tg_app.add_handler(CommandHandler("freeze_payments", cmd_freeze_payments))
+    tg_app.add_handler(CommandHandler("unfreeze_payments", cmd_unfreeze_payments))
+    tg_app.add_handler(CommandHandler("freeze_tools", cmd_freeze_tools))
+    tg_app.add_handler(CommandHandler("unfreeze_tools", cmd_unfreeze_tools))
+    tg_app.add_handler(CommandHandler("ops_plan", cmd_ops_plan))
     tg_app.add_handler(CommandHandler("providers",   cmd_providers))
     tg_app.add_handler(CommandHandler("api_recommend", cmd_api_recommend))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
@@ -43676,6 +44326,7 @@ async def asset_check():
 async def health_check():
     db_status = db_status_payload()
     providers = provider_status_payload()
+    mode = current_system_mode()
     db_ok = db_status["ok"]
     db_error = db_status["error"]
     return {
@@ -43698,6 +44349,12 @@ async def health_check():
         "cutout_configured": providers["image"]["cutout"],
         "telegram_configured": providers["core"]["telegram"],
         "public_base_url_configured": providers["core"]["public_base_url"],
+        "system_mode": mode.get("label") or "NORMAL",
+        "emergency_lock": bool(mode.get("emergency_lock")),
+        "maintenance_mode": bool(mode.get("maintenance_mode")),
+        "payment_freeze": bool(mode.get("payment_freeze")),
+        "tool_freeze": bool(mode.get("tool_freeze")),
+        "provider_freeze": bool(mode.get("provider_freeze")),
         "timestamp": now_text(),
     }
 
@@ -46906,6 +47563,17 @@ async def webhook_payos(request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    if flag_on("emergency_lock") or flag_on("payment_freeze"):
+        record_anomaly(
+            "payos_webhook_blocked_by_safe_mode",
+            "medium",
+            "PayOS webhook received while emergency/payment freeze is active",
+            user_id="payos",
+            username="payos",
+            auto_lock=False,
+        )
+        return JSONResponse({"code": "00", "desc": "payment_frozen"})
 
     sig  = body.get("signature", "")
     data = body.get("data", {})

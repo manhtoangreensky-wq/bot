@@ -13,6 +13,13 @@ TOAN AAS is following this model:
 
 `AI Tools SaaS + Pay-as-you-go Credits + Automation Platform`
 
+## Current Ops Safety Checkpoint
+
+- Emergency lock, maintenance mode, payment freeze and tool freeze are part of the Stable Revenue Bot operations layer.
+- After deploy, owner should test: `/emergency_status`, `/maintenance_on`, `/maintenance_off`, `/freeze_tools`, `/unfreeze_tools`, `/freeze_payments`, `/unfreeze_payments`, `/ops_plan`.
+- Use `/emergency_lock <reason>` only for real incident drills or urgent safety lock. Only owner should run `/emergency_unlock`.
+- Emergency mode must preserve DB, balances, payment history, ledger events and backups.
+
 The current phase is not the large app/dashboard phase. Priority number one is to finish the existing Telegram bot so it runs reliably and starts generating real revenue.
 
 ### Current Phase - Bot Revenue Phase
