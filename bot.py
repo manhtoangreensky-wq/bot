@@ -138,6 +138,9 @@ def env_any(*names: str, default: str = "") -> str:
             return str(value).strip()
     return default
 
+def env_flag(name: str, default: str = "0") -> bool:
+    return str(os.environ.get(name, default) or default).strip().lower() in {"1", "true", "yes", "on"}
+
 def normalize_public_base_url(value: str = "") -> str:
     value = (value or "").strip().rstrip("/")
     if not value:
@@ -218,6 +221,8 @@ GEMINI_API_KEY      = _env("GEMINI_API_KEY")
 OPENAI_API_KEY      = _env("OPENAI_API_KEY")
 OPENAI_TEXT_MODEL   = env_any("OPENAI_TEXT_MODEL", default="gpt-4o-mini")
 OPENAI_IMAGE_MODEL  = _env("OPENAI_IMAGE_MODEL", "gpt-image-1")
+ENABLE_OPENAI_IMAGE = env_flag("ENABLE_OPENAI_IMAGE", "0")
+ENABLE_OPENAI_IMAGE_EDIT = env_flag("ENABLE_OPENAI_IMAGE_EDIT", "0")
 
 # Audio
 DEEPGRAM_API_KEY    = env_any("DEEPGRAM_API_KEY", "Deepgram_API_KEY", "DEEPGRAM_KEY", "DEEPGRAM_TOKEN")
@@ -22336,8 +22341,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     else:
                         logger.warning(f"Cutout invalid output: {image_detail}")
                         save_tool_test_result("image_remove_bg", "FAIL", f"provider=cutout; {image_detail}", uid)
+                        record_api_debug("cutout", "remove_bg_customer", "FAIL", getattr(res, "status_code", 0), image_detail)
                 except Exception as e:
                     logger.error(f"Cutout error: {e}")
+                    record_api_debug("cutout", "remove_bg_customer", "FAIL", 0, provider_error_summary(e))
             if not ok:
                 refund_charged_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền tiết kiệm do lỗi", True)
                 await query.edit_message_text(
@@ -22378,6 +22385,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     else:
                         logger.warning(f"RemoveBG invalid output: {image_detail} → fallback Cutout")
                         save_tool_test_result("image_remove_bg", "FAIL", f"provider=removebg; {image_detail}", uid)
+                        record_api_debug("removebg", "remove_bg_customer", "FAIL", getattr(res, "status_code", 0), image_detail)
                         await alert_admin(
                             context,
                             "RemoveBG HD",
@@ -22385,6 +22393,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         )
                 except Exception as e:
                     logger.error(f"RemoveBG error: {e}")
+                    record_api_debug("removebg", "remove_bg_customer", "FAIL", 0, provider_error_summary(e))
                     await alert_admin(
                         context,
                         "RemoveBG HD",
@@ -22433,8 +22442,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         else:
                             logger.warning(f"Cutout fallback invalid output: {image_detail}")
                             save_tool_test_result("image_remove_bg", "FAIL", f"provider=cutout; {image_detail}", uid)
+                            record_api_debug("cutout", "remove_bg_customer_fallback", "FAIL", getattr(res, "status_code", 0), image_detail)
                     except Exception as e:
                         logger.error(f"Cutout fallback error: {e}")
+                        record_api_debug("cutout", "remove_bg_customer_fallback", "FAIL", 0, provider_error_summary(e))
                 if not cutout_ok:
                     refund_charged_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền fallback do lỗi", True)
                     if not premium_refunded:
@@ -22685,8 +22696,10 @@ def provider_status_payload() -> dict:
             "image_tools": is_feature_enabled("image_tools", default=True),
             "image_prompt_factory": is_feature_enabled("image_prompt_factory", default=True),
             "image_to_video_prompt": is_feature_enabled("image_to_video_prompt", default=True),
-            "image_openai_generation": is_feature_enabled("image_openai_generation", default=False),
-            "image_openai_edit": is_feature_enabled("image_openai_edit", default=False),
+            "image_openai_generation_env": ENABLE_OPENAI_IMAGE,
+            "image_openai_edit_env": ENABLE_OPENAI_IMAGE_EDIT,
+            "image_openai_generation": ENABLE_OPENAI_IMAGE and is_feature_enabled("image_openai_generation", default=False),
+            "image_openai_edit": ENABLE_OPENAI_IMAGE_EDIT and is_feature_enabled("image_openai_edit", default=False),
             "image_generation": is_feature_enabled("image_generation", default=False),
             "image_to_video": is_feature_enabled("image_to_video", default=False),
             "admin_publish": is_feature_enabled("admin_publish", default=False),
@@ -24149,8 +24162,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Image Tools Menu: <code>{'enabled/menu' if providers['media_factory']['image_tools'] else 'disabled'}</code>",
         f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
         f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
-        f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
-        f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_generation_env') else 'off'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_edit_env') else 'off'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
         f"• Real Video Generation: <code>{'enabled' if providers['media_factory']['image_to_video'] else 'planned/disabled'}</code>",
         f"• Admin Publish: <code>{'enabled/internal' if providers['media_factory']['admin_publish'] else 'disabled/internal'}</code>",
         f"• YouTube Publish: <code>{'enabled/admin-only' if providers['media_factory']['youtube_publish_admin'] else 'planned/admin-only/disabled'}</code>",
@@ -24228,8 +24241,8 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Image / Media</b>",
         f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
         f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
-        f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code>",
-        f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code>",
+        f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_generation_env') else 'off'}</code>",
+        f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_edit_env') else 'off'}</code>",
         f"• Customer publish: <code>{'enabled' if providers['media_factory']['customer_publish'] else 'disabled'}</code>",
         f"• Auto publish: <code>{'enabled' if providers['media_factory']['auto_publish'] else 'disabled'}</code>",
         f"• Ads assistant: <code>{'enabled' if providers['media_factory']['ads_assistant'] else 'disabled'}</code>",
@@ -24279,9 +24292,11 @@ async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result_preview = (getattr(res, "text", "") or "")[:160]
             gemini_status = "PASS" if result_preview else "FAIL"
             gemini_detail = result_preview or "empty_response"
+            record_api_debug("gemini", "tool_test_ai", gemini_status, 0, gemini_detail)
         except Exception as e:
             gemini_status = "FAIL"
-            gemini_detail = str(e)[:240]
+            gemini_detail = provider_error_summary(e)[:240]
+            record_api_debug("gemini", "tool_test_ai", "FAIL", 0, gemini_detail)
 
     if openai_client:
         try:
@@ -24300,20 +24315,24 @@ async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 result_preview = openai_text
             openai_status = "PASS" if openai_text else "FAIL"
             openai_detail = openai_text or "empty_response"
+            record_api_debug("openai", "tool_test_ai", openai_status, 0, openai_detail)
         except Exception as e:
             openai_status = "FAIL"
-            openai_detail = str(e)[:240]
+            openai_detail = provider_error_summary(e)[:240]
+            record_api_debug("openai", "tool_test_ai", "FAIL", 0, openai_detail)
 
     overall = "PASS" if "PASS" in {gemini_status, openai_status} else ("MISSING" if {gemini_status, openai_status} == {"MISSING"} else "FAIL")
     save_tool_test_result("ai", overall, f"Gemini={gemini_status}; OpenAI={openai_status}", update.effective_user.id)
     await update.message.reply_text(
-        "🤖 <b>AI Provider Smoke Test</b>\n\n"
+        "🤖 <b>AI Smoke Test</b>\n\n"
         f"• Gemini: <code>{html.escape(gemini_status)}</code>"
         + (f" — <code>{html.escape(gemini_detail[:180])}</code>" if gemini_detail else "")
         + "\n"
         f"• OpenAI fallback: <code>{html.escape(openai_status)}</code>"
         + (f" — <code>{html.escape(openai_detail[:180])}</code>" if openai_detail else "")
         + "\n"
+        f"• Overall: <code>{html.escape(overall)}</code>\n"
+        f"• Provider used: <code>{'Gemini' if gemini_status == 'PASS' else ('OpenAI' if openai_status == 'PASS' else '-')}</code>\n"
         f"• Result: <code>{html.escape(result_preview or '-')}</code>\n\n"
         "Không hiển thị API key.",
         parse_mode="HTML",
@@ -24606,7 +24625,7 @@ async def cmd_tool_test_image_debug(update: Update, context: ContextTypes.DEFAUL
         "",
         "<b>Local Telegram image</b>",
         f"• Size: <code>{local['size']}</code> bytes",
-        f"• PIL open: <code>{'OK' if local['pil_ok'] else 'FAIL'}</code>",
+        f"• PIL open: <code>{'PASS' if local['pil_ok'] else 'FAIL'}</code>",
         f"• Format: <code>{html.escape(str(local['format']))}</code>",
         f"• Mode: <code>{html.escape(str(local['mode']))}</code>",
         f"• Dimensions: <code>{html.escape(str(local['dimensions']))}</code>",
@@ -24867,6 +24886,8 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("TTS", "tts", get_tool_test_result("tts"), "Edge/Fish"),
         ("STT Deepgram", "stt", get_tool_test_result("stt"), "configured" if providers["audio"]["deepgram"] else "missing"),
         ("Image RemoveBG/Cutout", "image_remove_bg", image_result, "configured" if providers["image"]["ready"] else "missing"),
+        ("OpenAI Image", "ai_image", get_tool_test_result("ai_image"), "env ON" if ENABLE_OPENAI_IMAGE else "DISABLED env"),
+        ("OpenAI Image Edit", "ai_image_edit", get_tool_test_result("ai_image_edit"), "env ON" if ENABLE_OPENAI_IMAGE_EDIT else "DISABLED env"),
         ("Downloader", "downloader", get_tool_test_result("downloader"), "Cobalt self-host" if providers["downloader"].get("cobalt_self_host") else "MISSING Cobalt"),
     ]
     lines = ["🧪 <b>Tool Test Status</b>", ""]
@@ -26597,7 +26618,8 @@ def media_factory_overview_text() -> str:
         "• Tạo prompt ảnh/video.\n"
         "• Tạo voice tiếng Việt.\n"
         "• Tạo caption/hashtag/CTA.\n"
-        "• Tạo video pack để khách tự dựng hoặc tải xuống khi provider sẵn sàng.\n\n"
+        "• Hiện hỗ trợ content/video pack để khách tự dựng/tự đăng.\n"
+        "• Tạo video AI thật: planned/admin-only, chưa mở cho khách.\n\n"
         "<b>5. Duyệt nội dung</b>\n"
         "• Bot tạo bản nháp.\n"
         "• Khách/admin duyệt hoặc từ chối.\n"
@@ -26611,6 +26633,7 @@ def media_factory_overview_text() -> str:
         "• <code>/media_factory &lt;chủ đề&gt;</code> — tạo pack trend/script/ảnh/video/caption\n"
         "• <code>/video_factory_flow</code> — xem quy trình đầy đủ\n"
         "• <code>/image_tools</code> — công cụ ảnh\n"
+        "• <code>/video_provider_status</code> — trạng thái provider video AI thật\n"
         "• <code>/image_prompt &lt;chủ đề&gt;</code> — prompt ảnh chân thật\n"
         "• <code>/image_to_video_pack &lt;chủ đề&gt;</code> — prompt video từ ảnh\n"
         "• <code>/content_policy</code> — quy định nội dung/bản quyền\n\n"
@@ -26635,6 +26658,7 @@ def video_factory_flow_text() -> str:
         "<b>Bước 5: Tạo video pack</b>\n"
         "→ <code>/media_factory &lt;chủ đề&gt;</code>\n"
         "→ Kết quả gồm script, storyboard, prompt ảnh/video, voice-over, caption, hashtag, CTA.\n\n"
+        "→ Tạo video AI thật: planned/admin-only, chưa mở cho khách.\n\n"
         "<b>Bước 6: Duyệt</b>\n"
         "→ Khách kiểm tra bản nháp.\n"
         "→ Nếu chưa ổn: có thể yêu cầu tạo lại 1 lần theo chính sách gói.\n"
@@ -26777,17 +26801,25 @@ async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     readiness = customer_tool_readiness_payload()
     image_provider_label = readiness["image_remove_bg"]["label"]
     ai_label = readiness["ai"]["label"]
+    openai_image_label = (
+        "admin đã bật/test nội bộ" if (ENABLE_OPENAI_IMAGE and openai_client and is_feature_enabled("image_openai_generation", update.effective_user.id, default=False))
+        else "tạm khóa để kiểm soát chi phí"
+    )
+    openai_edit_label = (
+        "admin đã bật/test nội bộ" if (ENABLE_OPENAI_IMAGE_EDIT and openai_client and is_feature_enabled("image_openai_edit", update.effective_user.id, default=False))
+        else "tạm khóa để kiểm soát chi phí"
+    )
     lines = [
         "🖼 <b>Công cụ ảnh trong Video & Media Factory</b>",
         "",
         "<b>Công cụ tiết kiệm:</b>",
         f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật, <b>{IMAGE_PROMPT_PACK_COST} Xu</b>",
         f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo prompt video từ ảnh, <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>",
-        f"• Tách nền ảnh qua bot: <code>{html.escape(image_provider_label)}</code>",
+        f"• Tách nền ảnh qua bot: <code>{html.escape(image_provider_label)}</code> — nếu chưa PASS thì đang thử nghiệm provider",
         "",
         "<b>Công cụ cao cấp ChatGPT/OpenAI:</b>",
-        f"• <code>/ai_image &lt;mô tả ảnh&gt;</code> — tạo ảnh AI cao cấp, <b>{AI_IMAGE_COST} Xu</b>",
-        f"• <code>/ai_image_edit &lt;yêu cầu sửa ảnh&gt;</code> — reply ảnh để sửa bằng AI, <b>{AI_IMAGE_EDIT_COST} Xu</b>",
+        f"• <code>/ai_image &lt;mô tả ảnh&gt;</code> — tạo ảnh AI thật: <code>{html.escape(openai_image_label)}</code>",
+        f"• <code>/ai_image_edit &lt;yêu cầu sửa ảnh&gt;</code> — sửa ảnh AI thật: <code>{html.escape(openai_edit_label)}</code>",
         f"• AI provider: <code>{html.escape(ai_label)}</code>",
         "",
         "Lưu ý: ChatGPT/OpenAI tạo và sửa ảnh là gói cao cấp, chỉ hoạt động khi admin bật provider. "
@@ -26874,14 +26906,113 @@ async def send_openai_image_result(update: Update, result, caption: str) -> bool
         return True
     return False
 
+def openai_image_disabled_text(kind: str = "generation") -> str:
+    if kind == "edit":
+        return "OpenAI Image Edit đang disabled. Set ENABLE_OPENAI_IMAGE_EDIT=1 để admin test."
+    return "OpenAI Image đang disabled. Set ENABLE_OPENAI_IMAGE=1 để admin test."
+
+async def cmd_tool_test_ai_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    prompt = media_factory_topic_from_args(context)
+    if not prompt:
+        return await update.message.reply_text("⚠️ Cú pháp: /tool_test_ai_image <prompt>")
+    if not ENABLE_OPENAI_IMAGE:
+        save_tool_test_result("ai_image", "DISABLED", "ENABLE_OPENAI_IMAGE=0", update.effective_user.id)
+        return await update.message.reply_text(openai_image_disabled_text("generation"))
+    if not openai_client:
+        save_tool_test_result("ai_image", "MISSING", "OPENAI_API_KEY missing", update.effective_user.id)
+        return await update.message.reply_text("⚠️ OpenAI image provider chưa được cấu hình. Không có Xu nào bị trừ.")
+    safe_prompt = (
+        f"{prompt}\n\n"
+        "Create a safe, realistic, high-quality image. No watermark, no broken text, no illegal or deceptive content."
+    )
+    try:
+        def run_image():
+            return openai_client.images.generate(
+                model=OPENAI_IMAGE_MODEL,
+                prompt=safe_prompt,
+                size="1024x1024",
+                n=1,
+            )
+        result = await asyncio.to_thread(run_image)
+        sent = await send_openai_image_result(update, result, "✅ OpenAI Image admin smoke test PASS.")
+        if not sent:
+            raise RuntimeError("OpenAI image response did not contain b64_json or url")
+        save_tool_test_result("ai_image", "PASS", f"model={OPENAI_IMAGE_MODEL}; admin_smoke_test", update.effective_user.id)
+        record_api_debug("openai_image", "tool_test_ai_image", "PASS", 0, f"model={OPENAI_IMAGE_MODEL}; prompt_len={len(prompt)}")
+    except Exception as e:
+        detail = provider_error_summary(e)
+        save_tool_test_result("ai_image", "FAIL", detail, update.effective_user.id)
+        record_api_debug("openai_image", "tool_test_ai_image", "FAIL", 0, detail)
+        await update.message.reply_text(
+            "❌ OpenAI Image admin smoke test FAIL.\n"
+            f"• Error: <code>{html.escape(detail[:300])}</code>\n"
+            "Không có Xu nào bị trừ.",
+            parse_mode="HTML",
+        )
+
+async def cmd_tool_test_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    instruction = media_factory_topic_from_args(context)
+    if not instruction:
+        return await update.message.reply_text("⚠️ Cú pháp: reply ảnh rồi gõ /tool_test_ai_image_edit <yêu cầu sửa ảnh>")
+    reply = update.message.reply_to_message if update.message else None
+    if not (reply and getattr(reply, "photo", None)):
+        return await update.message.reply_text("⚠️ Hãy reply một ảnh rồi gõ /tool_test_ai_image_edit <yêu cầu sửa ảnh>.")
+    if not ENABLE_OPENAI_IMAGE_EDIT:
+        save_tool_test_result("ai_image_edit", "DISABLED", "ENABLE_OPENAI_IMAGE_EDIT=0", update.effective_user.id)
+        return await update.message.reply_text(openai_image_disabled_text("edit"))
+    if not openai_client:
+        save_tool_test_result("ai_image_edit", "MISSING", "OPENAI_API_KEY missing", update.effective_user.id)
+        return await update.message.reply_text("⚠️ OpenAI image edit provider chưa được cấu hình. Không có Xu nào bị trừ.")
+    try:
+        photo_size = reply.photo[-1]
+        img_bytes = bytes(await (await photo_size.get_file()).download_as_bytearray())
+        ok, png_bytes, detail = normalize_image_png_bytes(img_bytes)
+        if not ok:
+            raise RuntimeError(detail)
+        image_file = io.BytesIO(png_bytes)
+        image_file.name = "source.png"
+        safe_prompt = (
+            f"{instruction}\n\n"
+            "Edit safely and keep the result realistic. Do not add watermark, fake claims, or deceptive text."
+        )
+        def run_edit():
+            image_file.seek(0)
+            return openai_client.images.edit(
+                model=OPENAI_IMAGE_MODEL,
+                image=image_file,
+                prompt=safe_prompt,
+                size="1024x1024",
+                n=1,
+            )
+        result = await asyncio.to_thread(run_edit)
+        sent = await send_openai_image_result(update, result, "✅ OpenAI Image Edit admin smoke test PASS.")
+        if not sent:
+            raise RuntimeError("OpenAI image edit response did not contain b64_json or url")
+        save_tool_test_result("ai_image_edit", "PASS", f"model={OPENAI_IMAGE_MODEL}; admin_smoke_test", update.effective_user.id)
+        record_api_debug("openai_image", "tool_test_ai_image_edit", "PASS", 0, f"model={OPENAI_IMAGE_MODEL}; prompt_len={len(instruction)}")
+    except Exception as e:
+        detail = provider_error_summary(e)
+        save_tool_test_result("ai_image_edit", "FAIL", detail, update.effective_user.id)
+        record_api_debug("openai_image", "tool_test_ai_image_edit", "FAIL", 0, detail)
+        await update.message.reply_text(
+            "❌ OpenAI Image Edit admin smoke test FAIL.\n"
+            f"• Error: <code>{html.escape(detail[:300])}</code>\n"
+            "Không có Xu nào bị trừ.",
+            parse_mode="HTML",
+        )
+
 async def cmd_ai_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     topic = media_factory_topic_from_args(context)
     if not topic:
         return await update.message.reply_text("⚠️ Cú pháp: /ai_image <mô tả ảnh>")
-    if not is_feature_enabled("image_openai_generation", uid, default=False):
+    if not ENABLE_OPENAI_IMAGE or not is_feature_enabled("image_openai_generation", uid, default=False):
         return await update.message.reply_text(
-            "ℹ️ Tạo ảnh bằng ChatGPT/OpenAI chưa bật. "
+            "ℹ️ Tạo ảnh AI thật đang tạm khóa để kiểm soát chi phí. "
             "Bạn có thể dùng /image_prompt để lấy prompt ảnh chất lượng trước."
         )
     if not openai_client:
@@ -26920,9 +27051,9 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     has_reply_photo = bool(reply and getattr(reply, "photo", None))
     if not has_reply_photo:
         return await update.message.reply_text("⚠️ Hãy reply một ảnh rồi gõ /ai_image_edit <yêu cầu sửa ảnh>.")
-    if not is_feature_enabled("image_openai_edit", uid, default=False):
+    if not ENABLE_OPENAI_IMAGE_EDIT or not is_feature_enabled("image_openai_edit", uid, default=False):
         return await update.message.reply_text(
-            "ℹ️ Sửa ảnh bằng ChatGPT/OpenAI chưa bật. Đây là gói cao cấp vì tốn tài nguyên. "
+            "ℹ️ Sửa ảnh AI thật đang tạm khóa để kiểm soát chi phí. "
             "Bạn có thể dùng /image_prompt trước hoặc đợi admin bật công cụ."
         )
     if not openai_client:
@@ -26979,6 +27110,24 @@ async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_video_factory_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(video_factory_flow_text(), parse_mode="HTML")
+
+async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    providers = provider_status_payload()
+    real_video_enabled = bool(providers["media_factory"].get("image_to_video"))
+    customer_publish = bool(providers["media_factory"].get("customer_publish"))
+    lines = [
+        "🎬 <b>Video Provider Status</b>",
+        "",
+        f"• Real video generation: <code>{'enabled' if real_video_enabled else 'disabled/planned'}</code>",
+        "• Provider: <code>not configured</code>",
+        f"• Customer access: <code>{'ON' if customer_publish else 'OFF'}</code>",
+        "• Current available: <code>script/prompt/video pack only</code>",
+        "• Open customer video generation: <code>NO</code>",
+        "",
+        "Hiện TOAN AAS hỗ trợ script, storyboard, image prompt, video prompt pack, caption/hashtag/CTA.",
+        "Tạo video thật cần chọn provider video AI, test chi phí/provider trước và chỉ mở khi admin duyệt.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_admin_trend_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -27272,11 +27421,11 @@ def ai_failure_user_text(statuses: dict, errors: dict) -> str:
             return "tạm lỗi"
         return status.lower()
     return (
-        "❌ AI đang tạm quá tải hoặc hết quota provider.\n"
+        "❌ AI chat đang tạm hết quota provider hoặc quá tải.\n"
         f"• Gemini: {line('gemini')}\n"
         f"• OpenAI: {line('openai')}\n"
-        "Không có Xu nào bị trừ cho lần chat này.\n"
-        "Bạn có thể thử lại sau hoặc dùng các công cụ không cần AI provider."
+        "Không có Xu nào bị trừ.\n"
+        "Bạn vẫn có thể dùng các công cụ đã sẵn sàng như /translate_text, /image_prompt, /film."
     )
 
 def ai_failure_detail(statuses: dict, errors: dict) -> str:
@@ -27326,10 +27475,12 @@ async def call_ai_chat_with_fallback(system_prompt: str, user_text: str, user_id
                 raise RuntimeError(output or "Gemini empty_response")
             user_memory[uid_key].append(types.Content(role="model", parts=[types.Part(text=output)]))
             statuses["gemini"] = "PASS"
+            record_api_debug("gemini", "ai_chat", "PASS", 0, f"mode_chat_success chars={len(output)}")
             return {"ok": True, "provider": "gemini", "text": output, "statuses": statuses, "errors": errors}
         except Exception as e:
             statuses["gemini"] = "FAIL"
             errors["gemini"] = provider_error_summary(e)
+            record_api_debug("gemini", "ai_chat", "FAIL", 0, errors["gemini"])
             logger.warning(f"AI chat Gemini fallback: {errors['gemini']}")
 
     if openai_client:
@@ -27359,10 +27510,12 @@ async def call_ai_chat_with_fallback(system_prompt: str, user_text: str, user_id
             if is_ai_failure_text(output):
                 raise RuntimeError(output or "OpenAI empty_response")
             statuses["openai"] = "PASS"
+            record_api_debug("openai", "ai_chat", "PASS", 0, f"mode_chat_success chars={len(output)}")
             return {"ok": True, "provider": "openai", "text": output, "statuses": statuses, "errors": errors}
         except Exception as e:
             statuses["openai"] = "FAIL"
             errors["openai"] = provider_error_summary(e)
+            record_api_debug("openai", "ai_chat", "FAIL", 0, errors["openai"])
             logger.warning(f"AI chat OpenAI error: {errors['openai']}")
 
     return {
@@ -27529,7 +27682,8 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
             detail=detail,
         )
         save_tool_test_result("ai_chat", "FAIL", detail, uid)
-        return await update.message.reply_text(result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {}))
+        admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin else ""
+        return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
 
     if cost > 0 and not spend_fixed_credit(uid, cost, f"spend_ai_chat_{mode}", f"AI chat {mode}"):
         credits_now, _, _ = get_user(uid)
@@ -40502,17 +40656,27 @@ async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT
         f"• Canonical data current: <code>{html.escape(signature_data)}</code>",
         f"• Signature current masked: <code>{html.escape(mask_payos_signature(signature))}</code>",
         "",
+        "<b>✅ Code đã kiểm tra</b>",
+        "• orderCode int",
+        "• amount int",
+        "• URL exact",
+        "• signature variants tested bằng <code>/payos_debug_create</code>",
+        "• headers sent",
+        "",
+        "<b>⚠️ Cần admin kiểm tra ngoài code</b>",
+        "1. PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY có cùng một app/kênh không.",
+        "2. Có copy nhầm Webhook Secret thay vì Checksum Key không.",
+        "3. Key đang dùng là live/sandbox cùng môi trường không.",
+        "4. Merchant/app PayOS có active chưa.",
+        "5. Thử regenerate keys trong PayOS dashboard.",
+        "6. Test bằng SDK/sample chính thức ngoài bot.",
+        "",
     ])
     if sdk_ok:
         lines.append("Note: SDK có trong môi trường, nhưng lệnh này không gọi SDK để tránh tạo đơn ngoài ý muốn. Nếu cần test SDK thật, chạy official sample riêng với cùng bộ key.")
     else:
         lines.extend([
             "Note: PayOS SDK not installed.",
-            "Nếu mọi variant đều signature invalid, hãy kiểm tra theo thứ tự:",
-            "1. PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY có cùng một kênh/app PayOS không.",
-            "2. Không dùng nhầm Webhook Secret hoặc checksum của app khác.",
-            "3. Regenerate bộ key mới trong PayOS dashboard rồi cập nhật Railway.",
-            "4. Nếu vẫn lỗi, test bằng SDK chính thức/official sample ngoài bot.",
             "Dùng thêm: <code>/payos_key_fingerprint</code>.",
         ])
     lines.append("Lệnh này không tạo đơn thanh toán.")
@@ -40898,6 +41062,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not REMOVEBG_API_KEY and not CUTOUT_API_KEY:
         return await update.message.reply_text("❌ Dịch vụ tách nền chưa được cấu hình.")
+    image_test = preferred_tool_test_result("image_remove_bg", "image")
+    if not is_admin_user(uid) and str(image_test.get("status") or "").upper() != "PASS":
+        return await update.message.reply_text(
+            "🖼 Tách nền ảnh đang trong trạng thái thử nghiệm provider.\n"
+            "Admin cần chạy <code>/tool_test_image_debug</code> và xác nhận PASS trước khi mở công khai.\n"
+            "Bạn có thể dùng <code>/image_prompt &lt;chủ đề&gt;</code> trước. Không có Xu nào bị trừ.",
+            parse_mode="HTML",
+        )
     file_size = update.message.photo[-1].file_size
     raw_cost = calculate_dynamic_cost("image", file_size)
     credits, total_spent, is_vip = get_user(uid)
@@ -41082,7 +41254,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 detail=detail,
             )
             save_tool_test_result("ai_chat", "FAIL", detail, uid)
-            return await update.message.reply_text(result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {}))
+            admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin else ""
+            return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
 
         if cost > 0 and not spend_fixed_credit(uid, cost, f"spend_ai_chat_{mode_name}", f"AI chat {mode_name}"):
             credits_now, _, _ = get_user(uid)
@@ -41221,6 +41394,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_translate", cmd_tool_test_translate))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
     tg_app.add_handler(CommandHandler("tool_test_image_debug", cmd_tool_test_image_debug))
+    tg_app.add_handler(CommandHandler("tool_test_ai_image", cmd_tool_test_ai_image))
+    tg_app.add_handler(CommandHandler("tool_test_ai_image_edit", cmd_tool_test_ai_image_edit))
     tg_app.add_handler(CommandHandler("tool_test_tts", cmd_tool_test_tts))
     tg_app.add_handler(CommandHandler("tool_test_stt", cmd_tool_test_stt))
     tg_app.add_handler(CommandHandler("tool_test_stt_debug", cmd_tool_test_stt_debug))
@@ -41384,6 +41559,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("ai_image_edit", cmd_ai_image_edit))
     tg_app.add_handler(CommandHandler("media_factory", cmd_media_factory))
     tg_app.add_handler(CommandHandler("video_factory_flow", cmd_video_factory_flow))
+    tg_app.add_handler(CommandHandler("video_provider_status", cmd_video_provider_status))
     tg_app.add_handler(CommandHandler("admin_trend_video", admin_internal_command(cmd_admin_trend_video)))
     tg_app.add_handler(CommandHandler("review_job", admin_internal_command(cmd_review_job)))
     tg_app.add_handler(CommandHandler("approve_job", admin_internal_command(cmd_approve_job)))
