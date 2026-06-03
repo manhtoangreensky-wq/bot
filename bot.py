@@ -801,6 +801,38 @@ def init_db():
         reason TEXT,
         updated_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS member_tier_rewards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        tier TEXT,
+        promo_code TEXT,
+        bonus_percent INTEGER DEFAULT 0,
+        cap_xu INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'active',
+        created_at TEXT,
+        used_at TEXT,
+        note TEXT,
+        UNIQUE(user_id, tier)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_birthdays (
+        user_id TEXT PRIMARY KEY,
+        birthday_mmdd TEXT,
+        birthday_set_at TEXT,
+        last_changed_at TEXT,
+        change_locked INTEGER DEFAULT 0,
+        note TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS birthday_gifts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        tier TEXT,
+        gift_xu INTEGER DEFAULT 0,
+        birthday_year INTEGER,
+        status TEXT DEFAULT 'granted',
+        granted_at TEXT,
+        note TEXT,
+        UNIQUE(user_id, birthday_year)
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS promotion_codes (
         code TEXT PRIMARY KEY,
         bonus_xu INTEGER DEFAULT 0,
@@ -1283,6 +1315,9 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_assignments_code ON gift_assignments(code)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_beta_requests_status ON gift_beta_requests(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_gift_beta_requests_user ON gift_beta_requests(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_member_tier_rewards_user ON member_tier_rewards(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_member_tier_rewards_code ON member_tier_rewards(promo_code)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_birthday_gifts_user_year ON birthday_gifts(user_id, birthday_year)")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -1351,6 +1386,7 @@ def init_db():
         ("ends_at", "TEXT"),
         ("created_by", "TEXT"),
         ("requires_assignment", "INTEGER DEFAULT 0"),
+        ("owner_user_id", "TEXT"),
     ]:
         try:
             c.execute(f"ALTER TABLE promotion_codes ADD COLUMN {col} {col_type}")
@@ -2347,58 +2383,82 @@ def expire_old_payos_orders():
     conn.commit()
     conn.close()
 
-MEMBER_TIER_ORDER = ["none", "bac", "vang", "bach_kim", "kim_cuong", "vip"]
+MEMBER_TIER_ORDER = ["newbie", "silver", "gold", "platinum", "diamond", "vip"]
 MEMBER_TIER_LABELS = {
-    "none": "Tân thủ",
-    "bac": "Bạc",
-    "vang": "Vàng",
-    "bach_kim": "Bạch Kim",
-    "kim_cuong": "Kim Cương",
+    "newbie": "Newbie",
+    "silver": "Silver",
+    "gold": "Gold",
+    "platinum": "Platinum",
+    "diamond": "Diamond",
     "vip": "VIP",
 }
+MEMBER_TIER_BADGES = {
+    "newbie": "🌱 Newbie",
+    "silver": "🥈 Silver",
+    "gold": "🥇 Gold",
+    "platinum": "💠 Platinum",
+    "diamond": "💎 Diamond",
+    "vip": "👑 VIP",
+}
 MEMBER_TIER_THRESHOLDS = {
-    "none": 0,
-    "bac": 100_000,
-    "vang": 1_000_000,
-    "bach_kim": 10_000_000,
-    "kim_cuong": 50_000_000,
+    "newbie": 0,
+    "silver": 100_000,
+    "gold": 1_000_000,
+    "platinum": 10_000_000,
+    "diamond": 50_000_000,
     "vip": 100_000_000,
 }
 MEMBER_REFERRAL_POLICY = {
-    "none": {"percent": 0, "cap": 0},
-    "bac": {"percent": 3, "cap": 100},
-    "vang": {"percent": 6, "cap": 150},
-    "bach_kim": {"percent": 8, "cap": 200},
-    "kim_cuong": {"percent": 10, "cap": 250},
+    "newbie": {"percent": 0, "cap": 0},
+    "silver": {"percent": 3, "cap": 100},
+    "gold": {"percent": 6, "cap": 150},
+    "platinum": {"percent": 8, "cap": 200},
+    "diamond": {"percent": 10, "cap": 250},
     "vip": {"percent": 12, "cap": 300},
 }
 MEMBER_TOOL_DISCOUNT_POLICY = {
-    "none": 0,
-    "bac": 0,
-    "vang": 3,
-    "bach_kim": 5,
-    "kim_cuong": 8,
+    "newbie": 0,
+    "silver": 0,
+    "gold": 3,
+    "platinum": 5,
+    "diamond": 8,
     "vip": 10,
 }
+MEMBER_TIER_PROMO_POLICY = {
+    "silver": {"percent": 10, "cap": 100},
+    "gold": {"percent": 12, "cap": 150},
+    "platinum": {"percent": 15, "cap": 250},
+    "diamond": {"percent": 18, "cap": 400},
+    "vip": {"percent": 20, "cap": 600},
+}
+MEMBER_BIRTHDAY_GIFT_XU = {
+    "newbie": 0,
+    "silver": 100,
+    "gold": 150,
+    "platinum": 250,
+    "diamond": 350,
+    "vip": 500,
+}
 MEMBER_TIER_ALIASES = {
-    "tan_thu": "none",
-    "tân_thủ": "none",
-    "none": "none",
-    "0": "none",
-    "bac": "bac",
-    "bạc": "bac",
-    "silver": "bac",
-    "vang": "vang",
-    "vàng": "vang",
-    "gold": "vang",
-    "bach_kim": "bach_kim",
-    "bạch_kim": "bach_kim",
-    "bachkim": "bach_kim",
-    "platinum": "bach_kim",
-    "kim_cuong": "kim_cuong",
-    "kim_cương": "kim_cuong",
-    "kimcuong": "kim_cuong",
-    "diamond": "kim_cuong",
+    "tan_thu": "newbie",
+    "tân_thủ": "newbie",
+    "newbie": "newbie",
+    "none": "newbie",
+    "0": "newbie",
+    "bac": "silver",
+    "bạc": "silver",
+    "silver": "silver",
+    "vang": "gold",
+    "vàng": "gold",
+    "gold": "gold",
+    "bach_kim": "platinum",
+    "bạch_kim": "platinum",
+    "bachkim": "platinum",
+    "platinum": "platinum",
+    "kim_cuong": "diamond",
+    "kim_cương": "diamond",
+    "kimcuong": "diamond",
+    "diamond": "diamond",
     "vip": "vip",
 }
 
@@ -2406,19 +2466,26 @@ def normalize_member_tier(value: str) -> str:
     raw = str(value or "").strip().lower().replace(" ", "_")
     return MEMBER_TIER_ALIASES.get(raw, raw if raw in MEMBER_TIER_ORDER else "")
 
+def member_tier_rank(tier: str) -> int:
+    tier = normalize_member_tier(tier) or "newbie"
+    return MEMBER_TIER_ORDER.index(tier) if tier in MEMBER_TIER_ORDER else 0
+
 def member_tier_label(tier: str) -> str:
-    return MEMBER_TIER_LABELS.get(normalize_member_tier(tier) or "none", "Tân thủ")
+    return MEMBER_TIER_LABELS.get(normalize_member_tier(tier) or "newbie", "Newbie")
+
+def get_member_badge(tier: str) -> str:
+    return MEMBER_TIER_BADGES.get(normalize_member_tier(tier) or "newbie", MEMBER_TIER_BADGES["newbie"])
 
 def member_tier_by_total_paid(total_paid_vnd: int) -> str:
     paid = int(total_paid_vnd or 0)
-    for tier in ["vip", "kim_cuong", "bach_kim", "vang", "bac"]:
+    for tier in ["vip", "diamond", "platinum", "gold", "silver"]:
         if paid >= MEMBER_TIER_THRESHOLDS[tier]:
             return tier
-    return "none"
+    return "newbie"
 
 def member_next_tier(total_paid_vnd: int, tier: str) -> tuple[str, int]:
     paid = int(total_paid_vnd or 0)
-    current_index = MEMBER_TIER_ORDER.index(normalize_member_tier(tier) or "none")
+    current_index = MEMBER_TIER_ORDER.index(normalize_member_tier(tier) or "newbie")
     for next_tier in MEMBER_TIER_ORDER[current_index + 1:]:
         needed = MEMBER_TIER_THRESHOLDS[next_tier] - paid
         if needed > 0:
@@ -2426,7 +2493,7 @@ def member_next_tier(total_paid_vnd: int, tier: str) -> tuple[str, int]:
     return "", 0
 
 def member_referral_reward(base_xu: int, tier: str) -> int:
-    policy = MEMBER_REFERRAL_POLICY.get(normalize_member_tier(tier) or "none", MEMBER_REFERRAL_POLICY["none"])
+    policy = MEMBER_REFERRAL_POLICY.get(normalize_member_tier(tier) or "newbie", MEMBER_REFERRAL_POLICY["newbie"])
     percent = int(policy.get("percent") or 0)
     cap = int(policy.get("cap") or 0)
     if percent <= 0 or cap <= 0 or int(base_xu or 0) <= 0:
@@ -2434,44 +2501,84 @@ def member_referral_reward(base_xu: int, tier: str) -> int:
     return min(int(int(base_xu) * percent / 100), cap)
 
 def get_member_benefits(tier: str) -> list[str]:
-    tier = normalize_member_tier(tier) or "none"
+    tier = normalize_member_tier(tier) or "newbie"
     benefits = {
-        "none": [
+        "newbie": [
             "Trial 200 Xu nếu đủ điều kiện.",
             "Dùng các công cụ public đã được mở.",
-            "Referral được ghi nhận nhưng chưa có thưởng Xu trong MVP.",
+            "Xem quyền lợi nâng cấp tại /vip_policy.",
         ],
-        "bac": [
+        "silver": [
             "Referral 3%, tối đa 100 Xu / khách nạp lần đầu.",
             "Hỗ trợ thành viên.",
             "Tham gia ưu đãi cơ bản.",
         ],
-        "vang": [
+        "gold": [
             "Referral 6%, tối đa 150 Xu / khách nạp lần đầu.",
-            "Ưu tiên hỗ trợ hơn Bạc.",
+            "Ưu tiên hỗ trợ hơn Silver.",
             "Giảm tối đa 3% phí Xu cho tool đủ điều kiện.",
         ],
-        "bach_kim": [
+        "platinum": [
             "Referral 8%, tối đa 200 Xu / khách nạp lần đầu.",
+            "Free Normal Chat.",
+            "Free Chat Pro.",
             "Ưu tiên hỗ trợ cao.",
             "Được mời test một số công cụ mới khi phù hợp.",
             "Giảm tối đa 5% phí Xu cho tool đủ điều kiện.",
         ],
-        "kim_cuong": [
+        "diamond": [
             "Referral 10%, tối đa 250 Xu / khách nạp lần đầu.",
+            "Free Normal Chat.",
+            "Free Chat Pro.",
             "Ưu tiên hỗ trợ rất cao.",
             "Có thể được cấp quota test tool mới khi phù hợp.",
             "Giảm tối đa 8% phí Xu cho tool đủ điều kiện.",
         ],
         "vip": [
             "Referral 12%, tối đa 300 Xu / khách nạp lần đầu.",
+            "Free Normal Chat.",
+            "Free Chat Pro.",
             "Ưu tiên hỗ trợ cao nhất.",
             "Có thể được cấu hình/quy trình riêng theo nhu cầu.",
             "Được trải nghiệm sớm tính năng beta khi đủ điều kiện.",
             "Giảm tối đa 10% phí Xu cho tool đủ điều kiện.",
         ],
     }
-    return benefits.get(tier, benefits["none"])
+    return benefits.get(tier, benefits["newbie"])
+
+def has_free_normal_chat(tier: str) -> bool:
+    return member_tier_rank(tier) >= member_tier_rank("platinum")
+
+def has_free_pro_chat(tier: str) -> bool:
+    return member_tier_rank(tier) >= member_tier_rank("platinum")
+
+def effective_chat_charge(user_id, mode: str, base_cost: int, is_admin=False, is_legacy_vip=False) -> dict:
+    mode_norm = normalize_chat_tier(mode or CHAT_TIER_NORMAL)
+    profile = get_member_profile(user_id)
+    tier = profile.get("tier") or "newbie"
+    badge = get_member_badge(tier)
+    cost = int(base_cost or 0)
+    reason = ""
+    if is_admin:
+        cost = 0
+        reason = "Admin"
+    elif is_legacy_vip:
+        cost = 0
+        reason = "VIP legacy"
+    elif mode_norm == CHAT_TIER_NORMAL and has_free_normal_chat(tier):
+        cost = 0
+        reason = f"{badge} benefit"
+    elif mode_norm == CHAT_TIER_PRO and has_free_pro_chat(tier):
+        cost = 0
+        reason = f"{badge} benefit"
+    return {
+        "base_cost": int(base_cost or 0),
+        "cost": int(cost or 0),
+        "mode": mode_norm,
+        "tier": tier,
+        "badge": badge,
+        "reason": reason,
+    }
 
 def eligible_for_member_discount(tool_name: str, base_cost: int) -> bool:
     blocked = {"payment", "payos", "manual_qr", "promo", "gift", "trial", "admin", "provider_fail"}
@@ -2483,7 +2590,7 @@ def eligible_for_member_discount(tool_name: str, base_cost: int) -> bool:
 def calculate_member_discounted_cost(user_id, tool_name: str, base_cost: int) -> dict:
     base = int(base_cost or 0)
     profile = get_member_profile(user_id)
-    tier = profile.get("tier") or "none"
+    tier = profile.get("tier") or "newbie"
     percent = int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0)
     if not eligible_for_member_discount(tool_name, base):
         percent = 0
@@ -2566,14 +2673,15 @@ def get_member_profile(user_id, conn=None) -> dict:
         has_override = bool(override)
         total_paid = member_total_paid_vnd(uid, conn=conn)
         tier = override or ("vip" if is_vip_flag == 1 else member_tier_by_total_paid(total_paid))
-        if tier == "none" and is_vip_flag == 1 and not has_override:
+        if tier == "newbie" and is_vip_flag == 1 and not has_override:
             tier = "vip"
-        policy = MEMBER_REFERRAL_POLICY.get(tier, MEMBER_REFERRAL_POLICY["none"])
+        policy = MEMBER_REFERRAL_POLICY.get(tier, MEMBER_REFERRAL_POLICY["newbie"])
         next_tier, needed = member_next_tier(total_paid, tier)
         return {
             "user_id": uid,
             "tier": tier,
             "tier_label": member_tier_label(tier),
+            "tier_badge": get_member_badge(tier),
             "total_paid_vnd": total_paid,
             "override": override,
             "is_vip": is_vip_flag,
@@ -2683,8 +2791,9 @@ def award_referral_bonus_if_needed(conn, referred_user_id, order_code="", amount
         "status": "none",
         "reward_xu": 0,
         "referrer_user_id": "",
-        "tier": "none",
-        "tier_label": "Tân thủ",
+        "tier": "newbie",
+        "tier_label": "Newbie",
+        "tier_badge": get_member_badge("newbie"),
     }
     c = conn.cursor()
     c.execute(
@@ -2780,12 +2889,403 @@ def award_referral_bonus_if_needed(conn, referred_user_id, order_code="", amount
         "reward_xu": int(reward_xu or 0),
         "tier": tier,
         "tier_label": profile.get("tier_label") or member_tier_label(tier),
+        "tier_badge": profile.get("tier_badge") or get_member_badge(tier),
         "referrer_user_id": str(referrer_id),
     })
     return result
 
 def normalize_promo_code(code: str) -> str:
     return re.sub(r"[^A-Z0-9_-]", "", str(code or "").strip().upper())[:32]
+
+def tier_up_promo_policy(tier: str) -> dict:
+    return MEMBER_TIER_PROMO_POLICY.get(normalize_member_tier(tier) or "", {})
+
+def tier_up_promo_code(user_id, tier: str) -> str:
+    tier_norm = normalize_member_tier(tier)
+    suffix = re.sub(r"\D", "", str(user_id or ""))[-6:] or str(user_id or "")[-6:]
+    return normalize_promo_code(f"UP_{tier_norm.upper()}_{suffix}")
+
+def create_member_tier_reward(conn, user_id, tier: str, created_by="system", force=False) -> dict:
+    tier_norm = normalize_member_tier(tier)
+    policy = tier_up_promo_policy(tier_norm)
+    if not policy:
+        return {"created": False, "status": "no_policy", "tier": tier_norm, "promo_code": ""}
+    uid = str(user_id)
+    promo_code = tier_up_promo_code(uid, tier_norm)
+    now = now_text()
+    c = conn.cursor()
+    existing = c.execute(
+        "SELECT promo_code, bonus_percent, cap_xu, status, used_at FROM member_tier_rewards WHERE user_id=? AND tier=?",
+        (uid, tier_norm),
+    ).fetchone()
+    if existing and not force:
+        return {
+            "created": False,
+            "status": existing[3] or "active",
+            "tier": tier_norm,
+            "promo_code": existing[0] or promo_code,
+            "bonus_percent": int(existing[1] or policy["percent"]),
+            "cap_xu": int(existing[2] or policy["cap"]),
+            "used_at": existing[4] or "",
+        }
+    if existing and force:
+        c.execute("DELETE FROM member_tier_rewards WHERE user_id=? AND tier=?", (uid, tier_norm))
+        c.execute("UPDATE promotion_codes SET status='disabled', updated_at=? WHERE code=?", (now, promo_code))
+    c.execute(
+        """INSERT OR IGNORE INTO member_tier_rewards
+        (user_id, tier, promo_code, bonus_percent, cap_xu, status, created_at, note)
+        VALUES (?,?,?,?,?,?,?,?)""",
+        (uid, tier_norm, promo_code, int(policy["percent"]), int(policy["cap"]), "active", now, f"Tier up reward created by {created_by}"),
+    )
+    c.execute(
+        """INSERT INTO promotion_codes
+        (code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note, created_at, updated_at,
+         name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count, per_user_limit,
+         created_by, requires_assignment, owner_user_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(code) DO UPDATE SET
+            status=CASE WHEN promotion_codes.status='disabled' THEN 'active' ELSE promotion_codes.status END,
+            note=excluded.note,
+            updated_at=excluded.updated_at,
+            name=excluded.name,
+            promo_type=excluded.promo_type,
+            value=excluded.value,
+            discount_percent=excluded.discount_percent,
+            min_amount=excluded.min_amount,
+            min_amount_vnd=excluded.min_amount_vnd,
+            max_bonus_xu=excluded.max_bonus_xu,
+            usage_limit=excluded.usage_limit,
+            max_uses=excluded.max_uses,
+            per_user_limit=excluded.per_user_limit,
+            requires_assignment=1,
+            owner_user_id=excluded.owner_user_id""",
+        (
+            promo_code, 0, int(policy["percent"]), 1, 0, 50000, "active",
+            f"Tier-up personal promo {tier_norm} for user {uid}", now, now,
+            f"{get_member_badge(tier_norm)} tier-up promo", "tier_up", int(policy["percent"]), 50000,
+            int(policy["cap"]), 1, 0, 1, str(created_by or ADMIN_ID), 1, uid,
+        ),
+    )
+    record_usage_event_conn(
+        conn,
+        uid,
+        event_type="tier_promo_created",
+        tool_name="member",
+        command="/grant_tier_promo" if created_by != "system" else "tier_up",
+        status="created",
+        provider="internal",
+        detail=f"tier={tier_norm}; code={promo_code}; percent={policy['percent']}; cap={policy['cap']}",
+    )
+    return {
+        "created": True,
+        "status": "active",
+        "tier": tier_norm,
+        "promo_code": promo_code,
+        "bonus_percent": int(policy["percent"]),
+        "cap_xu": int(policy["cap"]),
+        "used_at": "",
+    }
+
+def member_tiers_crossed(old_tier: str, new_tier: str) -> list[str]:
+    old_rank = member_tier_rank(old_tier)
+    new_rank = member_tier_rank(new_tier)
+    if new_rank <= old_rank:
+        return []
+    return [tier for tier in MEMBER_TIER_ORDER[old_rank + 1:new_rank + 1] if tier in MEMBER_TIER_PROMO_POLICY]
+
+def handle_member_tier_up(conn, user_id, old_tier: str, new_tier: str, total_paid_vnd: int, source="payment") -> dict:
+    crossed = member_tiers_crossed(old_tier, new_tier)
+    if not crossed:
+        return {"upgraded": False, "old_tier": normalize_member_tier(old_tier) or "newbie", "new_tier": normalize_member_tier(new_tier) or "newbie", "promos": []}
+    promos = []
+    for tier in crossed:
+        promo = create_member_tier_reward(conn, user_id, tier, created_by="system")
+        promo["badge"] = get_member_badge(tier)
+        promos.append(promo)
+    record_usage_event_conn(
+        conn,
+        user_id,
+        event_type="tier_up",
+        tool_name="member",
+        command=source,
+        status="upgraded",
+        amount_vnd=int(total_paid_vnd or 0),
+        provider="internal",
+        detail=f"old={normalize_member_tier(old_tier)}; new={normalize_member_tier(new_tier)}; promos={','.join(p.get('promo_code') or '' for p in promos)}",
+    )
+    record_audit(
+        conn,
+        "system",
+        "system",
+        "member.tier_up",
+        "user",
+        str(user_id),
+        before={"tier": normalize_member_tier(old_tier) or "newbie"},
+        after={"tier": normalize_member_tier(new_tier) or "newbie", "total_paid_vnd": int(total_paid_vnd or 0), "promos": promos},
+        note=f"Tier up after {source}",
+    )
+    return {
+        "upgraded": True,
+        "old_tier": normalize_member_tier(old_tier) or "newbie",
+        "new_tier": normalize_member_tier(new_tier) or "newbie",
+        "total_paid_vnd": int(total_paid_vnd or 0),
+        "promos": promos,
+    }
+
+def format_tier_up_message(result: dict) -> str:
+    if not result or not result.get("upgraded"):
+        return ""
+    new_tier = result.get("new_tier") or "newbie"
+    badge = get_member_badge(new_tier)
+    benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(new_tier))
+    promo_lines = []
+    for promo in result.get("promos") or []:
+        if promo.get("promo_code"):
+            promo_lines.append(
+                f"• <code>{html.escape(promo['promo_code'])}</code> — +{int(promo.get('bonus_percent') or 0)}% Xu, tối đa {int(promo.get('cap_xu') or 0)} Xu"
+            )
+    promo_block = "\n".join(promo_lines) or "• Không có mã mới."
+    return (
+        f"🎉 <b>CHÚC MỪNG BẠN ĐÃ LÊN HẠNG {html.escape(badge)}</b>\n\n"
+        f"Bạn vừa đạt cấp thành viên: <b>{html.escape(badge)}</b>\n"
+        f"Tổng nạp tích lũy: <b>{vnd_text(result.get('total_paid_vnd') or 0)}</b>\n\n"
+        "<b>Quyền lợi mới của bạn:</b>\n"
+        f"{benefits}\n\n"
+        "🎁 <b>Mã ưu đãi lên hạng của bạn:</b>\n"
+        f"{promo_block}\n\n"
+        "Mã chỉ dùng cho chính tài khoản của bạn, dùng 1 lần, áp dụng cho đơn nạp từ 50.000đ và không cộng dồn mã khác.\n\n"
+        "Dùng mã:\n"
+        "1. Gõ <code>/promo MÃ_CỦA_BẠN</code>\n"
+        "2. Sau đó gõ <code>/naptien</code>\n\n"
+        "Xem quyền lợi: <code>/member</code> hoặc <code>/vip_policy</code>"
+    )
+
+def get_member_personal_promos(user_id, conn=None, include_used=True) -> list[dict]:
+    close_conn = False
+    if conn is None:
+        conn = db_connect()
+        close_conn = True
+    try:
+        status_clause = "" if include_used else "AND COALESCE(status,'active')='active' AND COALESCE(used_at,'')=''"
+        rows = conn.execute(
+            f"""SELECT tier, promo_code, bonus_percent, cap_xu, status, created_at, used_at
+            FROM member_tier_rewards WHERE user_id=? {status_clause}
+            ORDER BY id DESC LIMIT 20""",
+            (str(user_id),),
+        ).fetchall()
+        return [
+            {
+                "tier": row[0],
+                "promo_code": row[1],
+                "bonus_percent": int(row[2] or 0),
+                "cap_xu": int(row[3] or 0),
+                "status": row[4] or "active",
+                "created_at": row[5] or "",
+                "used_at": row[6] or "",
+            }
+            for row in rows
+        ]
+    finally:
+        if close_conn:
+            conn.close()
+
+def parse_birthday_mmdd(value: str) -> str:
+    raw = str(value or "").strip().replace("/", "-").replace(".", "-")
+    m = re.match(r"^(\d{1,2})-(\d{1,2})$", raw)
+    if not m:
+        return ""
+    day = int(m.group(1))
+    month = int(m.group(2))
+    try:
+        datetime(2024, month, day)
+    except ValueError:
+        return ""
+    return f"{day:02d}-{month:02d}"
+
+def birthday_gift_xu_for_tier(tier: str) -> int:
+    return int(MEMBER_BIRTHDAY_GIFT_XU.get(normalize_member_tier(tier) or "newbie", 0) or 0)
+
+def parse_datetime_text(value: str):
+    try:
+        return datetime.strptime(str(value or "")[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=VN_TZ)
+    except Exception:
+        return None
+
+def days_since_datetime_text(value: str) -> int:
+    dt = parse_datetime_text(value)
+    if not dt:
+        return 0
+    return max(0, (vn_now() - dt).days)
+
+def days_until_birthday(mmdd: str, from_dt=None) -> int:
+    from_dt = from_dt or vn_now()
+    parsed = parse_birthday_mmdd(mmdd)
+    if not parsed:
+        return 9999
+    day, month = [int(x) for x in parsed.split("-")]
+    target = datetime(from_dt.year, month, day, tzinfo=VN_TZ)
+    if target.date() < from_dt.date():
+        target = datetime(from_dt.year + 1, month, day, tzinfo=VN_TZ)
+    return max(0, (target.date() - from_dt.date()).days)
+
+def get_user_birthday(user_id, conn=None) -> dict:
+    close_conn = False
+    if conn is None:
+        conn = db_connect()
+        close_conn = True
+    try:
+        row = conn.execute(
+            "SELECT birthday_mmdd, birthday_set_at, last_changed_at, COALESCE(change_locked,0), COALESCE(note,'') FROM user_birthdays WHERE user_id=?",
+            (str(user_id),),
+        ).fetchone()
+        if not row:
+            return {}
+        return {
+            "birthday_mmdd": row[0] or "",
+            "birthday_set_at": row[1] or "",
+            "last_changed_at": row[2] or "",
+            "change_locked": int(row[3] or 0),
+            "note": row[4] or "",
+        }
+    finally:
+        if close_conn:
+            conn.close()
+
+def birthday_received_this_year(conn, user_id, year=None) -> bool:
+    year = int(year or vn_now().year)
+    row = conn.execute(
+        "SELECT 1 FROM birthday_gifts WHERE user_id=? AND birthday_year=? LIMIT 1",
+        (str(user_id), year),
+    ).fetchone()
+    return bool(row)
+
+def birthday_gift_status(user_id, conn=None) -> dict:
+    close_conn = False
+    if conn is None:
+        conn = db_connect()
+        close_conn = True
+    try:
+        birthday = get_user_birthday(user_id, conn=conn)
+        profile = get_member_profile(user_id, conn=conn)
+        tier = profile.get("tier") or "newbie"
+        gift_xu = birthday_gift_xu_for_tier(tier)
+        today = vn_now()
+        already = birthday_received_this_year(conn, user_id, today.year)
+        if not birthday:
+            state = "not_set"
+        elif parse_birthday_mmdd(birthday.get("birthday_mmdd")) != today.strftime("%d-%m"):
+            state = "not_today"
+        elif already:
+            state = "already_received"
+        elif gift_xu <= 0:
+            state = "tier_not_eligible"
+        elif days_since_datetime_text(birthday.get("birthday_set_at")) < 30:
+            state = "needs_manual_review"
+        else:
+            state = "eligible"
+        return {
+            "user_id": str(user_id),
+            "birthday": birthday,
+            "tier": tier,
+            "badge": get_member_badge(tier),
+            "gift_xu": gift_xu,
+            "already_received_this_year": already,
+            "days_since_set": days_since_datetime_text((birthday or {}).get("birthday_set_at", "")),
+            "days_until_birthday": days_until_birthday((birthday or {}).get("birthday_mmdd", "")),
+            "state": state,
+        }
+    finally:
+        if close_conn:
+            conn.close()
+
+def grant_birthday_gift(conn, user_id, actor_id="system", admin_override=False) -> dict:
+    uid = str(user_id)
+    profile = get_member_profile(uid, conn=conn)
+    tier = profile.get("tier") or "newbie"
+    gift_xu = birthday_gift_xu_for_tier(tier)
+    year = vn_now().year
+    if gift_xu <= 0:
+        return {"granted": False, "status": "tier_not_eligible", "gift_xu": 0, "tier": tier}
+    if birthday_received_this_year(conn, uid, year):
+        return {"granted": False, "status": "already_received", "gift_xu": 0, "tier": tier}
+    birthday = get_user_birthday(uid, conn=conn)
+    if not birthday and not admin_override:
+        return {"granted": False, "status": "not_set", "gift_xu": 0, "tier": tier}
+    if not admin_override:
+        if parse_birthday_mmdd(birthday.get("birthday_mmdd")) != vn_now().strftime("%d-%m"):
+            return {"granted": False, "status": "not_today", "gift_xu": 0, "tier": tier}
+        if days_since_datetime_text(birthday.get("birthday_set_at")) < 30:
+            return {"granted": False, "status": "needs_manual_review", "gift_xu": 0, "tier": tier}
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO birthday_gifts
+        (user_id, tier, gift_xu, birthday_year, status, granted_at, note)
+        VALUES (?,?,?,?,?,?,?)""",
+        (uid, tier, int(gift_xu), year, "granted", now_text(), f"Birthday gift granted by {actor_id}; admin_override={int(bool(admin_override))}"),
+    )
+    if int(cur.rowcount or 0) <= 0:
+        return {"granted": False, "status": "already_received", "gift_xu": 0, "tier": tier}
+    conn.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (int(gift_xu), uid))
+    record_credit_event(conn, uid, gift_xu, "birthday_gift", str(year), f"Birthday gift tier={tier}")
+    record_usage_event_conn(
+        conn,
+        uid,
+        event_type="birthday_gift",
+        tool_name="member",
+        command="/birthday",
+        status="granted",
+        xu_delta=int(gift_xu),
+        provider="internal",
+        detail=f"tier={tier}; year={year}; admin_override={int(bool(admin_override))}",
+    )
+    record_audit(
+        conn,
+        actor_id,
+        "admin" if str(actor_id) != "system" else "system",
+        "member.birthday_gift_granted",
+        "birthday_gift",
+        f"{uid}:{year}",
+        before=None,
+        after={"user_id": uid, "tier": tier, "gift_xu": gift_xu, "year": year},
+        note="Birthday gift granted",
+    )
+    row = conn.execute("SELECT COALESCE(credits,0) FROM users WHERE user_id=?", (uid,)).fetchone()
+    credits = int(row[0] or 0) if row else 0
+    return {"granted": True, "status": "granted", "gift_xu": gift_xu, "tier": tier, "badge": get_member_badge(tier), "balance": credits}
+
+def format_birthday_gift_message(result: dict) -> str:
+    return (
+        f"🎂 <b>CHÚC MỪNG SINH NHẬT {html.escape(result.get('badge') or get_member_badge(result.get('tier')))}</b>\n\n"
+        f"TOAN AAS tặng bạn +<b>{int(result.get('gift_xu') or 0)} Xu dịch vụ</b> nhân dịp sinh nhật.\n\n"
+        f"• Cấp thành viên: <b>{html.escape(result.get('badge') or get_member_badge(result.get('tier')))}</b>\n"
+        f"• Quà sinh nhật: +<b>{int(result.get('gift_xu') or 0)} Xu</b>\n"
+        f"• Số dư mới: <b>{int(result.get('balance') or 0)} Xu</b>\n\n"
+        "Chúc bạn một ngày nhiều năng lượng và tạo được nhiều nội dung hiệu quả cùng TOAN AAS!"
+    )
+
+async def maybe_auto_grant_birthday_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user:
+        return None
+    uid = update.effective_user.id
+    try:
+        status = birthday_gift_status(uid)
+        if status.get("state") != "eligible":
+            return status
+        conn = db_connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            result = grant_birthday_gift(conn, uid, actor_id="system", admin_override=False)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        if result.get("granted"):
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=format_birthday_gift_message(result), parse_mode="HTML")
+        return status
+    except Exception as e:
+        logger.warning(f"Birthday auto check failed: {e}")
+        return {"state": "error", "error": str(e)[:160]}
 
 def promo_policy_by_code(code: str) -> dict:
     norm = normalize_promo_code(code)
@@ -2797,7 +3297,7 @@ def promo_policy_by_code(code: str) -> dict:
 def promo_public_label(promo: dict) -> str:
     promo_type = promo.get("promo_type") or "fixed_bonus_xu"
     value = int(promo.get("value") or promo.get("bonus_xu") or 0)
-    if promo_type == "percent_bonus":
+    if promo_type in {"percent_bonus", "tier_up"}:
         return f"+{value}% Xu dịch vụ"
     if promo_type == "fixed_bonus_xu":
         return f"+{value} Xu dịch vụ"
@@ -2916,7 +3416,7 @@ def get_promo_code_dict(conn, code: str) -> dict:
     c.execute(
         """SELECT code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note,
                   name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count,
-                  per_user_limit, starts_at, ends_at, created_at, updated_at, requires_assignment
+                  per_user_limit, starts_at, ends_at, created_at, updated_at, requires_assignment, owner_user_id
         FROM promotion_codes WHERE code=?""",
         (normalize_promo_code(code),),
     )
@@ -2926,7 +3426,7 @@ def get_promo_code_dict(conn, code: str) -> dict:
     keys = [
         "code", "bonus_xu", "discount_percent", "max_uses", "used_count", "min_amount", "status", "note",
         "name", "promo_type", "value", "min_amount_vnd", "max_bonus_xu", "usage_limit", "usage_count",
-        "per_user_limit", "starts_at", "ends_at", "created_at", "updated_at", "requires_assignment",
+        "per_user_limit", "starts_at", "ends_at", "created_at", "updated_at", "requires_assignment", "owner_user_id",
     ]
     promo = dict(zip(keys, row))
     if not promo.get("promo_type"):
@@ -3552,6 +4052,10 @@ def validate_promo_code(user_id, code: str, amount_vnd=0, conn=None, after_paid=
             return False, promo, "min_amount_not_met"
         if amount_int > 0 and amount_int < promo_min_amount(promo):
             return False, promo, "min_amount"
+        if str(promo.get("promo_type") or "").lower() == "tier_up":
+            owner = str(promo.get("owner_user_id") or "").strip()
+            if owner and owner != str(user_id):
+                return False, promo, "owner_only"
 
         period_type = promo_period_type(norm_code)
         period_key = promo_period_key(norm_code)
@@ -3582,7 +4086,7 @@ def validate_promo_code(user_id, code: str, amount_vnd=0, conn=None, after_paid=
 def calculate_promo_bonus(promo: dict, base_xu: int, amount_vnd: int = 0) -> int:
     promo_type = promo.get("promo_type") or "fixed_bonus_xu"
     value = int(promo.get("value") or promo.get("bonus_xu") or 0)
-    if promo_type == "percent_bonus":
+    if promo_type in {"percent_bonus", "tier_up"}:
         bonus = math.floor(int(base_xu or 0) * value / 100)
     elif promo_type == "fixed_bonus_xu":
         bonus = value
@@ -3885,7 +4389,8 @@ def redeem_promo_for_order(conn, user_id, order_code: str, amount_vnd: int, base
 
     if bonus > 0:
         c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (bonus, str(user_id)))
-        record_credit_event(conn, user_id, bonus, "promo_bonus", f"{promo['code']}:{order_code}", f"Promo {promo['code']} thưởng {bonus} Xu")
+        credit_event_type = "tier_promo_bonus" if str(promo.get("promo_type") or "").lower() == "tier_up" else "promo_bonus"
+        record_credit_event(conn, user_id, bonus, credit_event_type, f"{promo['code']}:{order_code}", f"Promo {promo['code']} thưởng {bonus} Xu")
     c.execute(
         """UPDATE promotion_redemptions
         SET status='applied', order_code=?, bonus_xu=?, amount_vnd=?, base_xu=?, applied_at=?, redeemed_at=?, note=?
@@ -3906,6 +4411,25 @@ def redeem_promo_for_order(conn, user_id, order_code: str, amount_vnd: int, base
         WHERE code=?""",
         (now_text(), promo["code"]),
     )
+    if str(promo.get("promo_type") or "").lower() == "tier_up":
+        c.execute(
+            """UPDATE member_tier_rewards
+            SET status='used', used_at=?, note=?
+            WHERE user_id=? AND promo_code=? AND COALESCE(used_at,'')=''""",
+            (now_text(), f"Used on order {order_code}; bonus_xu={bonus}", str(user_id), promo["code"]),
+        )
+        record_usage_event_conn(
+            conn,
+            user_id,
+            event_type="tier_promo_used",
+            tool_name="member",
+            command="/promo",
+            status="applied",
+            xu_delta=int(bonus or 0),
+            amount_vnd=int(amount_vnd or 0),
+            provider="internal",
+            detail=f"code={promo['code']}; base_xu={int(base_xu or 0)}; bonus_xu={int(bonus or 0)}",
+        )
     if get_user_pending_promo_raw(conn, user_id).get("code") == promo["code"]:
         clear_user_pending_promo(user_id, conn)
     record_audit(
@@ -21161,12 +21685,16 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 (str(target_id), "PayOS user", 0, 0, now_text(), 0, 0)
             )
 
+        old_total_paid = member_total_paid_vnd(target_id, conn=conn)
+        old_tier = member_tier_by_total_paid(old_total_paid)
         launch_bonus = redeem_launch_bonus_for_order(conn, target_id, order_code, amount_vnd)
         total_credit = base_xu + launch_bonus
         c.execute(
             "UPDATE users SET credits = credits + ?, has_deposited=1, total_paid_vnd = COALESCE(total_paid_vnd,0) + ? WHERE user_id=?",
             (int(total_credit), int(amount_vnd or 0), str(target_id))
         )
+        new_total_paid = int(old_total_paid or 0) + int(amount_vnd or 0)
+        new_tier = member_tier_by_total_paid(new_total_paid)
         c.execute(
             "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
             (PAYOS_STATUS_PAID, now_text(), str(order_code))
@@ -21201,6 +21729,14 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             base_xu=int(base_xu or 0),
             is_first_deposit=is_first_deposit,
         )
+        tier_up_result = handle_member_tier_up(
+            conn,
+            target_id,
+            old_tier,
+            new_tier,
+            new_total_paid,
+            source="payos",
+        )
         info["promo_bonus"] = promo_bonus
         info["promo_code"] = promo_result.get("code") or ""
         info["promo_status"] = promo_result.get("status") or ""
@@ -21209,6 +21745,7 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
         info["total_credit_without_promo"] = total_credit
         info["referral_bonus"] = int(referral_result.get("reward_xu") or 0)
         info["referral_result"] = referral_result
+        info["tier_up_result"] = tier_up_result
         record_audit(
             conn,
             "payos",
@@ -23839,7 +24376,7 @@ def menu_text_main(is_admin: bool) -> str:
         "💳 Xu dịch vụ: PayOS QR động hoặc QR thủ công khi cổng tự động bận.\n"
         "📜 Pháp lý & an toàn: bấm “Điều khoản” hoặc gõ <code>/legal</code> để xem đầy đủ."
         f"{admin_line}\n\n"
-        "🎁 Tân thủ: mỗi ID Telegram chỉ nhận <b>200 Xu trải nghiệm</b> một lần.\n"
+        "🎁 Newbie: mỗi ID Telegram chỉ nhận <b>200 Xu trải nghiệm</b> một lần.\n"
         "Xu được quản lý theo ID Telegram. Xóa chat rồi bấm Start lại sẽ không nhận lại 200 Xu lần nữa.\n"
         "Bạn có thể dùng ngay 1 lượt <code>/film</code> Basic để thử quy trình tạo video script.\n"
         "💳 Hết Xu thì dùng <code>/naptien</code> để mua/nạp thêm Xu dịch vụ.\n\n"
@@ -24141,8 +24678,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_is_admin = is_admin_user(uid)
     member_profile = get_member_profile(uid)
     member_line = (
-        f"\n\n👑 Thành viên: <b>{html.escape(member_profile['tier_label'])}</b>\n"
+        f"\n\n👑 Thành viên: <b>{html.escape(member_profile.get('tier_badge') or member_profile['tier_label'])}</b>\n"
         "🎁 Giới thiệu bạn bè: <code>/referral</code>\n"
+        "🎂 Thêm ngày sinh tại <code>/birthday</code> để nhận quà bí mật theo hạng thành viên.\n"
         "📋 Quyền lợi thành viên: <code>/vip_policy</code>"
     )
     await update.message.reply_text(
@@ -24155,6 +24693,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(user_is_admin),
     )
+    await maybe_auto_grant_birthday_gift(update, context)
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_start(update, context)
@@ -25698,6 +26237,42 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
             (start_at, end_at),
             0,
         ) or 0)
+        tier_ups = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE event_type='tier_up' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        tier_promos_created = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE event_type='tier_promo_created' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        tier_promos_used = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE event_type='tier_promo_used' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        tier_promo_xu = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(xu_delta),0) FROM usage_events WHERE event_type='tier_promo_used' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        birthday_gifts = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM birthday_gifts WHERE granted_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        birthday_xu = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(gift_xu),0) FROM birthday_gifts WHERE granted_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
         provider_errors = int(sql_scalar(
             conn,
             "SELECT COUNT(*) FROM api_debug_events WHERE UPPER(status) NOT IN ('PASS','OK','SUCCESS') AND created_at BETWEEN ? AND ?",
@@ -25785,6 +26360,12 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
                 "ref_qualified": ref_qualified,
                 "ref_rewards_paid": ref_rewards_paid,
                 "ref_xu_rewarded": ref_xu_rewarded,
+                "tier_ups": tier_ups,
+                "tier_promos_created": tier_promos_created,
+                "tier_promos_used": tier_promos_used,
+                "tier_promo_xu": tier_promo_xu,
+                "birthday_gifts": birthday_gifts,
+                "birthday_xu": birthday_xu,
             },
         }
     finally:
@@ -25845,6 +26426,13 @@ def format_admin_report(payload: dict) -> str:
         f"• Qualified first deposits: <b>{growth.get('ref_qualified', 0)}</b>",
         f"• Referral rewards paid: <b>{growth.get('ref_rewards_paid', 0)}</b>",
         f"• Referral Xu rewarded: <b>{xu_text(growth.get('ref_xu_rewarded', 0))}</b>",
+        "",
+        "<b>Member / Birthday</b>",
+        f"• Tier ups: <b>{growth.get('tier_ups', 0)}</b>",
+        f"• Tier promo created/used: <b>{growth.get('tier_promos_created', 0)}</b>/<b>{growth.get('tier_promos_used', 0)}</b>",
+        f"• Tier promo Xu bonus: <b>{xu_text(growth.get('tier_promo_xu', 0))}</b>",
+        f"• Birthday gifts: <b>{growth.get('birthday_gifts', 0)}</b>",
+        f"• Birthday Xu gifted: <b>{xu_text(growth.get('birthday_xu', 0))}</b>",
         "",
         "<b>Provider</b>",
         f"• Provider error/debug fail: <b>{providers['errors']}</b>",
@@ -26298,6 +26886,7 @@ def promo_code_status_message(status: str) -> str:
         "min_amount": "Gói nạp chưa đạt số tiền tối thiểu của mã.",
         "first_topup_only": "Mã FIRST30 chỉ dành cho lần nạp đầu tiên.",
         "second_topup_only": "Mã SECOND15 chỉ dành cho lần nạp thứ 2.",
+        "owner_only": "Mã ưu đãi cá nhân này chỉ dùng cho đúng tài khoản được cấp.",
     }
     return messages.get(status, "Mã không hợp lệ, hết lượt, hết hạn hoặc chưa đủ điều kiện.")
 
@@ -26324,6 +26913,7 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<code>/promo WEEKLY10</code>",
             "",
             "Xem ưu đãi đang có: <code>/khuyenmai</code>",
+            "Xem mã cá nhân của bạn: <code>/my_promos</code>",
             "",
             "<b>Chính sách:</b>",
             "• Ưu đãi áp dụng cho đơn nạp từ 50k",
@@ -27766,10 +28356,17 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👑 <b>Thành viên & giới thiệu:</b>",
         "• Cấp thành viên tính theo tổng nạp thành công.",
         "• Cấp càng cao, thưởng giới thiệu và quyền lợi càng tốt.",
+        "• Platinum, Diamond và VIP được miễn phí Chat thường và Chat Pro.",
+        "• Chat Deep vẫn tính Xu để kiểm soát tác vụ sâu/API.",
         "• Referral chỉ thưởng khi người được mời nạp lần đầu thành công.",
         "• Tất cả ưu đãi là cộng thêm Xu dịch vụ, không phải chiết khấu tiền/rút tiền.",
         "• Xem chi tiết: <code>/vip_policy</code>",
         "• Link giới thiệu của bạn: <code>/referral</code>",
+        "",
+        "🎂 <b>Quà sinh nhật:</b>",
+        "• Thêm ngày sinh tại <code>/birthday</code> để nhận quà bí mật theo hạng thành viên.",
+        "• Nếu không lưu ngày sinh, hệ thống sẽ không tự động tặng quà.",
+        "• Quà là Xu dịch vụ nội bộ, không rút tiền, không chuyển nhượng.",
         "",
         "Giá đã bao gồm chi phí AI, server, xử lý lỗi và vận hành hệ thống. Admin có thể tạo khuyến mãi theo từng thời điểm.",
     ]
@@ -27846,6 +28443,7 @@ def chat_pro_usage_text() -> str:
         f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công\n"
         f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công\n"
         f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công\n"
+        "• Platinum/Diamond/VIP: miễn phí Chat thường và Chat Pro; Chat Deep vẫn tính Xu\n"
         "AI lỗi/quota/provider fail: không trừ Xu."
     )
 
@@ -28042,9 +28640,9 @@ async def call_ai_chat_with_fallback(system_prompt: str, user_text: str, user_id
         "message": ai_failure_user_text(statuses, errors),
     }
 
-def chat_charge_line(cost: int, mode: str, is_free: bool = False) -> str:
+def chat_charge_line(cost: int, mode: str, is_free: bool = False, reason: str = "") -> str:
     if is_free:
-        return "(-0 Xu) (VIP/Admin)"
+        return f"(-0 Xu | {reason})" if reason else "(-0 Xu)"
     mode_norm = normalize_chat_tier(mode)
     if mode_norm == CHAT_TIER_DEEP:
         return f"(-{cost} Xu Chat Deep)"
@@ -28092,9 +28690,21 @@ async def send_chat_pro_output(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
 async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     modes = ensure_user_modes(uid)
+    profile = get_member_profile(uid)
+    badge = profile.get("tier_badge") or get_member_badge(profile.get("tier"))
+    if has_free_normal_chat(profile.get("tier")):
+        member_note = (
+            f"🎁 Đặc quyền {html.escape(badge)}:\n"
+            "• Normal Chat: miễn phí\n"
+            "• Chat Pro: miễn phí\n"
+            "• Chat Deep: vẫn tính 20 Xu/lượt để kiểm soát tác vụ sâu"
+        )
+    else:
+        member_note = "🎯 Lên Platinum để mở Free Normal Chat và Free Chat Pro."
     lines = [
         "🤖 <b>Chế độ AI hiện tại</b>",
         "",
+        f"• Cấp thành viên: <b>{html.escape(badge)}</b>",
         f"• Chat mode: <code>{html.escape(modes.get('chat_mode') or 'normal')}</code>",
         f"• AI level: <code>{html.escape(modes.get('ai_level') or 'normal')}</code>",
         f"• Voice mode: <code>{html.escape(modes.get('voice_mode') or '-')}</code>",
@@ -28106,6 +28716,8 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công",
         f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công",
         "• AI lỗi/quota/provider fail: không trừ Xu",
+        "",
+        member_note,
         "",
         "<b>Lệnh đổi chế độ</b>",
         "• <code>/chat_pro_on</code> — bật Chat Pro persistent",
@@ -28178,7 +28790,9 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
 
     credits, _, is_vip = get_user(uid, update.effective_user.first_name)
     is_admin = str(uid) == ADMIN_ID
-    cost = 0 if (is_admin or is_vip) else chat_mode_cost(mode)
+    base_cost = chat_mode_cost(mode)
+    charge = effective_chat_charge(uid, mode, base_cost, is_admin=is_admin, is_legacy_vip=bool(is_vip))
+    cost = int(charge["cost"])
     if cost > 0 and credits < cost:
         return await update.message.reply_text(chat_insufficient_credits_text(mode, cost, credits))
 
@@ -28216,9 +28830,10 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
         status=mode,
         provider=provider,
         xu_delta=-int(cost or 0),
+        detail=f"tier={charge['tier']}; base={charge['base_cost']}; cost={charge['cost']}; benefit={charge.get('reason') or '-'}",
     )
-    save_tool_test_result("ai_chat", "PASS", f"provider={provider}; mode={mode}; cost={cost}", uid)
-    caption = f"Provider: {provider} | {chat_charge_line(cost, mode, is_admin or bool(is_vip))} | Còn lại: {credits_after} Xu"
+    save_tool_test_result("ai_chat", "PASS", f"provider={provider}; mode={mode}; base={charge['base_cost']}; cost={cost}; tier={charge['tier']}", uid)
+    caption = f"Provider: {provider} | {chat_charge_line(cost, mode, cost == 0, charge.get('reason') or '')} | Còn lại: {credits_after} Xu"
     await send_chat_pro_output(context, update.effective_chat.id, uid, output, caption)
 
 async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -28403,15 +29018,19 @@ async def cmd_telegram_takeover(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
+    await maybe_auto_grant_birthday_gift(update, context)
     credits, total_spent, is_vip = get_user(user_id, update.effective_user.first_name)
     member = get_member_profile(user_id)
     ref_stats = referral_stats_for_user(user_id)
     if is_admin_user(user_id):
         tier = "👑 ADMIN"
     else:
-        tier = member["tier_label"]
+        tier = member.get("tier_badge") or member["tier_label"]
     credit_display = "Vô Hạn (∞)" if is_admin_user(user_id) or is_vip else f"{credits} Xu dịch vụ"
     ref_link = referral_link_for_user(user_id)
+    birthday = get_user_birthday(user_id)
+    birthday_line = birthday.get("birthday_mmdd") if birthday else "chưa lưu (/birthday)"
+    chat_privilege = "Free Normal + Pro; Deep vẫn tính Xu" if has_free_normal_chat(member.get("tier")) else "Normal 5 Xu, Pro 10 Xu; lên Platinum để free Normal/Pro"
     msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{user_id}</code>\n"
@@ -28422,7 +29041,10 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Referral pending/rewarded: <b>{ref_stats['pending']}/{ref_stats['rewarded']}</b>\n"
         f"• Xu referral đã nhận: <b>{ref_stats['reward_xu']} Xu</b>\n"
         f"• Link giới thiệu: <code>{html.escape(ref_link)}</code>\n\n"
+        f"• Đặc quyền chat: <b>{html.escape(chat_privilege)}</b>\n"
+        f"• Birthday gift: <b>{html.escape(birthday_line)}</b>\n\n"
         f"👉 /member để xem quyền lợi đầy đủ.\n"
+        f"👉 /birthday để thêm/xem ngày sinh.\n"
         f"👉 /naptien để mua/nạp thêm Xu dịch vụ."
     )
     await update.message.reply_text(msg, parse_mode="HTML")
@@ -40618,7 +41240,7 @@ def member_referral_policy_text(profile: dict) -> str:
     percent = int(profile.get("ref_percent") or 0)
     cap = int(profile.get("ref_cap") or 0)
     if percent <= 0 or cap <= 0:
-        return "Tân thủ: chưa có thưởng Xu trong MVP, hệ thống chỉ ghi nhận referral."
+        return "Newbie: chưa mở thưởng Xu, hệ thống chỉ ghi nhận referral."
     return f"{percent}% Xu gốc gói nạp đầu tiên, tối đa {cap} Xu / khách."
 
 async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40637,7 +41259,7 @@ async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Bạn nhận Xu thưởng theo cấp thành viên của bạn.\n"
         "• Mỗi người được mời chỉ tạo thưởng một lần.\n"
         "• Không thưởng tài khoản ảo/spam/tự mời.\n\n"
-        f"👑 Cấp hiện tại: <b>{html.escape(profile['tier_label'])}</b>\n"
+        f"👑 Cấp hiện tại: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
         f"🎯 Tỷ lệ thưởng: <b>{member_referral_policy_text(profile)}</b>\n\n"
         "📊 <b>Thống kê nhanh:</b>\n"
         f"• Đã bấm link: <b>{stats['total']}</b>\n"
@@ -40684,22 +41306,44 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile = get_member_profile(uid)
     link = referral_link_for_user(uid, context.bot.username or BOT_USERNAME)
     next_line = "Bạn đang ở cấp cao nhất." if not profile["next_tier"] else (
-        f"Cấp tiếp theo: <b>{html.escape(profile['next_tier_label'])}</b> — còn cần <b>{vnd_text(profile['amount_to_next'])}</b>."
+        f"Cấp tiếp theo: <b>{html.escape(get_member_badge(profile['next_tier']))}</b> — còn cần <b>{vnd_text(profile['amount_to_next'])}</b>."
     )
     benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(profile["tier"]))
+    promos = get_member_personal_promos(uid, include_used=False)
+    promo_line = (
+        "\n".join(
+            f"• <code>{html.escape(p['promo_code'])}</code> — +{p['bonus_percent']}% Xu, tối đa {p['cap_xu']} Xu"
+            for p in promos[:5]
+        )
+        if promos else "• Chưa có mã ưu đãi cá nhân đang hoạt động."
+    )
+    birthday = get_user_birthday(uid)
+    birthday_line = f"• Đã lưu: <b>{html.escape(birthday.get('birthday_mmdd') or '-')}</b>" if birthday else "• Chưa lưu. Gõ <code>/birthday</code> để thêm ngày sinh và nhận quà bí mật theo hạng."
+    chat_line = (
+        "• Free Normal Chat\n• Free Chat Pro\n• Chat Deep vẫn tính Xu"
+        if has_free_normal_chat(profile["tier"]) else
+        "• Normal Chat: 5 Xu\n• Chat Pro: 10 Xu\n🎯 Lên Platinum để mở Free Normal Chat và Free Chat Pro."
+    )
     text = (
         "👑 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
-        f"• Cấp hiện tại: <b>{html.escape(profile['tier_label'])}</b>\n"
+        f"• Cấp hiện tại: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
         f"• Tổng nạp thành công: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
         f"• {next_line}\n\n"
         "<b>Quyền lợi hiện tại</b>\n"
         f"{benefits}\n\n"
         "<b>Thưởng giới thiệu hiện tại</b>\n"
         f"• {html.escape(member_referral_policy_text(profile))}\n\n"
+        "<b>Đặc quyền chat</b>\n"
+        f"{chat_line}\n\n"
         "Link giới thiệu:\n"
         f"<code>{html.escape(link)}</code>\n\n"
+        "🎁 <b>Mã ưu đãi cá nhân</b>\n"
+        f"{promo_line}\n\n"
+        "🎂 <b>Sinh nhật</b>\n"
+        f"{birthday_line}\n\n"
         "Xem thống kê: <code>/ref_stats</code>\n"
-        "Bảng quyền lợi: <code>/vip_policy</code>"
+        "Bảng quyền lợi: <code>/vip_policy</code>\n"
+        "Mã cá nhân: <code>/my_promos</code>"
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -40707,41 +41351,304 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "👑 <b>CHÍNH SÁCH THÀNH VIÊN TOAN AAS</b>",
         "",
-        "<b>Bạc — từ 100.000đ</b>",
+        "<b>🌱 Newbie — dưới 100.000đ</b>",
+        "• Trial 200 Xu nếu đủ điều kiện",
+        "• Dùng công cụ public",
+        "• Referral reward: chưa mở",
+        "",
+        "<b>🥈 Silver — từ 100.000đ</b>",
         "• Referral 3%, cap 100 Xu",
         "• Hỗ trợ thành viên",
         "• Ưu đãi cơ bản",
         "",
-        "<b>Vàng — từ 1.000.000đ</b>",
+        "<b>🥇 Gold — từ 1.000.000đ</b>",
         "• Referral 6%, cap 150 Xu",
-        "• Ưu tiên hỗ trợ hơn Bạc",
+        "• Ưu tiên hỗ trợ hơn Silver",
         "• Giảm tối đa 3% phí tool đủ điều kiện",
         "",
-        "<b>Bạch Kim — từ 10.000.000đ</b>",
+        "<b>💠 Platinum — từ 10.000.000đ</b>",
         "• Referral 8%, cap 200 Xu",
+        "• Free Normal Chat",
+        "• Free Chat Pro",
         "• Ưu tiên hỗ trợ cao",
         "• Beta tools khi phù hợp",
         "• Giảm tối đa 5%",
         "",
-        "<b>Kim Cương — từ 50.000.000đ</b>",
+        "<b>💎 Diamond — từ 50.000.000đ</b>",
         "• Referral 10%, cap 250 Xu",
+        "• Free Normal Chat",
+        "• Free Chat Pro",
         "• Ưu tiên hỗ trợ rất cao",
         "• Quota test tool mới khi phù hợp",
         "• Giảm tối đa 8%",
         "",
-        "<b>VIP — từ 100.000.000đ hoặc admin duyệt</b>",
+        "<b>👑 VIP — từ 100.000.000đ hoặc admin duyệt</b>",
         "• Referral 12%, cap 300 Xu",
+        "• Free Normal Chat",
+        "• Free Chat Pro",
         "• Ưu tiên hỗ trợ cao nhất",
         "• Cấu hình/quy trình riêng khi phù hợp",
         "• Giảm tối đa 10%",
+        "",
+        "🎉 <b>Thưởng khi lên hạng</b>",
+        "• Silver: +10%, tối đa 100 Xu",
+        "• Gold: +12%, tối đa 150 Xu",
+        "• Platinum: +15%, tối đa 250 Xu",
+        "• Diamond: +18%, tối đa 400 Xu",
+        "• VIP: +20%, tối đa 600 Xu",
+        "Mã lên hạng chỉ dùng cho chính tài khoản nhận mã, mỗi mốc 1 lần, không cộng dồn mã khác.",
+        "",
+        "🎂 <b>Quà sinh nhật thành viên</b>",
+        "• Silver: +100 Xu",
+        "• Gold: +150 Xu",
+        "• Platinum: +250 Xu",
+        "• Diamond: +350 Xu",
+        "• VIP: +500 Xu",
+        "Điều kiện: lưu ngày sinh bằng /birthday, lưu trước ít nhất 30 ngày để tự động xét, mỗi tài khoản nhận 1 lần/năm.",
         "",
         "<b>Lưu ý pháp lý</b>",
         "• Tất cả ưu đãi là Xu dịch vụ nội bộ.",
         "• Không rút tiền, không chuyển nhượng, không quy đổi ngược thành tiền.",
         "• Referral chỉ thưởng sau khi người được mời nạp lần đầu thành công.",
         "• TOAN AAS có quyền từ chối thưởng nếu phát hiện spam/tài khoản ảo/gian lận.",
+        "• Chat Deep vẫn tính Xu để kiểm soát tác vụ sâu/API.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_my_promos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    promos = get_member_personal_promos(uid, include_used=True)
+    if not promos:
+        return await update.message.reply_text(
+            "🎁 <b>MÃ ƯU ĐÃI CỦA BẠN</b>\n\n"
+            "Bạn chưa có mã ưu đãi cá nhân nào.\n"
+            "Lên hạng thành viên hoặc tham gia chiến dịch để nhận mã.",
+            parse_mode="HTML",
+        )
+    lines = ["🎁 <b>MÃ ƯU ĐÃI CỦA BẠN</b>"]
+    for promo in promos[:10]:
+        status = promo.get("status") or "active"
+        if promo.get("used_at"):
+            status = "used"
+        lines.extend([
+            "",
+            f"• <code>{html.escape(promo.get('promo_code') or '-')}</code> — +{int(promo.get('bonus_percent') or 0)}% Xu, tối đa {int(promo.get('cap_xu') or 0)} Xu",
+            f"  Hạng: <b>{html.escape(get_member_badge(promo.get('tier')))}</b> | Trạng thái: <b>{html.escape(status)}</b>",
+        ])
+    lines.extend([
+        "",
+        "Dùng mã: <code>/promo MÃ_CỦA_BẠN</code> rồi <code>/naptien</code>.",
+        "Mã cá nhân chỉ dùng cho đúng tài khoản của bạn, không chuyển nhượng.",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await maybe_auto_grant_birthday_gift(update, context)
+    uid = update.effective_user.id
+    status = birthday_gift_status(uid)
+    birthday = status.get("birthday") or {}
+    if not birthday:
+        return await update.message.reply_text(
+            "🎂 <b>QUÀ SINH NHẬT TOAN AAS</b>\n\n"
+            "Nếu bạn thêm ngày sinh vào hệ thống, TOAN AAS sẽ tặng bạn một món quà bí mật theo hạng thành viên.\n\n"
+            "Lưu ngày sinh:\n"
+            "<code>/set_birthday DD-MM</code>\n\n"
+            "Ví dụ:\n"
+            "<code>/set_birthday 20-11</code>\n\n"
+            "Lưu ý quan trọng:\n"
+            "• Chỉ tài khoản đã lưu ngày sinh mới được xét quà sinh nhật.\n"
+            "• Quà sinh nhật áp dụng từ hạng Silver trở lên.\n"
+            "• Ngày sinh cần được lưu trước ít nhất 30 ngày để hệ thống tự động xét quà.\n"
+            "• Nếu sinh nhật nằm trong vòng 30 ngày sau khi thêm ngày sinh, vui lòng nhắn admin/hỗ trợ để được duyệt thủ công.\n"
+            "• Admin có thể yêu cầu hình ảnh/thông tin chứng minh ngày sinh nếu cần.\n"
+            "• Quà sinh nhật là Xu dịch vụ nội bộ, không rút tiền, không chuyển nhượng.\n\n"
+            f"Hỗ trợ/admin: {html.escape(SUPPORT_TELEGRAM_URL)}",
+            parse_mode="HTML",
+        )
+    state_labels = {
+        "not_today": "chưa đến ngày",
+        "already_received": "đã nhận năm nay",
+        "tier_not_eligible": "hạng hiện tại chưa đủ điều kiện",
+        "needs_manual_review": "cần admin duyệt thủ công do lưu chưa đủ 30 ngày",
+        "eligible": "đủ điều kiện",
+    }
+    await update.message.reply_text(
+        "🎂 <b>SINH NHẬT CỦA BẠN</b>\n\n"
+        f"• Ngày sinh đã lưu: <b>{html.escape(birthday.get('birthday_mmdd') or '-')}</b>\n"
+        f"• Cấp thành viên hiện tại: <b>{html.escape(status.get('badge') or '-')}</b>\n"
+        f"• Quà sinh nhật năm nay: <b>{int(status.get('gift_xu') or 0)} Xu</b>\n"
+        f"• Đã lưu được: <b>{int(status.get('days_since_set') or 0)} ngày</b>\n"
+        f"• Trạng thái: <b>{html.escape(state_labels.get(status.get('state'), status.get('state') or '-'))}</b>\n\n"
+        f"Nếu cần đổi ngày sinh, vui lòng nhắn admin/hỗ trợ: {html.escape(SUPPORT_TELEGRAM_URL)}",
+        parse_mode="HTML",
+    )
+
+async def cmd_set_birthday(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not context.args:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/set_birthday DD-MM</code>\nVí dụ: <code>/set_birthday 20-11</code>", parse_mode="HTML")
+    mmdd = parse_birthday_mmdd(context.args[0])
+    if not mmdd:
+        return await update.message.reply_text("❌ Ngày sinh không hợp lệ. Dùng định dạng <code>DD-MM</code>, ví dụ <code>20-11</code>.", parse_mode="HTML")
+    conn = db_connect()
+    try:
+        existing = get_user_birthday(uid, conn=conn)
+        if existing:
+            return await update.message.reply_text(
+                "⚠️ Ngày sinh đã được lưu.\n\n"
+                f"• Ngày sinh hiện tại: <b>{html.escape(existing.get('birthday_mmdd') or '-')}</b>\n"
+                f"Để đổi ngày sinh, vui lòng nhắn admin/hỗ trợ: {html.escape(SUPPORT_TELEGRAM_URL)}",
+                parse_mode="HTML",
+            )
+        conn.execute(
+            """INSERT INTO user_birthdays
+            (user_id, birthday_mmdd, birthday_set_at, last_changed_at, change_locked, note)
+            VALUES (?,?,?,?,?,?)""",
+            (str(uid), mmdd, now_text(), now_text(), 1, "Set by user"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    warning = ""
+    if days_until_birthday(mmdd) <= 30:
+        warning = (
+            "\n\n⚠️ Sinh nhật của bạn nằm trong vòng 30 ngày kể từ ngày lưu.\n"
+            "Để tránh lạm dụng, hệ thống chưa tự động tặng quà cho lần này.\n"
+            f"Bạn có thể nhắn admin/hỗ trợ để được xét duyệt thủ công: {html.escape(SUPPORT_TELEGRAM_URL)}"
+        )
+    await update.message.reply_text(
+        f"🎂 Đã lưu ngày sinh của bạn: <b>{html.escape(mmdd)}</b>\n\n"
+        "Từ bây giờ, TOAN AAS sẽ dùng ngày sinh này để xét quà sinh nhật theo hạng thành viên.\n\n"
+        "Lưu ý:\n"
+        "• Chỉ tài khoản đã lưu ngày sinh mới được xét quà.\n"
+        "• Ngày sinh cần được lưu trước ít nhất 30 ngày để hệ thống tự động tặng quà.\n"
+        "• Nếu cần đổi ngày sinh, vui lòng nhắn admin/hỗ trợ."
+        f"{warning}",
+        parse_mode="HTML",
+    )
+
+async def cmd_set_birthday_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+        mmdd = parse_birthday_mmdd(context.args[1])
+        if not mmdd:
+            raise ValueError("invalid_date")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/set_birthday_admin USER_ID DD-MM</code>", parse_mode="HTML")
+    get_user(target_id)
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO user_birthdays (user_id, birthday_mmdd, birthday_set_at, last_changed_at, change_locked, note)
+            VALUES (?,?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                birthday_mmdd=excluded.birthday_mmdd,
+                last_changed_at=excluded.last_changed_at,
+                change_locked=1,
+                note=excluded.note""",
+            (str(target_id), mmdd, now_text(), now_text(), 1, f"Admin updated by {update.effective_user.id}"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    await update.message.reply_text(f"✅ Đã set birthday <b>{html.escape(mmdd)}</b> cho user <code>{html.escape(str(target_id))}</code>.", parse_mode="HTML")
+
+async def cmd_birthday_gift_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/birthday_gift_check USER_ID</code>", parse_mode="HTML")
+    status = birthday_gift_status(target_id)
+    birthday = status.get("birthday") or {}
+    await update.message.reply_text(
+        "🎂 <b>BIRTHDAY GIFT CHECK</b>\n\n"
+        f"• User: <code>{html.escape(str(target_id))}</code>\n"
+        f"• Birthday: <b>{html.escape(birthday.get('birthday_mmdd') or 'chưa lưu')}</b>\n"
+        f"• Set at: <code>{html.escape(birthday.get('birthday_set_at') or '-')}</code>\n"
+        f"• Days since set: <b>{int(status.get('days_since_set') or 0)}</b>\n"
+        f"• Days until birthday: <b>{int(status.get('days_until_birthday') or 0)}</b>\n"
+        f"• Tier: <b>{html.escape(status.get('badge') or '-')}</b>\n"
+        f"• Gift Xu: <b>{int(status.get('gift_xu') or 0)}</b>\n"
+        f"• Already received this year: <b>{'yes' if status.get('already_received_this_year') else 'no'}</b>\n"
+        f"• State: <code>{html.escape(status.get('state') or '-')}</code>\n\n"
+        "Nếu cần duyệt thủ công: <code>/birthday_gift_grant USER_ID</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_birthday_gift_grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/birthday_gift_grant USER_ID</code>", parse_mode="HTML")
+    get_user(target_id)
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        result = grant_birthday_gift(conn, target_id, actor_id=update.effective_user.id, admin_override=True)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    if result.get("granted"):
+        try:
+            await context.bot.send_message(chat_id=str(target_id), text=format_birthday_gift_message(result), parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"Birthday gift notify failed: {e}")
+        return await update.message.reply_text(
+            f"✅ Đã cấp quà sinh nhật +<b>{int(result.get('gift_xu') or 0)} Xu</b> cho <code>{html.escape(str(target_id))}</code>.",
+            parse_mode="HTML",
+        )
+    await update.message.reply_text(f"⚠️ Không cấp được: <code>{html.escape(result.get('status') or '-')}</code>", parse_mode="HTML")
+
+async def cmd_grant_tier_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = context.args[0]
+        tier = normalize_member_tier(context.args[1])
+        if tier not in MEMBER_TIER_PROMO_POLICY:
+            raise ValueError("invalid_tier")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/grant_tier_promo USER_ID silver|gold|platinum|diamond|vip</code>", parse_mode="HTML")
+    get_user(target_id)
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        promo = create_member_tier_reward(conn, target_id, tier, created_by=update.effective_user.id)
+        record_audit(
+            conn,
+            update.effective_user.id,
+            "admin",
+            "member.tier_promo_granted",
+            "member_tier_reward",
+            str(target_id),
+            before=None,
+            after=promo,
+            note="Admin granted tier promo manually",
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    status = "đã tạo" if promo.get("created") else f"đã tồn tại ({promo.get('status')})"
+    await update.message.reply_text(
+        f"✅ Mã tier promo {status}\n\n"
+        f"• User: <code>{html.escape(str(target_id))}</code>\n"
+        f"• Hạng: <b>{html.escape(get_member_badge(tier))}</b>\n"
+        f"• Mã: <code>{html.escape(promo.get('promo_code') or '')}</code>\n"
+        f"• Ưu đãi: +{int(promo.get('bonus_percent') or 0)}% Xu, tối đa {int(promo.get('cap_xu') or 0)} Xu",
+        parse_mode="HTML",
+    )
 
 async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -40752,7 +41659,7 @@ async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if tier not in MEMBER_TIER_ORDER:
             raise ValueError("invalid_tier")
     except Exception:
-        return await update.message.reply_text("⚠️ Cú pháp: /set_vip <USER_ID> <none|bac|vang|bach_kim|kim_cuong|vip>")
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/set_vip USER_ID newbie|silver|gold|platinum|diamond|vip</code>", parse_mode="HTML")
     get_user(target_id)
     conn = db_connect()
     try:
@@ -40777,7 +41684,7 @@ async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
     finally:
         conn.close()
-    await update.message.reply_text(f"✅ Đã set hạng <b>{html.escape(member_tier_label(tier))}</b> cho ID <code>{html.escape(str(target_id))}</code>.", parse_mode="HTML")
+    await update.message.reply_text(f"✅ Đã set hạng <b>{html.escape(get_member_badge(tier))}</b> cho ID <code>{html.escape(str(target_id))}</code>.", parse_mode="HTML")
 
 async def cmd_clear_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -40819,7 +41726,7 @@ async def cmd_ref_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🧾 <b>REFERRAL ADMIN VIEW</b>\n\n"
         f"• User: <code>{html.escape(str(target_id))}</code>\n"
-        f"• Tier: <b>{html.escape(profile['tier_label'])}</b>\n"
+        f"• Tier: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
         f"• Total paid: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
         f"• Ref total: <b>{stats['total']}</b>\n"
         f"• Pending: <b>{stats['pending']}</b>\n"
@@ -40890,6 +41797,11 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         target_id, amount = context.args[0], int(context.args[1])
+        pre_conn = db_connect()
+        try:
+            first_deposit_before_credit = not user_has_successful_deposit_conn(pre_conn, target_id)
+        finally:
+            pre_conn.close()
         add_credit(target_id, amount, "manual_deposit", "", "Admin duyệt bill thủ công")
         conn = db_connect()
         c = conn.cursor()
@@ -40904,8 +41816,11 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expected_order_xu = int(pending_order[2] or 0) if pending_order and pending_order[2] else 0
         order_amount = int(pending_order[1] or 0) if pending_order and pending_order[1] else 0
         order_base_xu = package_base_xu(order_amount) if order_amount else 0
-        is_first_deposit = not user_has_successful_deposit_conn(conn, target_id)
+        is_first_deposit = bool(first_deposit_before_credit)
         referral_result = {"reward_xu": 0, "status": "none", "referrer_user_id": ""}
+        old_total_paid = member_total_paid_vnd(target_id, conn=conn)
+        old_tier = member_tier_by_total_paid(old_total_paid)
+        tier_up_result = {"upgraded": False, "promos": []}
         if pending_order_code:
             c.execute(
                 "SELECT amount, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code=? LIMIT 1",
@@ -40943,6 +41858,15 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c.execute(
                 "UPDATE users SET has_deposited=1, total_paid_vnd=COALESCE(total_paid_vnd,0)+? WHERE user_id=?",
                 (int(order_amount or 0), str(target_id)),
+            )
+            new_total_paid = int(old_total_paid or 0) + int(order_amount or 0)
+            tier_up_result = handle_member_tier_up(
+                conn,
+                target_id,
+                old_tier,
+                member_tier_by_total_paid(new_total_paid),
+                new_total_paid,
+                source="manual_approval",
             )
         else:
             c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
@@ -40992,6 +41916,12 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         promo_user_line = f"🎁 Mã {html.escape(promo_code)}: +<b>{promo_bonus} Xu</b>.\n" if promo_bonus else ""
         promo_admin_line = f" | Promo {html.escape(promo_code)} +{promo_bonus} Xu" if promo_bonus else ""
         referral_admin_line = ""
+        tier_admin_line = ""
+        tier_user_line = ""
+        tier_message = format_tier_up_message(tier_up_result)
+        if tier_up_result.get("upgraded"):
+            tier_admin_line = f" | Tier {html.escape(tier_up_result.get('old_tier') or '-')}→{html.escape(tier_up_result.get('new_tier') or '-')}"
+            tier_user_line = "\n🎉 Bạn vừa lên hạng thành viên. Bot đã gửi chi tiết quyền lợi/mã ưu đãi riêng.\n"
         if int(referral_result.get("reward_xu") or 0) > 0:
             referral_admin_line = (
                 f" | Referral {html.escape(str(referral_result.get('referrer_user_id') or ''))} "
@@ -41005,7 +41935,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=(
                         "🎉 <b>Bạn vừa nhận thưởng giới thiệu TOAN AAS</b>\n\n"
                         "• Người được mời đã nạp Xu lần đầu thành công.\n"
-                        f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_label') or '')}</b>\n"
+                        f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_badge') or referral_result.get('tier_label') or '')}</b>\n"
                         f"• Thưởng giới thiệu: +<b>{int(referral_result.get('reward_xu') or 0)} Xu dịch vụ</b>\n"
                         f"• Số dư mới: <b>{ref_credits} Xu</b>"
                     ),
@@ -41019,15 +41949,22 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🎉 <b>NẠP TIỀN THÀNH CÔNG!</b>\n\n"
                 f"Admin đã xác nhận +<b>{amount} Xu</b>.\n"
                 f"{promo_user_line}"
+                f"{tier_user_line}"
                 f"🪙 Số dư mới: <b>{credits} Xu</b>\n\n"
                 f"Cảm ơn bạn đã tin dùng TOAN AAS! 🙏"
             ),
             parse_mode="HTML"
         )
+        if tier_message:
+            try:
+                await context.bot.send_message(chat_id=target_id, text=tier_message, parse_mode="HTML")
+            except Exception as notify_error:
+                logger.warning(f"Tier-up notify failed: {notify_error}")
         await update.message.reply_text(
             f"✅ Đã duyệt {amount} Xu cho ID: {target_id}"
             f"{promo_admin_line}"
             f"{referral_admin_line}"
+            f"{tier_admin_line}"
             f"{mismatch_line}",
             parse_mode="HTML",
         )
@@ -41093,6 +42030,9 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ),
                     parse_mode="HTML"
                 )
+                tier_message = format_tier_up_message(info.get("tier_up_result") or {})
+                if tier_message:
+                    await context.bot.send_message(chat_id=target_id, text=tier_message, parse_mode="HTML")
                 referral_result = info.get("referral_result") or {}
                 if int(referral_result.get("reward_xu") or 0) > 0:
                     referrer_id = str(referral_result.get("referrer_user_id") or "")
@@ -41102,7 +42042,7 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         text=(
                             "🎉 <b>Bạn vừa nhận thưởng giới thiệu TOAN AAS</b>\n\n"
                             "• Người được mời đã nạp Xu lần đầu thành công.\n"
-                            f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_label') or '')}</b>\n"
+                            f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_badge') or referral_result.get('tier_label') or '')}</b>\n"
                             f"• Thưởng giới thiệu: +<b>{int(referral_result.get('reward_xu') or 0)} Xu dịch vụ</b>\n"
                             f"• Số dư mới: <b>{ref_credits} Xu</b>"
                         ),
@@ -41933,7 +42873,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         modes = ensure_user_modes(uid)
         mode_name = modes.get("chat_mode") or CHAT_TIER_NORMAL
         mode_name = normalize_chat_tier(mode_name or CHAT_TIER_NORMAL)
-        cost = 0 if (is_admin or is_vip) else chat_mode_cost(mode_name)
+        base_cost = chat_mode_cost(mode_name)
+        charge = effective_chat_charge(uid, mode_name, base_cost, is_admin=is_admin, is_legacy_vip=bool(is_vip))
+        cost = int(charge["cost"])
         discount = 0.0
         warn = ""
         if cost > 0 and credits < cost:
@@ -42027,7 +42969,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"\n\n💼 <i>Còn: {credits_after} Xu</i>"
             )
         else:
-            cost_line = f"\n\n<i>{chat_charge_line(cost, mode_name, is_admin or bool(is_vip))}</i>"
+            cost_line = f"\n\n<i>{chat_charge_line(cost, mode_name, cost == 0, charge.get('reason') or '')}</i>"
         record_usage_event(
             uid,
             username=username,
@@ -42037,8 +42979,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             status=mode_name,
             provider=provider,
             xu_delta=-int(cost or 0),
+            detail=f"tier={charge['tier']}; base={charge['base_cost']}; cost={charge['cost']}; benefit={charge.get('reason') or '-'}",
         )
-        save_tool_test_result("ai_chat", "PASS", f"provider={provider}; mode={mode_name}; cost={cost}", uid)
+        save_tool_test_result("ai_chat", "PASS", f"provider={provider}; mode={mode_name}; base={charge['base_cost']}; cost={cost}; tier={charge['tier']}", uid)
         await update.message.reply_text(
             f"🤖 {html.escape(reply)}{cost_line}{warn}{active_mode_hint(uid)}",
             parse_mode="HTML"
@@ -42179,6 +43122,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("vip",         cmd_member))
     tg_app.add_handler(CommandHandler("rank",        cmd_member))
     tg_app.add_handler(CommandHandler("vip_policy",  cmd_vip_policy))
+    tg_app.add_handler(CommandHandler("my_promos",   cmd_my_promos))
+    tg_app.add_handler(CommandHandler("birthday",    cmd_birthday))
+    tg_app.add_handler(CommandHandler("set_birthday", cmd_set_birthday))
     tg_app.add_handler(CommandHandler("myid",        cmd_myid))
     tg_app.add_handler(CommandHandler("trial_status", cmd_trial_status))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
@@ -42421,6 +43367,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
     tg_app.add_handler(CommandHandler("set_vip",     cmd_set_vip))
     tg_app.add_handler(CommandHandler("clear_vip",   cmd_clear_vip))
+    tg_app.add_handler(CommandHandler("grant_tier_promo", cmd_grant_tier_promo))
+    tg_app.add_handler(CommandHandler("set_birthday_admin", cmd_set_birthday_admin))
+    tg_app.add_handler(CommandHandler("birthday_gift_check", cmd_birthday_gift_check))
+    tg_app.add_handler(CommandHandler("birthday_gift_grant", cmd_birthday_gift_grant))
     tg_app.add_handler(CommandHandler("ref_admin",   cmd_ref_admin))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
@@ -45990,6 +46940,9 @@ async def webhook_payos(request: Request):
                 ),
                 parse_mode="HTML"
             )
+            tier_message = format_tier_up_message(info.get("tier_up_result") or {})
+            if tier_message:
+                await tg_app.bot.send_message(chat_id=target_id, text=tier_message, parse_mode="HTML")
             if int(referral_result.get("reward_xu") or 0) > 0:
                 referrer_id = str(referral_result.get("referrer_user_id") or "")
                 ref_credits, _, _ = get_user(referrer_id)
@@ -45998,7 +46951,7 @@ async def webhook_payos(request: Request):
                     text=(
                         "🎉 <b>Bạn vừa nhận thưởng giới thiệu TOAN AAS</b>\n\n"
                         "• Người được mời đã nạp Xu lần đầu thành công.\n"
-                        f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_label') or '')}</b>\n"
+                        f"• Cấp của bạn: <b>{html.escape(referral_result.get('tier_badge') or referral_result.get('tier_label') or '')}</b>\n"
                         f"• Thưởng giới thiệu: +<b>{int(referral_result.get('reward_xu') or 0)} Xu dịch vụ</b>\n"
                         f"• Số dư mới: <b>{ref_credits} Xu</b>"
                     ),

@@ -1,108 +1,157 @@
-# TOAN AAS VIP And Referral Policy
+# TOAN AAS VIP, Referral, Tier Promo And Birthday Policy
 
-## Scope
-
-This policy applies to the current Stable Revenue Bot phase.
-
-All rewards are internal TOAN AAS service Xu. They are not cash, cannot be withdrawn, cannot be transferred, and cannot be converted back to money.
+Status: current bot policy.
 
 ## Member Tiers
 
-Member rank is based on cumulative successful top-up amount.
+| Internal key | Badge | Threshold |
+|---|---|---:|
+| `newbie` | 🌱 Newbie | under 100,000 VND |
+| `silver` | 🥈 Silver | from 100,000 VND |
+| `gold` | 🥇 Gold | from 1,000,000 VND |
+| `platinum` | 💠 Platinum | from 10,000,000 VND |
+| `diamond` | 💎 Diamond | from 50,000,000 VND |
+| `vip` | 👑 VIP | from 100,000,000 VND or admin override |
 
-| Tier | Threshold |
-|---|---:|
-| Tan thu | under 100,000 VND |
-| Bac | from 100,000 VND |
-| Vang | from 1,000,000 VND |
-| Bach Kim | from 10,000,000 VND |
-| Kim Cuong | from 50,000,000 VND |
-| VIP | from 100,000,000 VND or admin override |
+Old aliases are kept for data compatibility:
+`none` -> `newbie`, `bac` -> `silver`, `vang` -> `gold`, `bach_kim` -> `platinum`, `kim_cuong` -> `diamond`.
 
-Admin can override a tier with `/set_vip USER_ID TIER`.
+## Platinum+ Free Chat
 
-## Referral Reward
+Platinum, Diamond and VIP get:
 
-Referral reward is paid only when all conditions are true:
+- Free Normal Chat.
+- Free Chat Pro.
+- Chat Deep still costs Xu to control deep/API-heavy work.
 
-- The referred user is new.
-- The referred user starts the bot from a referral link.
-- The referred user completes the first successful top-up.
-- The top-up is confirmed by PayOS success or admin manual approval.
-- The referred user has not already generated a referral reward.
-- The referral is not self-referral, spam, fake account farming, or fraud.
+Base chat prices remain unchanged:
 
-Reward is calculated from base Xu of the referred user's first top-up only.
+- Normal Chat: 5 Xu.
+- Chat Pro: 10 Xu.
+- Chat Deep: 20 Xu.
 
-Launch Bonus, promo bonus, gift codes and trial Xu are excluded.
+AI/provider failure must not charge Xu.
 
-| Referrer tier | Reward | Cap |
+## Referral Rewards
+
+Referral rewards are paid only when the referred user completes their first successful deposit.
+
+Rewards are calculated from base Xu only:
+
+- No Launch Bonus in referral base.
+- No promo bonus in referral base.
+- No gift/trial in referral base.
+- One reward per referred user.
+- No self-referral.
+
+| Referrer tier | Percent | Cap |
 |---|---:|---:|
-| Tan thu | 0% | 0 Xu |
-| Bac | 3% | 100 Xu |
-| Vang | 6% | 150 Xu |
-| Bach Kim | 8% | 200 Xu |
-| Kim Cuong | 10% | 250 Xu |
+| Newbie | 0% | 0 Xu |
+| Silver | 3% | 100 Xu |
+| Gold | 6% | 150 Xu |
+| Platinum | 8% | 200 Xu |
+| Diamond | 10% | 250 Xu |
 | VIP | 12% | 300 Xu |
 
-Example with first top-up base 5,000 Xu:
+Calculation example with `base_xu=5000`:
 
-- Bac receives 100 Xu because 3% is 150 Xu but cap is 100 Xu.
-- Vang receives 150 Xu because 6% is 300 Xu but cap is 150 Xu.
-- Bach Kim receives 200 Xu.
-- Kim Cuong receives 250 Xu.
-- VIP receives 300 Xu.
+- Silver: 100 Xu.
+- Gold: 150 Xu.
+- Platinum: 200 Xu.
+- Diamond: 250 Xu.
+- VIP: 300 Xu.
 
-## Tool Discount Helper
+## Tier-Up Promo
 
-The bot includes a helper for future member discounts.
+When a user crosses a member tier threshold, the bot creates a personal top-up promo.
 
-Eligible conditions:
+Code format:
 
-- Base tool cost is at least 50 Xu.
-- Tool is not payment, promo, gift, trial, admin-only or provider-fail flow.
-- Tool is not disabled or experimental for customers.
+`UP_<TIER>_<USERID_SHORT>`
 
-Discount rates:
+Rules:
 
-| Tier | Discount |
+- Owner-only. Other users cannot use the code.
+- One code per tier per user.
+- One use only.
+- Minimum top-up amount: 50,000 VND.
+- Does not stack with other promo codes.
+- Adds service Xu only. It is not cash discount.
+
+| Tier reached | Bonus | Cap |
+|---|---:|---:|
+| Silver | +10% | 100 Xu |
+| Gold | +12% | 150 Xu |
+| Platinum | +15% | 250 Xu |
+| Diamond | +18% | 400 Xu |
+| VIP | +20% | 600 Xu |
+
+Commands:
+
+- User: `/my_promos`
+- Admin: `/grant_tier_promo USER_ID TIER`
+
+## Birthday Gifts
+
+Birthday gifts are service Xu only.
+
+| Tier | Birthday gift |
 |---|---:|
-| Tan thu | 0% |
-| Bac | 0% |
-| Vang | 3% |
-| Bach Kim | 5% |
-| Kim Cuong | 8% |
-| VIP | 10% |
+| Newbie | 0 Xu |
+| Silver | 100 Xu |
+| Gold | 150 Xu |
+| Platinum | 250 Xu |
+| Diamond | 350 Xu |
+| VIP | 500 Xu |
 
-MVP note: the helper exists first. Apply discounts to specific tools only after admin confirms the pricing impact.
+Rules:
 
-## Public Commands
+- User must save birthday with `/set_birthday DD-MM`.
+- No birth year is required.
+- User cannot self-change birthday after saving.
+- Birthday must be saved at least 30 days before the birthday for automatic gift.
+- If birthday is within 30 days after saving, admin manual review is required.
+- One gift per account per year.
+- Admin can grant manually with `/birthday_gift_grant USER_ID`.
+- Admin can inspect with `/birthday_gift_check USER_ID`.
 
-- `/referral` - show referral link, policy and quick stats.
-- `/ref_link` - show only the referral link.
-- `/ref_stats` - show referral stats.
-- `/member`, `/vip`, `/rank` - show member tier and benefits.
-- `/vip_policy` - show the full member and referral policy.
+## Tool Discount
 
-## Admin Commands
+Eligible tools can use member discounts when base cost is at least 50 Xu and the tool is not disabled/admin-only/provider-failing.
 
-- `/set_vip USER_ID TIER` - set member tier override.
-- `/clear_vip USER_ID` - clear tier override.
-- `/ref_admin USER_ID` - inspect referral stats for one user.
+Discounts:
 
-Allowed tiers:
+- Newbie: 0%.
+- Silver: 0%.
+- Gold: 3%.
+- Platinum: 5%.
+- Diamond: 8%.
+- VIP: 10%.
 
-- `none`
-- `bac`
-- `vang`
-- `bach_kim`
-- `kim_cuong`
-- `vip`
+Not eligible:
 
-## Anti-Fraud Rules
+- Payment, PayOS, manual QR.
+- Promo, gift, trial.
+- Admin/internal tools.
+- Disabled or provider-failing tools.
+- Chat pricing under 50 Xu, except Platinum+ free Normal/Pro chat.
+
+## Anti-Fraud
 
 - No self-referral.
 - Do not overwrite the first referrer.
-- No reward if the referred user already deposited before referral registration.
-- Each referred user can generate only one referral reward.
-- Admin may reject or adjust suspicious referrals later.
+- No referral reward if referred user had a successful deposit before referral.
+- One referral reward per referred user.
+- Admin can reject suspicious referral or birthday claims.
+- Birthday changes require admin.
+- All benefits are internal service Xu only: no cash withdrawal, no transfer, no conversion back to money.
+
+## Admin Commands
+
+- `/set_vip USER_ID newbie|silver|gold|platinum|diamond|vip`
+- `/clear_vip USER_ID`
+- `/ref_admin USER_ID`
+- `/grant_tier_promo USER_ID silver|gold|platinum|diamond|vip`
+- `/set_birthday_admin USER_ID DD-MM`
+- `/birthday_gift_check USER_ID`
+- `/birthday_gift_grant USER_ID`
