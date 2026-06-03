@@ -220,7 +220,8 @@ PAYOS_CHECKSUM_KEY  = _env("PAYOS_CHECKSUM_KEY")
 # Misc
 RAPIDAPI_KEY        = _env("RAPIDAPI_KEY")
 RAPIDAPI_HOST       = _env("RAPIDAPI_HOST")
-COBALT_API_URL      = _env("COBALT_API_URL", "https://api.cobalt.tools")
+COBALT_API_URL_RAW  = _env("COBALT_API_URL")
+COBALT_API_URL      = COBALT_API_URL_RAW or "https://api.cobalt.tools"
 COBALT_API_KEY      = _env("COBALT_API_KEY")
 PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "toanaasbot")
@@ -6804,16 +6805,17 @@ def operator_tool_readiness_data():
             "next": next_action,
         })
 
-    cobalt_url = (COBALT_API_URL or "").rstrip("/")
-    cobalt_public = cobalt_url == "https://api.cobalt.tools"
+    cobalt_url = (COBALT_API_URL_RAW or "").rstrip("/")
+    cobalt_effective_url = (COBALT_API_URL or "").rstrip("/")
+    cobalt_public = cobalt_effective_url.lower() == "https://api.cobalt.tools"
     add_check(
         "cobalt_downloader",
         bool(cobalt_url) and not cobalt_public,
-        "warning" if cobalt_public else ("ok" if cobalt_url else "blocked"),
+        "ok" if (cobalt_url and not cobalt_public) else "blocked",
         (
-            "Đang dùng public api.cobalt.tools; có bot protection, có thể không tải được video."
-            if cobalt_public else
-            ("Đã cấu hình Cobalt API riêng." if cobalt_url else "Chưa cấu hình COBALT_API_URL.")
+            "Đã cấu hình Cobalt self-host/custom URL, có thể smoke test bằng /tool_test_downloader."
+            if cobalt_url and not cobalt_public else
+            ("COBALT_API_URL đang trỏ public api.cobalt.tools; không dùng cho production/customer." if cobalt_url and cobalt_public else "Cobalt self-host missing: chưa cấu hình COBALT_API_URL.")
         ),
         "Self-host Cobalt trên Railway và set COBALT_API_URL=https://<cobalt-domain>",
         "video_download",
@@ -6838,8 +6840,8 @@ def operator_tool_readiness_data():
         "transcription_primary",
         bool(DEEPGRAM_API_KEY),
         "ok" if DEEPGRAM_API_KEY else "warning",
-        "Deepgram sẵn sàng." if DEEPGRAM_API_KEY else "Thiếu DEEPGRAM_API_KEY; bóc băng audio/video sẽ không chạy được.",
-        "Set DEEPGRAM_API_KEY.",
+        "Deepgram configured; cần smoke test bằng cách reply audio ngắn rồi chạy /tool_test_stt." if DEEPGRAM_API_KEY else "Thiếu DEEPGRAM_API_KEY; bóc băng audio/video sẽ không chạy được.",
+        "Reply audio 10-20 giây rồi chạy /tool_test_stt." if DEEPGRAM_API_KEY else "Set DEEPGRAM_API_KEY.",
         "transcription",
     )
     add_check(
@@ -21814,7 +21816,10 @@ def db_status_payload() -> dict:
         return {"ok": False, "error": str(e)[:160]}
 
 def provider_status_payload() -> dict:
-    cobalt_custom_url = bool(_env("COBALT_API_URL"))
+    cobalt_url = (COBALT_API_URL or "").rstrip("/")
+    cobalt_raw = (COBALT_API_URL_RAW or "").rstrip("/")
+    cobalt_public = bool(cobalt_raw) and cobalt_url.lower() == "https://api.cobalt.tools"
+    cobalt_self_host = bool(cobalt_raw) and not cobalt_public
     payos_ready = bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY)
     ai_ready = bool(GEMINI_API_KEY or OPENAI_API_KEY)
     return {
@@ -21849,7 +21854,9 @@ def provider_status_payload() -> dict:
             "ready": bool(REMOVEBG_API_KEY or CUTOUT_API_KEY),
         },
         "downloader": {
-            "cobalt_url": cobalt_custom_url,
+            "cobalt_url": bool(cobalt_raw),
+            "cobalt_self_host": cobalt_self_host,
+            "cobalt_public": cobalt_public,
             "cobalt_key": bool(COBALT_API_KEY),
             "rapidapi": bool(RAPIDAPI_KEY),
             "rapidapi_host": bool(RAPIDAPI_HOST),
@@ -21914,7 +21921,8 @@ def tool_test_status_text(tool_name: str) -> str:
 def customer_tool_readiness_payload() -> dict:
     providers = provider_status_payload()
     tests = {name: get_tool_test_result(name) for name in ["ai", "image", "tts", "stt", "downloader"]}
-    public_cobalt = AgentDownloader._uses_public_cobalt(COBALT_API_URL)
+    public_cobalt = bool(providers["downloader"].get("cobalt_public"))
+    cobalt_self_host = bool(providers["downloader"].get("cobalt_self_host"))
     return {
         "ai": {
             "configured": bool(providers["ai"]["ready"]),
@@ -21937,9 +21945,9 @@ def customer_tool_readiness_payload() -> dict:
             "label": "ready" if tests["stt"]["status"] == "PASS" else ("thử nghiệm" if providers["audio"]["deepgram"] else "missing"),
         },
         "downloader": {
-            "configured": bool(providers["downloader"]["cobalt_url"] and not public_cobalt),
+            "configured": cobalt_self_host,
             "tested": tests["downloader"]["status"] == "PASS",
-            "label": "ready" if tests["downloader"]["status"] == "PASS" else ("disabled/public cobalt" if public_cobalt else "thử nghiệm"),
+            "label": "ready" if tests["downloader"]["status"] == "PASS" else ("disabled/public cobalt" if public_cobalt else "Cobalt self-host missing"),
         },
         "publish": {
             "customer_publish": bool(providers["media_factory"]["customer_publish"]),
@@ -23194,6 +23202,16 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payos_debug_status = (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper()
     payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
     payos_dynamic_status = "working" if payos_debug_status == "PASS" and payos_checkout_url else "NEED DEBUG"
+    deepgram_status = "configured — ready_for_smoke_test" if providers["audio"]["deepgram"] else "missing"
+    if providers["downloader"].get("cobalt_self_host"):
+        cobalt_status = "configured/self-host"
+        cobalt_note = "OK to smoke test"
+    elif providers["downloader"].get("cobalt_public") and providers["downloader"].get("cobalt_url"):
+        cobalt_status = "public configured — disabled for customer production"
+        cobalt_note = "Set self-host COBALT_API_URL"
+    else:
+        cobalt_status = "Cobalt self-host missing"
+        cobalt_note = "Set COBALT_API_URL to self-host/custom provider"
     lines = [
         "🔐 <b>TOAN AAS Provider Status</b>",
         "configured = có ENV/key. tested = đã smoke test bằng /tool_test_*; configured không đồng nghĩa provider hoạt động.",
@@ -23217,7 +23235,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• AI tested: <code>{html.escape(tool_test_status_text('ai'))}</code>",
         "",
         "<b>Audio</b>",
-        f"• Deepgram STT: <code>{provider_status_text(providers['audio']['deepgram'])}</code>",
+        f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
         f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
         "• Edge TTS: <code>built-in/fallback</code>",
         f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
@@ -23245,11 +23263,13 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Ads Assistant: <code>{'enabled' if providers['media_factory']['ads_assistant'] else 'disabled'}</code>",
         "",
         "<b>Downloader</b>",
-        f"• Cobalt URL: <code>{provider_status_text(providers['downloader']['cobalt_url'])}</code>",
+        f"• Cobalt self-host: <code>{html.escape(cobalt_status)}</code>",
+        f"• Cobalt URL env: <code>{html.escape(COBALT_API_URL_RAW or '-')}</code>",
         f"• Cobalt Key: <code>{provider_status_text(providers['downloader']['cobalt_key'])}</code>",
         f"• RapidAPI Key: <code>{provider_status_text(providers['downloader']['rapidapi'])}</code>",
         f"• RapidAPI Host: <code>{provider_status_text(providers['downloader']['rapidapi_host'])}</code>",
         f"• Downloader tested: <code>{html.escape(tool_test_status_text('downloader'))}</code>",
+        f"• Downloader note: <code>{html.escape(cobalt_note)}</code>",
         "",
         "<b>Security</b>",
         f"• Lead webhook secret: <code>{provider_status_text(providers['security']['lead_webhook_secret'])}</code>",
@@ -23270,7 +23290,15 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_status = db_status_payload()
     payos_debug_status = (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper()
     payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
-    public_cobalt = str(COBALT_API_URL or "").rstrip("/").lower() == "https://api.cobalt.tools"
+    cobalt_raw = (COBALT_API_URL_RAW or "").rstrip("/")
+    public_cobalt = bool(cobalt_raw) and cobalt_raw.lower() == "https://api.cobalt.tools"
+    if providers["downloader"].get("cobalt_self_host"):
+        cobalt_readiness = "configured/self-host — ready_for_smoke_test"
+    elif public_cobalt:
+        cobalt_readiness = "public Cobalt configured — disabled_by_policy"
+    else:
+        cobalt_readiness = "Cobalt self-host missing"
+    deepgram_readiness = "ready_for_smoke_test" if providers["audio"]["deepgram"] else "missing"
     lines = [
         "🧪 <b>TOAN AAS Tool Audit</b>",
         "Audit này chỉ kiểm tra cấu hình/trạng thái. Muốn xác nhận provider chạy thật, dùng các lệnh /tool_test_*.",
@@ -23302,14 +23330,15 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Ads assistant: <code>{'enabled' if providers['media_factory']['ads_assistant'] else 'disabled'}</code>",
         "",
         "<b>Downloader</b>",
-        f"• Cobalt URL: <code>{html.escape(COBALT_API_URL or '-')}</code>",
-        f"• Public Cobalt: <code>{'yes - disabled for production safety' if public_cobalt else 'no/self-host or custom'}</code>",
+        f"• Cobalt self-host: <code>{html.escape(cobalt_readiness)}</code>",
+        f"• Cobalt URL env: <code>{html.escape(cobalt_raw or '-')}</code>",
+        f"• Public Cobalt fallback: <code>{'disabled_by_policy' if not cobalt_raw else ('yes - disabled for production safety' if public_cobalt else 'no/self-host or custom')}</code>",
         f"• RapidAPI: <code>{provider_status_text(providers['downloader']['rapidapi'])}</code>",
         f"• Tested: <code>{html.escape(tool_test_status_text('downloader'))}</code>",
         "• Smoke test: <code>/tool_test_downloader https://...</code>",
         "",
         "<b>Audio</b>",
-        f"• Deepgram STT: <code>{provider_status_text(providers['audio']['deepgram'])}</code>",
+        f"• Deepgram STT: <code>{html.escape(deepgram_readiness)}</code>",
         f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
         "• Edge TTS: <code>built-in/fallback</code>",
         f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
@@ -23520,10 +23549,11 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         passed = bool(transcript and not transcript.startswith("❌"))
         status = "PASS" if passed else "FAIL"
         save_tool_test_result("stt", status, transcript[:500], update.effective_user.id)
+        detail_label = "Transcript preview" if passed else "Error"
         await update.message.reply_text(
             "🎤 <b>STT Smoke Test</b>\n\n"
             f"• Deepgram: <code>{status}</code>\n"
-            f"• Transcript preview: <code>{html.escape(transcript[:500] or '-')}</code>",
+            f"• {detail_label}: <code>{html.escape(transcript[:500] or '-')}</code>",
             parse_mode="HTML",
         )
     except Exception as e:
@@ -23541,7 +23571,20 @@ async def cmd_tool_test_downloader(update: Update, context: ContextTypes.DEFAULT
     url = " ".join(context.args or []).strip()
     if not url:
         return await update.message.reply_text("⚠️ Cú pháp: <code>/tool_test_downloader https://...</code>", parse_mode="HTML")
-    api_base = (COBALT_API_URL or "https://api.cobalt.tools").rstrip("/")
+    cobalt_raw = (COBALT_API_URL_RAW or "").rstrip("/")
+    if not cobalt_raw:
+        save_tool_test_result("downloader", "MISSING", "Cobalt self-host missing: COBALT_API_URL missing", update.effective_user.id)
+        return await update.message.reply_text(
+            "📥 <b>Downloader Smoke Test</b>\n\n"
+            f"• URL: <code>{html.escape(url[:180])}</code>\n"
+            "• Provider: <code>Cobalt</code>\n"
+            "• API base: <code>-</code>\n"
+            "• Result: <code>MISSING</code>\n\n"
+            "Cobalt self-host missing. Hãy self-host Cobalt trên Railway/VPS rồi set <code>COBALT_API_URL</code>. "
+            "Public Cobalt không dùng cho customer production.",
+            parse_mode="HTML",
+        )
+    api_base = cobalt_raw
     public_cobalt = AgentDownloader._uses_public_cobalt(api_base)
     if public_cobalt:
         save_tool_test_result("downloader", "DISABLED_BY_POLICY", "public api.cobalt.tools disabled", update.effective_user.id)
@@ -33091,6 +33134,32 @@ async def cmd_operator_tool_readiness(update: Update, context: ContextTypes.DEFA
     lines.append("\nAPI: <code>GET /api/operator/tool-readiness</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_api_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    data = operator_tool_readiness_data()
+    checks = {item["key"]: item for item in data.get("checks", [])}
+    stt = checks.get("transcription_primary", {})
+    downloader = checks.get("cobalt_downloader", {})
+    lines = [
+        "🧭 <b>TOAN AAS API RECOMMEND</b>",
+        "",
+        "<b>STT / Deepgram</b>",
+        f"• Status: <code>{html.escape(stt.get('level') or '-')}</code>",
+        f"• Detail: {html.escape(stt.get('detail') or '-')}",
+        f"• Next: <code>{html.escape(stt.get('next') or '/tool_test_stt')}</code>",
+        "",
+        "<b>Downloader / Cobalt</b>",
+        f"• Status: <code>{html.escape(downloader.get('level') or '-')}</code>",
+        f"• Detail: {html.escape(downloader.get('detail') or '-')}",
+        f"• Next: <code>{html.escape(downloader.get('next') or 'Set COBALT_API_URL')}</code>",
+        "",
+        "Configured không đồng nghĩa provider hoạt động. Hãy chạy smoke test trước khi mở tool cho khách.",
+        "• Deepgram: reply audio ngắn rồi chạy <code>/tool_test_stt</code>",
+        "• Cobalt: self-host trước, rồi chạy <code>/tool_test_downloader https://...</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_operator_tool_events(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -38769,6 +38838,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
     tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
     tg_app.add_handler(CommandHandler("providers",   cmd_providers))
+    tg_app.add_handler(CommandHandler("api_recommend", cmd_api_recommend))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
     tg_app.add_handler(CommandHandler("tool_test_ai", cmd_tool_test_ai))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
