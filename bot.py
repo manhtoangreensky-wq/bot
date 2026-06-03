@@ -22012,6 +22012,12 @@ CURRENT_PRODUCT_SCOPE_TEXT = (
     "Hệ thống chưa kết nối tài khoản mạng xã hội, chưa đăng bài thay khách và chưa vận hành quảng cáo thay khách."
 )
 
+def service_credit_legal_note() -> str:
+    return (
+        "Xu dịch vụ chỉ dùng trong TOAN AAS, không phải tiền/tiền điện tử, "
+        "không rút tiền và không chuyển nhượng. Chi tiết: /dieukhoan_xu"
+    )
+
 INTERNAL_CUSTOMER_FEATURE_TEXT = (
     "⚠️ <b>Tính năng này đang ở chế độ nội bộ.</b>\n\n"
     "Hiện tại TOAN AAS tập trung tạo nội dung/video để bạn tự đăng.\n"
@@ -22087,10 +22093,10 @@ CUSTOMER_GUIDE_SECTIONS = [
             "<b>Gói nạp:</b>\n"
             "• 10.000đ: 100 Xu dịch vụ, dùng thử\n"
             "• 20.000đ: 200 Xu dịch vụ, dùng thử thêm\n"
-            "• 50.000đ: 500 Xu dịch vụ + 30 Xu dịch vụ Launch Bonus nếu lần đầu mua gói 50k\n"
-            "• 100.000đ: 1.000 Xu dịch vụ + 50 Xu dịch vụ Launch Bonus nếu lần đầu mua gói 100k\n"
-            "• 200.000đ: 2.000 Xu dịch vụ + 150 Xu dịch vụ Launch Bonus nếu lần đầu mua gói 200k\n"
-            "• 500.000đ: 5.000 Xu dịch vụ + 500 Xu dịch vụ Launch Bonus nếu lần đầu mua gói 500k\n\n"
+            "• 50.000đ → 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua gói 50k (tổng 530 Xu dịch vụ)\n"
+            "• 100.000đ → 1.000 Xu + 50 Xu Launch Bonus nếu lần đầu mua gói 100k (tổng 1.050 Xu dịch vụ)\n"
+            "• 200.000đ → 2.000 Xu + 150 Xu Launch Bonus nếu lần đầu mua gói 200k (tổng 2.150 Xu dịch vụ)\n"
+            "• 500.000đ → 5.000 Xu + 500 Xu Launch Bonus nếu lần đầu mua gói 500k (tổng 5.500 Xu dịch vụ)\n\n"
             "<b>Promo code nạp tiền:</b>\n"
             "Nhập <code>/promo FIRST30</code> trước khi nạp. Promo áp dụng từ gói 50k, mỗi đơn chỉ dùng 1 mã, "
             "không cộng dồn và chỉ cộng Xu dịch vụ sau khi thanh toán thành công.\n\n"
@@ -22269,12 +22275,6 @@ def terms_pdf_download_url() -> str:
     if not public_base:
         return ""
     return f"{public_base}/download/dieu-khoan-su-dung-toan-aas.pdf"
-
-def service_credit_legal_note() -> str:
-    return (
-        "Xu dịch vụ chỉ dùng trong TOAN AAS, không phải tiền/tiền điện tử, "
-        "không rút tiền và không chuyển nhượng. Chi tiết: /dieukhoan_xu"
-    )
 
 def legal_commands_short_text() -> str:
     return (
