@@ -10,6 +10,7 @@
 import os
 import logging
 import asyncio
+import base64
 import edge_tts
 import json
 import sqlite3
@@ -131,6 +132,7 @@ ACTIVE_TELEGRAM_WEBHOOK_WATCHDOG = ""
 # AI Providers
 GEMINI_API_KEY      = _env("GEMINI_API_KEY")
 OPENAI_API_KEY      = _env("OPENAI_API_KEY")
+OPENAI_IMAGE_MODEL  = _env("OPENAI_IMAGE_MODEL", "gpt-image-1")
 
 # Audio
 DEEPGRAM_API_KEY    = _env("DEEPGRAM_API_KEY")
@@ -447,6 +449,8 @@ TREND_AI_COST = 30
 IMAGE_PROMPT_PACK_COST = 80
 IMAGE_PACK_COST = 150
 IMAGE_TO_VIDEO_PROMPT_COST = 120
+AI_IMAGE_COST = 300
+AI_IMAGE_EDIT_COST = 350
 VIDEO_FROM_IMAGE_BASIC_COST = 300
 VIDEO_FROM_IMAGE_PRO_COST = 600
 MEDIA_FACTORY_PACK_COST = 500
@@ -1031,7 +1035,11 @@ def init_db():
         ("telegram_menu_v2", 1, "TOAN AAS grouped Telegram menu is enabled."),
         ("website_rebrand", 1, "TOAN AAS landing page rebrand is enabled."),
         ("trend_finder", 1, "Trend finder MVP enabled for content idea generation."),
+        ("image_tools", 1, "Customer image tools menu is enabled under Video & Media Factory."),
         ("image_prompt_factory", 1, "Generate realistic image prompts for AI image tools."),
+        ("image_to_video_prompt", 1, "Generate image-to-video prompt packs without real video rendering."),
+        ("image_openai_generation", 0, "OpenAI image generation is premium and disabled by default."),
+        ("image_openai_edit", 0, "OpenAI image editing is premium and disabled by default."),
         ("image_generation", 0, "Actual image generation requires provider support; fallback to prompt pack."),
         ("image_to_video", 0, "Actual image-to-video generation requires provider support; fallback to video prompt pack."),
     ]
@@ -21422,7 +21430,11 @@ def provider_status_payload() -> dict:
         },
         "media_factory": {
             "trend_finder": is_feature_enabled("trend_finder", default=True),
+            "image_tools": is_feature_enabled("image_tools", default=True),
             "image_prompt_factory": is_feature_enabled("image_prompt_factory", default=True),
+            "image_to_video_prompt": is_feature_enabled("image_to_video_prompt", default=True),
+            "image_openai_generation": is_feature_enabled("image_openai_generation", default=False),
+            "image_openai_edit": is_feature_enabled("image_openai_edit", default=False),
             "image_generation": is_feature_enabled("image_generation", default=False),
             "image_to_video": is_feature_enabled("image_to_video", default=False),
             "admin_publish": is_feature_enabled("admin_publish", default=False),
@@ -21806,7 +21818,7 @@ def admin_internal_command(handler):
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     if is_admin:
         rows = [
-            [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video Factory", callback_data="menu|video_factory")],
+            [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
             [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
             [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
             [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("💳 Billing", callback_data="menu|billing")],
@@ -21814,7 +21826,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         ]
     else:
         rows = [
-            [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video AI", callback_data="menu|video_factory")],
+            [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
             [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|billing"), InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing")],
             [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
         ]
@@ -21858,12 +21870,12 @@ def menu_text_main(is_admin: bool) -> str:
         "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
         "Cỗ máy AI hỗ trợ tạo nội dung, video script, voice, media và công cụ AI hằng ngày trong một bot Telegram.\n\n"
         "🤖 Trợ lý AI: viết kịch bản, ý tưởng, code, chiến lược.\n"
-        "🎬 Video Factory Lite: tạo kịch bản, storyboard, scene prompt, caption, hashtag, CTA cho Facebook, TikTok, YouTube.\n"
+        "🎬 Video & Media Factory: tạo script, storyboard, prompt ảnh chân thật, video prompt pack, caption, hashtag, CTA cho Facebook, TikTok, YouTube.\n"
         "🎤 Bóc Băng AI: chuyển âm thanh/video thành văn bản.\n"
         "🔊 Voice-off/TTS: tạo voice tiếng Việt cho nội dung.\n"
         "📥 Hút Media: tải video TikTok/YouTube/Facebook nếu công cụ khả dụng.\n"
         "🖼 Studio Đồ Họa: tách nền, xử lý ảnh, prompt hình ảnh.\n"
-        "🎞 Media Factory: tìm trend, prompt ảnh chân thật, video prompt pack để bạn tự đăng.\n"
+        "🖼 Công cụ ảnh: /image_tools, /image_prompt, /image_to_video_pack, /ai_image, /ai_image_edit.\n"
         "💳 Nạp Xu: PayOS QR động hoặc QR thủ công khi cổng tự động bận."
         f"{admin_line}\n\n"
         "🎁 Tân thủ: mỗi ID Telegram chỉ nhận <b>200 Xu trải nghiệm</b> một lần.\n"
@@ -21873,11 +21885,12 @@ def menu_text_main(is_admin: bool) -> str:
         "<b>Bắt đầu nhanh:</b>\n"
         "1. <code>/profile</code> — xem số dư\n"
         "2. <code>/film &lt;chủ đề&gt;</code> — tạo Video Script Basic\n"
-        "3. <code>/media_factory &lt;chủ đề&gt;</code> — tạo trend/script/ảnh/video/caption pack\n"
-        "4. <code>/pricing</code> — xem bảng giá\n"
-        "5. <code>/naptien</code> — nạp thêm Xu khi cần\n"
-        "6. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
-        "7. Tự đăng nội dung đã tạo lên kênh của bạn"
+        "3. <code>/image_tools</code> — xem công cụ ảnh và video prompt pack\n"
+        "4. <code>/media_factory &lt;chủ đề&gt;</code> — tạo trend/script/ảnh/video/caption pack\n"
+        "5. <code>/pricing</code> — xem bảng giá\n"
+        "6. <code>/naptien</code> — nạp thêm Xu khi cần\n"
+        "7. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
+        "8. Tự đăng nội dung đã tạo lên kênh của bạn"
         f"{admin_quick}"
         f"{runtime_line}\n\n"
         "Chọn nhóm chức năng bên dưới:"
@@ -21922,12 +21935,14 @@ def menu_text_ai_basic() -> str:
 def menu_text_video_factory(is_admin: bool) -> str:
     if not is_admin:
         return (
-            "🎬 <b>Multi-Platform AI Video Factory</b>\n\n"
-            "Tạo ý tưởng, kịch bản, storyboard, scene prompt và content pack cho Facebook, TikTok, YouTube.\n\n"
+            "🎬 <b>Video & Media Factory</b>\n\n"
+            "Tạo ý tưởng, kịch bản, storyboard, prompt ảnh chân thật, video prompt pack và content pack cho Facebook, TikTok, YouTube.\n\n"
             f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack, phí <b>{FILM_SCRIPT_COST} Xu</b>\n"
             f"• <code>/trend_ai &lt;chủ đề&gt;</code> — tìm ý tưởng/trend, phí <b>{TREND_AI_COST} Xu</b>\n"
             f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật, phí <b>{IMAGE_PROMPT_PACK_COST} Xu</b>\n"
-            f"• <code>/video_from_image &lt;chủ đề&gt;</code> — tạo video prompt pack, phí <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>\n"
+            f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack, phí <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>\n"
+            f"• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật, phí <b>{AI_IMAGE_COST} Xu</b>\n"
+            f"• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật, phí <b>{AI_IMAGE_EDIT_COST} Xu</b>\n"
             f"• <code>/media_factory &lt;chủ đề&gt;</code> — trọn gói trend/script/ảnh/video/caption, phí <b>{MEDIA_FACTORY_PACK_COST} Xu</b>\n"
             "• <code>/film topic=\"review sản phẩm\"</code> — tạo nội dung review để bạn tự đăng\n"
             "• <code>/film topic=\"sản phẩm A\" link=\"https://...\"</code> — dùng link bạn dán trực tiếp để viết caption/CTA tham khảo\n"
@@ -21936,7 +21951,7 @@ def menu_text_video_factory(is_admin: bool) -> str:
             f"{CURRENT_PRODUCT_SCOPE_TEXT}"
         )
     return (
-        "🎬 <b>Multi-Platform AI Video Factory</b>\n\n"
+        "🎬 <b>Video & Media Factory — INTERNAL TEST ONLY</b>\n\n"
         "INTERNAL TEST ONLY — quy trình admin:\n"
         f"1. User-facing Script Lite: <code>/film &lt;chủ đề&gt;</code> ({FILM_SCRIPT_COST} Xu)\n"
         "1b. INTERNAL TEST ONLY: dùng link đã lưu nội bộ khi admin truyền <code>aff=&lt;ID&gt;</code>\n"
@@ -22171,9 +22186,13 @@ def help_text_for_user(user_id) -> str:
         "• Bóc băng audio: gửi voice/mp3/m4a\n"
         "• Tách nền ảnh: gửi ảnh vào bot\n"
         "• Tải video sạch: gửi link TikTok/YouTube/Facebook\n\n"
-        "<b>3. Video Factory Lite</b>\n"
+        "<b>3. Video & Media Factory</b>\n"
         f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack ({FILM_SCRIPT_COST} Xu)\n"
-        "• Kết quả gồm outline, storyboard, scene prompt, caption, hashtag và CTA để bạn tự đăng.\n"
+        f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật ({IMAGE_PROMPT_PACK_COST} Xu)\n"
+        f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack ({IMAGE_TO_VIDEO_PROMPT_COST} Xu)\n"
+        f"• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật ({AI_IMAGE_COST} Xu)\n"
+        f"• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật ({AI_IMAGE_EDIT_COST} Xu)\n"
+        "• Kết quả gồm outline, storyboard, scene prompt, prompt ảnh, caption, hashtag và CTA để bạn tự đăng.\n"
         "• Có thể dán link trực tiếp trong prompt để bot viết caption/CTA tham khảo.\n\n"
         "<b>4. Báo cáo/tối ưu thủ công</b>\n"
         f"• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
@@ -22301,15 +22320,18 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
         "• Edge TTS: <code>built-in/fallback</code>",
         "",
-        "<b>Image</b>",
+        "<b>Image Utilities</b>",
         f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
         f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
         "",
-        "<b>Media Factory</b>",
+        "<b>Image / Media</b>",
         f"• Trend Finder: <code>{'ready' if providers['media_factory']['trend_finder'] else 'disabled'}</code>",
+        f"• Image Tools Menu: <code>{'ready' if providers['media_factory']['image_tools'] else 'disabled'}</code>",
         f"• Image Prompt Factory: <code>{'ready' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
-        f"• Image Generation: <code>{'ready' if providers['media_factory']['image_generation'] else 'planned/missing'}</code>",
-        f"• Image-to-Video: <code>{'ready' if providers['media_factory']['image_to_video'] else 'planned/missing'}</code>",
+        f"• Image-to-Video Prompt Pack: <code>{'ready' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
+        f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        f"• Real Video Generation: <code>{'enabled' if providers['media_factory']['image_to_video'] else 'planned/disabled'}</code>",
         f"• Admin Publish: <code>{'enabled/internal' if providers['media_factory']['admin_publish'] else 'disabled/internal'}</code>",
         f"• Customer Publish: <code>{'enabled' if providers['media_factory']['customer_publish'] else 'disabled'}</code>",
         f"• Auto Publish: <code>{'enabled' if providers['media_factory']['auto_publish'] else 'disabled'}</code>",
@@ -22342,6 +22364,9 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/film</code>: <b>{FILM_SCRIPT_COST} Xu</b>/lần",
         f"• <code>/trend_ai</code>: <b>{TREND_AI_COST} Xu</b>/lần",
         f"• <code>/image_prompt</code>: <b>{IMAGE_PROMPT_PACK_COST} Xu</b>/lần",
+        f"• <code>/image_to_video_pack</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>/lần",
+        f"• <code>/ai_image</code>: <b>{AI_IMAGE_COST} Xu</b>/lần nếu OpenAI image bật",
+        f"• <code>/ai_image_edit</code>: <b>{AI_IMAGE_EDIT_COST} Xu</b>/lần nếu OpenAI image edit bật",
         f"• <code>/image_pack</code>: <b>{IMAGE_PACK_COST} Xu</b>/lần",
         f"• <code>/video_from_image</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>/lần",
         f"• <code>/media_factory</code>: <b>{MEDIA_FACTORY_PACK_COST} Xu</b>/lần",
@@ -23269,7 +23294,7 @@ def fallback_image_prompt_pack(topic: str, advanced: bool = False) -> str:
             "Tỉ lệ: 9:16 cho Reels/TikTok, 1:1 cho feed, 16:9 cho YouTube.",
             "",
         ])
-    lines.append("Trạng thái: provider tạo ảnh thật chưa bật, bot trả prompt pack nâng cao để bạn dùng với công cụ tạo ảnh." if advanced else "Bước tiếp theo: dùng prompt này ở công cụ tạo ảnh bạn chọn hoặc chạy /video_from_image <mô tả ảnh>.")
+    lines.append("Trạng thái: provider tạo ảnh thật chưa bật, bot trả prompt pack nâng cao để bạn dùng với công cụ tạo ảnh." if advanced else "Bước tiếp theo: dùng prompt này ở công cụ tạo ảnh bạn chọn hoặc chạy /image_to_video_pack <mô tả ảnh>.")
     return "\n".join(lines)
 
 def fallback_video_from_image_pack(topic: str) -> str:
@@ -23334,6 +23359,8 @@ async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     topic = media_factory_topic_from_args(context)
     if not topic:
         return await update.message.reply_text("⚠️ Cú pháp: /image_prompt <chủ đề hoặc trend>")
+    if not is_feature_enabled("image_prompt_factory", uid, default=True):
+        return await update.message.reply_text("⚠️ Image Prompt Factory đang tắt tạm thời. Vui lòng thử lại sau.")
     if not await charge_media_factory_or_reply(update, uid, IMAGE_PROMPT_PACK_COST, "spend_image_prompt", f"Image prompt pack: {topic[:120]}"):
         return
     fallback = fallback_image_prompt_pack(topic)
@@ -23346,6 +23373,25 @@ async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     create_media_factory_job(uid, media_factory_username(update), "image_prompt", topic, image_prompt_pack=output, cost_xu=IMAGE_PROMPT_PACK_COST)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lines = [
+        "🖼 <b>Công cụ ảnh trong Video & Media Factory</b>",
+        "",
+        "<b>Công cụ tiết kiệm:</b>",
+        f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật, <b>{IMAGE_PROMPT_PACK_COST} Xu</b>",
+        f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo prompt video từ ảnh, <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>",
+        "",
+        "<b>Công cụ cao cấp ChatGPT/OpenAI:</b>",
+        f"• <code>/ai_image &lt;mô tả ảnh&gt;</code> — tạo ảnh AI cao cấp, <b>{AI_IMAGE_COST} Xu</b>",
+        f"• <code>/ai_image_edit &lt;yêu cầu sửa ảnh&gt;</code> — reply ảnh để sửa bằng AI, <b>{AI_IMAGE_EDIT_COST} Xu</b>",
+        "",
+        "Lưu ý: ChatGPT/OpenAI tạo và sửa ảnh là gói cao cấp, chỉ hoạt động khi admin bật provider. "
+        "Nếu chưa bật, bot không trừ Xu và sẽ gợi ý dùng /image_prompt trước.",
+        "",
+        "TOAN AAS gom nhiều công cụ vào một bot để khách không phải chạy nhiều website khác nhau.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_image_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -23368,7 +23414,9 @@ async def cmd_video_from_image(update: Update, context: ContextTypes.DEFAULT_TYP
     has_reply_photo = bool(reply and getattr(reply, "photo", None))
     topic = media_factory_topic_from_args(context, "ảnh user reply" if has_reply_photo else "")
     if not topic:
-        return await update.message.reply_text("⚠️ Cú pháp: /video_from_image <mô tả ảnh/chủ đề> hoặc reply ảnh rồi gõ /video_from_image")
+        return await update.message.reply_text("⚠️ Cú pháp: /image_to_video_pack <mô tả ảnh/chủ đề> hoặc reply ảnh rồi gõ /image_to_video_pack")
+    if not is_feature_enabled("image_to_video_prompt", uid, default=True):
+        return await update.message.reply_text("⚠️ Image-to-Video Prompt Pack đang tắt tạm thời. Vui lòng thử lại sau.")
     if not await charge_media_factory_or_reply(update, uid, IMAGE_TO_VIDEO_PROMPT_COST, "spend_video_from_image", f"Video from image pack: {topic[:120]}"):
         return
     provider_on = is_feature_enabled("image_to_video", uid, default=False)
@@ -23384,6 +23432,128 @@ async def cmd_video_from_image(update: Update, context: ContextTypes.DEFAULT_TYP
     create_media_factory_job(uid, media_factory_username(update), "video_from_image", topic, video_prompt_pack=output, cost_xu=IMAGE_TO_VIDEO_PROMPT_COST, note="provider_off_prompt_pack" if not provider_on else "provider_not_integrated")
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_image_to_video_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_video_from_image(update, context)
+
+def extract_openai_image_payload(result) -> tuple[str, str]:
+    data = getattr(result, "data", None)
+    if data is None and isinstance(result, dict):
+        data = result.get("data")
+    if not data:
+        return "", ""
+    item = data[0]
+    if isinstance(item, dict):
+        return item.get("b64_json") or "", item.get("url") or ""
+    return getattr(item, "b64_json", "") or "", getattr(item, "url", "") or ""
+
+async def send_openai_image_result(update: Update, result, caption: str) -> bool:
+    b64_json, url = extract_openai_image_payload(result)
+    if b64_json:
+        image_bytes = base64.b64decode(b64_json)
+        photo = io.BytesIO(image_bytes)
+        photo.name = "toan_aas_ai_image.png"
+        await update.message.reply_photo(photo=photo, caption=caption[:1000])
+        return True
+    if url:
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                response = await client.get(url)
+            if response.status_code < 400 and response.content:
+                photo = io.BytesIO(response.content)
+                photo.name = "toan_aas_ai_image.png"
+                await update.message.reply_photo(photo=photo, caption=caption[:1000])
+                return True
+        except Exception as e:
+            logger.warning(f"OpenAI image URL download failed: {e}")
+        await update.message.reply_text(f"✅ Ảnh đã tạo: {url}\n\n{caption}")
+        return True
+    return False
+
+async def cmd_ai_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /ai_image <mô tả ảnh>")
+    if not is_feature_enabled("image_openai_generation", uid, default=False):
+        return await update.message.reply_text(
+            "ℹ️ Tạo ảnh bằng ChatGPT/OpenAI chưa bật. "
+            "Bạn có thể dùng /image_prompt để lấy prompt ảnh chất lượng trước."
+        )
+    if not openai_client:
+        return await update.message.reply_text("⚠️ OpenAI image provider chưa được cấu hình. Bot chưa trừ Xu.")
+    if not await charge_media_factory_or_reply(update, uid, AI_IMAGE_COST, "spend_ai_image", f"AI image: {topic[:120]}"):
+        return
+    charged = not is_admin_user(uid)
+    try:
+        safe_prompt = (
+            f"{topic}\n\n"
+            "Create a safe, realistic, high-quality image. No watermark, no broken text, no illegal or deceptive content."
+        )
+        result = openai_client.images.generate(
+            model=OPENAI_IMAGE_MODEL,
+            prompt=safe_prompt,
+            size="1024x1024",
+            n=1,
+        )
+        sent = await send_openai_image_result(update, result, "✅ Ảnh AI TOAN AAS đã tạo xong.")
+        if not sent:
+            raise RuntimeError("OpenAI image response did not contain b64_json or url")
+        create_media_factory_job(uid, media_factory_username(update), "ai_image", topic, image_prompt_pack=safe_prompt, cost_xu=AI_IMAGE_COST, note="openai_image_generation")
+        balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
+        await update.message.reply_text(f"💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+    except Exception as e:
+        refund_charged_credit(uid, AI_IMAGE_COST, "ai_image_refund", "", "Hoàn phí tạo ảnh AI do lỗi provider", charged)
+        logger.warning(f"OpenAI image generation failed: {e}")
+        await update.message.reply_text("❌ Tạo ảnh AI lỗi. Nếu đã trừ Xu, bot đã hoàn lại. Bạn có thể dùng /image_prompt trước.")
+
+async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    instruction = media_factory_topic_from_args(context)
+    if not instruction:
+        return await update.message.reply_text("⚠️ Cú pháp: reply ảnh rồi gõ /ai_image_edit <yêu cầu sửa ảnh>")
+    reply = update.message.reply_to_message if update.message else None
+    has_reply_photo = bool(reply and getattr(reply, "photo", None))
+    if not has_reply_photo:
+        return await update.message.reply_text("⚠️ Hãy reply một ảnh rồi gõ /ai_image_edit <yêu cầu sửa ảnh>.")
+    if not is_feature_enabled("image_openai_edit", uid, default=False):
+        return await update.message.reply_text(
+            "ℹ️ Sửa ảnh bằng ChatGPT/OpenAI chưa bật. Đây là gói cao cấp vì tốn tài nguyên. "
+            "Bạn có thể dùng /image_prompt trước hoặc đợi admin bật công cụ."
+        )
+    if not openai_client:
+        return await update.message.reply_text("⚠️ OpenAI image edit provider chưa được cấu hình. Bot chưa trừ Xu.")
+    if not await charge_media_factory_or_reply(update, uid, AI_IMAGE_EDIT_COST, "spend_ai_image_edit", f"AI image edit: {instruction[:120]}"):
+        return
+    charged = not is_admin_user(uid)
+    try:
+        photo_size = reply.photo[-1]
+        tg_file = await context.bot.get_file(photo_size.file_id)
+        image_file = io.BytesIO()
+        await tg_file.download_to_memory(out=image_file)
+        image_file.seek(0)
+        image_file.name = "source.png"
+        safe_prompt = (
+            f"{instruction}\n\n"
+            "Edit safely and keep the result realistic. Do not add watermark, fake claims, or deceptive text."
+        )
+        result = openai_client.images.edit(
+            model=OPENAI_IMAGE_MODEL,
+            image=image_file,
+            prompt=safe_prompt,
+            size="1024x1024",
+            n=1,
+        )
+        sent = await send_openai_image_result(update, result, "✅ Ảnh AI TOAN AAS đã sửa xong.")
+        if not sent:
+            raise RuntimeError("OpenAI image edit response did not contain b64_json or url")
+        create_media_factory_job(uid, media_factory_username(update), "ai_image_edit", instruction, image_prompt_pack=safe_prompt, cost_xu=AI_IMAGE_EDIT_COST, note="openai_image_edit")
+        balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
+        await update.message.reply_text(f"💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+    except Exception as e:
+        refund_charged_credit(uid, AI_IMAGE_EDIT_COST, "ai_image_edit_refund", "", "Hoàn phí sửa ảnh AI do lỗi provider", charged)
+        logger.warning(f"OpenAI image edit failed: {e}")
+        await update.message.reply_text("❌ Sửa ảnh AI lỗi. Nếu đã trừ Xu, bot đã hoàn lại. Bạn có thể dùng /image_prompt trước.")
 
 async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -23463,7 +23633,7 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "💎 <b>BẢNG GIÁ TOAN AAS</b>",
         "",
-        "🎬 <b>Video & Content</b>",
+        "🎬 <b>Video & Media Factory</b>",
         f"• <code>/film</code> Basic: <b>{VIDEO_BASIC_COST} Xu</b>",
         "  Script/Prompt Pack 1 tập, 5 cảnh, output cho Facebook/TikTok/YouTube",
         f"• <code>/film tier=pro</code>: <b>{VIDEO_PRO_COST} Xu</b>",
@@ -23471,9 +23641,15 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/film tier=series</code>: <b>{VIDEO_SERIES_COST:,} Xu</b>",
         "  gói nhiều nội dung/chuỗi bài",
         "",
-        "🎞 <b>Media Factory</b>",
+        "🖼 <b>Ảnh trong Video & Media Factory</b>",
         f"• <code>/trend_ai</code>: <b>{TREND_AI_COST} Xu</b>",
         f"• <code>/image_prompt</code>: <b>{IMAGE_PROMPT_PACK_COST} Xu</b>",
+        f"• <code>/image_to_video_pack</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>",
+        f"• <code>/ai_image</code>: <b>{AI_IMAGE_COST} Xu</b>",
+        f"• <code>/ai_image_edit</code>: <b>{AI_IMAGE_EDIT_COST} Xu</b>",
+        "  ChatGPT/OpenAI ảnh là gói cao cấp. Nếu admin chưa bật provider, bot không trừ Xu và gợi ý prompt pack tiết kiệm hơn.",
+        "",
+        "🎞 <b>Media Pack</b>",
         f"• <code>/image_pack</code>: <b>{IMAGE_PACK_COST} Xu</b>",
         f"• <code>/video_from_image</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b> cho prompt pack",
         f"• <code>/media_factory</code>: <b>{MEDIA_FACTORY_PACK_COST} Xu</b>",
@@ -37187,9 +37363,13 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("film", cmd_film))
     tg_app.add_handler(CommandHandler("video_script", cmd_film))
     tg_app.add_handler(CommandHandler("trend_ai", cmd_trend_ai))
+    tg_app.add_handler(CommandHandler("image_tools", cmd_image_tools))
     tg_app.add_handler(CommandHandler("image_prompt", cmd_image_prompt))
     tg_app.add_handler(CommandHandler("image_pack", cmd_image_pack))
     tg_app.add_handler(CommandHandler("video_from_image", cmd_video_from_image))
+    tg_app.add_handler(CommandHandler("image_to_video_pack", cmd_image_to_video_pack))
+    tg_app.add_handler(CommandHandler("ai_image", cmd_ai_image))
+    tg_app.add_handler(CommandHandler("ai_image_edit", cmd_ai_image_edit))
     tg_app.add_handler(CommandHandler("media_factory", cmd_media_factory))
     tg_app.add_handler(CommandHandler("admin_trend_video", admin_internal_command(cmd_admin_trend_video)))
     tg_app.add_handler(CommandHandler("review_job", admin_internal_command(cmd_review_job)))
