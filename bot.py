@@ -740,6 +740,29 @@ def init_db():
         detail TEXT,
         created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        username TEXT,
+        event_type TEXT,
+        tool_name TEXT,
+        command TEXT,
+        status TEXT,
+        xu_delta INTEGER DEFAULT 0,
+        amount_vnd INTEGER DEFAULT 0,
+        provider TEXT,
+        detail TEXT,
+        created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_modes (
+        user_id TEXT PRIMARY KEY,
+        chat_mode TEXT DEFAULT 'normal',
+        ai_level TEXT DEFAULT 'normal',
+        voice_mode TEXT DEFAULT '',
+        media_mode TEXT DEFAULT '',
+        updated_at TEXT,
+        note TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS leads (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
@@ -1583,6 +1606,124 @@ def record_api_debug(provider: str, action: str, status: str, http_status: int =
         if conn:
             conn.close()
 
+def record_usage_event_conn(
+    conn,
+    user_id,
+    username="",
+    event_type="",
+    tool_name="",
+    command="",
+    status="",
+    xu_delta=0,
+    amount_vnd=0,
+    provider="",
+    detail="",
+):
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            username TEXT,
+            event_type TEXT,
+            tool_name TEXT,
+            command TEXT,
+            status TEXT,
+            xu_delta INTEGER DEFAULT 0,
+            amount_vnd INTEGER DEFAULT 0,
+            provider TEXT,
+            detail TEXT,
+            created_at TEXT
+        )""")
+        conn.execute(
+            """INSERT INTO usage_events
+            (user_id, username, event_type, tool_name, command, status, xu_delta, amount_vnd, provider, detail, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id or ""),
+                str(username or "")[:120],
+                str(event_type or "")[:80],
+                str(tool_name or "")[:80],
+                str(command or "")[:120],
+                str(status or "")[:80],
+                int(xu_delta or 0),
+                int(amount_vnd or 0),
+                str(provider or "")[:80],
+                sanitize_log_text(str(detail or ""))[:1000],
+                now_text(),
+            ),
+        )
+    except Exception as e:
+        logger.warning(f"Usage event write failed: {e}")
+
+def record_usage_event(
+    user_id,
+    username="",
+    event_type="",
+    tool_name="",
+    command="",
+    status="",
+    xu_delta=0,
+    amount_vnd=0,
+    provider="",
+    detail="",
+):
+    conn = None
+    try:
+        conn = db_connect()
+        record_usage_event_conn(
+            conn,
+            user_id,
+            username=username,
+            event_type=event_type,
+            tool_name=tool_name,
+            command=command,
+            status=status,
+            xu_delta=xu_delta,
+            amount_vnd=amount_vnd,
+            provider=provider,
+            detail=detail,
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Usage event failed: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def update_usage_event_amount_for_ref(user_id, ref_id, amount_vnd=0, event_type=""):
+    if not ref_id or not amount_vnd:
+        return
+    conn = None
+    try:
+        conn = db_connect()
+        event_filter = "xu_credit" if not event_type else str(event_type)
+        conn.execute(
+            """UPDATE usage_events
+            SET amount_vnd=?
+            WHERE user_id=? AND event_type=? AND detail LIKE ? AND COALESCE(amount_vnd,0)=0""",
+            (int(amount_vnd or 0), str(user_id), event_filter, f"%{str(ref_id)}%"),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Usage event amount update failed: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def update_usage_event_amount_for_ref_conn(conn, user_id, ref_id, amount_vnd=0, event_type=""):
+    if not ref_id or not amount_vnd:
+        return
+    try:
+        event_filter = "xu_credit" if not event_type else str(event_type)
+        conn.execute(
+            """UPDATE usage_events
+            SET amount_vnd=?
+            WHERE user_id=? AND event_type=? AND detail LIKE ? AND COALESCE(amount_vnd,0)=0""",
+            (int(amount_vnd or 0), str(user_id), event_filter, f"%{str(ref_id)}%"),
+        )
+    except Exception as e:
+        logger.warning(f"Usage event amount update failed: {e}")
+
 def emit_event(conn, event_type, source, payload=None, status="pending"):
     try:
         c = conn.cursor()
@@ -1634,6 +1775,17 @@ def record_credit_event(conn, user_id, delta, event_type, ref_id="", note=""):
         "INSERT INTO credit_events (user_id, delta, balance_after, event_type, ref_id, note, created_at) VALUES (?,?,?,?,?,?,?)",
         (str(user_id), int(delta), balance_after, event_type, str(ref_id), note, now_text())
     )
+    usage_type = "trial_granted" if str(event_type) == "trial_grant" else ("xu_credit" if int(delta or 0) > 0 else "xu_debit" if int(delta or 0) < 0 else "")
+    if usage_type:
+        record_usage_event_conn(
+            conn,
+            user_id,
+            event_type=usage_type,
+            tool_name="credits",
+            status=str(event_type or ""),
+            xu_delta=int(delta or 0),
+            detail=f"{event_type}; ref={ref_id}; {note}",
+        )
 
 def get_user(user_id, username="Unknown"):
     uid = str(user_id)
@@ -20562,6 +20714,19 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             record_credit_event(conn, target_id, launch_bonus, "launch_bonus", order_code, f"Launch Bonus gói {amount_vnd}đ")
         promo_result = redeem_promo_for_order(conn, target_id, order_code, amount_vnd, base_xu)
         promo_bonus = int(promo_result.get("bonus_xu") or 0)
+        update_usage_event_amount_for_ref_conn(conn, target_id, order_code, amount_vnd, "xu_credit")
+        record_usage_event_conn(
+            conn,
+            target_id,
+            event_type="payment_payos_success",
+            tool_name="payment",
+            command="/webhook/payos",
+            status="paid",
+            xu_delta=int(base_xu or 0) + int(launch_bonus or 0) + int(promo_bonus or 0),
+            amount_vnd=int(amount_vnd or 0),
+            provider="payos",
+            detail=f"order={order_code}; promo={promo_result.get('code') or ''}",
+        )
         referral_bonus = award_referral_bonus_if_needed(conn, target_id)
         info["promo_bonus"] = promo_bonus
         info["promo_code"] = promo_result.get("code") or ""
@@ -21754,6 +21919,97 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
     file_bytes = bytes(await file_obj.download_as_bytearray())
     meta["bytes"] = file_bytes
     return meta
+
+def ensure_user_modes(user_id) -> dict:
+    uid = str(user_id)
+    conn = db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS user_modes (
+            user_id TEXT PRIMARY KEY,
+            chat_mode TEXT DEFAULT 'normal',
+            ai_level TEXT DEFAULT 'normal',
+            voice_mode TEXT DEFAULT '',
+            media_mode TEXT DEFAULT '',
+            updated_at TEXT,
+            note TEXT
+        )""")
+        row = conn.execute(
+            "SELECT chat_mode, ai_level, voice_mode, media_mode, updated_at, note FROM user_modes WHERE user_id=?",
+            (uid,),
+        ).fetchone()
+        if not row:
+            conn.execute(
+                "INSERT OR IGNORE INTO user_modes (user_id, chat_mode, ai_level, voice_mode, media_mode, updated_at, note) VALUES (?,?,?,?,?,?,?)",
+                (uid, "normal", "normal", "", "", now_text(), "default"),
+            )
+            conn.commit()
+            row = ("normal", "normal", "", "", now_text(), "default")
+        return {
+            "user_id": uid,
+            "chat_mode": row[0] or "normal",
+            "ai_level": row[1] or "normal",
+            "voice_mode": row[2] or "",
+            "media_mode": row[3] or "",
+            "updated_at": row[4] or "",
+            "note": row[5] or "",
+        }
+    finally:
+        conn.close()
+
+def set_user_chat_mode(user_id, mode: str, username="", note="") -> tuple[bool, dict]:
+    mode = str(mode or "normal").lower().strip()
+    if mode not in {"normal", "pro", "deep"}:
+        mode = "normal"
+    current = ensure_user_modes(user_id)
+    changed = current.get("chat_mode") != mode or current.get("ai_level") != mode
+    if not changed:
+        return False, current
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO user_modes (user_id, chat_mode, ai_level, voice_mode, media_mode, updated_at, note)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                chat_mode=excluded.chat_mode,
+                ai_level=excluded.ai_level,
+                updated_at=excluded.updated_at,
+                note=excluded.note""",
+            (str(user_id), mode, mode, current.get("voice_mode", ""), current.get("media_mode", ""), now_text(), note),
+        )
+        record_usage_event_conn(
+            conn,
+            user_id,
+            username=username,
+            event_type="mode_enabled" if mode != "normal" else "mode_disabled",
+            tool_name="user_mode",
+            command=f"/chat_{mode}_on" if mode != "normal" else "/chat_mode_off",
+            status=mode,
+            detail=note,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return True, ensure_user_modes(user_id)
+
+def user_mode_label(modes: dict) -> str:
+    chat_mode = (modes or {}).get("chat_mode") or "normal"
+    if chat_mode == "deep":
+        return "Chat Deep"
+    if chat_mode == "pro":
+        return "Chat Pro"
+    return "Normal"
+
+def mode_start_notice(user_id) -> str:
+    modes = ensure_user_modes(user_id)
+    if (modes.get("chat_mode") or "normal") == "normal":
+        return ""
+    return f"\n\n⚙️ Bạn đang bật <b>{html.escape(user_mode_label(modes))}</b>. Gõ <code>/mode</code> để xem hoặc tắt."
+
+def active_mode_hint(user_id) -> str:
+    modes = ensure_user_modes(user_id)
+    if (modes.get("chat_mode") or "normal") == "normal":
+        return ""
+    return f"\n\n⚙️ Bạn đang bật <b>{html.escape(user_mode_label(modes))}</b>. Tác vụ chat sẽ dùng cấu hình này nếu có. Gõ <code>/mode</code> để đổi/tắt."
 
 def is_trial_account(user_id) -> bool:
     conn = db_connect()
@@ -23379,6 +23635,14 @@ def customer_start_surface_audit_data():
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("start", update)
     get_user(update.effective_user.id, update.effective_user.first_name)
+    record_usage_event(
+        update.effective_user.id,
+        username=update.effective_user.username or update.effective_user.first_name or "",
+        event_type="start",
+        tool_name="core",
+        command="/start",
+        status="ok",
+    )
     if context.args and context.args[0].startswith("ref_"):
         referrer = context.args[0].replace("ref_", "", 1)
         if register_referral(update.effective_user.id, referrer):
@@ -23387,7 +23651,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     user_is_admin = is_admin_user(update.effective_user.id)
     await update.message.reply_text(
-        build_start_message_text(update.effective_user.id),
+        build_start_message_text(update.effective_user.id) + mode_start_notice(update.effective_user.id),
         parse_mode="HTML",
         reply_markup=main_reply_keyboard(),
     )
@@ -24739,6 +25003,461 @@ async def cmd_mark_payos_test(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode="HTML",
     )
 
+def _report_dt_text(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+def report_period_bounds(period: str) -> tuple[str, str, str]:
+    now = datetime.now()
+    period = str(period or "today").lower().strip()
+    if period == "week":
+        start = datetime(now.year, now.month, now.day) - timedelta(days=6)
+        label = "7 ngày gần nhất"
+    elif period == "month":
+        start = datetime(now.year, now.month, 1)
+        label = f"Tháng {now.month:02d}/{now.year}"
+    elif period == "year":
+        start = datetime(now.year, 1, 1)
+        label = f"Năm {now.year}"
+    else:
+        start = datetime(now.year, now.month, now.day)
+        label = "Hôm nay"
+    return _report_dt_text(start), _report_dt_text(now), label
+
+def report_range_bounds(args) -> tuple[str, str, str] | None:
+    if len(args) < 2:
+        return None
+    try:
+        start = datetime.strptime(args[0], "%Y-%m-%d")
+        end = datetime.strptime(args[1], "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+        if end < start:
+            return None
+        return _report_dt_text(start), _report_dt_text(end), f"{args[0]} → {args[1]}"
+    except Exception:
+        return None
+
+def sql_scalar(conn, query: str, params=(), default=0):
+    try:
+        row = conn.execute(query, params).fetchone()
+        if not row or row[0] is None:
+            return default
+        return row[0]
+    except Exception:
+        return default
+
+def sql_rows(conn, query: str, params=()):
+    try:
+        return conn.execute(query, params).fetchall()
+    except Exception:
+        return []
+
+def vnd_text(value) -> str:
+    return f"{int(value or 0):,}đ".replace(",", ".")
+
+def xu_text(value) -> str:
+    return f"{int(value or 0):,} Xu".replace(",", ".")
+
+def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
+    conn = db_connect()
+    try:
+        total_users = int(sql_scalar(conn, "SELECT COUNT(*) FROM users", default=0) or 0)
+        new_users = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM users WHERE join_date BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        active_users = int(sql_scalar(
+            conn,
+            "SELECT COUNT(DISTINCT user_id) FROM usage_events WHERE created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        returning_users = int(sql_scalar(
+            conn,
+            """SELECT COUNT(DISTINCT e.user_id)
+            FROM usage_events e
+            JOIN users u ON u.user_id=e.user_id
+            WHERE e.created_at BETWEEN ? AND ? AND COALESCE(u.join_date,'') < ?""",
+            (start_at, end_at, start_at),
+            0,
+        ) or 0)
+        payos_row = conn.execute(
+            """SELECT COALESCE(SUM(amount),0), COUNT(*), COALESCE(SUM(xu),0)
+            FROM payos_orders
+            WHERE status=? AND paid_at BETWEEN ? AND ?""",
+            (PAYOS_STATUS_PAID, start_at, end_at),
+        ).fetchone()
+        manual_row = conn.execute(
+            """SELECT COALESCE(SUM(amount_vnd),0), COUNT(*), COALESCE(SUM(xu_delta),0)
+            FROM usage_events
+            WHERE event_type='payment_manual_approved' AND created_at BETWEEN ? AND ?""",
+            (start_at, end_at),
+        ).fetchone()
+        if not manual_row or int(manual_row[1] or 0) == 0:
+            manual_row = conn.execute(
+                """SELECT COALESCE(SUM(amount),0), COUNT(*), COALESCE(SUM(xu),0)
+                FROM pending_deposits
+                WHERE status='approved' AND submitted_at BETWEEN ? AND ?""",
+                (start_at, end_at),
+            ).fetchone()
+        credit_add = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(delta),0) FROM credit_events WHERE delta>0 AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        credit_spent = abs(int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(delta),0) FROM credit_events WHERE delta<0 AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0))
+        xu_circulating = int(sql_scalar(conn, "SELECT COALESCE(SUM(credits),0) FROM users", default=0) or 0)
+        tool_requested = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE event_type='tool_use' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        tool_success = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE event_type='tool_success' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        tool_fail = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE event_type IN ('tool_fail','provider_error') AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        trial_grants = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM usage_events WHERE event_type='trial_granted' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        promo_events = int(sql_scalar(
+            conn,
+            """SELECT COUNT(*) FROM credit_events
+            WHERE (event_type LIKE 'promo%' OR event_type LIKE 'gift%' OR event_type='launch_bonus')
+            AND created_at BETWEEN ? AND ?""",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        provider_errors = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM api_debug_events WHERE UPPER(status) NOT IN ('PASS','OK','SUCCESS') AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        top_tools = sql_rows(
+            conn,
+            """SELECT COALESCE(tool_name,''), COUNT(*)
+            FROM usage_events
+            WHERE event_type IN ('tool_use','tool_success') AND created_at BETWEEN ? AND ?
+            GROUP BY COALESCE(tool_name,'')
+            ORDER BY COUNT(*) DESC
+            LIMIT 8""",
+            (start_at, end_at),
+        )
+        top_commands = sql_rows(
+            conn,
+            """SELECT COALESCE(command,''), COUNT(*)
+            FROM usage_events
+            WHERE command<>'' AND created_at BETWEEN ? AND ?
+            GROUP BY COALESCE(command,'')
+            ORDER BY COUNT(*) DESC
+            LIMIT 8""",
+            (start_at, end_at),
+        )
+        provider_rows = sql_rows(
+            conn,
+            """SELECT COALESCE(provider,''), COALESCE(status,''), COUNT(*)
+            FROM api_debug_events
+            WHERE created_at BETWEEN ? AND ?
+            GROUP BY COALESCE(provider,''), COALESCE(status,'')
+            ORDER BY COUNT(*) DESC
+            LIMIT 8""",
+            (start_at, end_at),
+        )
+        payos_amount, payos_count, payos_xu = (int(payos_row[0] or 0), int(payos_row[1] or 0), int(payos_row[2] or 0))
+        manual_amount, manual_count, manual_xu = (int(manual_row[0] or 0), int(manual_row[1] or 0), int(manual_row[2] or 0))
+        return {
+            "label": label,
+            "start_at": start_at,
+            "end_at": end_at,
+            "users": {
+                "total": total_users,
+                "new": new_users,
+                "active": active_users,
+                "returning": returning_users,
+            },
+            "money": {
+                "payos_amount": payos_amount,
+                "payos_count": payos_count,
+                "payos_xu": payos_xu,
+                "manual_amount": manual_amount,
+                "manual_count": manual_count,
+                "manual_xu": manual_xu,
+                "total_amount": payos_amount + manual_amount,
+                "total_count": payos_count + manual_count,
+                "xu_sold": payos_xu + manual_xu,
+                "pending_deposits": int(sql_scalar(conn, "SELECT COUNT(*) FROM pending_deposits WHERE status='pending'", default=0) or 0),
+            },
+            "credits": {
+                "added": credit_add,
+                "spent": credit_spent,
+                "circulating": xu_circulating,
+            },
+            "tools": {
+                "requested": tool_requested,
+                "success": tool_success,
+                "fail": tool_fail,
+                "top_tools": top_tools,
+                "top_commands": top_commands,
+            },
+            "providers": {
+                "errors": provider_errors,
+                "rows": provider_rows,
+            },
+            "growth": {
+                "trial_grants": trial_grants,
+                "promo_events": promo_events,
+            },
+        }
+    finally:
+        conn.close()
+
+def format_admin_report(payload: dict) -> str:
+    users = payload["users"]
+    money = payload["money"]
+    credits = payload["credits"]
+    tools = payload["tools"]
+    providers = payload["providers"]
+    growth = payload["growth"]
+    success_rate = 0
+    if int(tools["success"] or 0) + int(tools["fail"] or 0) > 0:
+        success_rate = round((int(tools["success"] or 0) / (int(tools["success"] or 0) + int(tools["fail"] or 0))) * 100, 1)
+    top_tool_lines = [f"• {html.escape(str(name or 'unknown'))}: <b>{int(count or 0)}</b>" for name, count in tools["top_tools"]]
+    top_command_lines = [f"• <code>{html.escape(str(cmd or '-'))}</code>: <b>{int(count or 0)}</b>" for cmd, count in tools["top_commands"]]
+    provider_lines = [
+        f"• {html.escape(str(provider or 'unknown'))}/{html.escape(str(status or '-'))}: <b>{int(count or 0)}</b>"
+        for provider, status, count in providers["rows"]
+    ]
+    lines = [
+        f"📊 <b>TOAN AAS — BÁO CÁO {html.escape(payload['label']).upper()}</b>",
+        f"<code>{html.escape(payload['start_at'])}</code> → <code>{html.escape(payload['end_at'])}</code>",
+        "",
+        "<b>Users</b>",
+        f"• Tổng user: <b>{users['total']}</b>",
+        f"• User mới: <b>{users['new']}</b>",
+        f"• User active: <b>{users['active']}</b>",
+        f"• User quay lại: <b>{users['returning']}</b>",
+        "",
+        "<b>Doanh thu / Xu</b>",
+        f"• Tổng thu: <b>{vnd_text(money['total_amount'])}</b> ({money['total_count']} giao dịch)",
+        f"• PayOS: <b>{vnd_text(money['payos_amount'])}</b> ({money['payos_count']} giao dịch)",
+        f"• Manual QR: <b>{vnd_text(money['manual_amount'])}</b> ({money['manual_count']} giao dịch)",
+        f"• Xu đã bán theo đơn: <b>{xu_text(money['xu_sold'])}</b>",
+        f"• Bill chờ duyệt: <b>{money['pending_deposits']}</b>",
+        f"• Xu cộng trong kỳ: <b>{xu_text(credits['added'])}</b>",
+        f"• Xu trừ trong kỳ: <b>{xu_text(credits['spent'])}</b>",
+        f"• Xu đang lưu hành: <b>{xu_text(credits['circulating'])}</b>",
+        "",
+        "<b>Công cụ</b>",
+        f"• Lượt gọi tool: <b>{tools['requested']}</b>",
+        f"• Thành công: <b>{tools['success']}</b>",
+        f"• Lỗi: <b>{tools['fail']}</b>",
+        f"• Tỷ lệ thành công: <b>{success_rate}%</b>",
+        "",
+        "<b>Trial / Promo</b>",
+        f"• Trial đã cấp: <b>{growth['trial_grants']}</b>",
+        f"• Promo/Gift/Launch events: <b>{growth['promo_events']}</b>",
+        "",
+        "<b>Provider</b>",
+        f"• Provider error/debug fail: <b>{providers['errors']}</b>",
+    ]
+    if provider_lines:
+        lines.extend(provider_lines[:5])
+    if top_tool_lines:
+        lines.extend(["", "<b>Top tools</b>", *top_tool_lines[:6]])
+    if top_command_lines:
+        lines.extend(["", "<b>Top commands</b>", *top_command_lines[:6]])
+    lines.append("")
+    lines.append("Lệnh AI insight: <code>/report_ai_today</code> | chart: <code>/report_chart_week</code>")
+    return "\n".join(lines[:120])
+
+def admin_report_plain(payload: dict) -> str:
+    text = format_admin_report(payload)
+    text = re.sub(r"<[^>]+>", "", text)
+    return html.unescape(text)
+
+def report_chart_payload(start_at: str, end_at: str, label: str) -> str:
+    conn = db_connect()
+    try:
+        start_dt = datetime.strptime(start_at[:10], "%Y-%m-%d")
+        end_dt = datetime.strptime(end_at[:10], "%Y-%m-%d")
+        days = []
+        cursor = start_dt
+        while cursor <= end_dt and len(days) < 370:
+            days.append(cursor.strftime("%Y-%m-%d"))
+            cursor += timedelta(days=1)
+        revenue_rows = dict(sql_rows(
+            conn,
+            """SELECT substr(paid_at,1,10), COALESCE(SUM(amount),0)
+            FROM payos_orders WHERE status=? AND paid_at BETWEEN ? AND ?
+            GROUP BY substr(paid_at,1,10)""",
+            (PAYOS_STATUS_PAID, start_at, end_at),
+        ))
+        manual_rows = dict(sql_rows(
+            conn,
+            """SELECT substr(created_at,1,10), COALESCE(SUM(amount_vnd),0)
+            FROM usage_events WHERE event_type='payment_manual_approved' AND created_at BETWEEN ? AND ?
+            GROUP BY substr(created_at,1,10)""",
+            (start_at, end_at),
+        ))
+        user_rows = dict(sql_rows(
+            conn,
+            """SELECT substr(created_at,1,10), COUNT(DISTINCT user_id)
+            FROM usage_events WHERE created_at BETWEEN ? AND ?
+            GROUP BY substr(created_at,1,10)""",
+            (start_at, end_at),
+        ))
+        tool_rows = dict(sql_rows(
+            conn,
+            """SELECT substr(created_at,1,10), COUNT(*)
+            FROM usage_events WHERE event_type IN ('tool_use','tool_success','tool_fail') AND created_at BETWEEN ? AND ?
+            GROUP BY substr(created_at,1,10)""",
+            (start_at, end_at),
+        ))
+        values = {
+            day: int(revenue_rows.get(day, 0) or 0) + int(manual_rows.get(day, 0) or 0)
+            for day in days
+        }
+        max_revenue = max(values.values()) if values else 0
+        max_active = max([int(user_rows.get(day, 0) or 0) for day in days] or [0])
+        max_tools = max([int(tool_rows.get(day, 0) or 0) for day in days] or [0])
+        def bar(value, max_value, width=12):
+            value = int(value or 0)
+            max_value = int(max_value or 0)
+            if max_value <= 0 or value <= 0:
+                return "·"
+            filled = max(1, min(width, round((value / max_value) * width)))
+            return "█" * filled
+        lines = [
+            f"📈 <b>TOAN AAS Chart — {html.escape(label)}</b>",
+            "<code>Ngày | Doanh thu | Active | Tool</code>",
+            "",
+        ]
+        for day in days[-31:]:
+            revenue = values.get(day, 0)
+            active = int(user_rows.get(day, 0) or 0)
+            tool_count = int(tool_rows.get(day, 0) or 0)
+            lines.append(
+                f"<code>{day}</code> {bar(revenue, max_revenue)} {vnd_text(revenue)} | "
+                f"{bar(active, max_active, 8)} {active} | {bar(tool_count, max_tools, 8)} {tool_count}"
+            )
+        if len(days) > 31:
+            lines.append("")
+            lines.append("<i>Chart text fallback chỉ hiển thị 31 ngày cuối để không vượt giới hạn Telegram.</i>")
+        return "\n".join(lines)
+    finally:
+        conn.close()
+
+async def send_admin_report(update: Update, period: str, args=None):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if period == "range":
+        bounds = report_range_bounds(args or [])
+        if not bounds:
+            return await update.message.reply_text("⚠️ Cú pháp: /report_range YYYY-MM-DD YYYY-MM-DD")
+        start_at, end_at, label = bounds
+    else:
+        start_at, end_at, label = report_period_bounds(period)
+    payload = admin_report_payload(start_at, end_at, label)
+    await update.message.reply_text(format_admin_report(payload), parse_mode="HTML")
+
+async def send_ai_admin_report(update: Update, period: str):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    start_at, end_at, label = report_period_bounds(period)
+    payload = admin_report_payload(start_at, end_at, label)
+    base_report = admin_report_plain(payload)
+    prompt = (
+        "Bạn là AI vận hành cho admin TOAN AAS. Dựa trên báo cáo, hãy trả lời ngắn gọn bằng tiếng Việt: "
+        "1) tình hình chính, 2) rủi ro, 3) việc cần làm hôm nay. Không bịa số ngoài báo cáo."
+    )
+    try:
+        insight = AgentGemini.chat(prompt, base_report, update.effective_user.id)
+    except Exception as e:
+        insight = f"AI insight unavailable: {str(e)[:160]}"
+    await update.message.reply_text(
+        f"🧠 <b>AI Daily Insight — {html.escape(label)}</b>\n\n{html.escape(str(insight)[:3200])}",
+        parse_mode="HTML",
+    )
+
+async def send_report_chart(update: Update, period: str):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    start_at, end_at, label = report_period_bounds(period)
+    await update.message.reply_text(report_chart_payload(start_at, end_at, label), parse_mode="HTML")
+
+async def cmd_admin_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    start_at, end_at, label = report_period_bounds("today")
+    payload = admin_report_payload(start_at, end_at, label)
+    money = payload["money"]
+    users = payload["users"]
+    tools = payload["tools"]
+    text = (
+        "📊 <b>TOAN AAS — ADMIN DASHBOARD</b>\n\n"
+        f"• Users: <b>{users['total']}</b> tổng | <b>{users['new']}</b> mới hôm nay | <b>{users['active']}</b> active\n"
+        f"• Doanh thu hôm nay: <b>{vnd_text(money['total_amount'])}</b> ({money['total_count']} giao dịch)\n"
+        f"• Xu đã bán hôm nay: <b>{xu_text(money['xu_sold'])}</b>\n"
+        f"• Lượt tool: <b>{tools['requested']}</b> | thành công <b>{tools['success']}</b> | lỗi <b>{tools['fail']}</b>\n"
+        f"• Pending deposits: <b>{money['pending_deposits']}</b>\n\n"
+        "<b>Lệnh nhanh</b>\n"
+        "• <code>/report_today</code> | <code>/report_week</code> | <code>/report_month</code>\n"
+        "• <code>/report_ai_today</code> | <code>/report_chart_week</code>\n"
+        "• <code>/pending</code> | <code>/backup_db</code> | <code>/sales_ready</code>"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_report_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_admin_report(update, "today")
+
+async def cmd_report_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_admin_report(update, "week")
+
+async def cmd_report_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_admin_report(update, "month")
+
+async def cmd_report_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_admin_report(update, "year")
+
+async def cmd_report_range(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_admin_report(update, "range", context.args)
+
+async def cmd_report_ai_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_ai_admin_report(update, "today")
+
+async def cmd_report_ai_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_ai_admin_report(update, "week")
+
+async def cmd_report_ai_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_ai_admin_report(update, "month")
+
+async def cmd_report_chart_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_report_chart(update, "today")
+
+async def cmd_report_chart_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_report_chart(update, "week")
+
+async def cmd_report_chart_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await send_report_chart(update, "month")
+
 async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -24784,6 +25503,13 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• HTTP/Code: <code>{html.escape(str(payos_debug.get('http_status') or '-'))}</code> / <code>{html.escape(str(payos_debug.get('code') or '-'))}</code>",
         f"• Checkout URL: <code>{'YES' if payos_debug.get('checkout_url') else 'NO'}</code>",
         f"• Note: <code>{html.escape(payos_debug.get('note') or '-')}</code>",
+        "",
+        "<b>Reporting</b>",
+        "• /admin_dashboard: <code>available</code>",
+        "• /report_today /report_week /report_month: <code>available</code>",
+        "• /report_ai_today: <code>available if AI provider works</code>",
+        "• /report_chart_week: <code>available/text fallback</code>",
+        "• /mode /chat_pro_on /chat_deep_on: <code>available</code>",
         "",
         "<b>PayOS real test</b>",
         f"• Status: <code>{html.escape(payos_test.get('status') or 'NOT_TESTED')}</code>",
@@ -24925,6 +25651,15 @@ def promo_code_status_message(status: str) -> str:
 
 async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    record_usage_event(
+        uid,
+        username=update.effective_user.username or update.effective_user.first_name or "",
+        event_type="command",
+        tool_name="promo",
+        command="/promo",
+        status="requested" if context.args else "guide",
+        detail=normalize_promo_code(context.args[0]) if context.args else "",
+    )
     if not context.args:
         summary = get_user_promo_summary(uid)
         rows = summary.get("rows") or []
@@ -25346,6 +26081,16 @@ async def cmd_trial_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    record_usage_event(
+        uid,
+        username=update.effective_user.username or update.effective_user.first_name or "",
+        event_type="command",
+        tool_name="gift",
+        command="/gift",
+        status="requested" if context.args else "guide",
+        detail=normalize_promo_code(context.args[0]) if context.args else "",
+    )
     if not context.args:
         text = (
             "🎁 <b>Nhận quà TOAN AAS</b>\n\n"
@@ -26394,8 +27139,69 @@ async def send_chat_pro_output(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
             except Exception:
                 pass
 
+async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    modes = ensure_user_modes(uid)
+    lines = [
+        "🤖 <b>Chế độ AI hiện tại</b>",
+        "",
+        f"• Chat mode: <code>{html.escape(modes.get('chat_mode') or 'normal')}</code>",
+        f"• AI level: <code>{html.escape(modes.get('ai_level') or 'normal')}</code>",
+        f"• Voice mode: <code>{html.escape(modes.get('voice_mode') or '-')}</code>",
+        f"• Media mode: <code>{html.escape(modes.get('media_mode') or '-')}</code>",
+        f"• Updated: <code>{html.escape(modes.get('updated_at') or '-')}</code>",
+        "",
+        "<b>Lệnh đổi chế độ</b>",
+        "• <code>/chat_pro_on</code> — bật Chat Pro persistent",
+        "• <code>/chat_pro_off</code> — tắt Chat Pro về normal",
+        "• <code>/chat_deep_on</code> — bật Chat Deep persistent",
+        "• <code>/chat_deep_off</code> — tắt Chat Deep về normal",
+        "",
+        "Mode giữ nguyên cho đến khi bạn đổi/tắt; <code>/start</code> không reset mode.",
+    ]
+    record_usage_event(uid, username=update.effective_user.username or "", event_type="command", tool_name="user_mode", command="/mode", status="ok")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def set_chat_mode_command(update: Update, mode: str, command: str, note: str):
+    uid = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name or ""
+    changed, modes = set_user_chat_mode(uid, mode, username=username, note=note)
+    label = user_mode_label(modes)
+    if not changed:
+        return await update.message.reply_text(
+            f"ℹ️ <b>{html.escape(label)}</b> đang bật sẵn.\n\nGõ <code>/mode</code> để xem hoặc đổi chế độ.",
+            parse_mode="HTML",
+        )
+    if mode == "pro":
+        text = (
+            "✅ <b>Đã bật Chat Pro.</b>\n\n"
+            "Bot sẽ ưu tiên trả lời sâu hơn cho các cuộc trò chuyện sau cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
+        )
+    elif mode == "deep":
+        text = (
+            "✅ <b>Đã bật Chat Deep.</b>\n\n"
+            "⚠️ Chế độ Deep có thể tốn nhiều Xu/API hơn nếu áp dụng cho tác vụ tính phí.\n"
+            "Gõ <code>/chat_deep_off</code> để tắt."
+        )
+    else:
+        text = "✅ Đã đưa Chat mode về <b>normal</b>."
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_chat_pro_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await set_chat_mode_command(update, "pro", "/chat_pro_on", "User enabled persistent Chat Pro")
+
+async def cmd_chat_pro_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await set_chat_mode_command(update, "normal", "/chat_pro_off", "User disabled Chat Pro")
+
+async def cmd_chat_deep_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await set_chat_mode_command(update, "deep", "/chat_deep_on", "User enabled persistent Chat Deep")
+
+async def cmd_chat_deep_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await set_chat_mode_command(update, "normal", "/chat_deep_off", "User disabled Chat Deep")
+
 async def cmd_chat_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    record_usage_event(uid, username=update.effective_user.username or "", event_type="tool_use", tool_name="chat_pro", command="/chat_pro", status="requested")
     parsed = parse_chat_pro_args(" ".join(context.args or []))
     prompt = parsed["prompt"]
     if not prompt:
@@ -26641,6 +27447,14 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    record_usage_event(
+        uid,
+        username=update.effective_user.username or update.effective_user.first_name or "",
+        event_type="command",
+        tool_name="payment",
+        command="/naptien",
+        status="menu",
+    )
     credits, _, _ = get_user(uid, update.effective_user.first_name)
     pending = get_user_pending_promo(uid)
     pending_text = ""
@@ -29947,6 +30761,15 @@ async def send_video_script_file(context: ContextTypes.DEFAULT_TYPE, chat_id: in
 async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     raw = " ".join(context.args).strip()
+    record_usage_event(
+        uid,
+        username=update.effective_user.username or update.effective_user.first_name or "",
+        event_type="tool_use" if raw else "command",
+        tool_name="film",
+        command="/film",
+        status="requested" if raw else "guide",
+        detail=raw[:300],
+    )
     if not raw:
         text, keyboard = video_script_usage_text(uid)
         return await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
@@ -30034,6 +30857,17 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Video script file export error: {e}")
             await update.message.reply_text("⚠️ Không gửi được file export, nhưng preview/kết quả đã được tạo ở trên.")
+        record_usage_event(
+            uid,
+            username=update.effective_user.username or update.effective_user.first_name or "",
+            event_type="tool_success",
+            tool_name="film",
+            command="/film",
+            status="completed",
+            xu_delta=-int(cost or 0),
+            provider="ai_router",
+            detail=f"job={job_id}; topic={parsed.get('topic', '')[:120]}",
+        )
     except Exception as e:
         logger.error(f"Video Script Lite error: {e}")
         if job_id:
@@ -30042,6 +30876,16 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
         refunded = refund_charged_credit(uid, cost, "video_script_refund", str(job_id or ""), "Hoàn phí Video Script Lite do AI lỗi", charged)
+        record_usage_event(
+            uid,
+            username=update.effective_user.username or update.effective_user.first_name or "",
+            event_type="tool_fail",
+            tool_name="film",
+            command="/film",
+            status="ai_error",
+            provider="ai_router",
+            detail=f"job={job_id}; {str(e)[:240]}",
+        )
         refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b>." if refunded else ""
         return await update.message.reply_text(
             "❌ AI đang lỗi hoặc quá tải. Vui lòng thử lại sau." + refund_line,
@@ -38943,6 +39787,19 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         conn.commit()
         conn.close()
+        record_usage_event(
+            target_id,
+            event_type="payment_manual_approved",
+            tool_name="payment",
+            command="/duyet",
+            status="approved",
+            xu_delta=int(amount or 0),
+            amount_vnd=int(order_amount or 0),
+            provider="manual_qr",
+            detail=f"order={pending_order_code}",
+        )
+        if pending_order_code and order_amount:
+            update_usage_event_amount_for_ref(target_id, pending_order_code, order_amount, "xu_credit")
         credits, _, _ = get_user(target_id)
         mismatch_line = ""
         if expected_order_xu and int(amount) != int(expected_order_xu):
@@ -39862,13 +40719,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await AgentDownloader.download(data, context, update.effective_chat.id, cost, uid)
     else:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        modes = ensure_user_modes(uid)
+        mode_name = modes.get("chat_mode") or "normal"
+        mode_instruction = "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời súc tích, thân thiện."
+        if mode_name == "pro":
+            mode_instruction = "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Pro. Trả lời sâu hơn, có cấu trúc, đưa bước hành động rõ ràng."
+        elif mode_name == "deep":
+            mode_instruction = "Bạn là Trợ Lý Ảo TOAN AAS ở Chat Deep. Phân tích kỹ, nêu rủi ro, giả định và kế hoạch hành động cụ thể."
+        record_usage_event(
+            uid,
+            username=update.effective_user.username or update.effective_user.first_name or "",
+            event_type="tool_use",
+            tool_name="chat",
+            command="text",
+            status=mode_name,
+        )
         try:
             reply = AgentGemini.chat(
-                "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời súc tích, thân thiện.",
+                mode_instruction,
                 text, uid
             )
         except Exception as e:
             logger.error(f"Chat AI error: {e}")
+            record_usage_event(
+                uid,
+                username=update.effective_user.username or update.effective_user.first_name or "",
+                event_type="tool_fail",
+                tool_name="chat",
+                command="text",
+                status="ai_error",
+                provider="ai_router",
+                detail=str(e)[:300],
+            )
             refunded = refund_charged_credit(uid, cost, "chat_refund", "", "Hoàn phí chat do AI lỗi", cost > 0)
             refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b> vì dịch vụ lỗi." if refunded else ""
             return await update.message.reply_text(
@@ -39880,8 +40762,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cost_line = f"\n\n<i>(-{cost} Xu){discount_text}</i>"
         else:
             cost_line = ""
+        record_usage_event(
+            uid,
+            username=update.effective_user.username or update.effective_user.first_name or "",
+            event_type="tool_success",
+            tool_name="chat",
+            command="text",
+            status=mode_name,
+            provider="ai_router",
+            xu_delta=-int(cost or 0),
+        )
         await update.message.reply_text(
-            f"🤖 {reply}{cost_line}{warn}",
+            f"🤖 {reply}{cost_line}{warn}{active_mode_hint(uid)}",
             parse_mode="HTML"
         )
 
@@ -39997,6 +40889,18 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("translate_text", cmd_translate_text))
     tg_app.add_handler(CommandHandler("costs",       cmd_costs))
     tg_app.add_handler(CommandHandler("sales_ready", cmd_sales_ready))
+    tg_app.add_handler(CommandHandler("admin_dashboard", cmd_admin_dashboard))
+    tg_app.add_handler(CommandHandler("report_today", cmd_report_today))
+    tg_app.add_handler(CommandHandler("report_week", cmd_report_week))
+    tg_app.add_handler(CommandHandler("report_month", cmd_report_month))
+    tg_app.add_handler(CommandHandler("report_year", cmd_report_year))
+    tg_app.add_handler(CommandHandler("report_range", cmd_report_range))
+    tg_app.add_handler(CommandHandler("report_ai_today", cmd_report_ai_today))
+    tg_app.add_handler(CommandHandler("report_ai_week", cmd_report_ai_week))
+    tg_app.add_handler(CommandHandler("report_ai_month", cmd_report_ai_month))
+    tg_app.add_handler(CommandHandler("report_chart_today", cmd_report_chart_today))
+    tg_app.add_handler(CommandHandler("report_chart_week", cmd_report_chart_week))
+    tg_app.add_handler(CommandHandler("report_chart_month", cmd_report_chart_month))
     tg_app.add_handler(CommandHandler("payos_test_plan", cmd_payos_test_plan))
     tg_app.add_handler(CommandHandler("mark_payos_test", cmd_mark_payos_test))
     tg_app.add_handler(CommandHandler("payos_signature_debug", cmd_payos_signature_debug))
@@ -40008,6 +40912,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("pricing",     cmd_pricing))
     tg_app.add_handler(CommandHandler("banggia",     cmd_pricing))
     tg_app.add_handler(CommandHandler("pricing_admin", cmd_pricing_admin))
+    tg_app.add_handler(CommandHandler("mode",        cmd_mode))
+    tg_app.add_handler(CommandHandler("chat_pro_on", cmd_chat_pro_on))
+    tg_app.add_handler(CommandHandler("chat_pro_off", cmd_chat_pro_off))
+    tg_app.add_handler(CommandHandler("chat_deep_on", cmd_chat_deep_on))
+    tg_app.add_handler(CommandHandler("chat_deep_off", cmd_chat_deep_off))
     tg_app.add_handler(CommandHandler("chat_pro",    cmd_chat_pro))
     tg_app.add_handler(CommandHandler("models",      cmd_models))
     tg_app.add_handler(CommandHandler("ai_models",   cmd_models))

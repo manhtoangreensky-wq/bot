@@ -113,6 +113,16 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
 
 ## Current Priority
 
+0. Test admin reporting and persistent modes:
+   - `/admin_dashboard`
+   - `/report_today`
+   - `/report_week`
+   - `/report_month`
+   - `/report_ai_today`
+   - `/report_chart_week`
+   - `/mode`
+   - `/chat_pro_on`, send one normal chat message, then `/chat_pro_off`
+   - `/chat_deep_on`, send one normal chat message, then `/chat_deep_off`
 1. Test `/legal` and the Legal button in `/start`.
 2. Test `/terms`, `/privacy`, `/dieukhoan_xu`, `/refund_policy`, `/content_policy`, `/affiliate_policy`, `/ads_policy`.
 3. Test website `/`, `/landing`, `/LOGO.png`, `/banner.png` and the legal footer.
