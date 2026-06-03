@@ -15,15 +15,21 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
 
 ## Current Priority
 
-1. Deploy Image Tool Center MVP under Video & Media Factory.
-2. Test `/image_tools`.
-3. Test `/image_prompt ảnh sản phẩm máy hút bụi mini trong căn hộ Việt Nam`.
-4. Test `/image_to_video_pack ảnh sản phẩm máy hút bụi mini`.
-5. Test `/ai_image ảnh sản phẩm máy hút bụi mini trong căn hộ Việt Nam` while `image_openai_generation=0`; expected no charge and provider-off message.
-6. Reply image with `/ai_image_edit làm rõ nét hơn nhưng giữ tự nhiên` while `image_openai_edit=0`; expected no charge and provider-off message.
-7. Test `/providers` shows Image / Media status without secrets.
-8. Re-test `/start`, `/help`, `/pricing` show unified `Video & Media Factory`.
-9. Do not start big plan yet.
+1. Test `/terms`.
+2. Test `/privacy`.
+3. Test `/dieukhoan_xu`.
+4. Test `/refund_policy`.
+5. Test `/content_policy`.
+6. Test `/affiliate_policy`.
+7. Test `/ads_policy`.
+8. Test `/data_delete` and `/mydata`.
+9. Test tool audit commands.
+10. Test image tools.
+11. Fix PayOS separately if checkout remains invalid.
+12. Do not open customer publish or ads.
+13. Do not collect social passwords/cards.
+14. Keep legal gates before big plan modules.
+15. Do not start big plan yet.
 
 ## Next After Foundation Passes
 

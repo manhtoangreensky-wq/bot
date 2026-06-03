@@ -35,8 +35,8 @@ TOAN AAS khác ở chỗ:
 
 - Có quy trình từng bước: tạo ý tưởng -> script -> prompt cảnh -> caption -> hashtag -> CTA -> tối ưu.
 - Dùng bằng Telegram, không cần cài nhiều app.
-- Dùng Xu, dễ hiểu hơn token. Khách chỉ cần biết còn bao nhiêu Xu và lệnh này tốn bao nhiêu.
-- Có hướng dẫn nạp Xu, ưu đãi, gift code.
+- Dùng Xu dịch vụ nội bộ, khách chỉ cần biết còn bao nhiêu Xu dịch vụ và lệnh này tốn bao nhiêu.
+- Có hướng dẫn mua/nạp Xu dịch vụ, ưu đãi, gift code.
 - Có fallback QR thủ công nếu cổng tự động bận.
 - Có module Video Factory Lite tập trung vào Facebook/TikTok/YouTube.
 - Có thể dùng AI thường miễn phí theo giới hạn, còn tác vụ sâu hơn mới tính phí.
@@ -55,9 +55,9 @@ Nếu bạn là người mới, cứ làm đúng 7 bước này:
 1. Mở Telegram.
 2. Tìm bot: **@toanaasbot**.
 3. Bấm **START** hoặc gõ `/start`.
-4. Gõ `/profile` để xem số Xu hiện có.
+4. Gõ `/profile` để xem số Xu dịch vụ hiện có.
 5. Gõ `/khuyenmai` để xem mã ưu đãi đang có.
-6. Nếu muốn nạp Xu, gõ `/naptien` và chọn gói.
+6. Nếu muốn mua/nạp Xu dịch vụ, gõ `/naptien` và chọn gói.
 7. Nếu muốn tạo nội dung video, gõ `/film chủ đề của bạn`.
 
 Ví dụ cực đơn giản:
@@ -75,12 +75,12 @@ Sau đó bot sẽ tạo nội dung. Bạn đọc kết quả, sửa lại thông
 | Bạn muốn làm gì? | Dùng lệnh/nút nào? | Sau đó làm gì tiếp? |
 |---|---|---|
 | Xem bot có gì | `/start` hoặc `/help` | Đọc menu, chọn nhóm công cụ |
-| Xem số Xu | `/profile` | Nếu thiếu Xu thì nạp |
-| Kiểm tra Xu trải nghiệm | `/trial_status` | Xem ID Telegram đã nhận 200 Xu trial chưa |
-| Nạp Xu | `/naptien` | Chọn gói, quét QR, chờ cộng Xu hoặc gửi bill thủ công |
+| Xem số Xu dịch vụ | `/profile` | Nếu thiếu Xu dịch vụ thì nạp |
+| Kiểm tra Xu dịch vụ trải nghiệm | `/trial_status` | Xem ID Telegram đã nhận 200 Xu trial chưa |
+| Mua/nạp Xu dịch vụ | `/naptien` | Chọn gói, quét QR, chờ cộng Xu dịch vụ hoặc gửi bill thủ công |
 | Xem khuyến mãi | `/khuyenmai` | Chọn mã phù hợp, nhập `/promo MÃ` trước khi nạp |
 | Nhập mã promo | `/promo FIRST30` | Sau đó vào `/naptien` chọn gói đủ điều kiện |
-| Nhận mã quà tặng | `/gift THANK100` hoặc `/nhanqua SORRY100` | Gift public hợp lệ thì Xu cộng ngay; mã BETA cần admin cấp theo ID |
+| Nhận mã quà tặng | `/gift THANK100` hoặc `/nhanqua SORRY100` | Gift public hợp lệ thì Xu dịch vụ cộng ngay; mã BETA cần admin cấp theo ID |
 | Tạo kịch bản/prompt video | `/film <chủ đề>` | Lấy script, scene prompt, caption, hashtag, CTA |
 | Phân tích/tối ưu nội dung | `/growth_ai` | Đưa hook/caption/số liệu để bot góp ý |
 | Báo cáo hiệu quả thủ công | `/campaign_report` | Tổng hợp nội dung đã đăng, số liệu, bài học |
@@ -99,27 +99,45 @@ Nếu bạn không nhớ lệnh, gõ:
 
 ## 5. GIẢI THÍCH VỀ XU CHO KHÁCH DỄ HIỂU
 
-Xu là số dư trong bot. Bạn dùng Xu để chạy công cụ.
+Xu dịch vụ TOAN AAS là đơn vị nội bộ để tính lượt sử dụng công cụ trong bot. Bạn dùng Xu dịch vụ để chạy công cụ.
 
-- User mới nhận **200 Xu trải nghiệm**.
-- Mỗi ID Telegram chỉ nhận **200 Xu trải nghiệm một lần**.
-- Xóa chat, block bot rồi bấm Start lại hoặc đổi username không làm bạn nhận lại 200 Xu.
-- Xu được quản lý theo ID Telegram, không theo nội dung đoạn chat.
+- User mới nhận **200 Xu dịch vụ trải nghiệm**.
+- Mỗi ID Telegram chỉ nhận **200 Xu dịch vụ trải nghiệm một lần**.
+- Xóa chat, block bot rồi bấm Start lại hoặc đổi username không làm bạn nhận lại 200 Xu dịch vụ.
+- Xu dịch vụ được quản lý theo ID Telegram, không theo nội dung đoạn chat.
 - Khi cần hỗ trợ, dùng `/myid` hoặc `/trial_status` rồi gửi ID Telegram cho admin.
-- 1 Xu tương đương định giá nội bộ khoảng **100đ**.
+- Quy đổi sử dụng nội bộ theo gói: **10.000đ = 100 Xu dịch vụ**.
 - Một số tác vụ thường miễn phí hoặc có giới hạn/ngày.
-- Tác vụ tạo nội dung/video pack, phân tích sâu, xuất báo cáo sẽ tốn Xu.
+- Tác vụ tạo nội dung/video pack, phân tích sâu, xuất báo cáo sẽ tốn Xu dịch vụ.
+
+### 5.0. Điều khoản Xu dịch vụ
+
+Xu dịch vụ TOAN AAS:
+
+- Không phải tiền, tiền điện tử, tài sản số, chứng khoán hoặc phương tiện thanh toán.
+- Không có giá trị thanh toán bên ngoài TOAN AAS.
+- Không được rút về tiền mặt hoặc chuyển khoản.
+- Không được chuyển nhượng, mua bán, trao đổi giữa người dùng.
+- Chỉ dùng để sử dụng công cụ/dịch vụ trong bot TOAN AAS.
+- Có thể được tặng thêm trong chương trình khuyến mãi, hỗ trợ kỹ thuật hoặc sự kiện.
+- TOAN AAS có quyền khóa/thu hồi Xu dịch vụ khuyến mãi nếu phát hiện gian lận, spam, lạm dụng hoặc lỗi hệ thống.
+
+Xem nhanh trong bot bằng lệnh:
+
+```text
+/dieukhoan_xu
+```
 
 ### 5.1. Gói nạp cơ bản
 
-| Gói | Tiền | Xu gốc | Ghi chú |
+| Gói | Tiền | Xu dịch vụ gốc | Ghi chú |
 |---|---:|---:|---|
-| Dùng thử | 10.000đ | 100 Xu | thử hệ thống |
-| Nhỏ | 20.000đ | 200 Xu | thử thêm |
-| Trung | 50.000đ | 500 Xu | bắt đầu dùng nghiêm túc |
-| Tiêu chuẩn | 100.000đ | 1.000 Xu | dùng ổn định |
-| Nâng cao | 200.000đ | 2.000 Xu | dùng nhiều |
-| Doanh nghiệp | 500.000đ | 5.000 Xu | dùng nhiều nhất hiện tại |
+| Dùng thử | 10.000đ | 100 Xu dịch vụ | thử hệ thống |
+| Nhỏ | 20.000đ | 200 Xu dịch vụ | thử thêm |
+| Trung | 50.000đ | 500 Xu dịch vụ | bắt đầu dùng nghiêm túc |
+| Tiêu chuẩn | 100.000đ | 1.000 Xu dịch vụ | dùng ổn định |
+| Nâng cao | 200.000đ | 2.000 Xu dịch vụ | dùng nhiều |
+| Doanh nghiệp | 500.000đ | 5.000 Xu dịch vụ | dùng nhiều nhất hiện tại |
 
 ### 5.2. Launch Bonus lần đầu mua từng gói
 
@@ -134,15 +152,15 @@ Xu là số dư trong bot. Bạn dùng Xu để chạy công cụ.
 
 Gói 10k và 20k chỉ dùng thử, không có Launch Bonus. Launch Bonus bắt đầu từ gói 50k trở lên.
 Launch Bonus áp dụng 1 lần cho mỗi tài khoản ở từng gói 50k/100k/200k/500k.
-Các lần mua lại cùng gói chỉ nhận Xu gốc.
+Các lần mua lại cùng gói chỉ nhận Xu dịch vụ gốc.
 
 ---
 
 ### 5.3. Nếu tôi xóa chat với bot thì sao?
 
-TOAN AAS quản lý Xu theo **ID Telegram**, không theo nội dung đoạn chat.
+TOAN AAS quản lý Xu dịch vụ theo **ID Telegram**, không theo nội dung đoạn chat.
 
-Mỗi ID Telegram chỉ nhận **200 Xu trải nghiệm một lần**. Nếu bạn xóa chat rồi bấm Start lại, hệ thống vẫn nhận diện ID cũ và không cấp lại 200 Xu.
+Mỗi ID Telegram chỉ nhận **200 Xu dịch vụ trải nghiệm một lần**. Nếu bạn xóa chat rồi bấm Start lại, hệ thống vẫn nhận diện ID cũ và không cấp lại 200 Xu dịch vụ.
 
 Số dư được lưu theo ID Telegram khi hệ thống DB còn dữ liệu. Khi cần hỗ trợ, hãy dùng:
 
@@ -174,7 +192,7 @@ Làm như sau:
 6. Bot tạo link/QR thanh toán.
 7. Bạn mở app ngân hàng, quét QR hoặc bấm link thanh toán.
 8. Thanh toán đúng số tiền.
-9. Chờ hệ thống cộng Xu tự động.
+9. Chờ hệ thống cộng Xu dịch vụ tự động.
 10. Gõ `/profile` để kiểm tra số dư.
 
 ### 6.2. Nếu cổng tự động bận
@@ -193,7 +211,7 @@ AAS <ID Telegram> <Mã đơn>
 
 4. Chụp bill.
 5. Gửi bill ngay trong chat với bot.
-6. Chờ admin kiểm tra và cộng Xu.
+6. Chờ admin kiểm tra và cộng Xu dịch vụ.
 
 ### 6.3. Lưu ý khi nạp
 
@@ -209,7 +227,7 @@ AAS <ID Telegram> <Mã đơn>
 
 ### 7.1. Promo code nạp tiền
 
-Promo là mã ưu đãi chỉ cộng thêm Xu sau khi thanh toán thành công. Promo không giảm số tiền phải chuyển.
+Promo là mã ưu đãi chỉ cộng thêm Xu dịch vụ sau khi thanh toán thành công. Promo không giảm số tiền phải chuyển.
 
 Ví dụ:
 
@@ -223,16 +241,16 @@ Các mã thường dùng:
 
 | Mã | Ý nghĩa | Điều kiện |
 |---|---|---|
-| FIRST30 | Nạp lần đầu từ 50k: +30% Xu | nên dùng trước |
-| SECOND15 | Nạp lần 2 từ 50k: +15% Xu | dùng sau FIRST30 |
-| MONTHLY20 | Ưu đãi tháng từ 100k: +20% Xu | khi nạp lớn hơn |
-| WEEKLY10 | Ưu đãi tuần từ 50k: +10% Xu | dùng theo chương trình |
-| DAILY5 | Ưu đãi ngày từ 50k: +5% Xu | ưu đãi nhỏ |
+| FIRST30 | Nạp lần đầu từ 50k: +30% Xu dịch vụ | nên dùng trước |
+| SECOND15 | Nạp lần 2 từ 50k: +15% Xu dịch vụ | dùng sau FIRST30 |
+| MONTHLY20 | Ưu đãi tháng từ 100k: +20% Xu dịch vụ | khi nạp lớn hơn |
+| WEEKLY10 | Ưu đãi tuần từ 50k: +10% Xu dịch vụ | dùng theo chương trình |
+| DAILY5 | Ưu đãi ngày từ 50k: +5% Xu dịch vụ | ưu đãi nhỏ |
 | BETA50 | Mã beta giới hạn | không phải lúc nào cũng có |
 
 ### 7.2. Gift code
 
-Gift code là mã tặng Xu trực tiếp. Với mã public hợp lệ, Xu cộng ngay, không cần nạp tiền.
+Gift code là mã quà tặng cộng Xu dịch vụ nội bộ. Với mã public hợp lệ, Xu dịch vụ cộng ngay, không cần nạp tiền.
 
 Riêng mã có tiền tố BETA là mã test/sự kiện đặc biệt. User thường không tự nhận BETA nếu admin chưa cấp cho đúng ID Telegram.
 
@@ -248,7 +266,7 @@ hoặc:
 /nhanqua SORRY100
 ```
 
-Nếu admin/hỗ trợ yêu cầu, gõ `/myid` để lấy ID Telegram rồi gửi cho admin. Admin cấp mã BETA bằng ID đó; sau khi cấp, hệ thống mới cộng Xu.
+Nếu admin/hỗ trợ yêu cầu, gõ `/myid` để lấy ID Telegram rồi gửi cho admin. Admin cấp mã BETA bằng ID đó; sau khi cấp, hệ thống mới cộng Xu dịch vụ.
 
 Các mã BETA như BETA5, BETA10, BETA20, BETA100, BETA200, BETA500, BETA1000 chỉ dùng trong chương trình test/sự kiện đặc biệt. Mã có thể hết lượt hoặc mỗi người chỉ dùng một lần.
 
@@ -599,15 +617,15 @@ Video của tôi có 3000 view, 120 like, 8 comment, 5 share, 15 click nhưng ch
 
 ## 18. LỖI THƯỜNG GẶP VÀ CÁCH XỬ LÝ
 
-### 18.1. Bot báo thiếu Xu
+### 18.1. Bot báo thiếu Xu dịch vụ
 
 Làm như sau:
 
-1. Gõ `/profile` xem còn bao nhiêu Xu.
+1. Gõ `/profile` xem còn bao nhiêu Xu dịch vụ.
 2. Gõ `/naptien` để nạp thêm.
 3. Nếu có mã ưu đãi, nhập `/promo MÃ` trước khi chọn gói.
 
-### 18.2. Không thấy Xu cộng sau khi chuyển khoản
+### 18.2. Không thấy Xu dịch vụ cộng sau khi chuyển khoản
 
 1. Kiểm tra bạn chuyển đúng số tiền chưa.
 2. Kiểm tra nội dung chuyển khoản có đúng dạng AAS chưa.
@@ -697,7 +715,7 @@ Chào bạn, đây là cách dùng TOAN AAS đơn giản nhất:
 
 1. Vào Telegram tìm **@toanaasbot**.
 2. Bấm **START**.
-3. Gõ `/profile` để xem Xu trải nghiệm.
+3. Gõ `/profile` để xem Xu dịch vụ trải nghiệm.
 4. Muốn tạo video thì gõ:
 
 ```text
@@ -713,7 +731,7 @@ Ví dụ:
 5. Bot sẽ tạo kịch bản, prompt cảnh, caption, hashtag.
 6. Bạn đọc lại, sửa thông tin sản phẩm nếu cần.
 7. Bạn tự dùng nội dung đó để làm video và đăng lên nền tảng của mình.
-8. Nếu cần nạp thêm Xu, gõ `/naptien`.
+8. Nếu cần mua/nạp thêm Xu dịch vụ, gõ `/naptien`.
 9. Nếu có mã ưu đãi, gõ `/promo MÃ` trước khi nạp.
 
 Lưu ý: Bot hỗ trợ tạo nội dung/video pack để bạn tự đăng, chưa tự đăng bài hoặc chạy quảng cáo hộ bạn.
@@ -741,4 +759,4 @@ Chưa. Khách tự đăng. Phần đăng tự động là kế hoạch admin/int
 Chưa. TOAN AAS hiện không nhận tài khoản, mật khẩu hoặc thẻ thanh toán của khách.
 
 **Tại sao nên dùng?**  
-Vì bot gom quy trình tạo nội dung vào một nơi, dễ dùng bằng Telegram, có tiếng Việt, có Xu rõ ràng, có kịch bản/caption/prompt/CTA theo nền tảng, giúp tiết kiệm thời gian hơn so với tự dùng nhiều công cụ rời rạc.
+Vì bot gom quy trình tạo nội dung vào một nơi, dễ dùng bằng Telegram, có tiếng Việt, có Xu dịch vụ rõ ràng, có kịch bản/caption/prompt/CTA theo nền tảng, giúp tiết kiệm thời gian hơn so với tự dùng nhiều công cụ rời rạc.

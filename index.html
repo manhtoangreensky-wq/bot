@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TOAN AAS - AI Automation System</title>
-<meta name="description" content="TOAN AAS - Bot AI Telegram cho công cụ AI hằng ngày, Video Factory Lite, tạo script/caption/prompt, nạp Xu PayOS và hỗ trợ khách tự đăng nội dung Facebook, TikTok, YouTube.">
+<meta name="description" content="TOAN AAS - Bot AI Telegram cho công cụ AI hằng ngày, Video Factory Lite, tạo script/caption/prompt, mua/nạp Xu dịch vụ PayOS và hỗ trợ khách tự đăng nội dung Facebook, TikTok, YouTube.">
 <meta name="theme-color" content="#0A8F66">
 <meta property="og:title" content="TOAN AAS - AI Automation System">
-<meta property="og:description" content="Hệ thống AI tạo script, caption, prompt, Content Pack tự đăng và nạp Xu PayOS trong một bot Telegram.">
+<meta property="og:description" content="Hệ thống AI tạo script, caption, prompt, Content Pack tự đăng và mua/nạp Xu dịch vụ PayOS trong một bot Telegram.">
 <meta property="og:image" content="/banner.png">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" href="/LOGO.png">
@@ -559,6 +559,20 @@ footer {
   border-radius: 7px;
   background: var(--panel-3);
 }
+.footer-legal {
+  display: grid;
+  gap: 6px;
+  max-width: 480px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.footer-legal a {
+  color: var(--green-2);
+  font-weight: 900;
+}
+.footer-legal small {
+  color: rgba(226, 243, 235, .72);
+}
 
 @media (max-width: 980px) {
   .links { display: none; }
@@ -596,7 +610,7 @@ footer {
     <nav class="links" aria-label="Primary">
       <a href="#services">Dịch vụ AI</a>
       <a href="#video">Video AI</a>
-      <a href="#pricing">Nạp Xu</a>
+      <a href="#pricing">Gói Xu dịch vụ</a>
       <a href="#content-pack">Content Pack</a>
       <a href="#workflow">Quy trình</a>
       <a href="/download/huong-dan-toan-aas.docx">Hướng dẫn</a>
@@ -617,12 +631,12 @@ footer {
           Bot AI tạo nội dung và Video Script cho <span>Facebook, TikTok, YouTube</span>
         </h1>
         <p class="hero-copy">
-          Tạo script video, caption, voice, bóc băng audio, tách nền ảnh, tải video sạch và quản lý Xu bằng PayOS QR động - tất cả trong một bot Telegram.
+          Tạo script video, caption, voice, bóc băng audio, tách nền ảnh, tải video sạch và quản lý Xu dịch vụ bằng PayOS QR động - tất cả trong một bot Telegram.
         </p>
         <div class="hero-actions">
           <a class="btn primary" href="https://t.me/toanaasbot">Mở Bot Telegram</a>
           <a class="btn" href="/download/huong-dan-toan-aas.docx">Tải Hướng Dẫn</a>
-          <a class="btn" href="#pricing">Nạp Xu Ngay</a>
+          <a class="btn" href="#pricing">Mua Xu Dịch Vụ</a>
           <a class="btn" href="#video">Xem Quy Trình Video AI</a>
           <a class="btn" href="#contact">Gửi Yêu Cầu Tư Vấn</a>
         </div>
@@ -630,8 +644,8 @@ footer {
       <aside class="hero-logo-card" aria-label="TOAN AAS summary">
         <img src="/LOGO.png" alt="TOAN AAS - AI Automation System">
         <div class="hero-points">
-          <div><b>200 Xu</b>Trải nghiệm khi tạo tài khoản mới</div>
-          <div><b>PayOS QR</b>Nạp Xu tự động, có thủ công dự phòng</div>
+          <div><b>200 Xu dịch vụ</b>Trải nghiệm khi tạo tài khoản mới</div>
+          <div><b>PayOS QR</b>Mua/nạp Xu dịch vụ tự động, có thủ công dự phòng</div>
           <div><b>/film</b>Tạo Video Script Lite cho 3 nền tảng</div>
           <div><b>Self-post</b>Tạo nội dung để bạn tự đăng an toàn</div>
         </div>
@@ -652,7 +666,7 @@ footer {
       <div class="section-head">
         <div class="tag">Dịch vụ AI</div>
         <h2>Dịch vụ AI đang có trong TOAN AAS</h2>
-        <p>Các tiện ích khách dùng trực tiếp trong Telegram, có cơ chế Xu và hoàn Xu khi lỗi xử lý sau khi đã trừ phí.</p>
+        <p>Các tiện ích khách dùng trực tiếp trong Telegram, có cơ chế Xu dịch vụ và hoàn Xu dịch vụ khi lỗi xử lý sau khi đã trừ phí.</p>
       </div>
       <div class="grid-3">
         <article class="card">
@@ -721,49 +735,50 @@ footer {
   <section id="pricing" class="light">
     <div class="shell">
       <div class="section-head">
-        <div class="tag">PayOS Xu & Billing</div>
-        <h2>Nạp Xu tự động bằng PayOS QR động</h2>
-        <p>Chọn gói, quét QR, hệ thống tự cộng Xu sau khi thanh toán thành công. Mở Bot Telegram và dùng <b>/naptien</b> để nạp Xu. Nếu QR động lỗi, bot hỗ trợ VietQR thủ công và admin duyệt tay.</p>
+        <div class="tag">PayOS Xu dịch vụ & Billing</div>
+        <h2>Mua/nạp Xu dịch vụ bằng PayOS QR động</h2>
+        <p>Chọn gói, quét QR, hệ thống tự cộng Xu dịch vụ sau khi thanh toán thành công. Mở Bot Telegram và dùng <b>/naptien</b> để mua/nạp Xu dịch vụ. Nếu QR động lỗi, bot hỗ trợ VietQR thủ công và admin duyệt tay.</p>
       </div>
       <div class="pricing">
         <article class="price-card">
           <div class="price-name">Gói Dùng Thử</div>
           <div class="price">10.000đ</div>
-          <div class="xu">100 Xu</div>
+          <div class="xu">100 Xu dịch vụ</div>
           <ul><li>Phù hợp test bot nhanh</li><li>Dùng dịch vụ AI cơ bản</li></ul>
         </article>
         <article class="price-card">
           <div class="price-name">Gói Nhỏ</div>
           <div class="price">20.000đ</div>
-          <div class="xu">200 Xu</div>
+          <div class="xu">200 Xu dịch vụ</div>
           <ul><li>Chat, voice, audio nhỏ</li><li>Dùng thử nhiều tiện ích</li></ul>
         </article>
         <article class="price-card featured">
           <div class="price-name">Gói Trung</div>
           <div class="price">50.000đ</div>
-          <div class="xu">500 Xu gốc + 30 Xu Launch Bonus lần đầu</div>
+          <div class="xu">500 Xu dịch vụ gốc + 30 Xu dịch vụ Launch Bonus lần đầu</div>
           <ul><li>Gói phổ biến cho creator cá nhân</li><li>Đủ dùng cho nhiều workflow nhỏ</li></ul>
         </article>
         <article class="price-card">
           <div class="price-name">Gói Tiêu Chuẩn</div>
           <div class="price">100.000đ</div>
-          <div class="xu">1.000 Xu gốc + 50 Xu Launch Bonus lần đầu</div>
+          <div class="xu">1.000 Xu dịch vụ gốc + 50 Xu dịch vụ Launch Bonus lần đầu</div>
           <ul><li>Bắt đầu làm content đều hơn</li><li>Phù hợp dùng hằng ngày</li></ul>
         </article>
         <article class="price-card">
           <div class="price-name">Gói Nâng Cao</div>
           <div class="price">200.000đ</div>
-          <div class="xu">2.000 Xu gốc + 150 Xu Launch Bonus lần đầu</div>
+          <div class="xu">2.000 Xu dịch vụ gốc + 150 Xu dịch vụ Launch Bonus lần đầu</div>
           <ul><li>Nhiều batch nội dung hơn</li><li>Phù hợp creator và shop nhỏ</li></ul>
         </article>
         <article class="price-card">
           <div class="price-name">Gói Doanh Nghiệp</div>
           <div class="price">500.000đ</div>
-          <div class="xu">5.000 Xu gốc + 500 Xu Launch Bonus lần đầu</div>
+          <div class="xu">5.000 Xu dịch vụ gốc + 500 Xu dịch vụ Launch Bonus lần đầu</div>
           <ul><li>Vận hành cường độ cao</li><li>Phù hợp team bán hàng số</li></ul>
         </article>
       </div>
       <p class="pricing-note"><b>Launch Bonus</b> chỉ áp dụng 1 lần cho từng gói đủ điều kiện của mỗi tài khoản. Mã ưu đãi như FIRST30 có thể cộng thêm sau khi PayOS xác nhận thanh toán.</p>
+      <p class="pricing-note">Xu dịch vụ TOAN AAS là đơn vị nội bộ để sử dụng công cụ trong hệ thống, không phải tiền/tiền điện tử, không rút tiền và không chuyển nhượng. Gõ <b>/dieukhoan_xu</b> trong bot để xem chi tiết.</p>
     </div>
   </section>
 
@@ -788,12 +803,12 @@ footer {
       <div class="section-head">
         <div class="tag">Quy trình sử dụng</div>
         <h2>Quy trình kiếm tiền bằng TOAN AAS</h2>
-        <p>Đi từ dùng thử, tạo nội dung, nạp Xu, tự đăng rồi tối ưu theo phản hồi thực tế.</p>
+        <p>Đi từ dùng thử, tạo nội dung, mua/nạp Xu dịch vụ, tự đăng rồi tối ưu theo phản hồi thực tế.</p>
       </div>
       <div class="grid-2">
-        <div class="step"><div class="step-num">1</div><div><h3>Vào bot Telegram</h3><p>Tài khoản mới nhận 200 Xu trải nghiệm, đủ để thử 1 lượt /film Basic.</p></div></div>
+        <div class="step"><div class="step-num">1</div><div><h3>Vào bot Telegram</h3><p>Tài khoản mới nhận 200 Xu dịch vụ trải nghiệm, đủ để thử 1 lượt /film Basic.</p></div></div>
         <div class="step"><div class="step-num">2</div><div><h3>Dùng AI tools hoặc Video Script Lite</h3><p>Tạo nội dung, xử lý audio/ảnh/voice hoặc tạo content pack đa nền tảng.</p></div></div>
-        <div class="step"><div class="step-num">3</div><div><h3>Nạp Xu bằng PayOS khi cần</h3><p>Bot tạo QR động theo gói, kiểm tra số tiền và tự cộng Xu khi thanh toán thành công.</p></div></div>
+        <div class="step"><div class="step-num">3</div><div><h3>Mua/nạp Xu dịch vụ bằng PayOS khi cần</h3><p>Bot tạo QR động theo gói, kiểm tra số tiền và tự cộng Xu dịch vụ khi thanh toán thành công.</p></div></div>
         <div class="step"><div class="step-num">4</div><div><h3>Tự đăng và tối ưu dần</h3><p>Kiểm duyệt nội dung, đăng lên kênh phù hợp và cải thiện hook/caption/CTA theo phản hồi.</p></div></div>
       </div>
     </div>
@@ -811,7 +826,7 @@ footer {
         <div class="safety-item"><b>Không spam nền tảng</b>Ưu tiên chất lượng, nhịp đăng hợp lý và theo dõi hiệu quả.</div>
         <div class="safety-item"><b>Không deepfake người thật không consent</b>Chỉ dùng nhân vật tự tạo hoặc người thật có đồng ý rõ ràng, đủ điều kiện hợp pháp.</div>
         <div class="safety-item"><b>Claim cần minh bạch</b>Không hứa kết quả chắc chắn, không phóng đại công dụng hoặc sao chép nội dung thiếu quyền.</div>
-        <div class="safety-item"><b>Giao dịch có ghi nhận</b>Thanh toán, Xu và thao tác quan trọng được lưu để admin kiểm tra.</div>
+        <div class="safety-item"><b>Giao dịch có ghi nhận</b>Thanh toán, Xu dịch vụ và thao tác quan trọng được lưu để admin kiểm tra.</div>
         <div class="safety-item"><b>Có phương án thủ công</b>Khi QR động hoặc API lỗi, bot vẫn có quy trình nạp thủ công và duyệt bill.</div>
       </div>
     </div>
@@ -822,10 +837,10 @@ footer {
       <div class="contact-card">
         <div class="tag">Liên hệ</div>
         <h2>Bắt đầu với TOAN AAS</h2>
-        <p>Mở bot để dùng ngay hoặc gửi nhu cầu để được tư vấn cách tạo nội dung, video script và nạp Xu phù hợp.</p>
+        <p>Mở bot để dùng ngay hoặc gửi nhu cầu để được tư vấn cách tạo nội dung, video script và mua/nạp Xu dịch vụ phù hợp.</p>
         <div class="hero-actions" style="margin-top:24px;">
           <a class="btn primary" href="https://t.me/toanaasbot">Mở Bot Telegram</a>
-          <a class="btn" href="#pricing" style="color:var(--ink);border-color:var(--line-dark);">Xem Gói Xu</a>
+          <a class="btn" href="#pricing" style="color:var(--ink);border-color:var(--line-dark);">Xem Gói Xu Dịch Vụ</a>
         </div>
         <p style="margin-top:22px;">Telegram: <a href="https://t.me/toanaasbot" style="color:var(--green-2);font-weight:900;">@toanaasbot</a></p>
       </div>
@@ -849,12 +864,12 @@ footer {
               <label class="choice"><input type="checkbox" value="tiktok"> TikTok</label>
               <label class="choice"><input type="checkbox" value="youtube"> YouTube</label>
               <label class="choice"><input type="checkbox" value="ai-tools"> AI Tools</label>
-              <label class="choice"><input type="checkbox" value="payos-xu"> PayOS Xu</label>
+              <label class="choice"><input type="checkbox" value="payos-xu"> PayOS Xu dịch vụ</label>
             </div>
           </div>
           <div class="field">
             <label for="fnote">Nhu cầu</label>
-            <textarea id="fnote" name="note" placeholder="Ví dụ: muốn tạo video review cho TikTok, viết caption cho Facebook, bóc băng audio, nạp Xu cho team..."></textarea>
+            <textarea id="fnote" name="note" placeholder="Ví dụ: muốn tạo video review cho TikTok, viết caption cho Facebook, bóc băng audio, mua/nạp Xu dịch vụ cho team..."></textarea>
           </div>
           <button class="submit" type="submit">Gửi yêu cầu tư vấn</button>
           <div id="leadStatus" class="status" aria-live="polite"></div>
@@ -871,6 +886,12 @@ footer {
       <span>TOAN AAS</span>
     </div>
     <div>Built for AI Automation, Content Pack and Business Operations.</div>
+    <div class="footer-legal">
+      <b>Pháp lý & an toàn:</b>
+      <a href="/download/dieu-khoan-su-dung-toan-aas.pdf" target="_blank" rel="noopener">Điều khoản sử dụng dịch vụ</a>
+      <span>Gõ /privacy, /dieukhoan_xu, /refund_policy và /content_policy trong bot.</span>
+      <small>Xu dịch vụ TOAN AAS là đơn vị nội bộ để sử dụng công cụ trong hệ thống, không phải tiền/tiền điện tử, không rút tiền và không chuyển nhượng.</small>
+    </div>
     <div>© 2026 TOAN AAS - AI Automation System.</div>
   </div>
 </footer>

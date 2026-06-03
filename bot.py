@@ -360,6 +360,7 @@ TRIAL_CREDITS     = 200
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
 GUIDE_DOCX_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx"
+TERMS_PDF_FILE = "TOAN_AAS_DIEU_KHOAN_SU_DUNG_DICH_VU_V1.pdf"
 LAUNCH_BONUS_BY_AMOUNT = {
     50000: 30,
     100000: 50,
@@ -1884,8 +1885,8 @@ def manual_payment_text(uid: int, amount: int, xu: int, order_code: int, reason:
     reason_line = f"⚠️ {reason}\n\n" if reason else ""
     return (
         f"{reason_line}"
-        f"🏦 <b>NẠP XU THỦ CÔNG</b>\n\n"
-        f"📋 Gói: <b>{amount:,}đ → +{xu} Xu</b>\n"
+        f"🏦 <b>NẠP XU DỊCH VỤ THỦ CÔNG</b>\n\n"
+        f"📋 Gói: <b>{amount:,}đ: +{xu} Xu dịch vụ</b>\n"
         f"👤 ID Telegram: <code>{uid}</code>\n"
         f"🆔 Mã đơn: <code>{order_code}</code>\n\n"
         f"<b>Thông tin chuyển khoản:</b>\n"
@@ -1894,7 +1895,7 @@ def manual_payment_text(uid: int, amount: int, xu: int, order_code: int, reason:
         f"• Chủ tài khoản: <b>{MANUAL_BANK_OWNER}</b>\n"
         f"• Số tiền: <b>{amount:,}đ</b>\n"
         f"• Nội dung: <code>AAS {uid} {order_code}</code>\n\n"
-        f"📸 Sau khi chuyển khoản, gửi ảnh bill ngay tại đây. Admin sẽ kiểm tra và cộng <b>{xu} Xu</b>."
+        f"📸 Sau khi chuyển khoản, gửi ảnh bill ngay tại đây. Admin sẽ kiểm tra và cộng <b>{xu} Xu dịch vụ</b>."
     )
 
 def manual_qr_url(uid: int, amount: int, order_code: int) -> str:
@@ -1983,14 +1984,14 @@ def promo_public_label(promo: dict) -> str:
     promo_type = promo.get("promo_type") or "fixed_bonus_xu"
     value = int(promo.get("value") or promo.get("bonus_xu") or 0)
     if promo_type == "percent_bonus":
-        return f"+{value}% Xu"
+        return f"+{value}% Xu dịch vụ"
     if promo_type == "fixed_bonus_xu":
-        return f"+{value} Xu"
+        return f"+{value} Xu dịch vụ"
     if promo_type == "gift_xu":
-        return f"quà +{value} Xu"
+        return f"quà +{value} Xu dịch vụ"
     if promo_type == "service_discount_future":
         return "ưu đãi dịch vụ tương lai"
-    return f"+{value} Xu"
+    return f"+{value} Xu dịch vụ"
 
 def is_gift_promo(promo: dict) -> bool:
     return str((promo or {}).get("promo_type") or "").lower() == "gift_xu"
@@ -2458,6 +2459,7 @@ def gift_needs_assignment_message(user_or_id, code: str) -> str:
     return (
         "🎁 <b>Mã quà tặng cần admin kích hoạt</b>\n\n"
         f"Mã <code>{safe_code}</code> chỉ áp dụng cho tài khoản đã được admin cấp quyền.\n\n"
+        "Mã này chỉ dùng để nhận Xu dịch vụ nội bộ trong TOAN AAS.\n\n"
         "<b>Thông tin của bạn:</b>\n"
         f"• ID Telegram: <code>{html.escape(str(user_id))}</code>\n"
         f"• Username: {username_line}\n\n"
@@ -21981,9 +21983,9 @@ CUSTOMER_GUIDE_SECTIONS = [
             "⚡ <b>Luồng dùng nhanh cho người mới</b>\n\n"
             "1. Mở Telegram và tìm <b>@toanaasbot</b>.\n"
             "2. Bấm START hoặc gõ <code>/start</code>.\n"
-            "3. Gõ <code>/profile</code> để xem số Xu.\n"
+            "3. Gõ <code>/profile</code> để xem số Xu dịch vụ.\n"
             "4. Gõ <code>/khuyenmai</code> để xem ưu đãi.\n"
-            "5. Nếu muốn nạp Xu, gõ <code>/naptien</code> và chọn gói.\n"
+            "5. Nếu muốn mua/nạp Xu dịch vụ, gõ <code>/naptien</code> và chọn gói.\n"
             "6. Nếu muốn tạo nội dung video, gõ <code>/film chủ đề của bạn</code>.\n\n"
             "<b>Ví dụ:</b>\n"
             "<code>/film review máy xay sinh tố mini cho mẹ bỉm, đăng TikTok, giọng gần gũi, mục tiêu bán hàng</code>\n\n"
@@ -21996,12 +21998,12 @@ CUSTOMER_GUIDE_SECTIONS = [
         (
             "🧭 <b>Muốn làm gì thì dùng lệnh nào?</b>\n\n"
             "• Xem menu: <code>/start</code>, <code>/menu</code>, <code>/help</code>\n"
-            "• Xem số Xu: <code>/profile</code>\n"
+            "• Xem số Xu dịch vụ: <code>/profile</code>\n"
             "• Xem bảng giá: <code>/pricing</code> hoặc <code>/banggia</code>\n"
             "• Xem ưu đãi: <code>/khuyenmai</code>, <code>/uudai</code>, <code>/promos</code>\n"
             "• Nhập mã ưu đãi nạp: <code>/promo FIRST30</code>\n"
             "• Nhận mã quà tặng admin gửi: <code>/gift MÃ_ADMIN_GỬI</code> hoặc <code>/nhanqua MÃ_ADMIN_GỬI</code>\n"
-            "• Nạp Xu: <code>/naptien</code>\n"
+            "• Mua/nạp Xu dịch vụ: <code>/naptien</code>\n"
             "• Tạo script/prompt/caption video: <code>/film &lt;chủ đề&gt;</code>\n"
             "• Phân tích hook/caption/CTA: <code>/growth_ai</code>\n"
             "• Báo cáo thủ công: <code>/campaign_report</code>\n"
@@ -22013,22 +22015,23 @@ CUSTOMER_GUIDE_SECTIONS = [
         "credits",
         "Xu, nạp tiền, ưu đãi",
         (
-            "💳 <b>Xu, gói nạp và ưu đãi</b>\n\n"
-            "Xu là số dư trong bot. User mới nhận <b>200 Xu trải nghiệm</b>.\n"
+            "💳 <b>Xu dịch vụ, gói nạp và ưu đãi</b>\n\n"
+            "Xu dịch vụ là đơn vị nội bộ để dùng công cụ trong TOAN AAS. User mới nhận <b>200 Xu dịch vụ trải nghiệm</b>.\n"
             "Mỗi ID Telegram chỉ nhận 200 Xu trải nghiệm một lần. Xóa chat, block bot rồi start lại hoặc đổi username không làm nhận lại 200 Xu.\n"
             "Bạn có thể dùng <code>/trial_status</code> để kiểm tra trạng thái trial của mình.\n\n"
             "<b>Gói nạp:</b>\n"
-            "• 10.000đ → 100 Xu, dùng thử\n"
-            "• 20.000đ → 200 Xu, dùng thử thêm\n"
-            "• 50.000đ → 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua gói 50k\n"
-            "• 100.000đ → 1.000 Xu + 50 Xu Launch Bonus nếu lần đầu mua gói 100k\n"
-            "• 200.000đ → 2.000 Xu + 150 Xu Launch Bonus nếu lần đầu mua gói 200k\n"
-            "• 500.000đ → 5.000 Xu + 500 Xu Launch Bonus nếu lần đầu mua gói 500k\n\n"
+            "• 10.000đ: 100 Xu dịch vụ, dùng thử\n"
+            "• 20.000đ: 200 Xu dịch vụ, dùng thử thêm\n"
+            "• 50.000đ: 500 Xu dịch vụ + 30 Xu dịch vụ Launch Bonus nếu lần đầu mua gói 50k\n"
+            "• 100.000đ: 1.000 Xu dịch vụ + 50 Xu dịch vụ Launch Bonus nếu lần đầu mua gói 100k\n"
+            "• 200.000đ: 2.000 Xu dịch vụ + 150 Xu dịch vụ Launch Bonus nếu lần đầu mua gói 200k\n"
+            "• 500.000đ: 5.000 Xu dịch vụ + 500 Xu dịch vụ Launch Bonus nếu lần đầu mua gói 500k\n\n"
             "<b>Promo code nạp tiền:</b>\n"
             "Nhập <code>/promo FIRST30</code> trước khi nạp. Promo áp dụng từ gói 50k, mỗi đơn chỉ dùng 1 mã, "
-            "không cộng dồn và chỉ cộng Xu sau khi thanh toán thành công.\n\n"
+            "không cộng dồn và chỉ cộng Xu dịch vụ sau khi thanh toán thành công.\n\n"
             "<b>Gift code:</b>\n"
-            "Gift public hợp lệ sẽ cộng Xu trực tiếp. Riêng mã <code>BETA*</code> là mã sự kiện/test, cần admin cấp theo ID Telegram trước."
+            "Gift public hợp lệ sẽ cộng Xu dịch vụ trực tiếp. Riêng mã <code>BETA*</code> là mã sự kiện/test, cần admin cấp theo ID Telegram trước.\n\n"
+            f"{service_credit_legal_note()}"
         ),
     ),
     (
@@ -22045,16 +22048,16 @@ CUSTOMER_GUIDE_SECTIONS = [
     ),
     (
         "topup",
-        "Cách nạp Xu",
+        "Cách nạp Xu dịch vụ",
         (
-            "🏦 <b>Cách nạp Xu từng bước</b>\n\n"
+            "🏦 <b>Cách mua/nạp Xu dịch vụ từng bước</b>\n\n"
             "<b>PayOS QR động:</b>\n"
             "1. Gõ <code>/naptien</code>.\n"
             "2. Nếu có mã ưu đãi, nhập mã trước, ví dụ <code>/promo FIRST30</code>.\n"
             "3. Chọn gói muốn nạp.\n"
             "4. Bot tạo link/QR thanh toán.\n"
             "5. Mở app ngân hàng, quét QR hoặc bấm link thanh toán.\n"
-            "6. Thanh toán đúng số tiền và chờ hệ thống cộng Xu.\n"
+            "6. Thanh toán đúng số tiền và chờ hệ thống cộng Xu dịch vụ.\n"
             "7. Gõ <code>/profile</code> để kiểm tra số dư.\n\n"
             "<b>Khi cổng tự động bận:</b>\n"
             "Bot sẽ gửi QR thủ công. Bạn chuyển đúng số tiền với nội dung:\n"
@@ -22179,6 +22182,48 @@ def find_guide_docx_path() -> str:
             return path
     return ""
 
+def terms_pdf_candidates() -> list[str]:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return [
+        TERMS_PDF_FILE,
+        os.path.join(os.getcwd(), TERMS_PDF_FILE),
+        os.path.join(base_dir, TERMS_PDF_FILE),
+        os.path.join(base_dir, "docs", TERMS_PDF_FILE),
+        os.path.join(base_dir, "static", TERMS_PDF_FILE),
+        os.path.join(base_dir, "assets", TERMS_PDF_FILE),
+    ]
+
+def find_terms_pdf_path() -> str:
+    for path in terms_pdf_candidates():
+        if os.path.exists(path):
+            return path
+    return ""
+
+def terms_pdf_download_url() -> str:
+    public_base = (PUBLIC_BASE_URL or "").strip().rstrip("/")
+    if not public_base:
+        return ""
+    return f"{public_base}/download/dieu-khoan-su-dung-toan-aas.pdf"
+
+def service_credit_legal_note() -> str:
+    return (
+        "Xu dịch vụ chỉ dùng trong TOAN AAS, không phải tiền/tiền điện tử, "
+        "không rút tiền và không chuyển nhượng. Chi tiết: /dieukhoan_xu"
+    )
+
+def legal_commands_short_text() -> str:
+    return (
+        "📜 <b>Pháp lý & an toàn:</b>\n"
+        "• <code>/terms</code> — điều khoản sử dụng dịch vụ\n"
+        "• <code>/privacy</code> — quyền riêng tư\n"
+        "• <code>/dieukhoan_xu</code> — quy định Xu dịch vụ\n"
+        "• <code>/refund_policy</code> — nạp tiền/hỗ trợ\n"
+        "• <code>/content_policy</code> — quy định nội dung"
+    )
+
+def support_link_html() -> str:
+    return html.escape(SUPPORT_TELEGRAM_URL or "https://t.me/toanaas")
+
 def guide_index_text() -> str:
     lines = [
         "📘 <b>HƯỚNG DẪN SỬ DỤNG TOAN AAS</b>",
@@ -22230,13 +22275,15 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
             [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
             [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("💳 Billing", callback_data="menu|billing")],
+            [InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|hint_terms")],
             [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
         ]
     else:
         rows = [
             [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
-            [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|billing"), InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing")],
-            [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
+            [InlineKeyboardButton("💳 Xu Dịch Vụ", callback_data="menu|billing"), InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing")],
+            [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|hint_terms")],
+            [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
         ]
     return InlineKeyboardMarkup(rows)
 
@@ -22284,12 +22331,13 @@ def menu_text_main(is_admin: bool) -> str:
         "📥 Hút Media: tải video TikTok/YouTube/Facebook nếu công cụ khả dụng.\n"
         "🖼 Studio Đồ Họa: tách nền, xử lý ảnh, prompt hình ảnh.\n"
         "🖼 Công cụ ảnh: /image_tools, /image_prompt, /image_to_video_pack, /ai_image, /ai_image_edit.\n"
-        "💳 Nạp Xu: PayOS QR động hoặc QR thủ công khi cổng tự động bận."
+        "💳 Xu dịch vụ: PayOS QR động hoặc QR thủ công khi cổng tự động bận.\n"
+        "📜 /terms — điều khoản sử dụng | /dieukhoan_xu — quy định Xu dịch vụ."
         f"{admin_line}\n\n"
         "🎁 Tân thủ: mỗi ID Telegram chỉ nhận <b>200 Xu trải nghiệm</b> một lần.\n"
         "Xu được quản lý theo ID Telegram. Xóa chat rồi bấm Start lại sẽ không nhận lại 200 Xu lần nữa.\n"
         "Bạn có thể dùng ngay 1 lượt <code>/film</code> Basic để thử quy trình tạo video script.\n"
-        "💳 Hết Xu thì dùng <code>/naptien</code> để nạp thêm.\n\n"
+        "💳 Hết Xu thì dùng <code>/naptien</code> để mua/nạp thêm Xu dịch vụ.\n\n"
         "<b>Bắt đầu nhanh:</b>\n"
         "1. <code>/profile</code> — xem số dư\n"
         "2. <code>/film &lt;chủ đề&gt;</code> — tạo Video Script Basic\n"
@@ -22298,7 +22346,8 @@ def menu_text_main(is_admin: bool) -> str:
         "5. <code>/pricing</code> — xem bảng giá\n"
         "6. <code>/naptien</code> — nạp thêm Xu khi cần\n"
         "7. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
-        "8. Tự đăng nội dung đã tạo lên kênh của bạn"
+        "8. Tự đăng nội dung đã tạo lên kênh của bạn\n"
+        "9. <code>/terms</code> — xem điều khoản sử dụng dịch vụ"
         f"{admin_quick}"
         f"{runtime_line}\n\n"
         "Chọn nhóm chức năng bên dưới:"
@@ -22481,6 +22530,9 @@ def menu_text_support() -> str:
         "🛟 <b>Hỗ Trợ</b>\n\n"
         "• Hướng dẫn nhanh: <code>/help</code> hoặc <code>/commands</code>\n"
         "• Hướng dẫn chi tiết: <code>/huongdan</code> hoặc <code>/guide</code>\n"
+        "• Điều khoản: <code>/terms</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>\n"
+        "• Nạp tiền/hỗ trợ: <code>/refund_policy</code>\n"
+        "• Quy định nội dung: <code>/content_policy</code>\n"
         "• Góp ý/báo lỗi: <code>/gopy nội dung</code>\n"
         "• Thiếu xu: mở <code>/naptien</code> và chọn gói.\n"
         "• PayOS chưa cộng: chờ webhook hoặc gửi bill thủ công bằng <code>/thucong</code>.\n"
@@ -22495,8 +22547,9 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_growth_loop": ("video_workflow", "📈 <b>Growth Loop</b>\n\nCopy lệnh:\n<code>/growth_loop</code>"),
         "hint_campaign_preset": ("affiliate", "🎯 <b>Campaign Preset</b>\n\nCopy lệnh:\n<code>/campaign_preset preset=tech platform=tiktok limit=3</code>"),
         "hint_postback_setup": ("affiliate", "🔁 <b>Postback Setup</b>\n\nCopy lệnh:\n<code>/postback_setup network=trackfin platform=tiktok limit=12</code>"),
-        "hint_naptien": ("billing", "💳 <b>Nạp Xu</b>\n\nCopy lệnh:\n<code>/naptien</code>"),
+        "hint_naptien": ("billing", "💳 <b>Mua/Nạp Xu dịch vụ</b>\n\nCopy lệnh:\n<code>/naptien</code>"),
         "hint_profile": ("billing", "👤 <b>Tài khoản</b>\n\nCopy lệnh:\n<code>/profile</code>"),
+        "hint_terms": ("support", "📜 <b>Điều khoản sử dụng</b>\n\nCopy lệnh:\n<code>/terms</code>\n\n<code>/dieukhoan_xu</code> — quy định Xu dịch vụ"),
     }
     return hints.get(action, ("main", "Chọn nhóm chức năng bên dưới."))
 
@@ -22545,7 +22598,7 @@ def customer_start_surface_audit_data():
         "public_message_length": len(public_text),
         "admin_message_length": len(admin_text),
         "leaked_markers": leaked_markers,
-        "public_has_payment": "Nạp Xu" in public_text or "Billing" in public_text,
+        "public_has_payment": "Xu dịch vụ" in public_text or "Billing" in public_text,
         "admin_has_operator": "operator" in admin_text.lower() or "Quản trị" in admin_text,
         "rule": "Khách chỉ thấy menu dịch vụ/nạp tiền/hỗ trợ. Tools, MMO, operator và chẩn đoán webhook chỉ hiện trong menu Admin.",
     }
@@ -22580,11 +22633,11 @@ def help_text_for_user(user_id) -> str:
         "📘 <b>Hướng dẫn TOAN AAS</b>\n\n"
         "🎁 Tài khoản mới nhận <b>200 Xu trải nghiệm</b>, đủ để thử 1 lượt <code>/film</code> Basic.\n"
         "Mỗi ID Telegram chỉ nhận 200 Xu trải nghiệm một lần. Xóa chat/start lại không cấp lại 200 Xu.\n\n"
-        "<b>1. Tài khoản & nạp Xu</b>\n"
+        "<b>1. Tài khoản & Xu dịch vụ</b>\n"
         "• <code>/profile</code> — xem số dư, VIP, referral\n"
         "• <code>/trial_status</code> — kiểm tra trạng thái 200 Xu trải nghiệm\n"
         "• <code>/huongdan</code> hoặc <code>/guide</code> — xem hướng dẫn sử dụng chi tiết\n"
-        "• <code>/naptien</code> — tạo QR nạp Xu\n"
+        "• <code>/naptien</code> — tạo QR mua/nạp Xu dịch vụ\n"
         "• <code>/khuyenmai</code> hoặc <code>/uudai</code> — xem ưu đãi nên dùng\n"
         "• <code>/promo &lt;mã&gt;</code> hoặc <code>/magiamgia &lt;mã&gt;</code> — lưu mã ưu đãi cho lần nạp tiếp theo\n"
         "• <code>/thucong</code> — gửi bill thủ công khi QR lỗi\n"
@@ -22612,9 +22665,10 @@ def help_text_for_user(user_id) -> str:
         "<b>6. Bán thử/Beta</b>\n"
         "• <code>/beta_offer</code> hoặc <code>/goi_beta</code> — xem gói dùng thử\n"
         "• <code>/pricing</code> hoặc <code>/banggia</code> — xem bảng giá\n"
-        "• <code>/naptien</code> — nạp Xu\n"
+        "• <code>/naptien</code> — mua/nạp Xu dịch vụ\n"
         "• <code>/film &lt;chủ đề&gt;</code> — tạo nội dung\n"
-        "• <code>/growth_ai</code> — AI gợi ý tối ưu"
+        "• <code>/growth_ai</code> — AI gợi ý tối ưu\n\n"
+        f"{legal_commands_short_text()}"
     )
     if is_admin:
         text += (
@@ -22685,6 +22739,225 @@ async def cmd_guide_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"{idx}. <code>{html.escape(os.path.basename(path))}</code> — <code>{'exists' if os.path.exists(path) else 'missing'}</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+def terms_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    url = terms_pdf_download_url()
+    if url:
+        rows.append([InlineKeyboardButton("📄 Tải điều khoản PDF", url=url)])
+    rows.append([InlineKeyboardButton("💬 Nhắn admin/hỗ trợ", url=SUPPORT_TELEGRAM_URL or "https://t.me/toanaas")])
+    return InlineKeyboardMarkup(rows)
+
+def terms_text() -> str:
+    return (
+        "📜 <b>ĐIỀU KHOẢN SỬ DỤNG TOAN AAS</b>\n\n"
+        "Tài liệu này áp dụng cho người dùng sử dụng bot Telegram, website, công cụ AI, "
+        "công cụ xử lý ảnh/video/audio, Xu dịch vụ và các module thử nghiệm của TOAN AAS.\n\n"
+        "<b>Tóm tắt nhanh:</b>\n"
+        "• TOAN AAS là trung tâm công cụ AI/automation hỗ trợ tạo nội dung và xử lý media.\n"
+        "• Xu dịch vụ chỉ dùng nội bộ trong TOAN AAS, không phải tiền/coin/token, không rút tiền và không chuyển nhượng.\n"
+        "• Người dùng chịu trách nhiệm kiểm tra nội dung AI trước khi đăng.\n"
+        "• Không dùng hệ thống để lừa đảo, giả mạo, vi phạm bản quyền, deepfake gây hại, spam hoặc quảng cáo sai sự thật.\n"
+        "• Chức năng tự đăng bài/chạy quảng cáo cho khách chưa được mở công khai.\n"
+        f"• Khi cần hỗ trợ, liên hệ admin: {support_link_html()}\n\n"
+        "Bấm nút bên dưới để xem/tải bản PDF đầy đủ nếu file đã được triển khai."
+    )
+
+async def cmd_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(terms_text(), parse_mode="HTML", reply_markup=terms_keyboard())
+    if not terms_pdf_download_url():
+        path = find_terms_pdf_path()
+        if path:
+            try:
+                with open(path, "rb") as f:
+                    await context.bot.send_document(
+                        chat_id=update.effective_chat.id,
+                        document=f,
+                        filename=TERMS_PDF_FILE,
+                        caption="📜 Điều khoản sử dụng TOAN AAS",
+                    )
+            except Exception as e:
+                logger.warning(f"Cannot send terms PDF: {e}")
+        else:
+            await update.message.reply_text(
+                "⚠️ File điều khoản đang được cập nhật, vui lòng thử lại sau hoặc nhắn admin/hỗ trợ."
+            )
+
+def privacy_text() -> str:
+    return (
+        "🔐 <b>Chính sách quyền riêng tư TOAN AAS</b>\n\n"
+        "TOAN AAS có thể xử lý các dữ liệu cần thiết để vận hành dịch vụ:\n"
+        "• ID Telegram, username, tên hiển thị.\n"
+        "• Nội dung lệnh/chat bạn gửi vào bot.\n"
+        "• Ảnh, video, audio, file bạn gửi để xử lý.\n"
+        "• Thông tin đơn nạp, mã đơn, ảnh bill nếu bạn gửi để admin kiểm tra.\n"
+        "• Log sử dụng công cụ, số dư Xu dịch vụ, lịch sử cộng/trừ Xu dịch vụ.\n\n"
+        "<b>Mục đích xử lý:</b>\n"
+        "• Vận hành bot và công cụ AI.\n"
+        "• Tính phí Xu dịch vụ.\n"
+        "• Hỗ trợ khách hàng.\n"
+        "• Chống gian lận, spam, lạm dụng.\n"
+        "• Sao lưu và kiểm tra lỗi hệ thống.\n\n"
+        "<b>Cam kết:</b>\n"
+        "• Không bán dữ liệu cá nhân của bạn.\n"
+        "• Không công khai bill, ảnh, video, audio của bạn nếu không có yêu cầu/đồng ý.\n"
+        "• Không yêu cầu mật khẩu tài khoản mạng xã hội.\n"
+        "• Không yêu cầu thông tin thẻ thanh toán của bạn qua bot.\n"
+        "• Bạn có thể liên hệ admin để yêu cầu kiểm tra hoặc xóa dữ liệu phù hợp.\n\n"
+        f"Liên hệ hỗ trợ: {support_link_html()}"
+    )
+
+async def cmd_privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(privacy_text(), parse_mode="HTML")
+
+def service_credit_terms_text() -> str:
+    return (
+        "📜 <b>Điều khoản Xu dịch vụ TOAN AAS</b>\n\n"
+        "Xu dịch vụ TOAN AAS là đơn vị nội bộ dùng để tính lượt sử dụng công cụ AI trong hệ thống TOAN AAS.\n\n"
+        "<b>Xu dịch vụ:</b>\n"
+        "• Không phải tiền, tiền điện tử, tài sản số, chứng khoán hoặc phương tiện thanh toán.\n"
+        "• Không có giá trị thanh toán bên ngoài TOAN AAS.\n"
+        "• Không được rút về tiền mặt hoặc chuyển khoản.\n"
+        "• Không được chuyển nhượng, mua bán, trao đổi giữa người dùng.\n"
+        "• Chỉ dùng để sử dụng công cụ/dịch vụ trong bot TOAN AAS.\n"
+        "• Có thể được tặng thêm trong chương trình khuyến mãi, hỗ trợ kỹ thuật hoặc sự kiện.\n"
+        "• TOAN AAS có quyền khóa/thu hồi Xu dịch vụ khuyến mãi nếu phát hiện gian lận, spam, lạm dụng hoặc lỗi hệ thống.\n\n"
+        "Các gói nạp là gói Xu dịch vụ trả trước để sử dụng công cụ trong TOAN AAS. "
+        f"Khi cần hỗ trợ, liên hệ: {support_link_html()}"
+    )
+
+async def cmd_dieukhoan_xu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(service_credit_terms_text(), parse_mode="HTML")
+
+def refund_policy_text() -> str:
+    return (
+        "💳 <b>Chính sách nạp tiền và hỗ trợ</b>\n\n"
+        "TOAN AAS bán gói Xu dịch vụ trả trước để sử dụng công cụ trong hệ thống.\n\n"
+        "<b>Nguyên tắc:</b>\n"
+        "• Xu dịch vụ chỉ dùng trong TOAN AAS.\n"
+        "• Không rút Xu dịch vụ thành tiền.\n"
+        "• Không chuyển Xu dịch vụ cho người khác.\n"
+        "• Nếu chuyển khoản sai nội dung/sai số tiền, vui lòng gửi bill cho admin kiểm tra.\n"
+        "• Nếu lỗi do hệ thống khiến công cụ không xử lý được, TOAN AAS có thể hoàn lại Xu dịch vụ tương ứng.\n"
+        "• Các trường hợp đã sử dụng Xu dịch vụ thành công thường không hoàn tiền, trừ quyết định hỗ trợ riêng của admin.\n\n"
+        f"Liên hệ hỗ trợ: {support_link_html()}"
+    )
+
+async def cmd_refund_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(refund_policy_text(), parse_mode="HTML")
+
+def content_policy_text() -> str:
+    return (
+        "🧭 <b>Quy định nội dung TOAN AAS</b>\n\n"
+        "Không sử dụng TOAN AAS để tạo hoặc xử lý:\n"
+        "• Nội dung lừa đảo, giả mạo danh tính, giả mạo chứng cứ.\n"
+        "• Nội dung vi phạm bản quyền hoặc reup trái phép.\n"
+        "• Nội dung xúc phạm, bôi nhọ, xâm phạm đời tư.\n"
+        "• Nội dung khiêu dâm, bạo lực cực đoan hoặc gây hại.\n"
+        "• Nội dung hướng dẫn hành vi nguy hiểm/phi pháp.\n"
+        "• Deepfake/giọng nói/khuôn mặt người khác khi chưa có quyền.\n"
+        "• Quảng cáo sai sự thật, cam kết quá đà, hàng cấm, hàng giả, sản phẩm không rõ nguồn gốc.\n\n"
+        "Người dùng chịu trách nhiệm kiểm tra nội dung trước khi đăng. "
+        "TOAN AAS có quyền từ chối xử lý nội dung rủi ro."
+    )
+
+async def cmd_content_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(content_policy_text(), parse_mode="HTML")
+
+def affiliate_policy_text() -> str:
+    return (
+        "🔗 <b>Quy định affiliate và nội dung có hoa hồng</b>\n\n"
+        "Nếu nội dung có link affiliate/hoa hồng, người dùng nên công khai minh bạch.\n\n"
+        "<b>Mẫu disclosure:</b>\n"
+        "“Nội dung có thể chứa liên kết affiliate. Người tạo nội dung có thể nhận hoa hồng khi bạn mua qua link.”\n\n"
+        "<b>Không dùng TOAN AAS để:</b>\n"
+        "• Quảng cáo hàng giả, hàng cấm, hàng không rõ nguồn gốc.\n"
+        "• Claim quá đà về sức khỏe, tài chính, làm giàu, giảm cân, chữa bệnh.\n"
+        "• Giả vờ là review trung lập nếu thực tế có hoa hồng.\n"
+        "• Dùng hình ảnh/đánh giá khách hàng không có thật."
+    )
+
+async def cmd_affiliate_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(affiliate_policy_text(), parse_mode="HTML")
+
+def ads_policy_text() -> str:
+    return (
+        "📣 <b>Quy định quảng cáo và auto publish</b>\n\n"
+        "Hiện TOAN AAS chỉ hỗ trợ tạo nội dung, caption, prompt, video pack để người dùng tự kiểm tra và tự đăng.\n\n"
+        "<b>Chưa mở cho khách:</b>\n"
+        "• Tự động đăng bài lên tài khoản khách.\n"
+        "• Tự động chạy quảng cáo.\n"
+        "• Kết nối tài khoản quảng cáo khách.\n"
+        "• Nhận mật khẩu, token hoặc thẻ thanh toán của khách.\n\n"
+        "<b>Module ads/publish nếu có sẽ theo nguyên tắc:</b>\n"
+        "• Admin-first.\n"
+        "• Có kiểm duyệt.\n"
+        "• Có xác nhận trước khi đăng/chạy.\n"
+        "• Không cam kết duyệt quảng cáo 100%.\n"
+        "• Không cam kết doanh thu/viral."
+    )
+
+async def cmd_ads_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(ads_policy_text(), parse_mode="HTML")
+
+async def cmd_data_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = user.id if user else 0
+    text = (
+        "🗑 <b>Yêu cầu xóa dữ liệu</b>\n\n"
+        "Bạn có thể yêu cầu admin kiểm tra/xóa dữ liệu phù hợp liên quan đến tài khoản Telegram của bạn.\n\n"
+        f"ID Telegram của bạn: <code>{html.escape(str(user_id))}</code>\n\n"
+        f"Vui lòng nhắn admin/hỗ trợ: {support_link_html()}\n\n"
+        "Lưu ý: Một số dữ liệu giao dịch, log nạp Xu dịch vụ hoặc dữ liệu cần thiết cho đối soát/chống gian lận "
+        "có thể cần được lưu theo yêu cầu vận hành/kế toán/an toàn hệ thống."
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+    if ADMIN_ID:
+        try:
+            username, full_name, contact_url = telegram_user_contact_text(user)
+            await context.bot.send_message(
+                chat_id=int(ADMIN_ID),
+                text=(
+                    "🗑 <b>DATA DELETE REQUEST</b>\n\n"
+                    f"• User ID: <code>{html.escape(str(user_id))}</code>\n"
+                    f"• Username: @{html.escape(username)}\n"
+                    f"• Name: {html.escape(full_name or '-')}\n"
+                    f"• Contact: {html.escape(contact_url or '-')}"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"Could not notify admin about data delete request: {e}")
+
+async def cmd_mydata(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    uid = user.id if user else 0
+    username = user.username if user else ""
+    credits, total_spent, is_vip = get_user(uid, username or "Unknown")
+    conn = db_connect()
+    try:
+        row = conn.execute("SELECT join_date FROM users WHERE user_id=?", (str(uid),)).fetchone()
+        trial = conn.execute("SELECT granted_xu, granted_at FROM trial_grants WHERE user_id=?", (str(uid),)).fetchone()
+    finally:
+        conn.close()
+    pending = get_user_pending_promo(uid)
+    pending_code = (pending.get("promo") or {}).get("code") or "-"
+    lines = [
+        "🔎 <b>Dữ liệu tài khoản của tôi</b>",
+        "",
+        f"• ID Telegram: <code>{html.escape(str(uid))}</code>",
+        f"• Username: <code>{html.escape('@' + username if username else '-')}</code>",
+        f"• Số dư Xu dịch vụ: <b>{int(credits)} Xu</b>",
+        f"• Tổng Xu dịch vụ đã dùng/nạp: <b>{int(total_spent or 0)} Xu</b>",
+        f"• VIP/Admin: <code>{'yes' if is_vip or is_admin_user(uid) else 'no'}</code>",
+        f"• Ngày tham gia: <code>{html.escape(str(row[0] if row else '-'))}</code>",
+        f"• Trial: <code>{html.escape(str(trial[0]) + ' Xu lúc ' + str(trial[1]) if trial else 'chưa ghi nhận')}</code>",
+        f"• Promo đang chờ: <code>{html.escape(str(pending_code))}</code>",
+        "",
+        "Lệnh này không gửi bill, file, audio, video hoặc dữ liệu nhạy cảm.",
+        "Yêu cầu hỗ trợ/xóa dữ liệu phù hợp: <code>/data_delete</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -22693,7 +22966,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     admin_only = {"operator", "admin", "system"}
     if action in admin_only and not user_is_admin:
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
-    if action.startswith("hint_") and not user_is_admin and action not in {"hint_naptien", "hint_profile"}:
+    if action.startswith("hint_") and not user_is_admin and action not in {"hint_naptien", "hint_profile", "hint_terms"}:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
     text, keyboard = menu_content(action, user_is_admin)
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
@@ -23331,7 +23604,7 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Quy trình</b>",
         "1. <code>/profile</code> xem Xu",
-        "2. <code>/naptien</code> nạp Xu",
+        "2. <code>/naptien</code> mua/nạp Xu dịch vụ",
         "3. <code>/film &lt;chủ đề&gt;</code>",
         "4. Tự đăng lên kênh của bạn",
         "5. Ghi chú số liệu thủ công bên ngoài bot hoặc gửi admin nếu cần tổng hợp",
@@ -23377,7 +23650,7 @@ async def cmd_promo_seed_policy(update: Update, context: ContextTypes.DEFAULT_TY
         "• Gói 10k/20k dùng để thử nghiệm, không áp dụng mã ưu đãi\n"
         "• Mỗi đơn chỉ dùng 1 mã\n"
         "• Không cộng dồn mã\n"
-        "• Bonus Xu chỉ cộng sau khi PayOS thanh toán thành công\n\n"
+        "• Bonus Xu dịch vụ chỉ cộng sau khi PayOS thanh toán thành công\n\n"
         "Dùng: <code>/promo_list</code>",
         parse_mode="HTML",
     )
@@ -23423,7 +23696,7 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Gói 10k/20k chỉ để thử nghiệm",
             "• Mỗi đơn chỉ áp dụng 1 mã",
             "• Không cộng dồn mã",
-            "• Bonus Xu chỉ cộng sau khi thanh toán/duyệt bill thành công",
+            "• Bonus Xu dịch vụ chỉ cộng sau khi thanh toán/duyệt bill thành công",
         ]
         if pending.get("promo"):
             lines.extend([
@@ -23456,8 +23729,8 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text(
                 "✅ <b>Bạn đã nhận quà TOAN AAS</b>\n\n"
                 f"• Mã: <code>{html.escape(gift_info.get('code') or normalize_promo_code(code))}</code>\n"
-                f"• Xu nhận: <b>+{int(gift_info.get('xu') or 0)} Xu</b>\n"
-                f"• Số dư mới: <b>{int(gift_info.get('balance') or 0)} Xu</b>",
+                f"• Xu dịch vụ nhận: <b>+{int(gift_info.get('xu') or 0)} Xu</b>\n"
+                f"• Số dư mới: <b>{int(gift_info.get('balance') or 0)} Xu dịch vụ</b>",
                 parse_mode="HTML",
             )
         if status == "assignment_required":
@@ -23503,7 +23776,7 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Không cộng dồn mã khác\n"
             "• Có thể cộng với Launch Bonus nếu gói đó còn lần đầu mua gói\n"
             "• Áp dụng cho lần nạp tiếp theo nếu đủ điều kiện\n\n"
-            "Dùng <code>/naptien</code> để nạp Xu.",
+            "Dùng <code>/naptien</code> để mua/nạp Xu dịch vụ.",
             parse_mode="HTML",
         )
     return await update.message.reply_text(
@@ -23535,20 +23808,20 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔥 <b>Nên dùng trước:</b> {html.escape(recommended)}",
         "",
         "<b>Thứ tự gợi ý:</b>",
-        "1. <code>FIRST30</code> — nạp lần đầu từ 50k: +30% Xu",
-        "2. <code>SECOND15</code> — nạp lần 2 từ 50k: +15% Xu",
-        "3. <code>MONTHLY20</code> — ưu đãi tháng từ 100k: +20% Xu",
-        "4. <code>WEEKLY10</code> — ưu đãi tuần từ 50k: +10% Xu",
-        "5. <code>DAILY5</code> — ưu đãi ngày từ 50k: +5% Xu",
+        "1. <code>FIRST30</code> — nạp lần đầu từ 50k: +30% Xu dịch vụ",
+        "2. <code>SECOND15</code> — nạp lần 2 từ 50k: +15% Xu dịch vụ",
+        "3. <code>MONTHLY20</code> — ưu đãi tháng từ 100k: +20% Xu dịch vụ",
+        "4. <code>WEEKLY10</code> — ưu đãi tuần từ 50k: +10% Xu dịch vụ",
+        "5. <code>DAILY5</code> — ưu đãi ngày từ 50k: +5% Xu dịch vụ",
         "",
         "🎁 <b>Launch Bonus theo gói:</b>",
-        "• Lần đầu mua gói 50k: +30 Xu",
-        "• Lần đầu mua gói 100k: +50 Xu",
-        "• Lần đầu mua gói 200k: +150 Xu",
-        "• Lần đầu mua gói 500k: +500 Xu",
+        "• Lần đầu mua gói 50k: +30 Xu dịch vụ",
+        "• Lần đầu mua gói 100k: +50 Xu dịch vụ",
+        "• Lần đầu mua gói 200k: +150 Xu dịch vụ",
+        "• Lần đầu mua gói 500k: +500 Xu dịch vụ",
         "",
         "Mỗi tài khoản chỉ nhận Launch Bonus 1 lần cho từng gói.",
-        "Các lần mua lại cùng gói sẽ nhận Xu gốc.",
+        "Các lần mua lại cùng gói sẽ nhận Xu dịch vụ gốc.",
         "",
         "⚠️ <b>Quy tắc:</b>",
         "• FIRST30: mỗi tài khoản dùng 1 lần cho lần nạp đầu từ 50k",
@@ -23560,7 +23833,7 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Mỗi đơn nạp chỉ áp dụng 1 mã",
         "• Không cộng dồn mã",
         "• Mã mới sẽ thay mã đang chờ dùng",
-        "• Bonus Xu chỉ cộng sau khi thanh toán/duyệt bill thành công",
+        "• Bonus Xu dịch vụ chỉ cộng sau khi thanh toán/duyệt bill thành công",
         "• Launch Bonus không phải promo code",
         "• Mã có thể hết lượt/hết hạn/không đủ điều kiện",
         "",
@@ -23779,7 +24052,7 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<code>/gift MÃ_ADMIN_GỬI</code>\n"
             "<code>/nhanqua MÃ_ADMIN_GỬI</code>\n\n"
             "Mã quà tặng sự kiện/hỗ trợ riêng chỉ dùng khi admin gửi mã cho bạn. "
-            "Không cần tự thử nhiều mã vì hệ thống sẽ không cộng Xu nếu mã chưa được cấp cho ID Telegram của bạn."
+            "Không cần tự thử nhiều mã vì hệ thống sẽ không cộng Xu dịch vụ nếu mã chưa được cấp cho ID Telegram của bạn."
         )
         if is_admin_user(update.effective_user.id):
             text += "\n\nAdmin cấp BETA cho user bằng: <code>/gift BETA100 USER_ID</code>\nXem request: <code>/gift_request_list</code>"
@@ -23795,8 +24068,8 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=(
                         "🎁 <b>Admin đã cấp quà TOAN AAS cho bạn</b>\n\n"
                         f"• Mã: <code>{html.escape(info.get('code') or normalize_promo_code(code))}</code>\n"
-                        f"• Xu nhận: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
-                        f"• Số dư mới: <b>{int(info.get('balance') or 0)} Xu</b>"
+                        f"• Xu dịch vụ nhận: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
+                        f"• Số dư mới: <b>{int(info.get('balance') or 0)} Xu dịch vụ</b>"
                     ),
                     parse_mode="HTML",
                 )
@@ -23806,8 +24079,8 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "✅ <b>Đã cấp gift code cho user</b>\n\n"
                 f"• User ID: <code>{html.escape(str(target_user_id))}</code>\n"
                 f"• Mã: <code>{html.escape(info.get('code') or normalize_promo_code(code))}</code>\n"
-                f"• Xu: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
-                f"• Số dư user: <b>{int(info.get('balance') or 0)} Xu</b>",
+            f"• Xu dịch vụ: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
+            f"• Số dư user: <b>{int(info.get('balance') or 0)} Xu dịch vụ</b>",
                 parse_mode="HTML",
             )
         message = "Không cấp được mã quà tặng."
@@ -23824,8 +24097,8 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "✅ <b>Bạn đã nhận quà TOAN AAS</b>\n\n"
             f"• Mã: <code>{html.escape(info.get('code') or normalize_promo_code(code))}</code>\n"
-            f"• Xu nhận: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
-            f"• Số dư mới: <b>{int(info.get('balance') or 0)} Xu</b>",
+            f"• Xu dịch vụ nhận: <b>+{int(info.get('xu') or 0)} Xu</b>\n"
+            f"• Số dư mới: <b>{int(info.get('balance') or 0)} Xu dịch vụ</b>",
             parse_mode="HTML",
         )
     if status == "assignment_required":
@@ -24521,7 +24794,10 @@ async def cmd_reject_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
-        "💎 <b>BẢNG GIÁ TOAN AAS</b>",
+        "💎 <b>BẢNG GÓI XU DỊCH VỤ TOAN AAS</b>",
+        "",
+        "Quy đổi sử dụng nội bộ theo gói: 10.000đ = 100 Xu dịch vụ.",
+        service_credit_legal_note(),
         "",
         "🎬 <b>Video & Media Factory</b>",
         f"• <code>/film</code> Basic: <b>{VIDEO_BASIC_COST} Xu</b>",
@@ -24554,36 +24830,36 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Chat thường: model nhanh/tiết kiệm, fair-use hằng ngày ({CHAT_NORMAL_DAILY_LIMIT} lượt)",
         f"• <code>/chat_pro</code> Pro: từ <b>{CHAT_PRO_STANDARD_COST} Xu</b>",
         f"• <code>/chat_pro tier=deep</code>: từ <b>{CHAT_PRO_DEEP_COST} Xu</b>",
-        f"• Nội dung dài: +<b>{CHAT_PRO_MB_UNIT_COST} Xu</b>/đơn vị nội dung, không tính token lắt nhắt",
+        f"• Nội dung dài: +<b>{CHAT_PRO_MB_UNIT_COST} Xu</b>/đơn vị nội dung, không tính theo đơn vị kỹ thuật lắt nhắt",
         f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + theo độ dài",
         f"• Bóc băng audio: từ <b>{AUDIO_MIN_COST} Xu</b>, tính theo MB",
         f"• Tách nền ảnh: từ <b>{IMAGE_REMOVE_BG_BASE_COST}-{IMAGE_REMOVE_BG_PREMIUM_COST} Xu</b>",
         f"• Tải/xử lý video: từ <b>{VIDEO_DOWNLOAD_MIN_COST} Xu</b>, tính theo MB",
         "",
-        "💳 <b>Nạp Xu:</b> <code>/naptien</code>",
+        "💳 <b>Mua/Nạp Xu dịch vụ:</b> <code>/naptien</code>",
         "",
         "🎁 <b>Chính sách ưu đãi:</b>",
-        "• User mới nhận <b>200 Xu</b> trải nghiệm",
+        "• User mới nhận <b>200 Xu dịch vụ</b> trải nghiệm",
         "• Gói 10k/20k dùng để thử nghiệm",
         "• Mã ưu đãi bắt đầu từ đơn nạp 50k",
-        "• <code>FIRST30</code>: nạp lần đầu từ 50k +30% Xu",
-        "• <code>SECOND15</code>: nạp lần 2 từ 50k +15% Xu",
-        "• <code>WEEKLY10</code>: ưu đãi tuần từ 50k +10% Xu",
-        "• <code>DAILY5</code>: ưu đãi ngày từ 50k +5% Xu",
-        "• <code>MONTHLY20</code>: ưu đãi tháng từ 100k +20% Xu",
+        "• <code>FIRST30</code>: nạp lần đầu từ 50k +30% Xu dịch vụ",
+        "• <code>SECOND15</code>: nạp lần 2 từ 50k +15% Xu dịch vụ",
+        "• <code>WEEKLY10</code>: ưu đãi tuần từ 50k +10% Xu dịch vụ",
+        "• <code>DAILY5</code>: ưu đãi ngày từ 50k +5% Xu dịch vụ",
+        "• <code>MONTHLY20</code>: ưu đãi tháng từ 100k +20% Xu dịch vụ",
         "• Mỗi đơn chỉ dùng 1 mã, không cộng dồn",
         "",
         "🎁 <b>Launch Bonus lần đầu mua gói:</b>",
-        "• 50k: 500 Xu gốc + 30 Xu = 530 Xu",
-        "• 100k: 1.000 Xu gốc + 50 Xu = 1.050 Xu",
-        "• 200k: 2.000 Xu gốc + 150 Xu = 2.150 Xu",
-        "• 500k: 5.000 Xu gốc + 500 Xu = 5.500 Xu",
+        "• 50k: 500 Xu dịch vụ gốc + 30 Xu dịch vụ = 530 Xu dịch vụ",
+        "• 100k: 1.000 Xu dịch vụ gốc + 50 Xu dịch vụ = 1.050 Xu dịch vụ",
+        "• 200k: 2.000 Xu dịch vụ gốc + 150 Xu dịch vụ = 2.150 Xu dịch vụ",
+        "• 500k: 5.000 Xu dịch vụ gốc + 500 Xu dịch vụ = 5.500 Xu dịch vụ",
         "",
         "<b>Ví dụ gói 500k lần đầu + FIRST30:</b>",
-        "• Xu gốc: 5.000",
-        "• Launch Bonus lần đầu mua gói 500k: +500",
-        "• FIRST30: +30% Xu",
-        "• Tổng nhận theo chính sách hiện tại: 7.000 Xu",
+        "• Xu dịch vụ gốc: 5.000",
+        "• Launch Bonus lần đầu mua gói 500k: +500 Xu dịch vụ",
+        "• FIRST30: +30% Xu dịch vụ",
+        "• Tổng nhận theo chính sách hiện tại: 7.000 Xu dịch vụ",
         "",
         "Launch Bonus không phải promo code. Mỗi order chỉ có 1 promo code, nhưng Launch Bonus có thể cộng cùng promo nếu đủ điều kiện.",
         "",
@@ -24969,14 +25245,14 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tier = "🥈 BẠC (Giảm 10%)"
     else:
         tier = "🥉 Tiêu Chuẩn"
-    credit_display = "Vô Hạn (∞)" if is_admin_user(user_id) or is_vip else f"{credits} Xu"
+    credit_display = "Vô Hạn (∞)" if is_admin_user(user_id) or is_vip else f"{credits} Xu dịch vụ"
     msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{user_id}</code>\n"
         f"• Hạng: <b>{tier}</b>\n"
         f"• Số dư: <b>{credit_display}</b>\n"
-        f"• Tổng chi tiêu: {total_spent} Xu\n\n"
-        f"👉 /naptien để mua thêm hạn mức."
+        f"• Tổng Xu dịch vụ đã dùng/nạp: {total_spent} Xu\n\n"
+        f"👉 /naptien để mua/nạp thêm Xu dịch vụ."
     )
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -24993,25 +25269,27 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Lưu ý: nếu nhập mã khác, mã mới sẽ thay mã này.\n\n"
         )
     msg = (
-        f"💳 <b>NẠP SỐ DƯ TỰ ĐỘNG (QR ĐỘNG) — TOAN AAS</b>\n\n"
+        f"💳 <b>MUA/NẠP GÓI XU DỊCH VỤ (QR ĐỘNG) — TOAN AAS</b>\n\n"
         f"👤 ID Telegram: <code>{uid}</code>\n"
-        f"🪙 Số dư hiện tại: <b>{credits} Xu</b>\n\n"
+        f"🪙 Số dư hiện tại: <b>{credits} Xu dịch vụ</b>\n\n"
         f"🎁 <b>Có mã ưu đãi?</b>\n"
         f"Nhập <code>/promo FIRST30</code> trước khi chọn gói nạp.\n"
         f"Ưu đãi áp dụng cho đơn nạp từ 50.000đ trở lên.\n"
         f"Gói 10k/20k dùng để thử nghiệm, không áp dụng mã ưu đãi.\n"
         f"Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n\n"
         f"{pending_text}"
-        f"<b>🛒 BẢNG GIÁ (1 Xu = 100đ):</b>\n"
-        f"• Gói Dùng Thử: 10.000đ ➔ <b>100 Xu</b>\n"
-        f"• Gói Nhỏ: 20.000đ ➔ <b>200 Xu</b>\n"
-        f"• Gói Trung: 50.000đ ➔ <b>500 Xu</b> + 30 Xu Launch Bonus lần đầu mua gói = <b>530 Xu</b>\n"
-        f"• Gói Tiêu Chuẩn: 100.000đ ➔ <b>1.000 Xu</b> + 50 Xu Launch Bonus lần đầu mua gói = <b>1.050 Xu</b>\n"
-        f"• Gói Nâng Cao: 200.000đ ➔ <b>2.000 Xu</b> + 150 Xu Launch Bonus lần đầu mua gói = <b>2.150 Xu</b>\n"
-        f"• Gói Doanh Nghiệp: 500.000đ ➔ <b>5.000 Xu</b> + 500 Xu Launch Bonus lần đầu mua gói = <b>5.500 Xu</b>\n\n"
+        f"<b>🛒 BẢNG GÓI XU DỊCH VỤ:</b>\n"
+        f"Quy đổi sử dụng nội bộ theo gói: 10.000đ = 100 Xu dịch vụ.\n"
+        f"• Gói Dùng Thử: 10.000đ: <b>100 Xu dịch vụ</b>\n"
+        f"• Gói Nhỏ: 20.000đ: <b>200 Xu dịch vụ</b>\n"
+        f"• Gói Trung: 50.000đ: <b>500 Xu dịch vụ</b> + 30 Xu dịch vụ Launch Bonus lần đầu mua gói = <b>530 Xu dịch vụ</b>\n"
+        f"• Gói Tiêu Chuẩn: 100.000đ: <b>1.000 Xu dịch vụ</b> + 50 Xu dịch vụ Launch Bonus lần đầu mua gói = <b>1.050 Xu dịch vụ</b>\n"
+        f"• Gói Nâng Cao: 200.000đ: <b>2.000 Xu dịch vụ</b> + 150 Xu dịch vụ Launch Bonus lần đầu mua gói = <b>2.150 Xu dịch vụ</b>\n"
+        f"• Gói Doanh Nghiệp: 500.000đ: <b>5.000 Xu dịch vụ</b> + 500 Xu dịch vụ Launch Bonus lần đầu mua gói = <b>5.500 Xu dịch vụ</b>\n\n"
         f"🎁 Launch Bonus theo gói chỉ áp dụng 1 lần cho mỗi tài khoản ở từng gói 50k/100k/200k/500k.\n"
-        f"Các lần mua lại cùng gói sẽ nhận Xu gốc.\n\n"
+        f"Các lần mua lại cùng gói sẽ nhận Xu dịch vụ gốc.\n\n"
         f"🎁 Trial {TRIAL_CREDITS} Xu chỉ cấp 1 lần theo ID Telegram. Xóa chat hoặc start lại không làm nhận lại trial.\n\n"
+        f"{service_credit_legal_note()}\n\n"
         f"🏦 Nếu phải nạp thủ công, nội dung chuyển khoản sẽ là: <code>AAS {uid} &lt;order_code&gt;</code>\n\n"
         f"⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. Không lo điền sai nội dung chuyển khoản.\n\n"
         f"👇 <b>Vui lòng click chọn gói cước mong muốn dưới đây:</b>"
@@ -25058,14 +25336,14 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         USER_BILL_STATE[uid] = True
         text = (
-            "🏦 <b>NẠP XU THỦ CÔNG</b>\n\n"
+            "🏦 <b>NẠP XU DỊCH VỤ THỦ CÔNG</b>\n\n"
             f"👤 ID Telegram: <code>{uid}</code>\n\n"
             f"• Ngân hàng: <b>{MANUAL_BANK_NAME}</b>\n"
             f"• Số tài khoản: <code>{MANUAL_BANK_ACCOUNT}</code>\n"
             f"• Chủ tài khoản: <b>{MANUAL_BANK_OWNER}</b>\n"
             f"• Nội dung: <code>AAS {uid}</code>\n\n"
             "📸 Sau khi chuyển khoản, gửi ảnh bill tại đây.\n"
-            "Gợi ý: <code>/thucong 10k</code>, <code>/thucong 100k</code> để bot tự điền số tiền và số Xu."
+            "Gợi ý: <code>/thucong 10k</code>, <code>/thucong 100k</code> để bot tự điền số tiền và số Xu dịch vụ."
         )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -38120,6 +38398,17 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("huongdan",    cmd_huongdan))
     tg_app.add_handler(CommandHandler("guide",       cmd_huongdan))
     tg_app.add_handler(CommandHandler("hdsd",        cmd_huongdan))
+    tg_app.add_handler(CommandHandler("terms",       cmd_terms))
+    tg_app.add_handler(CommandHandler("privacy",     cmd_privacy))
+    tg_app.add_handler(CommandHandler("dieukhoan_xu", cmd_dieukhoan_xu))
+    tg_app.add_handler(CommandHandler("terms_xu",    cmd_dieukhoan_xu))
+    tg_app.add_handler(CommandHandler("xu_terms",     cmd_dieukhoan_xu))
+    tg_app.add_handler(CommandHandler("refund_policy", cmd_refund_policy))
+    tg_app.add_handler(CommandHandler("content_policy", cmd_content_policy))
+    tg_app.add_handler(CommandHandler("affiliate_policy", cmd_affiliate_policy))
+    tg_app.add_handler(CommandHandler("ads_policy",  cmd_ads_policy))
+    tg_app.add_handler(CommandHandler("data_delete", cmd_data_delete))
+    tg_app.add_handler(CommandHandler("mydata",      cmd_mydata))
     tg_app.add_handler(CommandHandler("guide_debug", cmd_guide_debug))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
@@ -38587,6 +38876,24 @@ async def download_customer_guide_docx():
         path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=GUIDE_DOCX_FILE,
+    )
+
+@fastapi_app.get("/download/dieu-khoan-su-dung-toan-aas.pdf")
+async def download_terms_pdf():
+    path = find_terms_pdf_path()
+    if not path:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "terms_file_missing",
+                "message": "File điều khoản đang được cập nhật, vui lòng thử lại sau hoặc nhắn admin/hỗ trợ.",
+            },
+            status_code=404,
+        )
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=TERMS_PDF_FILE,
     )
 
 @fastapi_app.get("/health")
