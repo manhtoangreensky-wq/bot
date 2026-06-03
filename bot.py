@@ -1164,6 +1164,9 @@ def init_db():
         ("admin_publish", 0, "Admin publish testing requires explicit approval before enabling."),
         ("customer_publish", 0, "Customer publish access is disabled by default."),
         ("auto_publish", 0, "Auto publish stays off until explicit approval."),
+        ("youtube_publish_admin", 0, "YouTube publish is planned/admin-only and disabled."),
+        ("tiktok_publish_admin", 0, "TikTok publish is planned/admin-only and disabled."),
+        ("facebook_publish_admin", 0, "Facebook publish is planned/admin-only and disabled."),
         ("ads_assistant", 0, "Ads assistant is future optional backlog and disabled by default."),
         ("worker_queue", 0, "Worker queue stays off until reviewed."),
         ("dashboard", 0, "Dashboard expansion is gated."),
@@ -21863,6 +21866,9 @@ def provider_status_payload() -> dict:
             "admin_publish": is_feature_enabled("admin_publish", default=False),
             "customer_publish": is_feature_enabled("customer_publish", default=False),
             "auto_publish": is_feature_enabled("auto_publish", default=False),
+            "youtube_publish_admin": is_feature_enabled("youtube_publish_admin", default=False),
+            "tiktok_publish_admin": is_feature_enabled("tiktok_publish_admin", default=False),
+            "facebook_publish_admin": is_feature_enabled("facebook_publish_admin", default=False),
             "ads_assistant": is_feature_enabled("ads_assistant", default=False),
         },
         "security": {
@@ -22319,6 +22325,36 @@ def legal_commands_short_text() -> str:
 def support_link_html() -> str:
     return html.escape(SUPPORT_TELEGRAM_URL or "https://t.me/toanaas")
 
+def legal_menu_text() -> str:
+    return (
+        "📜 <b>ĐIỀU KHOẢN & PHÁP LÝ TOAN AAS</b>\n\n"
+        "Vui lòng xem các mục bên dưới trước khi sử dụng bot, mua/nạp Xu dịch vụ hoặc dùng công cụ AI/media.\n\n"
+        "1. <code>/terms</code> — Điều khoản sử dụng dịch vụ\n"
+        "2. <code>/privacy</code> — Chính sách quyền riêng tư\n"
+        "3. <code>/dieukhoan_xu</code> — Quy định Xu dịch vụ\n"
+        "4. <code>/refund_policy</code> — Chính sách nạp tiền/hỗ trợ\n"
+        "5. <code>/content_policy</code> — Quy định nội dung\n"
+        "6. <code>/affiliate_policy</code> — Quy định affiliate/hoa hồng\n"
+        "7. <code>/ads_policy</code> — Quy định quảng cáo/auto publish\n"
+        "8. <code>/data_delete</code> — Yêu cầu kiểm tra/xóa dữ liệu\n"
+        "9. <code>/mydata</code> — Xem dữ liệu tài khoản cơ bản\n\n"
+        "<b>Tóm tắt quan trọng:</b>\n"
+        "• Xu dịch vụ chỉ dùng nội bộ trong TOAN AAS, không phải tiền/coin/token, không rút tiền và không chuyển nhượng.\n"
+        "• Người dùng chịu trách nhiệm kiểm tra nội dung AI trước khi đăng.\n"
+        "• Không dùng hệ thống để reup, vi phạm bản quyền, lừa đảo, deepfake gây hại hoặc spam.\n"
+        "• Chức năng tự đăng bài/chạy quảng cáo cho khách chưa mở công khai.\n"
+        f"• Hỗ trợ/admin: {support_link_html()}"
+    )
+
+def legal_menu_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    url = terms_pdf_download_url()
+    if url:
+        rows.append([InlineKeyboardButton("📄 Tải PDF điều khoản", url=url)])
+    rows.append([InlineKeyboardButton("💬 Nhắn admin/hỗ trợ", url=SUPPORT_TELEGRAM_URL or "https://t.me/toanaas")])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
 def log_command_received(command: str, update: Update):
     user = update.effective_user if isinstance(update, Update) else None
     logger.info(
@@ -22379,14 +22415,14 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
             [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
             [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
             [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("💳 Billing", callback_data="menu|billing")],
-            [InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|hint_terms")],
+            [InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|legal")],
             [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
         ]
     else:
         rows = [
             [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
             [InlineKeyboardButton("💳 Xu Dịch Vụ", callback_data="menu|billing"), InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing")],
-            [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|hint_terms")],
+            [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|legal")],
             [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
         ]
     return InlineKeyboardMarkup(rows)
@@ -22395,6 +22431,7 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
     rows = []
     if section == "video_factory":
         rows.append([InlineKeyboardButton("🧭 Quy trình tạo Video AI", callback_data="menu|video_workflow")])
+        rows.append([InlineKeyboardButton("🎬 Media Factory Flow", callback_data="menu|video_factory_flow")])
         if is_admin:
             rows.append([InlineKeyboardButton("🚀 Film Blueprint", callback_data="menu|hint_film_blueprint")])
             rows.append([InlineKeyboardButton("📦 Scene Pack", callback_data="menu|hint_scene_pack")])
@@ -22436,7 +22473,7 @@ def menu_text_main(is_admin: bool) -> str:
         "🖼 Studio Đồ Họa: tách nền, xử lý ảnh, prompt hình ảnh.\n"
         "🖼 Công cụ ảnh: /image_tools, /image_prompt, /image_to_video_pack, /ai_image, /ai_image_edit.\n"
         "💳 Xu dịch vụ: PayOS QR động hoặc QR thủ công khi cổng tự động bận.\n"
-        "📜 /terms — điều khoản sử dụng | /dieukhoan_xu — quy định Xu dịch vụ."
+        "📜 Pháp lý & an toàn: bấm “Điều khoản” hoặc gõ <code>/legal</code> để xem đầy đủ."
         f"{admin_line}\n\n"
         "🎁 Tân thủ: mỗi ID Telegram chỉ nhận <b>200 Xu trải nghiệm</b> một lần.\n"
         "Xu được quản lý theo ID Telegram. Xóa chat rồi bấm Start lại sẽ không nhận lại 200 Xu lần nữa.\n"
@@ -22446,12 +22483,13 @@ def menu_text_main(is_admin: bool) -> str:
         "1. <code>/profile</code> — xem số dư\n"
         "2. <code>/film &lt;chủ đề&gt;</code> — tạo Video Script Basic\n"
         "3. <code>/image_tools</code> — xem công cụ ảnh và video prompt pack\n"
-        "4. <code>/media_factory &lt;chủ đề&gt;</code> — tạo trend/script/ảnh/video/caption pack\n"
-        "5. <code>/pricing</code> — xem bảng giá\n"
-        "6. <code>/naptien</code> — nạp thêm Xu khi cần\n"
-        "7. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
-        "8. Tự đăng nội dung đã tạo lên kênh của bạn\n"
-        "9. <code>/terms</code> — xem điều khoản sử dụng dịch vụ"
+        "4. <code>/media_factory</code> — xem trung tâm Video & Media\n"
+        "5. <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
+        "6. <code>/pricing</code> — xem bảng giá\n"
+        "7. <code>/naptien</code> — nạp thêm Xu khi cần\n"
+        "8. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
+        "9. Tự đăng nội dung đã tạo lên kênh của bạn\n"
+        "10. <code>/legal</code> — xem điều khoản/pháp lý đầy đủ"
         f"{admin_quick}"
         f"{runtime_line}\n\n"
         "Chọn nhóm chức năng bên dưới:"
@@ -22505,6 +22543,8 @@ def menu_text_video_factory(is_admin: bool) -> str:
             f"• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật, phí <b>{AI_IMAGE_COST} Xu</b>\n"
             f"• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật, phí <b>{AI_IMAGE_EDIT_COST} Xu</b>\n"
             f"• <code>/media_factory &lt;chủ đề&gt;</code> — trọn gói trend/script/ảnh/video/caption, phí <b>{MEDIA_FACTORY_PACK_COST} Xu</b>\n"
+            "• <code>/media_factory</code> — xem trung tâm Video & Media\n"
+            "• <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
             "• <code>/film topic=\"review sản phẩm\"</code> — tạo nội dung review để bạn tự đăng\n"
             "• <code>/film topic=\"sản phẩm A\" link=\"https://...\"</code> — dùng link bạn dán trực tiếp để viết caption/CTA tham khảo\n"
             f"• <code>/growth_ai</code> — AI phân tích hook/caption/CTA, phí <b>{GROWTH_AI_COST} Xu</b>\n"
@@ -22666,6 +22706,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_video_factory(is_admin), menu_nav_keyboard("video_factory", is_admin)
     if action == "video_workflow":
         return menu_text_video_workflow(is_admin), menu_nav_keyboard("video_workflow", is_admin)
+    if action == "video_factory_flow":
+        return video_factory_flow_text(), menu_nav_keyboard("video_factory", is_admin)
     if action == "affiliate":
         return menu_text_affiliate(is_admin), menu_nav_keyboard("affiliate", is_admin)
     if action == "operator":
@@ -22678,6 +22720,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_billing(is_admin), menu_nav_keyboard("billing", is_admin)
     if action == "support":
         return menu_text_support(), menu_nav_keyboard("support", is_admin)
+    if action == "legal":
+        return legal_menu_text(), legal_menu_keyboard()
     if action == "guide":
         return guide_index_text(), guide_keyboard()
     if action.startswith("guide_"):
@@ -22742,6 +22786,7 @@ def help_text_for_user(user_id) -> str:
         "• <code>/profile</code> — xem số dư, VIP, referral\n"
         "• <code>/trial_status</code> — kiểm tra trạng thái 200 Xu trải nghiệm\n"
         "• <code>/huongdan</code> hoặc <code>/guide</code> — xem hướng dẫn sử dụng chi tiết\n"
+        "• <code>/legal</code> — xem điều khoản/pháp lý đầy đủ\n"
         "• <code>/naptien</code> — tạo QR mua/nạp Xu dịch vụ\n"
         "• <code>/khuyenmai</code> hoặc <code>/uudai</code> — xem ưu đãi nên dùng\n"
         "• <code>/promo &lt;mã&gt;</code> hoặc <code>/magiamgia &lt;mã&gt;</code> — lưu mã ưu đãi cho lần nạp tiếp theo\n"
@@ -22759,6 +22804,8 @@ def help_text_for_user(user_id) -> str:
         f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack ({IMAGE_TO_VIDEO_PROMPT_COST} Xu)\n"
         f"• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật ({AI_IMAGE_COST} Xu)\n"
         f"• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật ({AI_IMAGE_EDIT_COST} Xu)\n"
+        "• <code>/media_factory</code> — xem trung tâm Video & Media\n"
+        "• <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
         "• Kết quả gồm outline, storyboard, scene prompt, prompt ảnh, caption, hashtag và CTA để bạn tự đăng.\n"
         "• Có thể dán link trực tiếp trong prompt để bot viết caption/CTA tham khảo.\n\n"
         "<b>4. Báo cáo/tối ưu thủ công</b>\n"
@@ -22887,6 +22934,10 @@ async def cmd_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "⚠️ File điều khoản đang được cập nhật, vui lòng thử lại sau hoặc nhắn admin/hỗ trợ."
             )
+
+async def cmd_legal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command_received("legal", update)
+    await update.message.reply_text(legal_menu_text(), parse_mode="HTML", reply_markup=legal_menu_keyboard())
 
 def privacy_text() -> str:
     return (
@@ -23186,6 +23237,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
         f"• Real Video Generation: <code>{'enabled' if providers['media_factory']['image_to_video'] else 'planned/disabled'}</code>",
         f"• Admin Publish: <code>{'enabled/internal' if providers['media_factory']['admin_publish'] else 'disabled/internal'}</code>",
+        f"• YouTube Publish: <code>{'enabled/admin-only' if providers['media_factory']['youtube_publish_admin'] else 'planned/admin-only/disabled'}</code>",
+        f"• TikTok Publish: <code>{'enabled/admin-only' if providers['media_factory']['tiktok_publish_admin'] else 'planned/admin-only/disabled'}</code>",
+        f"• Facebook Publish: <code>{'enabled/admin-only' if providers['media_factory']['facebook_publish_admin'] else 'planned/admin-only/disabled'}</code>",
         f"• Customer Publish: <code>{'enabled' if providers['media_factory']['customer_publish'] else 'disabled'}</code>",
         f"• Auto Publish: <code>{'enabled' if providers['media_factory']['auto_publish'] else 'disabled'}</code>",
         f"• Ads Assistant: <code>{'enabled' if providers['media_factory']['ads_assistant'] else 'disabled'}</code>",
@@ -24603,6 +24657,77 @@ def update_media_factory_job_status(job_id: int, status: str, approved_by="", no
     finally:
         conn.close()
 
+def media_factory_overview_text() -> str:
+    return (
+        "🎬 <b>VIDEO & MEDIA FACTORY — TOAN AAS</b>\n\n"
+        "TOAN AAS hỗ trợ xây quy trình tạo nội dung/video đa hướng:\n\n"
+        "<b>1. Trend & Ý tưởng</b>\n"
+        "• Tìm/gợi ý trend TikTok, YouTube, Facebook.\n"
+        "• Gợi ý chủ đề, hook, tiêu đề, nội dung phù hợp.\n"
+        "• Gợi ý truyện/chủ đề đang hot theo nguồn hợp lệ.\n\n"
+        "<b>2. Thu thập tư liệu hợp lệ</b>\n"
+        "• Gợi ý từ khóa tìm ảnh/thông tin.\n"
+        "• Tạo prompt ảnh chân thật.\n"
+        "• Tạo danh sách ảnh/cảnh cần dùng.\n"
+        "• Chỉ dùng nội dung bạn sở hữu hoặc có quyền sử dụng.\n\n"
+        "<b>3. Dịch & biên tập</b>\n"
+        "• Dịch/biên tập nội dung Trung, Hàn, Nhật, Anh sang tiếng Việt khi nguồn hợp lệ.\n"
+        "• Biên tập thành lời kể tự nhiên.\n"
+        "• Tạo phụ đề, voice-over, caption.\n\n"
+        "<b>4. Tạo video AI</b>\n"
+        "• Tạo script/storyboard.\n"
+        "• Tạo prompt ảnh/video.\n"
+        "• Tạo voice tiếng Việt.\n"
+        "• Tạo caption/hashtag/CTA.\n"
+        "• Tạo video pack để khách tự dựng hoặc tải xuống khi provider sẵn sàng.\n\n"
+        "<b>5. Duyệt nội dung</b>\n"
+        "• Bot tạo bản nháp.\n"
+        "• Khách/admin duyệt hoặc từ chối.\n"
+        "• Nếu bản đầu chưa đúng yêu cầu, có thể yêu cầu tạo lại 1 lần theo chính sách gói.\n"
+        "• Sau khi duyệt/tải xuống, chỉnh sửa lớn có thể tính thêm Xu dịch vụ.\n\n"
+        "<b>6. Đăng bài</b>\n"
+        "• Customer publish: đang tắt.\n"
+        "• Admin publish: chỉ test nội bộ.\n"
+        "• TikTok/YouTube/Facebook API là backlog admin-only sau khi có approval gate.\n\n"
+        "<b>Lệnh liên quan:</b>\n"
+        "• <code>/media_factory &lt;chủ đề&gt;</code> — tạo pack trend/script/ảnh/video/caption\n"
+        "• <code>/video_factory_flow</code> — xem quy trình đầy đủ\n"
+        "• <code>/image_tools</code> — công cụ ảnh\n"
+        "• <code>/image_prompt &lt;chủ đề&gt;</code> — prompt ảnh chân thật\n"
+        "• <code>/image_to_video_pack &lt;chủ đề&gt;</code> — prompt video từ ảnh\n"
+        "• <code>/content_policy</code> — quy định nội dung/bản quyền\n\n"
+        "<b>Roadmap đang chuẩn hóa:</b> <code>/dubbing_help</code>, <code>/source_help</code>, "
+        "<code>/story_video_factory</code>, <code>/story_motion_prompt</code>.\n\n"
+        "TOAN AAS không cam kết video chắc chắn viral, đạt view, duyệt ads hoặc có doanh thu."
+    )
+
+def video_factory_flow_text() -> str:
+    return (
+        "🔁 <b>QUY TRÌNH TẠO VIDEO AI TOAN AAS</b>\n\n"
+        "<b>Bước 1: Tìm trend</b>\n"
+        "→ <code>/trend_ai &lt;chủ đề&gt;</code>\n\n"
+        "<b>Bước 2: Chọn hướng nội dung</b>\n"
+        "→ Bot gợi ý hook, tiêu đề, nội dung và hướng tư liệu hợp lệ.\n\n"
+        "<b>Bước 3: Tạo ảnh/cảnh</b>\n"
+        "→ <code>/image_prompt &lt;chủ đề&gt;</code>\n"
+        "→ <code>/image_to_video_pack &lt;chủ đề&gt;</code>\n\n"
+        "<b>Bước 4: Dịch/biên tập nếu có nội dung nước ngoài hợp lệ</b>\n"
+        "→ Dùng nguồn bạn sở hữu, nguồn có quyền, public domain hoặc giấy phép phù hợp.\n"
+        "→ Module dịch/lồng tiếng chuyên sâu đang nằm trong roadmap.\n\n"
+        "<b>Bước 5: Tạo video pack</b>\n"
+        "→ <code>/media_factory &lt;chủ đề&gt;</code>\n"
+        "→ Kết quả gồm script, storyboard, prompt ảnh/video, voice-over, caption, hashtag, CTA.\n\n"
+        "<b>Bước 6: Duyệt</b>\n"
+        "→ Khách kiểm tra bản nháp.\n"
+        "→ Nếu chưa ổn: có thể yêu cầu tạo lại 1 lần theo chính sách gói.\n"
+        "→ Nếu ổn: tải xuống hoặc tự dùng để dựng/đăng.\n\n"
+        "<b>Bước 7: Admin publish thử nghiệm</b>\n"
+        "→ Chỉ admin.\n"
+        "→ TikTok/YouTube/Facebook API sẽ làm sau.\n"
+        "→ Customer publish vẫn OFF.\n\n"
+        "TOAN AAS không hỗ trợ crawler/reup vi phạm bản quyền, né watermark/DRM/Content ID hoặc deepfake người thật khi chưa có quyền."
+    )
+
 def fallback_trend_ai_pack(topic: str) -> str:
     topic = topic or "sản phẩm/dịch vụ"
     templates = [
@@ -24920,7 +25045,7 @@ async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     topic = media_factory_topic_from_args(context)
     if not topic:
-        return await update.message.reply_text("⚠️ Cú pháp: /media_factory <chủ đề>")
+        return await update.message.reply_text(media_factory_overview_text(), parse_mode="HTML")
     if not await charge_media_factory_or_reply(update, uid, MEDIA_FACTORY_PACK_COST, "spend_media_factory", f"Media Factory pack: {topic[:120]}"):
         return
     fallback = fallback_media_factory_pack(topic)
@@ -24933,6 +25058,9 @@ async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     job_id = create_media_factory_job(uid, media_factory_username(update), "media_factory", topic, trend_title=topic, trend_summary=output[:1200], image_prompt_pack=output, video_prompt_pack=output, caption_pack=output, cost_xu=MEDIA_FACTORY_PACK_COST)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"Job ID: {job_id}\n\n{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_video_factory_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(video_factory_flow_text(), parse_mode="HTML")
 
 async def cmd_admin_trend_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -38620,6 +38748,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("huongdan",    cmd_huongdan))
     tg_app.add_handler(CommandHandler("guide",       cmd_huongdan))
     tg_app.add_handler(CommandHandler("hdsd",        cmd_huongdan))
+    tg_app.add_handler(CommandHandler("legal",       cmd_legal))
+    tg_app.add_handler(CommandHandler("phaply",      cmd_legal))
+    tg_app.add_handler(CommandHandler("dieukhoan",   cmd_legal))
     tg_app.add_handler(CommandHandler("terms",       cmd_terms))
     tg_app.add_handler(CommandHandler("privacy",     cmd_privacy))
     tg_app.add_handler(CommandHandler("dieukhoan_xu", cmd_dieukhoan_xu))
@@ -38781,6 +38912,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("ai_image", cmd_ai_image))
     tg_app.add_handler(CommandHandler("ai_image_edit", cmd_ai_image_edit))
     tg_app.add_handler(CommandHandler("media_factory", cmd_media_factory))
+    tg_app.add_handler(CommandHandler("video_factory_flow", cmd_video_factory_flow))
     tg_app.add_handler(CommandHandler("admin_trend_video", admin_internal_command(cmd_admin_trend_video)))
     tg_app.add_handler(CommandHandler("review_job", admin_internal_command(cmd_review_job)))
     tg_app.add_handler(CommandHandler("approve_job", admin_internal_command(cmd_approve_job)))

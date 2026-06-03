@@ -15,21 +15,19 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
 
 ## Current Priority
 
-1. Test `/terms`.
-2. Test `/privacy`.
-3. Test `/dieukhoan_xu`.
-4. Test `/refund_policy`.
-5. Test `/content_policy`.
-6. Test `/affiliate_policy`.
-7. Test `/ads_policy`.
-8. Test `/data_delete` and `/mydata`.
-9. Test tool audit commands.
-10. Test image tools.
-11. Fix PayOS separately if checkout remains invalid.
-12. Do not open customer publish or ads.
-13. Do not collect social passwords/cards.
-14. Keep legal gates before big plan modules.
-15. Do not start big plan yet.
+1. Test `/legal` and the Legal button in `/start`.
+2. Test `/terms`, `/privacy`, `/dieukhoan_xu`, `/refund_policy`, `/content_policy`, `/affiliate_policy`, `/ads_policy`.
+3. Test website `/`, `/landing`, `/LOGO.png`, `/banner.png` and the legal footer.
+4. Test `/media_factory`.
+5. Test `/video_factory_flow`.
+6. Test `/providers` and confirm PayOS still reports NEED DEBUG if checkout remains invalid.
+7. Test `/sales_ready`.
+8. Test image tools and tool audit commands.
+9. Fix PayOS separately if checkout remains invalid.
+10. Do not open customer publish or ads.
+11. Do not collect social passwords/cards.
+12. Keep legal gates before big plan modules.
+13. Do not start big plan yet.
 
 ## Next After Foundation Passes
 

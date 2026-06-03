@@ -562,7 +562,7 @@ footer {
 .footer-legal {
   display: grid;
   gap: 6px;
-  max-width: 480px;
+  max-width: 560px;
   font-size: 13px;
   line-height: 1.55;
 }
@@ -601,7 +601,7 @@ footer {
 <header class="topbar">
   <div class="shell nav">
     <a class="brand" href="#top" aria-label="TOAN AAS">
-      <img src="/LOGO.png" alt="TOAN AAS logo">
+      <img src="/LOGO.png" alt="TOAN AAS logo" loading="eager" onerror="this.onerror=null;this.src='/banner.png';">
       <div>
         <div class="brand-title">TOAN <span>AAS</span></div>
         <div class="brand-sub">AI Automation System</div>
@@ -642,7 +642,7 @@ footer {
         </div>
       </div>
       <aside class="hero-logo-card" aria-label="TOAN AAS summary">
-        <img src="/LOGO.png" alt="TOAN AAS - AI Automation System">
+        <img src="/LOGO.png" alt="TOAN AAS - AI Automation System" loading="eager" onerror="this.onerror=null;this.src='/banner.png';">
         <div class="hero-points">
           <div><b>200 Xu dịch vụ</b>Trải nghiệm khi tạo tài khoản mới</div>
           <div><b>PayOS QR</b>Mua/nạp Xu dịch vụ tự động, có thủ công dự phòng</div>
@@ -882,14 +882,18 @@ footer {
 <footer>
   <div class="shell footer-row">
     <div class="footer-brand">
-      <img src="/LOGO.png" alt="TOAN AAS logo">
+      <img src="/LOGO.png" alt="TOAN AAS logo" loading="lazy" onerror="this.onerror=null;this.src='/banner.png';">
       <span>TOAN AAS</span>
     </div>
     <div>Built for AI Automation, Content Pack and Business Operations.</div>
     <div class="footer-legal">
       <b>Pháp lý & an toàn:</b>
       <a href="/download/dieu-khoan-su-dung-toan-aas.pdf" target="_blank" rel="noopener">Điều khoản sử dụng dịch vụ</a>
-      <span>Gõ /privacy, /dieukhoan_xu, /refund_policy và /content_policy trong bot.</span>
+      <span>Quyền riêng tư: gõ <b>/privacy</b> trong bot.</span>
+      <span>Quy định Xu dịch vụ: gõ <b>/dieukhoan_xu</b> trong bot.</span>
+      <span>Chính sách nạp tiền/hỗ trợ: gõ <b>/refund_policy</b> trong bot.</span>
+      <span>Quy định nội dung: gõ <b>/content_policy</b> trong bot.</span>
+      <a href="https://t.me/toanaas" target="_blank" rel="noopener">Hỗ trợ/admin: @toanaas</a>
       <small>Xu dịch vụ TOAN AAS là đơn vị nội bộ để sử dụng công cụ trong hệ thống, không phải tiền/tiền điện tử, không rút tiền và không chuyển nhượng.</small>
     </div>
     <div>© 2026 TOAN AAS - AI Automation System.</div>
