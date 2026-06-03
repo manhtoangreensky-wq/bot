@@ -16,6 +16,7 @@ operator_uploads
 token tele.txt
 admin ID.txt
 *.docx
+!TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx
 *.mp4
 video AI
 toan-daas-updated-files

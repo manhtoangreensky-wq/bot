@@ -730,6 +730,15 @@ def init_db():
         note TEXT,
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS api_debug_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT,
+        action TEXT,
+        status TEXT,
+        http_status INTEGER DEFAULT 0,
+        detail TEXT,
+        created_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS leads (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
@@ -22514,7 +22523,27 @@ def guide_docx_candidates() -> list[str]:
     ]
 
 def find_guide_docx_path() -> str:
-    return find_asset_path(GUIDE_DOCX_FILE)
+    exact = find_asset_path(GUIDE_DOCX_FILE)
+    if exact:
+        return exact
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    search_dirs = [
+        os.getcwd(),
+        base_dir,
+        os.path.join(base_dir, "docs"),
+        os.path.join(base_dir, "static"),
+        os.path.join(base_dir, "assets"),
+    ]
+    markers = ("huong_dan", "huong-dan", "toan_aas_huong_dan")
+    for directory in search_dirs:
+        try:
+            for item in os.listdir(directory):
+                lower = item.lower()
+                if lower.endswith(".docx") and any(marker in lower for marker in markers):
+                    return os.path.join(directory, item)
+        except Exception:
+            pass
+    return ""
 
 def terms_pdf_candidates() -> list[str]:
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24123,6 +24152,47 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  note=<code>{html.escape(str(note))}</code>"
             + (f"\n  detail=<code>{html.escape(detail[:180])}</code>" if detail else "")
         )
+    lines.append("\nKhông hiển thị API key/token/secret.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_api_debug_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    try:
+        conn = db_connect()
+        conn.execute("""CREATE TABLE IF NOT EXISTS api_debug_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT,
+            action TEXT,
+            status TEXT,
+            http_status INTEGER DEFAULT 0,
+            detail TEXT,
+            created_at TEXT
+        )""")
+        rows = conn.execute(
+            "SELECT provider, action, status, http_status, detail, created_at FROM api_debug_events ORDER BY id DESC LIMIT 10"
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        return await update.message.reply_text(
+            f"❌ <code>/api_debug_status</code> lỗi DB: <code>{html.escape(str(e)[:240])}</code>",
+            parse_mode="HTML",
+        )
+
+    lines = ["🧪 <b>API Debug Status</b>", ""]
+    if not rows:
+        lines.append("Chưa có <code>api_debug_events</code> nào. Hãy chạy <code>/tool_test_translate</code>, <code>/tool_test_stt</code> hoặc <code>/tool_test_image</code> để ghi log.")
+    else:
+        lines.append("10 sự kiện API gần nhất:")
+        for provider, action, status, http_status, detail, created_at in rows:
+            lines.append(
+                f"• <code>{html.escape(provider or '-')}</code> "
+                f"<code>{html.escape(action or '-')}</code> "
+                f"<b>{html.escape(status or '-')}</b> "
+                f"HTTP <code>{int(http_status or 0)}</code> — "
+                f"<code>{html.escape((detail or '-')[:260])}</code> — "
+                f"<code>{html.escape(created_at or '-')}</code>"
+            )
     lines.append("\nKhông hiển thị API key/token/secret.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -39346,6 +39416,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("api_recommend", cmd_api_recommend))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
     tg_app.add_handler(CommandHandler("tool_status", cmd_tool_status))
+    tg_app.add_handler(CommandHandler("api_debug_status", cmd_api_debug_status))
     tg_app.add_handler(CommandHandler("tool_test_ai", cmd_tool_test_ai))
     tg_app.add_handler(CommandHandler("tool_test_translate", cmd_tool_test_translate))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
