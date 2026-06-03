@@ -183,6 +183,7 @@ h1 {
   max-width: 680px;
   color: var(--text-muted);
   font-size: 18px;
+  font-weight: 650;
 }
 .hero-actions {
   display: flex;
@@ -235,7 +236,7 @@ h1 {
   padding: 12px;
   font-size: 13px;
   font-weight: 800;
-  color: var(--ink-muted);
+  color: var(--ink-muted) !important;
   background: rgba(237,247,242,.84);
 }
 .hero-points b { display: block; color: var(--ink); font-size: 15px; }
@@ -300,7 +301,8 @@ h2 {
 .xu,
 .price-card ul,
 .hero-points div {
-  color: var(--ink-muted);
+  color: var(--ink-muted) !important;
+  font-weight: 600;
 }
 
 .dark p,
@@ -309,7 +311,7 @@ h2 {
 .platform p,
 .video-top p,
 .safety-item {
-  color: var(--text-muted);
+  color: var(--text-muted) !important;
 }
 
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
@@ -562,7 +564,7 @@ footer {
   padding: 38px 0;
   border-top: 1px solid var(--line);
   background: #06100c;
-  color: #cfe2d8;
+  color: #cfe2d8 !important;
 }
 .footer-row {
   display: flex;
@@ -592,11 +594,11 @@ footer {
   line-height: 1.55;
 }
 .footer-legal a {
-  color: #d9f5e8;
+  color: #d9f5e8 !important;
   font-weight: 900;
 }
 .footer-legal small {
-  color: #cfe2d8;
+  color: #cfe2d8 !important;
 }
 
 @media (max-width: 980px) {

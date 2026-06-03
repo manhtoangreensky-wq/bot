@@ -27,6 +27,7 @@ import unicodedata
 import csv
 import io
 import tempfile
+import mimetypes
 import shutil
 import traceback
 import xml.etree.ElementTree as ET
@@ -1551,6 +1552,37 @@ def set_system_setting(key, value, note="", updated_by=""):
         if conn:
             conn.close()
 
+def record_api_debug(provider: str, action: str, status: str, http_status: int = 0, detail: str = ""):
+    conn = None
+    try:
+        conn = db_connect()
+        conn.execute("""CREATE TABLE IF NOT EXISTS api_debug_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT,
+            action TEXT,
+            status TEXT,
+            http_status INTEGER DEFAULT 0,
+            detail TEXT,
+            created_at TEXT
+        )""")
+        conn.execute(
+            "INSERT INTO api_debug_events (provider, action, status, http_status, detail, created_at) VALUES (?,?,?,?,?,?)",
+            (
+                str(provider or "")[:60],
+                str(action or "")[:80],
+                str(status or "")[:80],
+                int(http_status or 0),
+                sanitize_log_text(str(detail or ""))[:1000],
+                now_text(),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"API debug event write failed: {e}")
+    finally:
+        if conn:
+            conn.close()
+
 def emit_event(conn, event_type, source, payload=None, status="pending"):
     try:
         c = conn.cursor()
@@ -1893,6 +1925,7 @@ PAYOS_CREATE_SIGNATURE_VARIANTS = {
     "faq_order": ("amount", "orderCode", "description", "returnUrl", "cancelUrl"),
     "payload_order": ("orderCode", "amount", "description", "cancelUrl", "returnUrl"),
 }
+PAYOS_CREATE_PAYMENT_ENDPOINT = "https://api-merchant.payos.vn/v2/payment-requests"
 PAYOS_DEBUG_SIGNATURE_VARIANTS = (
     "standard_sorted",
     "faq_order",
@@ -1918,6 +1951,31 @@ def build_payos_signature_data(payload: dict, variant: str | None = None) -> str
     if missing:
         raise KeyError(f"Missing PayOS signature field(s): {', '.join(missing)}")
     return "&".join(f"{key}={payload[key]}" for key in fields)
+
+def payos_payload_type_summary(payload: dict) -> str:
+    return (
+        f"orderCode type={type(payload.get('orderCode')).__name__}; "
+        f"amount type={type(payload.get('amount')).__name__}; "
+        f"description length={len(str(payload.get('description') or ''))}; "
+        f"cancelUrl={payload.get('cancelUrl')}; "
+        f"returnUrl={payload.get('returnUrl')}"
+    )
+
+def mask_payos_signature(signature: str) -> str:
+    signature = str(signature or "")
+    if len(signature) <= 16:
+        return "***" if signature else "missing"
+    return signature[:8] + "***" + signature[-8:]
+
+def env_strip_diagnostic(name: str, value: str) -> dict:
+    raw = os.environ.get(name, "")
+    stripped = str(raw or "").strip()
+    return {
+        "configured": bool(str(value or "")),
+        "raw_len": len(str(raw or "")),
+        "stripped_len": len(stripped),
+        "stripped_differs": str(raw or "") != stripped,
+    }
 
 def get_payos_create_signature_variant() -> str:
     # Customer payment creation must always use the PayOS documented order.
@@ -1997,7 +2055,7 @@ async def create_payos_payment_request(payos_body: dict, signature_variant: str 
     }
     async with httpx.AsyncClient() as client:
         res = await client.post(
-            "https://api-merchant.payos.vn/v2/payment-requests",
+            PAYOS_CREATE_PAYMENT_ENDPOINT,
             headers=headers,
             json=request_body,
             timeout=30.0
@@ -20929,6 +20987,20 @@ class AgentGemini:
 
 class AgentDeepgram:
     @staticmethod
+    def _result_summary(data: dict) -> tuple[str, str]:
+        try:
+            metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
+            results = data.get("results", {}) if isinstance(data, dict) else {}
+            channels = results.get("channels") or []
+            duration = metadata.get("duration") or metadata.get("audio_duration") or "-"
+            detected_language = "-"
+            if channels:
+                detected_language = str((channels[0].get("detected_language") or channels[0].get("language") or "-"))
+            return str(duration), detected_language or "-"
+        except Exception:
+            return "-", "-"
+
+    @staticmethod
     def _extract_transcript(data: dict) -> str:
         try:
             alt = (
@@ -20984,6 +21056,7 @@ class AgentDeepgram:
                         "smart_format": "true",
                         "detect_language": "true",
                         "punctuate": "true",
+                        "filler_words": "false",
                         "utterances": "false",
                     },
                     headers={
@@ -21002,13 +21075,23 @@ class AgentDeepgram:
                 transcript = AgentDeepgram._extract_transcript(data)
                 if not transcript:
                     debug = AgentDeepgram._debug_payload(data, body_preview)
-                    await alert_admin(context, "Deepgram empty transcript", debug[:900])
-                    return f"❌ Deepgram empty transcript. {debug[:420]}"
+                    duration, detected_language = AgentDeepgram._result_summary(data)
+                    record_api_debug("deepgram", "stt", "EMPTY_TRANSCRIPT", res.status_code, debug[:500])
+                    await alert_admin(context, "Deepgram empty transcript", debug[:300])
+                    return (
+                        "❌ Deepgram không nhận được lời nói rõ trong file.\n"
+                        f"• Duration: {duration}s\n"
+                        f"• Detected language: {detected_language}\n"
+                        "• Gợi ý: gửi voice/audio 10-20 giây, nói rõ, ít nhạc nền/ồn."
+                    )
+                record_api_debug("deepgram", "stt", "PASS", res.status_code, f"chars={len(transcript)}")
                 return transcript
             error_preview = body_preview[:300]
+            record_api_debug("deepgram", "stt", "FAIL", res.status_code, error_preview)
             await alert_admin(context, "Deepgram", f"HTTP {res.status_code}: {error_preview[:220]}")
             return f"❌ Deepgram HTTP {res.status_code}: {error_preview}"
         except Exception as e:
+            record_api_debug("deepgram", "stt", "FAIL", 0, str(e)[:300])
             return f"❌ Lỗi: {str(e)}"
 
 def detect_image_format(data: bytes) -> str:
@@ -21062,6 +21145,21 @@ def normalize_provider_image_response(res, provider_name: str) -> tuple[bool, by
     if not ok:
         return False, b"", f"{provider_name} HTTP {status_code}; content_type={content_type or '-'}; invalid_image={detail}"
     return True, png_bytes, f"{provider_name} {detail}->png"
+
+def format_image_provider_status(provider_name: str, status: str, detail: str = "") -> str:
+    status = str(status or "MISSING").upper()
+    if status != "FAIL":
+        return status
+    detail = sanitize_log_text(str(detail or "")).strip()
+    pattern = rf"{re.escape(provider_name)}\s+HTTP\s+(\d+);\s*content_type=([^;]+);\s*(?:body|invalid_image)=(.*)"
+    match = re.search(pattern, detail, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        code = match.group(1)
+        content_type = (match.group(2) or "-").strip()
+        body = re.sub(r"\s+", " ", (match.group(3) or "").strip())[:300]
+        return f"FAIL HTTP {code} {content_type} — {body or '-'}"
+    compact_detail = re.sub(r"\s+", " ", detail)[:300]
+    return f"FAIL — {compact_detail or '-'}"
 
 def telegram_png_document(data: bytes, filename: str = "no_bg.png") -> io.BytesIO:
     out = io.BytesIO(data)
@@ -23894,7 +23992,8 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
     cutout_status = "MISSING"
     output_bytes = b""
     output_provider = ""
-    detail = ""
+    remove_detail = ""
+    cutout_detail = ""
 
     if REMOVEBG_API_KEY:
         try:
@@ -23910,12 +24009,16 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
                 remove_status = "PASS"
                 output_bytes = png_bytes
                 output_provider = "RemoveBG"
+                remove_detail = image_detail
+                record_api_debug("removebg", "remove_bg", "PASS", getattr(res, "status_code", 0), image_detail)
             else:
                 remove_status = "FAIL"
-                detail = image_detail
+                remove_detail = image_detail
+                record_api_debug("removebg", "remove_bg", "FAIL", getattr(res, "status_code", 0), image_detail)
         except Exception as e:
             remove_status = "FAIL"
-            detail = str(e)[:180]
+            remove_detail = str(e)[:300]
+            record_api_debug("removebg", "remove_bg", "FAIL", 0, remove_detail)
 
     if not output_bytes and CUTOUT_API_KEY:
         try:
@@ -23930,19 +24033,26 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
                 cutout_status = "PASS"
                 output_bytes = png_bytes
                 output_provider = "Cutout"
+                cutout_detail = image_detail
+                record_api_debug("cutout", "remove_bg", "PASS", getattr(res, "status_code", 0), image_detail)
             else:
                 cutout_status = "FAIL"
-                detail = detail or image_detail
+                cutout_detail = image_detail
+                record_api_debug("cutout", "remove_bg", "FAIL", getattr(res, "status_code", 0), image_detail)
         except Exception as e:
             cutout_status = "FAIL"
-            detail = detail or str(e)[:180]
+            cutout_detail = str(e)[:300]
+            record_api_debug("cutout", "remove_bg", "FAIL", 0, cutout_detail)
 
     overall = "PASS" if output_bytes else ("MISSING" if remove_status == "MISSING" and cutout_status == "MISSING" else "FAIL")
-    save_tool_test_result("image", overall, f"RemoveBG={remove_status}; Cutout={cutout_status}; {detail}", update.effective_user.id)
+    remove_line = format_image_provider_status("RemoveBG", remove_status, remove_detail)
+    cutout_line = format_image_provider_status("Cutout", cutout_status, cutout_detail)
+    detail = f"RemoveBG={remove_line}; Cutout={cutout_line}"
+    save_tool_test_result("image", overall, detail, update.effective_user.id)
     if output_bytes:
         save_tool_test_result("image_remove_bg", "PASS", f"provider={output_provider.lower()}; cost_level=low; tool_test_image success", update.effective_user.id)
     elif overall == "FAIL":
-        save_tool_test_result("image_remove_bg", "FAIL", f"RemoveBG={remove_status}; Cutout={cutout_status}; {detail}", update.effective_user.id)
+        save_tool_test_result("image_remove_bg", "FAIL", detail, update.effective_user.id)
     if output_bytes:
         out = telegram_png_document(output_bytes, "toan_aas_tool_test_no_bg.png")
         await update.message.reply_document(
@@ -23952,8 +24062,8 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     await update.message.reply_text(
         ("✅ <b>Image provider PASS</b>\n\n" if output_bytes else "❌ <b>Image provider FAIL</b>\n\n")
-        + f"• RemoveBG: <code>{html.escape(remove_status)}</code>\n"
-        f"• Cutout: <code>{html.escape(cutout_status)}</code>\n"
+        + f"• RemoveBG: <code>{html.escape(remove_line)}</code>\n"
+        f"• Cutout: <code>{html.escape(cutout_line)}</code>\n"
         f"• Output sent: <code>{'yes' if output_bytes else 'no'}</code>\n"
         + (f"• Provider: <code>{html.escape(output_provider)}</code>\n" if output_bytes else "")
         + (f"• Error: <code>{html.escape(detail[:500])}</code>\n" if detail and not output_bytes else "")
@@ -24022,7 +24132,12 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⚠️ File quá lớn để smoke test. Hãy dùng audio ngắn dưới 15MB.")
     try:
         file_bytes = bytes(await (await media.get_file()).download_as_bytearray())
-        content_type = getattr(media, "mime_type", "") or ("audio/ogg" if getattr(reply, "voice", None) else "application/octet-stream")
+        content_type = getattr(media, "mime_type", "") or ""
+        file_name = getattr(media, "file_name", "") or ""
+        if not content_type and file_name:
+            content_type = mimetypes.guess_type(file_name)[0] or ""
+        if not content_type:
+            content_type = "audio/ogg" if getattr(reply, "voice", None) else "application/octet-stream"
         transcript = (await AgentDeepgram.transcribe(file_bytes, context, content_type=content_type) or "").strip()
         passed = bool(transcript and not transcript.startswith("❌"))
         status = "PASS" if passed else "FAIL"
@@ -24036,14 +24151,17 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
         else:
-            await update.message.reply_text(
-                "❌ <b>STT không nhận được transcript.</b>\n\n"
-                "• Provider: <code>Deepgram</code>\n"
-                "• Có thể file không có tiếng nói rõ, âm lượng nhỏ, hoặc định dạng chưa phù hợp.\n"
-                "• Hãy thử voice/audio 10-20 giây có giọng nói rõ.\n"
-                f"• Error: <code>{html.escape(detail[:240])}</code>",
-                parse_mode="HTML",
-            )
+            if detail.startswith("❌ Deepgram không nhận được"):
+                text = "🎤 <b>STT Smoke Test</b>\n\n" + html.escape(detail[:900])
+            else:
+                text = (
+                    "❌ <b>STT không nhận được transcript.</b>\n\n"
+                    "• Provider: <code>Deepgram</code>\n"
+                    "• Có thể file không có tiếng nói rõ, âm lượng nhỏ, hoặc định dạng chưa phù hợp.\n"
+                    "• Hãy thử voice/audio 10-20 giây có giọng nói rõ.\n"
+                    f"• Error: <code>{html.escape(detail[:240])}</code>"
+                )
+            await update.message.reply_text(text, parse_mode="HTML")
     except Exception as e:
         save_tool_test_result("stt", "FAIL", str(e)[:500], update.effective_user.id)
         await update.message.reply_text(
@@ -38629,10 +38747,14 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
                 "code": str(data.get("code") or ""),
                 "desc": str(data.get("desc") or data.get("message") or raw_preview or "")[:250],
                 "signature_data": raw_str,
+                "payload_debug": payos_payload_type_summary(payos_body),
+                "raw_preview": raw_preview[:500],
                 "checkout_url": checkout_url,
                 "payment_link_id": payment_link_id,
                 "pass": getattr(res, "status_code", "") == 200 and data.get("code") == "00",
             }
+            debug_status = "PASS" if result["pass"] else ("SIGNATURE_INVALID" if re.search(r"signature|mã kiểm tra", result["desc"], re.IGNORECASE) else "FAIL")
+            record_api_debug("payos", "create_payment_link", debug_status, getattr(res, "status_code", 0), f"variant={variant}; {result['payload_debug']}; desc={result['desc']}; raw={result['raw_preview']}")
         except Exception as e:
             try:
                 _signature, raw_str = sign_payos_payment_request(payos_body, variant=variant)
@@ -38645,10 +38767,13 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
                 "code": "",
                 "desc": str(e)[:250],
                 "signature_data": raw_str,
+                "payload_debug": payos_payload_type_summary(payos_body),
+                "raw_preview": "",
                 "checkout_url": "",
                 "payment_link_id": "",
                 "pass": False,
             }
+            record_api_debug("payos", "create_payment_link", "FAIL", 0, f"variant={variant}; {result['payload_debug']}; error={result['desc']}")
         results.append(result)
         if result["pass"] and first_pass is None:
             first_pass = result
@@ -38706,7 +38831,9 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
             f"Order: <code>{html.escape(str(item['order_code']))}</code>",
             f"HTTP/Code: <code>{html.escape(str(item['http_status']))}</code> / <code>{html.escape(str(item['code']))}</code>",
             f"Desc: <code>{html.escape(str(item['desc']))}</code>",
+            f"Payload: <code>{html.escape(str(item.get('payload_debug') or ''))}</code>",
             f"Signature data: <code>{html.escape(str(item['signature_data']))}</code>",
+            f"Raw: <code>{html.escape(str(item.get('raw_preview') or '')[:500])}</code>",
         ])
     await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
 
@@ -38715,24 +38842,73 @@ async def cmd_payos_env_check(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     def env_line(name: str, value: str) -> str:
-        if value:
-            return f"• <code>{name}</code>: configured, length=<b>{len(str(value))}</b>"
+        info = env_strip_diagnostic(name, value)
+        if info["configured"]:
+            return (
+                f"• <code>{name}</code>: configured len=<b>{info['stripped_len']}</b> "
+                f"raw_len=<code>{info['raw_len']}</code> "
+                f"stripped_differs=<code>{'yes' if info['stripped_differs'] else 'no'}</code>"
+            )
         return f"• <code>{name}</code>: <b>missing</b>"
 
     return_url = make_payos_return_url(context)
     lines = [
-        "🔐 <b>PayOS ENV check</b>",
+        "💳 <b>PayOS Env Check</b>",
         "",
         env_line("PAYOS_CLIENT_ID", PAYOS_CLIENT_ID),
         env_line("PAYOS_API_KEY", PAYOS_API_KEY),
         env_line("PAYOS_CHECKSUM_KEY", PAYOS_CHECKSUM_KEY),
         "",
+        f"public_base_url: <code>{html.escape(effective_public_base_url() or '-')}</code>",
+        f"returnUrl: <code>{html.escape(return_url)}</code>",
+        f"cancelUrl: <code>{html.escape(return_url)}</code>",
+        f"using endpoint: <code>{html.escape(PAYOS_CREATE_PAYMENT_ENDPOINT)}</code>",
         f"Active signature variant: <code>{html.escape(get_payos_create_signature_variant())}</code>",
-        f"Return/Cancel URL: <code>{html.escape(return_url)}</code>",
         "",
         "Không hiển thị key/token/checksum trong log hoặc Telegram.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_payos_signature_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return
+    amount = 10000
+    order_code = generate_order_code()
+    return_url = make_payos_return_url(context)
+    payload = {
+        "orderCode": int(order_code),
+        "amount": int(amount),
+        "description": make_payos_description("10k"),
+        "cancelUrl": return_url,
+        "returnUrl": return_url,
+    }
+    if PAYOS_CHECKSUM_KEY:
+        signature, signature_data = sign_payos_payment_request(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT)
+    else:
+        signature, signature_data = "", build_payos_signature_data(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT)
+    safe_payload = json.dumps(payload, ensure_ascii=False, indent=2)
+    record_api_debug(
+        "payos",
+        "signature_debug",
+        "READY" if PAYOS_CHECKSUM_KEY else "MISSING_CHECKSUM",
+        0,
+        f"{payos_payload_type_summary(payload)}; signature_data={signature_data}",
+    )
+    lines = [
+        "🧾 <b>PayOS Signature Debug</b>",
+        "",
+        f"checksum configured: <code>{'yes' if PAYOS_CHECKSUM_KEY else 'no'}</code>",
+        f"checksum key length: <code>{len(PAYOS_CHECKSUM_KEY or '')}</code>",
+        f"signature variant: <code>{html.escape(PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT)}</code>",
+        f"canonical data: <code>{html.escape(signature_data)}</code>",
+        f"signature masked: <code>{html.escape(mask_payos_signature(signature))}</code>",
+        f"payload types: <code>{html.escape(payos_payload_type_summary(payload))}</code>",
+        "payload JSON:",
+        f"<code>{html.escape(safe_payload)}</code>",
+        "",
+        "Lệnh này không gọi PayOS và không tạo đơn thanh toán.",
+    ]
+    await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -39428,6 +39604,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("sales_ready", cmd_sales_ready))
     tg_app.add_handler(CommandHandler("payos_test_plan", cmd_payos_test_plan))
     tg_app.add_handler(CommandHandler("mark_payos_test", cmd_mark_payos_test))
+    tg_app.add_handler(CommandHandler("payos_signature_debug", cmd_payos_signature_debug))
     tg_app.add_handler(CommandHandler("profile",     cmd_profile))
     tg_app.add_handler(CommandHandler("myid",        cmd_myid))
     tg_app.add_handler(CommandHandler("trial_status", cmd_trial_status))
