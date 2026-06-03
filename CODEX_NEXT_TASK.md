@@ -20,6 +20,47 @@ TOAN AAS is following this model:
 - Use `/emergency_lock <reason>` only for real incident drills or urgent safety lock. Only owner should run `/emergency_unlock`.
 - Emergency mode must preserve DB, balances, payment history, ledger events and backups.
 
+## Verified Live - LOCKED / STABLE
+
+Do not modify the sections below unless the admin gives a direct request for that exact flow. These flows were tested live and are considered stable.
+
+1. `/admin_whoami`
+   - Correctly shows Telegram ID, `is_owner`, `is_admin`, and admin permission status.
+   - Does not expose API keys, tokens, or secrets.
+
+2. `/vip_policy`
+   - Removed the word `cap`.
+   - Referral wording is clear: maximum reward is per referred customer's first successful top-up.
+   - Tier-up reward is clearly described as a promo code for the next top-up order.
+   - Birthday gift policy displays correctly.
+
+3. `/set_vip`
+   - Admin can set member tier successfully.
+   - Output clearly shows the acting admin ID and the target user ID.
+   - This command does not auto-create tier-up promo codes.
+   - Keep this logic unchanged.
+
+4. `/translate_mode`
+   - `/translate_mode en` turns translation mode on successfully.
+   - Normal text is translated through DeepL and does not fall into AI chat.
+   - `/translate_mode_off` turns translation mode off successfully.
+   - Keep this routing logic unchanged.
+
+5. `/birthday_approve`
+   - If admin enters `USER_ID` instead of `REQUEST_ID`, the bot returns the correct usage guidance.
+   - The command does not fall into AI chat.
+   - Keep this UX unchanged.
+
+6. Slash command routing
+   - Tested slash commands no longer fall into AI chat.
+   - Keep the guard: text starting with `/` must not be sent into AI chat.
+
+Operational note:
+
+- Telegram ID `7126457028` is currently admin but not owner.
+- If this account is the owner account, add `7126457028` to Railway ENV `OWNER_IDS`.
+- Do not hardcode owner IDs in code without an explicit admin request.
+
 The current phase is not the large app/dashboard phase. Priority number one is to finish the existing Telegram bot so it runs reliably and starts generating real revenue.
 
 ### Current Phase - Bot Revenue Phase

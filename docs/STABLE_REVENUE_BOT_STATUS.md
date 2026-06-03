@@ -12,6 +12,23 @@
 - Step 11 compile: PASS after Chat AI Tier System and `/chat_pro`.
 - Trial bonus update: `TRIAL_CREDITS = 200` so new users can try one `/film` Basic.
 
+## Verified Live - Locked Stable Flows
+
+The flows below were tested live and are locked. Do not change them unless there is a direct task for that exact flow.
+
+- `/admin_whoami`: shows Telegram ID, `is_owner`, `is_admin`, and admin permissions correctly without exposing secrets.
+- `/vip_policy`: referral wording, tier-up promo wording, birthday gift policy, and removal of `cap` wording are verified.
+- `/set_vip`: can set tiers, shows acting admin ID and target user ID clearly, and does not auto-create tier-up promo codes.
+- `/translate_mode`: `/translate_mode en` routes normal text to DeepL translation; `/translate_mode_off` disables it; translated text does not fall into AI chat.
+- `/birthday_approve`: entering `USER_ID` instead of `REQUEST_ID` returns correct guidance and does not fall into AI chat.
+- Slash command routing: tested slash commands do not fall into AI chat; keep the `/` command guard intact.
+
+Operational note:
+
+- Telegram ID `7126457028` is admin but not owner at the time of this note.
+- If it is the owner account, add `7126457028` to Railway ENV `OWNER_IDS`.
+- Do not hardcode owner IDs in code without a direct request.
+
 ## UI
 
 - Website TOAN AAS: `index.html` exists and `/landing` serves it.
