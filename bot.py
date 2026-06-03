@@ -215,11 +215,13 @@ TELEGRAM_HANDLERS_REGISTERED = 0
 # AI Providers
 GEMINI_API_KEY      = _env("GEMINI_API_KEY")
 OPENAI_API_KEY      = _env("OPENAI_API_KEY")
+OPENAI_TEXT_MODEL   = env_any("OPENAI_TEXT_MODEL", default="gpt-4o-mini")
 OPENAI_IMAGE_MODEL  = _env("OPENAI_IMAGE_MODEL", "gpt-image-1")
 
 # Audio
 DEEPGRAM_API_KEY    = env_any("DEEPGRAM_API_KEY", "Deepgram_API_KEY", "DEEPGRAM_KEY", "DEEPGRAM_TOKEN")
 DEEPL_API_KEY       = env_any("DEEPL_API_KEY", "DeepL_API_KEY", "DEEPL_KEY", "DEEPL_AUTH_KEY")
+DEEPL_API_URL       = env_any("DEEPL_API_URL", default="https://api-free.deepl.com/v2/translate")
 FISH_AUDIO_KEY      = _env("FISH_AUDIO_KEY")
 
 # Image
@@ -20918,34 +20920,84 @@ class AgentGemini:
 
 class AgentDeepgram:
     @staticmethod
-    async def transcribe(file_bytes: bytes, context: ContextTypes.DEFAULT_TYPE) -> str:
+    def _extract_transcript(data: dict) -> str:
+        try:
+            alt = (
+                data.get("results", {})
+                .get("channels", [{}])[0]
+                .get("alternatives", [{}])[0]
+            )
+            transcript = (alt.get("transcript") or "").strip()
+            if transcript:
+                return transcript
+            words = alt.get("words") or []
+            word_text = " ".join((item.get("punctuated_word") or item.get("word") or "").strip() for item in words).strip()
+            if word_text:
+                return word_text
+            paragraphs = (
+                alt.get("paragraphs", {})
+                .get("paragraphs", [])
+            )
+            paragraph_text = " ".join((item.get("text") or "").strip() for item in paragraphs).strip()
+            return paragraph_text
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _debug_payload(data: dict, body_preview: str = "") -> str:
+        try:
+            metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
+            results = data.get("results", {}) if isinstance(data, dict) else {}
+            keys = ",".join(list(data.keys())[:8]) if isinstance(data, dict) else "-"
+            channels = results.get("channels") or []
+            detected_language = ""
+            if channels:
+                detected_language = str((channels[0].get("detected_language") or channels[0].get("language") or ""))
+            return (
+                f"keys={keys}; duration={metadata.get('duration') or '-'}; "
+                f"detected_language={detected_language or '-'}; "
+                f"error={data.get('error') or data.get('message') or '-'}; "
+                f"body={body_preview[:500]}"
+            )
+        except Exception as e:
+            return f"debug_parse_failed={str(e)[:120]}; body={body_preview[:500]}"
+
+    @staticmethod
+    async def transcribe(file_bytes: bytes, context: ContextTypes.DEFAULT_TYPE, content_type: str = "application/octet-stream") -> str:
         if not DEEPGRAM_API_KEY:
             return "❌ Chưa cấu hình DEEPGRAM_API_KEY."
         try:
             async with httpx.AsyncClient() as client:
                 res = await client.post(
-                    "https://api.deepgram.com/v1/listen?model=nova-2&language=vi&smart_format=true",
+                    "https://api.deepgram.com/v1/listen",
+                    params={
+                        "model": "nova-2",
+                        "smart_format": "true",
+                        "detect_language": "true",
+                        "punctuate": "true",
+                        "utterances": "false",
+                    },
                     headers={
                         "Authorization": f"Token {DEEPGRAM_API_KEY}",
-                        "Content-Type": "audio/mpeg"
+                        "Content-Type": content_type or "application/octet-stream",
                     },
                     content=file_bytes,
                     timeout=60.0
                 )
+            body_preview = sanitize_log_text(res.text or "")[:500]
             if res.status_code == 200:
-                transcript = (
-                    res.json()
-                    .get("results", {})
-                    .get("channels", [{}])[0]
-                    .get("alternatives", [{}])[0]
-                    .get("transcript", "Không nhận diện được lời nói.")
-                )
-                transcript = (transcript or "").strip()
+                try:
+                    data = res.json()
+                except Exception:
+                    data = {}
+                transcript = AgentDeepgram._extract_transcript(data)
                 if not transcript:
-                    return "❌ Deepgram empty transcript."
+                    debug = AgentDeepgram._debug_payload(data, body_preview)
+                    await alert_admin(context, "Deepgram empty transcript", debug[:900])
+                    return f"❌ Deepgram empty transcript. {debug[:420]}"
                 return transcript
-            error_preview = res.text[:240]
-            await alert_admin(context, "Deepgram", f"HTTP {res.status_code}: {error_preview[:160]}")
+            error_preview = body_preview[:300]
+            await alert_admin(context, "Deepgram", f"HTTP {res.status_code}: {error_preview[:220]}")
             return f"❌ Deepgram HTTP {res.status_code}: {error_preview}"
         except Exception as e:
             return f"❌ Lỗi: {str(e)}"
@@ -20986,20 +21038,20 @@ def normalize_provider_image_response(res, provider_name: str) -> tuple[bool, by
     if status_code != 200:
         preview = ""
         try:
-            preview = str(getattr(res, "text", "") or "")[:180]
+            preview = sanitize_log_text(str(getattr(res, "text", "") or ""))[:500]
         except Exception:
             preview = ""
-        return False, b"", f"{provider_name} HTTP {status_code}: {preview}"
+        return False, b"", f"{provider_name} HTTP {status_code}; content_type={content_type or '-'}; body={preview}"
     if "json" in content_type or content_type.startswith("text/"):
         preview = ""
         try:
-            preview = str(getattr(res, "text", "") or "")[:180]
+            preview = sanitize_log_text(str(getattr(res, "text", "") or ""))[:500]
         except Exception:
             preview = ""
-        return False, b"", f"{provider_name} returned {content_type or 'text/json'}: {preview}"
+        return False, b"", f"{provider_name} HTTP {status_code}; content_type={content_type or 'text/json'}; body={preview}"
     ok, png_bytes, detail = normalize_image_png_bytes(bytes(getattr(res, "content", b"") or b""))
     if not ok:
-        return False, b"", f"{provider_name} invalid image: {detail}"
+        return False, b"", f"{provider_name} HTTP {status_code}; content_type={content_type or '-'}; invalid_image={detail}"
     return True, png_bytes, f"{provider_name} {detail}->png"
 
 def telegram_png_document(data: bytes, filename: str = "no_bg.png") -> io.BytesIO:
@@ -23591,21 +23643,42 @@ async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
     )
 
+class TranslationProviderError(RuntimeError):
+    def __init__(self, statuses: dict, errors: dict):
+        self.statuses = statuses or {}
+        self.errors = errors or {}
+        super().__init__("; ".join(f"{k}={v}" for k, v in self.errors.items()) or "No translation provider configured")
+
+def provider_error_summary(error) -> str:
+    return f"{type(error).__name__}: {sanitize_log_text(str(error))[:500]}"
+
+def is_quota_error_text(text: str) -> bool:
+    value = (text or "").lower()
+    return any(marker in value for marker in ("resource_exhausted", "quota", "429", "rate limit", "rate_limit"))
+
+def provider_line_status(status: str, detail: str = "") -> str:
+    status = str(status or "MISSING").upper()
+    detail = (detail or "").strip()
+    return status + (f" — {detail[:180]}" if detail else "")
+
 async def translate_with_deepl(text: str) -> str:
     if not DEEPL_API_KEY:
         raise RuntimeError("DEEPL_API_KEY missing")
-    endpoint = "https://api-free.deepl.com/v2/translate" if DEEPL_API_KEY.endswith(":fx") else "https://api.deepl.com/v2/translate"
+    endpoint = (DEEPL_API_URL or "https://api-free.deepl.com/v2/translate").strip()
     async with httpx.AsyncClient(timeout=30.0) as client:
         res = await client.post(
             endpoint,
-            data={
-                "auth_key": DEEPL_API_KEY,
-                "text": text,
+            headers={
+                "Authorization": f"DeepL-Auth-Key {DEEPL_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "text": [text],
                 "target_lang": "VI",
             },
         )
     if res.status_code != 200:
-        raise RuntimeError(f"DeepL HTTP {res.status_code}: {res.text[:180]}")
+        raise RuntimeError(f"DeepL HTTP {res.status_code}: {sanitize_log_text(res.text)[:300]}")
     data = res.json()
     translated = ((data.get("translations") or [{}])[0].get("text") or "").strip()
     if not translated:
@@ -23636,9 +23709,9 @@ async def translate_with_openai(text: str) -> str:
         raise RuntimeError("OpenAI missing")
     def run_openai():
         return openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=OPENAI_TEXT_MODEL,
             messages=[
-                {"role": "system", "content": "Dịch nội dung sang tiếng Việt tự nhiên. Chỉ trả bản dịch."},
+                {"role": "system", "content": "Translate the following text to natural Vietnamese. Return only the translation."},
                 {"role": "user", "content": text},
             ],
             max_tokens=800,
@@ -23657,20 +23730,21 @@ async def translate_to_vietnamese(text: str) -> dict:
             return {"provider": "deepl", "text": await translate_with_deepl(text), "statuses": {**statuses, "deepl": "PASS"}, "errors": errors}
         except Exception as e:
             statuses["deepl"] = "FAIL"
-            errors["deepl"] = str(e)[:240]
+            errors["deepl"] = provider_error_summary(e)
     if gemini_client:
         try:
             return {"provider": "gemini", "text": await translate_with_gemini(text), "statuses": {**statuses, "gemini": "PASS"}, "errors": errors}
         except Exception as e:
             statuses["gemini"] = "FAIL"
-            errors["gemini"] = str(e)[:240]
+            errors["gemini"] = provider_error_summary(e)
     if openai_client:
         try:
             return {"provider": "openai", "text": await translate_with_openai(text), "statuses": {**statuses, "openai": "PASS"}, "errors": errors}
         except Exception as e:
             statuses["openai"] = "FAIL"
-            errors["openai"] = str(e)[:240]
-    raise RuntimeError("; ".join(f"{k}={v}" for k, v in errors.items()) or "No translation provider configured")
+            errors["openai"] = provider_error_summary(e)
+            logger.warning("OpenAI translation fallback failed | %s", errors["openai"])
+    raise TranslationProviderError(statuses, errors)
 
 async def cmd_tool_test_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -23687,21 +23761,22 @@ async def cmd_tool_test_translate(update: Update, context: ContextTypes.DEFAULT_
             deepl_status = "PASS"
         except Exception as e:
             deepl_status = "FAIL"
-            errors["deepl"] = str(e)[:180]
+            errors["deepl"] = provider_error_summary(e)
     if gemini_client:
         try:
             results["gemini"] = await translate_with_gemini(source_text)
             gemini_status = "PASS"
         except Exception as e:
             gemini_status = "FAIL"
-            errors["gemini"] = str(e)[:180]
+            errors["gemini"] = provider_error_summary(e)
     if openai_client:
         try:
             results["openai"] = await translate_with_openai(source_text)
             openai_status = "PASS"
         except Exception as e:
             openai_status = "FAIL"
-            errors["openai"] = str(e)[:180]
+            errors["openai"] = provider_error_summary(e)
+            logger.warning("OpenAI translation smoke test failed | %s", errors["openai"])
     provider = next((name for name in ("deepl", "gemini", "openai") if results.get(name)), "")
     best_result = results.get(provider, "")
     if provider:
@@ -23711,13 +23786,17 @@ async def cmd_tool_test_translate(update: Update, context: ContextTypes.DEFAULT_
         overall = "FAIL" if any(v == "FAIL" for v in [deepl_status, gemini_status, openai_status]) else "MISSING"
         detail = "; ".join(f"{k}={v}" for k, v in errors.items()) or "No translation provider configured"
     save_tool_test_result("translation", overall, detail, update.effective_user.id)
+    save_tool_test_result("translation:deepl", deepl_status, errors.get("deepl") or ("ok" if deepl_status == "PASS" else ""), update.effective_user.id)
+    save_tool_test_result("translation:gemini", gemini_status, errors.get("gemini") or ("ok" if gemini_status == "PASS" else ""), update.effective_user.id)
+    save_tool_test_result("translation:openai", openai_status, errors.get("openai") or ("ok" if openai_status == "PASS" else ""), update.effective_user.id)
+    gemini_note = "quota exhausted, fallback used" if gemini_status == "FAIL" and is_quota_error_text(errors.get("gemini", "")) and provider == "openai" else errors.get("gemini", "")
     await update.message.reply_text(
         "🌐 <b>Translation Smoke Test</b>\n\n"
-        f"• DeepL: <code>{html.escape(deepl_status)}</code>\n"
-        f"• Gemini: <code>{html.escape(gemini_status)}</code>\n"
-        f"• OpenAI: <code>{html.escape(openai_status)}</code>\n"
+        f"• DeepL: <code>{html.escape(provider_line_status(deepl_status, errors.get('deepl', '')))}</code>\n"
+        f"• Gemini: <code>{html.escape(provider_line_status(gemini_status, gemini_note))}</code>\n"
+        f"• OpenAI: <code>{html.escape(provider_line_status(openai_status, errors.get('openai', '')))}</code>\n"
         f"• Overall: <code>{html.escape(overall)}</code>\n"
-        f"• Provider: <code>{html.escape(provider or '-')}</code>\n"
+        f"• Provider used: <code>{html.escape(provider or '-')}</code>\n"
         f"• Best result: <code>{html.escape(best_result[:500] or '-')}</code>"
         + (f"\n• Error: <code>{html.escape(detail[:240])}</code>" if overall == "FAIL" else ""),
         parse_mode="HTML",
@@ -23731,6 +23810,15 @@ async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         result = await translate_to_vietnamese(text)
         save_tool_test_result("translation", "PASS", f"provider={result.get('provider')}; translate_text success", update.effective_user.id)
+        result_statuses = result.get("statuses") or {}
+        result_errors = result.get("errors") or {}
+        for provider_name in ("deepl", "gemini", "openai"):
+            save_tool_test_result(
+                f"translation:{provider_name}",
+                result_statuses.get(provider_name, "MISSING"),
+                result_errors.get(provider_name, "ok" if result_statuses.get(provider_name) == "PASS" else ""),
+                update.effective_user.id,
+            )
         await update.message.reply_text(
             "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
             "• Nguồn: <code>auto</code>\n"
@@ -23740,10 +23828,23 @@ async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode="HTML",
         )
     except Exception as e:
-        save_tool_test_result("translation", "FAIL", str(e)[:500], update.effective_user.id)
+        error_text = str(e)[:900]
+        statuses = getattr(e, "statuses", {}) if isinstance(e, TranslationProviderError) else {}
+        errors = getattr(e, "errors", {}) if isinstance(e, TranslationProviderError) else {"error": provider_error_summary(e)}
+        save_tool_test_result("translation", "FAIL", error_text[:500], update.effective_user.id)
+        for provider_name in ("deepl", "gemini", "openai"):
+            save_tool_test_result(
+                f"translation:{provider_name}",
+                statuses.get(provider_name, "FAIL" if provider_name in errors else "MISSING"),
+                errors.get(provider_name, ""),
+                update.effective_user.id,
+            )
         await update.message.reply_text(
             "❌ Dịch văn bản đang lỗi tạm thời.\n\n"
-            f"• Error: <code>{html.escape(str(e)[:240])}</code>\n"
+            f"• DeepL: <code>{html.escape(provider_line_status(statuses.get('deepl', 'MISSING'), errors.get('deepl', '')))}</code>\n"
+            f"• Gemini: <code>{html.escape(provider_line_status(statuses.get('gemini', 'MISSING'), errors.get('gemini', '')))}</code>\n"
+            f"• OpenAI: <code>{html.escape(provider_line_status(statuses.get('openai', 'MISSING'), errors.get('openai', '')))}</code>\n"
+            f"• Error: <code>{html.escape(error_text[:240])}</code>\n"
             "Không có Xu nào bị trừ cho lần thử này.",
             parse_mode="HTML",
         )
@@ -23821,11 +23922,13 @@ async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE
             caption=f"🖼 Image Provider Smoke Test: {output_provider} PASS",
         )
     await update.message.reply_text(
-        "🖼 <b>Image Provider Smoke Test</b>\n\n"
-        f"• RemoveBG: <code>{html.escape(remove_status)}</code>\n"
+        ("✅ <b>Image provider PASS</b>\n\n" if output_bytes else "❌ <b>Image provider FAIL</b>\n\n")
+        + f"• RemoveBG: <code>{html.escape(remove_status)}</code>\n"
         f"• Cutout: <code>{html.escape(cutout_status)}</code>\n"
         f"• Output sent: <code>{'yes' if output_bytes else 'no'}</code>\n"
-        + (f"• Error: <code>{html.escape(detail[:240])}</code>\n" if detail and not output_bytes else "")
+        + (f"• Provider: <code>{html.escape(output_provider)}</code>\n" if output_bytes else "")
+        + (f"• Error: <code>{html.escape(detail[:500])}</code>\n" if detail and not output_bytes else "")
+        + ("• Xu đã hoàn nếu có trừ.\n" if not output_bytes else "")
         + "\nKhông hiển thị API key.",
         parse_mode="HTML",
     )
@@ -23890,7 +23993,8 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⚠️ File quá lớn để smoke test. Hãy dùng audio ngắn dưới 15MB.")
     try:
         file_bytes = bytes(await (await media.get_file()).download_as_bytearray())
-        transcript = (await AgentDeepgram.transcribe(file_bytes, context) or "").strip()
+        content_type = getattr(media, "mime_type", "") or ("audio/ogg" if getattr(reply, "voice", None) else "application/octet-stream")
+        transcript = (await AgentDeepgram.transcribe(file_bytes, context, content_type=content_type) or "").strip()
         passed = bool(transcript and not transcript.startswith("❌"))
         status = "PASS" if passed else "FAIL"
         detail = transcript if transcript else "empty_transcript"
@@ -23906,7 +24010,8 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "❌ <b>STT không nhận được transcript.</b>\n\n"
                 "• Provider: <code>Deepgram</code>\n"
-                "• Gợi ý: dùng audio có tiếng nói rõ, file ngắn hơn, hoặc kiểm tra định dạng.\n"
+                "• Có thể file không có tiếng nói rõ, âm lượng nhỏ, hoặc định dạng chưa phù hợp.\n"
+                "• Hãy thử voice/audio 10-20 giây có giọng nói rõ.\n"
                 f"• Error: <code>{html.escape(detail[:240])}</code>",
                 parse_mode="HTML",
             )
@@ -33521,13 +33626,32 @@ async def cmd_api_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     checks = {item["key"]: item for item in data.get("checks", [])}
     stt = checks.get("transcription_primary", {})
     downloader = checks.get("cobalt_downloader", {})
+    translation_result = get_tool_test_result("translation")
+    translation_deepl = get_tool_test_result("translation:deepl")
+    translation_gemini = get_tool_test_result("translation:gemini")
+    translation_openai = get_tool_test_result("translation:openai")
+    stt_result = get_tool_test_result("stt")
+    image_result = preferred_tool_test_result("image_remove_bg", "image")
     lines = [
         "🧭 <b>TOAN AAS API RECOMMEND</b>",
+        "",
+        "<b>Translation / DeepL + Gemini + OpenAI</b>",
+        f"• Tested: <code>{html.escape(tool_test_status_text('translation'))}</code>",
+        f"• DeepL: <code>{html.escape((translation_deepl.get('status') or 'NOT_TESTED') + (' — ' + (translation_deepl.get('detail') or '')[:180] if translation_deepl.get('detail') else ''))}</code>",
+        f"• Gemini: <code>{html.escape((translation_gemini.get('status') or 'NOT_TESTED') + (' — ' + (translation_gemini.get('detail') or '')[:180] if translation_gemini.get('detail') else ''))}</code>",
+        f"• OpenAI: <code>{html.escape((translation_openai.get('status') or 'NOT_TESTED') + (' — ' + (translation_openai.get('detail') or '')[:180] if translation_openai.get('detail') else ''))}</code>",
+        f"• Next: <code>{'Kiểm tra DEEPL_API_URL api-free/api-pro và key type.' if '403' in (translation_deepl.get('detail') or '') else ('Gemini quota exhausted: dùng OpenAI fallback hoặc thêm quota/key Gemini.' if is_quota_error_text(translation_gemini.get('detail') or '') else '/tool_test_translate')}</code>",
         "",
         "<b>STT / Deepgram</b>",
         f"• Status: <code>{html.escape(stt.get('level') or '-')}</code>",
         f"• Detail: {html.escape(stt.get('detail') or '-')}",
+        f"• Tested: <code>{html.escape((stt_result.get('status') or 'NOT_TESTED') + (' — ' + (stt_result.get('detail') or '')[:180] if stt_result.get('detail') else ''))}</code>",
         f"• Next: <code>{html.escape(stt.get('next') or '/tool_test_stt')}</code>",
+        "",
+        "<b>Image / RemoveBG + Cutout</b>",
+        f"• Config: <code>{'configured' if (REMOVEBG_API_KEY or CUTOUT_API_KEY) else 'missing'}</code>",
+        f"• Tested: <code>{html.escape((image_result.get('status') or 'NOT_TESTED') + (' — ' + (image_result.get('detail') or '')[:180] if image_result.get('detail') else ''))}</code>",
+        "• Next: <code>Reply ảnh nhỏ rồi chạy /tool_test_image; nếu fail kiểm tra quota/API key/provider RemoveBG/Cutout.</code>",
         "",
         "<b>Downloader / Cobalt</b>",
         f"• Status: <code>{html.escape(downloader.get('level') or '-')}</code>",
@@ -38963,7 +39087,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("⚡ <i>[Deepgram] Đang chạy bóc băng...</i>", parse_mode="HTML")
     try:
         file_bytes = bytes(await (await file_obj.get_file()).download_as_bytearray())
-        txt = await AgentDeepgram.transcribe(file_bytes, context)
+        content_type = getattr(file_obj, "mime_type", "") or ("audio/ogg" if update.message.voice else "application/octet-stream")
+        txt = await AgentDeepgram.transcribe(file_bytes, context, content_type=content_type)
         await msg.delete()
         if not txt.startswith("❌"):
             discount_text = " (VIP)" if discount > 0 else ""
