@@ -2595,17 +2595,17 @@ def get_member_benefits(tier: str) -> list[str]:
             "Xem quyền lợi nâng cấp tại /vip_policy.",
         ],
         "silver": [
-            "Referral 3%, tối đa 100 Xu / khách nạp lần đầu.",
+            "Thưởng giới thiệu: 3%, tối đa 100 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
             "Hỗ trợ thành viên.",
             "Tham gia ưu đãi cơ bản.",
         ],
         "gold": [
-            "Referral 6%, tối đa 150 Xu / khách nạp lần đầu.",
+            "Thưởng giới thiệu: 6%, tối đa 150 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
             "Ưu tiên hỗ trợ hơn Silver.",
             "Giảm tối đa 3% phí Xu cho tool đủ điều kiện.",
         ],
         "platinum": [
-            "Referral 8%, tối đa 200 Xu / khách nạp lần đầu.",
+            "Thưởng giới thiệu: 8%, tối đa 200 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
             "Free Normal Chat.",
             "Free Chat Pro.",
             "Ưu tiên hỗ trợ cao.",
@@ -2613,7 +2613,7 @@ def get_member_benefits(tier: str) -> list[str]:
             "Giảm tối đa 5% phí Xu cho tool đủ điều kiện.",
         ],
         "diamond": [
-            "Referral 10%, tối đa 250 Xu / khách nạp lần đầu.",
+            "Thưởng giới thiệu: 10%, tối đa 250 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
             "Free Normal Chat.",
             "Free Chat Pro.",
             "Ưu tiên hỗ trợ rất cao.",
@@ -2621,7 +2621,7 @@ def get_member_benefits(tier: str) -> list[str]:
             "Giảm tối đa 8% phí Xu cho tool đủ điều kiện.",
         ],
         "vip": [
-            "Referral 12%, tối đa 300 Xu / khách nạp lần đầu.",
+            "Thưởng giới thiệu: 12%, tối đa 300 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
             "Free Normal Chat.",
             "Free Chat Pro.",
             "Ưu tiên hỗ trợ cao nhất.",
@@ -3137,9 +3137,10 @@ def format_tier_up_message(result: dict) -> str:
         f"Tổng nạp tích lũy: <b>{vnd_text(result.get('total_paid_vnd') or 0)}</b>\n\n"
         "<b>Quyền lợi mới của bạn:</b>\n"
         f"{benefits}\n\n"
-        "🎁 <b>Mã ưu đãi lên hạng của bạn:</b>\n"
+        "🎁 <b>Mã ưu đãi cho đơn nạp tiếp theo sau khi lên hạng:</b>\n"
         f"{promo_block}\n\n"
-        "Mã chỉ dùng cho chính tài khoản của bạn, dùng 1 lần, áp dụng cho đơn nạp từ 50.000đ và không cộng dồn mã khác.\n\n"
+        "Mã chỉ dùng cho chính tài khoản của bạn, dùng 1 lần, áp dụng cho đơn nạp tiếp theo từ 50.000đ sau khi lên hạng và không cộng dồn mã khác.\n"
+        "Đây là cộng thêm Xu dịch vụ, không giảm tiền mặt.\n\n"
         "Dùng mã:\n"
         "1. Gõ <code>/promo MÃ_CỦA_BẠN</code>\n"
         "2. Sau đó gõ <code>/naptien</code>\n\n"
@@ -24022,20 +24023,26 @@ async def cmd_admin_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     role = effective_admin_role(uid)
     owner_ids_count = len([x for x in OWNER_IDS if str(x).strip()])
     admin_ids_count = len([x for x in ADMIN_IDS if str(x).strip()])
-    owner_fallback_note = "yes" if not str(OWNER_IDS_RAW or "").strip() else "no"
+    warnings = []
+    if owner_ids_count <= 0:
+        warnings.append("⚠️ OWNER_IDS đang rỗng, hãy set OWNER_IDS trên Railway.")
+    if not is_owner_user(uid):
+        warnings.append("Nếu đây là tài khoản chủ, thêm ID này vào OWNER_IDS trên Railway.")
+    warning_block = ("\n\n" + "\n".join(warnings)) if warnings else ""
     await update.message.reply_text(
         "🛡 <b>ADMIN DEBUG</b>\n\n"
         f"• Telegram ID: <code>{html.escape(str(uid))}</code>\n"
         f"• Username: <b>{html.escape('@' + username if username else '-')}</b>\n"
         f"• is_owner: <code>{'yes' if is_owner_user(uid) else 'no'}</code>\n"
         f"• is_admin: <code>{'yes' if is_admin_user(uid) else 'no'}</code>\n"
-        f"• OWNER_IDS loaded: <code>{owner_ids_count}</code>\n"
-        f"• ADMIN_IDS loaded: <code>{admin_ids_count}</code>\n"
-        f"• OWNER fallback to admin: <code>{owner_fallback_note}</code>\n"
         f"• Effective role: <b>{html.escape(role)}</b>\n"
         f"• Can emergency_lock: <code>{'yes' if is_owner_user(uid) else 'no'}</code>\n"
         f"• Can set_vip: <code>{'yes' if is_admin_user(uid) else 'no'}</code>\n"
-        f"• Can approve birthday: <code>{'yes' if is_admin_user(uid) else 'no'}</code>",
+        f"• Can approve birthday: <code>{'yes' if is_admin_user(uid) else 'no'}</code>\n\n"
+        "<b>ENV</b>\n"
+        f"• OWNER_IDS loaded: <code>{owner_ids_count}</code>\n"
+        f"• ADMIN_IDS loaded: <code>{admin_ids_count}</code>"
+        f"{warning_block}",
         parse_mode="HTML",
     )
 
@@ -25008,7 +25015,7 @@ EMERGENCY_ALLOWED_PUBLIC_COMMANDS = {
 }
 EMERGENCY_ALLOWED_ADMIN_COMMANDS = {
     "backup_db", "emergency_status", "emergency_unlock", "ops_plan",
-    "providers", "tool_status", "tool_audit", "sales_ready",
+    "admin_whoami", "providers", "tool_status", "tool_audit", "sales_ready",
 }
 PAYMENT_FREEZE_COMMANDS = {
     "duyet", "tuchoi", "checkpayos", "payos_debug_create", "mark_payos_test",
@@ -26478,9 +26485,12 @@ async def handle_auto_translate_message(update: Update, context: ContextTypes.DE
             detail=f"target={target}",
         )
         await update.message.reply_text(
-            f"🌐 <b>Dịch sang {html.escape(translate_target_label(target))}</b>\n\n"
+            "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
+            "• Nguồn: <code>auto</code>\n"
+            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
+            f"• Provider: <code>{html.escape(provider)}</code>\n\n"
             f"{html.escape(translated)}\n\n"
-            f"<i>Provider: {html.escape(provider)} | /translate_mode_off để tắt</i>",
+            "<i>/translate_mode_off để tắt</i>",
             parse_mode="HTML",
         )
     except Exception as e:
@@ -26501,6 +26511,7 @@ async def handle_auto_translate_message(update: Update, context: ContextTypes.DE
             "❌ Dịch tự động đang tạm lỗi hoặc hết quota provider.\n"
             f"• Chi tiết: {html.escape(detail[:240])}\n"
             "Không có Xu nào bị trừ.\n"
+            "Không chuyển sang AI chat để tránh trả lời sai ngữ cảnh.\n"
             "Tắt dịch: /translate_mode_off",
         )
 
@@ -42900,7 +42911,7 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Cấu hình/quy trình riêng khi phù hợp",
         "• Giảm tối đa 10%",
         "",
-        "🎉 <b>Mã ưu đãi khi lên hạng</b>",
+        "🎉 <b>Mã ưu đãi cho đơn nạp tiếp theo sau khi lên hạng</b>",
         "",
         "Khi bạn đạt mốc hạng mới, TOAN AAS có thể gửi mã ưu đãi cá nhân cho <b>đơn nạp tiếp theo</b> sau khi lên hạng.",
         "",
@@ -43457,19 +43468,19 @@ async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     badge = get_member_badge(tier)
     benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(tier))
     unlocked = ""
-    if has_free_normal_chat(tier):
+    if tier in {"platinum", "diamond", "vip"}:
         unlocked = (
-            "\n\n🎁 <b>Bạn đã mở:</b>\n"
+            "\n\n🎁 <b>Đặc quyền đã mở:</b>\n"
             "• Free Normal Chat\n"
             "• Free Chat Pro\n"
-            "• Chat Deep vẫn tính Xu theo chính sách"
+            "• Chat Deep vẫn tính Xu theo chính sách."
         )
     notify_warning = ""
     try:
         await context.bot.send_message(
             chat_id=str(target_id),
             text=(
-                f"🎉 <b>CHÚC MỪNG BẠN ĐÃ ĐƯỢC THĂNG HẠNG {html.escape(badge)}</b>\n\n"
+                f"🎉 <b>CHÚC MỪNG BẠN ĐÃ ĐƯỢC NÂNG HẠNG {html.escape(badge)}</b>\n\n"
                 "Admin TOAN AAS đã nâng cấp hạng thành viên cho bạn.\n\n"
                 f"• Hạng mới: <b>{html.escape(badge)}</b>\n\n"
                 "<b>Quyền lợi mới</b>\n"
@@ -43480,12 +43491,19 @@ async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
     except Exception as e:
-        notify_warning = f"\n\n⚠️ Không gửi được thông báo cho user: <code>{html.escape(provider_error_summary(e))}</code>"
+        notify_warning = (
+            "\n\n⚠️ Đã set hạng nhưng không gửi được thông báo cho user. "
+            "Có thể user chưa bấm Start hoặc đã chặn bot.\n"
+            f"• Error: <code>{html.escape(provider_error_summary(e))}</code>"
+        )
         logger.warning(f"Set VIP target notify failed: {e}")
     await update.message.reply_text(
         f"✅ Đã set hạng <b>{html.escape(badge)}</b> cho ID <code>{html.escape(str(target_id))}</code>.\n"
-        f"• Admin hiện tại: <code>{html.escape(str(update.effective_user.id))}</code>\n"
-        "• Lưu ý: hạng chỉ áp dụng cho ID được set. Không tự tạo mã ưu đãi lên hạng trong lệnh này."
+        f"• ID đang thao tác: <code>{html.escape(str(update.effective_user.id))}</code>\n"
+        f"• ID được nâng hạng: <code>{html.escape(str(target_id))}</code>\n\n"
+        "Lưu ý: <code>/member</code> trong cuộc chat hiện tại chỉ hiển thị hạng của ID đang chat. "
+        "Nếu bạn set cho user khác, hãy kiểm tra bằng <code>/ref_admin</code> hoặc user đó tự gõ <code>/member</code>.\n"
+        "Không tự tạo mã ưu đãi lên hạng trong lệnh này."
         f"{notify_warning}",
         parse_mode="HTML",
     )
