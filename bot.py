@@ -28,6 +28,7 @@ import csv
 import io
 import tempfile
 import shutil
+import traceback
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
@@ -60,6 +61,70 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger("TOAN_AAS")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+logging.getLogger("telegram.ext").setLevel(logging.INFO)
+
+def mask_secret(value: str, keep: int = 4) -> str:
+    value = str(value or "")
+    if not value:
+        return "missing"
+    if len(value) <= keep * 2:
+        return "***"
+    return value[:keep] + "***" + value[-keep:]
+
+def _log_secret_values() -> list[str]:
+    keys = [
+        "TELEGRAM_TOKEN",
+        "BOT_TOKEN",
+        "PAYOS_API_KEY",
+        "PAYOS_CHECKSUM_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "DEEPGRAM_API_KEY",
+        "DEEPL_API_KEY",
+        "FISH_AUDIO_KEY",
+        "REMOVEBG_API_KEY",
+        "CUTOUT_API_KEY",
+        "RAPIDAPI_KEY",
+        "COBALT_API_KEY",
+        "TELEGRAM_WEBHOOK_SECRET",
+        "LEAD_WEBHOOK_SECRET",
+        "OPERATOR_API_TOKEN",
+        "AFFILIATE_POSTBACK_TOKEN",
+    ]
+    values = []
+    for key in keys:
+        value = globals().get(key) or os.environ.get(key, "")
+        if value and len(str(value)) >= 8:
+            values.append(str(value))
+    return values
+
+def sanitize_log_text(text: str) -> str:
+    safe = str(text or "")
+    for value in _log_secret_values():
+        safe = safe.replace(value, mask_secret(value))
+    return safe
+
+class SecretMaskingFilter(logging.Filter):
+    def filter(self, record):
+        try:
+            record.msg = sanitize_log_text(record.getMessage())
+            record.args = ()
+        except Exception:
+            pass
+        return True
+
+class SecretMaskingFormatter(logging.Formatter):
+    def format(self, record):
+        return sanitize_log_text(super().format(record))
+
+_secret_masking_filter = SecretMaskingFilter()
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(_secret_masking_filter)
+    _handler.setFormatter(SecretMaskingFormatter("%(asctime)s | %(levelname)s | %(message)s"))
+for _log_name in ("TOAN_AAS", "httpx", "telegram", "telegram.ext"):
+    logging.getLogger(_log_name).addFilter(_secret_masking_filter)
 
 # ─── BIẾN MÔI TRƯỜNG ─────────────────────────────────────────────────────────
 def _env(key: str, default: str = "") -> str:
@@ -22224,6 +22289,15 @@ def legal_commands_short_text() -> str:
 def support_link_html() -> str:
     return html.escape(SUPPORT_TELEGRAM_URL or "https://t.me/toanaas")
 
+def log_command_received(command: str, update: Update):
+    user = update.effective_user if isinstance(update, Update) else None
+    logger.info(
+        "CMD received | cmd=%s | user_id=%s | username=%s",
+        command,
+        getattr(user, "id", "-") if user else "-",
+        getattr(user, "username", "-") if user else "-",
+    )
+
 def guide_index_text() -> str:
     lines = [
         "📘 <b>HƯỚNG DẪN SỬ DỤNG TOAN AAS</b>",
@@ -22604,6 +22678,7 @@ def customer_start_surface_audit_data():
     }
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command_received("start", update)
     get_user(update.effective_user.id, update.effective_user.first_name)
     if context.args and context.args[0].startswith("ref_"):
         referrer = context.args[0].replace("ref_", "", 1)
@@ -22763,6 +22838,7 @@ def terms_text() -> str:
     )
 
 async def cmd_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command_received("terms", update)
     await update.message.reply_text(terms_text(), parse_mode="HTML", reply_markup=terms_keyboard())
     if not terms_pdf_download_url():
         path = find_terms_pdf_path()
@@ -22957,6 +23033,44 @@ async def cmd_mydata(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Yêu cầu hỗ trợ/xóa dữ liệu phù hợp: <code>/data_delete</code>",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    error = context.error
+    error_name = type(error).__name__ if error else "UnknownError"
+    error_text = sanitize_log_text(str(error or ""))[:1200]
+    if error:
+        logger.error(
+            "Telegram handler error\n%s",
+            sanitize_log_text("".join(traceback.format_exception(type(error), error, error.__traceback__)))[:4000],
+        )
+    else:
+        logger.error("Telegram handler error | type=%s", error_name)
+
+    try:
+        if isinstance(update, Update) and update.effective_chat:
+            text = "❌ Lệnh vừa rồi bị lỗi xử lý. Admin đã được ghi log để kiểm tra."
+            if update.effective_user and is_admin_user(update.effective_user.id):
+                text += f"\n\n<code>{html.escape(error_name)}: {html.escape(error_text[:800])}</code>"
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=text,
+                parse_mode="HTML",
+            )
+    except Exception:
+        logger.exception("Failed to notify user about Telegram handler error")
+
+    try:
+        if ADMIN_ID:
+            await context.bot.send_message(
+                chat_id=int(ADMIN_ID),
+                text=(
+                    "🚨 <b>BOT COMMAND ERROR</b>\n\n"
+                    f"<code>{html.escape(error_name)}: {html.escape(error_text)}</code>"
+                ),
+                parse_mode="HTML",
+            )
+    except Exception:
+        pass
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -23676,7 +23790,7 @@ def promo_code_status_message(status: str) -> str:
     }
     return messages.get(status, "Mã không hợp lệ, hết lượt, hết hạn hoặc chưa đủ điều kiện.")
 
-async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not context.args:
         summary = get_user_promo_summary(uid)
@@ -23785,7 +23899,38 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
     )
 
+async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command_received("promo", update)
+    try:
+        return await _cmd_promo_impl(update, context)
+    except Exception as e:
+        logger.error(
+            "cmd_promo failed\n%s",
+            sanitize_log_text("".join(traceback.format_exception(type(e), e, e.__traceback__)))[:4000],
+        )
+        user_text = (
+            "❌ Mã ưu đãi đang lỗi xử lý tạm thời. Admin đã được ghi log để kiểm tra.\n\n"
+            "Bạn có thể thử lại sau hoặc xem ưu đãi gợi ý: <code>/khuyenmai</code>"
+        )
+        if update.effective_user and is_admin_user(update.effective_user.id):
+            user_text += f"\n\n<code>{html.escape(type(e).__name__)}: {html.escape(sanitize_log_text(str(e))[:800])}</code>"
+        await update.message.reply_text(user_text, parse_mode="HTML")
+        if ADMIN_ID:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(ADMIN_ID),
+                    text=(
+                        "🚨 <b>PROMO COMMAND ERROR</b>\n\n"
+                        f"• User: <code>{html.escape(str(update.effective_user.id if update.effective_user else '-'))}</code>\n"
+                        f"• Error: <code>{html.escape(type(e).__name__)}: {html.escape(sanitize_log_text(str(e))[:1200])}</code>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
 async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command_received("khuyenmai", update)
     uid = update.effective_user.id
     conn = db_connect()
     try:
@@ -23856,6 +24001,7 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_promo_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command_received("promo_debug", update)
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     if not context.args:
@@ -23938,6 +24084,28 @@ async def cmd_promo_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Note: {html.escape(str(note or '-'))}",
         ])
     await update.message.reply_text("\n".join(lines[:90]), parse_mode="HTML")
+
+async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_command_received("ping", update)
+    db_ok = False
+    try:
+        conn = db_connect()
+        try:
+            conn.execute("SELECT 1")
+            db_ok = True
+        finally:
+            conn.close()
+    except Exception:
+        db_ok = False
+    lines = [
+        "🏓 <b>TOAN AAS OK</b>",
+        f"• Build: <code>{html.escape(APP_BUILD)}</code>",
+        f"• Deploy: <code>{html.escape(APP_DEPLOY_ID or '-')}</code>",
+        f"• Mode: <code>{html.escape(ACTIVE_TELEGRAM_UPDATE_MODE or TELEGRAM_UPDATE_MODE or '-')}</code>",
+        f"• DB: <code>{'OK' if db_ok else 'FAIL'}</code>",
+        f"• Time: <code>{html.escape(now_text())}</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_promo_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -38412,6 +38580,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("guide_debug", cmd_guide_debug))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
+    tg_app.add_handler(CommandHandler("ping",        cmd_ping))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
     tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
@@ -38667,6 +38836,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_creative_callback, pattern=r"^creative\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_task_callback, pattern=r"^task\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
+    tg_app.add_error_handler(on_telegram_error)
 
     telegram_started = False
     try:
