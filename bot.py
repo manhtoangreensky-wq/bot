@@ -21766,6 +21766,7 @@ def provider_status_payload() -> dict:
             "admin_publish": is_feature_enabled("admin_publish", default=False),
             "customer_publish": is_feature_enabled("customer_publish", default=False),
             "auto_publish": is_feature_enabled("auto_publish", default=False),
+            "ads_assistant": is_feature_enabled("ads_assistant", default=False),
         },
         "security": {
             "lead_webhook_secret": bool(LEAD_WEBHOOK_SECRET),
@@ -21779,6 +21780,70 @@ def provider_status_text(value) -> str:
     if isinstance(value, bool):
         return "configured" if value else "missing"
     return bool_env_status(value)
+
+def tool_test_setting_key(tool_name: str, field: str) -> str:
+    clean_tool = re.sub(r"[^a-z0-9_:-]", "_", str(tool_name or "").strip().lower())
+    clean_field = re.sub(r"[^a-z0-9_:-]", "_", str(field or "").strip().lower())
+    return f"tool_test:{clean_tool}:{clean_field}"
+
+def save_tool_test_result(tool_name: str, status: str, detail: str = "", updated_by=""):
+    status_clean = str(status or "UNKNOWN").upper()[:40]
+    detail_clean = str(detail or "")[:1000]
+    tested_at = now_text()
+    set_system_setting(tool_test_setting_key(tool_name, "status"), status_clean, detail_clean, updated_by)
+    set_system_setting(tool_test_setting_key(tool_name, "at"), tested_at, detail_clean, updated_by)
+    set_system_setting(tool_test_setting_key(tool_name, "detail"), detail_clean, detail_clean, updated_by)
+    return {"status": status_clean, "tested_at": tested_at, "detail": detail_clean}
+
+def get_tool_test_result(tool_name: str) -> dict:
+    return {
+        "status": get_system_setting(tool_test_setting_key(tool_name, "status"), "NOT_TESTED") or "NOT_TESTED",
+        "tested_at": get_system_setting(tool_test_setting_key(tool_name, "at"), "") or "",
+        "detail": get_system_setting(tool_test_setting_key(tool_name, "detail"), "") or "",
+    }
+
+def tool_test_status_text(tool_name: str) -> str:
+    result = get_tool_test_result(tool_name)
+    status = str(result.get("status") or "NOT_TESTED").upper()
+    tested_at = result.get("tested_at") or ""
+    return f"{status}" + (f" at {tested_at}" if tested_at else "")
+
+def customer_tool_readiness_payload() -> dict:
+    providers = provider_status_payload()
+    tests = {name: get_tool_test_result(name) for name in ["ai", "image", "tts", "stt", "downloader"]}
+    public_cobalt = AgentDownloader._uses_public_cobalt(COBALT_API_URL)
+    return {
+        "ai": {
+            "configured": bool(providers["ai"]["ready"]),
+            "tested": tests["ai"]["status"] == "PASS",
+            "label": "ready" if tests["ai"]["status"] == "PASS" else ("configured/not tested" if providers["ai"]["ready"] else "missing"),
+        },
+        "image_remove_bg": {
+            "configured": bool(providers["image"]["ready"]),
+            "tested": tests["image"]["status"] == "PASS",
+            "label": "ready" if tests["image"]["status"] == "PASS" else ("thử nghiệm" if providers["image"]["ready"] else "missing"),
+        },
+        "tts": {
+            "configured": True,
+            "tested": tests["tts"]["status"] == "PASS",
+            "label": "ready" if tests["tts"]["status"] == "PASS" else "built-in/not tested",
+        },
+        "stt": {
+            "configured": bool(providers["audio"]["deepgram"]),
+            "tested": tests["stt"]["status"] == "PASS",
+            "label": "ready" if tests["stt"]["status"] == "PASS" else ("thử nghiệm" if providers["audio"]["deepgram"] else "missing"),
+        },
+        "downloader": {
+            "configured": bool(providers["downloader"]["cobalt_url"] and not public_cobalt),
+            "tested": tests["downloader"]["status"] == "PASS",
+            "label": "ready" if tests["downloader"]["status"] == "PASS" else ("disabled/public cobalt" if public_cobalt else "thử nghiệm"),
+        },
+        "publish": {
+            "customer_publish": bool(providers["media_factory"]["customer_publish"]),
+            "auto_publish": bool(providers["media_factory"]["auto_publish"]),
+            "ads_assistant": bool(providers["media_factory"].get("ads_assistant", False)),
+        },
+    }
 
 def promo_readiness_payload() -> dict:
     conn = None
@@ -22510,6 +22575,7 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def help_text_for_user(user_id) -> str:
     is_admin = is_admin_user(user_id)
+    readiness = customer_tool_readiness_payload()
     text = (
         "📘 <b>Hướng dẫn TOAN AAS</b>\n\n"
         "🎁 Tài khoản mới nhận <b>200 Xu trải nghiệm</b>, đủ để thử 1 lượt <code>/film</code> Basic.\n"
@@ -22526,9 +22592,9 @@ def help_text_for_user(user_id) -> str:
         "<b>2. Công cụ AI</b>\n"
         "• Chat AI: gửi text trực tiếp\n"
         "• Đọc voice: nhập <code>Đọc voice: nội dung</code>\n"
-        "• Bóc băng audio: gửi voice/mp3/m4a\n"
-        "• Tách nền ảnh: gửi ảnh vào bot\n"
-        "• Tải video sạch: gửi link TikTok/YouTube/Facebook\n\n"
+        f"• Bóc băng audio: gửi voice/mp3/m4a — <code>{html.escape(readiness['stt']['label'])}</code>\n"
+        f"• Tách nền ảnh: gửi ảnh vào bot — <code>{html.escape(readiness['image_remove_bg']['label'])}</code>\n"
+        f"• Tải video qua link: <code>{html.escape(readiness['downloader']['label'])}</code>; nếu link lỗi, hãy gửi file video trực tiếp\n\n"
         "<b>3. Video & Media Factory</b>\n"
         f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack ({FILM_SCRIPT_COST} Xu)\n"
         f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật ({IMAGE_PROMPT_PACK_COST} Xu)\n"
@@ -22662,6 +22728,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payos_dynamic_status = "working" if payos_debug_status == "PASS" and payos_checkout_url else "NEED DEBUG"
     lines = [
         "🔐 <b>TOAN AAS Provider Status</b>",
+        "configured = có ENV/key. tested = đã smoke test bằng /tool_test_*; configured không đồng nghĩa provider hoạt động.",
         "",
         "<b>Core</b>",
         f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
@@ -22678,34 +22745,40 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• OpenAI fallback: <code>{provider_status_text(providers['ai']['openai'])}</code>",
         "• Claude Sonnet/Opus: <code>planned/missing</code>",
         "• Grok cao cấp: <code>planned/missing</code>",
-        f"• Router normal/pro/deep: <code>{'ready' if providers['ai']['ready'] else 'missing'}</code>",
+        f"• Router normal/pro/deep: <code>{'configured' if providers['ai']['ready'] else 'missing'}</code>",
+        f"• AI tested: <code>{html.escape(tool_test_status_text('ai'))}</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{provider_status_text(providers['audio']['deepgram'])}</code>",
         f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
         "• Edge TTS: <code>built-in/fallback</code>",
+        f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
+        f"• STT tested: <code>{html.escape(tool_test_status_text('stt'))}</code>",
         "",
         "<b>Image Utilities</b>",
         f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
         f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
+        f"• Image provider tested: <code>{html.escape(tool_test_status_text('image'))}</code>",
         "",
         "<b>Image / Media</b>",
-        f"• Trend Finder: <code>{'ready' if providers['media_factory']['trend_finder'] else 'disabled'}</code>",
-        f"• Image Tools Menu: <code>{'ready' if providers['media_factory']['image_tools'] else 'disabled'}</code>",
-        f"• Image Prompt Factory: <code>{'ready' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
-        f"• Image-to-Video Prompt Pack: <code>{'ready' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
+        f"• Trend Finder: <code>{'enabled/content-only' if providers['media_factory']['trend_finder'] else 'disabled'}</code>",
+        f"• Image Tools Menu: <code>{'enabled/menu' if providers['media_factory']['image_tools'] else 'disabled'}</code>",
+        f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
+        f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
         f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
         f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
         f"• Real Video Generation: <code>{'enabled' if providers['media_factory']['image_to_video'] else 'planned/disabled'}</code>",
         f"• Admin Publish: <code>{'enabled/internal' if providers['media_factory']['admin_publish'] else 'disabled/internal'}</code>",
         f"• Customer Publish: <code>{'enabled' if providers['media_factory']['customer_publish'] else 'disabled'}</code>",
         f"• Auto Publish: <code>{'enabled' if providers['media_factory']['auto_publish'] else 'disabled'}</code>",
+        f"• Ads Assistant: <code>{'enabled' if providers['media_factory']['ads_assistant'] else 'disabled'}</code>",
         "",
         "<b>Downloader</b>",
         f"• Cobalt URL: <code>{provider_status_text(providers['downloader']['cobalt_url'])}</code>",
         f"• Cobalt Key: <code>{provider_status_text(providers['downloader']['cobalt_key'])}</code>",
         f"• RapidAPI Key: <code>{provider_status_text(providers['downloader']['rapidapi'])}</code>",
         f"• RapidAPI Host: <code>{provider_status_text(providers['downloader']['rapidapi_host'])}</code>",
+        f"• Downloader tested: <code>{html.escape(tool_test_status_text('downloader'))}</code>",
         "",
         "<b>Security</b>",
         f"• Lead webhook secret: <code>{provider_status_text(providers['security']['lead_webhook_secret'])}</code>",
@@ -22713,7 +22786,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Operator API token: <code>{provider_status_text(providers['security']['operator_api_token'])}</code>",
         f"• Affiliate postback token: <code>{provider_status_text(providers['security']['affiliate_postback_token'])}</code>",
         "",
-        "Không có API key/token/secret nào được hiển thị.",
+        "Không có API key/token/secret nào được hiển thị. Customer publish, auto publish và ads assistant mặc định OFF.",
     ]
     if not db_status["ok"]:
         lines.append(f"DB error: <code>{html.escape(db_status.get('error') or '-')}</code>")
@@ -22729,6 +22802,7 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     public_cobalt = str(COBALT_API_URL or "").rstrip("/").lower() == "https://api.cobalt.tools"
     lines = [
         "🧪 <b>TOAN AAS Tool Audit</b>",
+        "Audit này chỉ kiểm tra cấu hình/trạng thái. Muốn xác nhận provider chạy thật, dùng các lệnh /tool_test_*.",
         "",
         "<b>Core</b>",
         f"• DB: <code>{'OK' if db_status['ok'] else 'FAIL'}</code>",
@@ -22738,27 +22812,38 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>AI</b>",
         f"• Gemini: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
         f"• OpenAI: <code>{provider_status_text(providers['ai']['openai'])}</code>",
-        "• Smoke test: <code>/tool_test_ai</code> nếu đã có; nếu chưa, test bằng lệnh AI ngắn.",
+        f"• Tested: <code>{html.escape(tool_test_status_text('ai'))}</code>",
+        "• Smoke test: <code>/tool_test_ai</code>",
         "",
         "<b>Image utilities</b>",
         f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
         f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
+        f"• Tested: <code>{html.escape(tool_test_status_text('image'))}</code>",
+        "• Smoke test: reply ảnh rồi gõ <code>/tool_test_image</code>",
         "",
         "<b>Image / Media</b>",
-        f"• Image Prompt Factory: <code>{'ready' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
-        f"• Image-to-Video Prompt Pack: <code>{'ready' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
+        f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
+        f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
         f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code>",
         f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code>",
+        f"• Customer publish: <code>{'enabled' if providers['media_factory']['customer_publish'] else 'disabled'}</code>",
+        f"• Auto publish: <code>{'enabled' if providers['media_factory']['auto_publish'] else 'disabled'}</code>",
+        f"• Ads assistant: <code>{'enabled' if providers['media_factory']['ads_assistant'] else 'disabled'}</code>",
         "",
         "<b>Downloader</b>",
         f"• Cobalt URL: <code>{html.escape(COBALT_API_URL or '-')}</code>",
         f"• Public Cobalt: <code>{'yes - disabled for production safety' if public_cobalt else 'no/self-host or custom'}</code>",
         f"• RapidAPI: <code>{provider_status_text(providers['downloader']['rapidapi'])}</code>",
+        f"• Tested: <code>{html.escape(tool_test_status_text('downloader'))}</code>",
+        "• Smoke test: <code>/tool_test_downloader https://...</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{provider_status_text(providers['audio']['deepgram'])}</code>",
         f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
         "• Edge TTS: <code>built-in/fallback</code>",
+        f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
+        f"• STT tested: <code>{html.escape(tool_test_status_text('stt'))}</code>",
+        "• Smoke test: <code>/tool_test_tts Xin chào TOAN AAS</code>; reply audio rồi gõ <code>/tool_test_stt</code>",
         "",
         "<b>Payment</b>",
         f"• PayOS env: <code>{'configured' if providers['payos']['ready'] else 'missing'}</code>",
@@ -22768,6 +22853,279 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Không gọi API tốn tiền và không hiển thị secret.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    gemini_status = "MISSING"
+    gemini_detail = ""
+    openai_status = "MISSING"
+    openai_detail = ""
+    result_preview = ""
+
+    if gemini_client:
+        try:
+            def run_gemini():
+                return gemini_client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents="Reply exactly: OK TOAN AAS",
+                )
+            res = await asyncio.to_thread(run_gemini)
+            result_preview = (getattr(res, "text", "") or "")[:160]
+            gemini_status = "PASS" if result_preview else "FAIL"
+            gemini_detail = result_preview or "empty_response"
+        except Exception as e:
+            gemini_status = "FAIL"
+            gemini_detail = str(e)[:240]
+
+    if openai_client:
+        try:
+            def run_openai():
+                return openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a short smoke-test responder."},
+                        {"role": "user", "content": "Reply exactly: OK TOAN AAS"},
+                    ],
+                    max_tokens=20,
+                )
+            res = await asyncio.to_thread(run_openai)
+            openai_text = (res.choices[0].message.content or "")[:160]
+            if not result_preview:
+                result_preview = openai_text
+            openai_status = "PASS" if openai_text else "FAIL"
+            openai_detail = openai_text or "empty_response"
+        except Exception as e:
+            openai_status = "FAIL"
+            openai_detail = str(e)[:240]
+
+    overall = "PASS" if "PASS" in {gemini_status, openai_status} else ("MISSING" if {gemini_status, openai_status} == {"MISSING"} else "FAIL")
+    save_tool_test_result("ai", overall, f"Gemini={gemini_status}; OpenAI={openai_status}", update.effective_user.id)
+    await update.message.reply_text(
+        "🤖 <b>AI Provider Smoke Test</b>\n\n"
+        f"• Gemini: <code>{html.escape(gemini_status)}</code>"
+        + (f" — <code>{html.escape(gemini_detail[:180])}</code>" if gemini_detail else "")
+        + "\n"
+        f"• OpenAI fallback: <code>{html.escape(openai_status)}</code>"
+        + (f" — <code>{html.escape(openai_detail[:180])}</code>" if openai_detail else "")
+        + "\n"
+        f"• Result: <code>{html.escape(result_preview or '-')}</code>\n\n"
+        "Không hiển thị API key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    reply = update.message.reply_to_message if update.message else None
+    if not (reply and getattr(reply, "photo", None)):
+        return await update.message.reply_text("⚠️ Reply một ảnh rồi gõ <code>/tool_test_image</code>.", parse_mode="HTML")
+    photo_size = reply.photo[-1]
+    img_bytes = bytes(await (await photo_size.get_file()).download_as_bytearray())
+    remove_status = "MISSING"
+    cutout_status = "MISSING"
+    output_bytes = b""
+    output_provider = ""
+    detail = ""
+
+    if REMOVEBG_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                res = await client.post(
+                    "https://api.remove.bg/v1.0/removebg",
+                    headers={"X-Api-Key": REMOVEBG_API_KEY},
+                    files={"image_file": ("tool-test.png", img_bytes, "image/png")},
+                    data={"size": "auto"},
+                )
+            remove_status = "PASS" if res.status_code == 200 and res.content else f"FAIL HTTP {res.status_code}"
+            if remove_status == "PASS":
+                output_bytes = res.content
+                output_provider = "RemoveBG"
+            else:
+                detail = res.text[:180]
+        except Exception as e:
+            remove_status = "FAIL"
+            detail = str(e)[:180]
+
+    if not output_bytes and CUTOUT_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                res = await client.post(
+                    "https://www.cutout.pro/api/v1/matting2?mattingType=2&crop=true",
+                    headers={"APIKEY": CUTOUT_API_KEY},
+                    files={"file": ("tool-test.png", img_bytes, "image/png")},
+                )
+            cutout_status = "PASS" if res.status_code == 200 and res.content else f"FAIL HTTP {res.status_code}"
+            if cutout_status == "PASS":
+                output_bytes = res.content
+                output_provider = "Cutout"
+            else:
+                detail = detail or res.text[:180]
+        except Exception as e:
+            cutout_status = "FAIL"
+            detail = detail or str(e)[:180]
+
+    overall = "PASS" if output_bytes else ("MISSING" if remove_status == "MISSING" and cutout_status == "MISSING" else "FAIL")
+    save_tool_test_result("image", overall, f"RemoveBG={remove_status}; Cutout={cutout_status}; {detail}", update.effective_user.id)
+    if output_bytes:
+        out = io.BytesIO(output_bytes)
+        out.name = "toan_aas_tool_test_no_bg.png"
+        await update.message.reply_document(
+            document=out,
+            filename=out.name,
+            caption=f"🖼 Image Provider Smoke Test: {output_provider} PASS",
+        )
+    await update.message.reply_text(
+        "🖼 <b>Image Provider Smoke Test</b>\n\n"
+        f"• RemoveBG: <code>{html.escape(remove_status)}</code>\n"
+        f"• Cutout: <code>{html.escape(cutout_status)}</code>\n"
+        f"• Output sent: <code>{'yes' if output_bytes else 'no'}</code>\n"
+        + (f"• Error: <code>{html.escape(detail[:240])}</code>\n" if detail and not output_bytes else "")
+        + "\nKhông hiển thị API key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    text = " ".join(context.args or []).strip() or "Xin chào TOAN AAS"
+    text = text[:240]
+    tmp_path = ""
+    edge_status = "FAIL"
+    detail = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+            tmp_path = tmp.name
+        communicate = edge_tts.Communicate(text, "vi-VN-NamMinhNeural")
+        await communicate.save(tmp_path)
+        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+            edge_status = "PASS"
+            with open(tmp_path, "rb") as f:
+                await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=f,
+                    caption="🔊 TTS Smoke Test — Edge TTS PASS",
+                )
+        else:
+            detail = "empty_audio"
+    except Exception as e:
+        detail = str(e)[:240]
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+    overall = "PASS" if edge_status == "PASS" else "FAIL"
+    save_tool_test_result("tts", overall, f"Edge={edge_status}; Fish={'configured/not_tested' if FISH_AUDIO_KEY else 'missing'}; {detail}", update.effective_user.id)
+    await update.message.reply_text(
+        "🔊 <b>TTS Smoke Test</b>\n\n"
+        f"• Edge TTS: <code>{html.escape(edge_status)}</code>\n"
+        f"• Fish Audio: <code>{'configured/not_tested' if FISH_AUDIO_KEY else 'missing'}</code>\n"
+        f"• Output sent: <code>{'yes' if edge_status == 'PASS' else 'no'}</code>"
+        + (f"\n• Error: <code>{html.escape(detail)}</code>" if detail else ""),
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    reply = update.message.reply_to_message if update.message else None
+    media = None
+    if reply:
+        media = getattr(reply, "voice", None) or getattr(reply, "audio", None) or getattr(reply, "video", None) or getattr(reply, "document", None)
+    if not media:
+        return await update.message.reply_text("⚠️ Reply audio/voice/video ngắn rồi gõ <code>/tool_test_stt</code>.", parse_mode="HTML")
+    if not DEEPGRAM_API_KEY:
+        save_tool_test_result("stt", "MISSING", "DEEPGRAM_API_KEY missing", update.effective_user.id)
+        return await update.message.reply_text("🎤 <b>STT Smoke Test</b>\n\n• Deepgram: <code>MISSING</code>", parse_mode="HTML")
+    file_size = int(getattr(media, "file_size", 0) or 0)
+    if file_size > 15 * 1024 * 1024:
+        save_tool_test_result("stt", "FAIL", f"file_too_large={file_size}", update.effective_user.id)
+        return await update.message.reply_text("⚠️ File quá lớn để smoke test. Hãy dùng audio ngắn dưới 15MB.")
+    try:
+        file_bytes = bytes(await (await media.get_file()).download_as_bytearray())
+        transcript = await AgentDeepgram.transcribe(file_bytes, context)
+        passed = bool(transcript and not transcript.startswith("❌"))
+        status = "PASS" if passed else "FAIL"
+        save_tool_test_result("stt", status, transcript[:500], update.effective_user.id)
+        await update.message.reply_text(
+            "🎤 <b>STT Smoke Test</b>\n\n"
+            f"• Deepgram: <code>{status}</code>\n"
+            f"• Transcript preview: <code>{html.escape(transcript[:500] or '-')}</code>",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        save_tool_test_result("stt", "FAIL", str(e)[:500], update.effective_user.id)
+        await update.message.reply_text(
+            "🎤 <b>STT Smoke Test</b>\n\n"
+            "• Deepgram: <code>FAIL</code>\n"
+            f"• Error: <code>{html.escape(str(e)[:240])}</code>",
+            parse_mode="HTML",
+        )
+
+async def cmd_tool_test_downloader(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    url = " ".join(context.args or []).strip()
+    if not url:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/tool_test_downloader https://...</code>", parse_mode="HTML")
+    api_base = (COBALT_API_URL or "https://api.cobalt.tools").rstrip("/")
+    public_cobalt = AgentDownloader._uses_public_cobalt(api_base)
+    if public_cobalt:
+        save_tool_test_result("downloader", "DISABLED_BY_POLICY", "public api.cobalt.tools disabled", update.effective_user.id)
+        return await update.message.reply_text(
+            "📥 <b>Downloader Smoke Test</b>\n\n"
+            f"• URL: <code>{html.escape(url[:180])}</code>\n"
+            "• Provider: <code>Cobalt</code>\n"
+            f"• API base: <code>{html.escape(api_base)}</code>\n"
+            "• Public Cobalt: <code>yes</code>\n"
+            "• Result: <code>DISABLED_BY_POLICY</code>\n\n"
+            "Public Cobalt đang bị khóa theo policy để tránh quảng cáo/kênh lạ. "
+            "Muốn test thật, self-host Cobalt và set <code>COBALT_API_URL</code>.",
+            parse_mode="HTML",
+        )
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if COBALT_API_KEY:
+        headers["Authorization"] = f"Api-Key {COBALT_API_KEY}"
+    payload = {
+        "url": url,
+        "downloadMode": "auto",
+        "videoQuality": "720",
+        "filenameStyle": "basic",
+        "localProcessing": "disabled",
+    }
+    status = "FAIL"
+    detail = ""
+    has_media = False
+    try:
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            res = await client.post(api_base + "/", headers=headers, json=payload)
+        try:
+            data = res.json()
+        except Exception:
+            data = {"status": "error", "body": res.text[:300]}
+        media_url = data.get("url", "") if isinstance(data, dict) else ""
+        if isinstance(data, dict) and data.get("status") == "picker":
+            picker = data.get("picker") or []
+            media_url = next((item.get("url") for item in picker if item.get("url")), "")
+        has_media = bool(media_url)
+        status = "PASS" if res.status_code == 200 and has_media else "FAIL"
+        detail = f"HTTP {res.status_code}; cobalt_status={data.get('status') if isinstance(data, dict) else '-'}; has_media={has_media}"
+    except Exception as e:
+        detail = str(e)[:300]
+    save_tool_test_result("downloader", status, detail, update.effective_user.id)
+    await update.message.reply_text(
+        "📥 <b>Downloader Smoke Test</b>\n\n"
+        f"• URL: <code>{html.escape(url[:180])}</code>\n"
+        "• Provider: <code>Cobalt</code>\n"
+        f"• API base: <code>{html.escape(api_base)}</code>\n"
+        "• Public Cobalt: <code>no</code>\n"
+        f"• Result: <code>{html.escape(status)}</code>\n"
+        f"• Detail: <code>{html.escape(detail[:500])}</code>\n\n"
+        "Smoke test chỉ kiểm tra provider trả media URL, không gửi video và không trừ Xu.",
+        parse_mode="HTML",
+    )
 
 async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -23902,16 +24260,21 @@ async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
 
 async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    readiness = customer_tool_readiness_payload()
+    image_provider_label = readiness["image_remove_bg"]["label"]
+    ai_label = readiness["ai"]["label"]
     lines = [
         "🖼 <b>Công cụ ảnh trong Video & Media Factory</b>",
         "",
         "<b>Công cụ tiết kiệm:</b>",
         f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật, <b>{IMAGE_PROMPT_PACK_COST} Xu</b>",
         f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo prompt video từ ảnh, <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>",
+        f"• Tách nền ảnh qua bot: <code>{html.escape(image_provider_label)}</code>",
         "",
         "<b>Công cụ cao cấp ChatGPT/OpenAI:</b>",
         f"• <code>/ai_image &lt;mô tả ảnh&gt;</code> — tạo ảnh AI cao cấp, <b>{AI_IMAGE_COST} Xu</b>",
         f"• <code>/ai_image_edit &lt;yêu cầu sửa ảnh&gt;</code> — reply ảnh để sửa bằng AI, <b>{AI_IMAGE_EDIT_COST} Xu</b>",
+        f"• AI provider: <code>{html.escape(ai_label)}</code>",
         "",
         "Lưu ý: ChatGPT/OpenAI tạo và sửa ảnh là gói cao cấp, chỉ hoạt động khi admin bật provider. "
         "Nếu chưa bật, bot không trừ Xu và sẽ gợi ý dùng /image_prompt trước.",
@@ -37765,6 +38128,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
     tg_app.add_handler(CommandHandler("providers",   cmd_providers))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
+    tg_app.add_handler(CommandHandler("tool_test_ai", cmd_tool_test_ai))
+    tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
+    tg_app.add_handler(CommandHandler("tool_test_tts", cmd_tool_test_tts))
+    tg_app.add_handler(CommandHandler("tool_test_stt", cmd_tool_test_stt))
+    tg_app.add_handler(CommandHandler("tool_test_downloader", cmd_tool_test_downloader))
     tg_app.add_handler(CommandHandler("costs",       cmd_costs))
     tg_app.add_handler(CommandHandler("sales_ready", cmd_sales_ready))
     tg_app.add_handler(CommandHandler("payos_test_plan", cmd_payos_test_plan))
