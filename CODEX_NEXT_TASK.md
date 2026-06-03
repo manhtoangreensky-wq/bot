@@ -161,6 +161,25 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
    - `/payos_key_fingerprint`.
    - `/payos_official_debug`.
    - `/payos_debug_create`.
+0.2. Test Trend/Image/Video status after the media audit patch:
+   - `/feature_status`
+   - `/trend_status`
+   - `/trend_ai mỹ phẩm cho dân văn phòng`
+   - `/trend_research mỹ phẩm cho dân văn phòng`
+   - `/trend_live mỹ phẩm cho dân văn phòng` must report provider missing, no fake live data.
+   - `/image_tools`
+   - `/image_prompt máy hút bụi mini`
+   - `/image_to_video_pack máy hút bụi mini`
+   - `/ai_image ảnh sản phẩm máy hút bụi mini` must not charge if disabled.
+   - `/video_provider_status`
+   - `/media_factory chủ shop nhỏ dùng AI`
+   - `/source_help`
+   - `/dubbing_help`
+   - `/story_video_factory truyện cổ tích tự sáng tác`
+   - `/story_motion_prompt cô gái đi trong rừng cổ tích`
+   - `/sales_ready`
+   - `/tool_status`
+   - `/providers`
 1. Test `/legal` and the Legal button in `/start`.
 2. Test `/terms`, `/privacy`, `/dieukhoan_xu`, `/refund_policy`, `/content_policy`, `/affiliate_policy`, `/ads_policy`.
 3. Test website `/`, `/landing`, `/LOGO.png`, `/banner.png` and the legal footer.

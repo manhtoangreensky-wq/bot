@@ -227,6 +227,17 @@ OPENAI_TEXT_MODEL   = env_any("OPENAI_TEXT_MODEL", default="gpt-4o-mini")
 OPENAI_IMAGE_MODEL  = _env("OPENAI_IMAGE_MODEL", "gpt-image-1")
 ENABLE_OPENAI_IMAGE = env_flag("ENABLE_OPENAI_IMAGE", "0")
 ENABLE_OPENAI_IMAGE_EDIT = env_flag("ENABLE_OPENAI_IMAGE_EDIT", "0")
+ENABLE_REAL_VIDEO = env_flag("ENABLE_REAL_VIDEO", "0")
+ENABLE_TREND_LIVE = env_flag("ENABLE_TREND_LIVE", "0")
+ENABLE_DOWNLOADER_PUBLIC = env_flag("ENABLE_DOWNLOADER_PUBLIC", "0")
+ENABLE_REMOVE_BG_PUBLIC = env_flag("ENABLE_REMOVE_BG_PUBLIC", "0")
+ENABLE_AUTO_PUBLISH = env_flag("ENABLE_AUTO_PUBLISH", "0")
+ENABLE_CUSTOMER_PUBLISH = env_flag("ENABLE_CUSTOMER_PUBLISH", "0")
+ENABLE_ADS_ASSISTANT = env_flag("ENABLE_ADS_ASSISTANT", "0")
+ADMIN_TEST_OPENAI_IMAGE = env_flag("ADMIN_TEST_OPENAI_IMAGE", "1")
+ADMIN_TEST_OPENAI_IMAGE_EDIT = env_flag("ADMIN_TEST_OPENAI_IMAGE_EDIT", "1")
+ADMIN_TEST_REAL_VIDEO = env_flag("ADMIN_TEST_REAL_VIDEO", "0")
+ADMIN_TEST_TREND_LIVE = env_flag("ADMIN_TEST_TREND_LIVE", "0")
 
 # Audio
 DEEPGRAM_API_KEY    = env_any("DEEPGRAM_API_KEY", "Deepgram_API_KEY", "DEEPGRAM_KEY", "DEEPGRAM_TOKEN")
@@ -24283,6 +24294,9 @@ def provider_status_payload() -> dict:
         },
         "media_factory": {
             "trend_finder": is_feature_enabled("trend_finder", default=True),
+            "trend_live_env": ENABLE_TREND_LIVE,
+            "trend_live": ENABLE_TREND_LIVE and is_feature_enabled("trend_live", default=False),
+            "trend_live_stage": configured_release_stage("trend_live"),
             "image_tools": is_feature_enabled("image_tools", default=True),
             "image_prompt_factory": is_feature_enabled("image_prompt_factory", default=True),
             "image_to_video_prompt": is_feature_enabled("image_to_video_prompt", default=True),
@@ -24290,15 +24304,24 @@ def provider_status_payload() -> dict:
             "image_openai_edit_env": ENABLE_OPENAI_IMAGE_EDIT,
             "image_openai_generation": ENABLE_OPENAI_IMAGE and is_feature_enabled("image_openai_generation", default=False),
             "image_openai_edit": ENABLE_OPENAI_IMAGE_EDIT and is_feature_enabled("image_openai_edit", default=False),
+            "image_openai_generation_stage": configured_release_stage("ai_image"),
+            "image_openai_edit_stage": configured_release_stage("ai_image_edit"),
             "image_generation": is_feature_enabled("image_generation", default=False),
-            "image_to_video": is_feature_enabled("image_to_video", default=False),
+            "image_to_video": ENABLE_REAL_VIDEO and is_feature_enabled("image_to_video", default=False),
+            "real_video_env": ENABLE_REAL_VIDEO,
+            "real_video_stage": configured_release_stage("real_video"),
             "admin_publish": is_feature_enabled("admin_publish", default=False),
-            "customer_publish": is_feature_enabled("customer_publish", default=False),
-            "auto_publish": is_feature_enabled("auto_publish", default=False),
+            "customer_publish": ENABLE_CUSTOMER_PUBLISH and is_feature_enabled("customer_publish", default=False),
+            "customer_publish_stage": configured_release_stage("customer_publish"),
+            "auto_publish": ENABLE_AUTO_PUBLISH and is_feature_enabled("auto_publish", default=False),
+            "auto_publish_stage": configured_release_stage("auto_publish"),
             "youtube_publish_admin": is_feature_enabled("youtube_publish_admin", default=False),
             "tiktok_publish_admin": is_feature_enabled("tiktok_publish_admin", default=False),
             "facebook_publish_admin": is_feature_enabled("facebook_publish_admin", default=False),
-            "ads_assistant": is_feature_enabled("ads_assistant", default=False),
+            "ads_assistant": ENABLE_ADS_ASSISTANT and is_feature_enabled("ads_assistant", default=False),
+            "ads_assistant_stage": configured_release_stage("ads_assistant"),
+            "downloader_stage": configured_release_stage("downloader"),
+            "remove_bg_stage": configured_release_stage("remove_bg"),
         },
         "security": {
             "lead_webhook_secret": bool(LEAD_WEBHOOK_SECRET),
@@ -24355,6 +24378,80 @@ def preferred_tool_test_status_text(*tool_names: str) -> str:
     status = str(result.get("status") or "NOT_TESTED").upper()
     tested_at = result.get("tested_at") or ""
     return f"{status}" + (f" at {tested_at}" if tested_at else "")
+
+FEATURE_RELEASE_STAGES = {"PLANNED", "ADMIN_ONLY", "BETA_PRIVATE", "PUBLIC_READY", "DISABLED"}
+FEATURE_RELEASE_DEFAULTS = {
+    "ai_image": "DISABLED",
+    "ai_image_edit": "DISABLED",
+    "real_video": "DISABLED",
+    "trend_live": "DISABLED",
+    "downloader": "DISABLED",
+    "remove_bg": "ADMIN_ONLY",
+    "auto_publish": "DISABLED",
+    "customer_publish": "DISABLED",
+    "ads_assistant": "DISABLED",
+}
+
+def normalize_feature_key(value: str) -> str:
+    raw = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "openai_image": "ai_image",
+        "image_ai": "ai_image",
+        "openai_image_edit": "ai_image_edit",
+        "image_edit": "ai_image_edit",
+        "video": "real_video",
+        "video_generation": "real_video",
+        "trend": "trend_live",
+        "trend_realtime": "trend_live",
+        "cobalt": "downloader",
+        "download": "downloader",
+        "removebg": "remove_bg",
+        "cutout": "remove_bg",
+        "publish": "customer_publish",
+        "ads": "ads_assistant",
+    }
+    return aliases.get(raw, raw)
+
+def normalize_release_stage(value: str) -> str:
+    stage = str(value or "").strip().upper()
+    return stage if stage in FEATURE_RELEASE_STAGES else ""
+
+def configured_release_stage(feature: str) -> str:
+    key = normalize_feature_key(feature)
+    override = normalize_release_stage(get_system_flag(f"feature_stage:{key}", ""))
+    if override:
+        return override
+    if key == "ai_image":
+        return "ADMIN_ONLY" if ENABLE_OPENAI_IMAGE and ADMIN_TEST_OPENAI_IMAGE else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "ai_image_edit":
+        return "ADMIN_ONLY" if ENABLE_OPENAI_IMAGE_EDIT and ADMIN_TEST_OPENAI_IMAGE_EDIT else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "real_video":
+        return "ADMIN_ONLY" if ENABLE_REAL_VIDEO and ADMIN_TEST_REAL_VIDEO else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "trend_live":
+        return "ADMIN_ONLY" if ENABLE_TREND_LIVE and ADMIN_TEST_TREND_LIVE else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "downloader":
+        return "PUBLIC_READY" if ENABLE_DOWNLOADER_PUBLIC else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "remove_bg":
+        return "PUBLIC_READY" if ENABLE_REMOVE_BG_PUBLIC else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "auto_publish":
+        return "PUBLIC_READY" if ENABLE_AUTO_PUBLISH else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "customer_publish":
+        return "PUBLIC_READY" if ENABLE_CUSTOMER_PUBLISH else FEATURE_RELEASE_DEFAULTS[key]
+    if key == "ads_assistant":
+        return "PUBLIC_READY" if ENABLE_ADS_ASSISTANT else FEATURE_RELEASE_DEFAULTS[key]
+    return "PLANNED"
+
+def is_feature_public_ready(feature: str) -> bool:
+    return configured_release_stage(feature) == "PUBLIC_READY"
+
+def admin_first_guard_message(feature_label: str, fallback_command: str = "") -> str:
+    fallback = f"\n\nBạn có thể dùng công cụ thay thế:\n<code>{html.escape(fallback_command)}</code>" if fallback_command else ""
+    return (
+        "🚧 <b>Tính năng này đang được TOAN AAS kiểm thử nội bộ.</b>\n\n"
+        "Hiện tại công cụ chưa mở công khai để đảm bảo chất lượng, chi phí và an toàn dữ liệu."
+        f"{fallback}\n\n"
+        "Không có Xu nào bị trừ."
+    )
 
 def customer_tool_readiness_payload() -> dict:
     providers = provider_status_payload()
@@ -24917,9 +25014,11 @@ PAYMENT_FREEZE_COMMANDS = {
     "duyet", "tuchoi", "checkpayos", "payos_debug_create", "mark_payos_test",
 }
 TOOL_FREEZE_COMMANDS = {
-    "film", "video_script", "trend_ai", "image_tools", "image_prompt", "image_pack",
+    "film", "video_script", "trend_ai", "trend", "trend_live", "trend_research", "trend_status",
+    "image_tools", "image_prompt", "image_pack",
     "video_from_image", "image_to_video_pack", "ai_image", "ai_image_edit",
-    "media_factory", "video_factory_flow", "remove_bg", "translate_text",
+    "media_factory", "video_factory_flow", "video_provider_status", "remove_bg",
+    "source_help", "dubbing_help", "story_video_factory", "story_motion_prompt", "translate_text",
     "chat_pro", "chat_deep", "chat_pro_on", "chat_deep_on", "growth_ai",
     "campaign_report", "produce", "pipeline", "tool_test_ai", "tool_test_translate",
     "tool_test_image", "tool_test_image_debug", "tool_test_ai_image",
@@ -25914,19 +26013,26 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Image / Media</b>",
         f"• Trend Finder: <code>{'enabled/content-only' if providers['media_factory']['trend_finder'] else 'disabled'}</code>",
+        f"• Trend AI: <code>enabled/content-only</code> | tested <code>{html.escape(tool_test_status_text('trend_ai'))}</code>",
+        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code> | configured <code>{'yes' if providers['media_factory'].get('trend_live_env') else 'no'}</code> | tested <code>{html.escape(tool_test_status_text('trend_live'))}</code>",
+        "• Google Trends/API: <code>not configured</code>",
+        "• TikTok trend API: <code>not configured</code>",
+        "• YouTube trend API: <code>not configured</code>",
+        "• Facebook trend API: <code>not configured</code>",
+        "• Web search provider: <code>not configured</code>",
         f"• Image Tools Menu: <code>{'enabled/menu' if providers['media_factory']['image_tools'] else 'disabled'}</code>",
         f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
         f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
-        f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_generation_env') else 'off'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
-        f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_edit_env') else 'off'}</code> | key <code>{provider_status_text(providers['ai']['openai'])}</code>",
-        f"• Real Video Generation: <code>{'enabled' if providers['media_factory']['image_to_video'] else 'planned/disabled'}</code>",
+        f"• OpenAI Image Generation: configured <code>{provider_status_text(providers['ai']['openai'])}</code> | tested <code>{html.escape(tool_test_status_text('ai_image'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_generation_stage') or 'DISABLED')}</code>",
+        f"• OpenAI Image Edit: configured <code>{provider_status_text(providers['ai']['openai'])}</code> | tested <code>{html.escape(tool_test_status_text('ai_image_edit'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image_edit') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_edit_stage') or 'DISABLED')}</code>",
+        f"• Real Video Generation: configured <code>no</code> | tested <code>{html.escape(tool_test_status_text('real_video'))}</code> | public <code>{'ON' if is_feature_public_ready('real_video') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('real_video_stage') or 'DISABLED')}</code>",
         f"• Admin Publish: <code>{'enabled/internal' if providers['media_factory']['admin_publish'] else 'disabled/internal'}</code>",
         f"• YouTube Publish: <code>{'enabled/admin-only' if providers['media_factory']['youtube_publish_admin'] else 'planned/admin-only/disabled'}</code>",
         f"• TikTok Publish: <code>{'enabled/admin-only' if providers['media_factory']['tiktok_publish_admin'] else 'planned/admin-only/disabled'}</code>",
         f"• Facebook Publish: <code>{'enabled/admin-only' if providers['media_factory']['facebook_publish_admin'] else 'planned/admin-only/disabled'}</code>",
-        f"• Customer Publish: <code>{'enabled' if providers['media_factory']['customer_publish'] else 'disabled'}</code>",
-        f"• Auto Publish: <code>{'enabled' if providers['media_factory']['auto_publish'] else 'disabled'}</code>",
-        f"• Ads Assistant: <code>{'enabled' if providers['media_factory']['ads_assistant'] else 'disabled'}</code>",
+        f"• Customer Publish: public <code>{'ON' if providers['media_factory']['customer_publish'] else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('customer_publish_stage') or 'DISABLED')}</code>",
+        f"• Auto Publish: public <code>{'ON' if providers['media_factory']['auto_publish'] else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('auto_publish_stage') or 'DISABLED')}</code>",
+        f"• Ads Assistant: public <code>{'ON' if providers['media_factory']['ads_assistant'] else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('ads_assistant_stage') or 'DISABLED')}</code>",
         "",
         "<b>Downloader</b>",
         f"• Cobalt self-host: <code>{html.escape(cobalt_status)}</code>",
@@ -25954,6 +26060,7 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     providers = provider_status_payload()
     db_status = db_status_payload()
+    state = current_system_mode()
     payos_debug_status = (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper()
     payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
     cobalt_raw = (COBALT_API_URL_RAW or "").rstrip("/")
@@ -25995,10 +26102,13 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Smoke test: <code>/tool_test_translate</code>",
         "",
         "<b>Image / Media</b>",
+        "• Trend AI: <code>READY/content-only</code>",
+        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}/provider missing</code>",
         f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
         f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
-        f"• OpenAI Image Generation: <code>{'enabled' if providers['media_factory']['image_openai_generation'] else 'disabled'}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_generation_env') else 'off'}</code>",
-        f"• OpenAI Image Edit: <code>{'enabled' if providers['media_factory']['image_openai_edit'] else 'disabled'}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_edit_env') else 'off'}</code>",
+        f"• OpenAI Image Generation: <code>{html.escape(providers['media_factory'].get('image_openai_generation_stage') or 'DISABLED')}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_generation_env') else 'off'}</code>",
+        f"• OpenAI Image Edit: <code>{html.escape(providers['media_factory'].get('image_openai_edit_stage') or 'DISABLED')}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_edit_env') else 'off'}</code>",
+        f"• Real Video Generation: <code>{html.escape(providers['media_factory'].get('real_video_stage') or 'DISABLED')}</code>",
         f"• Customer publish: <code>{'enabled' if providers['media_factory']['customer_publish'] else 'disabled'}</code>",
         f"• Auto publish: <code>{'enabled' if providers['media_factory']['auto_publish'] else 'disabled'}</code>",
         f"• Ads assistant: <code>{'enabled' if providers['media_factory']['ads_assistant'] else 'disabled'}</code>",
@@ -26736,8 +26846,13 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("TTS", "tts", get_tool_test_result("tts"), "Edge/Fish"),
         ("STT Deepgram", "stt", get_tool_test_result("stt"), "configured" if providers["audio"]["deepgram"] else "missing"),
         ("Image RemoveBG/Cutout", "image_remove_bg", image_result, "configured" if providers["image"]["ready"] else "missing"),
+        ("Trend AI", "trend_ai", {"status": "READY", "tested_at": "content-only", "detail": "Prompt/content-only trend angle generator"}, "READY/content-only"),
+        ("Trend Live", "trend_live", get_tool_test_result("trend_live"), f"{providers['media_factory'].get('trend_live_stage') or 'DISABLED'} provider missing"),
+        ("Image Prompt", "image_prompt", {"status": "READY", "tested_at": "prompt-only", "detail": "Image prompt factory"}, "READY/prompt-only"),
         ("OpenAI Image", "ai_image", get_tool_test_result("ai_image"), "env ON" if ENABLE_OPENAI_IMAGE else "DISABLED env"),
         ("OpenAI Image Edit", "ai_image_edit", get_tool_test_result("ai_image_edit"), "env ON" if ENABLE_OPENAI_IMAGE_EDIT else "DISABLED env"),
+        ("Video Prompt Pack", "video_prompt_pack", {"status": "READY", "tested_at": "prompt-only", "detail": "Image-to-video prompt pack"}, "READY/prompt-only"),
+        ("Real Video", "real_video", get_tool_test_result("real_video"), f"{providers['media_factory'].get('real_video_stage') or 'DISABLED'} planned"),
         ("Downloader", "downloader", get_tool_test_result("downloader"), "Cobalt self-host" if providers["downloader"].get("cobalt_self_host") else "MISSING Cobalt"),
     ]
     lines = ["🧪 <b>Tool Test Status</b>", ""]
@@ -27582,6 +27697,18 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• AI: <code>{'READY' if providers['ai']['ready'] else 'NOT READY'}</code>",
         f"• STT: <code>{'READY' if providers['audio']['deepgram'] else 'MISSING'}</code>",
         f"• Image: <code>{'READY' if providers['image']['ready'] else 'MISSING'}</code>",
+        "",
+        "<b>Creative Tools</b>",
+        "• Trend AI: <code>READY/content-only</code>",
+        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}/provider missing</code>",
+        "• Image Prompt: <code>READY/prompt-only</code>",
+        f"• RemoveBG: <code>{'NEED TEST/PUBLIC OFF' if not is_feature_public_ready('remove_bg') else 'PUBLIC FLAG ON'}</code>",
+        f"• AI Image Real: <code>{html.escape(configured_release_stage('ai_image'))}</code>",
+        f"• AI Image Edit: <code>{html.escape(configured_release_stage('ai_image_edit'))}</code>",
+        "• Video Prompt Pack: <code>READY/prompt-only</code>",
+        f"• Real Video Generation: <code>{html.escape(configured_release_stage('real_video'))}/planned</code>",
+        f"• Downloader: <code>{'Cobalt self-host configured' if bool(COBALT_API_URL) else 'missing Cobalt/self-host'}</code>",
+        "• Status: <code>Image Prompt READY | Image Provider NEED TEST</code>",
         "",
         "<b>Money</b>",
         f"• Packages: <b>{data['packages']}</b>",
@@ -28741,7 +28868,8 @@ def media_factory_overview_text() -> str:
         "🎬 <b>VIDEO & MEDIA FACTORY — TOAN AAS</b>\n\n"
         "TOAN AAS hỗ trợ xây quy trình tạo nội dung/video đa hướng:\n\n"
         "<b>1. Trend & Ý tưởng</b>\n"
-        "• Tìm/gợi ý trend TikTok, YouTube, Facebook.\n"
+        "• Gợi ý trend bằng AI content-only; Trend Live chưa bật provider realtime.\n"
+        "• Checklist nghiên cứu thủ công cho TikTok, YouTube Shorts, Facebook Reels, Google Trends.\n"
         "• Gợi ý chủ đề, hook, tiêu đề, nội dung phù hợp.\n"
         "• Gợi ý truyện/chủ đề đang hot theo nguồn hợp lệ.\n\n"
         "<b>2. Thu thập tư liệu hợp lệ</b>\n"
@@ -28770,6 +28898,9 @@ def media_factory_overview_text() -> str:
         "• Admin publish: chỉ test nội bộ.\n"
         "• TikTok/YouTube/Facebook API là backlog admin-only sau khi có approval gate.\n\n"
         "<b>Lệnh liên quan:</b>\n"
+        "• <code>/trend_ai &lt;chủ đề&gt;</code> — gợi ý trend angle content-only\n"
+        "• <code>/trend_live &lt;chủ đề&gt;</code> — kiểm tra trạng thái trend realtime/provider\n"
+        "• <code>/trend_research &lt;chủ đề&gt;</code> — checklist nghiên cứu trend thủ công\n"
         "• <code>/media_factory &lt;chủ đề&gt;</code> — tạo pack trend/script/ảnh/video/caption\n"
         "• <code>/video_factory_flow</code> — xem quy trình đầy đủ\n"
         "• <code>/image_tools</code> — công cụ ảnh\n"
@@ -28787,6 +28918,8 @@ def video_factory_flow_text() -> str:
         "🔁 <b>QUY TRÌNH TẠO VIDEO AI TOAN AAS</b>\n\n"
         "<b>Bước 1: Tìm trend</b>\n"
         "→ <code>/trend_ai &lt;chủ đề&gt;</code>\n\n"
+        "→ <code>/trend_research &lt;chủ đề&gt;</code> nếu muốn checklist tự kiểm tra nguồn thật.\n"
+        "→ <code>/trend_live &lt;chủ đề&gt;</code> hiện chỉ báo provider missing, không fake dữ liệu live.\n\n"
         "<b>Bước 2: Chọn hướng nội dung</b>\n"
         "→ Bot gợi ý hook, tiêu đề, nội dung và hướng tư liệu hợp lệ.\n\n"
         "<b>Bước 3: Tạo ảnh/cảnh</b>\n"
@@ -28819,19 +28952,26 @@ def fallback_trend_ai_pack(topic: str) -> str:
         ("Mẹo tiết kiệm thời gian", "Dùng format mẹo nhanh, cảnh đời thường, CTA lưu lại/xem thêm."),
         ("Review hợp với ai", "Nêu rõ ai nên dùng, ai không nên dùng, tăng niềm tin."),
     ]
-    lines = [f"🔥 TREND GỢI Ý TOAN AAS\n\nChủ đề/ngách: {topic}\n"]
+    lines = [
+        "📈 TREND AI — TOAN AAS",
+        "",
+        f"Chủ đề/ngách: {topic}",
+        "Trạng thái: AI-suggested/content-only, không phải dữ liệu live realtime.",
+        "",
+    ]
     for idx, (title, angle) in enumerate(templates, 1):
         lines.extend([
-            f"{idx}. “{title}”",
-            f"• Vì sao đáng làm: {angle}",
-            "• Audience: người đang cân nhắc mua hoặc tìm giải pháp đơn giản.",
-            f"• Hook: “Nếu bạn đang gặp vấn đề này với {topic}, xem 20 giây này trước khi mua...”",
-            "• Video angle: cảnh đời thường -> vấn đề -> giải pháp -> CTA mềm.",
-            "• Rủi ro: tránh hứa chắc kết quả, tránh so sánh bôi xấu thương hiệu khác.",
-            f"• Lệnh tiếp theo: /image_prompt {topic} - {title}",
+            f"{idx}. Trend angle: “{title}”",
+            f"2. Vì sao đáng thử: {angle}",
+            f"3. Hook 3 giây: “Nếu bạn đang gặp vấn đề này với {topic}, xem 20 giây này trước khi mua...”",
+            "4. Format video: cảnh đời thường -> vấn đề -> checklist -> giải pháp mềm -> CTA tự chọn.",
+            "5. Ảnh/cảnh cần có: tình huống thật, sản phẩm/giải pháp xuất hiện tự nhiên, before/after không phóng đại.",
+            "6. Caption/CTA: Lưu lại để so sánh; xem mô tả/link nếu phù hợp nhu cầu.",
+            "7. Rủi ro bản quyền/chính sách: tránh hứa chắc kết quả, tránh so sánh bôi xấu thương hiệu khác, không reup video người khác.",
+            f"8. Lệnh tiếp theo: /image_prompt {topic} - {title} | /image_to_video_pack {topic} - {title} | /media_factory {topic} - {title}",
             "",
         ])
-    lines.append("Bước tiếp theo:\n• /image_prompt <trend bạn chọn>\n• /media_factory <trend bạn chọn>\n\nTOAN AAS chỉ tạo content/video pack để bạn tự đăng.")
+    lines.append("TOAN AAS hiện tạo content/video pack để bạn tự đăng. Trend Live mới nhất cần provider realtime và đang tắt.")
     return "\n".join(lines)
 
 def fallback_image_prompt_pack(topic: str, advanced: bool = False) -> str:
@@ -28880,20 +29020,37 @@ def fallback_media_factory_pack(topic: str) -> str:
     topic = topic or "sản phẩm/dịch vụ"
     return (
         f"🎬 MEDIA FACTORY PACK — TOAN AAS\n\nChủ đề: {topic}\n"
-        "Phạm vi: Content/video pack để bạn tự đăng. Chưa mở tự đăng bài cho khách.\n\n"
-        "=== TREND ANGLE ===\n"
+        "Phạm vi: Content/video pack để bạn tự đăng. Chưa mở tự đăng bài cho khách.\n"
+        "Trạng thái: Trend AI content-only; Trend Live disabled/provider missing; video thật disabled/planned; customer publish OFF.\n\n"
+        "=== 1. TREND & Ý TƯỞNG ===\n"
+        "Vì chưa có Trend Live realtime, pack dùng Trend AI content-only và checklist nghiên cứu thủ công.\n\n"
         f"{fallback_trend_ai_pack(topic)}\n\n"
-        "=== SCRIPT NGẮN ===\n"
+        "=== 2. THU THẬP TƯ LIỆU HỢP LỆ ===\n"
+        f"• Từ khóa nên tìm: {topic}, {topic} review, {topic} trước khi mua, {topic} lỗi thường gặp.\n"
+        "• Nguồn hợp lệ: nội dung tự có, ảnh/video tự quay, public domain, licensed stock, hoặc nội dung được phép sử dụng.\n"
+        "• Không reup video người khác, không né watermark/DRM/Content ID.\n\n"
+        "=== 3. SCRIPT / STORYBOARD ===\n"
         "Hook 0-3s: Nếu bạn đang gặp vấn đề này, đừng mua theo cảm xúc.\n"
         "Scene 1: Nêu tình huống đời thường.\n"
         "Scene 2: Chỉ ra tiêu chí kiểm tra.\n"
         "Scene 3: Đưa sản phẩm/giải pháp như một lựa chọn.\n"
         "Scene 4: Nhắc người xem tự so sánh nhu cầu.\n"
+        "Voice-over: giọng tự nhiên, không phóng đại, không cam kết kết quả chắc chắn.\n"
         "CTA: Lưu lại hoặc xem link chi tiết nếu phù hợp.\n\n"
-        "=== IMAGE PROMPTS ===\n"
+        "=== 4. IMAGE PROMPT PACK ===\n"
         f"{fallback_image_prompt_pack(topic)}\n\n"
-        "=== VIDEO FROM IMAGE ===\n"
+        "=== 5. VIDEO PROMPT PACK ===\n"
         f"{fallback_video_from_image_pack(topic)}\n\n"
+        "=== 6. DUYỆT NỘI DUNG ===\n"
+        "• Kiểm tra lại claim, nguồn ảnh/voice, thương hiệu, caption và CTA trước khi đăng.\n"
+        "• Approval workflow tự động cho khách là roadmap; hiện khách tự duyệt bản nháp trước khi dùng.\n\n"
+        "=== 7. TẠO VIDEO THẬT ===\n"
+        "• Real video generation: planned/admin-only/disabled.\n"
+        "• Chưa gọi provider video AI thật trong bot khách.\n\n"
+        "=== 8. ĐĂNG BÀI ===\n"
+        "• Customer publish: OFF.\n"
+        "• Admin publish: internal test only, cần approval gate.\n"
+        "• Khách tự đăng lên kênh của mình.\n\n"
         "=== RISK WARNING ===\n"
         "Tránh hứa chắc doanh thu/kết quả, tránh dùng ảnh người thật không có quyền, tránh claim y tế/tài chính quá mức.\n\n"
         "Bước tiếp theo:\n1. Tạo ảnh bằng prompt ở trên.\n2. Dùng ảnh để tạo video bằng tool video AI.\n3. Dán voice-over vào TTS.\n4. Tự đăng lên kênh của bạn.\n5. Nếu muốn admin hỗ trợ quy trình nâng cao, liên hệ support."
@@ -28909,13 +29066,99 @@ async def cmd_trend_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fallback = fallback_trend_ai_pack(topic)
     prompt = (
         "Bạn là TOAN AAS Trend Finder. Trả bằng tiếng Việt. Tạo đúng 5 trend/angle cho video ngắn. "
-        "Mỗi trend gồm: title, vì sao đáng làm, audience, hook, video angle, rủi ro nội dung, lệnh tiếp theo. "
-        "Không hứa doanh thu, không auto publish."
+        "Mở đầu phải ghi: Trạng thái: AI-suggested/content-only, không phải dữ liệu live realtime. "
+        "Mỗi trend phải gồm đủ: Trend angle, Vì sao đáng thử, Hook 3 giây, Format video, "
+        "Ảnh/cảnh cần có, Caption/CTA, Rủi ro bản quyền/chính sách, Lệnh tiếp theo gồm /image_prompt, /image_to_video_pack, /media_factory. "
+        "Không hứa doanh thu, không auto publish, không nói đây là trend mới nhất/live."
     )
     output = media_factory_ai(prompt, topic, f"trend_ai_{uid}", fallback)
+    if "Trạng thái: AI-suggested/content-only" not in output:
+        output = "📈 TREND AI — TOAN AAS\n\nTrạng thái: AI-suggested/content-only, không phải dữ liệu live realtime.\n\n" + output
     create_media_factory_job(uid, media_factory_username(update), "trend_ai", topic, trend_title=topic, trend_summary=output, cost_xu=TREND_AI_COST)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_trend_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /trend_live <ngách hoặc chủ đề>")
+    save_tool_test_result("trend_live", "DISABLED", "Trend Live provider missing; no realtime search provider configured", update.effective_user.id)
+    await update.message.reply_text(
+        "📡 <b>TREND LIVE — TOAN AAS</b>\n\n"
+        f"Ngách/chủ đề: <b>{html.escape(topic)}</b>\n\n"
+        "Trend Live chưa bật provider tìm kiếm realtime. Hiện bot chỉ có <code>/trend_ai</code> để gợi ý ý tưởng và <code>/trend_research</code> để lập checklist nghiên cứu.\n\n"
+        "Trạng thái:\n"
+        "• Google Trends/API: <code>not configured</code>\n"
+        "• TikTok trend API: <code>not configured</code>\n"
+        "• YouTube trend API: <code>not configured</code>\n"
+        "• Facebook trend API: <code>not configured</code>\n"
+        "• Web search provider: <code>not configured</code>\n\n"
+        "Không có Xu nào bị trừ.",
+        parse_mode="HTML",
+    )
+
+async def cmd_trend_research(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /trend_research <ngách hoặc chủ đề>")
+    keywords = [
+        topic,
+        f"{topic} review",
+        f"{topic} lỗi thường gặp",
+        f"{topic} trước khi mua",
+        f"{topic} mẹo tiết kiệm thời gian",
+    ]
+    keyword_text = ", ".join(keywords)
+    text = (
+        "🔎 TREND RESEARCH PLAN — TOAN AAS\n\n"
+        "Mục tiêu:\n"
+        "Tìm xu hướng thật, nhưng chỉ dùng nguồn hợp lệ và biến thành nội dung riêng.\n\n"
+        "Nên kiểm tra:\n"
+        f"• TikTok search: {keyword_text}\n"
+        f"• YouTube Shorts: {keyword_text}\n"
+        f"• Facebook Reels: {keyword_text}\n"
+        f"• Google Trends: {topic}\n"
+        "• Các group/cộng đồng phù hợp với ngách\n\n"
+        "Tiêu chí chọn trend:\n"
+        "• Có nhiều video mới gần đây\n"
+        "• Hook lặp lại nhiều\n"
+        "• Comment có nhu cầu thật\n"
+        "• Dễ biến thành nội dung riêng\n"
+        "• Không phụ thuộc reup/copy nguyên bản\n\n"
+        "Cảnh báo:\n"
+        "• Không tải/reup nội dung không có quyền.\n"
+        "• Không né watermark/DRM/Content ID.\n"
+        "• Không dùng giọng/hình người thật nếu chưa có quyền.\n"
+        "• Nên tạo script/ảnh/voice/video mới từ ý tưởng.\n\n"
+        "Bước tiếp theo:\n"
+        f"• /trend_ai {topic}\n"
+        f"• /media_factory {topic}\n"
+        f"• /image_prompt {topic}"
+    )
+    await reply_long_text(update, text)
+
+async def cmd_trend_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    providers = provider_status_payload()
+    lines = [
+        "📈 <b>TOAN AAS Trend Status</b>",
+        "",
+        "• Trend AI: <code>enabled — gợi ý ý tưởng bằng AI/prompt</code>",
+        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}/provider missing — chưa tìm realtime</code>",
+        "• Google Trends/API: <code>not configured</code>",
+        "• TikTok trend API: <code>not configured</code>",
+        "• YouTube trend API: <code>not configured</code>",
+        "• Facebook trend API: <code>not configured</code>",
+        "• Web search provider: <code>not configured</code>",
+        "• Current safe mode: <code>content-only</code>",
+        "",
+        "<b>Lệnh hiện có:</b>",
+        "• <code>/trend_ai &lt;chủ đề&gt;</code> — gợi ý trend angle",
+        "• <code>/trend_research &lt;chủ đề&gt;</code> — checklist nghiên cứu trend",
+        "• <code>/media_factory &lt;chủ đề&gt;</code> — tạo pack nội dung/video từ chủ đề",
+        "",
+        "Không hiển thị API key. Không fake dữ liệu live/latest nếu chưa có provider.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -28955,7 +29198,7 @@ async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Công cụ tiết kiệm:</b>",
         f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật, <b>{IMAGE_PROMPT_PACK_COST} Xu</b>",
         f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo prompt video từ ảnh, <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>",
-        f"• Tách nền ảnh qua bot: <code>{html.escape(image_provider_label)}</code> — nếu chưa PASS thì đang thử nghiệm provider",
+        f"• <code>/remove_bg</code> — hướng dẫn tách nền; provider hiện: <code>{html.escape(image_provider_label)}</code>",
         "",
         "<b>Công cụ cao cấp ChatGPT/OpenAI:</b>",
         f"• <code>/ai_image &lt;mô tả ảnh&gt;</code> — tạo ảnh AI thật: <code>{html.escape(openai_image_label)}</code>",
@@ -29152,8 +29395,8 @@ async def cmd_ai_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⚠️ Cú pháp: /ai_image <mô tả ảnh>")
     if not ENABLE_OPENAI_IMAGE or not is_feature_enabled("image_openai_generation", uid, default=False):
         return await update.message.reply_text(
-            "ℹ️ Tạo ảnh AI thật đang tạm khóa để kiểm soát chi phí. "
-            "Bạn có thể dùng /image_prompt để lấy prompt ảnh chất lượng trước."
+            admin_first_guard_message("AI Image", "/image_prompt <chủ đề>"),
+            parse_mode="HTML",
         )
     if not openai_client:
         return await update.message.reply_text("⚠️ OpenAI image provider chưa được cấu hình. Bot chưa trừ Xu.")
@@ -29193,8 +29436,8 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⚠️ Hãy reply một ảnh rồi gõ /ai_image_edit <yêu cầu sửa ảnh>.")
     if not ENABLE_OPENAI_IMAGE_EDIT or not is_feature_enabled("image_openai_edit", uid, default=False):
         return await update.message.reply_text(
-            "ℹ️ Sửa ảnh AI thật đang tạm khóa để kiểm soát chi phí. "
-            "Bạn có thể dùng /image_prompt trước hoặc đợi admin bật công cụ."
+            admin_first_guard_message("AI Image Edit", "/image_prompt <chủ đề>"),
+            parse_mode="HTML",
         )
     if not openai_client:
         return await update.message.reply_text("⚠️ OpenAI image edit provider chưa được cấu hình. Bot chưa trừ Xu.")
@@ -29240,10 +29483,17 @@ async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fallback = fallback_media_factory_pack(topic)
     prompt = (
         "Bạn là TOAN AAS Media Factory. Trả tiếng Việt. Tạo content/video pack đầy đủ từ topic/trend. "
-        "Bắt buộc gồm: trend angle, script ngắn, 6 image prompts chân thật, video-from-image prompt, voice-over, caption, hashtag, CTA, risk warning, next steps. "
-        "Nêu rõ khách tự đăng, không auto publish."
+        "Bắt buộc gồm 8 phần: 1 Trend & ý tưởng, 2 Thu thập tư liệu hợp lệ, 3 Script/storyboard, "
+        "4 Image prompt pack, 5 Video prompt pack, 6 Duyệt nội dung, 7 Tạo video thật planned/admin-only/disabled, "
+        "8 Đăng bài customer publish OFF/admin internal. "
+        "Nêu rõ Trend AI content-only, Trend Live provider missing, khách tự đăng, không auto publish."
     )
     output = media_factory_ai(prompt, topic, f"media_factory_{uid}", fallback)
+    if "Trend AI content-only" not in output:
+        output = (
+            "Trạng thái: Trend AI content-only; Trend Live disabled/provider missing; "
+            "video thật disabled/planned; customer publish OFF.\n\n"
+        ) + output
     job_id = create_media_factory_job(uid, media_factory_username(update), "media_factory", topic, trend_title=topic, trend_summary=output[:1200], image_prompt_pack=output, video_prompt_pack=output, caption_pack=output, cost_xu=MEDIA_FACTORY_PACK_COST)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"Job ID: {job_id}\n\n{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
@@ -29261,13 +29511,167 @@ async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAUL
         f"• Real video generation: <code>{'enabled' if real_video_enabled else 'disabled/planned'}</code>",
         "• Provider: <code>not configured</code>",
         f"• Customer access: <code>{'ON' if customer_publish else 'OFF'}</code>",
-        "• Current available: <code>script/prompt/video pack only</code>",
+        "• Current available: <code>script/storyboard/image prompt/video prompt pack/caption/hashtag/CTA</code>",
+        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}/provider missing</code>",
+        f"• Admin publish: <code>{'enabled/internal' if providers['media_factory'].get('admin_publish') else 'disabled/internal'}</code>",
+        "• Customer publish: <code>OFF</code>",
         "• Open customer video generation: <code>NO</code>",
         "",
         "Hiện TOAN AAS hỗ trợ script, storyboard, image prompt, video prompt pack, caption/hashtag/CTA.",
         "Tạo video thật cần chọn provider video AI, test chi phí/provider trước và chỉ mở khi admin duyệt.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_remove_bg_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    providers = provider_status_payload()
+    image_result = preferred_tool_test_result("image_remove_bg", "image")
+    status = (image_result.get("status") or "NOT_TESTED").upper()
+    public = "ON" if is_feature_public_ready("remove_bg") and providers["image"].get("ready") else "OFF"
+    lines = [
+        "🖼 <b>Tách nền ảnh — TOAN AAS</b>",
+        "",
+        f"• RemoveBG/Cutout configured: <code>{'yes' if providers['image'].get('ready') else 'no'}</code>",
+        f"• Last smoke test: <code>{html.escape(status)}</code>",
+        f"• Public stage: <code>{html.escape(providers['media_factory'].get('remove_bg_stage') or 'ADMIN_ONLY')}</code>",
+        f"• Public access: <code>{public}</code>",
+        "",
+        "Cách dùng hiện tại:",
+        "1. Gửi ảnh vào bot.",
+        "2. Chọn provider tách nền nếu bot hiện nút.",
+        "3. Nếu provider chưa PASS/public, công cụ ở trạng thái thử nghiệm để tránh trừ Xu sai.",
+        "",
+        "Admin test: reply ảnh rồi chạy <code>/tool_test_image</code> hoặc <code>/tool_test_image_debug</code>.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_source_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "📚 <b>Nguồn tư liệu hợp lệ — TOAN AAS</b>\n\n"
+        "Có thể dùng:\n"
+        "• Nội dung/ảnh/video bạn tự sở hữu hoặc tự quay.\n"
+        "• Public domain.\n"
+        "• Stock/media có license phù hợp.\n"
+        "• Nội dung được chủ sở hữu cho phép sử dụng.\n"
+        "• Script, hình ảnh, voice và video do bạn tự tạo mới từ ý tưởng.\n\n"
+        "Không hỗ trợ:\n"
+        "• Crawler/reup nội dung vi phạm bản quyền.\n"
+        "• Né watermark, DRM, Content ID.\n"
+        "• Clone giọng/hình người thật khi chưa có quyền.\n\n"
+        "Lệnh tiếp theo: <code>/trend_research &lt;chủ đề&gt;</code> hoặc <code>/media_factory &lt;chủ đề&gt;</code>."
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_dubbing_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "🎙 <b>Dịch & lồng tiếng hợp lệ — TOAN AAS</b>\n\n"
+        "TOAN AAS hỗ trợ định hướng tạo bản dịch/script/voice-over mới từ nguồn hợp lệ.\n\n"
+        "Nguyên tắc:\n"
+        "• Chỉ dùng nội dung bạn có quyền dịch/biên tập.\n"
+        "• Voice-over là giọng đọc mới từ bản dịch/script mới.\n"
+        "• Không clone giọng người thật nếu chưa có quyền rõ ràng.\n"
+        "• Không reup video gốc rồi thay âm thanh nếu chưa có license.\n\n"
+        "Gợi ý lệnh:\n"
+        "• <code>/translate_text &lt;nội dung&gt;</code>\n"
+        "• <code>/media_factory &lt;chủ đề&gt;</code>\n"
+        "• <code>/source_help</code>"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_story_video_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    topic = media_factory_topic_from_args(context) or "truyện/nội dung hợp lệ của bạn"
+    text = (
+        "📖 <b>Story Video Factory — TOAN AAS</b>\n\n"
+        "Trạng thái: roadmap/prompt workflow. Chưa tạo video thật tự động cho khách.\n\n"
+        f"Chủ đề: <b>{html.escape(topic)}</b>\n\n"
+        "Quy trình an toàn:\n"
+        "1. Chọn truyện/nội dung hợp lệ: tự viết, public domain, licensed hoặc được phép dùng.\n"
+        "2. Chia tập: mở đầu, cao trào, kết thúc, cliffhanger nếu cần.\n"
+        "3. Tạo script kể chuyện tự nhiên.\n"
+        "4. Tạo image prompt cho từng cảnh.\n"
+        "5. Tạo motion prompt bằng <code>/story_motion_prompt</code>.\n"
+        "6. Tạo voice-over/TTS hợp lệ.\n"
+        "7. Tạo caption/hashtag/CTA để tự đăng.\n\n"
+        "Không hỗ trợ reup/crawler truyện hoặc video vi phạm bản quyền."
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_story_motion_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /story_motion_prompt <mô tả cảnh/truyện hợp lệ>")
+    text = (
+        "🎞 <b>Story Motion Prompt — TOAN AAS</b>\n\n"
+        f"Cảnh: <b>{html.escape(topic)}</b>\n\n"
+        "Motion prompt:\n"
+        f"Animate a cinematic vertical story scene about {html.escape(topic)}, slow camera push-in, subtle character movement, natural atmosphere, soft lighting, emotional but not exaggerated, no watermark, no text artifacts, 12 seconds.\n\n"
+        "Camera movement:\n"
+        "Slow push-in, slight parallax, gentle handheld feel, keep main subject stable and readable.\n\n"
+        "Style:\n"
+        "Storytelling, realistic/semi-realistic depending on source, clean composition, safe content.\n\n"
+        "Trạng thái: prompt-only. Chưa gọi provider tạo video thật."
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_feature_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    providers = provider_status_payload()
+    features = [
+        ("ai_image", "AI Image", providers["media_factory"].get("image_openai_generation_env")),
+        ("ai_image_edit", "AI Image Edit", providers["media_factory"].get("image_openai_edit_env")),
+        ("real_video", "Real Video", providers["media_factory"].get("real_video_env")),
+        ("trend_live", "Trend Live", providers["media_factory"].get("trend_live_env")),
+        ("downloader", "Downloader", ENABLE_DOWNLOADER_PUBLIC),
+        ("remove_bg", "RemoveBG/Cutout", providers["image"].get("ready")),
+        ("auto_publish", "Auto Publish", ENABLE_AUTO_PUBLISH),
+        ("customer_publish", "Customer Publish", ENABLE_CUSTOMER_PUBLISH),
+        ("ads_assistant", "Ads Assistant", ENABLE_ADS_ASSISTANT),
+    ]
+    lines = [
+        "🧭 <b>TOAN AAS Feature Release Status</b>",
+        "",
+        "<code>configured</code> = có env/provider/flag liên quan. <code>public</code> = đã mở cho khách.",
+        "",
+    ]
+    for key, label, configured in features:
+        result = get_tool_test_result(key)
+        stage = configured_release_stage(key)
+        lines.append(
+            f"• {html.escape(label)}: stage <code>{html.escape(stage)}</code> | "
+            f"configured <code>{'yes' if configured else 'no'}</code> | "
+            f"tested <code>{html.escape(result.get('status') or 'NOT_TESTED')}</code> | "
+            f"public <code>{'ON' if stage == 'PUBLIC_READY' else 'OFF'}</code>"
+        )
+    lines.extend([
+        "",
+        "Owner set stage: <code>/feature_set ai_image ADMIN_ONLY</code>",
+        "Allowed: <code>PLANNED</code>, <code>ADMIN_ONLY</code>, <code>BETA_PRIVATE</code>, <code>PUBLIC_READY</code>, <code>DISABLED</code>",
+        "Lưu ý: đổi stage không tự tạo API key, không tự bật env và không bỏ qua smoke test.",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_feature_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_owner_user(uid):
+        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    if len(context.args or []) < 2:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: /feature_set FEATURE STATUS\n"
+            "Ví dụ: /feature_set ai_image ADMIN_ONLY\n"
+            "STATUS: PLANNED, ADMIN_ONLY, BETA_PRIVATE, PUBLIC_READY, DISABLED"
+        )
+    feature = normalize_feature_key(context.args[0])
+    stage = normalize_release_stage(context.args[1])
+    if not stage:
+        return await update.message.reply_text("❌ STATUS không hợp lệ. Dùng PLANNED, ADMIN_ONLY, BETA_PRIVATE, PUBLIC_READY hoặc DISABLED.")
+    set_system_flag(f"feature_stage:{feature}", stage, updated_by=uid, note="Owner updated feature release stage")
+    await update.message.reply_text(
+        "✅ Đã cập nhật feature stage.\n\n"
+        f"• Feature: <code>{html.escape(feature)}</code>\n"
+        f"• Stage: <code>{html.escape(stage)}</code>\n\n"
+        "Lưu ý: stage chỉ là release gate. Provider/env/smoke test vẫn phải cấu hình và kiểm tra riêng.",
+        parse_mode="HTML",
+    )
 
 async def cmd_admin_trend_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -37687,6 +38091,23 @@ async def cmd_api_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Tested: <code>{html.escape((image_result.get('status') or 'NOT_TESTED') + (' — ' + (image_result.get('detail') or '')[:180] if image_result.get('detail') else ''))}</code>",
         "• Next: <code>Reply ảnh nhỏ rồi chạy /tool_test_image; nếu fail kiểm tra quota/API key/provider RemoveBG/Cutout.</code>",
         "",
+        "<b>Trend Live / Realtime Search</b>",
+        "• Status: <code>missing/provider not configured</code>",
+        "• Current: <code>/trend_ai content-only</code> và <code>/trend_research checklist thủ công</code>",
+        "• Provider gợi ý sau này: <code>Google Trends unofficial, SerpAPI, DataForSEO, Tavily, Brave Search, YouTube Data API</code>",
+        "• Next: <code>Chưa gọi API live trong task này; chọn provider và test admin-first sau.</code>",
+        "",
+        "<b>Image Generation / OpenAI Image</b>",
+        f"• Generation stage: <code>{html.escape(configured_release_stage('ai_image'))}</code> | env <code>{'ON' if ENABLE_OPENAI_IMAGE else 'OFF'}</code>",
+        f"• Edit stage: <code>{html.escape(configured_release_stage('ai_image_edit'))}</code> | env <code>{'ON' if ENABLE_OPENAI_IMAGE_EDIT else 'OFF'}</code>",
+        "• Next: <code>Bật ENABLE_OPENAI_IMAGE=1 chỉ để admin test bằng /tool_test_ai_image; chưa public.</code>",
+        "",
+        "<b>Video Generation</b>",
+        f"• Real video stage: <code>{html.escape(configured_release_stage('real_video'))}</code>",
+        "• Provider: <code>not selected/not configured</code>",
+        "• Current: <code>/image_to_video_pack prompt-only</code> và <code>/media_factory content pack</code>",
+        "• Next: <code>Chọn provider video sau, test chi phí/quota trước khi mở.</code>",
+        "",
         "<b>Downloader / Cobalt</b>",
         f"• Status: <code>{html.escape(downloader.get('level') or '-')}</code>",
         f"• Detail: {html.escape(downloader.get('detail') or '-')}",
@@ -44507,6 +44928,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("ops_plan", cmd_ops_plan))
     tg_app.add_handler(CommandHandler("providers",   cmd_providers))
     tg_app.add_handler(CommandHandler("api_recommend", cmd_api_recommend))
+    tg_app.add_handler(CommandHandler("feature_status", cmd_feature_status))
+    tg_app.add_handler(CommandHandler("feature_set", cmd_feature_set))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
     tg_app.add_handler(CommandHandler("tool_status", cmd_tool_status))
     tg_app.add_handler(CommandHandler("api_debug_status", cmd_api_debug_status))
@@ -44686,6 +45109,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("film", cmd_film))
     tg_app.add_handler(CommandHandler("video_script", cmd_film))
     tg_app.add_handler(CommandHandler("trend_ai", cmd_trend_ai))
+    tg_app.add_handler(CommandHandler("trend", cmd_trend_ai))
+    tg_app.add_handler(CommandHandler("trend_live", cmd_trend_live))
+    tg_app.add_handler(CommandHandler("trend_research", cmd_trend_research))
+    tg_app.add_handler(CommandHandler("trend_status", cmd_trend_status))
     tg_app.add_handler(CommandHandler("image_tools", cmd_image_tools))
     tg_app.add_handler(CommandHandler("image_prompt", cmd_image_prompt))
     tg_app.add_handler(CommandHandler("image_pack", cmd_image_pack))
@@ -44693,9 +45120,14 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("image_to_video_pack", cmd_image_to_video_pack))
     tg_app.add_handler(CommandHandler("ai_image", cmd_ai_image))
     tg_app.add_handler(CommandHandler("ai_image_edit", cmd_ai_image_edit))
+    tg_app.add_handler(CommandHandler("remove_bg", cmd_remove_bg_help))
     tg_app.add_handler(CommandHandler("media_factory", cmd_media_factory))
     tg_app.add_handler(CommandHandler("video_factory_flow", cmd_video_factory_flow))
     tg_app.add_handler(CommandHandler("video_provider_status", cmd_video_provider_status))
+    tg_app.add_handler(CommandHandler("source_help", cmd_source_help))
+    tg_app.add_handler(CommandHandler("dubbing_help", cmd_dubbing_help))
+    tg_app.add_handler(CommandHandler("story_video_factory", cmd_story_video_factory))
+    tg_app.add_handler(CommandHandler("story_motion_prompt", cmd_story_motion_prompt))
     tg_app.add_handler(CommandHandler("admin_trend_video", admin_internal_command(cmd_admin_trend_video)))
     tg_app.add_handler(CommandHandler("review_job", admin_internal_command(cmd_review_job)))
     tg_app.add_handler(CommandHandler("approve_job", admin_internal_command(cmd_approve_job)))
