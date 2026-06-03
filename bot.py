@@ -440,6 +440,13 @@ CAMPAIGN_REPORT_COST = 50
 VIDEO_BASIC_COST   = 200
 VIDEO_PRO_COST     = 500
 VIDEO_SERIES_COST  = 1200
+TREND_AI_COST = 30
+IMAGE_PROMPT_PACK_COST = 80
+IMAGE_PACK_COST = 150
+IMAGE_TO_VIDEO_PROMPT_COST = 120
+VIDEO_FROM_IMAGE_BASIC_COST = 300
+VIDEO_FROM_IMAGE_PRO_COST = 600
+MEDIA_FACTORY_PACK_COST = 500
 AUDIO_BASE_COST    = 30
 AUDIO_COST_PER_MB  = 20
 AUDIO_MIN_COST     = 80
@@ -693,6 +700,25 @@ def init_db():
         output_text TEXT,
         output_json TEXT,
         created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS media_factory_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        username TEXT,
+        mode TEXT,
+        topic TEXT,
+        trend_title TEXT,
+        trend_summary TEXT,
+        image_prompt_pack TEXT,
+        video_prompt_pack TEXT,
+        caption_pack TEXT,
+        status TEXT DEFAULT 'draft',
+        cost_xu INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT,
+        approved_by TEXT,
+        approved_at TEXT,
+        note TEXT
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS video_script_outputs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1001,6 +1027,10 @@ def init_db():
         ("payos_dynamic", 1, "Dynamic QR billing is enabled."),
         ("telegram_menu_v2", 1, "TOAN AAS grouped Telegram menu is enabled."),
         ("website_rebrand", 1, "TOAN AAS landing page rebrand is enabled."),
+        ("trend_finder", 1, "Trend finder MVP enabled for content idea generation."),
+        ("image_prompt_factory", 1, "Generate realistic image prompts for AI image tools."),
+        ("image_generation", 0, "Actual image generation requires provider support; fallback to prompt pack."),
+        ("image_to_video", 0, "Actual image-to-video generation requires provider support; fallback to video prompt pack."),
     ]
     for key, enabled, note in feature_flag_defaults:
         c.execute(
@@ -1016,6 +1046,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_promo_redemptions_order ON promotion_redemptions(order_code)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_promo_state_user ON user_promo_state(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_trial_grants_user_id ON trial_grants(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_media_factory_jobs_user ON media_factory_jobs(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_media_factory_jobs_status ON media_factory_jobs(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_launch_bonus_user ON launch_bonus_redemptions(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_launch_bonus_order ON launch_bonus_redemptions(order_code)")
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_launch_bonus_user_package ON launch_bonus_redemptions(user_id, package_amount_vnd)")
@@ -21384,6 +21416,15 @@ def provider_status_payload() -> dict:
             "rapidapi": bool(RAPIDAPI_KEY),
             "rapidapi_host": bool(RAPIDAPI_HOST),
         },
+        "media_factory": {
+            "trend_finder": is_feature_enabled("trend_finder", default=True),
+            "image_prompt_factory": is_feature_enabled("image_prompt_factory", default=True),
+            "image_generation": is_feature_enabled("image_generation", default=False),
+            "image_to_video": is_feature_enabled("image_to_video", default=False),
+            "admin_publish": is_feature_enabled("admin_publish", default=False),
+            "customer_publish": is_feature_enabled("customer_publish", default=False),
+            "auto_publish": is_feature_enabled("auto_publish", default=False),
+        },
         "security": {
             "lead_webhook_secret": bool(LEAD_WEBHOOK_SECRET),
             "telegram_webhook_secret": bool(TELEGRAM_WEBHOOK_SECRET),
@@ -21815,6 +21856,7 @@ def menu_text_main(is_admin: bool) -> str:
         "🔊 Voice-off/TTS: tạo voice tiếng Việt cho nội dung.\n"
         "📥 Hút Media: tải video TikTok/YouTube/Facebook nếu công cụ khả dụng.\n"
         "🖼 Studio Đồ Họa: tách nền, xử lý ảnh, prompt hình ảnh.\n"
+        "🎞 Media Factory: tìm trend, prompt ảnh chân thật, video prompt pack để bạn tự đăng.\n"
         "💳 Nạp Xu: PayOS QR động hoặc QR thủ công khi cổng tự động bận."
         f"{admin_line}\n\n"
         "🎁 Tài khoản mới được tặng <b>200 Xu trải nghiệm</b>.\n"
@@ -21824,10 +21866,11 @@ def menu_text_main(is_admin: bool) -> str:
         "<b>Bắt đầu nhanh:</b>\n"
         "1. <code>/profile</code> — xem số dư\n"
         "2. <code>/film &lt;chủ đề&gt;</code> — tạo Video Script Basic\n"
-        "3. <code>/pricing</code> — xem bảng giá\n"
-        "4. <code>/naptien</code> — nạp thêm Xu khi cần\n"
-        "5. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
-        "6. Tự đăng nội dung đã tạo lên kênh của bạn"
+        "3. <code>/media_factory &lt;chủ đề&gt;</code> — tạo trend/script/ảnh/video/caption pack\n"
+        "4. <code>/pricing</code> — xem bảng giá\n"
+        "5. <code>/naptien</code> — nạp thêm Xu khi cần\n"
+        "6. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
+        "7. Tự đăng nội dung đã tạo lên kênh của bạn"
         f"{runtime_line}\n\n"
         "Chọn nhóm chức năng bên dưới:"
     )
@@ -21874,6 +21917,10 @@ def menu_text_video_factory(is_admin: bool) -> str:
             "🎬 <b>Multi-Platform AI Video Factory</b>\n\n"
             "Tạo ý tưởng, kịch bản, storyboard, scene prompt và content pack cho Facebook, TikTok, YouTube.\n\n"
             f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack, phí <b>{FILM_SCRIPT_COST} Xu</b>\n"
+            f"• <code>/trend_ai &lt;chủ đề&gt;</code> — tìm ý tưởng/trend, phí <b>{TREND_AI_COST} Xu</b>\n"
+            f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật, phí <b>{IMAGE_PROMPT_PACK_COST} Xu</b>\n"
+            f"• <code>/video_from_image &lt;chủ đề&gt;</code> — tạo video prompt pack, phí <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>\n"
+            f"• <code>/media_factory &lt;chủ đề&gt;</code> — trọn gói trend/script/ảnh/video/caption, phí <b>{MEDIA_FACTORY_PACK_COST} Xu</b>\n"
             "• <code>/film topic=\"review sản phẩm\"</code> — tạo nội dung review để bạn tự đăng\n"
             "• <code>/film topic=\"sản phẩm A\" link=\"https://...\"</code> — dùng link bạn dán trực tiếp để viết caption/CTA tham khảo\n"
             f"• <code>/growth_ai</code> — AI phân tích hook/caption/CTA, phí <b>{GROWTH_AI_COST} Xu</b>\n"
@@ -21891,7 +21938,13 @@ def menu_text_video_factory(is_admin: bool) -> str:
         "5. Scene pack: <code>/scene_pack job=... scene=1</code>\n"
         "6. Worker nhận task: <code>/worker_intake claim=1</code>\n"
         "7. Publish: <code>/publish_done</code>\n"
-        "8. Growth: <code>/growth_loop</code>"
+        "8. Growth: <code>/growth_loop</code>\n\n"
+        "🔐 <b>Admin Media Factory</b>\n"
+        "• <code>/admin_trend_video &lt;chủ đề&gt;</code>\n"
+        "• <code>/review_job &lt;id&gt;</code>\n"
+        "• <code>/approve_job &lt;id&gt;</code>\n"
+        "• <code>/reject_job &lt;id&gt;</code>\n"
+        "Publish vẫn admin-first và tắt mặc định."
     )
 
 def menu_text_video_workflow(is_admin: bool) -> str:
@@ -22249,6 +22302,15 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
         f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
         "",
+        "<b>Media Factory</b>",
+        f"• Trend Finder: <code>{'ready' if providers['media_factory']['trend_finder'] else 'disabled'}</code>",
+        f"• Image Prompt Factory: <code>{'ready' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
+        f"• Image Generation: <code>{'ready' if providers['media_factory']['image_generation'] else 'planned/missing'}</code>",
+        f"• Image-to-Video: <code>{'ready' if providers['media_factory']['image_to_video'] else 'planned/missing'}</code>",
+        f"• Admin Publish: <code>{'enabled/internal' if providers['media_factory']['admin_publish'] else 'disabled/internal'}</code>",
+        f"• Customer Publish: <code>{'enabled' if providers['media_factory']['customer_publish'] else 'disabled'}</code>",
+        f"• Auto Publish: <code>{'enabled' if providers['media_factory']['auto_publish'] else 'disabled'}</code>",
+        "",
         "<b>Downloader</b>",
         f"• Cobalt URL: <code>{provider_status_text(providers['downloader']['cobalt_url'])}</code>",
         f"• Cobalt Key: <code>{provider_status_text(providers['downloader']['cobalt_key'])}</code>",
@@ -22275,6 +22337,11 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💸 <b>TOAN AAS Cost Control</b>",
         "",
         f"• <code>/film</code>: <b>{FILM_SCRIPT_COST} Xu</b>/lần",
+        f"• <code>/trend_ai</code>: <b>{TREND_AI_COST} Xu</b>/lần",
+        f"• <code>/image_prompt</code>: <b>{IMAGE_PROMPT_PACK_COST} Xu</b>/lần",
+        f"• <code>/image_pack</code>: <b>{IMAGE_PACK_COST} Xu</b>/lần",
+        f"• <code>/video_from_image</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>/lần",
+        f"• <code>/media_factory</code>: <b>{MEDIA_FACTORY_PACK_COST} Xu</b>/lần",
         f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>/lần",
         f"• <code>/campaign_report</code>: <b>{CAMPAIGN_REPORT_COST} Xu</b>/lần",
         f"• Chat thường: <b>{CHAT_NORMAL_COST} Xu</b> trong fair-use hằng ngày ({CHAT_NORMAL_DAILY_LIMIT} lượt)",
@@ -23037,6 +23104,358 @@ async def cmd_gift_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
     await update.message.reply_text(f"✅ Đã tắt mã quà tặng <code>{html.escape(code)}</code>.", parse_mode="HTML")
 
+def build_realistic_image_prompt_rules() -> str:
+    return (
+        "Quy tắc prompt ảnh chân thật TOAN AAS:\n"
+        "1. Cảm xúc tự nhiên: khuôn mặt/cử chỉ đời thường, không quá cứng.\n"
+        "2. Ánh sáng thật: có vùng sáng/tối rõ, tránh ánh sáng đều giả.\n"
+        "3. Chi tiết đời thường: tóc hơi rối, nếp vải, vật thể xung quanh.\n"
+        "4. Phong cách chụp đời thực: như điện thoại/máy ảnh thật, góc chụp tự nhiên.\n"
+        "5. Hậu cảnh tự nhiên: có chiều sâu, có vật thể phía sau, blur nhẹ nếu hợp lý.\n"
+        "6. Khoảnh khắc tự nhiên: nhân vật/sản phẩm đang trong tình huống thật.\n"
+        "7. Negative: không da nhựa, không mặt quá mịn, không ánh sáng studio giả, không tay méo, "
+        "không chữ méo, không logo lạ, không watermark, không text sai."
+    )
+
+def media_factory_topic_from_args(context: ContextTypes.DEFAULT_TYPE, fallback: str = "") -> str:
+    return (" ".join(context.args or []).strip() or fallback.strip())
+
+def media_factory_username(update: Update) -> str:
+    user = update.effective_user
+    return ((user.username or user.first_name or "") if user else "").strip()
+
+async def charge_media_factory_or_reply(update: Update, uid, cost: int, event_type: str, note: str) -> bool:
+    if is_admin_user(uid) or int(cost or 0) <= 0:
+        return True
+    if spend_fixed_credit(uid, int(cost), event_type, note):
+        return True
+    credits, _, _ = get_user(uid)
+    await update.message.reply_text(
+        "⚠️ Không đủ Xu để dùng tính năng này.\n\n"
+        f"• Cần: {int(cost)} Xu\n"
+        f"• Số dư hiện tại: {int(credits)} Xu\n\n"
+        "Dùng /naptien để nạp thêm. Gói phổ biến: 50k / 100k / 200k."
+    )
+    return False
+
+async def reply_long_text(update: Update, text: str):
+    text = str(text or "").strip()
+    if not text:
+        return await update.message.reply_text("⚠️ Không có nội dung để gửi.")
+    chunk_size = 3600
+    while len(text) > chunk_size:
+        cut = text.rfind("\n\n", 0, chunk_size)
+        if cut < 1200:
+            cut = text.rfind("\n", 0, chunk_size)
+        if cut < 1200:
+            cut = chunk_size
+        await update.message.reply_text(text[:cut].strip())
+        text = text[cut:].strip()
+    if text:
+        await update.message.reply_text(text)
+
+def media_factory_ai(prompt: str, user_text: str, uid, fallback_text: str) -> str:
+    try:
+        output = AgentGemini.chat(prompt, user_text, uid)
+        cleaned = (output or "").strip()
+        if cleaned and not cleaned.startswith("❌") and len(cleaned) > 120:
+            return cleaned
+    except Exception as e:
+        logger.warning(f"Media Factory AI fallback: {e}")
+    return fallback_text
+
+def create_media_factory_job(user_id, username, mode, topic, trend_title="", trend_summary="", image_prompt_pack="", video_prompt_pack="", caption_pack="", status="draft", cost_xu=0, note="") -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO media_factory_jobs
+        (user_id, username, mode, topic, trend_title, trend_summary, image_prompt_pack,
+         video_prompt_pack, caption_pack, status, cost_xu, created_at, updated_at, approved_by, approved_at, note)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(user_id), str(username or ""), str(mode or ""), str(topic or ""),
+            str(trend_title or ""), str(trend_summary or ""), str(image_prompt_pack or ""),
+            str(video_prompt_pack or ""), str(caption_pack or ""), str(status or "draft"),
+            int(cost_xu or 0), now_text(), now_text(), "", "", str(note or ""),
+        ),
+    )
+    job_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return int(job_id)
+
+def get_media_factory_job(job_id: int) -> dict:
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """SELECT id, user_id, username, mode, topic, trend_title, trend_summary, image_prompt_pack,
+                      video_prompt_pack, caption_pack, status, cost_xu, created_at, updated_at, approved_by, approved_at, note
+            FROM media_factory_jobs WHERE id=?""",
+            (int(job_id),),
+        )
+        row = c.fetchone()
+        if not row:
+            return {}
+        keys = ["id", "user_id", "username", "mode", "topic", "trend_title", "trend_summary", "image_prompt_pack", "video_prompt_pack", "caption_pack", "status", "cost_xu", "created_at", "updated_at", "approved_by", "approved_at", "note"]
+        return dict(zip(keys, row))
+    finally:
+        conn.close()
+
+def update_media_factory_job_status(job_id: int, status: str, approved_by="", note="") -> bool:
+    conn = db_connect()
+    try:
+        approved_at = now_text() if status == "approved" else ""
+        cur = conn.execute(
+            """UPDATE media_factory_jobs
+            SET status=?, approved_by=COALESCE(NULLIF(?,''), approved_by),
+                approved_at=COALESCE(NULLIF(?,''), approved_at),
+                note=COALESCE(NULLIF(?,''), note), updated_at=?
+            WHERE id=?""",
+            (status, str(approved_by or ""), approved_at, str(note or ""), now_text(), int(job_id)),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+def fallback_trend_ai_pack(topic: str) -> str:
+    topic = topic or "sản phẩm/dịch vụ"
+    templates = [
+        ("Nỗi đau 30 giây mỗi ngày", "Biến vấn đề nhỏ lặp lại hằng ngày thành hook before/after."),
+        ("So sánh trước khi mua", "Tạo checklist 3 tiêu chí để người xem tự chọn sản phẩm phù hợp."),
+        ("Một sai lầm phổ biến", "Mở bằng lỗi thường gặp, sau đó đưa giải pháp mềm, không claim quá đà."),
+        ("Mẹo tiết kiệm thời gian", "Dùng format mẹo nhanh, cảnh đời thường, CTA lưu lại/xem thêm."),
+        ("Review hợp với ai", "Nêu rõ ai nên dùng, ai không nên dùng, tăng niềm tin."),
+    ]
+    lines = [f"🔥 TREND GỢI Ý TOAN AAS\n\nChủ đề/ngách: {topic}\n"]
+    for idx, (title, angle) in enumerate(templates, 1):
+        lines.extend([
+            f"{idx}. “{title}”",
+            f"• Vì sao đáng làm: {angle}",
+            "• Audience: người đang cân nhắc mua hoặc tìm giải pháp đơn giản.",
+            f"• Hook: “Nếu bạn đang gặp vấn đề này với {topic}, xem 20 giây này trước khi mua...”",
+            "• Video angle: cảnh đời thường -> vấn đề -> giải pháp -> CTA mềm.",
+            "• Rủi ro: tránh hứa chắc kết quả, tránh so sánh bôi xấu thương hiệu khác.",
+            f"• Lệnh tiếp theo: /image_prompt {topic} - {title}",
+            "",
+        ])
+    lines.append("Bước tiếp theo:\n• /image_prompt <trend bạn chọn>\n• /media_factory <trend bạn chọn>\n\nTOAN AAS chỉ tạo content/video pack để bạn tự đăng.")
+    return "\n".join(lines)
+
+def fallback_image_prompt_pack(topic: str, advanced: bool = False) -> str:
+    topic = topic or "sản phẩm/dịch vụ"
+    scenes = [
+        ("Ảnh hook mở đầu", "nhân vật nhìn thấy vấn đề trong tình huống đời thường"),
+        ("Ảnh đời thường", "bối cảnh nhà/phòng làm việc/quán nhỏ có chi tiết tự nhiên"),
+        ("Ảnh sản phẩm trong tay", "sản phẩm xuất hiện tự nhiên, không giống ảnh catalog"),
+        ("Ảnh before/after mềm", "hai trạng thái khác nhau nhưng không phóng đại"),
+        ("Ảnh thumbnail", "bố cục rõ chủ thể, cảm xúc vừa phải, không text sai"),
+        ("Ảnh kết thúc/CTA", "cảnh người dùng hài lòng nhẹ, không tạo cảm giác quảng cáo quá lố"),
+    ]
+    lines = [f"🖼 IMAGE PROMPT PACK — TOAN AAS\n\nChủ đề: {topic}\n\n{build_realistic_image_prompt_rules()}\n"]
+    for idx, (name, purpose) in enumerate(scenes, 1):
+        lines.extend([
+            f"{idx}. {name}",
+            "Prompt tiếng Việt:",
+            f"Ảnh chân thật về {topic}, {purpose}, ánh sáng tự nhiên, góc chụp như điện thoại, hậu cảnh có chiều sâu, chi tiết đời thường, màu sắc thật, cảm xúc tự nhiên.",
+            "English prompt:",
+            f"Realistic lifestyle photo about {topic}, {purpose}, natural light, smartphone photography, natural background depth, everyday details, authentic colors, natural expression.",
+            "Negative prompt:",
+            "plastic skin, over-smoothed face, fake studio lighting, deformed hands, broken text, strange logo, watermark, wrong text, over-perfect composition",
+            "Tỉ lệ: 9:16 cho Reels/TikTok, 1:1 cho feed, 16:9 cho YouTube.",
+            "",
+        ])
+    lines.append("Trạng thái: provider tạo ảnh thật chưa bật, bot trả prompt pack nâng cao để bạn dùng với công cụ tạo ảnh." if advanced else "Bước tiếp theo: dùng prompt này ở công cụ tạo ảnh bạn chọn hoặc chạy /video_from_image <mô tả ảnh>.")
+    return "\n".join(lines)
+
+def fallback_video_from_image_pack(topic: str) -> str:
+    topic = topic or "ảnh/chủ đề bạn gửi"
+    return (
+        f"🎞 VIDEO FROM IMAGE PACK — TOAN AAS\n\nẢnh/chủ đề: {topic}\n\n"
+        "1. Motion prompt:\n"
+        f"Biến ảnh về {topic} thành video 12-20 giây, chuyển động nhẹ, cảm giác đời thường, nhân vật/sản phẩm có chuyển động tự nhiên, không quá quảng cáo.\n\n"
+        "2. Camera:\nSlow push-in 10%, handheld nhẹ, giữ chủ thể rõ, hậu cảnh có blur nhẹ, không rung quá mạnh.\n\n"
+        "3. Voice-over 20s:\n"
+        f"“Nếu bạn đang quan tâm đến {topic}, hãy nhìn tình huống này. Điểm quan trọng không phải là mua ngay, mà là biết nó có hợp với nhu cầu của bạn không. Xem kỹ tiêu chí, rồi tự quyết định.”\n\n"
+        "4. Caption:\n"
+        f"Trước khi chọn {topic}, hãy kiểm tra 3 điểm này để tránh mua theo cảm xúc.\n\n"
+        "5. Hashtag:\n#toanaas #reviewthucte #meomuahang #tiktokshop #shorts\n\n"
+        "6. CTA:\nLưu lại để so sánh sau. Nếu cần, xem link/thông tin chi tiết trong mô tả.\n\n"
+        "Trạng thái: provider tạo video thật chưa bật. Đây là gói prompt/video plan để bạn tự dùng hoặc gửi admin xử lý."
+    )
+
+def fallback_media_factory_pack(topic: str) -> str:
+    topic = topic or "sản phẩm/dịch vụ"
+    return (
+        f"🎬 MEDIA FACTORY PACK — TOAN AAS\n\nChủ đề: {topic}\n"
+        "Phạm vi: Content/video pack để bạn tự đăng. Chưa mở tự đăng bài cho khách.\n\n"
+        "=== TREND ANGLE ===\n"
+        f"{fallback_trend_ai_pack(topic)}\n\n"
+        "=== SCRIPT NGẮN ===\n"
+        "Hook 0-3s: Nếu bạn đang gặp vấn đề này, đừng mua theo cảm xúc.\n"
+        "Scene 1: Nêu tình huống đời thường.\n"
+        "Scene 2: Chỉ ra tiêu chí kiểm tra.\n"
+        "Scene 3: Đưa sản phẩm/giải pháp như một lựa chọn.\n"
+        "Scene 4: Nhắc người xem tự so sánh nhu cầu.\n"
+        "CTA: Lưu lại hoặc xem link chi tiết nếu phù hợp.\n\n"
+        "=== IMAGE PROMPTS ===\n"
+        f"{fallback_image_prompt_pack(topic)}\n\n"
+        "=== VIDEO FROM IMAGE ===\n"
+        f"{fallback_video_from_image_pack(topic)}\n\n"
+        "=== RISK WARNING ===\n"
+        "Tránh hứa chắc doanh thu/kết quả, tránh dùng ảnh người thật không có quyền, tránh claim y tế/tài chính quá mức.\n\n"
+        "Bước tiếp theo:\n1. Tạo ảnh bằng prompt ở trên.\n2. Dùng ảnh để tạo video bằng tool video AI.\n3. Dán voice-over vào TTS.\n4. Tự đăng lên kênh của bạn.\n5. Nếu muốn admin hỗ trợ quy trình nâng cao, liên hệ support."
+    )
+
+async def cmd_trend_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /trend_ai <ngách hoặc chủ đề>")
+    if not await charge_media_factory_or_reply(update, uid, TREND_AI_COST, "spend_trend_ai", f"Trend AI: {topic[:120]}"):
+        return
+    fallback = fallback_trend_ai_pack(topic)
+    prompt = (
+        "Bạn là TOAN AAS Trend Finder. Trả bằng tiếng Việt. Tạo đúng 5 trend/angle cho video ngắn. "
+        "Mỗi trend gồm: title, vì sao đáng làm, audience, hook, video angle, rủi ro nội dung, lệnh tiếp theo. "
+        "Không hứa doanh thu, không auto publish."
+    )
+    output = media_factory_ai(prompt, topic, f"trend_ai_{uid}", fallback)
+    create_media_factory_job(uid, media_factory_username(update), "trend_ai", topic, trend_title=topic, trend_summary=output, cost_xu=TREND_AI_COST)
+    balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
+    await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /image_prompt <chủ đề hoặc trend>")
+    if not await charge_media_factory_or_reply(update, uid, IMAGE_PROMPT_PACK_COST, "spend_image_prompt", f"Image prompt pack: {topic[:120]}"):
+        return
+    fallback = fallback_image_prompt_pack(topic)
+    prompt = (
+        "Bạn là TOAN AAS Image Prompt Factory. Trả tiếng Việt. Tạo 6 prompt ảnh chân thật cho video ngắn. "
+        "Mỗi prompt có: mục đích, prompt tiếng Việt, English prompt, negative prompt, tỉ lệ ảnh. "
+        f"Áp dụng quy tắc:\n{build_realistic_image_prompt_rules()}"
+    )
+    output = media_factory_ai(prompt, topic, f"image_prompt_{uid}", fallback)
+    create_media_factory_job(uid, media_factory_username(update), "image_prompt", topic, image_prompt_pack=output, cost_xu=IMAGE_PROMPT_PACK_COST)
+    balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
+    await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_image_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /image_pack <chủ đề>")
+    if not await charge_media_factory_or_reply(update, uid, IMAGE_PACK_COST, "spend_image_pack", f"Image pack: {topic[:120]}"):
+        return
+    provider_on = is_feature_enabled("image_generation", uid, default=False)
+    output = fallback_image_prompt_pack(topic, advanced=True)
+    if not provider_on:
+        output = "ℹ️ Hiện provider tạo ảnh thật chưa bật, bot đang trả prompt pack để bạn dùng với công cụ tạo ảnh.\n\n" + output
+    create_media_factory_job(uid, media_factory_username(update), "image_pack", topic, image_prompt_pack=output, cost_xu=IMAGE_PACK_COST, note="provider_off_prompt_pack" if not provider_on else "provider_not_integrated")
+    balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
+    await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_video_from_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    reply = update.message.reply_to_message if update.message else None
+    has_reply_photo = bool(reply and getattr(reply, "photo", None))
+    topic = media_factory_topic_from_args(context, "ảnh user reply" if has_reply_photo else "")
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /video_from_image <mô tả ảnh/chủ đề> hoặc reply ảnh rồi gõ /video_from_image")
+    if not await charge_media_factory_or_reply(update, uid, IMAGE_TO_VIDEO_PROMPT_COST, "spend_video_from_image", f"Video from image pack: {topic[:120]}"):
+        return
+    provider_on = is_feature_enabled("image_to_video", uid, default=False)
+    fallback = fallback_video_from_image_pack(topic)
+    prompt = (
+        "Bạn là TOAN AAS Video From Image Builder. Trả tiếng Việt. Tạo video prompt pack từ ảnh/chủ đề. "
+        "Gồm motion prompt, camera movement, duration, voice-over 20s, caption, hashtag, CTA, output TikTok/Facebook/YouTube Shorts. "
+        "Không nói đã tạo video thật, không publish."
+    )
+    output = media_factory_ai(prompt, topic, f"video_from_image_{uid}", fallback)
+    if not provider_on:
+        output += "\n\nTrạng thái: provider tạo video thật chưa bật. Đây là Video Prompt Pack để bạn tự dùng."
+    create_media_factory_job(uid, media_factory_username(update), "video_from_image", topic, video_prompt_pack=output, cost_xu=IMAGE_TO_VIDEO_PROMPT_COST, note="provider_off_prompt_pack" if not provider_on else "provider_not_integrated")
+    balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
+    await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /media_factory <chủ đề>")
+    if not await charge_media_factory_or_reply(update, uid, MEDIA_FACTORY_PACK_COST, "spend_media_factory", f"Media Factory pack: {topic[:120]}"):
+        return
+    fallback = fallback_media_factory_pack(topic)
+    prompt = (
+        "Bạn là TOAN AAS Media Factory. Trả tiếng Việt. Tạo content/video pack đầy đủ từ topic/trend. "
+        "Bắt buộc gồm: trend angle, script ngắn, 6 image prompts chân thật, video-from-image prompt, voice-over, caption, hashtag, CTA, risk warning, next steps. "
+        "Nêu rõ khách tự đăng, không auto publish."
+    )
+    output = media_factory_ai(prompt, topic, f"media_factory_{uid}", fallback)
+    job_id = create_media_factory_job(uid, media_factory_username(update), "media_factory", topic, trend_title=topic, trend_summary=output[:1200], image_prompt_pack=output, video_prompt_pack=output, caption_pack=output, cost_xu=MEDIA_FACTORY_PACK_COST)
+    balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
+    await reply_long_text(update, f"Job ID: {job_id}\n\n{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_admin_trend_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Chức năng này chỉ dành cho admin.")
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /admin_trend_video <chủ đề>")
+    fallback = fallback_media_factory_pack(topic)
+    prompt = "Bạn là TOAN AAS Admin Trend-to-Video Pipeline. Tạo draft review nội bộ từ trend sang video pack. Không publish. Trả đầy đủ pack để admin review."
+    output = media_factory_ai(prompt, topic, f"admin_trend_video_{update.effective_user.id}", fallback)
+    job_id = create_media_factory_job(update.effective_user.id, media_factory_username(update), "admin_trend_video", topic, trend_title=topic, trend_summary=output[:1200], image_prompt_pack=output, video_prompt_pack=output, caption_pack=output, status="pending_review", cost_xu=0, note="admin_first_publish_off")
+    await update.message.reply_text(
+        "✅ Đã tạo Admin Trend-to-Video Draft\n\n"
+        f"Job ID: {job_id}\n"
+        f"Chủ đề: {topic}\n"
+        "Trạng thái: pending_review\n\n"
+        f"Lệnh tiếp:\n/review_job {job_id}\n/approve_job {job_id}\n/reject_job {job_id} <lý do>\n/publish_queue chỉ khi admin_publish bật"
+    )
+
+async def cmd_review_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Chức năng này chỉ dành cho admin.")
+    try:
+        job_id = int(context.args[0])
+    except (IndexError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: /review_job <job_id>")
+    job = get_media_factory_job(job_id)
+    if not job:
+        return await update.message.reply_text("❌ Không tìm thấy Media Factory job.")
+    content = job.get("caption_pack") or job.get("video_prompt_pack") or job.get("image_prompt_pack") or job.get("trend_summary") or ""
+    await reply_long_text(update, f"🔎 REVIEW JOB #{job_id}\nStatus: {job.get('status')}\nMode: {job.get('mode')}\nTopic: {job.get('topic')}\n\n{content}")
+
+async def cmd_approve_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Chức năng này chỉ dành cho admin.")
+    try:
+        job_id = int(context.args[0])
+    except (IndexError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: /approve_job <job_id>")
+    if not update_media_factory_job_status(job_id, "approved", approved_by=update.effective_user.id, note="Admin approved content; publish remains gated."):
+        return await update.message.reply_text("❌ Không tìm thấy job.")
+    publish_on = is_feature_enabled("admin_publish", update.effective_user.id, default=False)
+    note = "Publish vẫn đang tắt." if not publish_on else "Admin publish flag đang bật, vẫn cần dùng publish queue riêng."
+    await update.message.reply_text(f"✅ Đã duyệt nội dung job #{job_id}. {note}")
+
+async def cmd_reject_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Chức năng này chỉ dành cho admin.")
+    try:
+        job_id = int(context.args[0])
+    except (IndexError, ValueError):
+        return await update.message.reply_text("⚠️ Cú pháp: /reject_job <job_id> <lý do>")
+    reason = " ".join(context.args[1:]).strip() or "Admin rejected"
+    if not update_media_factory_job_status(job_id, "rejected", approved_by=update.effective_user.id, note=reason):
+        return await update.message.reply_text("❌ Không tìm thấy job.")
+    await update.message.reply_text(f"✅ Đã reject job #{job_id}. Lý do: {reason}")
+
 async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "💎 <b>BẢNG GIÁ TOAN AAS</b>",
@@ -23048,6 +23467,14 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  nhiều hook/caption/CTA hơn",
         f"• <code>/film tier=series</code>: <b>{VIDEO_SERIES_COST:,} Xu</b>",
         "  gói nhiều nội dung/chuỗi bài",
+        "",
+        "🎞 <b>Media Factory</b>",
+        f"• <code>/trend_ai</code>: <b>{TREND_AI_COST} Xu</b>",
+        f"• <code>/image_prompt</code>: <b>{IMAGE_PROMPT_PACK_COST} Xu</b>",
+        f"• <code>/image_pack</code>: <b>{IMAGE_PACK_COST} Xu</b>",
+        f"• <code>/video_from_image</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b> cho prompt pack",
+        f"• <code>/media_factory</code>: <b>{MEDIA_FACTORY_PACK_COST} Xu</b>",
+        "  Nếu provider tạo ảnh/video thật chưa bật, bot trả prompt pack để bạn dùng với công cụ AI tương ứng.",
         "",
         "📈 <b>Báo cáo/tối ưu thủ công</b>",
         f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>",
@@ -23078,6 +23505,7 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Mỗi đơn chỉ dùng 1 mã, không cộng dồn",
         "",
         "🎁 <b>Launch Bonus lần đầu mua gói:</b>",
+        "• 50k: 500 Xu gốc + 30 Xu = 530 Xu",
         "• 100k: 1.000 Xu gốc + 50 Xu = 1.050 Xu",
         "• 200k: 2.000 Xu gốc + 150 Xu = 2.150 Xu",
         "• 500k: 5.000 Xu gốc + 500 Xu = 5.500 Xu",
@@ -23603,7 +24031,7 @@ async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     text = (
         "💰 <b>WORKFLOW AI KIẾM TIỀN HỢP PHÁP</b>\n\n"
-        "<b>1. Faceless video:</b> ChatGPT/Claude viết kịch bản → ElevenLabs/Edge TTS đọc → Kling/CapCut dựng → đăng TikTok/Reels/YouTube Shorts.\n"
+        "<b>1. Faceless video:</b> ChatGPT/Codex/TOAN AAS AI Builder viết kịch bản → TTS đọc → công cụ dựng video → tự đăng TikTok/Reels/YouTube Shorts.\n"
         "<b>2. TikTok Affiliate:</b> chọn niche dễ mua → tạo 3-5 video/ngày → gắn sản phẩm → đo video thắng và remix.\n"
         "<b>3. Dịch vụ video AI:</b> nhận brief doanh nghiệp nhỏ → báo giá 500k-2M/video → giao kịch bản, voice, phụ đề, bản dựng.\n"
         "<b>4. Ảnh người mẫu AI:</b> chỉ dùng nhân vật tự tạo hoặc người thật có đồng ý rõ ràng, đủ 18 tuổi; không giả mạo người khác.\n\n"
@@ -36755,6 +37183,15 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_patterns", admin_internal_command(cmd_video_patterns)))
     tg_app.add_handler(CommandHandler("film", cmd_film))
     tg_app.add_handler(CommandHandler("video_script", cmd_film))
+    tg_app.add_handler(CommandHandler("trend_ai", cmd_trend_ai))
+    tg_app.add_handler(CommandHandler("image_prompt", cmd_image_prompt))
+    tg_app.add_handler(CommandHandler("image_pack", cmd_image_pack))
+    tg_app.add_handler(CommandHandler("video_from_image", cmd_video_from_image))
+    tg_app.add_handler(CommandHandler("media_factory", cmd_media_factory))
+    tg_app.add_handler(CommandHandler("admin_trend_video", admin_internal_command(cmd_admin_trend_video)))
+    tg_app.add_handler(CommandHandler("review_job", admin_internal_command(cmd_review_job)))
+    tg_app.add_handler(CommandHandler("approve_job", admin_internal_command(cmd_approve_job)))
+    tg_app.add_handler(CommandHandler("reject_job", admin_internal_command(cmd_reject_job)))
     tg_app.add_handler(CommandHandler("film_blueprint", admin_internal_command(cmd_film_blueprint)))
     tg_app.add_handler(CommandHandler("film_project_pack", admin_internal_command(cmd_film_project_pack)))
     tg_app.add_handler(CommandHandler("film_series", admin_internal_command(cmd_film_series)))
