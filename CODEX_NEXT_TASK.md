@@ -63,10 +63,15 @@ Do not modify the sections below unless the admin gives a direct request for tha
    - Balance display such as `Vô hạn` must never be used to infer OWNER.
    - Keep this separation unchanged.
 
+8. Emergency lock / unlock
+   - Verified live: owner account can run `/emergency_lock` and `/emergency_unlock`.
+   - Emergency lock preserves DB, balances, payment history, ledger events and backups.
+   - Emergency owner/admin notifications are deduplicated so the command caller does not receive the same alert twice.
+   - Keep this flow unchanged unless the admin directly requests an emergency ops change.
+
 Operational note:
 
-- Telegram ID `7126457028` is currently admin but not owner.
-- If this account is the owner account, add `7126457028` to Railway ENV `OWNER_IDS`.
+- Telegram ID `7126457028` is the verified owner account when Railway ENV `OWNER_IDS` contains `7126457028`.
 - Do not hardcode owner IDs in code without an explicit admin request.
 
 The current phase is not the large app/dashboard phase. Priority number one is to finish the existing Telegram bot so it runs reliably and starts generating real revenue.

@@ -25214,11 +25214,14 @@ def freeze_block_message(reason: str, state: dict) -> str:
         )
     return emergency_user_message()
 
-async def notify_ops_alert(context: ContextTypes.DEFAULT_TYPE, title: str, lines: list[str]):
+async def notify_ops_alert(context: ContextTypes.DEFAULT_TYPE, title: str, lines: list[str], exclude_user_id=None):
     if not context or not getattr(context, "bot", None):
         return
     body = "\n".join([title, "", *lines])[:3800]
+    excluded = str(exclude_user_id) if exclude_user_id is not None else ""
     for chat_id in owner_and_admin_ids():
+        if excluded and str(chat_id) == excluded:
+            continue
         try:
             await context.bot.send_message(chat_id=str(chat_id), text=body, parse_mode="HTML")
         except Exception as e:
@@ -28278,7 +28281,7 @@ async def cmd_emergency_lock(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "• DB: <b>preserved</b>",
         f"• Reason: <code>{html.escape(reason)}</code>",
     ]
-    await notify_ops_alert(context, "🚨 <b>EMERGENCY LOCK ENABLED</b>", lines)
+    await notify_ops_alert(context, "🚨 <b>EMERGENCY LOCK ENABLED</b>", lines, exclude_user_id=update.effective_user.id)
     await update.message.reply_text("🚨 <b>EMERGENCY LOCK ENABLED</b>\n\n" + "\n".join(lines), parse_mode="HTML")
 
 async def cmd_emergency_unlock(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -28309,6 +28312,7 @@ async def cmd_emergency_unlock(update: Update, context: ContextTypes.DEFAULT_TYP
         context,
         "✅ <b>Emergency lock disabled</b>",
         ["Hãy kiểm tra /providers, /tool_status, /sales_ready trước khi mở bán lại."],
+        exclude_user_id=update.effective_user.id,
     )
     await update.message.reply_text(
         "✅ Emergency lock disabled.\n\nHãy kiểm tra <code>/providers</code>, <code>/tool_status</code>, <code>/sales_ready</code> trước khi mở bán lại.",
