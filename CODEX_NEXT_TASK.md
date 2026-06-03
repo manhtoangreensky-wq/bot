@@ -15,17 +15,22 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
 
 ## Current Priority
 
-1. Deploy latest Stable Revenue Bot.
-2. Test `/payos_debug_create`.
-3. Test `/naptien` chọn 10k.
-4. Test `/naptien` chọn 50k.
-5. Test `/promo_seed_policy`.
-6. Test `/promo FIRST30`.
-7. Test `/gift_seed_beta`.
-8. Test `/gift BETA100`.
-9. Test `/backup_db`.
-10. Test `/sales_ready`.
-11. Do not start big plan yet.
+1. Deploy latest Stable Revenue Bot foundation hotfix.
+2. Test `/huongdan` only shows/downloads Word guide, no Markdown and no numbered buttons.
+3. Test `/start` as admin and normal user.
+4. Test `/promo FIRST30` works without manual seeding after deploy.
+5. Test `/naptien` chọn 50k and verify first-package Launch Bonus +30 Xu after paid/manual approval flow.
+6. Test trial lock: same Telegram ID never receives 200 trial Xu twice, even if `users` row is recreated while `trial_grants` remains.
+7. Test `ADMIN_IDS` with secondary admin for `/providers`, `/sales_ready`, `/backup_db`, `/promo_list`, `/gift_list`, `/duyet`.
+8. Do not start big plan yet.
+
+## Next After Foundation Passes
+
+- Add Image Tool Center MVP.
+- Add basic image tools.
+- Add OpenAI image flags.
+- Add image-to-video prompt pack.
+- Do not build Image Tool Center until guide, trial, promo, admin and payment foundation pass.
 
 Manual sequence:
 

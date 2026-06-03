@@ -104,6 +104,10 @@ def detect_public_base_url() -> tuple[str, str]:
 
 TELEGRAM_TOKEN      = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
 ADMIN_ID            = _env("ADMIN_ID", "7126457028")
+ADMIN_IDS_RAW       = _env("ADMIN_IDS", ADMIN_ID)
+ADMIN_IDS           = {x.strip() for x in ADMIN_IDS_RAW.replace(";", ",").split(",") if x.strip()}
+if ADMIN_ID:
+    ADMIN_IDS.add(str(ADMIN_ID))
 APP_VERSION         = "TOAN AAS V15.2"
 START_TIME          = time.time()
 APP_BUILD_SHA       = (
@@ -343,7 +347,6 @@ TRIAL_CREDITS     = 200
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
 GUIDE_DOCX_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx"
-GUIDE_MD_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.md"
 LAUNCH_BONUS_BY_AMOUNT = {
     50000: 30,
     100000: 50,
@@ -1123,6 +1126,7 @@ def init_db():
         WHERE promo_type='gift_xu'
           AND UPPER(code) NOT LIKE 'BETA%'"""
     )
+    seed_promotion_policy(conn)
     c.execute(
         """INSERT OR IGNORE INTO trial_grants (user_id, granted_xu, granted_at, username, note)
         SELECT user_id,
@@ -1502,7 +1506,7 @@ def add_credit(user_id, amount, event_type="manual_add", ref_id="", note=""):
     conn.close()
 
 def refund_charged_credit(user_id, amount, event_type="refund", ref_id="", note="", was_charged=True) -> bool:
-    if not was_charged or str(user_id) == ADMIN_ID or int(amount or 0) <= 0:
+    if not was_charged or is_admin_user(user_id) or int(amount or 0) <= 0:
         return False
     get_user(user_id)
     amount = int(amount)
@@ -1521,7 +1525,7 @@ def refund_charged_credit(user_id, amount, event_type="refund", ref_id="", note=
     return True
 
 def spend_fixed_credit(user_id, amount, event_type, note="") -> bool:
-    if str(user_id) == ADMIN_ID:
+    if is_admin_user(user_id):
         return True
     get_user(user_id)
     conn = db_connect()
@@ -21361,7 +21365,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 def is_admin_user(user_id) -> bool:
-    return str(user_id) == ADMIN_ID
+    return str(user_id) in ADMIN_IDS or str(user_id) == str(ADMIN_ID)
 
 def bool_env_status(value) -> str:
     return "configured" if bool(value) else "missing"
@@ -21751,16 +21755,7 @@ def guide_keyboard() -> InlineKeyboardMarkup:
     if public_base:
         rows.append([
             InlineKeyboardButton("📄 Tải bản Word", url=f"{public_base}/download/huong-dan-toan-aas.docx"),
-            InlineKeyboardButton("📝 Tải bản Markdown", url=f"{public_base}/download/huong-dan-toan-aas.md"),
         ])
-    row = []
-    for idx, (key, title, _body) in enumerate(CUSTOMER_GUIDE_SECTIONS, start=1):
-        row.append(InlineKeyboardButton(str(idx), callback_data=f"menu|guide_{key}"))
-        if len(row) == 5:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -21770,7 +21765,7 @@ def guide_index_text() -> str:
         "",
         "Bot tạo nội dung, script, prompt, caption, hashtag, CTA, voice/media pack để bạn tự đăng lên Facebook, TikTok, YouTube.",
         "",
-        "Bạn có thể bấm nút bên dưới để tải bản Word/Markdown, hoặc mở từng phần ngay trong Telegram.",
+        "Bạn có thể bấm nút bên dưới để tải bản Word, hoặc mở từng phần bằng lệnh trong Telegram.",
         "",
         "<b>Mục lục:</b>",
     ]
@@ -21847,6 +21842,18 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
 def menu_text_main(is_admin: bool) -> str:
     runtime_line = f"\n🧬 Runtime: <code>{APP_BUILD}</code>" if is_admin else ""
     admin_line = "\n• Quản trị doanh thu, bill, backup và operator nội bộ" if is_admin else ""
+    admin_quick = (
+        "\n\n🔐 <b>Admin nhanh:</b>\n"
+        "• <code>/providers</code> — kiểm tra provider\n"
+        "• <code>/sales_ready</code> — kiểm tra sẵn sàng bán\n"
+        "• <code>/backup_db</code> — backup DB\n"
+        "• <code>/promo_seed_policy</code> — tạo/cập nhật mã ưu đãi\n"
+        "• <code>/promo_list</code> — xem mã ưu đãi\n"
+        "• <code>/gift_seed_beta</code> — tạo mã BETA\n"
+        "• <code>/gift_list</code> — xem mã quà\n"
+        "• <code>/gift BETA100 USER_ID</code> — cấp quà cho user"
+        if is_admin else ""
+    )
     return (
         "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
         "Cỗ máy AI hỗ trợ tạo nội dung, video script, voice, media và công cụ AI hằng ngày trong một bot Telegram.\n\n"
@@ -21859,8 +21866,8 @@ def menu_text_main(is_admin: bool) -> str:
         "🎞 Media Factory: tìm trend, prompt ảnh chân thật, video prompt pack để bạn tự đăng.\n"
         "💳 Nạp Xu: PayOS QR động hoặc QR thủ công khi cổng tự động bận."
         f"{admin_line}\n\n"
-        "🎁 Tài khoản mới được tặng <b>200 Xu trải nghiệm</b>.\n"
-        "Mỗi ID Telegram chỉ nhận quà trải nghiệm một lần; xóa chat hoặc đổi username không làm reset 200 Xu.\n"
+        "🎁 Tân thủ: mỗi ID Telegram chỉ nhận <b>200 Xu trải nghiệm</b> một lần.\n"
+        "Xu được quản lý theo ID Telegram. Xóa chat rồi bấm Start lại sẽ không nhận lại 200 Xu lần nữa.\n"
         "Bạn có thể dùng ngay 1 lượt <code>/film</code> Basic để thử quy trình tạo video script.\n"
         "💳 Hết Xu thì dùng <code>/naptien</code> để nạp thêm.\n\n"
         "<b>Bắt đầu nhanh:</b>\n"
@@ -21871,6 +21878,7 @@ def menu_text_main(is_admin: bool) -> str:
         "5. <code>/naptien</code> — nạp thêm Xu khi cần\n"
         "6. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
         "7. Tự đăng nội dung đã tạo lên kênh của bạn"
+        f"{admin_quick}"
         f"{runtime_line}\n\n"
         "Chọn nhóm chức năng bên dưới:"
     )
@@ -22212,15 +22220,10 @@ async def cmd_huongdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if section or PUBLIC_BASE_URL:
         return
-    guide_files = [
-        (GUIDE_DOCX_FILE, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-        (GUIDE_MD_FILE, "text/markdown"),
-    ]
     sent_any = False
-    for filename, _mime in guide_files:
-        path = os.path.join(os.path.dirname(__file__), filename)
-        if not os.path.exists(path):
-            continue
+    filename = GUIDE_DOCX_FILE
+    path = os.path.join(os.path.dirname(__file__), filename)
+    if os.path.exists(path):
         try:
             with open(path, "rb") as f:
                 await context.bot.send_document(
@@ -22234,7 +22237,7 @@ async def cmd_huongdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Cannot send guide document {filename}: {e}")
     if not sent_any:
         await update.message.reply_text(
-            "⚠️ Chưa có link tải hướng dẫn. Admin cần set PUBLIC_BASE_URL hoặc kiểm tra file hướng dẫn trong repo."
+            "⚠️ Chưa có file Word hướng dẫn. Admin cần set PUBLIC_BASE_URL hoặc kiểm tra file hướng dẫn trong repo."
         )
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -23779,7 +23782,7 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     bot_info = {}
     expected_webhook = expected_telegram_webhook_url()
@@ -23836,7 +23839,7 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_telegram_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     expected_webhook = expected_telegram_webhook_url()
     try:
@@ -23864,7 +23867,7 @@ async def cmd_telegram_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_telegram_takeover(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         result = await set_telegram_webhook_takeover(context.bot, drop_pending_updates=True)
@@ -23890,7 +23893,7 @@ async def cmd_telegram_takeover(update: Update, context: ContextTypes.DEFAULT_TY
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     credits, total_spent, is_vip = get_user(user_id, update.effective_user.first_name)
-    if user_id == ADMIN_ID:
+    if is_admin_user(user_id):
         tier = "👑 ADMIN (Miễn phí 100%)"
     elif is_vip == 1:
         tier = "💎 VIP (Miễn phí 100%)"
@@ -23900,7 +23903,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tier = "🥈 BẠC (Giảm 10%)"
     else:
         tier = "🥉 Tiêu Chuẩn"
-    credit_display = "Vô Hạn (∞)" if user_id == ADMIN_ID or is_vip else f"{credits} Xu"
+    credit_display = "Vô Hạn (∞)" if is_admin_user(user_id) or is_vip else f"{credits} Xu"
     msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{user_id}</code>\n"
@@ -35985,7 +35988,7 @@ async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT
 async def handle_video_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if str(query.from_user.id) != ADMIN_ID:
+    if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
     parts = query.data.split("|")
     if len(parts) != 3:
@@ -36063,7 +36066,7 @@ async def cmd_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ─── ADMIN COMMANDS ───────────────────────────────────────────────────────────
 async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         target_id, amount = context.args[0], int(context.args[1])
@@ -36079,7 +36082,7 @@ async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Cú pháp: /add <ID> <Số_Xu>")
 
 async def cmd_admin_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     conn = db_connect()
     c = conn.cursor()
@@ -36101,7 +36104,7 @@ async def cmd_admin_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         target_id, amount = context.args[0], int(context.args[1])
@@ -36198,7 +36201,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Cú pháp: /duyet <ID> <Số_Xu>")
 
 async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         order_code = context.args[0]
@@ -36263,7 +36266,7 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Không kiểm tra được PayOS: {str(e)}")
 
 async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
         set_system_setting("payos_debug_create_status", "FAIL", "Missing PayOS env", update.effective_user.id)
@@ -36387,7 +36390,7 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_payos_env_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
 
     def env_line(name: str, value: str) -> str:
@@ -36411,7 +36414,7 @@ async def cmd_payos_env_check(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         target_id = context.args[0]
@@ -36449,7 +36452,7 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Cú pháp: /tuchoi <ID>")
 
 async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     conn = db_connect()
     c = conn.cursor()
@@ -36471,7 +36474,7 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     conn = db_connect()
     c = conn.cursor()
@@ -36499,7 +36502,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     today = datetime.now().strftime("%Y-%m-%d")
     month_prefix = datetime.now().strftime("%Y-%m")
@@ -36595,7 +36598,7 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_setvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         target_id = context.args[0]
@@ -36630,7 +36633,7 @@ async def cmd_setvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Cú pháp: /setvip <ID> <1|0>")
 
 async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     db_path = str(DB_FILE or "")
     db_name = os.path.basename(db_path) or "toandaas_system.db"
@@ -37496,17 +37499,6 @@ async def download_customer_guide_docx():
         path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=GUIDE_DOCX_FILE,
-    )
-
-@fastapi_app.get("/download/huong-dan-toan-aas.md")
-async def download_customer_guide_md():
-    path = customer_guide_file_path(GUIDE_MD_FILE)
-    if not os.path.exists(path):
-        return customer_guide_missing_response()
-    return FileResponse(
-        path,
-        media_type="text/markdown; charset=utf-8",
-        filename=GUIDE_MD_FILE,
     )
 
 @fastapi_app.get("/health")

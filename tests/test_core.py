@@ -38,14 +38,13 @@ def test_health_status_and_runtime_endpoints(monkeypatch):
     assert runtime.json()["service"].startswith("TOAN AAS")
 
 
-def test_customer_guide_download_routes_exist():
+def test_customer_guide_download_routes_are_word_only():
     client = TestClient(bot.fastapi_app)
     docx = client.get("/download/huong-dan-toan-aas.docx")
     md = client.get("/download/huong-dan-toan-aas.md")
     assert docx.status_code == 200
-    assert md.status_code == 200
+    assert md.status_code == 404
     assert "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx" in docx.headers["content-disposition"]
-    assert "TOAN AAS" in md.text
 
 
 def test_public_start_menu_does_not_leak_admin_commands():
