@@ -24655,6 +24655,241 @@ async def cmd_admin_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
     )
 
+def admin_center_text(section: str = "main") -> str:
+    section = str(section or "main").strip().lower()
+    sections = {
+        "member": (
+            "🪪 <b>ADMIN MEMBER HELP</b>\n\n"
+            "• <code>/settier &lt;ID&gt; &lt;newbie|silver|gold|platinum|diamond|vip&gt;</code> — đặt hạng thành viên theo chính sách mới\n"
+            "• <code>/set_member_tier &lt;ID&gt; &lt;tier&gt;</code> — alias của /settier\n"
+            "• <code>/set_vip &lt;ID&gt; &lt;tier&gt;</code> — alias cũ cho override hạng\n"
+            "• <code>/setvip &lt;ID&gt; &lt;1|0&gt;</code> — legacy bật/tắt VIP nội bộ, không khuyến nghị dùng cho hạng mới\n"
+            "• <code>/member_user &lt;ID&gt;</code> — xem hạng/quyền lợi user\n"
+            "• <code>/grant_tier_promo &lt;ID&gt; &lt;tier&gt;</code> — tạo mã ưu đãi lên hạng thủ công\n\n"
+            "Nguyên tắc: hạng thành viên chỉ giảm Xu khi tiêu dịch vụ và có ưu đãi lên hạng một lần. Không cộng thêm Xu định kỳ theo hạng khi nạp."
+        ),
+        "payment": (
+            "💳 <b>ADMIN PAYMENT HELP</b>\n\n"
+            "• <code>/pending</code> — xem bill thủ công đang chờ\n"
+            "• <code>/duyet &lt;bill_id&gt; &lt;Xu&gt;</code> — duyệt bill sau khi đối soát tiền thật\n"
+            "• <code>/tuchoi &lt;bill_id&gt;</code> — từ chối bill\n"
+            "• <code>/thucong</code> — hướng dẫn khách nạp thủ công\n"
+            "• <code>/add &lt;ID&gt; &lt;Xu&gt;</code> — cộng Xu trực tiếp cho user khi cần\n"
+            "• <code>/deduct &lt;ID&gt; &lt;Xu&gt;</code> — trừ Xu thủ công nếu cần\n"
+            "• <code>/payos_debug_create 10000</code> — test tạo checkout PayOS, không cộng Xu\n"
+            "• <code>/payos_status &lt;order_code&gt;</code> hoặc <code>/checkpayos &lt;order_code&gt;</code> — kiểm tra đơn\n"
+            "• <code>/payos_key_fingerprint</code> — kiểm tra key dạng mask\n\n"
+            "Quan trọng: <code>/duyet</code> chỉ dùng cho bill pending. Nếu muốn cộng Xu trực tiếp, dùng <code>/add</code>. Admin phải đối soát tiền thật trước khi duyệt bill."
+        ),
+        "tools": (
+            "🧪 <b>ADMIN TOOLS HELP</b>\n\n"
+            "• <code>/providers</code> — xem provider configured/tested\n"
+            "• <code>/tool_audit</code> — audit tool/provider không lộ secret\n"
+            "• <code>/tool_test_ai</code> — test Gemini/OpenAI fallback\n"
+            "• <code>/tool_test_image_debug</code> — test provider ảnh\n"
+            "• <code>/tool_test_tts</code> — test TTS\n"
+            "• <code>/tool_test_stt</code> — reply audio để test STT\n"
+            "• <code>/tool_test_downloader &lt;link&gt;</code> — test downloader/self-host Cobalt\n"
+            "• <code>/sales_ready</code> — checklist sẵn sàng bán\n\n"
+            "Không mở tool cho khách nếu provider chưa PASS hoặc còn ADMIN_ONLY."
+        ),
+    }
+    if section in sections:
+        return sections[section]
+    return (
+        "🔐 <b>ADMIN CENTER TOAN AAS</b>\n\n"
+        "<b>A. User & Xu</b>\n"
+        "• <code>/add &lt;ID&gt; &lt;Xu&gt;</code> — cộng Xu trực tiếp cho user\n"
+        "• <code>/deduct &lt;ID&gt; &lt;Xu&gt;</code> — trừ Xu thủ công nếu cần\n"
+        "• <code>/profile_user &lt;ID&gt;</code> — xem hồ sơ user\n"
+        "• <code>/ledger_user &lt;ID&gt;</code> — xem lịch sử Xu gần nhất\n\n"
+        "<b>B. Thành viên</b>\n"
+        "• <code>/settier &lt;ID&gt; &lt;newbie|silver|gold|platinum|diamond|vip&gt;</code> — đặt hạng thành viên\n"
+        "• <code>/set_member_tier &lt;ID&gt; &lt;tier&gt;</code> — alias của /settier\n"
+        "• <code>/setvip &lt;ID&gt; &lt;1|0&gt;</code> — legacy: bật/tắt VIP nội bộ, không khuyến nghị dùng cho hạng mới\n"
+        "• <code>/member_user &lt;ID&gt;</code> — xem hạng/quyền lợi user\n\n"
+        "<b>C. Bill thủ công</b>\n"
+        "• <code>/pending</code> — xem bill đang chờ\n"
+        "• <code>/duyet &lt;bill_id&gt; &lt;Xu&gt;</code> — duyệt bill sau khi đối soát tiền thật\n"
+        "• <code>/tuchoi &lt;bill_id&gt;</code> — từ chối bill\n"
+        "• <code>/thucong</code> — hướng dẫn khách nạp thủ công\n\n"
+        "<b>D. PayOS</b>\n"
+        "• <code>/payos_debug_create 10000</code> — test tạo checkout\n"
+        "• <code>/payos_status &lt;order_code&gt;</code>\n"
+        "• <code>/checkpayos &lt;order_code&gt;</code>\n"
+        "• <code>/payos_key_fingerprint</code>\n\n"
+        "<b>E. Provider & Tool</b>\n"
+        "• <code>/providers</code> — xem trạng thái API\n"
+        "• <code>/tool_test_ai</code> — test AI\n"
+        "• <code>/tool_test_image_debug</code> — test image provider\n"
+        "• <code>/sales_ready</code> — kiểm tra sẵn sàng bán\n\n"
+        "<b>F. Báo cáo</b>\n"
+        "• <code>/dashboard</code>\n"
+        "• <code>/stats</code>\n"
+        "• <code>/admin_report_month YYYY-MM</code>\n"
+        "• <code>/admin_report_year YYYY</code>\n\n"
+        "<b>G. Bảo mật</b>\n"
+        "• <code>/admin_docs</code>\n"
+        "• <code>/security_status</code>\n"
+        "• <code>/risk_checklist</code>\n"
+        "• <code>/official_channels</code>\n\n"
+        "Lưu ý: Admin phải đối soát tiền thật trước khi duyệt bill thủ công. TOAN AAS không yêu cầu OTP/API key/token/mật khẩu của khách.\n\n"
+        "Xem nhanh: <code>/admin_member_help</code>, <code>/admin_payment_help</code>, <code>/admin_tools_help</code>."
+    )
+
+async def cmd_admin_center(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(admin_center_text("main"), parse_mode="HTML")
+
+async def cmd_admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_admin_center(update, context)
+
+async def cmd_admin_member_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(admin_center_text("member"), parse_mode="HTML")
+
+async def cmd_admin_payment_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(admin_center_text("payment"), parse_mode="HTML")
+
+async def cmd_admin_tools_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(admin_center_text("tools"), parse_mode="HTML")
+
+async def cmd_profile_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/profile_user USER_ID</code>", parse_mode="HTML")
+    target_id = str(context.args[0]).strip()
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            "SELECT credits, total_spent, is_vip FROM users WHERE user_id=?",
+            (target_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return await update.message.reply_text(f"⚠️ Không tìm thấy user <code>{html.escape(target_id)}</code>.", parse_mode="HTML")
+    credits, total_spent, is_vip_flag = row
+    profile = get_member_profile(target_id)
+    stats = referral_stats_for_user(target_id)
+    await update.message.reply_text(
+        "👤 <b>ADMIN USER PROFILE</b>\n\n"
+        f"• User ID: <code>{html.escape(target_id)}</code>\n"
+        f"• Số dư: <b>{int(credits or 0)} Xu</b>\n"
+        f"• Total spent legacy: <b>{int(total_spent or 0)} Xu</b>\n"
+        f"• Is VIP legacy: <code>{int(is_vip_flag or 0)}</code>\n"
+        f"• Hạng: <b>{html.escape(profile.get('tier_badge') or profile.get('tier_label') or '-')}</b>\n"
+        f"• Tổng nạp thành công: <b>{vnd_text(profile.get('total_paid_vnd') or 0)}</b>\n"
+        f"• Referral total/rewarded: <b>{int(stats.get('total') or 0)}</b>/<b>{int(stats.get('rewarded') or 0)}</b>\n"
+        f"• Referral Xu: <b>{int(stats.get('reward_xu') or 0)} Xu</b>",
+        parse_mode="HTML",
+    )
+
+async def cmd_member_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/member_user USER_ID</code>", parse_mode="HTML")
+    target_id = str(context.args[0]).strip()
+    if not user_exists(target_id):
+        return await update.message.reply_text(f"⚠️ Không tìm thấy user <code>{html.escape(target_id)}</code>.", parse_mode="HTML")
+    profile = get_member_profile(target_id)
+    benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(profile.get("tier") or "newbie"))
+    await update.message.reply_text(
+        "🪪 <b>ADMIN MEMBER USER</b>\n\n"
+        f"• User ID: <code>{html.escape(target_id)}</code>\n"
+        f"• Hạng: <b>{html.escape(profile.get('tier_badge') or profile.get('tier_label') or '-')}</b>\n"
+        f"• Discount tiêu Xu: <b>{int(profile.get('discount_percent') or 0)}%</b>\n"
+        f"• Tổng nạp: <b>{vnd_text(profile.get('total_paid_vnd') or 0)}</b>\n\n"
+        "<b>Quyền lợi</b>\n"
+        f"{benefits}",
+        parse_mode="HTML",
+    )
+
+async def cmd_ledger_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/ledger_user USER_ID</code>", parse_mode="HTML")
+    target_id = str(context.args[0]).strip()
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT delta, balance_after, event_type, ref_id, note, created_at
+            FROM credit_events WHERE user_id=? ORDER BY id DESC LIMIT 10""",
+            (target_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return await update.message.reply_text(f"ℹ️ Chưa có credit_events cho <code>{html.escape(target_id)}</code>.", parse_mode="HTML")
+    lines = ["📒 <b>ADMIN USER LEDGER</b>", "", f"User: <code>{html.escape(target_id)}</code>"]
+    for delta, balance, event_type, ref_id, note, created_at in rows:
+        lines.append(
+            f"• <code>{html.escape(str(created_at or '-')[:19])}</code> | "
+            f"{int(delta or 0):+d} Xu | bal={int(balance or 0)} | "
+            f"{html.escape(str(event_type or '-'))} | {html.escape(str(ref_id or '-'))}"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_admin_deduct(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = str(context.args[0]).strip()
+        amount = int(context.args[1])
+        if amount <= 0:
+            raise ValueError("amount")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/deduct USER_ID Xu</code>", parse_mode="HTML")
+    conn = db_connect()
+    try:
+        row = conn.execute("SELECT credits FROM users WHERE user_id=?", (target_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return await update.message.reply_text(f"⚠️ Không tìm thấy user <code>{html.escape(target_id)}</code>.", parse_mode="HTML")
+    credits = int(row[0] or 0)
+    if int(credits or 0) < amount:
+        return await update.message.reply_text(
+            f"⚠️ User <code>{html.escape(target_id)}</code> chỉ còn <b>{int(credits or 0)} Xu</b>, không đủ để trừ <b>{amount} Xu</b>.",
+            parse_mode="HTML",
+        )
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE users SET credits = credits - ? WHERE user_id=?", (amount, target_id))
+        record_credit_event(conn, target_id, -amount, "admin_deduct", "", f"Admin {update.effective_user.id} deducted Xu")
+        record_audit(
+            conn,
+            update.effective_user.id,
+            "admin",
+            "credit.deducted",
+            "user",
+            target_id,
+            before={"credits": int(credits or 0)},
+            after={"delta": -amount, "credits": int(credits or 0) - amount},
+            note="/deduct admin manual adjustment",
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    await update.message.reply_text(
+        f"✅ Đã trừ <b>{amount} Xu</b> từ user <code>{html.escape(target_id)}</code>.\n"
+        f"• Số dư mới: <b>{int(credits or 0) - amount} Xu</b>",
+        parse_mode="HTML",
+    )
+
 def get_system_flag(key, default=""):
     try:
         conn = db_connect()
@@ -31685,9 +31920,9 @@ async def doc_send_file(update: Update, path: str, filename: str, caption: str) 
 
 def doc_pdf_to_word_text(input_pdf: str, output_docx: str) -> tuple[bool, str]:
     if not PdfReader:
-        return False, "Thiếu pypdf/PyPDF2 để đọc PDF."
+        return False, "PDF sang Word đang admin test/chưa mở public. Bot chưa trừ Xu."
     if not DocxDocument:
-        return False, "Thiếu python-docx để tạo file Word."
+        return False, "PDF sang Word đang admin test/chưa mở public. Bot chưa trừ Xu."
     reader = PdfReader(input_pdf)
     if len(reader.pages) > DOC_MAX_PAGES:
         return False, f"PDF có {len(reader.pages)} trang, vượt giới hạn {DOC_MAX_PAGES} trang/lần."
@@ -31707,7 +31942,7 @@ def doc_pdf_to_word_text(input_pdf: str, output_docx: str) -> tuple[bool, str]:
 
 def doc_image_to_pdf(input_image: str, output_pdf: str) -> tuple[bool, str]:
     if not Image:
-        return False, "Thiếu Pillow để đổi ảnh sang PDF."
+        return False, "Ảnh sang PDF đang thiếu engine local. Bot chưa trừ Xu."
     with Image.open(input_image) as img:
         rgb = img.convert("RGB")
         rgb.save(output_pdf, "PDF", resolution=100.0)
@@ -34011,7 +34246,71 @@ async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAUL
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def prepare_remove_bg_from_cached_image(update: Update, context: ContextTypes.DEFAULT_TYPE, info: dict) -> bool:
+    uid = update.effective_user.id
+    if not info or not doc_is_image(info):
+        return False
+    if not REMOVEBG_API_KEY and not CUTOUT_API_KEY:
+        await update.message.reply_text("❌ Dịch vụ tách nền chưa được cấu hình.")
+        return True
+    image_test = preferred_tool_test_result("image_remove_bg", "image")
+    if not is_admin_user(uid) and str(image_test.get("status") or "").upper() != "PASS":
+        await update.message.reply_text(
+            "🖼 Tách nền ảnh đang trong trạng thái thử nghiệm provider.\n"
+            "Admin cần chạy <code>/tool_test_image_debug</code> và xác nhận PASS trước khi mở công khai.\n"
+            "Bạn có thể dùng <code>/image_prompt &lt;chủ đề&gt;</code> hoặc <code>/image_to_pdf</code> trước. Không có Xu nào bị trừ.",
+            parse_mode="HTML",
+        )
+        return True
+    file_size = int(info.get("file_size") or 0)
+    raw_cost = calculate_dynamic_cost("image", file_size)
+    credits, _, _ = get_user(uid)
+    premium_charge = apply_member_service_discount(uid, raw_cost, "spend_image_paid")
+    final_cost = 0 if is_admin_user(uid) else int(premium_charge.get("final_cost") or 0)
+    free_charge = apply_member_service_discount(uid, IMAGE_FREE_COST, "spend_image_free")
+    image_free_cost = 0 if is_admin_user(uid) else int(free_charge.get("final_cost") or 0)
+    if credits < image_free_cost and not is_admin_user(uid):
+        await reply_insufficient_credits(update, credits, image_free_cost)
+        return True
+    try:
+        tg_file = await context.bot.get_file(info["file_id"])
+        img_bytes = bytes(await tg_file.download_as_bytearray())
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Không tải được ảnh để tách nền: {html.escape(str(e)[:180])}", parse_mode="HTML")
+        return True
+    USER_PENDING[uid] = {
+        "type": "image",
+        "file_bytes": img_bytes,
+        "cost": final_cost,
+        "chat_id": update.effective_chat.id,
+        "premium_charged": False,
+    }
+    kb = provider_keyboard("image", uid, final_cost)
+    if is_trial_account(uid):
+        img_desc = (
+            f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
+            f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{image_free_cost} Xu</b>\n\n"
+            f"<i>💡 Nạp tiền để mở khoá Gói Cao Cấp — chất lượng HD!</i>"
+        )
+    else:
+        img_desc = (
+            f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
+            f"🖼️ <b>Gói Cao Cấp</b> — RemoveBG HD, trừ <b>{final_cost} Xu</b>\n"
+            f"✂️ <b>Gói Tiết Kiệm</b> — Cutout.pro, trừ <b>{image_free_cost} Xu</b>\n\n"
+            f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển Cutout.pro và hoàn phần chênh lệch.</i>"
+        )
+    await update.message.reply_text(img_desc, parse_mode="HTML", reply_markup=kb)
+    return True
+
 async def cmd_remove_bg_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    info, _ = doc_input_file_info(update)
+    if info:
+        if doc_is_pdf(info):
+            return await update.message.reply_text(
+                "⚠️ Lệnh này cần ảnh. Nếu muốn xử lý PDF, dùng /pdf_to_word, /pdf_to_images, /compress_pdf hoặc /split_pdf."
+            )
+        if await prepare_remove_bg_from_cached_image(update, context, info):
+            return
     providers = provider_status_payload()
     image_result = preferred_tool_test_result("image_remove_bg", "image")
     status = (image_result.get("status") or "NOT_TESTED").upper()
@@ -34025,9 +34324,10 @@ async def cmd_remove_bg_help(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"• Public access: <code>{public}</code>",
         "",
         "Cách dùng hiện tại:",
-        "1. Gửi ảnh vào bot.",
-        "2. Chọn provider tách nền nếu bot hiện nút.",
-        "3. Nếu provider chưa PASS/public, công cụ ở trạng thái thử nghiệm để tránh trừ Xu sai.",
+        "1. Gửi ảnh vào bot hoặc reply ảnh.",
+        "2. Gõ <code>/remove_bg</code>.",
+        "3. Chọn provider tách nền nếu bot hiện nút.",
+        "4. Nếu provider chưa PASS/public, công cụ ở trạng thái thử nghiệm để tránh trừ Xu sai.",
         "",
         "Admin test: reply ảnh rồi chạy <code>/tool_test_image</code> hoặc <code>/tool_test_image_debug</code>.",
     ]
@@ -34470,22 +34770,10 @@ def chat_mode_instruction(mode: str) -> str:
     return "Bạn là Trợ Lý Ảo TOAN AAS. Trả lời ngắn gọn, thực dụng, thân thiện."
 
 def ai_failure_user_text(statuses: dict, errors: dict) -> str:
-    def line(provider: str) -> str:
-        status = str((statuses or {}).get(provider) or "MISSING").upper()
-        detail = str((errors or {}).get(provider) or "").strip()
-        if status == "MISSING":
-            return "thiếu cấu hình"
-        if is_quota_error_text(detail):
-            return "hết quota/tạm lỗi"
-        if status == "FAIL":
-            return "tạm lỗi"
-        return status.lower()
     return (
-        "❌ AI chat đang tạm hết quota provider hoặc quá tải.\n"
-        f"• Gemini: {line('gemini')}\n"
-        f"• OpenAI: {line('openai')}\n"
-        "Không có Xu nào bị trừ.\n"
-        "Bạn vẫn có thể dùng các công cụ đã sẵn sàng như /translate_text, /image_prompt, /film."
+        "❌ AI đang tạm hết quota hoặc quá tải.\n"
+        "Bot chưa trừ Xu. Vui lòng thử lại sau.\n\n"
+        "Bạn vẫn có thể dùng các công cụ đã sẵn sàng như /translate_text, /image_prompt hoặc /doc_tools."
     )
 
 def ai_failure_detail(statuses: dict, errors: dict) -> str:
@@ -47269,6 +47557,16 @@ def member_referral_policy_text(profile: dict) -> str:
         return "Newbie: chưa mở thưởng Xu, hệ thống chỉ ghi nhận referral."
     return f"{percent}% Xu gốc gói nạp đầu tiên, tối đa {cap} Xu cho mỗi khách được giới thiệu nạp lần đầu."
 
+def member_referral_policy_table_text() -> str:
+    return (
+        "• Newbie: chỉ ghi nhận referral, chưa thưởng Xu\n"
+        "• Silver: tối đa 20 Xu/referral hợp lệ\n"
+        "• Gold: tối đa 30 Xu/referral hợp lệ\n"
+        "• Platinum: tối đa 50 Xu/referral hợp lệ\n"
+        "• Diamond: tối đa 80 Xu/referral hợp lệ\n"
+        "• VIP: tối đa 100 Xu/referral hợp lệ"
+    )
+
 async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     bot_name = context.bot.username or BOT_USERNAME
@@ -47287,6 +47585,14 @@ async def cmd_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Không thưởng tài khoản ảo/spam/tự mời.\n\n"
         f"🪪 Cấp hiện tại: <b>{html.escape(profile.get('tier_badge') or profile['tier_label'])}</b>\n"
         f"🎯 Tỷ lệ thưởng: <b>{member_referral_policy_text(profile)}</b>\n\n"
+        "<b>Mức thưởng tối đa theo hạng</b>\n"
+        f"{member_referral_policy_table_text()}\n\n"
+        "<b>Điều kiện:</b>\n"
+        "• Bạn bè là tài khoản mới.\n"
+        "• Bạn bè nạp lần đầu thành công.\n"
+        "• Không tự mời, không tài khoản ảo/spam.\n"
+        "• Xu thưởng không rút tiền, không chuyển nhượng.\n"
+        "• Admin có quyền khóa referral nếu phát hiện gian lận.\n\n"
         "📊 <b>Thống kê nhanh:</b>\n"
         f"• Đã bấm link: <b>{stats['total']}</b>\n"
         f"• Pending: <b>{stats['pending']}</b>\n"
@@ -47456,6 +47762,18 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Admin có thể yêu cầu hình ảnh/thông tin chứng minh ngày sinh nếu cần.",
         "• Mỗi tài khoản chỉ nhận quà sinh nhật 1 lần/năm.",
         "• Quà là Xu dịch vụ nội bộ, không rút tiền, không chuyển nhượng.",
+        "",
+        "🎁 <b>Thưởng giới thiệu tối đa theo hạng</b>",
+        "",
+        member_referral_policy_table_text(),
+        "",
+        "Điều kiện:",
+        "• Bạn bè là tài khoản mới.",
+        "• Bạn bè nạp lần đầu thành công.",
+        "• Không tự mời.",
+        "• Không tài khoản ảo/spam.",
+        "• Xu thưởng không rút tiền, không chuyển nhượng.",
+        "• Admin có quyền khóa referral nếu phát hiện gian lận.",
         "",
         "<b>Lưu ý pháp lý</b>",
         "• Tất cả ưu đãi là Xu dịch vụ nội bộ.",
@@ -47943,14 +48261,23 @@ async def cmd_grant_tier_promo(update: Update, context: ContextTypes.DEFAULT_TYP
 async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    command_name = doc_current_command_name(update, "/settier")
     try:
         target_id = context.args[0]
         tier = normalize_member_tier(context.args[1])
         if tier not in MEMBER_TIER_ORDER:
             raise ValueError("invalid_tier")
     except Exception:
-        return await update.message.reply_text("⚠️ Cú pháp: <code>/set_vip USER_ID newbie|silver|gold|platinum|diamond|vip</code>", parse_mode="HTML")
-    get_user(target_id)
+        return await update.message.reply_text(
+            "⚠️ Cú pháp:\n"
+            f"<code>{command_name} &lt;ID&gt; &lt;newbie|silver|gold|platinum|diamond|vip&gt;</code>\n\n"
+            "Ví dụ:\n"
+            "<code>/settier 7817576663 platinum</code>\n\n"
+            "Lưu ý: <code>/setvip &lt;ID&gt; &lt;1|0&gt;</code> là lệnh legacy nội bộ, không dùng cho hạng thành viên mới.",
+            parse_mode="HTML",
+        )
+    if not user_exists(target_id):
+        return await update.message.reply_text(f"⚠️ Không tìm thấy user <code>{html.escape(str(target_id))}</code>. User cần bấm /start trước.", parse_mode="HTML")
     conn = db_connect()
     try:
         before = get_member_profile(target_id, conn=conn)
@@ -49169,49 +49496,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     remember_last_user_file(update)
-
-    if not REMOVEBG_API_KEY and not CUTOUT_API_KEY:
-        return await update.message.reply_text("❌ Dịch vụ tách nền chưa được cấu hình.")
-    image_test = preferred_tool_test_result("image_remove_bg", "image")
-    if not is_admin_user(uid) and str(image_test.get("status") or "").upper() != "PASS":
-        return await update.message.reply_text(
-            "🖼 Tách nền ảnh đang trong trạng thái thử nghiệm provider.\n"
-            "Admin cần chạy <code>/tool_test_image_debug</code> và xác nhận PASS trước khi mở công khai.\n"
-            "Bạn có thể dùng <code>/image_prompt &lt;chủ đề&gt;</code> trước. Không có Xu nào bị trừ.",
-            parse_mode="HTML",
-        )
-    file_size = update.message.photo[-1].file_size
-    raw_cost = calculate_dynamic_cost("image", file_size)
-    credits, _, _ = get_user(uid)
-    premium_charge = apply_member_service_discount(uid, raw_cost, "spend_image_paid")
-    final_cost = 0 if is_admin_user(uid) else int(premium_charge.get("final_cost") or 0)
-    free_charge = apply_member_service_discount(uid, IMAGE_FREE_COST, "spend_image_free")
-    image_free_cost = 0 if is_admin_user(uid) else int(free_charge.get("final_cost") or 0)
-    if credits < image_free_cost and not is_admin_user(uid):
-        return await reply_insufficient_credits(update, credits, image_free_cost)
-    img_bytes = bytes(await (await update.message.photo[-1].get_file()).download_as_bytearray())
-    USER_PENDING[uid] = {
-        "type": "image",
-        "file_bytes": img_bytes,
-        "cost": final_cost,
-        "chat_id": update.effective_chat.id,
-        "premium_charged": False,
-    }
-    kb = provider_keyboard("image", uid, final_cost)
-    if is_trial_account(uid):
-        img_desc = (
-            f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
-            f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{image_free_cost} Xu</b>\n\n"
-            f"<i>💡 Nạp tiền để mở khoá Gói Cao Cấp — chất lượng HD!</i>"
-        )
-    else:
-        img_desc = (
-            f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
-            f"🖼️ <b>Gói Cao Cấp</b> — RemoveBG HD, trừ <b>{final_cost} Xu</b>\n"
-            f"✂️ <b>Gói Tiết Kiệm</b> — Cutout.pro, trừ <b>{image_free_cost} Xu</b>\n\n"
-            f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển Cutout.pro và hoàn phần chênh lệch.</i>"
-        )
-    await update.message.reply_text(img_desc, parse_mode="HTML", reply_markup=kb)
+    await update.message.reply_text(
+        "✅ Đã nhận ảnh.\n\n"
+        "Bạn có thể dùng:\n"
+        "• /image_to_pdf — đổi ảnh sang PDF\n"
+        "• /remove_bg — tách nền ảnh\n"
+        "• /ai_image_edit <yêu cầu> — reply ảnh để chỉnh sửa AI nếu provider được bật\n\n"
+        "Ảnh đã được lưu tạm 10 phút để dùng cho lệnh tiếp theo.",
+        parse_mode="HTML",
+    )
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_user_file(update)
@@ -49926,9 +50219,19 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("pending",     cmd_pending))
     tg_app.add_handler(CommandHandler("stats",       cmd_stats))
     tg_app.add_handler(CommandHandler("dashboard",   cmd_dashboard))
-    tg_app.add_handler(CommandHandler("admin",       cmd_dashboard))
+    tg_app.add_handler(CommandHandler("admin",       cmd_admin_center))
+    tg_app.add_handler(CommandHandler("admin_help",  cmd_admin_help))
+    tg_app.add_handler(CommandHandler("admin_member_help", cmd_admin_member_help))
+    tg_app.add_handler(CommandHandler("admin_payment_help", cmd_admin_payment_help))
+    tg_app.add_handler(CommandHandler("admin_tools_help", cmd_admin_tools_help))
+    tg_app.add_handler(CommandHandler("profile_user", cmd_profile_user))
+    tg_app.add_handler(CommandHandler("member_user", cmd_member_user))
+    tg_app.add_handler(CommandHandler("ledger_user", cmd_ledger_user))
+    tg_app.add_handler(CommandHandler("deduct",     cmd_admin_deduct))
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
     tg_app.add_handler(CommandHandler("set_vip",     cmd_set_vip))
+    tg_app.add_handler(CommandHandler("settier",     cmd_set_vip))
+    tg_app.add_handler(CommandHandler("set_member_tier", cmd_set_vip))
     tg_app.add_handler(CommandHandler("clear_vip",   cmd_clear_vip))
     tg_app.add_handler(CommandHandler("grant_tier_promo", cmd_grant_tier_promo))
     tg_app.add_handler(CommandHandler("set_birthday_admin", cmd_set_birthday_admin))
