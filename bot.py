@@ -24420,6 +24420,13 @@ def provider_status_text(value) -> str:
         return "configured" if value else "missing"
     return bool_env_status(value)
 
+def video_provider_status_line(label: str, configured: bool, test_name: str, stage: str) -> str:
+    return (
+        f"• {html.escape(label)}: <code>{provider_status_text(configured)}</code>"
+        f" | tested <code>{html.escape(tool_test_status_text(test_name))}</code>"
+        f" | stage <code>{html.escape(stage or 'DISABLED')}</code>"
+    )
+
 async def reply_html_lines(update: Update, lines: list[str], limit: int = 3600):
     chunk = []
     current_len = 0
@@ -27278,6 +27285,11 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     providers = provider_status_payload()
     image_result = preferred_tool_test_result("image_remove_bg", "image")
     ai_result = preferred_tool_test_result("ai_chat", "ai")
+    real_video_note = (
+        f"{providers['media_factory'].get('real_video_stage') or 'DISABLED'} configured/not tested"
+        if (providers["video"].get("kling") or providers["video"].get("runway"))
+        else f"{providers['media_factory'].get('real_video_stage') or 'DISABLED'} provider missing"
+    )
     items = [
         ("AI", "ai", ai_result, "Gemini/OpenAI chat"),
         ("Translation", "translation", get_tool_test_result("translation"), "DeepL/Gemini/OpenAI"),
@@ -27292,7 +27304,7 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("Stability Image", "stability_image", get_tool_test_result("stability_image"), f"{providers['media_factory'].get('stability_image_stage') or 'DISABLED'}"),
         ("Image Upscale", "image_upscale", get_tool_test_result("image_upscale"), f"{providers['media_factory'].get('image_upscale_stage') or 'DISABLED'}"),
         ("Video Prompt Pack", "video_prompt_pack", {"status": "READY", "tested_at": "prompt-only", "detail": "Image-to-video prompt pack"}, "READY/prompt-only"),
-        ("Real Video", "real_video", get_tool_test_result("real_video"), f"{providers['media_factory'].get('real_video_stage') or 'DISABLED'} planned"),
+        ("Real Video", "real_video", get_tool_test_result("real_video"), real_video_note),
         ("Kling Video", "kling_video", get_tool_test_result("kling_video"), f"{providers['media_factory'].get('kling_video_stage') or 'DISABLED'}"),
         ("Runway Video", "runway_video", get_tool_test_result("runway_video"), f"{providers['media_factory'].get('runway_video_stage') or 'DISABLED'}"),
         ("HeyGen Avatar", "heygen_avatar", get_tool_test_result("heygen_avatar"), f"{providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED'}"),
@@ -29471,9 +29483,9 @@ def fallback_media_factory_pack(topic: str) -> str:
     return (
         f"🎬 MEDIA FACTORY PACK — TOAN AAS\n\nChủ đề: {topic}\n"
         "Phạm vi: Content/video pack để bạn tự đăng. Chưa mở tự đăng bài cho khách.\n"
-        "Trạng thái: Trend AI content-only; Trend Live disabled/provider missing; video thật disabled/planned; customer publish OFF.\n\n"
+        "Trạng thái: Trend AI content-only; Trend Live admin/internal nếu có provider; video thật admin-only/not public; customer publish OFF.\n\n"
         "=== 1. TREND & Ý TƯỞNG ===\n"
-        "Vì chưa có Trend Live realtime, pack dùng Trend AI content-only và checklist nghiên cứu thủ công.\n\n"
+        "Vì Trend Live realtime chưa mở cho khách, pack dùng Trend AI content-only và checklist nghiên cứu thủ công.\n\n"
         f"{fallback_trend_ai_pack(topic)}\n\n"
         "=== 2. THU THẬP TƯ LIỆU HỢP LỆ ===\n"
         f"• Từ khóa nên tìm: {topic}, {topic} review, {topic} trước khi mua, {topic} lỗi thường gặp.\n"
@@ -29495,7 +29507,7 @@ def fallback_media_factory_pack(topic: str) -> str:
         "• Kiểm tra lại claim, nguồn ảnh/voice, thương hiệu, caption và CTA trước khi đăng.\n"
         "• Approval workflow tự động cho khách là roadmap; hiện khách tự duyệt bản nháp trước khi dùng.\n\n"
         "=== 7. TẠO VIDEO THẬT ===\n"
-        "• Real video generation: planned/admin-only/disabled.\n"
+        "• Real video generation: admin-only/not public nếu provider đã cấu hình; khách hiện dùng prompt/video plan.\n"
         "• Chưa gọi provider video AI thật trong bot khách.\n\n"
         "=== 8. ĐĂNG BÀI ===\n"
         "• Customer publish: OFF.\n"
@@ -29602,16 +29614,23 @@ async def cmd_trend_research(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cmd_trend_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     providers = provider_status_payload()
+    serpapi_configured = bool(providers["search"].get("serpapi"))
+    trend_live_stage = providers["media_factory"].get("trend_live_stage") or "DISABLED"
+    trend_live_note = (
+        f"{trend_live_stage} / SerpAPI configured / tested {tool_test_status_text('trend_live')}"
+        if serpapi_configured
+        else f"{trend_live_stage} / SerpAPI missing / tested {tool_test_status_text('trend_live')}"
+    )
     lines = [
         "📈 <b>TOAN AAS Trend Status</b>",
         "",
         "• Trend AI: <code>enabled — gợi ý ý tưởng bằng AI/prompt</code>",
-        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}/provider missing — chưa tìm realtime</code>",
+        f"• Trend Live: <code>{html.escape(trend_live_note)}</code>",
         "• Google Trends/API: <code>not configured</code>",
         "• TikTok trend API: <code>not configured</code>",
         "• YouTube trend API: <code>not configured</code>",
         "• Facebook trend API: <code>not configured</code>",
-        "• Web search provider: <code>not configured</code>",
+        f"• Web search provider: <code>{'SerpAPI/admin-only' if serpapi_configured else 'not configured'}</code>",
         "• Current safe mode: <code>content-only</code>",
         "",
         "<b>Lệnh hiện có:</b>",
@@ -29947,15 +29966,15 @@ async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = (
         "Bạn là TOAN AAS Media Factory. Trả tiếng Việt. Tạo content/video pack đầy đủ từ topic/trend. "
         "Bắt buộc gồm 8 phần: 1 Trend & ý tưởng, 2 Thu thập tư liệu hợp lệ, 3 Script/storyboard, "
-        "4 Image prompt pack, 5 Video prompt pack, 6 Duyệt nội dung, 7 Tạo video thật planned/admin-only/disabled, "
+        "4 Image prompt pack, 5 Video prompt pack, 6 Duyệt nội dung, 7 Tạo video thật admin-only/not public, "
         "8 Đăng bài customer publish OFF/admin internal. "
-        "Nêu rõ Trend AI content-only, Trend Live provider missing, khách tự đăng, không auto publish."
+        "Nêu rõ Trend AI content-only, Trend Live chưa mở cho khách, khách tự đăng, không auto publish."
     )
     output = media_factory_ai(prompt, topic, f"media_factory_{uid}", fallback)
     if "Trend AI content-only" not in output:
         output = (
-            "Trạng thái: Trend AI content-only; Trend Live disabled/provider missing; "
-            "video thật disabled/planned; customer publish OFF.\n\n"
+            "Trạng thái: Trend AI content-only; Trend Live admin/internal nếu có provider; "
+            "video thật admin-only/not public; customer publish OFF.\n\n"
         ) + output
     job_id = create_media_factory_job(uid, media_factory_username(update), "media_factory", topic, trend_title=topic, trend_summary=output[:1200], image_prompt_pack=output, video_prompt_pack=output, caption_pack=output, cost_xu=MEDIA_FACTORY_PACK_COST)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
@@ -29966,16 +29985,27 @@ async def cmd_video_factory_flow(update: Update, context: ContextTypes.DEFAULT_T
 
 async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     providers = provider_status_payload()
-    real_video_enabled = bool(providers["media_factory"].get("image_to_video"))
+    real_video_configured = bool(providers["video"].get("kling") or providers["video"].get("runway"))
+    real_video_stage = providers["media_factory"].get("real_video_stage") or "DISABLED"
+    real_video_status = "ADMIN_ONLY / configured / not tested" if real_video_configured else f"{real_video_stage} / provider missing"
     customer_publish = bool(providers["media_factory"].get("customer_publish"))
+    serpapi_configured = bool(providers["search"].get("serpapi"))
+    trend_live_stage = providers["media_factory"].get("trend_live_stage") or "DISABLED"
+    trend_live_status = (
+        f"{trend_live_stage} / SerpAPI configured / tested {tool_test_status_text('trend_live')}"
+        if serpapi_configured
+        else f"{trend_live_stage} / SerpAPI missing / tested {tool_test_status_text('trend_live')}"
+    )
     lines = [
         "🎬 <b>Video Provider Status</b>",
         "",
-        f"• Real video generation: <code>{'enabled' if real_video_enabled else 'disabled/planned'}</code>",
-        "• Provider: <code>not configured</code>",
+        video_provider_status_line("Kling Video", bool(providers["video"].get("kling")), "kling_video", providers["media_factory"].get("kling_video_stage") or "DISABLED"),
+        video_provider_status_line("Runway Video", bool(providers["video"].get("runway")), "runway_video", providers["media_factory"].get("runway_video_stage") or "DISABLED"),
+        video_provider_status_line("HeyGen Avatar", bool(providers["video"].get("heygen")), "heygen_avatar", providers["media_factory"].get("heygen_avatar_stage") or "DISABLED"),
+        f"• Real video generation: <code>{html.escape(real_video_status)}</code>",
         f"• Customer access: <code>{'ON' if customer_publish else 'OFF'}</code>",
         "• Current available: <code>script/storyboard/image prompt/video prompt pack/caption/hashtag/CTA</code>",
-        f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}/provider missing</code>",
+        f"• Trend Live: <code>{html.escape(trend_live_status)}</code>",
         f"• Admin publish: <code>{'enabled/internal' if providers['media_factory'].get('admin_publish') else 'disabled/internal'}</code>",
         "• Customer publish: <code>OFF</code>",
         "• Open customer video generation: <code>NO</code>",
