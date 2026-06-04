@@ -16,21 +16,24 @@ Status: current bot policy.
 Old aliases are kept for data compatibility:
 `none` -> `newbie`, `bac` -> `silver`, `vang` -> `gold`, `bach_kim` -> `platinum`, `kim_cuong` -> `diamond`.
 
-## Platinum+ Free Chat
+## Member Access And Service Discount
 
-Platinum, Diamond and VIP get:
+Membership is intentionally simple. Normal public tools should stay mostly the same across tiers unless admin explicitly opens a separate paid/internal feature.
 
-- Free Normal Chat.
-- Free Chat Pro.
-- Chat Deep still costs Xu to control deep/API-heavy work.
+Member tier affects only:
 
-Base chat prices remain unchanged:
+- Automatic discount when spending Xu on eligible services.
+- One-time rank-up/top-up promo when the user first reaches a new tier.
 
-- Normal Chat: 5 Xu.
-- Chat Pro: 10 Xu.
-- Chat Deep: 20 Xu.
+Member tier does not affect top-up package base Xu.
 
-AI/provider failure must not charge Xu.
+Example:
+
+- Gold user top-ups 100,000 VND -> receives the same base Xu as every user.
+- Gold does not receive +4% Xu on top-up.
+- Gold only gets 4% discount when spending Xu on eligible services.
+
+No recurring VIP/member top-up bonus is allowed.
 
 ## Referral Rewards
 
@@ -77,6 +80,7 @@ Rules:
 - Minimum top-up amount: 50,000 VND.
 - Does not stack with other promo codes.
 - Adds service Xu only. It is not cash discount.
+- This is a one-time rank-up benefit, not a recurring bonus on every top-up.
 
 | Tier reached | Bonus | Cap |
 |---|---:|---:|
@@ -138,24 +142,26 @@ Privacy:
 
 ## Tool Discount
 
-Eligible tools can use member discounts when base cost is at least 50 Xu and the tool is not disabled/admin-only/provider-failing.
+Eligible services can use member discounts when the tool is enabled and the provider works.
 
 Discounts:
 
 - Newbie: 0%.
-- Silver: 0%.
-- Gold: 3%.
-- Platinum: 5%.
+- Silver: 2%.
+- Gold: 4%.
+- Platinum: 6%.
 - Diamond: 8%.
 - VIP: 10%.
 
 Not eligible:
 
 - Payment, PayOS, manual QR.
+- Top-up package base Xu.
 - Promo, gift, trial.
 - Admin/internal tools.
 - Disabled or provider-failing tools.
-- Chat pricing under 50 Xu, except Platinum+ free Normal/Pro chat.
+
+Do not stack member tier with top-up packages. Do not create recurring extra Xu by member tier on every top-up.
 
 ## Anti-Fraud
 

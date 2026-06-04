@@ -34,6 +34,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from typing import Optional
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Form
@@ -2240,22 +2241,60 @@ def refund_charged_credit(user_id, amount, event_type="refund", ref_id="", note=
     conn.close()
     return True
 
-def spend_fixed_credit(user_id, amount, event_type, note="") -> bool:
+def spend_fixed_credit_info(user_id, amount, event_type, note="", apply_member_discount_flag=True) -> dict:
+    base_amount = int(amount or 0)
     if is_admin_user(user_id):
-        return True
+        return {
+            "ok": True,
+            "base_cost": base_amount,
+            "final_cost": 0,
+            "discount_rate": 0,
+            "discount_xu": 0,
+            "tier": "admin",
+            "badge": admin_display_badge(user_id) or "Admin",
+            "note": "admin_free",
+        }
     get_user(user_id)
+    charge = (
+        apply_member_service_discount(user_id, base_amount, event_type)
+        if apply_member_discount_flag
+        else {
+            "base_cost": base_amount,
+            "final_cost": base_amount,
+            "discount_rate": 0,
+            "discount_xu": 0,
+            "tier": get_member_profile(user_id).get("tier") or "newbie",
+            "badge": get_role_badge(user_id),
+        }
+    )
+    final_amount = int(charge.get("final_cost") or 0)
     conn = db_connect()
     c = conn.cursor()
     c.execute("SELECT credits FROM users WHERE user_id=?", (str(user_id),))
     row = c.fetchone()
-    if not row or row[0] < amount:
+    if not row or int(row[0] or 0) < final_amount:
         conn.close()
-        return False
-    c.execute("UPDATE users SET credits = credits - ?, total_spent = total_spent + ? WHERE user_id=?", (amount, amount, str(user_id)))
-    record_credit_event(conn, user_id, -amount, event_type, "", note)
+        charge["ok"] = False
+        return charge
+    c.execute(
+        "UPDATE users SET credits = credits - ?, total_spent = total_spent + ? WHERE user_id=?",
+        (final_amount, final_amount, str(user_id)),
+    )
+    discount_note = ""
+    if int(charge.get("discount_xu") or 0) > 0:
+        discount_note = (
+            f" | member_discount tier={charge.get('tier')} "
+            f"base={charge.get('base_cost')} rate={charge.get('discount_rate')} "
+            f"discount={charge.get('discount_xu')} final={final_amount}"
+        )
+    record_credit_event(conn, user_id, -final_amount, event_type, "", f"{note}{discount_note}")
     conn.commit()
     conn.close()
-    return True
+    charge["ok"] = True
+    return charge
+
+def spend_fixed_credit(user_id, amount, event_type, note="") -> bool:
+    return bool(spend_fixed_credit_info(user_id, amount, event_type, note).get("ok"))
 
 def is_payos_order_processed(order_code: str) -> bool:
     conn = db_connect()
@@ -2686,9 +2725,9 @@ MEMBER_REFERRAL_POLICY = {
 }
 MEMBER_TOOL_DISCOUNT_POLICY = {
     "newbie": 0,
-    "silver": 0,
-    "gold": 3,
-    "platinum": 5,
+    "silver": 2,
+    "gold": 4,
+    "platinum": 6,
     "diamond": 8,
     "vip": 10,
 }
@@ -2770,75 +2809,60 @@ def member_referral_reward(base_xu: int, tier: str) -> int:
 
 def get_member_benefits(tier: str) -> list[str]:
     tier = normalize_member_tier(tier) or "newbie"
+    discount = int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0)
     benefits = {
         "newbie": [
             "Trial 200 Xu nếu đủ điều kiện.",
             "Dùng các công cụ public đã được mở.",
+            "Ưu đãi dịch vụ: 0% khi tiêu Xu.",
             "Xem quyền lợi nâng cấp tại /vip_policy.",
         ],
         "silver": [
             "Thưởng giới thiệu: 3%, tối đa 100 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
-            "Hỗ trợ thành viên.",
-            "Tham gia ưu đãi cơ bản.",
+            f"Ưu đãi dịch vụ: giảm {discount}% khi tiêu Xu.",
+            "Mã ưu đãi lên hạng Silver chỉ nhận 1 lần khi đạt hạng.",
         ],
         "gold": [
             "Thưởng giới thiệu: 6%, tối đa 150 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
-            "Ưu tiên hỗ trợ hơn Silver.",
-            "Giảm tối đa 3% phí Xu cho tool đủ điều kiện.",
+            f"Ưu đãi dịch vụ: giảm {discount}% khi tiêu Xu.",
+            "Mã ưu đãi lên hạng Gold chỉ nhận 1 lần khi đạt hạng.",
         ],
         "platinum": [
             "Thưởng giới thiệu: 8%, tối đa 200 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
-            "Free Normal Chat.",
-            "Free Chat Pro.",
-            "Ưu tiên hỗ trợ cao.",
-            "Được mời test một số công cụ mới khi phù hợp.",
-            "Giảm tối đa 5% phí Xu cho tool đủ điều kiện.",
+            f"Ưu đãi dịch vụ: giảm {discount}% khi tiêu Xu.",
+            "Mã ưu đãi lên hạng Platinum chỉ nhận 1 lần khi đạt hạng.",
         ],
         "diamond": [
             "Thưởng giới thiệu: 10%, tối đa 250 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
-            "Free Normal Chat.",
-            "Free Chat Pro.",
-            "Ưu tiên hỗ trợ rất cao.",
-            "Có thể được cấp quota test tool mới khi phù hợp.",
-            "Giảm tối đa 8% phí Xu cho tool đủ điều kiện.",
+            f"Ưu đãi dịch vụ: giảm {discount}% khi tiêu Xu.",
+            "Mã ưu đãi lên hạng Diamond chỉ nhận 1 lần khi đạt hạng.",
         ],
         "vip": [
             "Thưởng giới thiệu: 12%, tối đa 300 Xu cho mỗi khách được giới thiệu nạp lần đầu.",
-            "Free Normal Chat.",
-            "Free Chat Pro.",
-            "Ưu tiên hỗ trợ cao nhất.",
-            "Có thể được cấu hình/quy trình riêng theo nhu cầu.",
-            "Được trải nghiệm sớm tính năng beta khi đủ điều kiện.",
-            "Giảm tối đa 10% phí Xu cho tool đủ điều kiện.",
+            f"Ưu đãi dịch vụ: giảm {discount}% khi tiêu Xu.",
+            "Mã ưu đãi lên hạng VIP chỉ nhận 1 lần khi đạt hạng.",
         ],
     }
     return benefits.get(tier, benefits["newbie"])
 
 def has_free_normal_chat(tier: str) -> bool:
-    return member_tier_rank(tier) >= member_tier_rank("platinum")
+    return False
 
 def has_free_pro_chat(tier: str) -> bool:
-    return member_tier_rank(tier) >= member_tier_rank("platinum")
+    return False
 
 def effective_chat_charge(user_id, mode: str, base_cost: int, is_admin=False, is_legacy_vip=False) -> dict:
     mode_norm = normalize_chat_tier(mode or CHAT_TIER_NORMAL)
-    profile = get_member_profile(user_id)
-    tier = profile.get("tier") or "newbie"
-    badge = get_member_badge(tier)
-    cost = int(base_cost or 0)
+    charge = apply_member_service_discount(user_id, int(base_cost or 0), f"ai_chat_{mode_norm}")
+    tier = charge.get("tier") or "newbie"
+    badge = charge.get("badge") or get_member_badge(tier)
+    cost = int(charge.get("final_cost") or 0)
     reason = ""
     if is_admin:
         cost = 0
         reason = "Admin"
-    elif is_legacy_vip:
-        cost = 0
-        reason = "VIP legacy"
-    elif mode_norm == CHAT_TIER_NORMAL and has_free_normal_chat(tier):
-        cost = 0
-        reason = f"{badge} benefit"
-    elif mode_norm == CHAT_TIER_PRO and has_free_pro_chat(tier):
-        cost = 0
-        reason = f"{badge} benefit"
+    elif int(charge.get("discount_xu") or 0) > 0:
+        reason = f"{badge} discount {int(charge.get('discount_rate') or 0)}%"
     return {
         "base_cost": int(base_cost or 0),
         "cost": int(cost or 0),
@@ -2846,30 +2870,55 @@ def effective_chat_charge(user_id, mode: str, base_cost: int, is_admin=False, is
         "tier": tier,
         "badge": badge,
         "reason": reason,
+        "discount_rate": int(charge.get("discount_rate") or 0),
+        "discount_xu": int(charge.get("discount_xu") or 0),
     }
 
 def eligible_for_member_discount(tool_name: str, base_cost: int) -> bool:
-    blocked = {"payment", "payos", "manual_qr", "promo", "gift", "trial", "admin", "provider_fail"}
+    blocked = {"payment", "payos", "manual_qr", "topup", "deposit", "promo", "gift", "trial", "admin", "refund", "provider_fail"}
     name = str(tool_name or "").strip().lower()
-    if int(base_cost or 0) < 50:
+    if int(base_cost or 0) <= 0:
         return False
     return not any(marker in name for marker in blocked)
 
-def calculate_member_discounted_cost(user_id, tool_name: str, base_cost: int) -> dict:
+def get_member_service_discount_rate(user_id, total_spent=None, is_vip=None) -> int:
+    profile = get_member_profile(user_id)
+    tier = profile.get("tier") or "newbie"
+    return int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0)
+
+def apply_member_service_discount(user_id, base_cost: int, tool_name: str = "service") -> dict:
     base = int(base_cost or 0)
     profile = get_member_profile(user_id)
     tier = profile.get("tier") or "newbie"
-    percent = int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0)
+    percent = get_member_service_discount_rate(user_id)
     if not eligible_for_member_discount(tool_name, base):
         percent = 0
-    discounted = max(0, math.ceil(base * (1 - percent / 100))) if percent else base
+    discount_xu = int(math.floor(base * percent / 100)) if percent else 0
+    final_cost = max(0, base - discount_xu)
     return {
         "base_cost": base,
+        "discount_rate": percent,
         "discount_percent": percent,
-        "discounted_cost": discounted,
+        "discount_xu": discount_xu,
+        "final_cost": final_cost,
+        "discounted_cost": final_cost,
         "tier": tier,
         "tier_label": member_tier_label(tier),
+        "badge": get_member_badge(tier),
     }
+
+def calculate_member_discounted_cost(user_id, tool_name: str, base_cost: int) -> dict:
+    return apply_member_service_discount(user_id, base_cost, tool_name)
+
+def member_discount_display_line(charge: dict) -> str:
+    if int((charge or {}).get("discount_xu") or 0) <= 0:
+        return ""
+    return (
+        f"Giá gốc: {int(charge.get('base_cost') or 0)} Xu\n"
+        f"Ưu đãi thành viên {html.escape(str(charge.get('badge') or ''))}: "
+        f"-{int(charge.get('discount_xu') or 0)} Xu ({int(charge.get('discount_rate') or 0)}%)\n"
+        f"Đã trừ: {int(charge.get('final_cost') or 0)} Xu"
+    )
 
 def user_exists(user_id, conn=None) -> bool:
     close_conn = False
@@ -22002,22 +22051,24 @@ def calculate_dynamic_cost(action_type, size_or_length):
     return CHAT_SHORT_COST
 
 def apply_discount(total_spent, raw_cost):
+    # Legacy helper kept for compatibility with older tests/helpers.
+    # New service charges must use apply_member_service_discount().
     if total_spent >= 20000:
         discount = 0.20
     elif total_spent >= 5000:
         discount = 0.10
     else:
         discount = 0.0
-    return math.ceil(raw_cost * (1 - discount)), discount
+    return math.ceil(int(raw_cost or 0) * (1 - discount)), discount
 
 def deduct_dynamic_credit(user_id, action_type, size_or_length) -> tuple:
     if str(user_id) == ADMIN_ID:
         return True, 0, 1.0
     credits, total_spent, is_vip = get_user(user_id)
-    if is_vip == 1:
-        return True, 0, 1.0
     raw_cost  = calculate_dynamic_cost(action_type, size_or_length)
-    final_cost, discount_rate = apply_discount(total_spent, raw_cost)
+    charge = apply_member_service_discount(user_id, raw_cost, action_type)
+    final_cost = int(charge.get("final_cost") or 0)
+    discount_rate = int(charge.get("discount_rate") or 0) / 100
     if credits >= final_cost:
         conn = db_connect()
         c = conn.cursor()
@@ -22029,7 +22080,13 @@ def deduct_dynamic_credit(user_id, action_type, size_or_length) -> tuple:
             "INSERT INTO transactions (user_id, action, cost, discount_rate, created_at) VALUES (?,?,?,?,?)",
             (str(user_id), action_type, final_cost, discount_rate, now_text())
         )
-        record_credit_event(conn, user_id, -final_cost, f"spend_{action_type}", "", f"Trừ xu cho {action_type}")
+        note = f"Trừ xu cho {action_type}"
+        if int(charge.get("discount_xu") or 0) > 0:
+            note += (
+                f" | member_discount tier={charge.get('tier')} base={charge.get('base_cost')} "
+                f"rate={charge.get('discount_rate')} discount={charge.get('discount_xu')} final={final_cost}"
+            )
+        record_credit_event(conn, user_id, -final_cost, f"spend_{action_type}", "", note)
         conn.commit()
         conn.close()
         return True, final_cost, discount_rate
@@ -23696,9 +23753,11 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 "Hoàn phí voice cao cấp trước khi chọn gói tiết kiệm",
                 pending.get("premium_charged", False),
             )
-            if not spend_fixed_credit(uid, VOICE_FREE_COST, "spend_voice_free", "Gói voice tiết kiệm"):
+            free_charge = spend_fixed_credit_info(uid, VOICE_FREE_COST, "spend_voice_free", "Gói voice tiết kiệm")
+            voice_free_charged = int(free_charge.get("final_cost") or 0)
+            if not free_charge.get("ok"):
                 credits_now, _, _ = get_user(uid)
-                await edit_insufficient_credits(query, credits_now, VOICE_FREE_COST, uid)
+                await edit_insufficient_credits(query, credits_now, voice_free_charged or VOICE_FREE_COST, uid)
                 return
             await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Tiết Kiệm)...</i>", parse_mode="HTML")
             out = f"v_{uid}.mp3"
@@ -23710,12 +23769,12 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 with open(out, "rb") as f:
                     await context.bot.send_audio(
                         chat_id=chat_id, audio=f,
-                        caption=f"🔊 Gói Tiết Kiệm — Tổng hợp giọng nói thành công! (-{VOICE_FREE_COST} Xu)"
+                        caption=f"🔊 Gói Tiết Kiệm — Tổng hợp giọng nói thành công! (-{voice_free_charged} Xu)"
                     )
                 await query.delete_message()
             except Exception as e:
                 logger.error(f"Edge TTS error: {e}")
-                refund_charged_credit(uid, VOICE_FREE_COST, "refund", "", "Hoàn gói voice tiết kiệm do lỗi", True)
+                refund_charged_credit(uid, voice_free_charged, "refund", "", "Hoàn gói voice tiết kiệm do lỗi", voice_free_charged > 0)
                 await query.edit_message_text("❌ Gói Tiết Kiệm gặp lỗi.")
             finally:
                 if os.path.exists(out):
@@ -23724,7 +23783,9 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text("⏳ <i>Đang tổng hợp giọng nói (Gói Cao Cấp)...</i>", parse_mode="HTML")
             out = f"v_{uid}.mp3"
             ok = False
-            premium_charged = spend_fixed_credit(uid, cost, "spend_voice_paid", "Gói voice cao cấp Fish Audio")
+            premium_charge = spend_fixed_credit_info(uid, cost, "spend_voice_paid", "Gói voice cao cấp Fish Audio", apply_member_discount_flag=False)
+            premium_charged = bool(premium_charge.get("ok"))
+            cost = int(premium_charge.get("final_cost") or cost)
             if not premium_charged:
                 credits_now, _, _ = get_user(uid)
                 await edit_insufficient_credits(query, credits_now, cost, uid)
@@ -23780,9 +23841,11 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         "Hoàn phí voice cao cấp do fallback",
                         premium_charged,
                     )
-                    if not spend_fixed_credit(uid, VOICE_FREE_COST, "spend_voice_free_fallback", "Fallback sang Edge TTS"):
+                    fallback_charge = spend_fixed_credit_info(uid, VOICE_FREE_COST, "spend_voice_free_fallback", "Fallback sang Edge TTS")
+                    fallback_cost = int(fallback_charge.get("final_cost") or 0)
+                    if not fallback_charge.get("ok"):
                         credits_now, _, _ = get_user(uid)
-                        await edit_insufficient_credits(query, credits_now, VOICE_FREE_COST, uid)
+                        await edit_insufficient_credits(query, credits_now, fallback_cost or VOICE_FREE_COST, uid)
                         return
                     fallback_charged = True
                     try:
@@ -23793,12 +23856,12 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         with open(out, "rb") as f:
                             await context.bot.send_audio(
                                 chat_id=chat_id, audio=f,
-                                caption=f"🔊 Gói Tiết Kiệm — Hoàn thành! (-{VOICE_FREE_COST} Xu)"
+                                caption=f"🔊 Gói Tiết Kiệm — Hoàn thành! (-{fallback_cost} Xu)"
                             )
                         await query.delete_message()
                     except Exception as e:
                         logger.error(f"Edge TTS fallback error: {e}")
-                        refund_charged_credit(uid, VOICE_FREE_COST, "refund", "", "Hoàn gói voice fallback do lỗi", fallback_charged)
+                        refund_charged_credit(uid, fallback_cost, "refund", "", "Hoàn gói voice fallback do lỗi", fallback_charged and fallback_cost > 0)
                         await query.edit_message_text("❌ Cả Fish Audio và Edge TTS đều lỗi. Xu đã hoàn lại.")
             except Exception as e:
                 logger.error(f"Voice paid error: {e}")
@@ -23820,9 +23883,11 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                 "Hoàn phí ảnh cao cấp trước khi chọn gói tiết kiệm",
                 pending.get("premium_charged", False),
             )
-            if not spend_fixed_credit(uid, IMAGE_FREE_COST, "spend_image_free", "Gói tách nền tiết kiệm"):
+            free_charge = spend_fixed_credit_info(uid, IMAGE_FREE_COST, "spend_image_free", "Gói tách nền tiết kiệm")
+            image_free_charged = int(free_charge.get("final_cost") or 0)
+            if not free_charge.get("ok"):
                 credits_now, _, _ = get_user(uid)
-                await edit_insufficient_credits(query, credits_now, IMAGE_FREE_COST, uid)
+                await edit_insufficient_credits(query, credits_now, image_free_charged or IMAGE_FREE_COST, uid)
                 return
             await query.edit_message_text("⏳ <i>Đang tách nền (Gói Tiết Kiệm)...</i>", parse_mode="HTML")
             ok = False
@@ -23840,7 +23905,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         await context.bot.send_document(
                             chat_id=chat_id, document=telegram_png_document(png_bytes),
                             filename="no_bg.png",
-                            caption=f"✂️ Gói Tiết Kiệm — Tách nền thành công! (-{IMAGE_FREE_COST} Xu)"
+                            caption=f"✂️ Gói Tiết Kiệm — Tách nền thành công! (-{image_free_charged} Xu)"
                         )
                         save_tool_test_result("image_remove_bg", "PASS", "provider=cutout; cost_level=low; remove_bg command success", uid)
                         save_tool_test_result("image", "PASS", "provider=cutout; cost_level=low; remove_bg command success", uid)
@@ -23854,7 +23919,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     logger.error(f"Cutout error: {e}")
                     record_api_debug("cutout", "remove_bg_customer", "FAIL", 0, provider_error_summary(e))
             if not ok:
-                refund_charged_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền tiết kiệm do lỗi", True)
+                refund_charged_credit(uid, image_free_charged, "refund", "", "Hoàn gói tách nền tiết kiệm do lỗi", image_free_charged > 0)
                 await query.edit_message_text(
                     "❌ Provider trả lỗi hoặc file không phải ảnh hợp lệ.\n"
                     "✅ Xu đã hoàn lại.\n"
@@ -23863,7 +23928,9 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
         else:
             await query.edit_message_text("⏳ <i>Đang tách nền (Gói Cao Cấp)...</i>", parse_mode="HTML")
             ok = False
-            premium_charged = spend_fixed_credit(uid, cost, "spend_image_paid", "Gói tách nền cao cấp RemoveBG")
+            premium_charge = spend_fixed_credit_info(uid, cost, "spend_image_paid", "Gói tách nền cao cấp RemoveBG", apply_member_discount_flag=False)
+            premium_charged = bool(premium_charge.get("ok"))
+            cost = int(premium_charge.get("final_cost") or cost)
             if not premium_charged:
                 credits_now, _, _ = get_user(uid)
                 await edit_insufficient_credits(query, credits_now, cost, uid)
@@ -23922,9 +23989,11 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     "Hoàn phí ảnh cao cấp do fallback",
                     premium_charged,
                 )
-                if not spend_fixed_credit(uid, IMAGE_FREE_COST, "spend_image_free_fallback", "Fallback sang Cutout"):
+                fallback_charge = spend_fixed_credit_info(uid, IMAGE_FREE_COST, "spend_image_free_fallback", "Fallback sang Cutout")
+                fallback_cost = int(fallback_charge.get("final_cost") or 0)
+                if not fallback_charge.get("ok"):
                     credits_now, _, _ = get_user(uid)
-                    await edit_insufficient_credits(query, credits_now, IMAGE_FREE_COST, uid)
+                    await edit_insufficient_credits(query, credits_now, fallback_cost or IMAGE_FREE_COST, uid)
                     return
                 cutout_ok = False
                 if CUTOUT_API_KEY:
@@ -23941,7 +24010,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                             await context.bot.send_document(
                                 chat_id=chat_id, document=telegram_png_document(png_bytes),
                                 filename="no_bg.png",
-                                caption=f"✂️ Gói Tiết Kiệm — Hoàn thành! (-{IMAGE_FREE_COST} Xu)"
+                                caption=f"✂️ Gói Tiết Kiệm — Hoàn thành! (-{fallback_cost} Xu)"
                             )
                             save_tool_test_result("image_remove_bg", "PASS", "provider=cutout; cost_level=low; remove_bg fallback success", uid)
                             save_tool_test_result("image", "PASS", "provider=cutout; cost_level=low; remove_bg fallback success", uid)
@@ -23955,7 +24024,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                         logger.error(f"Cutout fallback error: {e}")
                         record_api_debug("cutout", "remove_bg_customer_fallback", "FAIL", 0, provider_error_summary(e))
                 if not cutout_ok:
-                    refund_charged_credit(uid, IMAGE_FREE_COST, "refund", "", "Hoàn gói tách nền fallback do lỗi", True)
+                    refund_charged_credit(uid, fallback_cost, "refund", "", "Hoàn gói tách nền fallback do lỗi", fallback_cost > 0)
                     if not premium_refunded:
                         refund_charged_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp do lỗi", premium_charged)
                     await query.edit_message_text(
@@ -25488,25 +25557,86 @@ def admin_internal_command(handler):
     return wrapped
 
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
+        [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs")],
+        [InlineKeyboardButton("🖼 Ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎤 Âm thanh", callback_data="menu|main_audio")],
+        [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
+        [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|main_guide")],
+    ]
     if is_admin:
-        rows = [
-            [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
-            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|doc_tools"), InlineKeyboardButton("🧠 Memory", callback_data="menu|memory")],
-            [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
+        rows.extend([
             [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
-            [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("💳 Billing", callback_data="menu|billing")],
-            [InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|legal")],
-            [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
-        ]
-    else:
-        rows = [
-            [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
-            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|doc_tools"), InlineKeyboardButton("🧠 Memory", callback_data="menu|memory")],
-            [InlineKeyboardButton("💳 Xu Dịch Vụ", callback_data="menu|billing"), InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing")],
-            [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|legal")],
-            [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
-        ]
+            [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
+        ])
     return InlineKeyboardMarkup(rows)
+
+def public_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")]])
+
+def main_video_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 Tạo video ngay", callback_data="menu|hint_film")],
+        [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick")],
+        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
+
+def main_ai_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Cách hỏi AI hay", callback_data="menu|hint_ai_prompt")],
+        [InlineKeyboardButton("👤 Xem tài khoản", callback_data="menu|main_profile")],
+        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
+
+def main_memory_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📝 Lưu ghi chú", callback_data="menu|hint_note"), InlineKeyboardButton("🔎 Tìm ghi chú", callback_data="menu|hint_search_note")],
+        [InlineKeyboardButton("⏰ Nhắc việc", callback_data="menu|hint_remind")],
+        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
+
+def main_docs_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📄 Mở công cụ tài liệu", callback_data="menu|hint_doc_tools")],
+        [InlineKeyboardButton("💰 Xem giá", callback_data="menu|hint_pricing")],
+        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
+
+def main_image_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Mở công cụ ảnh", callback_data="menu|hint_image_tools")],
+        [InlineKeyboardButton("🎬 Ảnh sang video prompt", callback_data="menu|hint_image_to_video_pack")],
+        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
+
+def main_audio_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎤 Mở công cụ âm thanh", callback_data="menu|hint_media_factory")],
+        [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick")],
+        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
+
+def main_quick_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
+        [InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
+        [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
+
+def main_topup_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien")],
+        [InlineKeyboardButton("💰 Xem giá", callback_data="menu|hint_pricing")],
+        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
+
+def main_guide_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📘 Hướng dẫn đầy đủ", callback_data="menu|guide")],
+        [InlineKeyboardButton("📜 Điều khoản", callback_data="menu|legal")],
+        [InlineKeyboardButton("💰 Bảng giá", callback_data="menu|hint_pricing")],
+        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
 
 def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = []
@@ -25528,57 +25658,71 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
+PUBLIC_COMMAND_FUNCTIONS = {
+    "film": "cmd_film",
+    "profile": "cmd_profile",
+    "pricing": "cmd_pricing",
+    "naptien": "cmd_naptien",
+    "gift": "cmd_gift",
+    "referral": "cmd_ref",
+    "birthday": "cmd_birthday",
+    "legal": "cmd_legal",
+    "image_tools": "cmd_image_tools",
+    "image_prompt": "cmd_image_prompt",
+    "image_to_video_pack": "cmd_image_to_video_pack",
+    "media_factory": "cmd_media_factory",
+    "video_factory_flow": "cmd_video_factory_flow",
+    "memory": "cmd_memory",
+    "memory_plan": "cmd_memory_plan",
+    "memory_status": "cmd_memory_status",
+    "note": "cmd_note",
+    "notes": "cmd_notes",
+    "search_note": "cmd_search_note",
+    "note_view": "cmd_note_view",
+    "note_priority": "cmd_note_priority",
+    "notes_important": "cmd_notes_important",
+    "remind": "cmd_remind",
+    "reminders": "cmd_reminders",
+    "reminder_done": "cmd_reminder_done",
+    "reminder_cancel": "cmd_reminder_cancel",
+    "doc_tools": "cmd_doc_tools",
+    "image_to_pdf": "cmd_image_to_pdf",
+    "pdf_to_word": "cmd_pdf_to_word",
+    "pdf_to_images": "cmd_pdf_to_images",
+    "compress_pdf": "cmd_compress_pdf",
+    "merge_pdf": "cmd_merge_pdf",
+    "split_pdf": "cmd_split_pdf",
+    "ocr_image": "cmd_ocr_image",
+    "ocr_pdf": "cmd_ocr_pdf",
+    "voiceover": "cmd_voiceover",
+    "tts": "cmd_voiceover",
+    "ai_image": "cmd_ai_image",
+    "ai_image_edit": "cmd_ai_image_edit",
+}
+
+def public_command_exists(command: str) -> bool:
+    fn_name = PUBLIC_COMMAND_FUNCTIONS.get(command.strip().lstrip("/"))
+    return bool(fn_name and callable(globals().get(fn_name)))
+
 def menu_text_main(is_admin: bool) -> str:
-    runtime_line = f"\n🧬 Runtime: <code>{APP_BUILD}</code>" if is_admin else ""
-    admin_line = "\n• Quản trị doanh thu, bill, backup và operator nội bộ" if is_admin else ""
-    admin_quick = (
-        "\n\n🔐 <b>Admin nhanh:</b>\n"
-        "• <code>/providers</code> — kiểm tra provider\n"
-        "• <code>/sales_ready</code> — kiểm tra sẵn sàng bán\n"
-        "• <code>/backup_db</code> — backup DB\n"
-        "• <code>/promo_seed_policy</code> — tạo/cập nhật mã ưu đãi\n"
-        "• <code>/promo_list</code> — xem mã ưu đãi\n"
-        "• <code>/gift_seed_beta</code> — tạo mã BETA\n"
-        "• <code>/gift_list</code> — xem mã quà\n"
-        "• <code>/gift BETA100 USER_ID</code> — cấp quà cho user\n"
-        "• <code>/emergency_status</code> — trạng thái khóa an toàn\n"
-        "• <code>/ops_plan</code> — kế hoạch vận hành khẩn cấp"
-        if is_admin else ""
-    )
+    runtime_line = f"\n\n🧬 Runtime: <code>{APP_BUILD}</code>" if is_admin else ""
+    admin_line = "\n\n🔐 Admin có thêm nút Quản Trị / Hệ Thống / Affiliate / Operator ở cuối menu." if is_admin else ""
     return (
         "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
-        "Cỗ máy AI hỗ trợ tạo nội dung, video script, voice, media và công cụ AI hằng ngày trong một bot Telegram.\n\n"
-        "🤖 Trợ lý AI: viết kịch bản, ý tưởng, code, chiến lược.\n"
-        "🎬 Video & Media Factory: tạo script, storyboard, prompt ảnh chân thật, video prompt pack, caption, hashtag, CTA cho Facebook, TikTok, YouTube.\n"
-        "🎤 Bóc Băng AI: chuyển âm thanh/video thành văn bản.\n"
-        "🔊 Voice-off/TTS: tạo voice tiếng Việt cho nội dung.\n"
-        f"🧠 Memory: lưu ghi chú, tìm kiếm và nhắc việc — <code>{memory_public_stage()}</code>.\n"
-        "📥 Hút Media: tải video TikTok/YouTube/Facebook nếu công cụ khả dụng.\n"
-        "🖼 Studio Đồ Họa: tách nền, xử lý ảnh, prompt hình ảnh.\n"
-        "🖼 Công cụ ảnh: /image_tools, /image_prompt, /image_to_video_pack, /ai_image, /ai_image_edit.\n"
-        "📄 Công cụ tài liệu: /doc_tools — PDF/Word/ảnh/nén/tách/OCR nếu engine khả dụng.\n"
-        "💳 Xu dịch vụ: PayOS QR động hoặc QR thủ công khi cổng tự động bận.\n"
-        "📜 Pháp lý & an toàn: bấm “Điều khoản” hoặc gõ <code>/legal</code> để xem đầy đủ."
-        f"{admin_line}\n\n"
-        "🎁 Newbie: mỗi ID Telegram chỉ nhận <b>200 Xu trải nghiệm</b> một lần.\n"
-        "Xu được quản lý theo ID Telegram. Xóa chat rồi bấm Start lại sẽ không nhận lại 200 Xu lần nữa.\n"
-        "Bạn có thể dùng ngay 1 lượt <code>/film</code> Basic để thử quy trình tạo video script.\n"
-        "💳 Hết Xu thì dùng <code>/naptien</code> để mua/nạp thêm Xu dịch vụ.\n\n"
-        "<b>Bắt đầu nhanh:</b>\n"
-        "1. <code>/profile</code> — xem số dư\n"
-        "2. <code>/film &lt;chủ đề&gt;</code> — tạo Video Script Basic\n"
-        "3. <code>/image_tools</code> — xem công cụ ảnh và video prompt pack\n"
-        "4. <code>/media_factory</code> — xem trung tâm Video & Media\n"
-        "5. <code>/doc_tools</code> — công cụ PDF/ảnh/tài liệu\n"
-        "6. <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
-        "7. <code>/pricing</code> — xem bảng giá\n"
-        "8. <code>/naptien</code> — nạp thêm Xu khi cần\n"
-        "9. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
-        "10. Tự đăng nội dung đã tạo lên kênh của bạn\n"
-        "11. <code>/legal</code> — xem điều khoản/pháp lý đầy đủ"
-        f"{admin_quick}"
-        f"{runtime_line}\n\n"
-        "Chọn nhóm chức năng bên dưới:"
+        "Trợ lý AI giúp bạn làm việc nhanh hơn mỗi ngày: tạo nội dung, video script, hình ảnh, voice, ghi chú, "
+        "tài liệu PDF/Word và công cụ AI trong một bot Telegram.\n\n"
+        "Bạn muốn làm gì hôm nay?\n\n"
+        "🎬 <b>Video / Content</b>\nTạo kịch bản video, chia cảnh, caption, hashtag, CTA để bạn tự đăng.\n\n"
+        "🤖 <b>Hỏi AI / Viết nội dung</b>\nNhờ AI viết bài, lên ý tưởng, sửa câu chữ, viết code, lập kế hoạch.\n\n"
+        "🧠 <b>Kho ghi nhớ</b>\nLưu ghi chú, tìm lại thông tin, đánh dấu việc quan trọng và đặt nhắc việc.\n\n"
+        "📄 <b>Tài liệu / PDF / Word</b>\nChuyển PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF nếu công cụ đã bật.\n\n"
+        "🖼 <b>Công cụ ảnh</b>\nTạo prompt ảnh, tách nền, xử lý ảnh, chuẩn bị ảnh cho video.\n\n"
+        "🎤 <b>Âm thanh / Voice</b>\nBóc băng audio/video thành chữ hoặc tạo giọng đọc tiếng Việt.\n\n"
+        "💳 <b>Xu dịch vụ</b>\nNạp Xu, xem bảng giá, dùng mã quà tặng hoặc mã khuyến mãi.\n\n"
+        "📚 <b>Hướng dẫn</b>\nXem cách dùng, điều khoản, chính sách Xu và quyền lợi thành viên.\n\n"
+        "Bấm nút bên dưới để bắt đầu 👇"
+        f"{admin_line}"
+        f"{runtime_line}"
     )
 
 def build_account_line(user_id) -> str:
@@ -25596,13 +25740,38 @@ def build_account_line(user_id) -> str:
     except Exception:
         return ""
 
-def build_start_message_text(user_id) -> str:
-    is_admin = is_admin_user(user_id)
-    text = menu_text_main(is_admin)
-    account_line = build_account_line(user_id)
-    if account_line:
-        text = text.replace("\n\nChọn nhóm chức năng bên dưới:", account_line + "\nChọn nhóm chức năng bên dưới:")
-    return text
+def build_start_message_text(user_id, user_existed_before: Optional[bool] = None) -> str:
+    is_admin = is_admin_user(user_id) if str(user_id).isdigit() else False
+    member_badge = get_role_badge(user_id) if str(user_id).isdigit() else "🌱 Newbie"
+    try:
+        credits_display = "200" if not str(user_id).isdigit() else str(get_user(user_id)[0])
+    except Exception:
+        credits_display = "Vô hạn" if is_admin else "200"
+    trial_line = ""
+    if user_existed_before is False:
+        trial_line = "\n🎁 Tài khoản mới đã có 200 Xu trải nghiệm để dùng thử công cụ."
+    elif user_existed_before is True:
+        trial_line = "\n🎁 Số dư hiện tại được quản lý theo ID Telegram của bạn."
+    return (
+        "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
+        "Trợ lý AI giúp bạn làm việc nhanh hơn mỗi ngày:\n"
+        "tạo nội dung, video script, hình ảnh, voice, ghi chú, tài liệu PDF/Word và công cụ AI trong một bot Telegram.\n\n"
+        f"🎁 Số dư: <b>{html.escape(credits_display)} Xu</b>\n"
+        f"👤 ID: <code>{html.escape(str(user_id))}</code>\n"
+        f"🪪 Hạng: <b>{html.escape(member_badge)}</b>"
+        f"{trial_line}\n\n"
+        "Bạn muốn làm gì hôm nay?\n\n"
+        "🎬 <b>Video / Content</b>\nTạo kịch bản video, chia cảnh, caption, hashtag, CTA để bạn tự đăng.\n\n"
+        "🤖 <b>Hỏi AI / Viết nội dung</b>\nNhờ AI viết bài, lên ý tưởng, sửa câu chữ, viết code, lập kế hoạch.\n\n"
+        "🧠 <b>Kho ghi nhớ</b>\nLưu ghi chú, tìm lại thông tin, đánh dấu việc quan trọng và đặt nhắc việc.\n\n"
+        "📄 <b>Tài liệu / PDF / Word</b>\nChuyển PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF nếu công cụ đã bật.\n\n"
+        "🖼 <b>Công cụ ảnh</b>\nTạo prompt ảnh, tách nền, xử lý ảnh, chuẩn bị ảnh cho video.\n\n"
+        "🎤 <b>Âm thanh / Voice</b>\nBóc băng audio/video thành chữ hoặc tạo giọng đọc tiếng Việt.\n\n"
+        "💳 <b>Xu dịch vụ</b>\nNạp Xu, xem bảng giá, dùng mã quà tặng hoặc mã khuyến mãi.\n\n"
+        "📚 <b>Hướng dẫn</b>\nXem cách dùng, điều khoản, chính sách Xu và quyền lợi thành viên.\n\n"
+        "Bấm nút bên dưới để bắt đầu 👇"
+        + (f"\n\n🧬 Runtime: <code>{APP_BUILD}</code>" if is_admin else "")
+    )
 
 def menu_text_ai_basic() -> str:
     return (
@@ -25770,8 +25939,195 @@ def menu_text_support() -> str:
         "Admin xem góp ý bằng <code>/admin_gopy</code>."
     )
 
+def menu_text_main_video() -> str:
+    return (
+        "🎬 <b>VIDEO / CONTENT PACK</b>\n\n"
+        "Dùng để tạo kịch bản video, chia cảnh, caption, hashtag và CTA.\n"
+        "Phù hợp khi bạn muốn làm nội dung cho Facebook, TikTok, YouTube.\n\n"
+        "Bạn tự đăng nội dung đã tạo lên kênh của mình.\n\n"
+        "<b>Lệnh nhanh:</b>\n"
+        "• <code>/film &lt;chủ đề&gt;</code> — tạo kịch bản video cơ bản\n"
+        "• <code>/video_factory_flow</code> — xem quy trình tạo nội dung video\n"
+        "• <code>/media_factory</code> — mở trung tâm Video &amp; Media"
+    )
+
+def menu_text_main_ai() -> str:
+    return (
+        "🤖 <b>HỎI AI / VIẾT NỘI DUNG</b>\n\n"
+        "Dùng để nhờ AI viết bài, sửa câu chữ, lên ý tưởng, viết code, lập kế hoạch hoặc phân tích nội dung.\n\n"
+        "Bạn có thể nhắn trực tiếp câu hỏi cho bot.\n\n"
+        "<b>Ví dụ:</b>\n"
+        "• Viết caption bán hàng cho sản phẩm này\n"
+        "• Gợi ý 10 ý tưởng video TikTok\n"
+        "• Sửa bài viết này cho chuyên nghiệp hơn\n"
+        "• Lập kế hoạch công việc hôm nay"
+    )
+
+def menu_text_main_memory() -> str:
+    if not (public_command_exists("memory") or public_command_exists("note")):
+        return "🧠 <b>KHO GHI NHỚ</b>\n\nKho ghi nhớ đang được admin kiểm tra, sẽ mở sau."
+    return (
+        "🧠 <b>KHO GHI NHỚ</b>\n\n"
+        "Dùng để lưu ghi chú, thông tin khách hàng, ý tưởng, việc cần làm và tìm lại khi cần.\n"
+        "Phù hợp cho người hay quên, làm việc với nhiều khách hoặc muốn lưu ý tưởng nhanh.\n\n"
+        "<b>Lệnh nhanh:</b>\n"
+        "• <code>/memory</code> — mở kho ghi nhớ\n"
+        "• <code>/note &lt;nội dung&gt;</code> — lưu nhanh một ghi chú\n"
+        "• <code>/notes</code> — xem ghi chú đã lưu\n"
+        "• <code>/search_note &lt;từ khóa&gt;</code> — tìm lại ghi chú\n"
+        "• <code>/remind 30m &lt;nội dung&gt;</code> — đặt nhắc việc\n"
+        "• <code>/reminders</code> — xem các nhắc việc\n\n"
+        "<b>Ví dụ:</b>\n"
+        "• <code>/note khách A hỏi báo giá video 500k</code>\n"
+        "• <code>/remind 2h gọi lại cho khách A</code>"
+    )
+
+def menu_text_main_docs() -> str:
+    if not (public_command_exists("doc_tools") or public_command_exists("pdf_to_word")):
+        return "📄 <b>TÀI LIỆU / PDF / WORD</b>\n\nCông cụ PDF/Word đang được admin kiểm tra, sẽ mở sau."
+    lines = [
+        "📄 <b>TÀI LIỆU / PDF / WORD</b>",
+        "",
+        "Dùng để xử lý file văn phòng nhanh:",
+        "chuyển PDF sang Word, ảnh sang PDF, nén PDF, tách/gộp PDF hoặc xuất PDF thành ảnh.",
+        "",
+        "Phù hợp khi bạn cần xử lý hồ sơ, báo giá, tài liệu học tập, tài liệu khách gửi.",
+        "",
+        "<b>Lệnh nhanh:</b>",
+        "• <code>/doc_tools</code> — mở công cụ tài liệu",
+    ]
+    if public_command_exists("image_to_pdf"):
+        lines.append("• Reply ảnh rồi dùng <code>/image_to_pdf</code> — chuyển ảnh thành PDF")
+    if public_command_exists("pdf_to_word"):
+        lines.append("• Reply PDF rồi dùng <code>/pdf_to_word</code> — chuyển PDF sang Word")
+    if public_command_exists("pdf_to_images"):
+        lines.append("• Reply PDF rồi dùng <code>/pdf_to_images</code> — chuyển PDF thành ảnh")
+    if public_command_exists("compress_pdf"):
+        lines.append("• Reply PDF rồi dùng <code>/compress_pdf</code> — nén PDF")
+    if public_command_exists("split_pdf"):
+        lines.append("• Reply PDF rồi dùng <code>/split_pdf 1</code> — tách trang PDF")
+    if public_command_exists("merge_pdf"):
+        lines.append("• <code>/merge_pdf</code> — gộp PDF nếu công cụ đã hỗ trợ")
+    if public_command_exists("ocr_image"):
+        lines.append("• Reply ảnh rồi dùng <code>/ocr_image</code> — OCR ảnh")
+    if public_command_exists("ocr_pdf"):
+        lines.append("• Reply PDF rồi dùng <code>/ocr_pdf</code> — OCR PDF")
+    return "\n".join(lines)
+
+def menu_text_main_image() -> str:
+    return (
+        "🖼 <b>CÔNG CỤ ẢNH</b>\n\n"
+        "Dùng để tạo prompt ảnh, tách nền, xử lý ảnh và chuẩn bị ảnh cho video.\n"
+        "Phù hợp làm hình sản phẩm, thumbnail, ảnh minh họa hoặc ảnh đăng bài.\n\n"
+        "<b>Lệnh nhanh:</b>\n"
+        "• <code>/image_tools</code> — mở công cụ ảnh\n"
+        "• <code>/image_prompt</code> — tạo prompt ảnh\n"
+        "• <code>/image_to_video_pack</code> — tạo prompt video từ ý tưởng ảnh\n"
+        "• <code>/ai_image</code> — tạo ảnh AI nếu admin đã bật\n"
+        "• <code>/ai_image_edit</code> — sửa ảnh AI nếu admin đã bật\n\n"
+        "Lưu ý: tool tốn API vẫn admin-first nếu chưa public. Không trừ Xu nếu provider lỗi."
+    )
+
+def menu_text_main_audio() -> str:
+    lines = [
+        "🎤 <b>ÂM THANH / VOICE</b>",
+        "",
+        "Dùng để bóc băng audio/video thành chữ hoặc tạo giọng đọc tiếng Việt cho nội dung.",
+        "Phù hợp làm voice-off video, ghi chú cuộc họp, chuyển lời nói thành văn bản.",
+        "",
+        "<b>Lệnh nhanh:</b>",
+    ]
+    if public_command_exists("media_factory"):
+        lines.append("• <code>/media_factory</code> — mở trung tâm media")
+    if public_command_exists("voiceover"):
+        lines.append("• <code>/voiceover &lt;nội dung&gt;</code> — tạo giọng đọc")
+    if public_command_exists("tts"):
+        lines.append("• <code>/tts &lt;nội dung&gt;</code> — tạo giọng đọc nhanh")
+    lines.append("• Gửi voice/mp3/m4a/video ngắn vào bot để bóc băng nếu STT đã bật.")
+    return "\n".join(lines)
+
+def menu_text_main_quick() -> str:
+    lines = [
+        "⚡ <b>TRUY CẬP NHANH</b>",
+        "",
+        "Các việc hay dùng nhất:",
+        "",
+    ]
+    quick_items = [
+        ("film", "🎬 <code>/film &lt;chủ đề&gt;</code>\nTạo kịch bản video: ý tưởng, cảnh quay, caption, hashtag, CTA."),
+        ("memory", "🧠 <code>/memory</code>\nMở kho ghi nhớ AI: lưu ghi chú, tìm lại thông tin, xem gói lưu trữ."),
+        ("note", "📝 <code>/note &lt;nội dung&gt;</code>\nLưu nhanh một ghi chú, ví dụ: <code>/note khách A hỏi báo giá video 500k</code>"),
+        ("search_note", "🔎 <code>/search_note &lt;từ khóa&gt;</code>\nTìm lại ghi chú đã lưu."),
+        ("remind", "⏰ <code>/remind 30m &lt;việc cần nhắc&gt;</code>\nĐặt nhắc việc, ví dụ: <code>/remind 30m gọi lại cho khách A</code>"),
+        ("doc_tools", "📄 <code>/doc_tools</code>\nMở công cụ tài liệu: PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF."),
+        ("image_tools", "🖼 <code>/image_tools</code>\nMở công cụ ảnh: prompt ảnh, xử lý ảnh, ảnh sang video prompt."),
+        ("media_factory", "🎤 <code>/media_factory</code>\nMở trung tâm Video &amp; Media."),
+        ("naptien", "💳 <code>/naptien</code>\nNạp thêm Xu bằng QR tự động hoặc QR thủ công."),
+        ("pricing", "💰 <code>/pricing</code>\nXem bảng giá Xu và chi phí từng công cụ."),
+        ("gift", "🎁 <code>/gift &lt;mã&gt;</code>\nNhập mã quà tặng để nhận Xu nếu admin gửi mã."),
+        ("profile", "👤 <code>/profile</code>\nXem số dư Xu, hạng thành viên và tài khoản."),
+        ("legal", "📜 <code>/legal</code>\nXem điều khoản, chính sách Xu, hoàn tiền, dữ liệu và nội dung an toàn."),
+    ]
+    lines.append("🤖 <b>Nhắn câu hỏi trực tiếp</b>\nHỏi AI viết bài, sửa nội dung, lên kế hoạch, viết code hoặc phân tích ý tưởng.")
+    for command, text in quick_items:
+        if public_command_exists(command):
+            lines.extend(["", text])
+    lines.extend([
+        "",
+        "Bạn chỉ cần nhớ:",
+        "• Muốn tạo video → bấm 🎬 Video",
+        "• Muốn lưu việc → bấm 🧠 Ghi nhớ",
+        "• Muốn xử lý file → bấm 📄 PDF/Word",
+        "• Hết Xu → bấm 💳 Nạp Xu",
+    ])
+    return "\n".join(lines)
+
+def menu_text_main_topup() -> str:
+    return (
+        "💳 <b>NẠP XU DỊCH VỤ</b>\n\n"
+        "Dùng <code>/naptien</code> để mở flow nạp Xu hiện có và chọn gói.\n"
+        "Bot sẽ tạo QR động nếu cổng tự động hoạt động, hoặc hướng dẫn QR thủ công khi cần.\n\n"
+        "Không cần gửi mật khẩu, không cần gửi thông tin thẻ. Xu được quản lý theo ID Telegram."
+    )
+
+def menu_text_main_profile(user_id) -> str:
+    if not str(user_id).isdigit():
+        return "👤 <b>TÀI KHOẢN</b>\n\nGõ <code>/profile</code> để xem số dư Xu, hạng thành viên và thông tin tài khoản."
+    credits, total_spent, is_vip = get_user(user_id)
+    balance = "Vô hạn" if is_admin_user(user_id) else f"{int(credits)} Xu"
+    return (
+        "👤 <b>TÀI KHOẢN</b>\n\n"
+        f"• ID: <code>{html.escape(str(user_id))}</code>\n"
+        f"• 🪪 Hạng: <b>{html.escape(get_role_badge(user_id))}</b>\n"
+        f"• Số dư: <b>{html.escape(balance)}</b>\n\n"
+        "Gõ <code>/profile</code> để xem chi tiết referral, birthday gift và quyền lợi thành viên."
+    )
+
+def menu_text_main_guide() -> str:
+    return (
+        "📚 <b>HƯỚNG DẪN</b>\n\n"
+        "Bạn có thể xem:\n\n"
+        "• <code>/help</code> — hướng dẫn dùng bot\n"
+        "• <code>/pricing</code> — bảng giá Xu\n"
+        "• <code>/legal</code> — điều khoản và chính sách\n"
+        "• <code>/vip_policy</code> — quyền lợi thành viên\n"
+        "• <code>/referral</code> — giới thiệu bạn bè\n"
+        "• <code>/birthday</code> — thêm ngày sinh nhận quà bí mật\n\n"
+        "Gợi ý: bắt đầu dễ nhất là dùng <code>/film</code> để tạo một kịch bản video hoặc nhắn trực tiếp câu hỏi cho AI."
+    )
+
 def menu_hint_text(action: str) -> tuple[str, str]:
     hints = {
+        "hint_film": ("main_video", "🎬 <b>Tạo video nhanh</b>\n\nCopy lệnh:\n<code>/film chủ đề của bạn</code>\n\nVí dụ:\n<code>/film review máy xay sinh tố mini, đăng TikTok, giọng gần gũi</code>"),
+        "hint_ai_prompt": ("main_ai", "✍️ <b>Cách hỏi AI hay</b>\n\nNói rõ mục tiêu, đối tượng, nền tảng, giọng văn và kết quả bạn muốn.\n\nVí dụ:\n<code>Viết caption bán hàng cho sản phẩm X, giọng gần gũi, có CTA, dành cho mẹ bỉm.</code>"),
+        "hint_note": ("main_memory", "📝 <b>Lưu ghi chú</b>\n\nCopy lệnh:\n<code>/note nội dung cần lưu</code>"),
+        "hint_search_note": ("main_memory", "🔎 <b>Tìm ghi chú</b>\n\nCopy lệnh:\n<code>/search_note từ khóa</code>"),
+        "hint_remind": ("main_memory", "⏰ <b>Đặt nhắc việc</b>\n\nCopy lệnh:\n<code>/remind 30m nội dung cần nhắc</code>"),
+        "hint_doc_tools": ("main_docs", "📄 <b>Công cụ tài liệu</b>\n\nCopy lệnh:\n<code>/doc_tools</code>"),
+        "hint_pricing": ("main_topup", "💰 <b>Bảng giá</b>\n\nCopy lệnh:\n<code>/pricing</code>"),
+        "hint_image_tools": ("main_image", "🖼 <b>Công cụ ảnh</b>\n\nCopy lệnh:\n<code>/image_tools</code>"),
+        "hint_image_to_video_pack": ("main_image", "🎬 <b>Ảnh sang video prompt</b>\n\nCopy lệnh:\n<code>/image_to_video_pack chủ đề hoặc mô tả ảnh</code>"),
+        "hint_media_factory": ("main_audio", "🎤 <b>Trung tâm Video & Media</b>\n\nCopy lệnh:\n<code>/media_factory</code>\n\nTạo voice, bóc băng và video/content pack tùy provider đã bật."),
         "hint_film_blueprint": ("video_workflow", "🚀 <b>Film Blueprint</b>\n\nCopy lệnh:\n<code>/film_blueprint</code>"),
         "hint_scene_pack": ("video_workflow", "📦 <b>Scene Pack</b>\n\nCopy lệnh:\n<code>/scene_pack job=&lt;JOB_ID&gt; scene=1</code>"),
         "hint_growth_loop": ("video_workflow", "📈 <b>Growth Loop</b>\n\nCopy lệnh:\n<code>/growth_loop</code>"),
@@ -25786,6 +26142,26 @@ def menu_hint_text(action: str) -> tuple[str, str]:
 def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup]:
     if action in {"main", "back"}:
         return menu_text_main(is_admin), main_menu_keyboard(is_admin)
+    if action == "main_video":
+        return menu_text_main_video(), main_video_keyboard()
+    if action == "main_ai":
+        return menu_text_main_ai(), main_ai_keyboard()
+    if action == "main_memory":
+        return menu_text_main_memory(), main_memory_keyboard()
+    if action == "main_docs":
+        return menu_text_main_docs(), main_docs_keyboard()
+    if action == "main_image":
+        return menu_text_main_image(), main_image_keyboard()
+    if action == "main_audio":
+        return menu_text_main_audio(), main_audio_keyboard()
+    if action == "main_quick":
+        return menu_text_main_quick(), main_quick_keyboard()
+    if action == "main_topup":
+        return menu_text_main_topup(), main_topup_keyboard()
+    if action == "main_profile":
+        return "👤 <b>TÀI KHOẢN</b>\n\nGõ <code>/profile</code> để xem số dư Xu, hạng thành viên và thông tin tài khoản.", public_back_keyboard()
+    if action == "main_guide":
+        return menu_text_main_guide(), main_guide_keyboard()
     if action == "ai_basic":
         return menu_text_ai_basic(), menu_nav_keyboard("ai_basic", is_admin)
     if action == "video_factory":
@@ -25865,20 +26241,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif ref_result.get("reason") == "self_ref":
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
     user_is_admin = is_admin_user(uid)
-    member_badge = get_role_badge(uid)
-    member_line = (
-        f"\n\n🪪 Thành viên: <b>{html.escape(member_badge)}</b>\n"
-        "🎁 Giới thiệu bạn bè: <code>/referral</code>\n"
-        "🎂 Thêm ngày sinh tại <code>/birthday</code> để nhận quà bí mật theo hạng thành viên.\n"
-        "📋 Quyền lợi thành viên: <code>/vip_policy</code>"
-    )
     await update.message.reply_text(
-        build_start_message_text(uid) + mode_start_notice(uid) + member_line,
-        parse_mode="HTML",
-        reply_markup=main_reply_keyboard(),
-    )
-    await update.message.reply_text(
-        "Chọn nhóm chức năng:",
+        build_start_message_text(uid, user_existed_before=user_existed_before) + mode_start_notice(uid),
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(user_is_admin),
     )
@@ -25886,6 +26250,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_start(update, context)
+
+async def cmd_quick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        menu_text_main_quick(),
+        parse_mode="HTML",
+        reply_markup=main_quick_keyboard(),
+    )
 
 def help_text_for_user(user_id) -> str:
     is_admin = is_admin_user(user_id)
@@ -26284,11 +26655,19 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     user_is_admin = is_admin_user(query.from_user.id)
     admin_only = {"operator", "admin", "system"}
+    public_hints = {
+        "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
+        "hint_note", "hint_search_note", "hint_remind", "hint_doc_tools", "hint_pricing",
+        "hint_image_tools", "hint_image_to_video_pack", "hint_media_factory",
+    }
     if action in admin_only and not user_is_admin:
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
-    if action.startswith("hint_") and not user_is_admin and action not in {"hint_naptien", "hint_profile", "hint_terms"}:
+    if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
-    text, keyboard = menu_content(action, user_is_admin)
+    if action == "main_profile":
+        text, keyboard = menu_text_main_profile(query.from_user.id), public_back_keyboard()
+    else:
+        text, keyboard = menu_content(action, user_is_admin)
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29484,12 +29863,14 @@ def media_factory_username(update: Update) -> str:
 async def charge_media_factory_or_reply(update: Update, uid, cost: int, event_type: str, note: str) -> bool:
     if is_admin_user(uid) or int(cost or 0) <= 0:
         return True
-    if spend_fixed_credit(uid, int(cost), event_type, note):
+    charge = apply_member_service_discount(uid, int(cost), event_type)
+    final_cost = int(charge.get("final_cost") or 0)
+    if spend_fixed_credit_info(uid, int(cost), event_type, note).get("ok"):
         return True
     credits, _, _ = get_user(uid)
     await update.message.reply_text(
         "⚠️ Không đủ Xu để dùng tính năng này.\n\n"
-        f"• Cần: {int(cost)} Xu\n"
+        f"• Cần: {final_cost} Xu\n"
         f"• Số dư hiện tại: {int(credits)} Xu\n\n"
         "Dùng /naptien để nạp thêm. Gói phổ biến: 50k / 100k / 200k."
     )
@@ -29556,12 +29937,14 @@ def doc_tools_menu_text() -> str:
 async def doc_check_can_pay(update: Update, uid, cost: int) -> bool:
     if is_admin_user(uid) or int(cost or 0) <= 0:
         return True
+    charge = apply_member_service_discount(uid, int(cost), "doc_tool")
+    final_cost = int(charge.get("final_cost") or 0)
     credits, _, _ = get_user(uid)
-    if int(credits or 0) >= int(cost):
+    if int(credits or 0) >= final_cost:
         return True
     await update.message.reply_text(
         "⚠️ Không đủ Xu để dùng công cụ tài liệu.\n\n"
-        f"• Cần: {int(cost)} Xu\n"
+        f"• Cần: {final_cost} Xu\n"
         f"• Số dư hiện tại: {int(credits or 0)} Xu\n\n"
         "Dùng /naptien để nạp thêm."
     )
@@ -29570,9 +29953,14 @@ async def doc_check_can_pay(update: Update, uid, cost: int) -> bool:
 async def doc_charge_after_success(update: Update, uid, cost: int, event_type: str, note: str) -> bool:
     if is_admin_user(uid) or int(cost or 0) <= 0:
         return True
-    if spend_fixed_credit(uid, int(cost), event_type, note):
+    charge = spend_fixed_credit_info(uid, int(cost), event_type, note)
+    if charge.get("ok"):
         credits, _, _ = get_user(uid)
-        await update.message.reply_text(f"💼 Đã trừ {int(cost)} Xu. Còn lại: {int(credits)} Xu | /naptien để nạp thêm")
+        discount_line = member_discount_display_line(charge)
+        prefix = (discount_line + "\n") if discount_line else ""
+        await update.message.reply_text(
+            f"{prefix}💼 Còn lại: {int(credits)} Xu | /naptien để nạp thêm"
+        )
         return True
     await update.message.reply_text(
         "⚠️ File đã tạo xong nhưng số dư thay đổi nên bot chưa trừ Xu. Vui lòng kiểm tra /profile và nạp thêm nếu cần."
@@ -30449,17 +30837,20 @@ async def cmd_note_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(quota_error, parse_mode="HTML")
     plan = ensure_memory_plan(uid)
     charge_xu = 0
+    charge_due_xu = 0
     if not is_admin_user(uid) and int(plan["ai_classify_used"]) >= int(plan["ai_classify_monthly_limit"]):
         charge_xu = MEMORY_AI_CLASSIFY_COST
+        memory_charge = apply_member_service_discount(uid, charge_xu, "memory_ai_classify")
+        charge_due_xu = int(memory_charge.get("final_cost") or 0)
         credits, _, _ = get_user(uid)
-        if int(credits or 0) < charge_xu:
+        if int(credits or 0) < charge_due_xu:
             note_id = memory_create_note(uid, content)
             memory_record_event(uid, "note_created_ai_quota_no_credit", note_id=note_id, detail="saved as normal note")
             save_tool_test_result("memory_notes", "PASS", "note saved; AI quota exhausted and insufficient Xu", uid)
             return await update.message.reply_text(
                 f"✅ Đã lưu ghi chú thường <code>#{note_id}</code>.\n\n"
                 "⚠️ Hết quota AI phân loại và chưa đủ Xu để dùng AI classify.\n"
-                f"• Cần: {MEMORY_AI_CLASSIFY_COST} Xu\n"
+                f"• Cần: {charge_due_xu} Xu\n"
                 "Dùng /naptien để nạp thêm hoặc /memory_plan để xem gói.",
                 parse_mode="HTML",
             )
@@ -30475,7 +30866,7 @@ async def cmd_note_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Bot không trừ Xu.",
             parse_mode="HTML",
         )
-    if charge_xu and not spend_fixed_credit(uid, charge_xu, "memory_ai_classify", f"note_ai classify cost={charge_xu}"):
+    if charge_xu and not spend_fixed_credit_info(uid, charge_xu, "memory_ai_classify", f"note_ai classify cost={charge_xu}").get("ok"):
         note_id = memory_create_note(uid, content)
         memory_record_event(uid, "note_created_ai_charge_failed", note_id=note_id, detail="saved as normal note after charge failed")
         save_tool_test_result("memory_notes", "PASS", "note saved; charge failed after AI classify", uid)
@@ -32533,15 +32924,12 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Chat Pro: miễn phí nội bộ\n"
             "• Chat Deep: miễn phí nội bộ admin"
         )
-    elif has_free_normal_chat(profile.get("tier")):
-        member_note = (
-            f"🎁 Đặc quyền {html.escape(badge)}:\n"
-            "• Normal Chat: miễn phí\n"
-            "• Chat Pro: miễn phí\n"
-            "• Chat Deep: vẫn tính 20 Xu/lượt để kiểm soát tác vụ sâu"
-        )
     else:
-        member_note = "🎯 Lên Platinum để mở Free Normal Chat và Free Chat Pro."
+        discount_rate = int(get_member_service_discount_rate(uid) or 0)
+        member_note = (
+            f"🎯 Ưu đãi {html.escape(badge)}: giảm <b>{discount_rate}%</b> khi tiêu Xu cho dịch vụ đủ điều kiện.\n"
+            "Gói nạp nhận Xu gốc giống mọi khách hàng; hạng thành viên không cộng thêm Xu định kỳ khi nạp."
+        )
     lines = [
         "🤖 <b>Chế độ AI hiện tại</b>",
         "",
@@ -32658,7 +33046,7 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
         admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin else ""
         return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
 
-    if cost > 0 and not spend_fixed_credit(uid, cost, f"spend_ai_chat_{mode}", f"AI chat {mode}"):
+    if cost > 0 and not spend_fixed_credit_info(uid, cost, f"spend_ai_chat_{mode}", f"AI chat {mode}", apply_member_discount_flag=False).get("ok"):
         credits_now, _, _ = get_user(uid)
         return await update.message.reply_text(chat_insufficient_credits_text(mode, cost, credits_now))
 
@@ -32875,9 +33263,9 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     birthday_date = birthday.get("birthday_mmdd") if birthday else "chưa lưu (/birthday)"
     birthday_line = f"{birthday_date}; quà bí mật theo hạng thành viên"
     if admin_badge:
-        chat_privilege = "Free Normal Chat, Free Chat Pro, Free Chat Deep nội bộ admin"
+        service_privilege = "Miễn phí công cụ nội bộ admin khi vận hành/test"
     else:
-        chat_privilege = "Free Normal + Pro; Deep vẫn tính Xu" if has_free_normal_chat(member.get("tier")) else "Normal 5 Xu, Pro 10 Xu; lên Platinum để free Normal/Pro"
+        service_privilege = f"Giảm {int(get_member_service_discount_rate(user_id) or 0)}% khi tiêu Xu cho dịch vụ đủ điều kiện"
     msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{user_id}</code>\n"
@@ -32888,7 +33276,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Referral pending/rewarded: <b>{ref_stats['pending']}/{ref_stats['rewarded']}</b>\n"
         f"• Xu referral đã nhận: <b>{ref_stats['reward_xu']} Xu</b>\n"
         f"• Link giới thiệu: <code>{html.escape(ref_link)}</code>\n\n"
-        f"• Đặc quyền chat: <b>{html.escape(chat_privilege)}</b>\n"
+        f"• Ưu đãi dịch vụ: <b>{html.escape(service_privilege)}</b>\n"
         f"• Birthday gift: <b>{html.escape(birthday_line)}</b>\n\n"
         f"👉 /member để xem quyền lợi đầy đủ.\n"
         f"👉 /birthday để thêm/xem ngày sinh.\n"
@@ -32944,6 +33332,7 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Gói Doanh Nghiệp: 500.000đ: <b>5.000 Xu dịch vụ</b> + 500 Xu dịch vụ Launch Bonus lần đầu mua gói = <b>5.500 Xu dịch vụ</b>\n\n"
         f"🎁 Launch Bonus theo gói chỉ áp dụng 1 lần cho mỗi tài khoản ở từng gói 50k/100k/200k/500k.\n"
         f"Các lần mua lại cùng gói sẽ nhận Xu dịch vụ gốc.\n\n"
+        f"🪪 Hạng thành viên không làm tăng Xu gói nạp. Ưu đãi hạng chỉ áp dụng khi bạn tiêu Xu cho dịch vụ đủ điều kiện.\n\n"
         f"🎁 Trial {TRIAL_CREDITS} Xu chỉ cấp 1 lần theo ID Telegram. Xóa chat hoặc start lại không làm nhận lại trial.\n\n"
         f"{service_credit_legal_note()}\n\n"
         f"🏦 Nếu phải nạp thủ công, nội dung chuyển khoản sẽ là: <code>AAS {uid} &lt;order_code&gt;</code>\n\n"
@@ -36258,15 +36647,19 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             affiliate_context += "\nExtra affiliate note: " + parsed.get("affiliate", "")
         parsed["affiliate"] = affiliate_context
 
-    credits, _, is_vip = get_user(uid, update.effective_user.first_name)
+    credits, _, _ = get_user(uid, update.effective_user.first_name)
     is_admin = is_admin_user(uid)
     calculated_cost = calculate_film_cost(parsed.get("episodes", 1), parsed.get("scenes", 5), parsed.get("tier", "basic"))
-    cost = 0 if (is_admin or is_vip) else calculated_cost
+    charge = apply_member_service_discount(uid, calculated_cost, "spend_video_script")
+    cost = 0 if is_admin else int(charge.get("final_cost") or 0)
     charged = False
     if cost > 0:
         if credits < cost:
             return await reply_insufficient_credits(update, credits, cost)
-        charged = spend_fixed_credit(uid, cost, "spend_video_script", f"Video Script Lite: {parsed.get('topic', '')[:120]}")
+        charge_result = spend_fixed_credit_info(uid, calculated_cost, "spend_video_script", f"Video Script Lite: {parsed.get('topic', '')[:120]}")
+        charged = bool(charge_result.get("ok"))
+        cost = int(charge_result.get("final_cost") or cost)
+        charge = charge_result
         if not charged:
             credits_now, _, _ = get_user(uid)
             return await reply_insufficient_credits(update, credits_now, cost)
@@ -36279,6 +36672,7 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Chủ đề: <b>{html.escape(parsed.get('topic', ''))}</b>\n"
             f"Nền tảng: <b>{html.escape(parsed.get('platforms', ''))}</b>\n"
             f"Gói: <b>{html.escape(str(parsed.get('tier') or 'basic'))}</b> | Chi phí: <b>{cost} Xu</b>"
+            + (f"\n{html.escape(member_discount_display_line(charge))}" if int((charge or {}).get("discount_xu") or 0) > 0 else "")
             + (f"\nAffiliate: <code>#{affiliate_id}</code> {html.escape(affiliate_row[2] or '')}" if affiliate_row else ""),
             parse_mode="HTML",
         )
@@ -36304,7 +36698,9 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + f"Số tập: <b>{parsed.get('episodes')}</b>\n"
             f"Số cảnh/tập: <b>{parsed.get('scenes')}</b>\n"
             f"Gói: <b>{html.escape(str(parsed.get('tier') or 'basic'))}</b>\n"
-            f"Chi phí: <b>{cost} Xu</b>\n\n"
+            f"Chi phí: <b>{cost} Xu</b>\n"
+            + (f"{html.escape(member_discount_display_line(charge))}\n" if int((charge or {}).get("discount_xu") or 0) > 0 else "")
+            + "\n"
             "✅ Đã tạo: outline, scene prompts, caption từng nền tảng, CTA/hashtag, quality check.\n\n"
             f"<b>Preview:</b>\n<pre>{preview}</pre>\n\n"
             f"💼 Số dư còn lại: <b>{credits_after} Xu</b>\n"
@@ -41797,14 +42193,18 @@ async def cmd_growth_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
-    credits, _, is_vip = get_user(uid, update.effective_user.first_name)
+    credits, _, _ = get_user(uid, update.effective_user.first_name)
     is_admin = is_admin_user(uid)
-    cost = 0 if (is_admin or is_vip) else GROWTH_AI_COST
+    charge = apply_member_service_discount(uid, GROWTH_AI_COST, "spend_growth_ai")
+    cost = 0 if is_admin else int(charge.get("final_cost") or 0)
     charged = False
     if cost > 0:
         if credits < cost:
             return await reply_insufficient_credits(update, credits, cost)
-        charged = spend_fixed_credit(uid, cost, "spend_growth_ai", f"AI Growth Coach {args['days']}d {args['platform'] or 'all'}")
+        charge_result = spend_fixed_credit_info(uid, GROWTH_AI_COST, "spend_growth_ai", f"AI Growth Coach {args['days']}d {args['platform'] or 'all'}")
+        charged = bool(charge_result.get("ok"))
+        cost = int(charge_result.get("final_cost") or cost)
+        charge = charge_result
         if not charged:
             credits_now, _, _ = get_user(uid)
             return await reply_insufficient_credits(update, credits_now, cost)
@@ -41834,7 +42234,9 @@ async def cmd_growth_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Tổng views: <b>{int(totals['views']):,}</b>\n"
             f"• Tổng clicks: <b>{int(totals['clicks']):,}</b>\n"
             f"• Tổng revenue: <b>{money_vnd(totals['revenue'])}</b>\n"
-            f"• Chi phí: <b>{cost} Xu</b>\n\n"
+            f"• Chi phí: <b>{cost} Xu</b>\n"
+            + (f"{html.escape(member_discount_display_line(charge))}\n" if int((charge or {}).get("discount_xu") or 0) > 0 else "")
+            + "\n"
         )
         if len(output_text) > 3200:
             await status_msg.edit_text(
@@ -41886,14 +42288,18 @@ async def cmd_campaign_report(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Bạn có thể dùng <code>/film &lt;chủ đề&gt;</code> để tạo nội dung mới, hoặc gửi số liệu cho admin để tổng hợp thủ công.",
             parse_mode="HTML",
         )
-    credits, _, is_vip = get_user(uid, update.effective_user.first_name)
+    credits, _, _ = get_user(uid, update.effective_user.first_name)
     is_admin = is_admin_user(uid)
-    cost = 0 if (is_admin or is_vip) else CAMPAIGN_REPORT_COST
+    charge = apply_member_service_discount(uid, CAMPAIGN_REPORT_COST, "spend_campaign_report")
+    cost = 0 if is_admin else int(charge.get("final_cost") or 0)
     charged = False
     if cost > 0:
         if credits < cost:
             return await reply_insufficient_credits(update, credits, cost)
-        charged = spend_fixed_credit(uid, cost, "spend_campaign_report", f"Campaign report {args['days']}d {args['platform'] or 'all'}")
+        charge_result = spend_fixed_credit_info(uid, CAMPAIGN_REPORT_COST, "spend_campaign_report", f"Campaign report {args['days']}d {args['platform'] or 'all'}")
+        charged = bool(charge_result.get("ok"))
+        cost = int(charge_result.get("final_cost") or cost)
+        charge = charge_result
         if not charged:
             credits_now, _, _ = get_user(uid)
             return await reply_insufficient_credits(update, credits_now, cost)
@@ -41912,7 +42318,8 @@ async def cmd_campaign_report(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             "✅ Đã xuất báo cáo chiến dịch.\n\n"
             f"Chi phí: <b>{cost} Xu</b>\n"
-            f"💼 Số dư còn lại: <b>{credits_after} Xu</b>\n\n"
+            + (f"{html.escape(member_discount_display_line(charge))}\n" if int((charge or {}).get("discount_xu") or 0) > 0 else "")
+            + f"💼 Số dư còn lại: <b>{credits_after} Xu</b>\n\n"
             "Gợi ý tiếp: dùng <code>/growth_ai</code> để AI phân tích sâu, hoặc <code>/film</code> để tạo Content Pack mới.",
             parse_mode="HTML",
         )
@@ -45223,12 +45630,12 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Quà sinh nhật: <b>quà bí mật theo hạng thành viên</b>"
     )
     if admin_badge:
-        chat_line = "• Free Normal Chat\n• Free Chat Pro\n• Free Chat Deep nội bộ admin"
+        service_line = "• Free Normal Chat nội bộ\n• Free Chat Pro nội bộ\n• Free Chat Deep nội bộ admin"
     else:
-        chat_line = (
-            "• Free Normal Chat\n• Free Chat Pro\n• Chat Deep vẫn tính Xu"
-            if has_free_normal_chat(profile["tier"]) else
-            "• Normal Chat: 5 Xu\n• Chat Pro: 10 Xu\n🎯 Lên Platinum để mở Free Normal Chat và Free Chat Pro."
+        service_line = (
+            f"• Ưu đãi dịch vụ hiện tại: giảm <b>{int(get_member_service_discount_rate(uid) or 0)}%</b> khi tiêu Xu\n"
+            "• Hạng thành viên không cộng thêm Xu định kỳ khi nạp tiền\n"
+            "• Gói nạp 10k/20k/50k/100k/200k/500k nhận Xu gốc như nhau cho mọi khách"
         )
     text = (
         "🪪 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
@@ -45240,8 +45647,8 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{benefits}\n\n"
         "<b>Thưởng giới thiệu hiện tại</b>\n"
         f"• {html.escape(member_referral_policy_text(profile))}\n\n"
-        "<b>Đặc quyền chat</b>\n"
-        f"{chat_line}\n\n"
+        "<b>Ưu đãi tiêu Xu</b>\n"
+        f"{service_line}\n\n"
         "Link giới thiệu:\n"
         f"<code>{html.escape(link)}</code>\n\n"
         "🎁 <b>Mã ưu đãi cá nhân</b>\n"
@@ -45258,44 +45665,22 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "🪪 <b>CHÍNH SÁCH THÀNH VIÊN TOAN AAS</b>",
         "",
-        "<b>🌱 Newbie — dưới 100.000đ</b>",
-        "• Trial 200 Xu nếu đủ điều kiện",
-        "• Dùng công cụ public",
-        "• Thưởng giới thiệu: chưa mở",
+        "TOAN AAS giữ hạng thành viên đơn giản: mọi hạng dùng gần như cùng bộ công cụ public. Hạng cao hơn chỉ giúp tiết kiệm Xu khi dùng dịch vụ và nhận mã ưu đãi lên hạng một lần.",
         "",
-        "<b>🥈 Silver — từ 100.000đ</b>",
-        "• Thưởng giới thiệu: 3%, tối đa 100 Xu cho mỗi khách được giới thiệu nạp lần đầu",
-        "• Hỗ trợ thành viên",
-        "• Ưu đãi cơ bản",
+        "<b>📊 Hạng thành viên</b>",
+        "• 🌱 Newbie — dưới 100.000đ: giảm 0% khi tiêu Xu",
+        "• 🥈 Silver — từ 100.000đ: giảm 2% khi tiêu Xu",
+        "• 🥇 Gold — từ 1.000.000đ: giảm 4% khi tiêu Xu",
+        "• 💠 Platinum — từ 10.000.000đ: giảm 6% khi tiêu Xu",
+        "• 💎 Diamond — từ 50.000.000đ: giảm 8% khi tiêu Xu",
+        "• 👑 VIP — từ 100.000.000đ hoặc admin duyệt: giảm 10% khi tiêu Xu",
         "",
-        "<b>🥇 Gold — từ 1.000.000đ</b>",
-        "• Thưởng giới thiệu: 6%, tối đa 150 Xu cho mỗi khách được giới thiệu nạp lần đầu",
-        "• Ưu tiên hỗ trợ hơn Silver",
-        "• Giảm tối đa 3% phí tool đủ điều kiện",
-        "",
-        "<b>💠 Platinum — từ 10.000.000đ</b>",
-        "• Thưởng giới thiệu: 8%, tối đa 200 Xu cho mỗi khách được giới thiệu nạp lần đầu",
-        "• Free Normal Chat",
-        "• Free Chat Pro",
-        "• Ưu tiên hỗ trợ cao",
-        "• Beta tools khi phù hợp",
-        "• Giảm tối đa 5%",
-        "",
-        "<b>💎 Diamond — từ 50.000.000đ</b>",
-        "• Thưởng giới thiệu: 10%, tối đa 250 Xu cho mỗi khách được giới thiệu nạp lần đầu",
-        "• Free Normal Chat",
-        "• Free Chat Pro",
-        "• Ưu tiên hỗ trợ rất cao",
-        "• Quota test tool mới khi phù hợp",
-        "• Giảm tối đa 8%",
-        "",
-        "<b>👑 VIP — từ 100.000.000đ hoặc admin duyệt</b>",
-        "• Thưởng giới thiệu: 12%, tối đa 300 Xu cho mỗi khách được giới thiệu nạp lần đầu",
-        "• Free Normal Chat",
-        "• Free Chat Pro",
-        "• Ưu tiên hỗ trợ cao nhất",
-        "• Cấu hình/quy trình riêng khi phù hợp",
-        "• Giảm tối đa 10%",
+        "<b>Nguyên tắc quan trọng</b>",
+        "• Gói nạp giống nhau cho mọi khách hàng.",
+        "• Không áp dụng discount thành viên vào số Xu nạp.",
+        "• Không có cộng thêm Xu định kỳ theo hạng ở mỗi lần nạp.",
+        "• Gold nạp 100.000đ vẫn nhận Xu gốc như mọi khách; Gold chỉ được giảm 4% khi tiêu Xu cho dịch vụ.",
+        "• Không khóa công cụ thường bằng nhiều tầng hạng phức tạp trừ khi admin công bố riêng.",
         "",
         "🎉 <b>Mã ưu đãi cho đơn nạp tiếp theo sau khi lên hạng</b>",
         "",
@@ -45312,6 +45697,7 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Mỗi mốc hạng nhận 1 lần.",
         "• Mỗi mã chỉ dùng 1 lần.",
         "• Không cộng dồn với mã khuyến mãi khác.",
+        "• Đây là mã lên hạng một lần, không phải bonus nạp định kỳ theo hạng.",
         "• Đây là cộng thêm Xu dịch vụ, không giảm tiền mặt.",
         "",
         "🎂 <b>Quà sinh nhật thành viên</b>",
@@ -45855,11 +46241,12 @@ async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     benefits = "\n".join(f"• {html.escape(item)}" for item in get_member_benefits(tier))
     unlocked = ""
     if tier in {"platinum", "diamond", "vip"}:
+        tier_discount = int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0)
         unlocked = (
-            "\n\n🎁 <b>Đặc quyền đã mở:</b>\n"
-            "• Free Normal Chat\n"
-            "• Free Chat Pro\n"
-            "• Chat Deep vẫn tính Xu theo chính sách."
+            "\n\n🎁 <b>Ưu đãi hạng đã cập nhật:</b>\n"
+            f"• Giảm {tier_discount}% khi tiêu Xu cho dịch vụ đủ điều kiện\n"
+            "• Không cộng thêm Xu định kỳ theo hạng ở mỗi lần nạp\n"
+            "• Gói nạp vẫn nhận Xu gốc giống mọi khách hàng"
         )
     notify_warning = ""
     try:
@@ -46993,10 +47380,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     file_size = update.message.photo[-1].file_size
     raw_cost = calculate_dynamic_cost("image", file_size)
-    credits, total_spent, is_vip = get_user(uid)
-    final_cost, _ = apply_discount(total_spent, raw_cost)
-    if credits < IMAGE_FREE_COST and str(uid) != ADMIN_ID and is_vip != 1:
-        return await reply_insufficient_credits(update, credits, IMAGE_FREE_COST)
+    credits, _, _ = get_user(uid)
+    premium_charge = apply_member_service_discount(uid, raw_cost, "spend_image_paid")
+    final_cost = 0 if is_admin_user(uid) else int(premium_charge.get("final_cost") or 0)
+    free_charge = apply_member_service_discount(uid, IMAGE_FREE_COST, "spend_image_free")
+    image_free_cost = 0 if is_admin_user(uid) else int(free_charge.get("final_cost") or 0)
+    if credits < image_free_cost and not is_admin_user(uid):
+        return await reply_insufficient_credits(update, credits, image_free_cost)
     img_bytes = bytes(await (await update.message.photo[-1].get_file()).download_as_bytearray())
     USER_PENDING[uid] = {
         "type": "image",
@@ -47009,14 +47399,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_trial_account(uid):
         img_desc = (
             f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
-            f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{IMAGE_FREE_COST} Xu</b>\n\n"
+            f"✂️ <b>Gói Tiết Kiệm</b> — Tách nền nhanh, trừ <b>{image_free_cost} Xu</b>\n\n"
             f"<i>💡 Nạp tiền để mở khoá Gói Cao Cấp — chất lượng HD!</i>"
         )
     else:
         img_desc = (
             f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
             f"🖼️ <b>Gói Cao Cấp</b> — RemoveBG HD, trừ <b>{final_cost} Xu</b>\n"
-            f"✂️ <b>Gói Tiết Kiệm</b> — Cutout.pro, trừ <b>{IMAGE_FREE_COST} Xu</b>\n\n"
+            f"✂️ <b>Gói Tiết Kiệm</b> — Cutout.pro, trừ <b>{image_free_cost} Xu</b>\n\n"
             f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển Cutout.pro và hoàn phần chênh lệch.</i>"
         )
     await update.message.reply_text(img_desc, parse_mode="HTML", reply_markup=kb)
@@ -47039,7 +47429,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         txt = await AgentDeepgram.transcribe(file_bytes, context, content_type=content_type)
         await msg.delete()
         if not txt.startswith("❌"):
-            discount_text = " (VIP)" if discount > 0 else ""
+            discount_text = " (đã áp dụng ưu đãi thành viên)" if discount > 0 else ""
             await update.message.reply_text(
                 f"🗣️ <i>\"{txt}\"</i>\n\n<i>(-{cost} Xu){discount_text}</i>",
                 parse_mode="HTML"
@@ -47116,7 +47506,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         # voice / download — voice được chọn provider trước; download trừ Xu trực tiếp.
         if action_key == "voice":
-            min_voice_cost = VOICE_FREE_COST if str(uid) != ADMIN_ID and not is_vip else 0
+            free_voice_charge = apply_member_service_discount(uid, VOICE_FREE_COST, "spend_voice_free")
+            min_voice_cost = 0 if is_admin else int(free_voice_charge.get("final_cost") or 0)
             if min_voice_cost and credits < min_voice_cost:
                 return await reply_insufficient_credits(update, credits, min_voice_cost)
             cost, discount = 0, 0.0
@@ -47130,7 +47521,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if act == "voice":
         raw_cost_v = calculate_dynamic_cost("voice", size_calc)
         refund_charged_credit(uid, cost, "refund", "", "Hoàn phí phân loại voice trước khi khách chọn gói", True)
-        fish_cost, _ = apply_discount(total_spent, raw_cost_v)
+        fish_charge = apply_member_service_discount(uid, raw_cost_v, "spend_voice_paid")
+        fish_cost = 0 if is_admin else int(fish_charge.get("final_cost") or 0)
+        free_voice_charge = apply_member_service_discount(uid, VOICE_FREE_COST, "spend_voice_free")
+        voice_free_cost = 0 if is_admin else int(free_voice_charge.get("final_cost") or 0)
         USER_PENDING[uid] = {
             "type": "voice",
             "data": data,
@@ -47143,14 +47537,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_trial_account(uid):
             voice_desc = (
                 f"🎙️ <b>Chọn gói đọc giọng nói:</b>\n\n"
-                f"🔊 <b>Gói Tiết Kiệm</b> — Giọng chuẩn, trừ <b>{VOICE_FREE_COST} Xu</b>\n\n"
+                f"🔊 <b>Gói Tiết Kiệm</b> — Giọng chuẩn, trừ <b>{voice_free_cost} Xu</b>\n\n"
                 f"<i>💡 Nạp tiền để mở khoá Gói Cao Cấp — giọng nhân bản siêu thực!</i>"
             )
         else:
             voice_desc = (
                 f"🎙️ <b>Chọn gói đọc giọng nói:</b>\n\n"
                 f"🎙️ <b>Gói Cao Cấp</b> — Fish Audio HD, trừ <b>{fish_cost} Xu</b>\n"
-                f"🔊 <b>Gói Tiết Kiệm</b> — Edge TTS, trừ <b>{VOICE_FREE_COST} Xu</b>\n\n"
+                f"🔊 <b>Gói Tiết Kiệm</b> — Edge TTS, trừ <b>{voice_free_cost} Xu</b>\n\n"
                 f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển Edge TTS và hoàn phần chênh lệch.</i>"
             )
         await update.message.reply_text(voice_desc, parse_mode="HTML", reply_markup=kb)
@@ -47186,7 +47580,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin else ""
             return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
 
-        if cost > 0 and not spend_fixed_credit(uid, cost, f"spend_ai_chat_{mode_name}", f"AI chat {mode_name}"):
+        if cost > 0 and not spend_fixed_credit_info(uid, cost, f"spend_ai_chat_{mode_name}", f"AI chat {mode_name}", apply_member_discount_flag=False).get("ok"):
             credits_now, _, _ = get_user(uid)
             return await update.message.reply_text(chat_insufficient_credits_text(mode_name, cost, credits_now))
 
@@ -47295,6 +47689,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("support",     cmd_support))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
+    tg_app.add_handler(CommandHandler("quick",       cmd_quick))
+    tg_app.add_handler(CommandHandler("quickstart",  cmd_quick))
+    tg_app.add_handler(CommandHandler("truycapnhanh", cmd_quick))
     tg_app.add_handler(CommandHandler("help",        cmd_help))
     tg_app.add_handler(CommandHandler("commands",    cmd_help))
     tg_app.add_handler(CommandHandler("huongdan",    cmd_huongdan))
