@@ -32121,14 +32121,14 @@ async def cmd_pdf_to_word(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     if test_mode and not is_admin_user(uid):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh test này.")
     cost = 0 if is_admin_user(uid) else doc_cost("pdf_to_word_text")
-    if not await doc_check_can_pay(update, uid, cost):
-        return
     with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
         ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "pdf")
         if not ok:
             if test_mode:
                 save_tool_test_result("pdf_to_word", "FAIL", error, uid)
             return await update.message.reply_text(f"⚠️ {error}")
+        if not await doc_check_can_pay(update, uid, cost):
+            return
         output_path = os.path.join(tmpdir, "toan_aas_pdf_to_word.docx")
         try:
             ok, error = doc_pdf_to_word_text(input_path, output_path)
@@ -32149,14 +32149,14 @@ async def cmd_image_to_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, t
     if test_mode and not is_admin_user(uid):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh test này.")
     cost = 0 if is_admin_user(uid) else doc_cost("image_to_pdf")
-    if not await doc_check_can_pay(update, uid, cost):
-        return
     with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
         ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "image")
         if not ok:
             if test_mode:
                 save_tool_test_result("image_to_pdf", "FAIL", error, uid)
             return await update.message.reply_text(f"⚠️ {error}")
+        if not await doc_check_can_pay(update, uid, cost):
+            return
         output_path = os.path.join(tmpdir, "toan_aas_image_to_pdf.pdf")
         try:
             ok, error = doc_image_to_pdf(input_path, output_path)
@@ -32177,14 +32177,14 @@ async def cmd_pdf_to_images(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if test_mode and not is_admin_user(uid):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh test này.")
     cost = 0 if is_admin_user(uid) else doc_cost("pdf_to_images")
-    if not await doc_check_can_pay(update, uid, cost):
-        return
     with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
         ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "pdf")
         if not ok:
             if test_mode:
                 save_tool_test_result("pdf_to_images", "FAIL", error, uid)
             return await update.message.reply_text(f"⚠️ {error}")
+        if not await doc_check_can_pay(update, uid, cost):
+            return
         try:
             ok, image_paths, error = doc_pdf_to_images(input_path, tmpdir)
         except Exception as e:
@@ -32209,14 +32209,14 @@ async def cmd_compress_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, t
     if test_mode and not is_admin_user(uid):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh test này.")
     cost = 0 if is_admin_user(uid) else doc_cost("compress_pdf")
-    if not await doc_check_can_pay(update, uid, cost):
-        return
     with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
         ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "pdf")
         if not ok:
             if test_mode:
                 save_tool_test_result("compress_pdf", "FAIL", error, uid)
             return await update.message.reply_text(f"⚠️ {error}")
+        if not await doc_check_can_pay(update, uid, cost):
+            return
         output_path = os.path.join(tmpdir, "toan_aas_compressed.pdf")
         try:
             ok, error = doc_compress_pdf(input_path, output_path)
@@ -32236,12 +32236,12 @@ async def cmd_split_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     page_spec = " ".join(context.args or []).strip()
     cost = 0 if is_admin_user(uid) else doc_cost("split_pdf")
-    if not await doc_check_can_pay(update, uid, cost):
-        return
     with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
         ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "pdf")
         if not ok:
             return await update.message.reply_text(f"⚠️ {error}")
+        if not await doc_check_can_pay(update, uid, cost):
+            return
         output_path = os.path.join(tmpdir, "toan_aas_split.pdf")
         try:
             ok, error = doc_split_pdf(input_path, output_path, page_spec)
@@ -32267,12 +32267,12 @@ async def cmd_merge_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_ocr_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     cost = 0 if is_admin_user(uid) else doc_cost("ocr_image")
-    if not await doc_check_can_pay(update, uid, cost):
-        return
     with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
         ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "image")
         if not ok:
             return await update.message.reply_text(f"⚠️ {error}")
+        if not await doc_check_can_pay(update, uid, cost):
+            return
         try:
             ok, text, error = doc_ocr_image_to_text(input_path)
         except Exception as e:
