@@ -23563,11 +23563,13 @@ def set_user_chat_mode(user_id, mode: str, username="", note="") -> tuple[bool, 
     return True, ensure_user_modes(user_id)
 
 TRANSLATE_LANGUAGE_OPTIONS = {
-    "vi": {"name": "Vietnamese", "deepl": "VI"},
+    "vi": {"name": "Tiếng Việt", "deepl": "VI"},
     "en": {"name": "English", "deepl": "EN-US"},
-    "ja": {"name": "Japanese", "deepl": "JA"},
-    "ko": {"name": "Korean", "deepl": "KO"},
-    "zh": {"name": "Chinese", "deepl": "ZH"},
+    "zh": {"name": "中文", "deepl": "ZH"},
+    "ja": {"name": "日本語", "deepl": "JA"},
+    "ko": {"name": "한국어", "deepl": "KO"},
+    "th": {"name": "ไทย", "deepl": "TH"},
+    "ar": {"name": "العربية", "deepl": "AR"},
 }
 
 def normalize_translate_target(value: str) -> str:
@@ -23587,6 +23589,9 @@ def normalize_translate_target(value: str) -> str:
         "china": "zh",
         "chinese": "zh",
         "zh_cn": "zh",
+        "thai": "th",
+        "thailand": "th",
+        "arabic": "ar",
     }
     return aliases.get(raw, raw if raw in TRANSLATE_LANGUAGE_OPTIONS else "")
 
@@ -25677,16 +25682,34 @@ def main_image_keyboard() -> InlineKeyboardMarkup:
 def main_audio_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎤 Mở công cụ âm thanh", callback_data="menu|hint_media_factory")],
-        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|main_audio")],
+        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
         [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+    ])
+
+def translate_language_keyboard(other: bool = False) -> InlineKeyboardMarkup:
+    if other:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🇯🇵 日本語", callback_data="menu|translate_set_ja"), InlineKeyboardButton("🇰🇷 한국어", callback_data="menu|translate_set_ko")],
+            [InlineKeyboardButton("🇹🇭 ไทย", callback_data="menu|translate_set_th"), InlineKeyboardButton("🇸🇦 العربية", callback_data="menu|translate_set_ar")],
+            [InlineKeyboardButton("⬅️ 3 ngôn ngữ chính", callback_data="menu|translate")],
+            [InlineKeyboardButton("🌐 Tắt dịch tự động", callback_data="menu|translate_off")],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="menu|translate_set_vi")],
+        [InlineKeyboardButton("🇺🇸 English", callback_data="menu|translate_set_en")],
+        [InlineKeyboardButton("🇨🇳 中文", callback_data="menu|translate_set_zh")],
+        [InlineKeyboardButton("🌍 Ngôn ngữ khác / More languages", callback_data="menu|translate_more")],
+        [InlineKeyboardButton("🌐 Tắt dịch tự động", callback_data="menu|translate_off")],
+        [InlineKeyboardButton("⬅️ Về âm thanh", callback_data="menu|main_audio"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def main_quick_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
         [InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
-        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|main_audio"), InlineKeyboardButton("🖼 Ảnh", callback_data="menu|main_image")],
+        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🖼 Ảnh", callback_data="menu|main_image")],
         [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
@@ -26137,6 +26160,29 @@ def menu_text_main_audio() -> str:
     ])
     return "\n".join(lines)
 
+def menu_text_translate(other: bool = False) -> str:
+    if other:
+        return (
+            "🌍 <b>NGÔN NGỮ KHÁC / MORE LANGUAGES</b>\n\n"
+            "Chọn ngôn ngữ muốn bot dịch tự động sang. Sau khi bật, tin nhắn văn bản thường sẽ được dịch thay vì chat AI.\n\n"
+            "• 🇯🇵 日本語\n"
+            "• 🇰🇷 한국어\n"
+            "• 🇹🇭 ไทย\n"
+            "• 🇸🇦 العربية\n\n"
+            "Provider: DeepL/Gemini/OpenAI fallback theo cấu hình. Nếu provider lỗi, không trừ Xu."
+        )
+    return (
+        "🌐 <b>DỊCH THUẬT TOAN AAS</b>\n\n"
+        "Chọn một trong 3 ngôn ngữ chính bên dưới để bật dịch tự động:\n\n"
+        "🇻🇳 Tiếng Việt\n"
+        "🇺🇸 English\n"
+        "🇨🇳 中文\n\n"
+        "Các ngôn ngữ khác nằm trong nút <b>🌍 Ngôn ngữ khác / More languages</b>.\n\n"
+        "Sau khi bật, tin nhắn văn bản thường sẽ được dịch sang ngôn ngữ đã chọn. "
+        "Tắt bằng <code>/translate_mode_off</code> hoặc nút tắt bên dưới.\n\n"
+        "Dịch nhanh bằng lệnh: <code>/translate en nội dung</code>."
+    )
+
 def menu_text_main_quick() -> str:
     lines = [
         "⚡ <b>TRUY CẬP NHANH</b>",
@@ -26246,6 +26292,10 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_main_image(), main_image_keyboard()
     if action == "main_audio":
         return menu_text_main_audio(), main_audio_keyboard()
+    if action == "translate":
+        return menu_text_translate(False), translate_language_keyboard(False)
+    if action == "translate_more":
+        return menu_text_translate(True), translate_language_keyboard(True)
     if action == "main_quick":
         return menu_text_main_quick(), main_quick_keyboard()
     if action == "main_topup":
@@ -27077,6 +27127,34 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
+    if action.startswith("translate_set_"):
+        target = normalize_translate_target(action.replace("translate_set_", "", 1))
+        if not target:
+            return await query.answer("Ngôn ngữ chưa hỗ trợ.", show_alert=True)
+        set_user_translate_mode(
+            query.from_user.id,
+            target,
+            username=query.from_user.username or query.from_user.first_name or "",
+            note=f"User enabled translate mode from menu target={target}",
+        )
+        text = (
+            f"✅ Đã bật dịch tự động sang <b>{html.escape(translate_target_label(target))}</b>.\n\n"
+            "Từ bây giờ, tin nhắn văn bản thường sẽ được dịch thay vì chat AI.\n"
+            "Tắt bằng <code>/translate_mode_off</code> hoặc nút bên dưới."
+        )
+        return await query.edit_message_text(text, parse_mode="HTML", reply_markup=translate_language_keyboard(False))
+    if action == "translate_off":
+        set_user_translate_mode(
+            query.from_user.id,
+            "",
+            username=query.from_user.username or query.from_user.first_name or "",
+            note="User disabled translate mode from menu",
+        )
+        return await query.edit_message_text(
+            "✅ Đã tắt dịch tự động. Tin nhắn thường sẽ quay về AI chat.",
+            parse_mode="HTML",
+            reply_markup=translate_language_keyboard(False),
+        )
     if action == "main_profile":
         text, keyboard = menu_text_main_profile(query.from_user.id), public_back_keyboard()
     else:
@@ -27610,7 +27688,7 @@ async def cmd_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     target = normalize_translate_target(args[0])
     if not target:
-        return await update.message.reply_text("⚠️ Ngôn ngữ chưa hỗ trợ. Dùng: <code>vi|en|ja|ko|zh</code>", parse_mode="HTML")
+        return await update.message.reply_text("⚠️ Ngôn ngữ chưa hỗ trợ. Dùng: <code>vi|en|zh|ja|ko|th|ar</code>", parse_mode="HTML")
     text = " ".join(args[1:]).strip()[:1800]
     if not text:
         return await update.message.reply_text("⚠️ Thiếu nội dung cần dịch.", parse_mode="HTML")
@@ -27656,11 +27734,17 @@ async def cmd_ko_vi(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_translate_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name or ""
-    target = normalize_translate_target(context.args[0] if context.args else "vi")
+    if not context.args:
+        return await update.message.reply_text(
+            menu_text_translate(False),
+            parse_mode="HTML",
+            reply_markup=translate_language_keyboard(False),
+        )
+    target = normalize_translate_target(context.args[0])
     if not target:
         supported = ", ".join(sorted(TRANSLATE_LANGUAGE_OPTIONS.keys()))
         return await update.message.reply_text(
-            f"⚠️ Ngôn ngữ chưa hỗ trợ. Dùng: <code>/translate_mode vi|en|ja|ko|zh</code>\n"
+            f"⚠️ Ngôn ngữ chưa hỗ trợ. Dùng: <code>/translate_mode vi|en|zh|ja|ko|th|ar</code>\n"
             f"Hiện hỗ trợ: <code>{html.escape(supported)}</code>",
             parse_mode="HTML",
         )
@@ -27690,7 +27774,7 @@ async def cmd_translate_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• DeepL: <code>{'configured' if DEEPL_API_KEY else 'missing'}</code>\n"
         f"• Gemini: <code>{'configured' if gemini_client else 'missing'}</code>\n"
         f"• OpenAI: <code>{'configured' if openai_client else 'missing'}</code>\n\n"
-        "Bật: <code>/translate_mode en</code>\n"
+        "Bật: <code>/translate_mode</code> hoặc <code>/translate_mode en</code>\n"
         "Tắt: <code>/translate_mode_off</code>",
         parse_mode="HTML",
     )

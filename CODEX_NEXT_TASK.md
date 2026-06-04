@@ -98,6 +98,8 @@ Goals:
 - Do not open ads assistant before there is a clear workflow.
 - Do not run the Big Plan while basic tools/API providers still fail.
 - Do not make broad changes to parts already stable.
+- PayOS checkout/debug is the final payment blocker before sales; do not mark real payment PASS until admin performs a real payment test.
+- Future USD/international payment receiving accounts belong to a later billing expansion, separate from the current VND PayOS/manual QR flow.
 
 ### Next Phase - Big Plan / TOAN AAS SaaS Platform
 
