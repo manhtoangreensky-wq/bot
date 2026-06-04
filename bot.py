@@ -22810,9 +22810,9 @@ class AgentGemini:
                 return res.choices[0].message.content
             except Exception as e:
                 logger.error(f"OpenAI error: {e}")
-                return "❌ Lỗi cả Gemini lẫn OpenAI."
+                return "❌ AI đang tạm hết quota hoặc quá tải.\nBot chưa trừ Xu. Vui lòng thử lại sau."
 
-        return "❌ Không có AI Provider nào hoạt động."
+        return "❌ AI đang tạm hết quota hoặc quá tải.\nBot chưa trừ Xu. Vui lòng thử lại sau."
 
 class AgentDeepgram:
     REQUEST_PARAMS = {
@@ -26576,6 +26576,10 @@ PUBLIC_COMMAND_FUNCTIONS = {
     "tts": "cmd_voiceover",
     "translate": "cmd_translate",
     "translate_text": "cmd_translate_text",
+    "translate_tools": "cmd_translate_tools",
+    "translate_file": "cmd_translate_file",
+    "translate_voice": "cmd_translate_voice",
+    "translate_audio": "cmd_translate_voice",
     "vi_en": "cmd_vi_en",
     "en_vi": "cmd_en_vi",
     "zh_vi": "cmd_zh_vi",
@@ -26937,6 +26941,9 @@ def menu_text_main_audio() -> str:
         "🌐 <b>Dịch thuật / Translate</b>",
         "Dùng để dịch văn bản, transcript, phụ đề và nội dung phục vụ video/content.",
         "• <code>/translate &lt;ngôn ngữ&gt; &lt;nội dung&gt;</code> — dịch văn bản",
+        "• <code>/translate_file &lt;ngôn ngữ&gt;</code> — gửi/reply file text/doc/pdf để dịch nếu tool đã bật",
+        "• <code>/translate_voice &lt;ngôn ngữ&gt;</code> — gửi/reply voice/audio để bóc băng rồi dịch nếu STT đã bật",
+        "• <code>/translate_audio &lt;ngôn ngữ&gt;</code> — alias của /translate_voice",
         "• <code>/vi_en &lt;nội dung&gt;</code> — Việt → Anh nếu provider đã bật",
         "• <code>/en_vi &lt;nội dung&gt;</code> — Anh → Việt nếu provider đã bật",
         "• <code>/zh_vi</code>, <code>/ja_vi</code>, <code>/ko_vi</code> — dịch về tiếng Việt nếu provider đã bật",
@@ -28355,6 +28362,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Grok cao cấp: <code>planned/missing</code>",
         f"• Router normal/pro/deep: <code>{'configured' if providers['ai']['ready'] else 'missing'}</code>",
         f"• AI tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
+        "• AI quota guide: <code>Gemini quota exhausted/OpenAI 429/rate limit → đổi key, nạp billing, tăng quota hoặc tạm dùng fallback provider.</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -28923,6 +28931,135 @@ async def cmd_translate_status(update: Update, context: ContextTypes.DEFAULT_TYP
         "Tắt: <code>/translate_mode_off</code>",
         parse_mode="HTML",
     )
+
+TRANSLATE_FILE_NOT_READY_TEXT = "Dịch file đang admin test/chưa mở public. Bot chưa trừ Xu."
+TRANSLATE_AUDIO_ERROR_TEXT = "Chưa xử lý được audio. Bot chưa trừ Xu."
+
+def translate_tools_text() -> str:
+    return (
+        "🌐 <b>CÔNG CỤ DỊCH TOAN AAS</b>\n\n"
+        "<b>Đang hỗ trợ:</b>\n"
+        "• <code>/translate en nội dung</code> — dịch văn bản trực tiếp\n"
+        "• <code>/translate_text nội dung</code> — dịch nhanh về tiếng Việt\n"
+        "• <code>/translate_file en</code> — gửi/reply file text/doc/pdf để dịch nếu tool đã bật\n"
+        "• <code>/translate_voice en</code> — gửi/reply voice/audio, bóc băng rồi dịch nếu STT đã bật\n"
+        "• <code>/translate_audio en</code> — alias của /translate_voice\n\n"
+        "<b>Lưu ý:</b>\n"
+        "• Dịch file đang admin test, chỉ xử lý định dạng có engine local.\n"
+        "• Dịch voice/audio cần Deepgram STT hoạt động.\n"
+        "• Provider lỗi hoặc hết quota: bot chưa trừ Xu.\n"
+        "• Chỉ dịch nội dung bạn sở hữu hoặc có quyền sử dụng."
+    )
+
+async def cmd_translate_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(translate_tools_text(), parse_mode="HTML")
+
+async def translate_file_extract_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str, str]:
+    info, _source = doc_input_file_info(update)
+    if not info:
+        return False, "", "Hãy gửi file text/doc/pdf hoặc reply file rồi gõ /translate_file <ngôn_ngữ>."
+    if int(info.get("file_size") or 0) > DOC_MAX_FILE_BYTES:
+        return False, "", f"File quá lớn. Giới hạn MVP là {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB."
+    if doc_is_image(info):
+        return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+    ext = doc_file_ext(info.get("file_name") or info.get("filename") or "")
+    try:
+        tg_file = await context.bot.get_file(info.get("file_id") or "")
+        data = bytes(await tg_file.download_as_bytearray())
+    except Exception:
+        return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+    if ext in {".txt", ".md", ".csv", ".json", ".srt", ".vtt", ".log"}:
+        text = data.decode("utf-8", errors="replace").strip()
+        return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_NOT_READY_TEXT)
+    with tempfile.TemporaryDirectory(prefix="toanaas_translate_") as tmpdir:
+        input_path = os.path.join(tmpdir, "input" + (ext or ".bin"))
+        with open(input_path, "wb") as f:
+            f.write(data)
+        if doc_is_pdf(info):
+            if not PdfReader:
+                return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+            try:
+                reader = PdfReader(input_path)
+                chunks = []
+                for page in reader.pages[:DOC_MAX_PAGES]:
+                    page_text = (page.extract_text() or "").strip()
+                    if page_text:
+                        chunks.append(page_text)
+                text = "\n\n".join(chunks).strip()
+                return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_NOT_READY_TEXT)
+            except Exception:
+                return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+        if ext == ".docx":
+            if not DocxDocument:
+                return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+            try:
+                doc = DocxDocument(input_path)
+                text = "\n".join(p.text for p in getattr(doc, "paragraphs", []) if p.text).strip()
+                return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_NOT_READY_TEXT)
+            except Exception:
+                return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+    return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+
+async def cmd_translate_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target = normalize_translate_target((context.args or [""])[0])
+    if not target:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/translate_file en</code> hoặc <code>/translate_file vi</code>", parse_mode="HTML")
+    ok, source_text, error = await translate_file_extract_text(update, context)
+    if not ok:
+        return await update.message.reply_text(error or TRANSLATE_FILE_NOT_READY_TEXT)
+    try:
+        result = await translate_to_language(source_text[:3000], target)
+        save_tool_test_result("translation_file", "PASS", f"provider={result.get('provider')}; target={target}", update.effective_user.id)
+        await update.message.reply_text(
+            "🌐 <b>DỊCH FILE TOAN AAS</b>\n\n"
+            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
+            f"• Provider: <code>{html.escape(result.get('provider') or '-')}</code>\n\n"
+            "<b>Nội dung gốc:</b>\n"
+            f"<code>{html.escape(source_text[:1000])}</code>\n\n"
+            "<b>Bản dịch:</b>\n"
+            f"{html.escape((result.get('text') or '')[:2200])}",
+            parse_mode="HTML",
+        )
+    except Exception:
+        save_tool_test_result("translation_file", "FAIL", "translation provider failed", update.effective_user.id)
+        await update.message.reply_text("❌ Dịch file đang lỗi tạm thời hoặc hết quota provider. Bot chưa trừ Xu.")
+
+async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target = normalize_translate_target((context.args or [""])[0])
+    if not target:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/translate_voice en</code> hoặc <code>/translate_audio vi</code>", parse_mode="HTML")
+    if not DEEPGRAM_API_KEY:
+        return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info:
+        return await update.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ <code>/translate_voice en</code> trong vòng 2 phút.", parse_mode="HTML")
+    if int(media_info.get("file_size", 0) or 0) > 15 * 1024 * 1024 or not media_info.get("bytes"):
+        return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+    try:
+        transcript = (await AgentDeepgram.transcribe(
+            media_info["bytes"],
+            context,
+            content_type=media_info.get("content_type") or "application/octet-stream",
+        ) or "").strip()
+        if not transcript or transcript.startswith("❌"):
+            save_tool_test_result("translation_voice", "FAIL", transcript[:400] or "empty_transcript", update.effective_user.id)
+            return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+        result = await translate_to_language(transcript[:3000], target)
+        save_tool_test_result("translation_voice", "PASS", f"stt=deepgram; provider={result.get('provider')}; target={target}", update.effective_user.id)
+        await update.message.reply_text(
+            "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
+            f"• STT: <code>Deepgram</code>\n"
+            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
+            f"• Provider dịch: <code>{html.escape(result.get('provider') or '-')}</code>\n\n"
+            "<b>Transcript gốc:</b>\n"
+            f"<code>{html.escape(transcript[:1100])}</code>\n\n"
+            "<b>Bản dịch:</b>\n"
+            f"{html.escape((result.get('text') or '')[:2200])}",
+            parse_mode="HTML",
+        )
+    except Exception:
+        save_tool_test_result("translation_voice", "FAIL", "stt_or_translation_provider_failed", update.effective_user.id)
+        await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
 
 async def handle_auto_translate_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, target: str):
     uid = update.effective_user.id
@@ -34210,12 +34347,9 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not source_file_id:
         return await update.message.reply_text("⚠️ Hãy reply ảnh dạng photo hoặc file ảnh jpg/jpeg/png/webp rồi gõ /ai_image_edit <yêu cầu sửa ảnh>.")
     if not ENABLE_OPENAI_IMAGE_EDIT or not is_feature_enabled("image_openai_edit", uid, default=False):
-        return await update.message.reply_text(
-            admin_first_guard_message("AI Image Edit", "/image_prompt <chủ đề>"),
-            parse_mode="HTML",
-        )
+        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public. Bot chưa trừ Xu.")
     if not openai_client:
-        return await update.message.reply_text("⚠️ OpenAI image edit provider chưa được cấu hình. Bot chưa trừ Xu.")
+        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public. Bot chưa trừ Xu.")
     if not await charge_media_factory_or_reply(update, uid, AI_IMAGE_EDIT_COST, "spend_ai_image_edit", f"AI image edit: {instruction[:120]}"):
         return
     charged = not is_admin_user(uid)
@@ -34313,16 +34447,11 @@ async def prepare_remove_bg_from_cached_image(update: Update, context: ContextTy
     if not info or not doc_is_image(info):
         return False
     if not REMOVEBG_API_KEY and not CUTOUT_API_KEY:
-        await update.message.reply_text("❌ Dịch vụ tách nền chưa được cấu hình.")
+        await update.message.reply_text("Tách nền đang admin test/chưa mở public. Bot chưa trừ Xu.")
         return True
     image_test = preferred_tool_test_result("image_remove_bg", "image")
     if not is_admin_user(uid) and str(image_test.get("status") or "").upper() != "PASS":
-        await update.message.reply_text(
-            "🖼 Tách nền ảnh đang trong trạng thái thử nghiệm provider.\n"
-            "Admin cần chạy <code>/tool_test_image_debug</code> và xác nhận PASS trước khi mở công khai.\n"
-            "Bạn có thể dùng <code>/image_prompt &lt;chủ đề&gt;</code> hoặc <code>/image_to_pdf</code> trước. Không có Xu nào bị trừ.",
-            parse_mode="HTML",
-        )
+        await update.message.reply_text("Tách nền đang admin test/chưa mở public. Bot chưa trừ Xu.")
         return True
     file_size = int(info.get("file_size") or 0)
     raw_cost = calculate_dynamic_cost("image", file_size)
@@ -49993,6 +50122,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("avatar_video", cmd_avatar_video))
     tg_app.add_handler(CommandHandler("translate", cmd_translate))
     tg_app.add_handler(CommandHandler("translate_text", cmd_translate_text))
+    tg_app.add_handler(CommandHandler("translate_tools", cmd_translate_tools))
+    tg_app.add_handler(CommandHandler("translate_file", cmd_translate_file))
+    tg_app.add_handler(CommandHandler("translate_voice", cmd_translate_voice))
+    tg_app.add_handler(CommandHandler("translate_audio", cmd_translate_voice))
     tg_app.add_handler(CommandHandler("vi_en", cmd_vi_en))
     tg_app.add_handler(CommandHandler("en_vi", cmd_en_vi))
     tg_app.add_handler(CommandHandler("zh_vi", cmd_zh_vi))
