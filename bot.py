@@ -25727,7 +25727,7 @@ def menu_text_main(is_admin: bool) -> str:
         "🎤 <b>Âm thanh / Voice</b>\nBóc băng audio/video thành chữ hoặc tạo giọng đọc tiếng Việt.\n\n"
         "💳 <b>Xu dịch vụ</b>\nNạp Xu, xem bảng giá, dùng mã quà tặng hoặc mã khuyến mãi.\n\n"
         "📚 <b>Hướng dẫn</b>\nXem cách dùng, điều khoản, chính sách Xu và quyền lợi thành viên.\n\n"
-        "Bấm nút bên dưới để bắt đầu 👇"
+        "Bấm Start = đồng ý Điều khoản, Quyền riêng tư, Xu/hoàn tiền & Sở hữu trí tuệ TOAN AAS."
         f"{admin_line}"
         f"{runtime_line}"
     )
@@ -25776,7 +25776,8 @@ def build_start_message_text(user_id, user_existed_before: Optional[bool] = None
         "🎤 <b>Âm thanh / Voice</b>\nBóc băng audio/video thành chữ hoặc tạo giọng đọc tiếng Việt.\n\n"
         "💳 <b>Xu dịch vụ</b>\nNạp Xu, xem bảng giá, dùng mã quà tặng hoặc mã khuyến mãi.\n\n"
         "📚 <b>Hướng dẫn</b>\nXem cách dùng, điều khoản, chính sách Xu và quyền lợi thành viên.\n\n"
-        "Bấm nút bên dưới để bắt đầu 👇"
+        "Bằng việc bấm Start, nạp Xu hoặc tiếp tục sử dụng TOAN AAS, bạn xác nhận đã đọc, hiểu và đồng ý với "
+        "/legal, /privacy, /dieukhoan_xu, /refund_policy và chính sách sở hữu trí tuệ của TOAN AAS."
         + (f"\n\n🧬 Runtime: <code>{APP_BUILD}</code>" if is_admin else "")
     )
 
