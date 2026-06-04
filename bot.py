@@ -25244,6 +25244,21 @@ def provider_status_text(value) -> str:
         return "configured" if value else "missing"
     return bool_env_status(value)
 
+def provider_runtime_status_text(configured: bool, *tool_names: str) -> str:
+    if not configured:
+        return "missing"
+    result = preferred_tool_test_result(*tool_names) if tool_names else {"status": "NOT_TESTED", "detail": ""}
+    status = str(result.get("status") or "NOT_TESTED").upper()
+    detail = str(result.get("detail") or "").lower()
+    if status == "PASS":
+        return "configured/tested_pass"
+    if status == "FAIL":
+        quota_markers = ("quota", "429", "rate limit", "ratelimit", "resource_exhausted", "insufficient_quota")
+        return "quota_fail" if any(marker in detail for marker in quota_markers) else "configured/fail"
+    if status in {"MISSING", "DISABLED"}:
+        return status.lower()
+    return "configured/not_tested"
+
 def video_provider_status_line(label: str, configured: bool, test_name: str, stage: str) -> str:
     return (
         f"• {html.escape(label)}: <code>{provider_status_text(configured)}</code>"
@@ -26583,6 +26598,8 @@ PUBLIC_COMMAND_FUNCTIONS = {
     "translate_file": "cmd_translate_file",
     "translate_voice": "cmd_translate_voice",
     "translate_audio": "cmd_translate_voice",
+    "transcribe": "cmd_transcribe",
+    "ai_status": "cmd_ai_status",
     "vi_en": "cmd_vi_en",
     "en_vi": "cmd_en_vi",
     "zh_vi": "cmd_zh_vi",
@@ -28374,8 +28391,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Manual QR fallback: <code>working/available</code>",
         "",
         "<b>AI</b>",
-        f"• Gemini: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
-        f"• OpenAI fallback: <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        f"• Gemini: <code>{provider_runtime_status_text(providers['ai']['gemini'], 'ai_gemini', 'ai_chat', 'ai')}</code>",
+        f"• OpenAI fallback: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_openai', 'ai_chat', 'ai')}</code>",
         "• Claude Sonnet/Opus: <code>planned/missing</code>",
         "• Grok cao cấp: <code>planned/missing</code>",
         f"• Router normal/pro/deep: <code>{'configured' if providers['ai']['ready'] else 'missing'}</code>",
@@ -28384,8 +28401,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
-        f"• ElevenLabs TTS: <code>{provider_status_text(providers['audio']['elevenlabs'])}</code> | tested <code>{html.escape(tool_test_status_text('tts:elevenlabs'))}</code>",
-        f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
+        f"• ElevenLabs TTS: <code>{provider_runtime_status_text(providers['audio']['elevenlabs'], 'tts:elevenlabs', 'tts')}</code> | tested <code>{html.escape(tool_test_status_text('tts:elevenlabs'))}</code>",
+        f"• Fish Audio: <code>{provider_runtime_status_text(providers['audio']['fish_audio'], 'tts:fish', 'tts')}</code>",
         f"• Edge TTS: <code>{'built-in/fallback' if providers['audio']['edge_tts'] else 'package missing'}</code>",
         f"• Auphonic enhance: <code>{provider_status_text(providers['audio']['auphonic'])}</code> | stage <code>{html.escape(providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED')}</code>",
         f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
@@ -28398,8 +28415,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Translation tested: <code>{html.escape(tool_test_status_text('translation'))}</code>",
         "",
         "<b>Image Utilities</b>",
-        f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
-        f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
+        f"• RemoveBG: <code>{provider_runtime_status_text(providers['image']['removebg'], 'image_remove_bg', 'image')}</code>",
+        f"• Cutout: <code>{provider_runtime_status_text(providers['image']['cutout'], 'image_remove_bg', 'image')}</code>",
         f"• Image provider tested: <code>{html.escape(preferred_tool_test_status_text('image_remove_bg', 'image'))}</code>",
         "",
         "<b>Document/PDF</b>",
@@ -28426,8 +28443,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Image Tools Menu: <code>{'enabled/menu' if providers['media_factory']['image_tools'] else 'disabled'}</code>",
         f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
         f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
-        f"• OpenAI Image Generation: configured <code>{provider_status_text(providers['ai']['openai'])}</code> | tested <code>{html.escape(tool_test_status_text('ai_image'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_generation_stage') or 'DISABLED')}</code>",
-        f"• OpenAI Image Edit: configured <code>{provider_status_text(providers['ai']['openai'])}</code> | tested <code>{html.escape(tool_test_status_text('ai_image_edit'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image_edit') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_edit_stage') or 'DISABLED')}</code>",
+        f"• OpenAI Image Generation: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_image')}</code> | tested <code>{html.escape(tool_test_status_text('ai_image'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_generation_stage') or 'DISABLED')}</code>",
+        f"• OpenAI Image Edit: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_image_edit')}</code> | tested <code>{html.escape(tool_test_status_text('ai_image_edit'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image_edit') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_edit_stage') or 'DISABLED')}</code>",
         f"• Stability Image: configured <code>{provider_status_text(providers['image']['stability'])}</code> | tested <code>{html.escape(tool_test_status_text('stability_image'))}</code> | stage <code>{html.escape(providers['media_factory'].get('stability_image_stage') or 'DISABLED')}</code>",
         f"• Image Upscale: configured <code>{provider_status_text(providers['image']['upscale'])}</code> | tested <code>{html.escape(tool_test_status_text('image_upscale'))}</code> | stage <code>{html.escape(providers['media_factory'].get('image_upscale_stage') or 'DISABLED')}</code>",
         f"• Kling Video: configured <code>{provider_status_text(providers['video']['kling'])}</code> | tested <code>{html.escape(tool_test_status_text('kling_video'))}</code> | stage <code>{html.escape(providers['media_factory'].get('kling_video_stage') or 'DISABLED')}</code>",
@@ -28463,6 +28480,44 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"DB error: <code>{html.escape(db_status.get('error') or '-')}</code>")
     await reply_html_lines(update, lines)
 
+async def cmd_ai_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    providers = provider_status_payload()
+    lines = [
+        "🤖 <b>TOAN AAS AI / MEDIA STATUS</b>",
+        "",
+        "<b>AI Chat</b>",
+        f"• Gemini: <code>{provider_runtime_status_text(providers['ai']['gemini'], 'ai_gemini', 'ai_chat', 'ai')}</code>",
+        f"• OpenAI: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_openai', 'ai_chat', 'ai')}</code>",
+        f"• Router tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
+        "",
+        "<b>Image</b>",
+        f"• AI image generation: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_image')}</code> | public <code>{'ON' if is_feature_public_ready('ai_image') else 'OFF'}</code>",
+        f"• AI image edit: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_image_edit')}</code> | public <code>{'ON' if is_feature_public_ready('ai_image_edit') else 'OFF'}</code>",
+        f"• RemoveBG: <code>{provider_runtime_status_text(providers['image']['removebg'], 'image_remove_bg', 'image')}</code>",
+        f"• Cutout: <code>{provider_runtime_status_text(providers['image']['cutout'], 'image_remove_bg', 'image')}</code>",
+        "",
+        "<b>Audio / Translation</b>",
+        f"• STT Deepgram: <code>{provider_runtime_status_text(providers['audio']['deepgram'], 'stt')}</code>",
+        f"• DeepL: <code>{provider_runtime_status_text(providers['translation']['deepl'], 'translation', 'translation_file', 'translation_voice')}</code>",
+        f"• TTS ElevenLabs: <code>{provider_runtime_status_text(providers['audio']['elevenlabs'], 'tts:elevenlabs', 'tts')}</code>",
+        f"• TTS Fish Audio: <code>{provider_runtime_status_text(providers['audio']['fish_audio'], 'tts:fish', 'tts')}</code>",
+        f"• TTS Edge: <code>{'configured/built_in' if providers['audio']['edge_tts'] else 'missing'}</code>",
+        "",
+        "<b>Video</b>",
+        f"• Kling: <code>{provider_runtime_status_text(providers['video']['kling'], 'kling_video', 'real_video')}</code>",
+        f"• Runway: <code>{provider_runtime_status_text(providers['video']['runway'], 'runway_video', 'real_video')}</code>",
+        f"• HeyGen: <code>{provider_runtime_status_text(providers['video']['heygen'], 'heygen_avatar')}</code>",
+        f"• Customer real video: <code>{'ON' if is_feature_public_ready('real_video') else 'OFF'}</code>",
+        "",
+        "configured/not_tested = có cấu hình nhưng chưa chứng minh chạy thật. quota_fail = đã test và lỗi quota/rate limit.",
+    ]
+    if is_admin_or_owner(uid):
+        ai_detail = (preferred_tool_test_result("ai_chat", "ai").get("detail") or "")[:350]
+        if ai_detail:
+            lines.extend(["", f"<b>Admin detail</b>: <code>{html.escape(ai_detail)}</code>"])
+    await reply_html_lines(update, lines)
+
 async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -28491,14 +28546,14 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
         "",
         "<b>AI</b>",
-        f"• Gemini: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
-        f"• OpenAI: <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        f"• Gemini: <code>{provider_runtime_status_text(providers['ai']['gemini'], 'ai_gemini', 'ai_chat', 'ai')}</code>",
+        f"• OpenAI: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_openai', 'ai_chat', 'ai')}</code>",
         f"• Tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
         "• Smoke test: <code>/tool_test_ai</code>",
         "",
         "<b>Image utilities</b>",
-        f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
-        f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
+        f"• RemoveBG: <code>{provider_runtime_status_text(providers['image']['removebg'], 'image_remove_bg', 'image')}</code>",
+        f"• Cutout: <code>{provider_runtime_status_text(providers['image']['cutout'], 'image_remove_bg', 'image')}</code>",
         f"• Tested: <code>{html.escape(preferred_tool_test_status_text('image_remove_bg', 'image'))}</code>",
         "• Smoke test: reply ảnh rồi gõ <code>/tool_test_image</code>",
         "",
@@ -28536,8 +28591,8 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_readiness)}</code>",
-        f"• ElevenLabs TTS: <code>{provider_status_text(providers['audio']['elevenlabs'])}</code> | tested <code>{html.escape(tool_test_status_text('tts:elevenlabs'))}</code>",
-        f"• Fish Audio: <code>{provider_status_text(providers['audio']['fish_audio'])}</code>",
+        f"• ElevenLabs TTS: <code>{provider_runtime_status_text(providers['audio']['elevenlabs'], 'tts:elevenlabs', 'tts')}</code> | tested <code>{html.escape(tool_test_status_text('tts:elevenlabs'))}</code>",
+        f"• Fish Audio: <code>{provider_runtime_status_text(providers['audio']['fish_audio'], 'tts:fish', 'tts')}</code>",
         f"• Edge TTS: <code>{'built-in/fallback' if providers['audio']['edge_tts'] else 'package missing'}</code>",
         f"• Auphonic enhance: <code>{provider_status_text(providers['audio']['auphonic'])}</code> | stage <code>{html.escape(providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED')}</code>",
         f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
@@ -28604,6 +28659,8 @@ async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     overall = "PASS" if "PASS" in {gemini_status, openai_status} else ("MISSING" if {gemini_status, openai_status} == {"MISSING"} else "FAIL")
     save_tool_test_result("ai", overall, f"Gemini={gemini_status}; OpenAI={openai_status}", update.effective_user.id)
+    save_tool_test_result("ai_gemini", gemini_status, gemini_detail, update.effective_user.id)
+    save_tool_test_result("ai_openai", openai_status, openai_detail, update.effective_user.id)
     await update.message.reply_text(
         "🤖 <b>AI Smoke Test</b>\n\n"
         f"• Gemini: <code>{html.escape(gemini_status)}</code>"
@@ -28951,7 +29008,11 @@ async def cmd_translate_status(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 TRANSLATE_FILE_NOT_READY_TEXT = "Dịch file đang admin test/chưa mở public. Bot chưa trừ Xu."
+TRANSLATE_FILE_EXTRACT_ERROR_TEXT = "Không đọc được nội dung file này. Bot chưa trừ Xu."
+TRANSLATE_FILE_PROVIDER_ERROR_TEXT = "Dịch file đang lỗi provider. Bot chưa trừ Xu."
+TRANSLATE_AUDIO_MISSING_STT_TEXT = "Chưa xử lý được audio vì STT chưa cấu hình hoặc đang admin test. Bot chưa trừ Xu."
 TRANSLATE_AUDIO_ERROR_TEXT = "Chưa xử lý được audio. Bot chưa trừ Xu."
+TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT = "Đã bóc băng được nhưng dịch lỗi provider. Bot chưa trừ Xu phần dịch."
 
 def translate_tools_text() -> str:
     return (
@@ -28985,10 +29046,10 @@ async def translate_file_extract_text(update: Update, context: ContextTypes.DEFA
         tg_file = await context.bot.get_file(info.get("file_id") or "")
         data = bytes(await tg_file.download_as_bytearray())
     except Exception:
-        return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+        return False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT
     if ext in {".txt", ".md", ".csv", ".json", ".srt", ".vtt", ".log"}:
         text = data.decode("utf-8", errors="replace").strip()
-        return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_NOT_READY_TEXT)
+        return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT)
     with tempfile.TemporaryDirectory(prefix="toanaas_translate_") as tmpdir:
         input_path = os.path.join(tmpdir, "input" + (ext or ".bin"))
         with open(input_path, "wb") as f:
@@ -29004,18 +29065,18 @@ async def translate_file_extract_text(update: Update, context: ContextTypes.DEFA
                     if page_text:
                         chunks.append(page_text)
                 text = "\n\n".join(chunks).strip()
-                return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_NOT_READY_TEXT)
+                return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT)
             except Exception:
-                return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+                return False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT
         if ext == ".docx":
             if not DocxDocument:
                 return False, "", TRANSLATE_FILE_NOT_READY_TEXT
             try:
                 doc = DocxDocument(input_path)
                 text = "\n".join(p.text for p in getattr(doc, "paragraphs", []) if p.text).strip()
-                return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_NOT_READY_TEXT)
+                return (True, text[:3500], "") if text else (False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT)
             except Exception:
-                return False, "", TRANSLATE_FILE_NOT_READY_TEXT
+                return False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT
     return False, "", TRANSLATE_FILE_NOT_READY_TEXT
 
 async def cmd_translate_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29040,14 +29101,14 @@ async def cmd_translate_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
     except Exception:
         save_tool_test_result("translation_file", "FAIL", "translation provider failed", update.effective_user.id)
-        await update.message.reply_text("❌ Dịch file đang lỗi tạm thời hoặc hết quota provider. Bot chưa trừ Xu.")
+        await update.message.reply_text(TRANSLATE_FILE_PROVIDER_ERROR_TEXT)
 
 async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = normalize_translate_target((context.args or [""])[0])
     if not target:
         return await update.message.reply_text("⚠️ Cú pháp: <code>/translate_voice en</code> hoặc <code>/translate_audio vi</code>", parse_mode="HTML")
     if not DEEPGRAM_API_KEY:
-        return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+        return await update.message.reply_text(TRANSLATE_AUDIO_MISSING_STT_TEXT)
     media_info = await resolve_stt_test_media(update, context)
     if not media_info:
         return await update.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ <code>/translate_voice en</code> trong vòng 2 phút.", parse_mode="HTML")
@@ -29062,7 +29123,11 @@ async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not transcript or transcript.startswith("❌"):
             save_tool_test_result("translation_voice", "FAIL", transcript[:400] or "empty_transcript", update.effective_user.id)
             return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
-        result = await translate_to_language(transcript[:3000], target)
+        try:
+            result = await translate_to_language(transcript[:3000], target)
+        except Exception:
+            save_tool_test_result("translation_voice", "FAIL", "translation_provider_failed_after_stt", update.effective_user.id)
+            return await update.message.reply_text(TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT)
         save_tool_test_result("translation_voice", "PASS", f"stt=deepgram; provider={result.get('provider')}; target={target}", update.effective_user.id)
         await update.message.reply_text(
             "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
@@ -29077,6 +29142,60 @@ async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     except Exception:
         save_tool_test_result("translation_voice", "FAIL", "stt_or_translation_provider_failed", update.effective_user.id)
+        await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+
+def audio_voice_received_text() -> str:
+    return (
+        "✅ Đã nhận audio/voice.\n"
+        "Bạn có thể dùng:\n"
+        "• /translate_voice en — bóc băng rồi dịch sang English\n"
+        "• /translate_voice zh — bóc băng rồi dịch sang 中文\n"
+        "• /transcribe — chỉ bóc băng thành văn bản"
+    )
+
+async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not DEEPGRAM_API_KEY:
+        return await update.message.reply_text(TRANSLATE_AUDIO_MISSING_STT_TEXT)
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info:
+        return await update.message.reply_text(
+            "⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ /transcribe trong vòng 2 phút."
+        )
+    file_size = int(media_info.get("file_size", 0) or 0)
+    if file_size > 15 * 1024 * 1024 or not media_info.get("bytes"):
+        return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+    raw_cost = calculate_dynamic_cost("whisper", file_size)
+    ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, raw_cost, "spend_transcribe")
+    if not ok_credit:
+        return
+    try:
+        transcript = (await AgentDeepgram.transcribe(
+            media_info["bytes"],
+            context,
+            content_type=media_info.get("content_type") or "application/octet-stream",
+        ) or "").strip()
+        if not transcript or transcript.startswith("❌"):
+            save_tool_test_result("stt", "FAIL", transcript[:400] or "empty_transcript", uid)
+            return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+        charge_result = await spend_media_factory_after_success_or_reply(
+            update,
+            uid,
+            raw_cost,
+            "spend_transcribe",
+            f"Transcribe audio: {file_size} bytes",
+        )
+        if not charge_result.get("ok"):
+            return
+        save_tool_test_result("stt", "PASS", f"provider=deepgram; source={media_info.get('source')}", uid)
+        balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
+        await update.message.reply_text(
+            "🎤 TRANSCRIBE TOAN AAS\n\n"
+            f"{transcript[:3500]}\n\n"
+            f"💼 Còn lại: {balance} Xu | /naptien để nạp thêm"
+        )
+    except Exception:
+        save_tool_test_result("stt", "FAIL", "transcribe_provider_failed", uid)
         await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
 
 async def handle_auto_translate_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, target: str):
@@ -31893,6 +32012,42 @@ async def charge_media_factory_or_reply(update: Update, uid, cost: int, event_ty
     )
     return False
 
+async def preview_media_factory_credit_or_reply(update: Update, uid, cost: int, event_type: str) -> tuple[bool, dict]:
+    base_cost = int(cost or 0)
+    if is_admin_user(uid) or base_cost <= 0:
+        tier = "admin" if is_admin_user(uid) else (member_profile(uid).get("tier") or "newbie")
+        return True, {"ok": True, "base_cost": base_cost, "final_cost": 0, "discount_xu": 0, "tier": tier}
+    charge = apply_member_service_discount(uid, base_cost, event_type)
+    final_cost = int(charge.get("final_cost") or 0)
+    credits, _, _ = get_user(uid)
+    if int(credits or 0) >= final_cost:
+        return True, charge
+    await update.message.reply_text(
+        "⚠️ Không đủ Xu để dùng tính năng này.\n\n"
+        f"• Cần: {final_cost} Xu\n"
+        f"• Số dư hiện tại: {int(credits or 0)} Xu\n\n"
+        "Dùng /naptien để nạp thêm. Gói phổ biến: 50k / 100k / 200k."
+    )
+    return False, charge
+
+async def spend_media_factory_after_success_or_reply(update: Update, uid, cost: int, event_type: str, note: str) -> dict:
+    base_cost = int(cost or 0)
+    if is_admin_user(uid) or base_cost <= 0:
+        tier = "admin" if is_admin_user(uid) else (member_profile(uid).get("tier") or "newbie")
+        return {"ok": True, "base_cost": base_cost, "final_cost": 0, "discount_xu": 0, "tier": tier}
+    charge_result = spend_fixed_credit_info(uid, base_cost, event_type, note)
+    if charge_result.get("ok"):
+        return charge_result
+    credits_now, _, _ = get_user(uid)
+    final_cost = int(charge_result.get("final_cost") or charge_result.get("cost") or base_cost)
+    await update.message.reply_text(
+        "⚠️ Không đủ Xu để dùng tính năng này.\n\n"
+        f"• Cần: {final_cost} Xu\n"
+        f"• Số dư hiện tại: {int(credits_now or 0)} Xu\n\n"
+        "Dùng /naptien để nạp thêm."
+    )
+    return charge_result
+
 async def reply_long_text(update: Update, text: str):
     text = str(text or "").strip()
     if not text:
@@ -33654,6 +33809,15 @@ def media_factory_ai(prompt: str, user_text: str, uid, fallback_text: str) -> st
         logger.warning(f"Media Factory AI fallback: {e}")
     return fallback_text
 
+async def reply_ai_provider_failure(update: Update, uid, result: dict, tool_name: str = "ai") -> None:
+    statuses = (result or {}).get("statuses") or {}
+    errors = (result or {}).get("errors") or {}
+    detail = ai_failure_detail(statuses, errors)
+    save_tool_test_result(tool_name, "FAIL", detail, uid)
+    admin_detail = f"\n\nAdmin detail: {html.escape(detail[:500])}" if is_admin_or_owner(uid) else ""
+    message = (result or {}).get("message") or ai_failure_user_text(statuses, errors)
+    await update.message.reply_text(message + admin_detail)
+
 def create_media_factory_job(user_id, username, mode, topic, trend_title="", trend_summary="", image_prompt_pack="", video_prompt_pack="", caption_pack="", status="draft", cost_xu=0, note="") -> int:
     conn = db_connect()
     c = conn.cursor()
@@ -33876,15 +34040,26 @@ def fallback_video_from_image_pack(topic: str) -> str:
     topic = topic or "ảnh/chủ đề bạn gửi"
     return (
         f"🎞 VIDEO FROM IMAGE PACK — TOAN AAS\n\nẢnh/chủ đề: {topic}\n\n"
-        "1. Motion prompt:\n"
-        f"Biến ảnh về {topic} thành video 12-20 giây, chuyển động nhẹ, cảm giác đời thường, nhân vật/sản phẩm có chuyển động tự nhiên, không quá quảng cáo.\n\n"
-        "2. Camera:\nSlow push-in 10%, handheld nhẹ, giữ chủ thể rõ, hậu cảnh có blur nhẹ, không rung quá mạnh.\n\n"
-        "3. Voice-over 20s:\n"
+        "Scene:\n"
+        f"Một cảnh đời thường/quảng cáo nhẹ về {topic}, chủ thể rõ, bối cảnh sạch và hợp pháp.\n\n"
+        "Camera movement:\n"
+        "Slow push-in 10%, handheld nhẹ, giữ chủ thể rõ, hậu cảnh có blur nhẹ, không rung quá mạnh.\n\n"
+        "Motion:\n"
+        f"Biến ảnh về {topic} thành video có chuyển động nhẹ, sản phẩm/nhân vật chuyển động tự nhiên, không quá quảng cáo.\n\n"
+        "Lighting:\n"
+        "Ánh sáng mềm, sáng sạch, có chiều sâu, tránh ánh sáng giả studio quá gắt.\n\n"
+        "Style:\n"
+        "Realistic lifestyle, clean commercial look, natural color, not over-polished.\n\n"
+        "Duration:\n"
+        "5-12 giây cho prompt ngắn hoặc 12-20 giây nếu dựng thành video review.\n\n"
+        "Negative prompt:\n"
+        "warped product, deformed hands, broken text, fake logo, watermark, flicker, over-sharpened, unnatural motion, exaggerated claims.\n\n"
+        "Voice-over 20s:\n"
         f"“Nếu bạn đang quan tâm đến {topic}, hãy nhìn tình huống này. Điểm quan trọng không phải là mua ngay, mà là biết nó có hợp với nhu cầu của bạn không. Xem kỹ tiêu chí, rồi tự quyết định.”\n\n"
-        "4. Caption:\n"
+        "Caption:\n"
         f"Trước khi chọn {topic}, hãy kiểm tra 3 điểm này để tránh mua theo cảm xúc.\n\n"
-        "5. Hashtag:\n#toanaas #reviewthucte #meomuahang #tiktokshop #shorts\n\n"
-        "6. CTA:\nLưu lại để so sánh sau. Nếu cần, xem link/thông tin chi tiết trong mô tả.\n\n"
+        "Hashtag:\n#toanaas #reviewthucte #meomuahang #tiktokshop #shorts\n\n"
+        "CTA:\nLưu lại để so sánh sau. Nếu cần, xem link/thông tin chi tiết trong mô tả.\n\n"
         "Trạng thái: provider tạo video thật chưa bật. Đây là gói prompt/video plan để bạn tự dùng hoặc gửi admin xử lý."
     )
 
@@ -34059,15 +34234,26 @@ async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⚠️ Cú pháp: /image_prompt <chủ đề hoặc trend>")
     if not is_feature_enabled("image_prompt_factory", uid, default=True):
         return await update.message.reply_text("⚠️ Image Prompt Factory đang tắt tạm thời. Vui lòng thử lại sau.")
-    if not await charge_media_factory_or_reply(update, uid, IMAGE_PROMPT_PACK_COST, "spend_image_prompt", f"Image prompt pack: {topic[:120]}"):
+    ok_credit, charge_preview = await preview_media_factory_credit_or_reply(update, uid, IMAGE_PROMPT_PACK_COST, "spend_image_prompt")
+    if not ok_credit:
         return
-    fallback = fallback_image_prompt_pack(topic)
-    prompt = (
-        "Bạn là TOAN AAS Image Prompt Factory. Trả tiếng Việt. Tạo 6 prompt ảnh chân thật cho video ngắn. "
-        "Mỗi prompt có: mục đích, prompt tiếng Việt, English prompt, negative prompt, tỉ lệ ảnh. "
-        f"Áp dụng quy tắc:\n{build_realistic_image_prompt_rules()}"
+    system_prompt = (
+        "Bạn là TOAN AAS Image Prompt Factory. Trả tiếng Việt. Chỉ tạo prompt ảnh, không tạo ảnh thật, "
+        "không gọi provider ảnh, không tách nền. Output phải có đúng các mục: Chủ thể, Bối cảnh, Ánh sáng, "
+        "Góc máy, Phong cách, Negative prompt. Có thể thêm English prompt nếu hữu ích."
     )
-    output = media_factory_ai(prompt, topic, f"image_prompt_{uid}", fallback)
+    user_prompt = (
+        f"Chủ đề: {topic}\n\n"
+        f"Quy tắc ảnh chân thật:\n{build_realistic_image_prompt_rules()}\n\n"
+        "Tạo 3-6 prompt phù hợp video ngắn/quảng cáo. Không hứa đã tạo ảnh thật."
+    )
+    result = await call_ai_chat_with_fallback(system_prompt, user_prompt, f"image_prompt_{uid}", max_tokens=1400)
+    if not result.get("ok"):
+        return await reply_ai_provider_failure(update, uid, result, "image_prompt")
+    output = (result.get("text") or "").strip()
+    charge_result = await spend_media_factory_after_success_or_reply(update, uid, IMAGE_PROMPT_PACK_COST, "spend_image_prompt", f"Image prompt pack: {topic[:120]}")
+    if not charge_result.get("ok"):
+        return
     create_media_factory_job(uid, media_factory_username(update), "image_prompt", topic, image_prompt_pack=output, cost_xu=IMAGE_PROMPT_PACK_COST)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
@@ -34134,19 +34320,36 @@ async def cmd_video_from_image(update: Update, context: ContextTypes.DEFAULT_TYP
         return await update.message.reply_text("⚠️ Cú pháp: /image_to_video_pack <mô tả ảnh/chủ đề> hoặc reply ảnh rồi gõ /image_to_video_pack")
     if not is_feature_enabled("image_to_video_prompt", uid, default=True):
         return await update.message.reply_text("⚠️ Image-to-Video Prompt Pack đang tắt tạm thời. Vui lòng thử lại sau.")
-    if not await charge_media_factory_or_reply(update, uid, IMAGE_TO_VIDEO_PROMPT_COST, "spend_video_from_image", f"Video from image pack: {topic[:120]}"):
+    ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, IMAGE_TO_VIDEO_PROMPT_COST, "spend_video_from_image")
+    if not ok_credit:
         return
     provider_on = is_feature_enabled("image_to_video", uid, default=False)
     fallback = fallback_video_from_image_pack(topic)
-    prompt = (
-        "Bạn là TOAN AAS Video From Image Builder. Trả tiếng Việt. Tạo video prompt pack từ ảnh/chủ đề. "
-        "Gồm motion prompt, camera movement, duration, voice-over 20s, caption, hashtag, CTA, output TikTok/Facebook/YouTube Shorts. "
-        "Không nói đã tạo video thật, không publish."
+    system_prompt = (
+        "Bạn là TOAN AAS Video From Image Builder. Trả tiếng Việt. Tạo video prompt pack từ ảnh/chủ đề, "
+        "không nói đã tạo video thật, không publish. Output bắt buộc gồm: Scene, Camera movement, Motion, "
+        "Lighting, Style, Duration, Negative prompt, Caption, Hashtag, CTA."
     )
-    output = media_factory_ai(prompt, topic, f"video_from_image_{uid}", fallback)
+    result = await call_ai_chat_with_fallback(system_prompt, topic, f"video_from_image_{uid}", max_tokens=1400)
+    charged_cost = IMAGE_TO_VIDEO_PROMPT_COST
+    note = "provider_off_prompt_pack" if not provider_on else "provider_not_integrated"
+    if result.get("ok"):
+        output = (result.get("text") or "").strip()
+        charge_result = await spend_media_factory_after_success_or_reply(update, uid, IMAGE_TO_VIDEO_PROMPT_COST, "spend_video_from_image", f"Video from image pack: {topic[:120]}")
+        if not charge_result.get("ok"):
+            return
+    else:
+        detail = ai_failure_detail(result.get("statuses") or {}, result.get("errors") or {})
+        save_tool_test_result("video_from_image", "FAIL", detail, uid)
+        output = (
+            "⚠️ AI provider đang lỗi/quota nên bot trả Video Prompt Pack an toàn dạng fallback. Bot chưa trừ Xu.\n\n"
+            + fallback
+        )
+        charged_cost = 0
+        note = "ai_provider_fail_fallback_no_charge"
     if not provider_on:
         output += "\n\nTrạng thái: provider tạo video thật chưa bật. Đây là Video Prompt Pack để bạn tự dùng."
-    create_media_factory_job(uid, media_factory_username(update), "video_from_image", topic, video_prompt_pack=output, cost_xu=IMAGE_TO_VIDEO_PROMPT_COST, note="provider_off_prompt_pack" if not provider_on else "provider_not_integrated")
+    create_media_factory_job(uid, media_factory_username(update), "video_from_image", topic, video_prompt_pack=output, cost_xu=charged_cost, note=note)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
 
@@ -34330,25 +34533,35 @@ async def cmd_ai_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⚠️ Cú pháp: /ai_image <mô tả ảnh>")
     if not ENABLE_OPENAI_IMAGE or not is_feature_enabled("image_openai_generation", uid, default=False):
         return await update.message.reply_text(
-            admin_first_guard_message("AI Image", "/image_prompt <chủ đề>"),
-            parse_mode="HTML",
+            "🎨 Tạo ảnh AI đang admin test/chưa mở public hoặc provider đang hết quota.\n"
+            "Bot chưa trừ Xu."
         )
     if not openai_client:
-        return await update.message.reply_text("⚠️ OpenAI image provider chưa được cấu hình. Bot chưa trừ Xu.")
-    if not await charge_media_factory_or_reply(update, uid, AI_IMAGE_COST, "spend_ai_image", f"AI image: {topic[:120]}"):
+        return await update.message.reply_text(
+            "🎨 Tạo ảnh AI đang admin test/chưa mở public hoặc provider đang hết quota.\n"
+            "Bot chưa trừ Xu."
+        )
+    ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, AI_IMAGE_COST, "spend_ai_image")
+    if not ok_credit:
         return
-    charged = not is_admin_user(uid)
+    charged = False
     try:
         safe_prompt = (
             f"{topic}\n\n"
             "Create a safe, realistic, high-quality image. No watermark, no broken text, no illegal or deceptive content."
         )
-        result = openai_client.images.generate(
-            model=OPENAI_IMAGE_MODEL,
-            prompt=safe_prompt,
-            size="1024x1024",
-            n=1,
-        )
+        def run_image_generate():
+            return openai_client.images.generate(
+                model=OPENAI_IMAGE_MODEL,
+                prompt=safe_prompt,
+                size="1024x1024",
+                n=1,
+            )
+        result = await asyncio.to_thread(run_image_generate)
+        charge_result = await spend_media_factory_after_success_or_reply(update, uid, AI_IMAGE_COST, "spend_ai_image", f"AI image: {topic[:120]}")
+        if not charge_result.get("ok"):
+            return
+        charged = not is_admin_user(uid)
         sent = await send_openai_image_result(update, result, "✅ Ảnh AI TOAN AAS đã tạo xong.")
         if not sent:
             raise RuntimeError("OpenAI image response did not contain b64_json or url")
@@ -34358,7 +34571,10 @@ async def cmd_ai_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         refund_charged_credit(uid, AI_IMAGE_COST, "ai_image_refund", "", "Hoàn phí tạo ảnh AI do lỗi provider", charged)
         logger.warning(f"OpenAI image generation failed: {e}")
-        await update.message.reply_text("❌ Tạo ảnh AI lỗi. Nếu đã trừ Xu, bot đã hoàn lại. Bạn có thể dùng /image_prompt trước.")
+        await update.message.reply_text(
+            "🎨 Tạo ảnh AI đang admin test/chưa mở public hoặc provider đang hết quota.\n"
+            "Bot chưa trừ Xu." if not charged else "❌ Tạo ảnh AI lỗi. Bot đã hoàn Xu."
+        )
 
 async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -34376,14 +34592,20 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply = update.message.reply_to_message if update.message else None
     source_file_id, source_name = reply_image_file_id_for_edit(reply)
     if not source_file_id:
-        return await update.message.reply_text("⚠️ Hãy reply ảnh dạng photo hoặc file ảnh jpg/jpeg/png/webp rồi gõ /ai_image_edit <yêu cầu sửa ảnh>.")
+        info, _source = doc_input_file_info(update)
+        if info and doc_is_image(info):
+            source_file_id = info.get("file_id") or ""
+            source_name = info.get("file_name") or info.get("filename") or "source.png"
+    if not source_file_id:
+        return await update.message.reply_text("⚠️ Hãy reply ảnh hoặc gửi ảnh/file ảnh rồi gõ /ai_image_edit <yêu cầu sửa ảnh> trong vòng 10 phút.")
     if not ENABLE_OPENAI_IMAGE_EDIT or not is_feature_enabled("image_openai_edit", uid, default=False):
-        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public. Bot chưa trừ Xu.")
+        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc provider chưa cấu hình. Bot chưa trừ Xu.")
     if not openai_client:
-        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public. Bot chưa trừ Xu.")
-    if not await charge_media_factory_or_reply(update, uid, AI_IMAGE_EDIT_COST, "spend_ai_image_edit", f"AI image edit: {instruction[:120]}"):
+        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc provider chưa cấu hình. Bot chưa trừ Xu.")
+    ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, AI_IMAGE_EDIT_COST, "spend_ai_image_edit")
+    if not ok_credit:
         return
-    charged = not is_admin_user(uid)
+    charged = False
     try:
         tg_file = await context.bot.get_file(source_file_id)
         image_file = io.BytesIO()
@@ -34394,13 +34616,20 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{instruction}\n\n"
             "Edit safely and keep the result realistic. Do not add watermark, fake claims, or deceptive text."
         )
-        result = openai_client.images.edit(
-            model=OPENAI_IMAGE_MODEL,
-            image=image_file,
-            prompt=safe_prompt,
-            size="1024x1024",
-            n=1,
-        )
+        def run_image_edit():
+            image_file.seek(0)
+            return openai_client.images.edit(
+                model=OPENAI_IMAGE_MODEL,
+                image=image_file,
+                prompt=safe_prompt,
+                size="1024x1024",
+                n=1,
+            )
+        result = await asyncio.to_thread(run_image_edit)
+        charge_result = await spend_media_factory_after_success_or_reply(update, uid, AI_IMAGE_EDIT_COST, "spend_ai_image_edit", f"AI image edit: {instruction[:120]}")
+        if not charge_result.get("ok"):
+            return
+        charged = not is_admin_user(uid)
         sent = await send_openai_image_result(update, result, "✅ Ảnh AI TOAN AAS đã sửa xong.")
         if not sent:
             raise RuntimeError("OpenAI image edit response did not contain b64_json or url")
@@ -34410,7 +34639,10 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         refund_charged_credit(uid, AI_IMAGE_EDIT_COST, "ai_image_edit_refund", "", "Hoàn phí sửa ảnh AI do lỗi provider", charged)
         logger.warning(f"OpenAI image edit failed: {e}")
-        await update.message.reply_text("❌ Sửa ảnh AI lỗi. Nếu đã trừ Xu, bot đã hoàn lại. Bạn có thể dùng /image_prompt trước.")
+        await update.message.reply_text(
+            "Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc provider chưa cấu hình. Bot chưa trừ Xu."
+            if not charged else "❌ Sửa ảnh AI lỗi. Bot đã hoàn Xu."
+        )
 
 async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -34418,23 +34650,38 @@ async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not topic:
         lang = get_user_language(uid) or "vi"
         return await update.message.reply_text(media_factory_overview_text_i18n(lang), parse_mode="HTML", reply_markup=main_audio_keyboard(lang))
-    if not await charge_media_factory_or_reply(update, uid, MEDIA_FACTORY_PACK_COST, "spend_media_factory", f"Media Factory pack: {topic[:120]}"):
+    ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, MEDIA_FACTORY_PACK_COST, "spend_media_factory")
+    if not ok_credit:
         return
     fallback = fallback_media_factory_pack(topic)
-    prompt = (
+    system_prompt = (
         "Bạn là TOAN AAS Media Factory. Trả tiếng Việt. Tạo content/video pack đầy đủ từ topic/trend. "
         "Bắt buộc gồm 8 phần: 1 Trend & ý tưởng, 2 Thu thập tư liệu hợp lệ, 3 Script/storyboard, "
         "4 Image prompt pack, 5 Video prompt pack, 6 Duyệt nội dung, 7 Tạo video thật admin-only/not public, "
         "8 Đăng bài customer publish OFF/admin internal. "
         "Nêu rõ Trend AI content-only, Trend Live chưa mở cho khách, khách tự đăng, không auto publish."
     )
-    output = media_factory_ai(prompt, topic, f"media_factory_{uid}", fallback)
+    result = await call_ai_chat_with_fallback(system_prompt, topic, f"media_factory_{uid}", max_tokens=1800)
+    charged_cost = MEDIA_FACTORY_PACK_COST
+    if result.get("ok"):
+        output = (result.get("text") or "").strip()
+        charge_result = await spend_media_factory_after_success_or_reply(update, uid, MEDIA_FACTORY_PACK_COST, "spend_media_factory", f"Media Factory pack: {topic[:120]}")
+        if not charge_result.get("ok"):
+            return
+    else:
+        detail = ai_failure_detail(result.get("statuses") or {}, result.get("errors") or {})
+        save_tool_test_result("media_factory", "FAIL", detail, uid)
+        output = (
+            "⚠️ AI provider đang lỗi/quota nên bot trả Media Factory Pack fallback an toàn. Bot chưa trừ Xu.\n\n"
+            + fallback
+        )
+        charged_cost = 0
     if "Trend AI content-only" not in output:
         output = (
             "Trạng thái: Trend AI content-only; Trend Live admin/internal nếu có provider; "
             "video thật admin-only/not public; customer publish OFF.\n\n"
         ) + output
-    job_id = create_media_factory_job(uid, media_factory_username(update), "media_factory", topic, trend_title=topic, trend_summary=output[:1200], image_prompt_pack=output, video_prompt_pack=output, caption_pack=output, cost_xu=MEDIA_FACTORY_PACK_COST)
+    job_id = create_media_factory_job(uid, media_factory_username(update), "media_factory", topic, trend_title=topic, trend_summary=output[:1200], image_prompt_pack=output, video_prompt_pack=output, caption_pack=output, cost_xu=charged_cost)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"Job ID: {job_id}\n\n{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
 
@@ -34478,11 +34725,11 @@ async def prepare_remove_bg_from_cached_image(update: Update, context: ContextTy
     if not info or not doc_is_image(info):
         return False
     if not REMOVEBG_API_KEY and not CUTOUT_API_KEY:
-        await update.message.reply_text("Tách nền đang admin test/chưa mở public. Bot chưa trừ Xu.")
+        await update.message.reply_text("Tách nền đang admin test/chưa mở public hoặc provider đang lỗi. Bot chưa trừ Xu.")
         return True
     image_test = preferred_tool_test_result("image_remove_bg", "image")
     if not is_admin_user(uid) and str(image_test.get("status") or "").upper() != "PASS":
-        await update.message.reply_text("Tách nền đang admin test/chưa mở public. Bot chưa trừ Xu.")
+        await update.message.reply_text("Tách nền đang admin test/chưa mở public hoặc provider đang lỗi. Bot chưa trừ Xu.")
         return True
     file_size = int(info.get("file_size") or 0)
     raw_cost = calculate_dynamic_cost("image", file_size)
@@ -38923,7 +39170,15 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parsed.get("tone", ""),
             parsed.get("language", "vi"),
         )
-        output_text = generate_video_script_pack(prompt, uid)
+        ai_result = await call_ai_chat_with_fallback(
+            "Bạn là AI Video Script Lite của TOAN AAS. Chỉ tạo script/prompt pack, không render video, không tự đăng bài cho khách. Output phải có Hook, Script, Cảnh quay, Caption, Hashtag, CTA.",
+            prompt,
+            f"film_{uid}",
+            max_tokens=2000,
+        )
+        if not ai_result.get("ok"):
+            raise RuntimeError(ai_failure_detail(ai_result.get("statuses") or {}, ai_result.get("errors") or {}))
+        output_text = (ai_result.get("text") or "").strip()
         if cost > 0:
             charge_result = spend_fixed_credit_info(uid, calculated_cost, "spend_video_script", f"Video Script Lite: {parsed.get('topic', '')[:120]}")
             charged = bool(charge_result.get("ok"))
@@ -38987,11 +39242,10 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             provider="ai_router",
             detail=f"job={job_id}; {str(e)[:240]}",
         )
-        refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b>." if refunded else "\n\nBot chưa trừ Xu cho lần tạo lỗi này."
-        return await update.message.reply_text(
-            "❌ AI provider đang lỗi/quota hoặc quá tải. Vui lòng thử lại sau hoặc báo admin." + refund_line,
-            parse_mode="HTML",
-        )
+        base_message = ai_failure_user_text({}, {})
+        admin_detail = f"\n\nAdmin detail: {html.escape(str(e)[:500])}" if is_admin_or_owner(uid) else ""
+        refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b>." if refunded else ""
+        return await update.message.reply_text(base_message + admin_detail + refund_line, parse_mode="HTML")
 
 async def cmd_addlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -49745,44 +49999,11 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_media(update)
-    file_obj = update.message.voice or update.message.audio
-    if not file_obj:
-        return
-    uid = update.effective_user.id
-    file_size = file_obj.file_size
-    can_afford, cost, discount = deduct_dynamic_credit(uid, "whisper", file_size)
-    if not can_afford:
-        credits_now, _, _ = get_user(uid)
-        return await reply_insufficient_credits(update, credits_now, cost)
-    msg = await update.message.reply_text("⚡ <i>[Deepgram] Đang chạy bóc băng...</i>", parse_mode="HTML")
-    try:
-        file_bytes = bytes(await (await file_obj.get_file()).download_as_bytearray())
-        content_type = getattr(file_obj, "mime_type", "") or ("audio/ogg" if update.message.voice else "application/octet-stream")
-        txt = await AgentDeepgram.transcribe(file_bytes, context, content_type=content_type)
-        await msg.delete()
-        if not txt.startswith("❌"):
-            discount_text = " (đã áp dụng ưu đãi thành viên)" if discount > 0 else ""
-            await update.message.reply_text(
-                f"🗣️ <i>\"{txt}\"</i>\n\n<i>(-{cost} Xu){discount_text}</i>",
-                parse_mode="HTML"
-            )
-            if update.message.voice:
-                update.message.text = txt
-                await handle_message(update, context)
-        else:
-            refund_charged_credit(uid, cost, "refund", "", "Hoàn phí bóc băng do Deepgram lỗi", True)
-            await update.message.reply_text(txt + ("\n✅ Xu đã hoàn lại." if cost > 0 and str(uid) != ADMIN_ID else ""))
-    except Exception as e:
-        logger.error(f"Deepgram media handler error: {e}")
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-        refund_charged_credit(uid, cost, "refund", "", "Hoàn phí bóc băng do lỗi xử lý file", True)
-        await update.message.reply_text("❌ Lỗi xử lý audio." + (" Xu đã hoàn lại." if cost > 0 and str(uid) != ADMIN_ID else ""))
+    await update.message.reply_text(audio_voice_received_text())
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_media(update)
+    await update.message.reply_text(audio_voice_received_text())
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -50083,6 +50304,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("unfreeze_tools", cmd_unfreeze_tools))
     tg_app.add_handler(CommandHandler("ops_plan", cmd_ops_plan))
     tg_app.add_handler(CommandHandler("providers",   cmd_providers))
+    tg_app.add_handler(CommandHandler("ai_status",   cmd_ai_status))
     tg_app.add_handler(CommandHandler("api_recommend", cmd_api_recommend))
     tg_app.add_handler(CommandHandler("feature_status", cmd_feature_status))
     tg_app.add_handler(CommandHandler("feature_set", cmd_feature_set))
@@ -50163,6 +50385,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("translate_file", cmd_translate_file))
     tg_app.add_handler(CommandHandler("translate_voice", cmd_translate_voice))
     tg_app.add_handler(CommandHandler("translate_audio", cmd_translate_voice))
+    tg_app.add_handler(CommandHandler("transcribe", cmd_transcribe))
     tg_app.add_handler(CommandHandler("vi_en", cmd_vi_en))
     tg_app.add_handler(CommandHandler("en_vi", cmd_en_vi))
     tg_app.add_handler(CommandHandler("zh_vi", cmd_zh_vi))
