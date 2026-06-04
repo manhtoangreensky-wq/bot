@@ -184,6 +184,9 @@ for _log_name in ("TOAN_AAS", "httpx", "telegram", "telegram.ext"):
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
 
+def _first_env_line(value: str) -> str:
+    return str(value or "").strip().splitlines()[0].strip() if str(value or "").strip() else ""
+
 def env_any(*names: str, default: str = "") -> str:
     for name in names:
         value = os.environ.get(str(name or ""), "")
@@ -346,7 +349,16 @@ if ADMIN_TELEGRAM_URL.rstrip("/").lower() in {
 }:
     ADMIN_TELEGRAM_URL = SUPPORT_TELEGRAM_URL
 TELEGRAM_UPDATE_MODE_RAW = _env("TELEGRAM_UPDATE_MODE")
-TELEGRAM_UPDATE_MODE = (TELEGRAM_UPDATE_MODE_RAW or ("webhook" if PUBLIC_BASE_URL else "polling")).lower()
+TELEGRAM_UPDATE_MODE_CLEAN = _first_env_line(TELEGRAM_UPDATE_MODE_RAW).lower()
+TELEGRAM_UPDATE_MODE_ENV_WARNING = bool(
+    TELEGRAM_UPDATE_MODE_RAW
+    and TELEGRAM_UPDATE_MODE_CLEAN != str(TELEGRAM_UPDATE_MODE_RAW or "").strip().lower()
+)
+TELEGRAM_UPDATE_MODE = (
+    TELEGRAM_UPDATE_MODE_CLEAN
+    if TELEGRAM_UPDATE_MODE_CLEAN in {"webhook", "polling"}
+    else ("webhook" if PUBLIC_BASE_URL else "polling")
+)
 TELEGRAM_FORCE_POLLING = _env("TELEGRAM_FORCE_POLLING", "0").lower() in {"1", "true", "yes", "on"}
 TELEGRAM_WEBHOOK_SECRET = _env("TELEGRAM_WEBHOOK_SECRET")
 TELEGRAM_TAKEOVER_INTERVAL_SECONDS = max(0, int(_env("TELEGRAM_TAKEOVER_INTERVAL_SECONDS", "45") or "45"))
@@ -2671,6 +2683,7 @@ async def send_manual_payment(
     order_code: int,
     reason: str = "",
 ):
+    set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu)
     text = manual_payment_text(uid, amount, xu, order_code, reason)
     try:
         await context.bot.send_photo(
@@ -23318,6 +23331,31 @@ class AgentDownloader:
 # ─── STATE ───────────────────────────────────────────────────────────────────
 USER_BILL_STATE: dict = {}
 USER_PENDING: dict = {}
+MANUAL_BILL_STATE_TTL_SECONDS = 30 * 60
+
+def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key=""):
+    USER_BILL_STATE[uid] = {
+        "order_code": str(order_code or ""),
+        "amount": int(amount or 0),
+        "xu": int(xu or 0),
+        "pkg_key": str(pkg_key or ""),
+        "expires_at": time.time() + MANUAL_BILL_STATE_TTL_SECONDS,
+    }
+
+def get_active_manual_bill_state(uid):
+    state = USER_BILL_STATE.get(uid)
+    if not state:
+        return None
+    if state is True:
+        state = {"expires_at": time.time() + MANUAL_BILL_STATE_TTL_SECONDS}
+        USER_BILL_STATE[uid] = state
+    if not isinstance(state, dict):
+        USER_BILL_STATE.pop(uid, None)
+        return None
+    if float(state.get("expires_at") or 0) < time.time():
+        USER_BILL_STATE.pop(uid, None)
+        return None
+    return state
 LAST_MEDIA_CACHE_TTL_SECONDS = 120
 LAST_MEDIA_BY_USER: dict = {}
 
@@ -24073,13 +24111,6 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         launch_bonus_xu=launch_preview,
         package_amount_vnd=amount,
     )
-    USER_BILL_STATE[uid] = {
-        "order_code": order_code,
-        "amount": amount,
-        "xu": xu,
-        "pkg_key": pkg_key,
-    }
-
     if flag_on("payment_freeze"):
         await query.edit_message_text("💳 PayOS QR động đang được khóa an toàn. Bot sẽ gửi QR thủ công cho gói này.")
         await send_manual_payment(
@@ -25577,7 +25608,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     if is_admin:
         rows.extend([
             [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
-            [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
+            [InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
         ])
     return InlineKeyboardMarkup(rows)
 
@@ -25622,6 +25653,7 @@ def main_image_keyboard() -> InlineKeyboardMarkup:
 def main_audio_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎤 Mở công cụ âm thanh", callback_data="menu|hint_media_factory")],
+        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|main_audio")],
         [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
@@ -25630,6 +25662,7 @@ def main_quick_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
         [InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
+        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|main_audio"), InlineKeyboardButton("🖼 Ảnh", callback_data="menu|main_image")],
         [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
@@ -25708,6 +25741,13 @@ PUBLIC_COMMAND_FUNCTIONS = {
     "ocr_pdf": "cmd_ocr_pdf",
     "voiceover": "cmd_voiceover",
     "tts": "cmd_voiceover",
+    "translate": "cmd_translate",
+    "translate_text": "cmd_translate_text",
+    "vi_en": "cmd_vi_en",
+    "en_vi": "cmd_en_vi",
+    "zh_vi": "cmd_zh_vi",
+    "ja_vi": "cmd_ja_vi",
+    "ko_vi": "cmd_ko_vi",
     "ai_image": "cmd_ai_image",
     "ai_image_edit": "cmd_ai_image_edit",
 }
@@ -25718,7 +25758,7 @@ def public_command_exists(command: str) -> bool:
 
 def menu_text_main(is_admin: bool) -> str:
     runtime_line = f"\n\n🧬 Runtime: <code>{APP_BUILD}</code>" if is_admin else ""
-    admin_line = "\n\n🔐 Admin có thêm nút Quản Trị / Hệ Thống / Affiliate / Operator ở cuối menu." if is_admin else ""
+    admin_line = "\n\n🔐 Admin có thêm nút Quản Trị / Hệ Thống ở cuối menu. Các lab nội bộ chỉ mở qua lệnh admin riêng." if is_admin else ""
     return (
         "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
         "Trợ lý AI giúp bạn làm việc nhanh hơn mỗi ngày: tạo nội dung, video script, hình ảnh, voice, ghi chú, "
@@ -26059,6 +26099,18 @@ def menu_text_main_audio() -> str:
     if public_command_exists("tts"):
         lines.append("• <code>/tts &lt;nội dung&gt;</code> — tạo giọng đọc nhanh")
     lines.append("• Gửi voice/mp3/m4a/video ngắn vào bot để bóc băng nếu STT đã bật.")
+    lines.extend([
+        "",
+        "🌐 <b>Dịch thuật / Translate</b>",
+        "Dùng để dịch văn bản, transcript, phụ đề và nội dung phục vụ video/content.",
+        "• <code>/translate &lt;ngôn ngữ&gt; &lt;nội dung&gt;</code> — dịch văn bản",
+        "• <code>/vi_en &lt;nội dung&gt;</code> — Việt → Anh nếu provider đã bật",
+        "• <code>/en_vi &lt;nội dung&gt;</code> — Anh → Việt nếu provider đã bật",
+        "• <code>/zh_vi</code>, <code>/ja_vi</code>, <code>/ko_vi</code> — dịch về tiếng Việt nếu provider đã bật",
+        "• Dịch thuật dùng DeepL/Gemini/OpenAI fallback theo cấu hình.",
+        "• Nếu provider lỗi: không trừ Xu hoặc hoàn Xu theo flow hiện có.",
+        "• Chỉ dịch nội dung bạn sở hữu hoặc có quyền sử dụng.",
+    ])
     return "\n".join(lines)
 
 def menu_text_main_quick() -> str:
@@ -26077,6 +26129,7 @@ def menu_text_main_quick() -> str:
         ("doc_tools", "📄 <code>/doc_tools</code>\nMở công cụ tài liệu: PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF."),
         ("image_tools", "🖼 <code>/image_tools</code>\nMở công cụ ảnh: prompt ảnh, xử lý ảnh, ảnh sang video prompt."),
         ("media_factory", "🎤 <code>/media_factory</code>\nMở trung tâm Video &amp; Media."),
+        ("translate_text", "🌐 <code>/translate en nội dung</code>\nDịch văn bản bằng DeepL/Gemini/OpenAI fallback nếu provider đã bật."),
         ("naptien", "💳 <code>/naptien</code>\nNạp thêm Xu bằng QR tự động hoặc QR thủ công."),
         ("pricing", "💰 <code>/pricing</code>\nXem bảng giá Xu và chi phí từng công cụ."),
         ("gift", "🎁 <code>/gift &lt;mã&gt;</code>\nNhập mã quà tặng để nhận Xu nếu admin gửi mã."),
@@ -26990,7 +27043,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     user_is_admin = is_admin_user(query.from_user.id)
-    admin_only = {"operator", "admin", "system"}
+    admin_only = {"affiliate", "operator", "admin", "system"}
     public_hints = {
         "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
         "hint_note", "hint_search_note", "hint_remind", "hint_doc_tools", "hint_pricing",
@@ -27517,6 +27570,64 @@ async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "Không có Xu nào bị trừ cho lần thử này.",
             parse_mode="HTML",
         )
+
+async def cmd_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args or []
+    if len(args) < 2:
+        return await update.message.reply_text(
+            "🌐 <b>DỊCH THUẬT TOAN AAS</b>\n\n"
+            "Cú pháp:\n"
+            "• <code>/translate en nội dung cần dịch</code>\n"
+            "• <code>/translate vi nội dung cần dịch</code>\n"
+            "• <code>/vi_en nội dung tiếng Việt</code>\n"
+            "• <code>/en_vi English text</code>\n\n"
+            "Provider: DeepL/Gemini/OpenAI fallback theo cấu hình. Nếu lỗi, không trừ Xu.",
+            parse_mode="HTML",
+        )
+    target = normalize_translate_target(args[0])
+    if not target:
+        return await update.message.reply_text("⚠️ Ngôn ngữ chưa hỗ trợ. Dùng: <code>vi|en|ja|ko|zh</code>", parse_mode="HTML")
+    text = " ".join(args[1:]).strip()[:1800]
+    if not text:
+        return await update.message.reply_text("⚠️ Thiếu nội dung cần dịch.", parse_mode="HTML")
+    try:
+        result = await translate_to_language(text, target)
+        save_tool_test_result("translation", "PASS", f"provider={result.get('provider')}; translate success target={target}", update.effective_user.id)
+        await update.message.reply_text(
+            "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
+            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
+            f"• Provider: <code>{html.escape(result.get('provider') or '-')}</code>\n\n"
+            f"{html.escape(result.get('text') or '')}",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        error_text = str(e)[:900]
+        save_tool_test_result("translation", "FAIL", error_text[:500], update.effective_user.id)
+        await update.message.reply_text(
+            "❌ Dịch văn bản đang lỗi tạm thời hoặc hết quota provider.\n"
+            "Không có Xu nào bị trừ cho lần thử này.\n\n"
+            f"• Error: <code>{html.escape(error_text[:240])}</code>",
+            parse_mode="HTML",
+        )
+
+async def cmd_translate_alias(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str):
+    context.args = [target] + list(context.args or [])
+    return await cmd_translate(update, context)
+
+async def cmd_vi_en(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_translate_alias(update, context, "en")
+
+async def cmd_en_vi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_translate_alias(update, context, "vi")
+
+async def cmd_zh_vi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_translate_alias(update, context, "vi")
+
+async def cmd_ja_vi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_translate_alias(update, context, "vi")
+
+async def cmd_ko_vi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_translate_alias(update, context, "vi")
 
 async def cmd_translate_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -31127,24 +31238,35 @@ def memory_extract_json(text: str) -> dict:
     raw = str(text or "").strip()
     if not raw or raw.startswith("❌"):
         return {}
-    try:
-        return json.loads(raw)
-    except Exception:
-        pass
-    match = re.search(r"\{.*\}", raw, re.S)
-    if match:
+    candidates = []
+    fence = re.search(r"```(?:json)?\s*(.*?)```", raw, re.I | re.S)
+    if fence:
+        candidates.append(fence.group(1).strip())
+    candidates.append(raw)
+    for candidate in candidates:
+        if not candidate:
+            continue
         try:
-            return json.loads(match.group(0))
+            parsed = json.loads(candidate)
+            return parsed if isinstance(parsed, dict) else {}
         except Exception:
-            return {}
+            pass
+        match = re.search(r"\{.*\}", candidate, re.S)
+        if match:
+            try:
+                parsed = json.loads(match.group(0))
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                pass
     return {}
 
 def memory_ai_classify(content: str, user_id) -> tuple[bool, dict, str]:
     prompt = (
-        "Bạn là TOAN AAS Memory classifier. Hãy trả về JSON thuần, không markdown.\n"
+        "Bạn là TOAN AAS Memory classifier. Chỉ trả về đúng 1 object JSON hợp lệ, không markdown, không giải thích.\n"
         "Schema: title, summary, tags, category, priority.\n"
         "priority chỉ dùng một trong: low, normal, important, urgent.\n"
-        "category chọn ngắn gọn theo nội dung. tags là list 3-8 tag."
+        "category chọn ngắn gọn theo nội dung. tags là list 3-8 tag.\n"
+        "Nếu thiếu dữ liệu, tự đặt default ngắn gọn nhưng JSON vẫn phải hợp lệ."
     )
     try:
         output = AgentGemini.chat(prompt, str(content or "")[:6000], f"memory:{user_id}", is_json=False)
@@ -31272,6 +31394,8 @@ def memory_menu_text() -> str:
         "• <code>/remind 30m &lt;nội dung&gt;</code>\n"
         "• <code>/remind 20:00 &lt;nội dung&gt;</code>\n"
         "• <code>/repeat_daily 08:00 &lt;nội dung&gt;</code>\n"
+        "• <code>/repeat_weekly t2 08:00 &lt;nội dung&gt;</code> — nhắc hằng tuần\n"
+        "• <code>/repeat_monthly 1 09:00 &lt;nội dung&gt;</code> — nhắc hằng tháng\n"
         "• <code>/reminders</code> — xem nhắc nhở đang bật\n\n"
         "Ghi chú thường miễn phí trong quota gói. AI phân loại/tóm tắt dùng quota hoặc Xu.\n"
         "Basic memory dùng được nếu hệ thống đã bật. AI memory nâng cao theo cấu hình/admin test."
@@ -31839,10 +31963,19 @@ async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not reminders:
         return await update.message.reply_text("✅ Bạn chưa có reminder active/paused.")
     lines = ["⏰ <b>Reminder đang bật</b>", ""]
+    repeat_labels = {
+        "none": "Một lần",
+        "daily": "Hằng ngày",
+        "weekly": "Hằng tuần",
+        "monthly": "Hằng tháng",
+        "yearly": "Hằng năm",
+    }
     for item in reminders:
         note_part = f" | note #{item.get('note_id')}" if int(item.get("note_id") or 0) else ""
+        repeat_rule = str(item.get("repeat_rule") or "none")
+        repeat_label = repeat_labels.get(repeat_rule, repeat_rule)
         lines.append(
-            f"#{item['id']} — <code>{html.escape(item.get('status') or '')}</code> | <code>{html.escape(item.get('repeat_rule') or 'none')}</code>{note_part}\n"
+            f"#{item['id']} — <code>{html.escape(item.get('status') or '')}</code> | <b>{html.escape(repeat_label)}</b>{note_part}\n"
             f"  next: <code>{html.escape(item.get('next_run_at') or '-')}</code>\n"
             f"  {html.escape((item.get('remind_text') or '')[:180])}"
         )
@@ -33675,6 +33808,8 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
         "telegram_update_mode_active": ACTIVE_TELEGRAM_UPDATE_MODE or "-",
         "telegram_update_mode_raw": TELEGRAM_UPDATE_MODE_RAW or "-",
+        "telegram_update_mode_clean": TELEGRAM_UPDATE_MODE_CLEAN or "-",
+        "telegram_update_mode_env_warning": TELEGRAM_UPDATE_MODE_ENV_WARNING,
         "telegram_force_polling": TELEGRAM_FORCE_POLLING,
         "railway_runtime_detected": is_railway_runtime(),
         "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
@@ -33715,6 +33850,11 @@ async def cmd_telegram_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"• Telegram webhook: <code>{html.escape(info.get('url') or '-')}</code>",
         f"• Pending updates: <b>{int(info.get('pending_update_count') or 0)}</b>",
     ]
+    if TELEGRAM_UPDATE_MODE_ENV_WARNING:
+        lines.append(
+            "⚠️ <b>ENV warning:</b> <code>TELEGRAM_UPDATE_MODE</code> có nhiều dòng/ký tự lạ; "
+            "bot chỉ dùng dòng đầu. Trên Railway nên đặt đúng một giá trị: <code>webhook</code> hoặc <code>polling</code>."
+        )
     if info.get("last_error_message"):
         lines.append(f"• Last error: <code>{html.escape(info.get('last_error_message') or '')}</code>")
     lines.extend([
@@ -33849,7 +33989,6 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🚀 Gói Nâng Cao (200k)", callback_data=f"pkg|200k|{uid}")],
         [InlineKeyboardButton("🏢 Gói Doanh Nghiệp (500k)", callback_data=f"pkg|500k|{uid}")]
     ]
-    USER_BILL_STATE[uid] = True
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -33878,10 +34017,9 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
             launch_bonus_xu=launch_preview,
             package_amount_vnd=amount,
         )
-        USER_BILL_STATE[uid] = {"order_code": order_code, "amount": amount, "xu": xu, "pkg_key": context.args[0].lower()}
         return await send_manual_payment(context, update.effective_chat.id, uid, amount, xu, order_code)
     else:
-        USER_BILL_STATE[uid] = True
+        set_manual_bill_state(uid)
         text = (
             "🏦 <b>NẠP XU DỊCH VỤ THỦ CÔNG</b>\n\n"
             f"👤 ID Telegram: <code>{uid}</code>\n\n"
@@ -37131,11 +37269,18 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
     affiliate_row = None
     affiliate_id = int(parsed.get("affiliate_id") or 0)
     if affiliate_id:
+        if not is_admin_user(uid):
+            return await update.message.reply_text(
+                "⚠️ <code>affiliate_id</code> là tham số nội bộ cho admin/operator.\n\n"
+                "Khách hàng có thể dán link trực tiếp trong lệnh:\n"
+                "<code>/film topic=\"review sản phẩm\" link=\"https://...\"</code>",
+                parse_mode="HTML",
+            )
         affiliate_row = get_affiliate_link(affiliate_id, uid)
         if not affiliate_row:
             return await update.message.reply_text(
-                f"❌ Không tìm thấy link affiliate <code>#{affiliate_id}</code> trong kho của bạn.\n"
-                "Dùng <code>/links</code> để xem ID link đang có.",
+                f"❌ Không tìm thấy link nội bộ <code>#{affiliate_id}</code> trong khu vực admin.\n"
+                "Dùng <code>/links</code> để xem ID link nội bộ đang có.",
                 parse_mode="HTML",
             )
         if (affiliate_row[6] or "active").lower() != "active":
@@ -37157,13 +37302,6 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if cost > 0:
         if credits < cost:
             return await reply_insufficient_credits(update, credits, cost)
-        charge_result = spend_fixed_credit_info(uid, calculated_cost, "spend_video_script", f"Video Script Lite: {parsed.get('topic', '')[:120]}")
-        charged = bool(charge_result.get("ok"))
-        cost = int(charge_result.get("final_cost") or cost)
-        charge = charge_result
-        if not charged:
-            credits_now, _, _ = get_user(uid)
-            return await reply_insufficient_credits(update, credits_now, cost)
 
     job_id = 0
     try:
@@ -37172,7 +37310,7 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🎬 <b>Đang tạo Video Script Lite #{job_id}...</b>\n\n"
             f"Chủ đề: <b>{html.escape(parsed.get('topic', ''))}</b>\n"
             f"Nền tảng: <b>{html.escape(parsed.get('platforms', ''))}</b>\n"
-            f"Gói: <b>{html.escape(str(parsed.get('tier') or 'basic'))}</b> | Chi phí: <b>{cost} Xu</b>"
+            f"Gói: <b>{html.escape(str(parsed.get('tier') or 'basic'))}</b> | Chi phí dự kiến: <b>{cost} Xu</b>"
             + (f"\n{html.escape(member_discount_display_line(charge))}" if int((charge or {}).get("discount_xu") or 0) > 0 else "")
             + (f"\nAffiliate: <code>#{affiliate_id}</code> {html.escape(affiliate_row[2] or '')}" if affiliate_row else ""),
             parse_mode="HTML",
@@ -37188,6 +37326,15 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parsed.get("language", "vi"),
         )
         output_text = generate_video_script_pack(prompt, uid)
+        if cost > 0:
+            charge_result = spend_fixed_credit_info(uid, calculated_cost, "spend_video_script", f"Video Script Lite: {parsed.get('topic', '')[:120]}")
+            charged = bool(charge_result.get("ok"))
+            cost = int(charge_result.get("final_cost") or cost)
+            charge = charge_result
+            if not charged:
+                update_video_script_job(job_id, "failed", "")
+                credits_now, _, _ = get_user(uid)
+                return await reply_insufficient_credits(update, credits_now, cost)
         update_video_script_job(job_id, "completed", output_text)
         credits_after, _, _ = get_user(uid)
         preview = html.escape(truncate_text(output_text, 1800))
@@ -37242,9 +37389,9 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             provider="ai_router",
             detail=f"job={job_id}; {str(e)[:240]}",
         )
-        refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b>." if refunded else ""
+        refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b>." if refunded else "\n\nBot chưa trừ Xu cho lần tạo lỗi này."
         return await update.message.reply_text(
-            "❌ AI đang lỗi hoặc quá tải. Vui lòng thử lại sau." + refund_line,
+            "❌ AI provider đang lỗi/quota hoặc quá tải. Vui lòng thử lại sau hoặc báo admin." + refund_line,
             parse_mode="HTML",
         )
 
@@ -47814,20 +47961,14 @@ async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     username = update.effective_user.first_name
-    caption_lower = (update.message.caption or "").lower()
-    bill_state = USER_BILL_STATE.get(uid)
-    is_bill = bill_state or any(
-        k in caption_lower for k in ["bill", "nạp", "chuyển khoản", "ck", "aas", "daas"]
-    )
+    bill_state = get_active_manual_bill_state(uid)
+    is_bill = bool(bill_state)
 
     if is_bill:
         USER_BILL_STATE.pop(uid, None)
-        if isinstance(bill_state, dict):
-            order_code = bill_state.get("order_code", "")
-            amount = int(bill_state.get("amount", 0) or 0)
-            xu = int(bill_state.get("xu", 0) or 0)
-        else:
-            order_code, amount, xu = "", 0, 0
+        order_code = bill_state.get("order_code", "")
+        amount = int(bill_state.get("amount", 0) or 0)
+        xu = int(bill_state.get("xu", 0) or 0)
         conn = db_connect()
         c = conn.cursor()
         c.execute(
@@ -48322,7 +48463,13 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("audio_enhance", cmd_audio_enhance))
     tg_app.add_handler(CommandHandler("real_video", cmd_real_video))
     tg_app.add_handler(CommandHandler("avatar_video", cmd_avatar_video))
+    tg_app.add_handler(CommandHandler("translate", cmd_translate))
     tg_app.add_handler(CommandHandler("translate_text", cmd_translate_text))
+    tg_app.add_handler(CommandHandler("vi_en", cmd_vi_en))
+    tg_app.add_handler(CommandHandler("en_vi", cmd_en_vi))
+    tg_app.add_handler(CommandHandler("zh_vi", cmd_zh_vi))
+    tg_app.add_handler(CommandHandler("ja_vi", cmd_ja_vi))
+    tg_app.add_handler(CommandHandler("ko_vi", cmd_ko_vi))
     tg_app.add_handler(CommandHandler("translate_mode", cmd_translate_mode))
     tg_app.add_handler(CommandHandler("translate_mode_off", cmd_translate_mode_off))
     tg_app.add_handler(CommandHandler("translate_status", cmd_translate_status))
@@ -48977,6 +49124,8 @@ async def runtime_health(request: Request):
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
         "telegram_update_mode_active": ACTIVE_TELEGRAM_UPDATE_MODE or "",
         "telegram_update_mode_raw": TELEGRAM_UPDATE_MODE_RAW or "",
+        "telegram_update_mode_clean": TELEGRAM_UPDATE_MODE_CLEAN or "",
+        "telegram_update_mode_env_warning": TELEGRAM_UPDATE_MODE_ENV_WARNING,
         "telegram_webhook_path": TELEGRAM_WEBHOOK_PATH,
         "telegram_webhook_url": expected_webhook,
         "telegram_webhook_url_active": ACTIVE_TELEGRAM_WEBHOOK_URL or "",
