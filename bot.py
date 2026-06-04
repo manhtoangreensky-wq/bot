@@ -2472,13 +2472,12 @@ PAYOS_CREATE_SIGNATURE_VARIANTS = {
     "faq_order": ("amount", "orderCode", "description", "returnUrl", "cancelUrl"),
     "payload_order": ("orderCode", "amount", "description", "cancelUrl", "returnUrl"),
 }
-PAYOS_CREATE_PAYMENT_ENDPOINT = "https://api-merchant.payos.vn/v2/payment-requests"
-PAYOS_DEBUG_SIGNATURE_VARIANTS = (
-    "standard_sorted",
-    "faq_order",
-    "payload_order",
-    "sorted_all_payload_keys",
+PAYOS_OFFICIAL_CREATE_SIGNATURE_NOTE = (
+    "Official payOS create payment link signature data: "
+    "amount,cancelUrl,description,orderCode,returnUrl"
 )
+PAYOS_CREATE_PAYMENT_ENDPOINT = "https://api-merchant.payos.vn/v2/payment-requests"
+PAYOS_DEBUG_SIGNATURE_VARIANTS = ("standard_sorted",)
 
 def normalize_payos_signature_variant(variant: str | None) -> str:
     variant = str(variant or "").strip().lower()
@@ -2616,7 +2615,9 @@ def format_payos_create_debug(
     )
 
 async def create_payos_payment_request(payos_body: dict, signature_variant: str | None = None) -> tuple[object, dict, str, str]:
-    active_variant = normalize_payos_signature_variant(signature_variant) if signature_variant else PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT
+    # Live checkout creation follows payOS official/SDK create-payment signature order:
+    # amount, cancelUrl, description, orderCode, returnUrl. Do not URL-encode before signing.
+    active_variant = normalize_payos_signature_variant(signature_variant) if signature_variant else get_payos_create_signature_variant()
     signature, raw_str = sign_payos_payment_request(payos_body, active_variant)
     request_body = {**payos_body, "signature": signature}
     headers = {
@@ -47176,112 +47177,109 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
             "❌ Thiếu PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY."
         )
 
-    amount = 10000
+    pkg_key = "50k"
+    amount = 50000
     return_url = make_payos_return_url(context)
-    description = make_payos_description("10k")
-    used_order_codes = set()
-    results = []
-    first_pass = None
-
-    for variant in PAYOS_DEBUG_SIGNATURE_VARIANTS:
-        order_code = generate_order_code()
-        while order_code in used_order_codes:
-            order_code = generate_order_code() + len(used_order_codes) + 1
-        used_order_codes.add(order_code)
-        payos_body = {
-            "orderCode": order_code,
-            "amount": amount,
-            "description": description,
-            "cancelUrl": return_url,
-            "returnUrl": return_url,
+    description = make_payos_description(pkg_key)
+    variant = get_payos_create_signature_variant()
+    order_code = generate_order_code()
+    payos_body = {
+        "orderCode": int(order_code),
+        "amount": int(amount),
+        "description": description,
+        "cancelUrl": return_url,
+        "returnUrl": return_url,
+    }
+    try:
+        res, res_data, raw_preview, raw_str = await create_payos_payment_request(payos_body, signature_variant=variant)
+        data = res_data if isinstance(res_data, dict) else {}
+        checkout_data = data.get("data") if isinstance(data.get("data"), dict) else {}
+        checkout_url = checkout_data.get("checkoutUrl", "")
+        payment_link_id = checkout_data.get("paymentLinkId", "")
+        result = {
+            "variant": variant,
+            "order_code": order_code,
+            "http_status": getattr(res, "status_code", ""),
+            "code": str(data.get("code") or ""),
+            "desc": str(data.get("desc") or data.get("message") or raw_preview or "")[:250],
+            "signature_data": raw_str,
+            "payload_debug": payos_payload_type_summary(payos_body),
+            "raw_preview": raw_preview[:500],
+            "checkout_url": checkout_url,
+            "payment_link_id": payment_link_id,
+            "pass": getattr(res, "status_code", "") == 200 and data.get("code") == "00",
         }
+        debug_status = "PASS" if result["pass"] else ("SIGNATURE_INVALID" if re.search(r"signature|mã kiểm tra", result["desc"], re.IGNORECASE) else "FAIL")
+        record_api_debug(
+            "payos",
+            "create_payment_link",
+            debug_status,
+            getattr(res, "status_code", 0),
+            f"official_create_signature; pkg={pkg_key}; {result['payload_debug']}; desc={result['desc']}; raw={result['raw_preview']}",
+        )
+    except Exception as e:
         try:
-            res, res_data, raw_preview, raw_str = await create_payos_payment_request(payos_body, signature_variant=variant)
-            data = res_data if isinstance(res_data, dict) else {}
-            checkout_data = data.get("data") if isinstance(data.get("data"), dict) else {}
-            checkout_url = checkout_data.get("checkoutUrl", "")
-            payment_link_id = checkout_data.get("paymentLinkId", "")
-            result = {
-                "variant": variant,
-                "order_code": order_code,
-                "http_status": getattr(res, "status_code", ""),
-                "code": str(data.get("code") or ""),
-                "desc": str(data.get("desc") or data.get("message") or raw_preview or "")[:250],
-                "signature_data": raw_str,
-                "payload_debug": payos_payload_type_summary(payos_body),
-                "raw_preview": raw_preview[:500],
-                "checkout_url": checkout_url,
-                "payment_link_id": payment_link_id,
-                "pass": getattr(res, "status_code", "") == 200 and data.get("code") == "00",
-            }
-            debug_status = "PASS" if result["pass"] else ("SIGNATURE_INVALID" if re.search(r"signature|mã kiểm tra", result["desc"], re.IGNORECASE) else "FAIL")
-            record_api_debug("payos", "create_payment_link", debug_status, getattr(res, "status_code", 0), f"variant={variant}; {result['payload_debug']}; desc={result['desc']}; raw={result['raw_preview']}")
-        except Exception as e:
-            try:
-                _signature, raw_str = sign_payos_payment_request(payos_body, variant=variant)
-            except Exception:
-                raw_str = ""
-            result = {
-                "variant": variant,
-                "order_code": order_code,
-                "http_status": "",
-                "code": "",
-                "desc": str(e)[:250],
-                "signature_data": raw_str,
-                "payload_debug": payos_payload_type_summary(payos_body),
-                "raw_preview": "",
-                "checkout_url": "",
-                "payment_link_id": "",
-                "pass": False,
-            }
-            record_api_debug("payos", "create_payment_link", "FAIL", 0, f"variant={variant}; {result['payload_debug']}; error={result['desc']}")
-        results.append(result)
-        if result["pass"] and first_pass is None:
-            first_pass = result
+            _signature, raw_str = sign_payos_payment_request(payos_body, variant=variant)
+        except Exception:
+            raw_str = ""
+        result = {
+            "variant": variant,
+            "order_code": order_code,
+            "http_status": "",
+            "code": "",
+            "desc": str(e)[:250],
+            "signature_data": raw_str,
+            "payload_debug": payos_payload_type_summary(payos_body),
+            "raw_preview": "",
+            "checkout_url": "",
+            "payment_link_id": "",
+            "pass": False,
+        }
+        record_api_debug("payos", "create_payment_link", "FAIL", 0, f"official_create_signature; pkg={pkg_key}; {result['payload_debug']}; error={result['desc']}")
 
     now = now_text()
-    if first_pass:
-        set_system_setting("payos_debug_create_status", "PASS", f"order={first_pass['order_code']}", update.effective_user.id)
-        set_system_setting("payos_debug_create_at", now, f"order={first_pass['order_code']}", update.effective_user.id)
-        set_system_setting("payos_debug_create_order", str(first_pass["order_code"]), "PayOS debug checkout created", update.effective_user.id)
-        set_system_setting("payos_debug_create_variant", str(first_pass["variant"]), "PayOS debug checkout created", update.effective_user.id)
-        set_system_setting("payos_debug_create_checkout_url", str(first_pass["checkout_url"]), "PayOS debug checkout created", update.effective_user.id)
-        set_system_setting("payos_debug_create_payment_link_id", str(first_pass["payment_link_id"]), "PayOS debug checkout created", update.effective_user.id)
-        set_system_setting("payos_debug_create_http_status", str(first_pass["http_status"]), "PayOS debug checkout created", update.effective_user.id)
-        set_system_setting("payos_debug_create_code", str(first_pass["code"]), "PayOS debug checkout created", update.effective_user.id)
-        set_system_setting("payos_debug_create_desc", str(first_pass["desc"]), "PayOS debug checkout created", update.effective_user.id)
-        set_system_setting("payos_debug_create_note", "checkout_url_created", "PayOS debug checkout created", update.effective_user.id)
+    if result["pass"]:
+        set_system_setting("payos_debug_create_status", "PASS", f"order={result['order_code']}", update.effective_user.id)
+        set_system_setting("payos_debug_create_at", now, f"order={result['order_code']}", update.effective_user.id)
+        set_system_setting("payos_debug_create_order", str(result["order_code"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_variant", str(result["variant"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_checkout_url", str(result["checkout_url"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_payment_link_id", str(result["payment_link_id"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_http_status", str(result["http_status"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_code", str(result["code"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_desc", str(result["desc"]), "PayOS debug checkout created", update.effective_user.id)
+        set_system_setting("payos_debug_create_note", "checkout_url_created_official_50k", "PayOS debug checkout created", update.effective_user.id)
     else:
-        last_result = results[-1] if results else {}
-        set_system_setting("payos_debug_create_status", "FAIL", "all_signature_variants_failed", update.effective_user.id)
-        set_system_setting("payos_debug_create_at", now, "all_signature_variants_failed", update.effective_user.id)
-        set_system_setting("payos_debug_create_order", str(last_result.get("order_code") or ""), "PayOS debug create failed", update.effective_user.id)
-        set_system_setting("payos_debug_create_variant", "", "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_status", "FAIL", "official_signature_failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_at", now, "official_signature_failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_order", str(result.get("order_code") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_variant", str(result.get("variant") or ""), "PayOS debug create failed", update.effective_user.id)
         set_system_setting("payos_debug_create_checkout_url", "", "PayOS debug create failed", update.effective_user.id)
         set_system_setting("payos_debug_create_payment_link_id", "", "PayOS debug create failed", update.effective_user.id)
-        set_system_setting("payos_debug_create_http_status", str(last_result.get("http_status") or ""), "PayOS debug create failed", update.effective_user.id)
-        set_system_setting("payos_debug_create_code", str(last_result.get("code") or ""), "PayOS debug create failed", update.effective_user.id)
-        set_system_setting("payos_debug_create_desc", str(last_result.get("desc") or ""), "PayOS debug create failed", update.effective_user.id)
-        set_system_setting("payos_debug_create_note", "all_signature_variants_failed", "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_http_status", str(result.get("http_status") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_code", str(result.get("code") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_desc", str(result.get("desc") or ""), "PayOS debug create failed", update.effective_user.id)
+        set_system_setting("payos_debug_create_note", "official_signature_failed", "PayOS debug create failed", update.effective_user.id)
 
     lines = []
-    if first_pass:
+    if result["pass"]:
         lines.extend([
-            "✅ <b>PayOS debug create PASS</b>",
+            "✅ <b>PayOS debug create PASS — official signature</b>",
             "",
-            f"Working variant: <code>{html.escape(str(first_pass['variant']))}</code>",
-            f"Order: <code>{html.escape(str(first_pass['order_code']))}</code>",
-            f"paymentLinkId: <code>{html.escape(str(first_pass['payment_link_id']))}</code>",
-            f"Checkout: {html.escape(str(first_pass['checkout_url']))}",
+            f"Package: <code>{pkg_key}</code> | Amount: <code>{amount}</code>",
+            f"Variant: <code>{html.escape(str(result['variant']))}</code>",
+            f"Order: <code>{html.escape(str(result['order_code']))}</code>",
+            f"paymentLinkId: <code>{html.escape(str(result['payment_link_id']))}</code>",
+            f"Checkout: {html.escape(str(result['checkout_url']))}",
             "",
             "Không cần thanh toán link debug này.",
         ])
     else:
         lines.extend([
-            "❌ <b>PayOS debug create FAIL</b>",
+            "❌ <b>PayOS debug create FAIL — official signature</b>",
             "",
-            "Tất cả signature variants đều bị từ chối hoặc lỗi.",
-            "Vì nhiều cách ký đều bị PayOS từ chối, khả năng cao không phải chỉ do thứ tự field.",
+            f"Package: <code>{pkg_key}</code> | Amount: <code>{amount}</code>",
+            "Bot đã dùng đúng signature data theo docs/SDK payOS cho API tạo link thanh toán.",
             "",
             "<b>Nguyên nhân khả nghi:</b>",
             "• PAYOS_CHECKSUM_KEY không cùng bộ với PAYOS_CLIENT_ID/PAYOS_API_KEY.",
@@ -47294,19 +47292,20 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
         ])
     lines.extend(["", "<b>Headers sent</b>"])
     lines.extend(payos_header_debug_summary())
-    lines.extend(["", "<b>Variant results</b>"])
-    for item in results:
-        ok_icon = "✅" if item["pass"] else "❌"
-        lines.extend([
-            "",
-            f"{ok_icon} <code>{html.escape(str(item['variant']))}</code>",
-            f"Order: <code>{html.escape(str(item['order_code']))}</code>",
-            f"HTTP/Code: <code>{html.escape(str(item['http_status']))}</code> / <code>{html.escape(str(item['code']))}</code>",
-            f"Desc: <code>{html.escape(str(item['desc']))}</code>",
-            f"Payload: <code>{html.escape(str(item.get('payload_debug') or ''))}</code>",
-            f"Signature data: <code>{html.escape(str(item['signature_data']))}</code>",
-            f"Raw: <code>{html.escape(str(item.get('raw_preview') or '')[:500])}</code>",
-        ])
+    ok_icon = "✅" if result["pass"] else "❌"
+    lines.extend([
+        "",
+        "<b>Official create request</b>",
+        f"{ok_icon} <code>{html.escape(str(result['variant']))}</code>",
+        f"Order: <code>{html.escape(str(result['order_code']))}</code>",
+        f"HTTP/Code: <code>{html.escape(str(result['http_status']))}</code> / <code>{html.escape(str(result['code']))}</code>",
+        f"Desc: <code>{html.escape(str(result['desc']))}</code>",
+        f"Payload: <code>{html.escape(str(result.get('payload_debug') or ''))}</code>",
+        f"Signature data: <code>{html.escape(str(result['signature_data']))}</code>",
+        f"Raw: <code>{html.escape(str(result.get('raw_preview') or '')[:500])}</code>",
+        "",
+        f"Note: <code>{html.escape(PAYOS_OFFICIAL_CREATE_SIGNATURE_NOTE)}</code>",
+    ])
     await update.message.reply_text("\n".join(lines)[:3900], parse_mode="HTML")
 
 async def cmd_payos_env_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -47365,7 +47364,7 @@ async def cmd_payos_key_fingerprint(update: Update, context: ContextTypes.DEFAUL
         key_line("PAYOS_CHECKSUM_KEY", PAYOS_CHECKSUM_KEY),
         "",
         "Dùng fingerprint first4/last4 để đối chiếu với dashboard PayOS mà không lộ full key.",
-        "Nếu <code>/payos_debug_create</code> vẫn signature invalid với mọi variant, ưu tiên kiểm tra:",
+        "Nếu <code>/payos_debug_create</code> vẫn signature invalid với official signature, ưu tiên kiểm tra:",
         "1. 3 key có cùng một kênh/app PayOS không.",
         "2. Có dùng nhầm Webhook Secret hoặc checksum app khác không.",
         "3. Merchant/app PayOS đã active đúng chưa.",
@@ -47378,13 +47377,13 @@ async def cmd_payos_key_fingerprint(update: Update, context: ContextTypes.DEFAUL
 async def cmd_payos_signature_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return
-    amount = 10000
+    amount = 50000
     order_code = generate_order_code()
     return_url = make_payos_return_url(context)
     payload = {
         "orderCode": int(order_code),
         "amount": int(amount),
-        "description": make_payos_description("10k"),
+        "description": make_payos_description("50k"),
         "cancelUrl": return_url,
         "returnUrl": return_url,
     }
@@ -47420,13 +47419,13 @@ async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT
     if not is_admin_user(update.effective_user.id):
         return
     sdk_ok, sdk_name = payos_sdk_availability()
-    amount = 10000
+    amount = 50000
     order_code = generate_order_code()
     return_url = make_payos_return_url(context)
     payload = {
         "orderCode": int(order_code),
         "amount": int(amount),
-        "description": make_payos_description("10k"),
+        "description": make_payos_description("50k"),
         "cancelUrl": return_url,
         "returnUrl": return_url,
     }
@@ -47466,7 +47465,7 @@ async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT
         "• orderCode int",
         "• amount int",
         "• URL exact",
-        "• signature variants tested bằng <code>/payos_debug_create</code>",
+        "• official create-payment signature tested bằng <code>/payos_debug_create</code>",
         "• headers sent",
         "",
         "<b>⚠️ Cần admin kiểm tra ngoài code</b>",
