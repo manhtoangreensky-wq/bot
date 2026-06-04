@@ -28362,7 +28362,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = current_system_mode()
     payos_debug_status = (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper()
     payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
-    payos_dynamic_status = "working" if payos_debug_status == "PASS" else "NEED DEBUG"
+    payos_dynamic_status = "working" if providers["payos"]["ready"] else "missing"
     deepgram_status = "configured — ready_for_smoke_test" if providers["audio"]["deepgram"] else "missing"
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
