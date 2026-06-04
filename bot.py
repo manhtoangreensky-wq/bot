@@ -25788,7 +25788,7 @@ def guide_keyboard() -> InlineKeyboardMarkup:
         rows.append([
             InlineKeyboardButton("📄 Tải bản Word", url=f"{public_base}/download/huong-dan-toan-aas.docx"),
         ])
-    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main_guide"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def find_asset_path(filename: str) -> str:
@@ -25920,7 +25920,7 @@ def legal_menu_keyboard() -> InlineKeyboardMarkup:
     if url:
         rows.append([InlineKeyboardButton("📄 Tải PDF điều khoản", url=url)])
     rows.append([InlineKeyboardButton("💬 Nhắn admin/hỗ trợ", url=SUPPORT_TELEGRAM_URL or "https://t.me/toanaas")])
-    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main_guide"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def log_command_received(command: str, update: Update):
@@ -26231,15 +26231,33 @@ def localized_start_menu_text(user_id, lang: str) -> str:
     tier = get_role_badge(user_id)
     if lang == "zh":
         return (
-            "👑 <b>TOAN AAS</b>\n"
-            "<b>AI AUTOMATION SYSTEM</b>\n\n"
-            "一个 Telegram Bot，集合日常 AI 工具：\n"
-            "内容、视频、图片、语音、文档、翻译和记忆。\n\n"
+            "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
+            "你的日常 AI 助手，集合在一个 Telegram Bot：\n"
+            "内容创作、视频脚本、图片、语音、翻译、笔记和文档工具。\n\n"
             f"🎁 余额: <b>{html.escape(str(credits_display))} Xu</b>\n"
             f"👤 ID: <code>{html.escape(str(user_id))}</code>\n"
             f"🪪 等级: <b>{html.escape(tier)}</b>\n"
             f"🌐 语言: <b>{html.escape(display_lang)}</b>\n\n"
-            "请选择功能："
+            "请选择今天要使用的功能：\n\n"
+            "🎬 <b>内容创作</b>\n"
+            "视频脚本、分镜、标题、标签和 CTA。\n\n"
+            "🤖 <b>AI 助手</b>\n"
+            "写文章、想点子、优化文案、写代码和做计划。\n\n"
+            "📄 <b>文档工具</b>\n"
+            "PDF 转 Word、图片转 PDF，以及已启用的 PDF 工具。\n\n"
+            "🖼 <b>图片工具</b>\n"
+            "图片 Prompt、抠图、图片处理和视频素材准备。\n\n"
+            "🎤 <b>语音工具</b>\n"
+            "音频/视频转文字，或生成越南语配音。\n\n"
+            "🌐 <b>翻译</b>\n"
+            "翻译文本、字幕、转写稿和视频内容。\n\n"
+            "🧠 <b>记忆/提醒</b>\n"
+            "保存笔记、查找信息和设置提醒。\n\n"
+            "💳 <b>Xu 服务</b>\n"
+            "充值 Xu、查看价格、使用礼品/优惠码。\n\n"
+            "继续使用 TOAN AAS 即表示你同意 "
+            "<code>/legal</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>, "
+            "<code>/refund_policy</code> 和 TOAN AAS 知识产权政策。"
         )
     if lang == "vi":
         return (
@@ -26275,16 +26293,34 @@ def localized_start_menu_text(user_id, lang: str) -> str:
     if lang in OTHER_USER_LANGUAGES:
         fallback_note = f"\n\nSelected language: {html.escape(display_lang)}. Interface fallback: English while this language is being prepared."
     return (
-        "👑 <b>TOAN AAS</b>\n"
-        "<b>AI AUTOMATION SYSTEM</b>\n\n"
-        "All daily AI tools in one Telegram bot:\n"
-        "content, video, images, voice, documents, translation and memory.\n\n"
+        "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
+        "Your daily AI assistant in one Telegram bot:\n"
+        "create content, video scripts, images, voice, translations, notes and document tools faster.\n\n"
         f"🎁 Balance: <b>{html.escape(str(credits_display))} Xu</b>\n"
         f"👤 ID: <code>{html.escape(str(user_id))}</code>\n"
         f"🪪 Tier: <b>{html.escape(tier)}</b>\n"
         f"🌐 Language: <b>{html.escape(display_lang)}</b>"
         f"{fallback_note}\n\n"
-        "What would you like to do today?"
+        "What would you like to do today?\n\n"
+        "🎬 <b>Content</b>\n"
+        "Video scripts, scene breakdowns, captions, hashtags and CTA.\n\n"
+        "🤖 <b>Ask AI</b>\n"
+        "Write posts, generate ideas, improve wording, write code and make plans.\n\n"
+        "📄 <b>Documents</b>\n"
+        "PDF to Word, image to PDF, compress/split/merge PDF when tools are enabled.\n\n"
+        "🖼 <b>Images</b>\n"
+        "Image prompts, background removal, media preparation and visual workflows.\n\n"
+        "🎤 <b>Voice</b>\n"
+        "Transcribe audio/video or create Vietnamese voice-over.\n\n"
+        "🌐 <b>Translate</b>\n"
+        "Translate text, transcripts, subtitles and video content.\n\n"
+        "🧠 <b>Memory</b>\n"
+        "Save notes, find information and set reminders.\n\n"
+        "💳 <b>Xu services</b>\n"
+        "Top up Xu, view pricing, use gift/promo codes.\n\n"
+        "By pressing Start, topping up Xu or continuing to use TOAN AAS, you agree to "
+        "<code>/legal</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>, "
+        "<code>/refund_policy</code> and TOAN AAS intellectual property policy."
     )
 
 def public_back_keyboard() -> InlineKeyboardMarkup:
@@ -26293,6 +26329,32 @@ def public_back_keyboard() -> InlineKeyboardMarkup:
 def localized_public_back_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     label = "⬅️ Về menu chính" if normalize_user_language(lang) == "vi" else "⬅️ Main menu"
     return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data="menu|main")]])
+
+def menu_parent_action(section: str = "main") -> str:
+    parent_map = {
+        "main_video": "main_video",
+        "main_ai": "main_ai",
+        "main_memory": "main_memory",
+        "main_docs": "main_docs",
+        "main_image": "main_image",
+        "main_audio": "main_audio",
+        "translate": "translate",
+        "video_factory": "main_video",
+        "video_workflow": "video_factory",
+        "doc_tools": "main_docs",
+        "memory": "main_memory",
+        "billing": "main_topup",
+        "support": "main_guide",
+        "legal": "main_guide",
+        "guide": "main_guide",
+        "main_topup": "main_topup",
+        "admin": "main",
+        "admin_subpage": "admin",
+        "system": "main",
+        "affiliate": "main",
+        "operator": "main",
+    }
+    return parent_map.get(str(section or "main"), "main")
 
 def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
@@ -26464,14 +26526,14 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("🔁 Postback Setup", callback_data="menu|hint_postback_setup")])
     elif section == "billing":
         rows.append([InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien"), InlineKeyboardButton("👤 Cú pháp /profile", callback_data="menu|hint_profile")])
-    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{menu_parent_action(section)}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def menu_nav_keyboard_i18n(section: str = "main", is_admin: bool = False, lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) == "vi":
         return menu_nav_keyboard(section, is_admin)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ Back", callback_data="menu|back"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")]
+        [InlineKeyboardButton("⬅️ Back", callback_data=f"menu|{menu_parent_action(section)}"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")]
     ])
 
 PUBLIC_COMMAND_FUNCTIONS = {
@@ -28107,7 +28169,7 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if isinstance(update, Update) and update.effective_chat:
-            text = "❌ Lệnh vừa rồi bị lỗi xử lý. Admin đã được ghi log để kiểm tra."
+            text = "❌ Có lỗi khi xử lý lệnh. Bot chưa trừ Xu. Vui lòng thử lại sau."
             if update.effective_user and is_admin_user(update.effective_user.id):
                 text += f"\n\n<code>{html.escape(error_name)}: {html.escape(error_text[:800])}</code>"
             await context.bot.send_message(
@@ -32103,10 +32165,10 @@ async def cmd_image_to_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, t
         if not ok:
             if test_mode:
                 save_tool_test_result("image_to_pdf", "FAIL", error, uid)
-            return await update.message.reply_text(f"⚠️ {error}")
+            return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.")
         sent, send_error = await doc_send_file(update, output_path, "toan_aas_image_to_pdf.pdf", "📄 Ảnh sang PDF hoàn tất.")
         if not sent:
-            return await update.message.reply_text(f"⚠️ {send_error}")
+            return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.")
         await doc_charge_after_success(update, uid, cost, "spend_image_to_pdf", "Image to PDF")
         save_tool_test_result("image_to_pdf", "PASS", "Created PDF from image", uid)
 
@@ -34772,8 +34834,7 @@ def chat_mode_instruction(mode: str) -> str:
 def ai_failure_user_text(statuses: dict, errors: dict) -> str:
     return (
         "❌ AI đang tạm hết quota hoặc quá tải.\n"
-        "Bot chưa trừ Xu. Vui lòng thử lại sau.\n\n"
-        "Bạn vẫn có thể dùng các công cụ đã sẵn sàng như /translate_text, /image_prompt hoặc /doc_tools."
+        "Bot chưa trừ Xu. Vui lòng thử lại sau."
     )
 
 def ai_failure_detail(statuses: dict, errors: dict) -> str:
@@ -35054,7 +35115,7 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
             detail=detail,
         )
         save_tool_test_result("ai_chat", "FAIL", detail, uid)
-        admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin else ""
+        admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin_user(uid) else ""
         return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
 
     if cost > 0 and not spend_fixed_credit_info(uid, cost, f"spend_ai_chat_{mode}", f"AI chat {mode}", apply_member_discount_flag=False).get("ok"):
@@ -48902,6 +48963,13 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
         ])
     lines.extend(["", "<b>Headers sent</b>"])
     lines.extend(payos_header_debug_summary())
+    lines.extend([
+        "",
+        "<b>Key fingerprint</b>",
+        f"• PAYOS_CLIENT_ID: <code>{html.escape(mask_key_fingerprint(PAYOS_CLIENT_ID))}</code>",
+        f"• PAYOS_API_KEY: <code>{html.escape(mask_key_fingerprint(PAYOS_API_KEY))}</code>",
+        f"• PAYOS_CHECKSUM_KEY: <code>{html.escape(mask_key_fingerprint(PAYOS_CHECKSUM_KEY))}</code>",
+    ])
     ok_icon = "✅" if result["pass"] else "❌"
     lines.extend([
         "",
@@ -49675,7 +49743,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 detail=detail,
             )
             save_tool_test_result("ai_chat", "FAIL", detail, uid)
-            admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin else ""
+            admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin_user(uid) else ""
             return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
 
         if cost > 0 and not spend_fixed_credit_info(uid, cost, f"spend_ai_chat_{mode_name}", f"AI chat {mode_name}", apply_member_discount_flag=False).get("ok"):
