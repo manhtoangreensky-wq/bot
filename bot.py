@@ -26699,7 +26699,7 @@ async def cmd_admin_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.extend([
         "",
         "<b>Rule</b>",
-        "• Không public NDA, risk plan, tax workbook, IP plan.",
+        "• Không public risk plan, NDA, B2B nội bộ, Excel báo cáo, Codex prompt hoặc IP plan chi tiết.",
         "• Không mở auto publish/ads/affiliate vault.",
         "• Legal/accounting export là sổ quản trị nội bộ, không thay thế tư vấn luật sư/kế toán.",
     ])
@@ -26759,10 +26759,18 @@ def community_text() -> str:
         "• Cập nhật tính năng mới\n"
         "• Nhận cảnh báo bảo trì nếu có\n"
         "• Trao đổi kinh nghiệm dùng TOAN AAS\n\n"
-        "👉 <b>Tham gia tại đây:</b>\n"
+        "👉 <b>Tham gia:</b>\n"
         f"<a href=\"{html.escape(TOAN_AAS_COMMUNITY_URL)}\">{html.escape(TOAN_AAS_COMMUNITY_URL)}</a>\n\n"
+        "<b>Tài liệu công khai:</b>\n"
+        "• <code>/legal</code> — điều khoản\n"
+        "• <code>/privacy</code> — quyền riêng tư\n"
+        "• <code>/refund_policy</code> — nạp tiền/hỗ trợ\n"
+        "• <code>/pricing</code> — bảng báo giá\n"
+        "• <code>/help</code> — hướng dẫn\n\n"
+        "<b>Tài liệu nội bộ:</b>\n"
+        "Risk plan, NDA, B2B nội bộ, Excel báo cáo, Codex prompt và IP plan chi tiết chỉ dành cho admin qua <code>/admin_docs</code>.\n\n"
         "<b>Lưu ý:</b>\n"
-        "TOAN AAS không bao giờ yêu cầu mật khẩu, mã OTP, API key, token hoặc thông tin thẻ thanh toán trong nhóm."
+        "TOAN AAS không bao giờ yêu cầu mật khẩu, OTP, API key, token hoặc thông tin thẻ thanh toán trong nhóm."
     )
 
 async def cmd_hub(update: Update, context: ContextTypes.DEFAULT_TYPE):
