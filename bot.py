@@ -363,6 +363,7 @@ OPERATOR_UPLOAD_DIR = _env("OPERATOR_UPLOAD_DIR", "operator_uploads")
 MAX_OPERATOR_UPLOAD_MB = int(_env("MAX_OPERATOR_UPLOAD_MB", "200") or "200")
 META_GRAPH_VERSION = _env("META_GRAPH_VERSION", "v24.0")
 REFERENCE_VIDEO_DIR = _env("REFERENCE_VIDEO_DIR", r"D:\mybot\video AI tham khảo")
+TOAN_AAS_DOCS_DIR = _env("TOAN_AAS_DOCS_DIR")
 
 def is_railway_runtime() -> bool:
     return any(
@@ -25802,25 +25803,26 @@ def menu_text_video_factory(is_admin: bool) -> str:
         return (
             "🎬 <b>Video & Media Factory</b>\n\n"
             "Tạo ý tưởng, kịch bản, storyboard, prompt ảnh chân thật, video prompt pack và content pack cho Facebook, TikTok, YouTube.\n\n"
-            f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack, phí <b>{FILM_SCRIPT_COST} Xu</b>\n"
-            f"• <code>/trend_ai &lt;chủ đề&gt;</code> — tìm ý tưởng/trend, phí <b>{TREND_AI_COST} Xu</b>\n"
-            f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật, phí <b>{IMAGE_PROMPT_PACK_COST} Xu</b>\n"
-            f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack, phí <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>\n"
-            f"• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật, phí <b>{AI_IMAGE_COST} Xu</b>\n"
-            f"• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật, phí <b>{AI_IMAGE_EDIT_COST} Xu</b>\n"
-            f"• <code>/media_factory &lt;chủ đề&gt;</code> — trọn gói trend/script/ảnh/video/caption, phí <b>{MEDIA_FACTORY_PACK_COST} Xu</b>\n"
+            "• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack\n"
+            "• <code>/trend_ai &lt;chủ đề&gt;</code> — tìm ý tưởng/trend\n"
+            "• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật\n"
+            "• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack\n"
+            "• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật\n"
+            "• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật\n"
+            "• <code>/media_factory &lt;chủ đề&gt;</code> — trọn gói trend/script/ảnh/video/caption\n"
             "• <code>/media_factory</code> — xem trung tâm Video & Media\n"
             "• <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
             "• <code>/film topic=\"review sản phẩm\"</code> — tạo nội dung review để bạn tự đăng\n"
             "• <code>/film topic=\"sản phẩm A\" link=\"https://...\"</code> — dùng link bạn dán trực tiếp để viết caption/CTA tham khảo\n"
-            f"• <code>/growth_ai</code> — AI phân tích hook/caption/CTA, phí <b>{GROWTH_AI_COST} Xu</b>\n"
-            f"• <code>/campaign_report</code> — xuất báo cáo nội dung thủ công, phí <b>{CAMPAIGN_REPORT_COST} Xu</b>\n\n"
+            "• <code>/growth_ai</code> — AI phân tích hook/caption/CTA\n"
+            "• <code>/campaign_report</code> — xuất báo cáo nội dung thủ công\n\n"
+            "Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n\n"
             f"{CURRENT_PRODUCT_SCOPE_TEXT}"
         )
     return (
         "🎬 <b>Video & Media Factory — INTERNAL TEST ONLY</b>\n\n"
         "INTERNAL TEST ONLY — quy trình admin:\n"
-        f"1. User-facing Script Lite: <code>/film &lt;chủ đề&gt;</code> ({FILM_SCRIPT_COST} Xu)\n"
+        "1. User-facing Script Lite: <code>/film &lt;chủ đề&gt;</code>\n"
         "1b. INTERNAL TEST ONLY: dùng link đã lưu nội bộ khi admin truyền <code>aff=&lt;ID&gt;</code>\n"
         "2. Ý tưởng/blueprint: <code>/film_blueprint</code>\n"
         "3. Tạo series: <code>/film_series topic=...</code>\n"
@@ -25869,9 +25871,10 @@ def menu_text_affiliate(is_admin: bool) -> str:
             "🎬 <b>Content Pack tự đăng</b>\n\n"
             "TOAN AAS hiện tập trung tạo nội dung/video để bạn tự đăng lên Facebook, TikTok, YouTube.\n\n"
             "<b>Dùng ngay:</b>\n"
-            f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack ({FILM_SCRIPT_COST} Xu)\n"
-            f"• <code>/growth_ai</code> — phân tích hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
-            f"• <code>/campaign_report</code> — báo cáo thủ công khi có dữ liệu ({CAMPAIGN_REPORT_COST} Xu)\n\n"
+            "• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack\n"
+            "• <code>/growth_ai</code> — phân tích hook/caption/CTA\n"
+            "• <code>/campaign_report</code> — báo cáo thủ công khi có dữ liệu\n"
+            "• Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n\n"
             "Nếu muốn dùng link sản phẩm, dán trực tiếp trong lệnh:\n"
             "<code>/film topic=\"review sản phẩm A\" link=\"https://...\"</code>\n\n"
             f"{CURRENT_PRODUCT_SCOPE_TEXT}\n\n"
@@ -26298,20 +26301,22 @@ def help_text_for_user(user_id) -> str:
         "• <code>/note &lt;nội dung&gt;</code> — lưu ghi chú nhanh\n"
         "• <code>/note_ai &lt;nội dung&gt;</code> — lưu + AI tóm tắt/phân loại\n"
         "• <code>/remind 30m &lt;nội dung&gt;</code> — đặt nhắc việc\n"
-        f"• Trạng thái: <code>{memory_public_stage()}</code>\n\n"
+        "• Basic memory dùng được nếu hệ thống đã bật. AI memory nâng cao theo cấu hình/admin test.\n\n"
         "<b>4. Video & Media Factory</b>\n"
-        f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack ({FILM_SCRIPT_COST} Xu)\n"
-        f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật ({IMAGE_PROMPT_PACK_COST} Xu)\n"
-        f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack ({IMAGE_TO_VIDEO_PROMPT_COST} Xu)\n"
-        f"• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật ({AI_IMAGE_COST} Xu)\n"
-        f"• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật ({AI_IMAGE_EDIT_COST} Xu)\n"
+        "• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack\n"
+        "• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật\n"
+        "• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack\n"
+        "• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật\n"
+        "• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật\n"
         "• <code>/media_factory</code> — xem trung tâm Video & Media\n"
         "• <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
         "• Kết quả gồm outline, storyboard, scene prompt, prompt ảnh, caption, hashtag và CTA để bạn tự đăng.\n"
-        "• Có thể dán link trực tiếp trong prompt để bot viết caption/CTA tham khảo.\n\n"
+        "• Có thể dán link trực tiếp trong prompt để bot viết caption/CTA tham khảo.\n"
+        "• Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n\n"
         "<b>5. Báo cáo/tối ưu thủ công</b>\n"
-        f"• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
-        f"• <code>/campaign_report</code> — xuất báo cáo nội dung thủ công ({CAMPAIGN_REPORT_COST} Xu)\n"
+        "• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA\n"
+        "• <code>/campaign_report</code> — xuất báo cáo nội dung thủ công\n"
+        "• Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n"
         f"• {CURRENT_PRODUCT_SCOPE_TEXT}\n\n"
         "<b>6. Hỗ trợ</b>\n"
         "• <code>/gopy nội dung</code> — góp ý/báo lỗi\n\n"
@@ -26569,9 +26574,12 @@ async def cmd_ads_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(ads_policy_text(), parse_mode="HTML")
 
 RISK_PACKAGE_DIR_CANDIDATES = [
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "toan_aas_risk_package"),
-    os.path.join(os.getcwd(), "toan_aas_risk_package"),
-    r"D:\TOANAAS\bot telegram\toan_aas_risk_package",
+    path for path in [
+        TOAN_AAS_DOCS_DIR,
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "toan_aas_risk_package"),
+        os.path.join(os.getcwd(), "toan_aas_risk_package"),
+        r"D:\TOANAAS\bot telegram\toan_aas_risk_package",
+    ] if path
 ]
 
 ADMIN_DOCS = {
@@ -29239,7 +29247,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Core</b>",
         f"• DB: <code>{'OK' if data['db_ok'] else 'FAIL'}</code>",
-        "• Health: <code>OK if /health returns JSON</code>",
+        "• HTTP health route: <code>/health</code> returns JSON",
         f"• Backup command: <code>{'available' if commands['backup_db'] else 'missing'}</code>",
         "",
         "<b>Operations/Safety</b>",
@@ -30412,10 +30420,9 @@ def doc_tools_menu_text() -> str:
         "1. Gửi file PDF/ảnh vào bot.\n"
         "2. Reply file đó.\n"
         "3. Gõ lệnh cần dùng.\n\n"
-        "<b>Giá tham khảo:</b>\n"
-        "• Công cụ cơ bản: 5–10 Xu/lần\n"
-        "• OCR: tính theo ảnh/trang\n"
-        "• Lỗi xử lý: không trừ Xu\n\n"
+        "<b>Giá:</b>\n"
+        "Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n"
+        "Nếu provider lỗi trong quá trình xử lý, bot không trừ Xu hoặc hoàn Xu theo flow hiện có.\n\n"
         "<b>Giới hạn MVP:</b>\n"
         f"• PDF tối đa {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB\n"
         f"• Tối đa {DOC_MAX_PAGES} trang/lần cho công cụ PDF cơ bản\n"
@@ -31244,11 +31251,9 @@ def memory_plan_text() -> str:
         "<b>Xu phụ trợ:</b>\n"
         "• Lưu note text thường: miễn phí trong quota gói\n"
         f"• AI phân loại/tóm tắt: dùng quota, sau quota {MEMORY_AI_CLASSIFY_COST} Xu/lần\n"
-        "• OCR ảnh vào note: 10 Xu/ảnh khi mở\n"
-        "• Audio thành note: 10–20 Xu/phút khi mở\n"
-        "• Export PDF/DOCX: 5–10 Xu/lần khi mở\n"
-        "• Tìm kiếm AI nâng cao: 5 Xu/lần khi mở\n\n"
-        f"Trạng thái public: <code>{memory_public_stage()}</code>"
+        "• OCR ảnh/audio/export/tìm kiếm AI nâng cao theo cấu hình khi mở.\n"
+        "• Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n\n"
+        "Basic memory dùng được nếu hệ thống đã bật. AI memory nâng cao theo cấu hình/admin test."
     )
 
 def memory_menu_text() -> str:
@@ -31268,7 +31273,7 @@ def memory_menu_text() -> str:
         "• <code>/repeat_daily 08:00 &lt;nội dung&gt;</code>\n"
         "• <code>/reminders</code> — xem nhắc nhở đang bật\n\n"
         "Ghi chú thường miễn phí trong quota gói. AI phân loại/tóm tắt dùng quota hoặc Xu.\n"
-        f"Public flag: <code>{memory_public_stage()}</code>"
+        "Basic memory dùng được nếu hệ thống đã bật. AI memory nâng cao theo cấu hình/admin test."
     )
 
 def memory_status_text(user_id) -> str:
@@ -31281,7 +31286,8 @@ def memory_status_text(user_id) -> str:
         f"• Storage: <b>{status['storage_mb']:.2f}/{plan['storage_limit_mb']}MB</b>\n"
         f"• AI classify còn lại: <b>{status['ai_remaining']}/{plan['ai_classify_monthly_limit']}</b>\n"
         f"• Reminder active: <b>{status['active_reminders']}</b>\n"
-        f"• Public flag: <code>{memory_public_stage()}</code>"
+        "• Basic memory: dùng được nếu hệ thống đã bật\n"
+        "• AI memory nâng cao: theo cấu hình/admin test"
     )
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -32444,8 +32450,8 @@ async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🖼 <b>Công cụ ảnh trong Video & Media Factory</b>",
         "",
         "<b>Công cụ tiết kiệm:</b>",
-        f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật, <b>{IMAGE_PROMPT_PACK_COST} Xu</b>",
-        f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo prompt video từ ảnh, <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>",
+        "• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật",
+        "• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo prompt video từ ảnh",
         f"• <code>/remove_bg</code> — hướng dẫn tách nền; provider hiện: <code>{html.escape(image_provider_label)}</code>",
         "",
         "<b>Công cụ cao cấp ChatGPT/OpenAI:</b>",
@@ -32455,6 +32461,8 @@ async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Lưu ý: ChatGPT/OpenAI tạo và sửa ảnh là gói cao cấp, chỉ hoạt động khi admin bật provider. "
         "Nếu chưa bật, bot không trừ Xu và sẽ gợi ý dùng /image_prompt trước.",
+        "",
+        "Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.",
         "",
         "TOAN AAS gom nhiều công cụ vào một bot để khách không phải chạy nhiều website khác nhau.",
     ]
@@ -33041,39 +33049,41 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "💳 <b>Mua/Nạp Xu dịch vụ:</b> <code>/naptien</code>",
         "",
-        "🎁 <b>Chính sách ưu đãi:</b>",
-        "• User mới nhận <b>200 Xu dịch vụ</b> trải nghiệm",
-        "• Gói 10k/20k dùng để thử nghiệm",
-        "• Mã ưu đãi bắt đầu từ đơn nạp 50k",
-        "• <code>FIRST30</code>: nạp lần đầu từ 50k +30% Xu dịch vụ",
-        "• <code>SECOND15</code>: nạp lần 2 từ 50k +15% Xu dịch vụ",
-        "• <code>WEEKLY10</code>: ưu đãi tuần từ 50k +10% Xu dịch vụ",
-        "• <code>DAILY5</code>: ưu đãi ngày từ 50k +5% Xu dịch vụ",
-        "• <code>MONTHLY20</code>: ưu đãi tháng từ 100k +20% Xu dịch vụ",
-        "• Mỗi đơn chỉ dùng 1 mã, không cộng dồn",
+        "🎁 <b>Chính sách ưu đãi nạp:</b>",
+        "• User mới nhận <b>200 Xu dịch vụ</b> trải nghiệm một lần theo ID Telegram.",
+        "• Gói nạp nhận Xu gốc giống nhau cho mọi user.",
+        "• Hạng thành viên không giảm tiền nạp và không làm tăng Xu gói nạp.",
+        "• Không có cộng thêm Xu định kỳ theo hạng ở mỗi lần nạp.",
+        "• Mã ưu đãi nạp áp dụng theo từng chương trình đang bật.",
+        "• Mỗi đơn chỉ dùng 1 mã ưu đãi, không cộng dồn mã.",
+        "• Promo/Launch Bonus chỉ cộng sau khi thanh toán thành công và đủ điều kiện.",
         "",
         "🎁 <b>Launch Bonus lần đầu mua gói:</b>",
         "• 50k: 500 Xu dịch vụ gốc + 30 Xu dịch vụ = 530 Xu dịch vụ",
         "• 100k: 1.000 Xu dịch vụ gốc + 50 Xu dịch vụ = 1.050 Xu dịch vụ",
         "• 200k: 2.000 Xu dịch vụ gốc + 150 Xu dịch vụ = 2.150 Xu dịch vụ",
         "• 500k: 5.000 Xu dịch vụ gốc + 500 Xu dịch vụ = 5.500 Xu dịch vụ",
+        "• Launch Bonus chỉ áp dụng 1 lần cho từng tài khoản ở từng gói đủ điều kiện.",
+        "• Mua lại cùng gói chỉ nhận Xu gốc.",
         "",
-        "<b>Ví dụ gói 500k lần đầu + FIRST30:</b>",
-        "• Xu dịch vụ gốc: 5.000",
-        "• Launch Bonus lần đầu mua gói 500k: +500 Xu dịch vụ",
-        "• FIRST30: +30% Xu dịch vụ",
-        "• Tổng nhận theo chính sách hiện tại: 7.000 Xu dịch vụ",
-        "",
-        "Launch Bonus không phải promo code. Mỗi order chỉ có 1 promo code, nhưng Launch Bonus có thể cộng cùng promo nếu đủ điều kiện.",
-        "",
-        "🪪 <b>Thành viên & giới thiệu:</b>",
+        "🪪 <b>Thành viên:</b>",
         "• Cấp thành viên tính theo tổng nạp thành công.",
-        "• Cấp càng cao, thưởng giới thiệu và quyền lợi càng tốt.",
-        "• Platinum, Diamond và VIP được miễn phí Chat thường và Chat Pro.",
-        "• Chat Deep vẫn tính Xu để kiểm soát tác vụ sâu/API.",
-        "• Referral chỉ thưởng khi người được mời nạp lần đầu thành công.",
-        "• Tất cả ưu đãi là cộng thêm Xu dịch vụ, không phải chiết khấu tiền/rút tiền.",
+        "• TOAN AAS giữ hạng thành viên đơn giản: mọi hạng dùng gần như cùng bộ công cụ public.",
+        "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ đủ điều kiện:",
+        "  🌱 Newbie: 0%",
+        "  🥈 Silver: 2%",
+        "  🥇 Gold: 4%",
+        "  💠 Platinum: 6%",
+        "  💎 Diamond: 8%",
+        "  👑 VIP: 10%",
+        "• Không giảm tiền nạp theo hạng.",
+        "• Không cộng thêm Xu định kỳ theo hạng.",
+        "• Ưu đãi lên hạng chỉ dùng 1 lần khi lần đầu đạt hạng mới.",
+        "• Không chia quyền công cụ phức tạp theo hạng; quyền truy cập public gần như giống nhau.",
         "• Xem chi tiết: <code>/vip_policy</code>",
+        "",
+        "🤝 <b>Giới thiệu:</b>",
+        "• Referral chỉ thưởng khi người được mời nạp lần đầu thành công, theo chính sách hiện hành.",
         "• Link giới thiệu của bạn: <code>/referral</code>",
         "",
         "🎂 <b>Quà sinh nhật:</b>",
@@ -33120,6 +33130,8 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Giá mặc định đặt cao.",
         "• Khuyến mãi dùng % giảm hoặc tặng Xu.",
         "• Không bán dưới giá vốn.",
+        "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ: Newbie 0%, Silver 2%, Gold 4%, Platinum 6%, Diamond 8%, VIP 10%.",
+        "• Không có đặc quyền Chat 0 Xu theo hạng và không tăng Xu gói nạp theo hạng.",
         "• Video/render thật sau này phải có bảng giá riêng.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -33156,7 +33168,7 @@ def chat_pro_usage_text() -> str:
         f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công\n"
         f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công\n"
         f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công\n"
-        "• Platinum/Diamond/VIP: miễn phí Chat thường và Chat Pro; Chat Deep vẫn tính Xu\n"
+        "• Hạng thành viên được giảm Xu khi dùng dịch vụ đủ điều kiện; xem /pricing\n"
         "AI lỗi/quota/provider fail: không trừ Xu."
     )
 
@@ -36976,8 +36988,7 @@ def video_script_usage_text(uid: int) -> tuple[str, InlineKeyboardMarkup]:
         "• Caption riêng cho Facebook/TikTok/YouTube\n"
         "• CTA/hashtag\n"
         "• File .md tải về\n\n"
-        f"Chi phí: Basic <b>{VIDEO_BASIC_COST} Xu</b> | Pro <b>{VIDEO_PRO_COST} Xu</b> | Series <b>{VIDEO_SERIES_COST} Xu</b>\n"
-        "Basic gồm 1 tập/5 cảnh; thêm tập +100 Xu, thêm cảnh +20 Xu.\n\n"
+        "Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n\n"
         f"{CURRENT_PRODUCT_SCOPE_TEXT}"
     )
     return text, build_topup_keyboard(uid)
@@ -48356,6 +48367,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
     tg_app.add_handler(CommandHandler("pricing",     cmd_pricing))
     tg_app.add_handler(CommandHandler("banggia",     cmd_pricing))
+    tg_app.add_handler(CommandHandler("baogia",      cmd_pricing))
     tg_app.add_handler(CommandHandler("pricing_admin", cmd_pricing_admin))
     tg_app.add_handler(CommandHandler("mode",        cmd_mode))
     tg_app.add_handler(CommandHandler("chat_pro_on", cmd_chat_pro_on))
