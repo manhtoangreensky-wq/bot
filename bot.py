@@ -29012,6 +29012,27 @@ TRANSLATE_AUDIO_MISSING_STT_TEXT = "Chưa xử lý được audio vì STT chưa 
 TRANSLATE_AUDIO_ERROR_TEXT = "Chưa xử lý được audio. Bot chưa trừ Xu."
 TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT = "Đã bóc băng được nhưng dịch lỗi provider. Bot chưa trừ Xu phần dịch."
 
+def translate_voice_missing_target_text() -> str:
+    return (
+        "🌐 Dịch voice/audio\n\n"
+        "Vui lòng chọn ngôn ngữ đích:\n"
+        "• /translate_voice en — dịch sang English\n"
+        "• /translate_voice vi — dịch sang Tiếng Việt\n"
+        "• /translate_tools — xem thêm ngôn ngữ hỗ trợ\n\n"
+        "Bot chưa trừ Xu."
+    )
+
+def is_likely_vietnamese_transcript(text: str) -> bool:
+    sample = f" {(text or '').lower()} "
+    vietnamese_chars = "ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ"
+    if any(ch in sample for ch in vietnamese_chars):
+        return True
+    common_words = (
+        " tôi ", " bạn ", " muốn ", " cần ", " là ", " của ", " cho ", " với ",
+        " không ", " được ", " trong ", " này ", " đó ", " hãy ", " về ", " bằng ",
+    )
+    return sum(1 for word in common_words if word in sample) >= 2
+
 def translate_tools_text() -> str:
     return (
         "🌐 <b>CÔNG CỤ DỊCH TOAN AAS</b>\n\n"
@@ -29104,7 +29125,7 @@ async def cmd_translate_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = normalize_translate_target((context.args or [""])[0])
     if not target:
-        return await update.message.reply_text("⚠️ Cú pháp: <code>/translate_voice en</code> hoặc <code>/translate_audio vi</code>", parse_mode="HTML")
+        return await update.message.reply_text(translate_voice_missing_target_text())
     if not DEEPGRAM_API_KEY:
         return await update.message.reply_text(TRANSLATE_AUDIO_MISSING_STT_TEXT)
     media_info = await resolve_stt_test_media(update, context)
@@ -29121,6 +29142,18 @@ async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not transcript or transcript.startswith("❌"):
             save_tool_test_result("translation_voice", "FAIL", transcript[:400] or "empty_transcript", update.effective_user.id)
             return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+        if target == "vi" and is_likely_vietnamese_transcript(transcript):
+            save_tool_test_result("translation_voice", "PASS", "stt=deepgram; target=vi; transcript_already_vi", update.effective_user.id)
+            return await update.message.reply_text(
+                "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
+                "• STT: <code>Deepgram</code>\n"
+                "• Đích: <b>Tiếng Việt</b>\n"
+                "• Provider dịch: <code>không cần dịch</code>\n\n"
+                "<b>Transcript gốc:</b>\n"
+                f"<code>{html.escape(transcript[:1100])}</code>\n\n"
+                "Transcript đã là Tiếng Việt. Bot chưa cần dịch thêm.",
+                parse_mode="HTML",
+            )
         try:
             result = await translate_to_language(transcript[:3000], target)
         except Exception:
