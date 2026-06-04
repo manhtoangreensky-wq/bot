@@ -25205,7 +25205,7 @@ CUSTOMER_GUIDE_SECTIONS = [
             "• chưa kết nối tài khoản Facebook/TikTok/YouTube\n"
             "• chưa chạy quảng cáo hộ khách\n"
             "• chưa cam kết doanh thu\n"
-            "• kho affiliate/link store là phần admin/internal/backlog, chưa public cho khách\n\n"
+            "• các module lưu link/publish nội bộ là phần admin/internal/backlog, chưa public cho khách\n\n"
             "Khách hiện nhận được: script, prompt, caption, hashtag, CTA và hướng tối ưu để tự đăng."
         ),
     ),
@@ -25340,6 +25340,8 @@ def legal_menu_text() -> str:
         "• Xu dịch vụ chỉ dùng nội bộ trong TOAN AAS, không phải tiền/coin/token, không rút tiền và không chuyển nhượng.\n"
         "• Người dùng chịu trách nhiệm kiểm tra nội dung AI trước khi đăng.\n"
         "• Không dùng hệ thống để reup, vi phạm bản quyền, lừa đảo, deepfake gây hại hoặc spam.\n"
+        "• TOAN AAS giữ quyền với logo, tài liệu, prompt, workflow, source, DB và cấu hình nội bộ.\n"
+        "• Không sao chép, reverse engineer, bán lại hoặc tạo dịch vụ cạnh tranh từ tài liệu/quy trình nội bộ nếu chưa được phép.\n"
         "• Chức năng tự đăng bài/chạy quảng cáo cho khách chưa mở công khai.\n"
         f"• Hỗ trợ/admin: {support_link_html()}"
     )
@@ -25401,12 +25403,17 @@ async def reply_internal_customer_feature(update: Update):
 
 EMERGENCY_ALLOWED_PUBLIC_COMMANDS = {
     "ping", "status", "support", "legal", "terms", "privacy", "profile",
-    "emergency_status", "ops_plan",
+    "official_channels", "kenh_chinh_thuc", "emergency_status", "ops_plan",
 }
 EMERGENCY_ALLOWED_ADMIN_COMMANDS = {
     "backup_db", "emergency_status", "emergency_unlock", "ops_plan",
     "admin_whoami", "providers", "tool_status", "tool_audit", "tool_catalog",
     "admin_api_roadmap", "api_recommend", "sales_ready",
+    "admin_docs", "security_status", "security_checklist", "risk_checklist",
+    "ip_notice", "legal_export", "admin_report_month", "admin_report_year",
+    "export_accounting_month", "export_accounting_year", "billing_report", "xu_ledger_export",
+    "admin_doc_ip", "admin_doc_risk", "admin_doc_checklist", "admin_doc_b2c",
+    "admin_doc_b2b", "admin_doc_nda", "admin_doc_tax", "admin_doc_converter", "admin_doc_sources",
 }
 PAYMENT_FREEZE_COMMANDS = {
     "duyet", "tuchoi", "checkpayos", "payos_debug_create", "mark_payos_test",
@@ -26399,6 +26406,11 @@ def terms_text() -> str:
         "• Xu dịch vụ chỉ dùng nội bộ trong TOAN AAS, không phải tiền/coin/token, không rút tiền và không chuyển nhượng.\n"
         "• Người dùng chịu trách nhiệm kiểm tra nội dung AI trước khi đăng.\n"
         "• Không dùng hệ thống để lừa đảo, giả mạo, vi phạm bản quyền, deepfake gây hại, spam hoặc quảng cáo sai sự thật.\n"
+        "• TOAN AAS giữ quyền với logo, tài liệu, prompt, workflow, source code, database, cấu hình hệ thống và tài liệu vận hành nội bộ.\n"
+        "• Người dùng không được sao chép, reverse engineer, bán lại hoặc dùng tài liệu/quy trình nội bộ để tạo dịch vụ cạnh tranh nếu chưa được TOAN AAS cho phép.\n"
+        "• Nội dung người dùng gửi vào bot cần thuộc quyền sử dụng hợp pháp của người gửi; user chịu trách nhiệm với file, ảnh, audio, video và prompt đã gửi.\n"
+        "• Kết quả AI là nội dung hỗ trợ, có thể sai/thiếu; user phải kiểm tra lại pháp lý, bản quyền, số liệu, tuyên bố quảng cáo và tính phù hợp trước khi dùng công khai.\n"
+        f"• Khiếu nại bản quyền/giả mạo: gửi thông tin và bằng chứng qua {support_link_html()} để admin kiểm tra thủ công.\n"
         "• Chức năng tự đăng bài/chạy quảng cáo cho khách chưa được mở công khai.\n"
         f"• Khi cần hỗ trợ, liên hệ admin: {support_link_html()}\n\n"
         "Bấm nút bên dưới để xem/tải bản PDF đầy đủ nếu file đã được triển khai."
@@ -26551,6 +26563,287 @@ def ads_policy_text() -> str:
 
 async def cmd_ads_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(ads_policy_text(), parse_mode="HTML")
+
+RISK_PACKAGE_DIR_CANDIDATES = [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "toan_aas_risk_package"),
+    os.path.join(os.getcwd(), "toan_aas_risk_package"),
+    r"D:\TOANAAS\bot telegram\toan_aas_risk_package",
+]
+
+ADMIN_DOCS = {
+    "ip": {
+        "file": "01_TOAN_AAS_RUI_RO_PHAP_LY_IP_VN_V1.docx",
+        "title": "Rủi ro pháp lý/IP",
+        "command": "/admin_doc_ip",
+        "visibility": "ADMIN_ONLY",
+    },
+    "risk": {
+        "file": "02_TOAN_AAS_SO_TAY_UNG_PHO_RUI_RO_NGAY_V1.docx",
+        "title": "Sổ tay ứng phó rủi ro",
+        "command": "/admin_doc_risk",
+        "visibility": "ADMIN_ONLY",
+    },
+    "checklist": {
+        "file": "03_TOAN_AAS_CHECKLIST_TAI_LIEU_PHAI_LAM_NGAY_V1.docx",
+        "title": "Checklist tài liệu phải làm ngay",
+        "command": "/admin_doc_checklist",
+        "visibility": "ADMIN_ONLY",
+    },
+    "b2c": {
+        "file": "04_TOAN_AAS_HOP_DONG_B2C_DANG_KY_TAI_KHOAN_V1.docx",
+        "title": "Hợp đồng/đăng ký B2C draft",
+        "command": "/admin_doc_b2c",
+        "visibility": "ADMIN_ONLY",
+    },
+    "b2b": {
+        "file": "05_TOAN_AAS_HOP_DONG_B2B_MAU_V1.docx",
+        "title": "Hợp đồng B2B mẫu",
+        "command": "/admin_doc_b2b",
+        "visibility": "ADMIN_ONLY",
+    },
+    "nda": {
+        "file": "06_TOAN_AAS_NDA_ADMIN_CODER_CTV_V1.docx",
+        "title": "NDA admin/coder/CTV",
+        "command": "/admin_doc_nda",
+        "visibility": "ADMIN_ONLY",
+    },
+    "tax": {
+        "file": "08_TOAN_AAS_ADMIN_REPORTING_TAX_WORKBOOK_V1.xlsx",
+        "title": "Admin reporting/tax workbook",
+        "command": "/admin_doc_tax",
+        "visibility": "ADMIN_ONLY",
+    },
+    "converter": {
+        "file": "09_TOAN_AAS_DOCUMENT_CONVERTER_EXPANSION_SPEC_V1.md",
+        "title": "Document converter expansion spec",
+        "command": "/admin_doc_converter",
+        "visibility": "ADMIN_ONLY",
+    },
+    "sources": {
+        "file": "11_TOAN_AAS_NGUON_LUAT_CONG_KHAI_CAN_RA_SOAT.md",
+        "title": "Nguồn luật công khai cần rà soát",
+        "command": "/admin_doc_sources",
+        "visibility": "ADMIN_ONLY",
+    },
+}
+
+PUBLIC_DOCS = {
+    "guide_docx": "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx",
+    "terms_pdf": "TOAN_AAS_DIEU_KHOAN_SU_DUNG_DICH_VU_V1.pdf",
+}
+
+def find_risk_package_file(filename: str) -> str:
+    safe_name = os.path.basename(str(filename or "").strip())
+    if not safe_name:
+        return ""
+    exact = find_asset_path(safe_name)
+    if exact:
+        return exact
+    for directory in RISK_PACKAGE_DIR_CANDIDATES:
+        try:
+            candidate = os.path.join(directory, safe_name)
+            if os.path.exists(candidate):
+                return candidate
+        except Exception:
+            pass
+    return ""
+
+async def send_admin_doc_by_key(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Tài liệu này chỉ dành cho admin/internal.")
+    item = ADMIN_DOCS.get(key)
+    if not item:
+        return await update.message.reply_text("⚠️ Tài liệu admin không hợp lệ.")
+    path = find_risk_package_file(item["file"])
+    if not path:
+        return await update.message.reply_text(
+            "⚠️ Chưa tìm thấy file trên server hiện tại.\n\n"
+            f"• Tên file: <code>{html.escape(item['file'])}</code>\n"
+            "• Trạng thái: ADMIN_ONLY\n"
+            "• Gợi ý: đưa thư mục <code>toan_aas_risk_package</code> vào cùng thư mục bot nếu muốn bot gửi file trực tiếp.",
+            parse_mode="HTML",
+        )
+    with open(path, "rb") as f:
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=f,
+            filename=os.path.basename(path),
+            caption=(
+                f"🔐 {item['title']}\n"
+                "Phạm vi: ADMIN_ONLY / INTERNAL. Không gửi công khai cho khách nếu chưa được duyệt."
+            ),
+        )
+
+async def cmd_admin_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    lines = [
+        "🔐 <b>TOAN AAS ADMIN DOCS — INTERNAL ONLY</b>",
+        "",
+        "<b>Public cho khách hiện tại</b>",
+        f"• Hướng dẫn khách: <code>{html.escape(PUBLIC_DOCS['guide_docx'])}</code> — qua /huongdan hoặc website",
+        f"• Điều khoản dịch vụ: <code>{html.escape(PUBLIC_DOCS['terms_pdf'])}</code> — qua /legal hoặc website",
+        "",
+        "<b>Admin-only, không public</b>",
+    ]
+    for key, item in ADMIN_DOCS.items():
+        found = "OK" if find_risk_package_file(item["file"]) else "missing"
+        lines.append(
+            f"• <code>{html.escape(item['command'])}</code> — {html.escape(item['title'])} "
+            f"(<code>{html.escape(found)}</code>)"
+        )
+    lines.extend([
+        "",
+        "<b>Rule</b>",
+        "• Không public NDA, risk plan, tax workbook, IP plan.",
+        "• Không mở auto publish/ads/affiliate vault.",
+        "• Legal/accounting export là sổ quản trị nội bộ, không thay thế tư vấn luật sư/kế toán.",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_admin_doc_ip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_doc_by_key(update, context, "ip")
+
+async def cmd_admin_doc_risk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_doc_by_key(update, context, "risk")
+
+async def cmd_admin_doc_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_doc_by_key(update, context, "checklist")
+
+async def cmd_admin_doc_b2c(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_doc_by_key(update, context, "b2c")
+
+async def cmd_admin_doc_b2b(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_doc_by_key(update, context, "b2b")
+
+async def cmd_admin_doc_nda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_doc_by_key(update, context, "nda")
+
+async def cmd_admin_doc_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_doc_by_key(update, context, "tax")
+
+async def cmd_admin_doc_converter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_doc_by_key(update, context, "converter")
+
+async def cmd_admin_doc_sources(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_doc_by_key(update, context, "sources")
+
+def official_channels_text() -> str:
+    website = effective_public_base_url() or "https://bot-production-2dd7.up.railway.app"
+    return (
+        "🛰 <b>KÊNH CHÍNH THỨC TOAN AAS</b>\n\n"
+        f"• Bot chính thức: <a href=\"{html.escape(OFFICIAL_TELEGRAM_URL)}\">{html.escape(OFFICIAL_TELEGRAM_URL)}</a>\n"
+        f"• Hỗ trợ/admin: <a href=\"{html.escape(SUPPORT_TELEGRAM_URL)}\">{html.escape(SUPPORT_TELEGRAM_URL)}</a>\n"
+        f"• Website hiện tại: <a href=\"{html.escape(website)}\">{html.escape(website)}</a>\n"
+        "• Domain dự kiến sau khi mua/cấu hình: <code>toanaas.vn</code>\n\n"
+        "<b>Cảnh báo chống giả mạo:</b>\n"
+        "TOAN AAS không yêu cầu mật khẩu mạng xã hội, mã OTP, thông tin thẻ thanh toán hoặc private key qua Telegram."
+    )
+
+async def cmd_official_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(official_channels_text(), parse_mode="HTML", disable_web_page_preview=True)
+
+def ip_notice_text() -> str:
+    return (
+        "© <b>TOAN AAS — IP / Anti-copy Notice</b>\n\n"
+        "TOAN AAS giữ quyền với logo, tên thương hiệu, tài liệu hướng dẫn, prompt, workflow, source code, database, "
+        "cấu hình hệ thống, nội dung vận hành nội bộ và các tài liệu rủi ro/pháp lý/kế toán do TOAN AAS biên soạn.\n\n"
+        "Không được sao chép, reverse engineer, bán lại, chia sẻ tài liệu nội bộ hoặc dùng quy trình/source/cấu hình "
+        "để tạo dịch vụ cạnh tranh nếu chưa có đồng ý bằng văn bản từ TOAN AAS.\n\n"
+        "Nếu phát hiện giả mạo/bản quyền, admin cần lưu bằng chứng, URL, ảnh chụp, thời gian phát hiện và liên hệ luật sư/kế toán khi cần."
+    )
+
+async def cmd_ip_notice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin/internal.")
+    await update.message.reply_text(ip_notice_text(), parse_mode="HTML")
+
+def security_checklist_text() -> str:
+    return (
+        "🛡 <b>TOAN AAS SECURITY CHECKLIST — ADMIN ONLY</b>\n\n"
+        "<b>Telegram/Git/Railway</b>\n"
+        "□ OWNER_IDS đúng chủ tài khoản.\n"
+        "□ ADMIN_IDS chỉ gồm người thật cần quyền vận hành.\n"
+        "□ Telegram token không nằm trong code/log/ảnh chụp public.\n"
+        "□ Railway ENV không lộ secret.\n"
+        "□ GitHub bật 2FA và không commit .env/database backup.\n\n"
+        "<b>Thanh toán/Xu</b>\n"
+        "□ Manual QR fallback hoạt động rõ.\n"
+        "□ PayOS chỉ cộng Xu khi webhook/checkpayos xác minh đúng.\n"
+        "□ Không biến Xu thành tiền/coin/token/ví điện tử.\n"
+        "□ Top-up package giống nhau cho mọi user; member tier chỉ giảm Xu khi tiêu dịch vụ.\n\n"
+        "<b>Dữ liệu/File</b>\n"
+        "□ File upload có giới hạn MB/trang/MIME.\n"
+        "□ File tạm xóa sau xử lý.\n"
+        "□ Không gửi NDA/tax/IP/risk docs cho khách.\n"
+        "□ Backup DB định kỳ và không public file backup.\n\n"
+        "<b>Module rủi ro</b>\n"
+        "□ Auto publish OFF.\n"
+        "□ Ads assistant OFF.\n"
+        "□ Affiliate vault không public cho khách.\n"
+        "□ Legal/accounting export chỉ là sổ quản trị nội bộ, không thay thế luật sư/kế toán."
+    )
+
+async def cmd_security_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin/internal.")
+    await update.message.reply_text(security_checklist_text(), parse_mode="HTML")
+
+async def cmd_risk_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin/internal.")
+    await update.message.reply_text(
+        "📋 <b>RISK CHECKLIST — TRƯỚC KHI MỞ MODULE MỚI</b>\n\n"
+        "□ Provider đã PASS smoke test.\n"
+        "□ Có giới hạn Xu, file size, timeout và refund khi lỗi.\n"
+        "□ Có cảnh báo nội dung rủi ro/bản quyền.\n"
+        "□ Không public tài liệu admin-only.\n"
+        "□ Không mở auto publish/ads/customer account connect.\n"
+        "□ Nếu liên quan kế toán/pháp lý, cần admin duyệt và luật sư/kế toán rà sau.",
+        parse_mode="HTML",
+    )
+
+async def cmd_security_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    owner_count = len(parse_id_set(os.getenv("OWNER_IDS", ""))) if callable(globals().get("parse_id_set")) else len(OWNER_IDS)
+    admin_count = len(parse_id_set(os.getenv("ADMIN_IDS", ""))) if callable(globals().get("parse_id_set")) else len(ADMIN_IDS)
+    db_ok = os.path.exists(DB_FILE)
+    latest = latest_security_event()
+    lines = [
+        "🛡 <b>SECURITY STATUS — TOAN AAS</b>",
+        "",
+        f"• OWNER_IDS: <b>{owner_count}</b>",
+        f"• ADMIN_IDS: <b>{admin_count}</b>",
+        f"• Emergency lock: <b>{'ON' if flag_on('emergency_lock') else 'OFF'}</b>",
+        f"• Maintenance: <b>{'ON' if flag_on('maintenance') else 'OFF'}</b>",
+        f"• DB file: <code>{html.escape(str(DB_FILE))}</code> — <b>{'OK' if db_ok else 'MISSING'}</b>",
+        f"• Public URL: <code>{html.escape(effective_public_base_url() or '-')}</code>",
+        f"• Update mode: <code>{html.escape(str(ACTIVE_TELEGRAM_UPDATE_MODE or TELEGRAM_UPDATE_MODE or '-'))}</code>",
+        f"• Latest security event: <code>{html.escape(str(latest.get('event_type') or '-'))}</code> / <code>{html.escape(str(latest.get('created_at') or '-'))}</code>",
+        "",
+        "2FA/secret checklist là thao tác thủ công: dùng /security_checklist để rà.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_legal_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin/internal.")
+    content = "\n\n".join([
+        "# TOAN AAS Legal Export",
+        "## Official Channels\n" + re.sub(r"<[^>]+>", "", html.unescape(official_channels_text())),
+        "## Legal Menu\n" + re.sub(r"<[^>]+>", "", html.unescape(legal_menu_text())),
+        "## Terms\n" + re.sub(r"<[^>]+>", "", html.unescape(terms_text())),
+        "## Privacy\n" + re.sub(r"<[^>]+>", "", html.unescape(privacy_text())),
+        "## Service Credits\n" + re.sub(r"<[^>]+>", "", html.unescape(service_credit_terms_text())),
+        "## Refund\n" + re.sub(r"<[^>]+>", "", html.unescape(refund_policy_text())),
+        "## Content Policy\n" + re.sub(r"<[^>]+>", "", html.unescape(content_policy_text())),
+        "## Affiliate Policy\n" + re.sub(r"<[^>]+>", "", html.unescape(affiliate_policy_text())),
+        "## Ads Policy\n" + re.sub(r"<[^>]+>", "", html.unescape(ads_policy_text())),
+        "## IP Notice\n" + re.sub(r"<[^>]+>", "", html.unescape(ip_notice_text())),
+        "\nNote: Bản export này để admin/luật sư rà soát, không tự động thay thế tư vấn pháp lý.",
+    ])
+    await send_report_file(context, update.effective_chat.id, update.effective_user.id, content, "txt", "📜 TOAN AAS legal export for review")
 
 async def cmd_data_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -28623,6 +28916,168 @@ def report_chart_payload(start_at: str, end_at: str, label: str) -> str:
         return "\n".join(lines)
     finally:
         conn.close()
+
+def month_report_bounds(month_arg: str = "") -> tuple[str, str, str]:
+    raw = (month_arg or "").strip()
+    if raw:
+        dt = datetime.strptime(raw, "%Y-%m")
+    else:
+        now = datetime.now()
+        dt = datetime(now.year, now.month, 1)
+    if dt.month == 12:
+        next_month = datetime(dt.year + 1, 1, 1)
+    else:
+        next_month = datetime(dt.year, dt.month + 1, 1)
+    end = next_month - timedelta(seconds=1)
+    return _report_dt_text(dt), _report_dt_text(end), f"Tháng {dt.strftime('%Y-%m')}"
+
+def year_report_bounds(year_arg: str = "") -> tuple[str, str, str]:
+    raw = (year_arg or "").strip()
+    year = int(raw) if raw else datetime.now().year
+    start = datetime(year, 1, 1)
+    end = datetime(year, 12, 31, 23, 59, 59)
+    return _report_dt_text(start), _report_dt_text(end), f"Năm {year}"
+
+def accounting_export_csv(start_at: str, end_at: str, label: str, ledger_only: bool = False) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["TOAN AAS Accounting/Internal Export", label, start_at, end_at])
+    writer.writerow(["Note", "Sổ quản trị nội bộ, không thay thế hóa đơn/chứng từ hợp pháp hoặc tư vấn kế toán/thuế."])
+    writer.writerow([])
+    conn = db_connect()
+    try:
+        payos_amount = int(sql_scalar(conn, "SELECT COALESCE(SUM(amount),0) FROM payos_orders WHERE status=? AND paid_at BETWEEN ? AND ?", (PAYOS_STATUS_PAID, start_at, end_at), 0) or 0)
+        payos_count = int(sql_scalar(conn, "SELECT COUNT(*) FROM payos_orders WHERE status=? AND paid_at BETWEEN ? AND ?", (PAYOS_STATUS_PAID, start_at, end_at), 0) or 0)
+        manual_amount = int(sql_scalar(conn, "SELECT COALESCE(SUM(amount),0) FROM pending_deposits WHERE status='approved' AND submitted_at BETWEEN ? AND ?", (start_at, end_at), 0) or 0)
+        manual_count = int(sql_scalar(conn, "SELECT COUNT(*) FROM pending_deposits WHERE status='approved' AND submitted_at BETWEEN ? AND ?", (start_at, end_at), 0) or 0)
+        xu_sold = int(sql_scalar(conn, "SELECT COALESCE(SUM(xu),0) FROM payos_orders WHERE status=? AND paid_at BETWEEN ? AND ?", (PAYOS_STATUS_PAID, start_at, end_at), 0) or 0)
+        xu_manual = int(sql_scalar(conn, "SELECT COALESCE(SUM(xu),0) FROM pending_deposits WHERE status='approved' AND submitted_at BETWEEN ? AND ?", (start_at, end_at), 0) or 0)
+        xu_spent = abs(int(sql_scalar(conn, "SELECT COALESCE(SUM(delta),0) FROM credit_events WHERE delta<0 AND created_at BETWEEN ? AND ?", (start_at, end_at), 0) or 0))
+        xu_refunded = int(sql_scalar(conn, "SELECT COALESCE(SUM(delta),0) FROM credit_events WHERE delta>0 AND lower(event_type) LIKE '%refund%' AND created_at BETWEEN ? AND ?", (start_at, end_at), 0) or 0)
+        writer.writerow(["SUMMARY"])
+        writer.writerow(["total_cash_received_vnd", payos_amount + manual_amount])
+        writer.writerow(["payos_paid_orders", payos_count])
+        writer.writerow(["manual_approved_orders", manual_count])
+        writer.writerow(["payos_amount_vnd", payos_amount])
+        writer.writerow(["manual_amount_vnd", manual_amount])
+        writer.writerow(["xu_sold_payos", xu_sold])
+        writer.writerow(["xu_sold_manual", xu_manual])
+        writer.writerow(["xu_spent", xu_spent])
+        writer.writerow(["xu_refunded", xu_refunded])
+        writer.writerow([])
+
+        if not ledger_only:
+            writer.writerow(["PAYOS_ORDERS"])
+            writer.writerow(["order_code", "user_id", "amount_vnd", "package_amount_vnd", "base_xu", "launch_bonus_xu", "total_xu", "payment_method", "status", "created_at", "paid_at", "payment_link_id"])
+            for row in sql_rows(
+                conn,
+                """SELECT order_code,user_id,amount,package_amount_vnd,base_xu,launch_bonus_xu,xu,status,created_at,paid_at,payment_link_id
+                FROM payos_orders
+                WHERE created_at BETWEEN ? AND ? OR paid_at BETWEEN ? AND ?
+                ORDER BY COALESCE(paid_at,created_at)""",
+                (start_at, end_at, start_at, end_at),
+            ):
+                writer.writerow([row[0], row[1], row[2], row[3], row[4], row[5], row[6], "payos", row[7], row[8], row[9], row[10]])
+            writer.writerow([])
+
+            writer.writerow(["MANUAL_DEPOSITS"])
+            writer.writerow(["deposit_id", "order_code", "user_id", "username", "amount_vnd", "total_xu", "payment_method", "status", "submitted_at"])
+            for row in sql_rows(
+                conn,
+                """SELECT id,order_code,user_id,username,amount,xu,status,submitted_at
+                FROM pending_deposits
+                WHERE submitted_at BETWEEN ? AND ?
+                ORDER BY submitted_at""",
+                (start_at, end_at),
+            ):
+                writer.writerow([row[0], row[1], row[2], row[3], row[4], row[5], "manual_qr", row[6], row[7]])
+            writer.writerow([])
+
+            writer.writerow(["TRANSACTIONS_SPEND"])
+            writer.writerow(["user_id", "action", "base_cost", "discount_rate", "discount_xu", "final_cost", "created_at"])
+            for row in sql_rows(
+                conn,
+                "SELECT user_id,action,cost,discount_rate,created_at FROM transactions WHERE created_at BETWEEN ? AND ? ORDER BY created_at",
+                (start_at, end_at),
+            ):
+                final_cost = int(row[2] or 0)
+                writer.writerow([row[0], row[1], "", row[3], "", final_cost, row[4]])
+            writer.writerow([])
+
+        writer.writerow(["CREDIT_EVENTS_LEDGER"])
+        writer.writerow(["user_id", "delta", "balance_after", "event_type", "ref_id", "note", "created_at"])
+        for row in sql_rows(
+            conn,
+            "SELECT user_id,delta,balance_after,event_type,ref_id,note,created_at FROM credit_events WHERE created_at BETWEEN ? AND ? ORDER BY created_at",
+            (start_at, end_at),
+        ):
+            writer.writerow(list(row))
+        writer.writerow([])
+
+        writer.writerow(["REFUNDS"])
+        writer.writerow(["user_id", "xu_refunded", "event_type", "ref_id", "reason", "created_at"])
+        for row in sql_rows(
+            conn,
+            "SELECT user_id,delta,event_type,ref_id,note,created_at FROM credit_events WHERE delta>0 AND lower(event_type) LIKE '%refund%' AND created_at BETWEEN ? AND ? ORDER BY created_at",
+            (start_at, end_at),
+        ):
+            writer.writerow([row[0], row[1], row[2], row[3], row[4], row[5]])
+    finally:
+        conn.close()
+    return buffer.getvalue()
+
+async def cmd_admin_report_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        start_at, end_at, label = month_report_bounds(context.args[0] if context.args else "")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/admin_report_month YYYY-MM</code>", parse_mode="HTML")
+    payload = admin_report_payload(start_at, end_at, label)
+    await update.message.reply_text(format_admin_report(payload) + f"\n\nExport CSV: <code>/export_accounting_month {start_at[:7]}</code>", parse_mode="HTML")
+
+async def cmd_admin_report_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        start_at, end_at, label = year_report_bounds(context.args[0] if context.args else "")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/admin_report_year YYYY</code>", parse_mode="HTML")
+    payload = admin_report_payload(start_at, end_at, label)
+    await update.message.reply_text(format_admin_report(payload) + f"\n\nExport CSV: <code>/export_accounting_year {start_at[:4]}</code>", parse_mode="HTML")
+
+async def cmd_export_accounting_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        start_at, end_at, label = month_report_bounds(context.args[0] if context.args else "")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/export_accounting_month YYYY-MM</code>", parse_mode="HTML")
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    content = accounting_export_csv(start_at, end_at, label, ledger_only=False)
+    await send_report_file(context, update.effective_chat.id, update.effective_user.id, content, "csv", f"📒 Accounting export — {label}")
+
+async def cmd_export_accounting_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        start_at, end_at, label = year_report_bounds(context.args[0] if context.args else "")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/export_accounting_year YYYY</code>", parse_mode="HTML")
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    content = accounting_export_csv(start_at, end_at, label, ledger_only=False)
+    await send_report_file(context, update.effective_chat.id, update.effective_user.id, content, "csv", f"📒 Accounting export — {label}")
+
+async def cmd_billing_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_admin_report_month(update, context)
+
+async def cmd_xu_ledger_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        start_at, end_at, label = month_report_bounds(context.args[0] if context.args else "")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/xu_ledger_export YYYY-MM</code>", parse_mode="HTML")
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    content = accounting_export_csv(start_at, end_at, label, ledger_only=True)
+    await send_report_file(context, update.effective_chat.id, update.effective_user.id, content, "csv", f"🪙 Xu ledger export — {label}")
 
 async def send_admin_report(update: Update, period: str, args=None):
     if not is_admin_user(update.effective_user.id):
@@ -47709,8 +48164,25 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("content_policy", cmd_content_policy))
     tg_app.add_handler(CommandHandler("affiliate_policy", cmd_affiliate_policy))
     tg_app.add_handler(CommandHandler("ads_policy",  cmd_ads_policy))
+    tg_app.add_handler(CommandHandler("official_channels", cmd_official_channels))
+    tg_app.add_handler(CommandHandler("kenh_chinh_thuc", cmd_official_channels))
     tg_app.add_handler(CommandHandler("data_delete", cmd_data_delete))
     tg_app.add_handler(CommandHandler("mydata",      cmd_mydata))
+    tg_app.add_handler(CommandHandler("admin_docs",  cmd_admin_docs))
+    tg_app.add_handler(CommandHandler("admin_doc_ip", cmd_admin_doc_ip))
+    tg_app.add_handler(CommandHandler("admin_doc_risk", cmd_admin_doc_risk))
+    tg_app.add_handler(CommandHandler("admin_doc_checklist", cmd_admin_doc_checklist))
+    tg_app.add_handler(CommandHandler("admin_doc_b2c", cmd_admin_doc_b2c))
+    tg_app.add_handler(CommandHandler("admin_doc_b2b", cmd_admin_doc_b2b))
+    tg_app.add_handler(CommandHandler("admin_doc_nda", cmd_admin_doc_nda))
+    tg_app.add_handler(CommandHandler("admin_doc_tax", cmd_admin_doc_tax))
+    tg_app.add_handler(CommandHandler("admin_doc_converter", cmd_admin_doc_converter))
+    tg_app.add_handler(CommandHandler("admin_doc_sources", cmd_admin_doc_sources))
+    tg_app.add_handler(CommandHandler("security_status", cmd_security_status))
+    tg_app.add_handler(CommandHandler("security_checklist", cmd_security_checklist))
+    tg_app.add_handler(CommandHandler("risk_checklist", cmd_risk_checklist))
+    tg_app.add_handler(CommandHandler("ip_notice", cmd_ip_notice))
+    tg_app.add_handler(CommandHandler("legal_export", cmd_legal_export))
     tg_app.add_handler(CommandHandler("guide_debug", cmd_guide_debug))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
@@ -47815,6 +48287,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("report_month", cmd_report_month))
     tg_app.add_handler(CommandHandler("report_year", cmd_report_year))
     tg_app.add_handler(CommandHandler("report_range", cmd_report_range))
+    tg_app.add_handler(CommandHandler("admin_report_month", cmd_admin_report_month))
+    tg_app.add_handler(CommandHandler("admin_report_year", cmd_admin_report_year))
+    tg_app.add_handler(CommandHandler("export_accounting_month", cmd_export_accounting_month))
+    tg_app.add_handler(CommandHandler("export_accounting_year", cmd_export_accounting_year))
+    tg_app.add_handler(CommandHandler("billing_report", cmd_billing_report))
+    tg_app.add_handler(CommandHandler("xu_ledger_export", cmd_xu_ledger_export))
     tg_app.add_handler(CommandHandler("report_ai_today", cmd_report_ai_today))
     tg_app.add_handler(CommandHandler("report_ai_week", cmd_report_ai_week))
     tg_app.add_handler(CommandHandler("report_ai_month", cmd_report_ai_month))
