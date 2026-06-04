@@ -2579,6 +2579,13 @@ def payos_checkout_unavailable_text(pkg_key: str, amount: int, order_code: int, 
         f"{reason_line}"
     )
 
+def payos_unavailable_keyboard(pkg_key: str, uid: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔁 Thử lại PayOS", callback_data=f"pkg|{pkg_key}|{uid}")],
+        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=f"pkg|manual_{pkg_key}|{uid}")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main_topup")],
+    ])
+
 PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT = "standard_sorted"
 PAYOS_CREATE_SIGNATURE_FIELDS = ("amount", "cancelUrl", "description", "orderCode", "returnUrl")
 PAYOS_CREATE_SIGNATURE_VARIANTS = {
@@ -2753,19 +2760,49 @@ def manual_payment_text(uid: int, amount: int, xu: int, order_code: int, reason:
     reason_line = f"⚠️ {reason}\n\n" if reason else ""
     return (
         f"{reason_line}"
-        f"🏦 <b>NẠP XU DỊCH VỤ THỦ CÔNG</b>\n\n"
-        f"📋 Gói: <b>{amount:,}đ: +{xu} Xu dịch vụ</b>\n"
-        f"👤 ID Telegram: <code>{uid}</code>\n"
-        f"🆔 Mã đơn: <code>{order_code}</code>\n\n"
+        f"🏦 <b>NẠP THỦ CÔNG TOAN AAS</b>\n\n"
+        "Dùng khi PayOS QR động đang lỗi hoặc bạn cần admin hỗ trợ đối soát.\n\n"
+        f"👤 ID của bạn: <code>{uid}</code>\n"
+        f"💰 Gói: <b>{amount:,}đ</b>\n"
+        f"🪙 Xu dự kiến: <b>{xu} Xu dịch vụ</b>\n"
+        f"🧾 Nội dung chuyển khoản: <code>AAS {uid} {order_code}</code>\n\n"
         f"<b>Thông tin chuyển khoản:</b>\n"
         f"• Ngân hàng: <b>{MANUAL_BANK_NAME}</b>\n"
         f"• Số tài khoản: <code>{MANUAL_BANK_ACCOUNT}</code>\n"
         f"• Chủ tài khoản: <b>{MANUAL_BANK_OWNER}</b>\n"
         f"• Số tiền: <b>{amount:,}đ</b>\n"
         f"• Nội dung: <code>AAS {uid} {order_code}</code>\n\n"
-        f"📸 Sau khi chuyển khoản, gửi ảnh bill ngay tại đây.\n"
-        f"⚠️ Vì có rủi ro fake bill, TOAN AAS chỉ cộng Xu sau khi admin đối soát và xác minh tiền thật đã vào tài khoản.\n"
-        f"✅ Nếu hợp lệ, admin sẽ cộng <b>{xu} Xu dịch vụ</b>."
+        "Bước 1: Chuyển khoản đúng thông tin/QR thủ công.\n"
+        "Bước 2: Chụp bill giao dịch.\n"
+        "Bước 3: Gửi ảnh bill vào bot trong vòng 10 phút.\n"
+        "Bước 4: Chờ admin kiểm tra sao kê thật và duyệt.\n\n"
+        "⚠️ <b>Lưu ý chống fake bill:</b>\n"
+        "Ảnh bill không đồng nghĩa giao dịch đã thành công.\n"
+        "TOAN AAS chỉ cộng Xu sau khi admin xác minh tiền thật đã vào tài khoản."
+    )
+
+def manual_custom_payment_text(uid: int, reason: str = "") -> str:
+    reason_line = f"⚠️ {reason}\n\n" if reason else ""
+    return (
+        f"{reason_line}"
+        "🏦 <b>NẠP THỦ CÔNG TOAN AAS</b>\n\n"
+        "Dùng khi PayOS QR động đang lỗi hoặc bạn cần admin hỗ trợ đối soát.\n\n"
+        f"👤 ID của bạn: <code>{uid}</code>\n"
+        "💰 Gói: <b>chưa chọn / chờ admin đối soát</b>\n"
+        "🪙 Xu dự kiến: <b>chờ admin xác nhận theo số tiền thật</b>\n"
+        f"🧾 Nội dung chuyển khoản: <code>AAS {uid} MANUAL</code>\n\n"
+        f"<b>Thông tin chuyển khoản:</b>\n"
+        f"• Ngân hàng: <b>{MANUAL_BANK_NAME}</b>\n"
+        f"• Số tài khoản: <code>{MANUAL_BANK_ACCOUNT}</code>\n"
+        f"• Chủ tài khoản: <b>{MANUAL_BANK_OWNER}</b>\n"
+        f"• Nội dung: <code>AAS {uid} MANUAL</code>\n\n"
+        "Bước 1: Chuyển khoản đúng thông tin/QR thủ công.\n"
+        "Bước 2: Chụp bill giao dịch.\n"
+        "Bước 3: Gửi ảnh bill vào bot trong vòng 10 phút.\n"
+        "Bước 4: Chờ admin kiểm tra sao kê thật và duyệt.\n\n"
+        "⚠️ <b>Lưu ý chống fake bill:</b>\n"
+        "Ảnh bill không đồng nghĩa giao dịch đã thành công.\n"
+        "TOAN AAS chỉ cộng Xu sau khi admin xác minh tiền thật đã vào tài khoản."
     )
 
 def manual_qr_url(uid: int, amount: int, order_code: int) -> str:
@@ -23435,7 +23472,9 @@ class AgentDownloader:
 # ─── STATE ───────────────────────────────────────────────────────────────────
 USER_BILL_STATE: dict = {}
 USER_PENDING: dict = {}
-MANUAL_BILL_STATE_TTL_SECONDS = 30 * 60
+MANUAL_BILL_STATE_TTL_SECONDS = 10 * 60
+LAST_USER_FILE_TTL_SECONDS = 10 * 60
+LAST_USER_FILE: dict = {}
 
 def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key=""):
     USER_BILL_STATE[uid] = {
@@ -23460,6 +23499,67 @@ def get_active_manual_bill_state(uid):
         USER_BILL_STATE.pop(uid, None)
         return None
     return state
+
+def classify_user_file_from_message(message) -> dict:
+    if not message:
+        return {}
+    if getattr(message, "photo", None):
+        photo = message.photo[-1]
+        return {
+            "file_id": str(photo.file_id or ""),
+            "file_type": "photo",
+            "kind": "photo",
+            "mime_type": "image/jpeg",
+            "filename": "telegram_photo.jpg",
+            "file_name": "telegram_photo.jpg",
+            "file_size": int(photo.file_size or 0),
+        }
+    doc = getattr(message, "document", None)
+    if doc:
+        mime_type = str(getattr(doc, "mime_type", "") or "")
+        filename = str(getattr(doc, "file_name", "") or "file")
+        ext = os.path.splitext(filename)[1].lower()
+        if mime_type == "application/pdf" or ext == ".pdf":
+            file_type = "pdf"
+        elif mime_type.startswith("image/") or ext in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+            file_type = "image"
+        else:
+            file_type = "document"
+        return {
+            "file_id": str(getattr(doc, "file_id", "") or ""),
+            "file_type": file_type,
+            "kind": "document",
+            "mime_type": mime_type,
+            "filename": filename,
+            "file_name": filename,
+            "file_size": int(getattr(doc, "file_size", 0) or 0),
+        }
+    return {}
+
+def remember_last_user_file(update: Update):
+    try:
+        if not update.effective_user or not update.message:
+            return
+        info = classify_user_file_from_message(update.message)
+        if not info or not info.get("file_id"):
+            return
+        info.update({
+            "chat_id": update.effective_chat.id if update.effective_chat else "",
+            "created_at_ts": time.time(),
+            "created_at": now_text(),
+        })
+        LAST_USER_FILE[str(update.effective_user.id)] = info
+    except Exception as e:
+        logger.warning(f"last user file cache write failed: {e}")
+
+def get_last_user_file(user_id) -> dict:
+    info = LAST_USER_FILE.get(str(user_id)) or {}
+    if not info:
+        return {}
+    if float(info.get("created_at_ts") or 0) + LAST_USER_FILE_TTL_SECONDS < time.time():
+        LAST_USER_FILE.pop(str(user_id), None)
+        return {}
+    return dict(info)
 LAST_MEDIA_CACHE_TTL_SECONDS = 120
 LAST_MEDIA_BY_USER: dict = {}
 
@@ -24199,6 +24299,47 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
         return
 
+    if pkg_key.startswith("manual_"):
+        manual_key = pkg_key.replace("manual_", "", 1)
+        if manual_key in PAYMENT_PACKAGES:
+            pkg = PAYMENT_PACKAGES[manual_key]
+            amount = int(pkg["amount"])
+            get_user(uid, query.from_user.first_name or "Manual payment user")
+            package_credit = calculate_package_credit_for_user(uid, amount)
+            base_xu = int(package_credit.get("base_xu") or pkg["xu"])
+            launch_preview = int(package_credit.get("launch_bonus_xu") or 0)
+            xu = int(package_credit.get("total_xu") or base_xu)
+            order_code = generate_order_code()
+            create_order(
+                order_code,
+                uid,
+                amount,
+                xu,
+                base_xu=base_xu,
+                launch_bonus_xu=launch_preview,
+                package_amount_vnd=amount,
+            )
+            set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=manual_key)
+            await query.edit_message_text(
+                manual_payment_text(uid, amount, xu, order_code, "Bạn đã chọn nạp thủ công."),
+                parse_mode="HTML",
+            )
+            try:
+                await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=manual_qr_url(uid, amount, order_code),
+                    caption="🏦 QR thủ công theo đúng số tiền và nội dung chuyển khoản.",
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"Manual QR callback send error: {e}")
+            return
+        set_manual_bill_state(uid, order_code="MANUAL")
+        return await query.edit_message_text(
+            manual_custom_payment_text(uid, "Bạn đã chọn nạp thủ công."),
+            parse_mode="HTML",
+        )
+
     if pkg_key not in PAYMENT_PACKAGES:
         await query.edit_message_text("❌ Gói nạp không hợp lệ.")
         return
@@ -24230,6 +24371,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 "PayOS QR động đang khóa an toàn. Dùng /thucong nếu cần nạp thủ công.",
             ),
             parse_mode="HTML",
+            reply_markup=payos_unavailable_keyboard(pkg_key, uid),
         )
         return
 
@@ -24243,6 +24385,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 "Thiếu PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY.",
             ),
             parse_mode="HTML",
+            reply_markup=payos_unavailable_keyboard(pkg_key, uid),
         )
         return
 
@@ -24326,6 +24469,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(
                 payos_checkout_unavailable_text(pkg_key, amount, order_code, desc),
                 parse_mode="HTML",
+                reply_markup=payos_unavailable_keyboard(pkg_key, uid),
             )
     except Exception as e:
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
@@ -24341,6 +24485,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text(
             payos_checkout_unavailable_text(pkg_key, amount, order_code, str(e)),
             parse_mode="HTML",
+            reply_markup=payos_unavailable_keyboard(pkg_key, uid),
         )
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
@@ -25798,20 +25943,40 @@ def localized_start_menu_text(user_id, lang: str) -> str:
             "一个 Telegram Bot，集合日常 AI 工具：\n"
             "内容、视频、图片、语音、文档、翻译和记忆。\n\n"
             f"🎁 余额: <b>{html.escape(str(credits_display))} Xu</b>\n"
+            f"👤 ID: <code>{html.escape(str(user_id))}</code>\n"
             f"🪪 等级: <b>{html.escape(tier)}</b>\n"
             f"🌐 语言: <b>{html.escape(display_lang)}</b>\n\n"
             "请选择功能："
         )
     if lang == "vi":
         return (
-            "👑 <b>TOAN AAS</b>\n"
-            "<b>AI AUTOMATION SYSTEM</b>\n\n"
-            "Tất cả công cụ AI hằng ngày trong một bot:\n"
-            "tạo nội dung, video, ảnh, voice, tài liệu, dịch thuật và ghi nhớ.\n\n"
+            "👑 <b>TOAN AAS — AI AUTOMATION SYSTEM</b>\n\n"
+            "Trợ lý AI giúp bạn làm việc nhanh hơn mỗi ngày:\n"
+            "tạo nội dung, video script, hình ảnh, voice, dịch thuật, ghi chú và xử lý tài liệu trong một bot Telegram.\n\n"
             f"🎁 Số dư: <b>{html.escape(str(credits_display))} Xu</b>\n"
+            f"👤 ID: <code>{html.escape(str(user_id))}</code>\n"
             f"🪪 Hạng: <b>{html.escape(tier)}</b>\n"
             f"🌐 Ngôn ngữ: <b>{html.escape(display_lang)}</b>\n\n"
-            "Bạn muốn làm gì hôm nay?"
+            "Bạn muốn làm gì hôm nay?\n\n"
+            "🎬 <b>Tạo nội dung</b>\n"
+            "Kịch bản video, chia cảnh, caption, hashtag, CTA.\n\n"
+            "🤖 <b>Hỏi AI</b>\n"
+            "Viết bài, lên ý tưởng, sửa câu chữ, viết code, lập kế hoạch.\n\n"
+            "📄 <b>Tài liệu</b>\n"
+            "PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF nếu công cụ đã bật.\n\n"
+            "🖼 <b>Hình ảnh</b>\n"
+            "Prompt ảnh, tách nền, xử lý ảnh, chuẩn bị ảnh cho video.\n\n"
+            "🎤 <b>Voice</b>\n"
+            "Bóc băng audio/video hoặc tạo giọng đọc tiếng Việt.\n\n"
+            "🌐 <b>Dịch thuật</b>\n"
+            "Dịch văn bản, transcript, phụ đề và nội dung video.\n\n"
+            "🧠 <b>Ghi nhớ</b>\n"
+            "Lưu ghi chú, tìm lại thông tin, đặt nhắc việc.\n\n"
+            "💳 <b>Xu dịch vụ</b>\n"
+            "Nạp Xu, xem bảng giá, dùng mã quà tặng/khuyến mãi.\n\n"
+            "Bằng việc bấm Start, nạp Xu hoặc tiếp tục sử dụng TOAN AAS, bạn đồng ý "
+            "<code>/legal</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>, "
+            "<code>/refund_policy</code> và chính sách sở hữu trí tuệ của TOAN AAS."
         )
     fallback_note = ""
     if lang in OTHER_USER_LANGUAGES:
@@ -25822,6 +25987,7 @@ def localized_start_menu_text(user_id, lang: str) -> str:
         "All daily AI tools in one Telegram bot:\n"
         "content, video, images, voice, documents, translation and memory.\n\n"
         f"🎁 Balance: <b>{html.escape(str(credits_display))} Xu</b>\n"
+        f"👤 ID: <code>{html.escape(str(user_id))}</code>\n"
         f"🪪 Tier: <b>{html.escape(tier)}</b>\n"
         f"🌐 Language: <b>{html.escape(display_lang)}</b>"
         f"{fallback_note}\n\n"
@@ -30952,6 +31118,16 @@ def doc_reply_file_info(update: Update) -> dict:
         }
     return {}
 
+def doc_input_file_info(update: Update) -> tuple[dict, str]:
+    info = doc_reply_file_info(update)
+    if info:
+        return info, "reply"
+    if update.effective_user:
+        info = get_last_user_file(update.effective_user.id)
+        if info:
+            return info, "last"
+    return {}, ""
+
 def doc_file_ext(file_name: str) -> str:
     return os.path.splitext(file_name or "")[1].lower()
 
@@ -30962,14 +31138,33 @@ def doc_is_image(info: dict) -> bool:
     mime = (info.get("mime_type") or "").lower()
     return info.get("kind") == "photo" or mime.startswith("image/") or doc_file_ext(info.get("file_name")) in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
-async def doc_download_reply_to_path(update: Update, context: ContextTypes.DEFAULT_TYPE, tmpdir: str, expected: str) -> tuple[bool, str, dict, str]:
-    info = doc_reply_file_info(update)
+def doc_current_command_name(update: Update, fallback: str = "") -> str:
+    text = str(getattr(update.effective_message, "text", "") or "").strip()
+    if text.startswith("/"):
+        return html.escape(text.split()[0])
+    return fallback
+
+def doc_expected_file_error(update: Update, expected: str, info: dict, source: str) -> str:
+    command_name = doc_current_command_name(update, "/pdf_to_word" if expected == "pdf" else "/image_to_pdf")
     if not info:
-        return False, "", {}, "Hãy reply file PDF/ảnh rồi gõ lại lệnh."
+        if expected == "image":
+            return f"Hãy gửi ảnh hoặc reply ảnh rồi gõ {command_name}."
+        return f"Hãy gửi file PDF hoặc reply file PDF rồi gõ {command_name}."
     if expected == "pdf" and not doc_is_pdf(info):
-        return False, "", info, "File reply không phải PDF."
+        if doc_is_image(info):
+            return "Lệnh này cần PDF. Nếu muốn xử lý ảnh, dùng /image_to_pdf hoặc /ocr_image."
+        return "File đã gửi không phải PDF. Hãy gửi file PDF hoặc reply file PDF rồi gõ lại lệnh."
     if expected == "image" and not doc_is_image(info):
-        return False, "", info, "File reply không phải ảnh."
+        if doc_is_pdf(info):
+            return "Lệnh này cần ảnh. Nếu muốn xử lý PDF, dùng /pdf_to_word, /pdf_to_images, /compress_pdf hoặc /split_pdf."
+        return "File đã gửi không phải ảnh. Hãy gửi ảnh hoặc reply ảnh rồi gõ lại lệnh."
+    return ""
+
+async def doc_download_reply_to_path(update: Update, context: ContextTypes.DEFAULT_TYPE, tmpdir: str, expected: str) -> tuple[bool, str, dict, str]:
+    info, source = doc_input_file_info(update)
+    expected_error = doc_expected_file_error(update, expected, info, source)
+    if expected_error:
+        return False, "", info, expected_error
     if int(info.get("file_size") or 0) > DOC_MAX_FILE_BYTES:
         return False, "", info, f"File quá lớn. Giới hạn MVP là {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB."
     suffix = doc_file_ext(info.get("file_name")) or (".pdf" if expected == "pdf" else ".jpg")
@@ -34349,7 +34544,8 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⚡ Gói Trung (50k)", callback_data=f"pkg|50k|{uid}")],
         [InlineKeyboardButton("⭐ Gói Tiêu Chuẩn (100k)", callback_data=f"pkg|100k|{uid}")],
         [InlineKeyboardButton("🚀 Gói Nâng Cao (200k)", callback_data=f"pkg|200k|{uid}")],
-        [InlineKeyboardButton("🏢 Gói Doanh Nghiệp (500k)", callback_data=f"pkg|500k|{uid}")]
+        [InlineKeyboardButton("🏢 Gói Doanh Nghiệp (500k)", callback_data=f"pkg|500k|{uid}")],
+        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=f"pkg|manual_custom|{uid}")],
     ]
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -34381,18 +34577,8 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return await send_manual_payment(context, update.effective_chat.id, uid, amount, xu, order_code)
     else:
-        set_manual_bill_state(uid)
-        text = (
-            "🏦 <b>NẠP XU DỊCH VỤ THỦ CÔNG</b>\n\n"
-            f"👤 ID Telegram: <code>{uid}</code>\n\n"
-            f"• Ngân hàng: <b>{MANUAL_BANK_NAME}</b>\n"
-            f"• Số tài khoản: <code>{MANUAL_BANK_ACCOUNT}</code>\n"
-            f"• Chủ tài khoản: <b>{MANUAL_BANK_OWNER}</b>\n"
-            f"• Nội dung: <code>AAS {uid}</code>\n\n"
-            "📸 Sau khi chuyển khoản, gửi ảnh bill tại đây.\n"
-            "⚠️ TOAN AAS chỉ cộng Xu sau khi admin đối soát tiền thật đã vào tài khoản. Ảnh bill không tự động cộng Xu.\n"
-            "Gợi ý: <code>/thucong 10k</code>, <code>/thucong 100k</code> để bot tự điền số tiền và số Xu dịch vụ."
-        )
+        set_manual_bill_state(uid, order_code="MANUAL")
+        text = manual_custom_payment_text(uid)
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -47418,25 +47604,43 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return
     try:
-        target_id, amount = context.args[0], int(context.args[1])
-        pre_conn = db_connect()
-        try:
-            first_deposit_before_credit = not user_has_successful_deposit_conn(pre_conn, target_id)
-        finally:
-            pre_conn.close()
-        add_credit(target_id, amount, "manual_deposit", "", "Admin duyệt bill thủ công")
+        lookup_key, amount = context.args[0], int(context.args[1])
+        lookup_conn = db_connect()
+        lookup_c = lookup_conn.cursor()
+        pending_deposit_id = 0
+        pending_order = None
+        if str(lookup_key).isdigit():
+            lookup_c.execute(
+                "SELECT id, user_id, order_code, amount, xu FROM pending_deposits WHERE id=? AND status='pending' LIMIT 1",
+                (str(lookup_key),),
+            )
+            pending_order = lookup_c.fetchone()
+        if not pending_order:
+            lookup_c.execute(
+                "SELECT id, user_id, order_code, amount, xu FROM pending_deposits WHERE user_id=? AND status='pending' ORDER BY submitted_at DESC LIMIT 1",
+                (str(lookup_key),),
+            )
+            pending_order = lookup_c.fetchone()
+        if not pending_order:
+            lookup_conn.close()
+            return await update.message.reply_text(
+                "⚠️ Không có bill thủ công đang chờ cho ID/mã bill này.\n\n"
+                "Nếu muốn cộng Xu trực tiếp, dùng <code>/add &lt;ID&gt; &lt;Xu&gt;</code>.",
+                parse_mode="HTML",
+            )
+        pending_deposit_id = int(pending_order[0])
+        target_id = str(pending_order[1])
+        first_deposit_before_credit = not user_has_successful_deposit_conn(lookup_conn, target_id)
+        lookup_conn.close()
+
+        add_credit(target_id, amount, "manual_deposit", str(pending_deposit_id), "Admin duyệt bill thủ công")
         conn = db_connect()
         c = conn.cursor()
-        c.execute(
-            "SELECT order_code, amount, xu FROM pending_deposits WHERE user_id=? AND status='pending' ORDER BY submitted_at DESC LIMIT 1",
-            (str(target_id),)
-        )
-        pending_order = c.fetchone()
         launch_recorded = 0
         promo_result = {"bonus_xu": 0, "code": "", "status": "none"}
-        pending_order_code = str(pending_order[0]) if pending_order and pending_order[0] else ""
-        expected_order_xu = int(pending_order[2] or 0) if pending_order and pending_order[2] else 0
-        order_amount = int(pending_order[1] or 0) if pending_order and pending_order[1] else 0
+        pending_order_code = str(pending_order[2]) if pending_order and pending_order[2] else ""
+        expected_order_xu = int(pending_order[4] or 0) if pending_order and pending_order[4] else 0
+        order_amount = int(pending_order[3] or 0) if pending_order and pending_order[3] else 0
         order_base_xu = package_base_xu(order_amount) if order_amount else 0
         is_first_deposit = bool(first_deposit_before_credit)
         referral_result = {"reward_xu": 0, "status": "none", "referrer_user_id": ""}
@@ -47450,7 +47654,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             order_meta = c.fetchone()
             if order_meta:
-                order_amount = int(order_meta[0] or pending_order[1] or 0)
+                order_amount = int(order_meta[0] or pending_order[3] or 0)
                 order_base_xu = int(order_meta[1] or package_base_xu(order_amount))
                 order_launch_xu = int(order_meta[2] or 0)
                 if order_launch_xu <= 0:
@@ -47466,8 +47670,8 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pending_order_code,
                 )
         c.execute(
-            "UPDATE pending_deposits SET status='approved' WHERE user_id=? AND status='pending'",
-            (str(target_id),)
+            "UPDATE pending_deposits SET status='approved' WHERE id=? AND status='pending'",
+            (pending_deposit_id,)
         )
         if pending_order_code:
             c.execute(
@@ -47508,9 +47712,9 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "admin",
             "bill.approved",
             "pending_deposit",
-            str(target_id),
-            before={"status": "pending", "order_code": pending_order_code},
-            after={"status": "approved", "user_id": str(target_id), "xu": int(amount), "launch_bonus_recorded": int(launch_recorded or 0), "promo_code": promo_code, "promo_bonus": promo_bonus},
+            str(pending_deposit_id),
+            before={"status": "pending", "order_code": pending_order_code, "user_id": str(target_id)},
+            after={"status": "approved", "deposit_id": int(pending_deposit_id), "user_id": str(target_id), "xu": int(amount), "launch_bonus_recorded": int(launch_recorded or 0), "promo_code": promo_code, "promo_bonus": promo_bonus},
             note="Admin approved manual bill",
         )
         conn.commit()
@@ -47583,7 +47787,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as notify_error:
                 logger.warning(f"Tier-up notify failed: {notify_error}")
         await update.message.reply_text(
-            f"✅ Đã duyệt {amount} Xu cho ID: {target_id}"
+            f"✅ Đã duyệt bill <code>#{pending_deposit_id}</code>: +{amount} Xu cho ID <code>{html.escape(str(target_id))}</code>"
             f"{promo_admin_line}"
             f"{referral_admin_line}"
             f"{tier_admin_line}"
@@ -47591,7 +47795,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
     except (IndexError, ValueError):
-        await update.message.reply_text("⚠️ Cú pháp: /duyet <ID> <Số_Xu>")
+        await update.message.reply_text("⚠️ Cú pháp: <code>/duyet &lt;deposit_id|user_id&gt; &lt;Số_Xu&gt;</code>", parse_mode="HTML")
 
 async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -48031,12 +48235,33 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return
     try:
-        target_id = context.args[0]
+        lookup_key = context.args[0]
         conn = db_connect()
         c = conn.cursor()
+        pending = None
+        if str(lookup_key).isdigit():
+            c.execute(
+                "SELECT id, user_id FROM pending_deposits WHERE id=? AND status='pending' LIMIT 1",
+                (str(lookup_key),),
+            )
+            pending = c.fetchone()
+        if not pending:
+            c.execute(
+                "SELECT id, user_id FROM pending_deposits WHERE user_id=? AND status='pending' ORDER BY submitted_at DESC LIMIT 1",
+                (str(lookup_key),),
+            )
+            pending = c.fetchone()
+        if not pending:
+            conn.close()
+            return await update.message.reply_text(
+                "⚠️ Không có bill thủ công đang chờ cho ID/mã bill này.",
+                parse_mode="HTML",
+            )
+        deposit_id = int(pending[0])
+        target_id = str(pending[1])
         c.execute(
-            "UPDATE pending_deposits SET status='rejected' WHERE user_id=? AND status='pending'",
-            (str(target_id),)
+            "UPDATE pending_deposits SET status='rejected' WHERE id=? AND status='pending'",
+            (deposit_id,)
         )
         rejected_count = c.rowcount
         record_audit(
@@ -48045,9 +48270,9 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "admin",
             "bill.rejected",
             "pending_deposit",
-            str(target_id),
-            before={"status": "pending"},
-            after={"status": "rejected", "rows": int(rejected_count or 0)},
+            str(deposit_id),
+            before={"status": "pending", "user_id": str(target_id)},
+            after={"status": "rejected", "rows": int(rejected_count or 0), "user_id": str(target_id)},
             note="Admin rejected manual bill",
         )
         conn.commit()
@@ -48061,9 +48286,9 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ),
             parse_mode="HTML"
         )
-        await update.message.reply_text(f"✅ Đã từ chối và thông báo ID: {target_id}")
+        await update.message.reply_text(f"✅ Đã từ chối bill #{deposit_id} và thông báo ID: {target_id}")
     except IndexError:
-        await update.message.reply_text("⚠️ Cú pháp: /tuchoi <ID>")
+        await update.message.reply_text("⚠️ Cú pháp: /tuchoi <deposit_id|user_id>")
 
 async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -48083,7 +48308,8 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expected = f" | {r[5]:,}đ → {r[6]} Xu | đơn {r[4]}" if r[5] and r[6] else ""
         lines.append(
             f"• #{r[0]} | {r[2]} | <code>{r[1]}</code>{expected} | {r[3]}\n"
-            f"  ➔ <code>/duyet {r[1]} {r[6] or '&lt;Xu&gt;'}</code>"
+            f"  ➔ <code>/duyet {r[0]} {r[6] or '&lt;Xu&gt;'}</code>\n"
+            f"  ➔ <code>/tuchoi {r[0]}</code>"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -48383,8 +48609,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🆔 ID: <code>{uid}</code>\n"
             f"{expected_line}"
             f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
-            f"👉 Duyệt: <code>/duyet {uid} {xu or '&lt;Số_Xu&gt;'}</code>\n"
-            f"❌ Từ chối: <code>/tuchoi {uid}</code>"
+            f"👉 Duyệt: <code>/duyet {deposit_id} {xu or '&lt;Số_Xu&gt;'}</code>\n"
+            f"❌ Từ chối: <code>/tuchoi {deposit_id}</code>\n\n"
+            f"⚠️ Dùng mã bill <code>#{deposit_id}</code>, không dùng user ID khi có nhiều bill."
         )
         await context.bot.send_photo(
             chat_id=ADMIN_ID,
@@ -48400,6 +48627,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         return
+
+    remember_last_user_file(update)
 
     if not REMOVEBG_API_KEY and not CUTOUT_API_KEY:
         return await update.message.reply_text("❌ Dịch vụ tách nền chưa được cấu hình.")
@@ -48443,6 +48672,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển Cutout.pro và hoàn phần chênh lệch.</i>"
         )
     await update.message.reply_text(img_desc, parse_mode="HTML", reply_markup=kb)
+
+async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    remember_last_user_file(update)
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_media(update)
@@ -49166,6 +49398,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
     tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.Document.MP3 | filters.Document.MP4 | filters.Document.WAV, handle_media_cache_only))
+    tg_app.add_handler(MessageHandler(filters.Document.ALL, handle_document_cache_only))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
