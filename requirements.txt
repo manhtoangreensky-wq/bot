@@ -8,4 +8,7 @@ openai==2.38.0
 pydantic==2.13.4
 python-multipart==0.0.29
 Pillow==12.2.0
+pypdf
+python-docx
+PyMuPDF
 pytest==9.0.3

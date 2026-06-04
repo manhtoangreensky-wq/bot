@@ -29,6 +29,7 @@ import tempfile
 import mimetypes
 import shutil
 import traceback
+import zipfile
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
@@ -61,6 +62,42 @@ except Exception:
     Image = None
     ImageDraw = None
     ImageFont = None
+
+try:
+    from pypdf import PdfReader, PdfWriter
+    PDF_LIBRARY_NAME = "pypdf"
+    PDF_LIBRARY_ERROR = ""
+except Exception as e:
+    try:
+        from PyPDF2 import PdfReader, PdfWriter
+        PDF_LIBRARY_NAME = "PyPDF2"
+        PDF_LIBRARY_ERROR = ""
+    except Exception as e2:
+        PdfReader = None
+        PdfWriter = None
+        PDF_LIBRARY_NAME = ""
+        PDF_LIBRARY_ERROR = str(e2 or e)[:240]
+
+try:
+    from docx import Document as DocxDocument
+    DOCX_LIBRARY_ERROR = ""
+except Exception as e:
+    DocxDocument = None
+    DOCX_LIBRARY_ERROR = str(e)[:240]
+
+try:
+    import fitz
+    FITZ_LIBRARY_ERROR = ""
+except Exception as e:
+    fitz = None
+    FITZ_LIBRARY_ERROR = str(e)[:240]
+
+try:
+    import pytesseract
+    PYTESSERACT_ERROR = ""
+except Exception as e:
+    pytesseract = None
+    PYTESSERACT_ERROR = str(e)[:240]
 
 # ─── LOGGING ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -631,6 +668,19 @@ CHAT_PRO_MAX_COST = 200
 CHAT_PRO_MB_UNIT_COST = 20
 CHAT_PRO_MIN_COST = 10
 CHAT_TEXT_MB_CHARS = 4000
+DOC_COSTS = {
+    "image_to_pdf": 5,
+    "compress_pdf": 5,
+    "pdf_to_images": 10,
+    "pdf_to_word_text": 10,
+    "split_pdf": 10,
+    "merge_pdf": 10,
+    "ocr_image": 10,
+    "ocr_pdf_per_page": 10,
+}
+DOC_MAX_FILE_BYTES = 20 * 1024 * 1024
+DOC_MAX_PAGES = 30
+DOC_OCR_MAX_PAGES = 10
 CHAT_TIER_NORMAL = "normal"
 CHAT_TIER_PRO = "pro"
 CHAT_TIER_DEEP = "deep"
@@ -24301,6 +24351,33 @@ def db_status_payload() -> dict:
 def admin_only_stage_if_configured(configured: bool) -> str:
     return "ADMIN_ONLY" if configured else "DISABLED"
 
+def doc_tools_status_payload() -> dict:
+    pdf_lib = bool(PdfReader and PdfWriter)
+    docx_lib = bool(DocxDocument)
+    fitz_lib = bool(fitz)
+    pillow_lib = bool(Image)
+    ocr_local = bool(pytesseract and Image)
+    return {
+        "pdf_library": pdf_lib,
+        "pdf_library_name": PDF_LIBRARY_NAME or "missing",
+        "pdf_library_error": PDF_LIBRARY_ERROR,
+        "docx": docx_lib,
+        "docx_error": DOCX_LIBRARY_ERROR,
+        "pymupdf": fitz_lib,
+        "pymupdf_error": FITZ_LIBRARY_ERROR,
+        "pillow": pillow_lib,
+        "ocr_local": ocr_local,
+        "ocr_local_error": PYTESSERACT_ERROR,
+        "ocr_cloud": False,
+        "image_to_pdf": pillow_lib,
+        "pdf_to_word": pdf_lib and docx_lib,
+        "pdf_to_images": fitz_lib,
+        "compress_pdf": fitz_lib,
+        "split_pdf": pdf_lib,
+        "merge_pdf": pdf_lib,
+        "ready_basic": pillow_lib or pdf_lib or fitz_lib,
+    }
+
 def provider_status_payload() -> dict:
     cobalt_url = (COBALT_API_URL or "").rstrip("/")
     cobalt_raw = (COBALT_API_URL_RAW or "").rstrip("/")
@@ -24369,6 +24446,7 @@ def provider_status_payload() -> dict:
             "rapidapi": bool(RAPIDAPI_KEY),
             "rapidapi_host": bool(RAPIDAPI_HOST),
         },
+        "document": doc_tools_status_payload(),
         "media_factory": {
             "trend_finder": is_feature_enabled("trend_finder", default=True),
             "trend_live_env": bool(SERPAPI_API_KEY),
@@ -24666,6 +24744,7 @@ def sales_readiness_payload() -> dict:
         "growth_ai": callable(globals().get("cmd_growth_ai")),
         "campaign_report": callable(globals().get("cmd_campaign_report")),
         "performance_report": callable(globals().get("cmd_performance_report")),
+        "doc_tools": callable(globals().get("cmd_doc_tools")),
         "promo": callable(globals().get("cmd_promo")),
         "promo_guide": callable(globals().get("cmd_promo_guide")),
         "promo_seed_policy": callable(globals().get("cmd_promo_seed_policy")),
@@ -25298,6 +25377,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     if is_admin:
         rows = [
             [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
+            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|doc_tools")],
             [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
             [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
             [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("💳 Billing", callback_data="menu|billing")],
@@ -25307,6 +25387,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     else:
         rows = [
             [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
+            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|doc_tools")],
             [InlineKeyboardButton("💳 Xu Dịch Vụ", callback_data="menu|billing"), InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing")],
             [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|legal")],
             [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
@@ -25360,6 +25441,7 @@ def menu_text_main(is_admin: bool) -> str:
         "📥 Hút Media: tải video TikTok/YouTube/Facebook nếu công cụ khả dụng.\n"
         "🖼 Studio Đồ Họa: tách nền, xử lý ảnh, prompt hình ảnh.\n"
         "🖼 Công cụ ảnh: /image_tools, /image_prompt, /image_to_video_pack, /ai_image, /ai_image_edit.\n"
+        "📄 Công cụ tài liệu: /doc_tools — PDF/Word/ảnh/nén/tách/OCR nếu engine khả dụng.\n"
         "💳 Xu dịch vụ: PayOS QR động hoặc QR thủ công khi cổng tự động bận.\n"
         "📜 Pháp lý & an toàn: bấm “Điều khoản” hoặc gõ <code>/legal</code> để xem đầy đủ."
         f"{admin_line}\n\n"
@@ -25372,12 +25454,13 @@ def menu_text_main(is_admin: bool) -> str:
         "2. <code>/film &lt;chủ đề&gt;</code> — tạo Video Script Basic\n"
         "3. <code>/image_tools</code> — xem công cụ ảnh và video prompt pack\n"
         "4. <code>/media_factory</code> — xem trung tâm Video & Media\n"
-        "5. <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
-        "6. <code>/pricing</code> — xem bảng giá\n"
-        "7. <code>/naptien</code> — nạp thêm Xu khi cần\n"
-        "8. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
-        "9. Tự đăng nội dung đã tạo lên kênh của bạn\n"
-        "10. <code>/legal</code> — xem điều khoản/pháp lý đầy đủ"
+        "5. <code>/doc_tools</code> — công cụ PDF/ảnh/tài liệu\n"
+        "6. <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
+        "7. <code>/pricing</code> — xem bảng giá\n"
+        "8. <code>/naptien</code> — nạp thêm Xu khi cần\n"
+        "9. <code>/gift &lt;mã&gt;</code> — nhận Xu quà tặng nếu admin gửi mã\n"
+        "10. Tự đăng nội dung đã tạo lên kênh của bạn\n"
+        "11. <code>/legal</code> — xem điều khoản/pháp lý đầy đủ"
         f"{admin_quick}"
         f"{runtime_line}\n\n"
         "Chọn nhóm chức năng bên dưới:"
@@ -25596,6 +25679,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_video_workflow(is_admin), menu_nav_keyboard("video_workflow", is_admin)
     if action == "video_factory_flow":
         return video_factory_flow_text(), menu_nav_keyboard("video_factory", is_admin)
+    if action == "doc_tools":
+        return doc_tools_menu_text(), menu_nav_keyboard("doc_tools", is_admin)
     if action == "affiliate":
         return menu_text_affiliate(is_admin), menu_nav_keyboard("affiliate", is_admin)
     if action == "operator":
@@ -26158,6 +26243,17 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• RemoveBG: <code>{provider_status_text(providers['image']['removebg'])}</code>",
         f"• Cutout: <code>{provider_status_text(providers['image']['cutout'])}</code>",
         f"• Image provider tested: <code>{html.escape(preferred_tool_test_status_text('image_remove_bg', 'image'))}</code>",
+        "",
+        "<b>Document/PDF</b>",
+        f"• Local PDF tools: <code>{'configured' if providers['document']['ready_basic'] else 'missing'}</code>",
+        f"• PDF library: <code>{html.escape(providers['document']['pdf_library_name'])}</code>",
+        f"• PDF to Word: <code>{'configured' if providers['document']['pdf_to_word'] else 'missing package'}</code> | tested <code>{html.escape(tool_test_status_text('pdf_to_word'))}</code>",
+        f"• Image to PDF: <code>{'configured' if providers['document']['image_to_pdf'] else 'missing package'}</code> | tested <code>{html.escape(tool_test_status_text('image_to_pdf'))}</code>",
+        f"• PDF to Images: <code>{'configured' if providers['document']['pdf_to_images'] else 'missing package'}</code> | tested <code>{html.escape(tool_test_status_text('pdf_to_images'))}</code>",
+        f"• Compress PDF: <code>{'configured' if providers['document']['compress_pdf'] else 'missing package'}</code> | tested <code>{html.escape(tool_test_status_text('compress_pdf'))}</code>",
+        f"• Split/Merge PDF: <code>{'configured' if providers['document']['split_pdf'] else 'missing package'}</code>",
+        f"• OCR local: <code>{'available' if providers['document']['ocr_local'] else 'missing/planned'}</code>",
+        "• OCR cloud: <code>not configured</code>",
         "",
         "<b>Image / Media</b>",
         f"• Trend Finder: <code>{'enabled/content-only' if providers['media_factory']['trend_finder'] else 'disabled'}</code>",
@@ -27296,6 +27392,13 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("TTS", "tts", get_tool_test_result("tts"), "ElevenLabs/Fish/Edge fallback"),
         ("STT Deepgram", "stt", get_tool_test_result("stt"), "configured" if providers["audio"]["deepgram"] else "missing"),
         ("Image RemoveBG/Cutout", "image_remove_bg", image_result, "configured" if providers["image"]["ready"] else "missing"),
+        ("Document Tools", "doc_tools", get_tool_test_result("doc_tools"), "configured" if providers["document"]["ready_basic"] else "missing local packages"),
+        ("PDF to Word", "pdf_to_word", get_tool_test_result("pdf_to_word"), "configured" if providers["document"]["pdf_to_word"] else "missing pypdf/python-docx"),
+        ("Image to PDF", "image_to_pdf", get_tool_test_result("image_to_pdf"), "configured" if providers["document"]["image_to_pdf"] else "missing Pillow"),
+        ("PDF to Images", "pdf_to_images", get_tool_test_result("pdf_to_images"), "configured" if providers["document"]["pdf_to_images"] else "missing PyMuPDF"),
+        ("Compress PDF", "compress_pdf", get_tool_test_result("compress_pdf"), "configured" if providers["document"]["compress_pdf"] else "missing PyMuPDF"),
+        ("Split PDF", "split_pdf", get_tool_test_result("split_pdf"), "configured" if providers["document"]["split_pdf"] else "missing pypdf/PyPDF2"),
+        ("OCR Image/PDF", "ocr_image", get_tool_test_result("ocr_image"), "READY" if providers["document"]["ocr_local"] else "PLANNED/ADMIN_ONLY"),
         ("Trend AI", "trend_ai", {"status": "READY", "tested_at": "content-only", "detail": "Prompt/content-only trend angle generator"}, "READY/content-only"),
         ("Trend Live", "trend_live", get_tool_test_result("trend_live"), f"{providers['media_factory'].get('trend_live_stage') or 'DISABLED'} SerpAPI={provider_status_text(providers['search']['serpapi'])}"),
         ("Image Prompt", "image_prompt", {"status": "READY", "tested_at": "prompt-only", "detail": "Image prompt factory"}, "READY/prompt-only"),
@@ -28170,6 +28273,14 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Audio Enhance: <code>{html.escape(configured_release_stage('auphonic_audio_enhance'))}</code> | Auphonic <code>{provider_status_text(providers['audio']['auphonic'])}</code>",
         f"• Downloader: <code>{'Cobalt self-host configured' if bool(COBALT_API_URL) else 'missing Cobalt/self-host'}</code>",
         "• Status: <code>Prompt tools READY | API tools admin-only until smoke test PASS</code>",
+        "",
+        "<b>Document Tools</b>",
+        f"• PDF/Image conversion: <code>{'READY_FOR_TEST' if providers['document']['ready_basic'] else 'MISSING_PACKAGES'}</code>",
+        f"• PDF to Word: <code>{'configured' if providers['document']['pdf_to_word'] else 'missing pypdf/python-docx'}</code> | tested <code>{html.escape(tool_test_status_text('pdf_to_word'))}</code>",
+        f"• Image to PDF: <code>{'configured' if providers['document']['image_to_pdf'] else 'missing Pillow'}</code> | tested <code>{html.escape(tool_test_status_text('image_to_pdf'))}</code>",
+        f"• PDF to Images: <code>{'configured' if providers['document']['pdf_to_images'] else 'missing PyMuPDF'}</code> | tested <code>{html.escape(tool_test_status_text('pdf_to_images'))}</code>",
+        f"• Compress PDF: <code>{'configured' if providers['document']['compress_pdf'] else 'missing PyMuPDF'}</code> | tested <code>{html.escape(tool_test_status_text('compress_pdf'))}</code>",
+        f"• OCR: <code>{'READY_FOR_TEST' if providers['document']['ocr_local'] else 'ADMIN_ONLY/PLANNED'}</code>",
         "",
         "<b>Money</b>",
         f"• Packages: <b>{data['packages']}</b>",
@@ -29259,6 +29370,523 @@ async def reply_long_text(update: Update, text: str):
         text = text[cut:].strip()
     if text:
         await update.message.reply_text(text)
+
+def doc_cost(action: str, pages: int = 1) -> int:
+    if action == "ocr_pdf":
+        return max(1, int(pages or 1)) * int(DOC_COSTS["ocr_pdf_per_page"])
+    return int(DOC_COSTS.get(action, 10))
+
+def doc_tools_status_text() -> str:
+    status = doc_tools_status_payload()
+    return (
+        f"PDF lib={status['pdf_library_name']} | "
+        f"DOCX={'yes' if status['docx'] else 'no'} | "
+        f"PyMuPDF={'yes' if status['pymupdf'] else 'no'} | "
+        f"Pillow={'yes' if status['pillow'] else 'no'} | "
+        f"OCR local={'yes' if status['ocr_local'] else 'no'}"
+    )
+
+def doc_tools_menu_text() -> str:
+    return (
+        "📄 <b>CÔNG CỤ TÀI LIỆU TOAN AAS</b>\n\n"
+        "<b>Đang hỗ trợ:</b>\n"
+        "• <code>/pdf_to_word</code> — PDF sang Word\n"
+        "• <code>/image_to_pdf</code> — ảnh sang PDF\n"
+        "• <code>/pdf_to_images</code> — PDF sang ảnh\n"
+        "• <code>/compress_pdf</code> — nén PDF\n"
+        "• <code>/split_pdf &lt;trang&gt;</code> — tách PDF\n"
+        "• <code>/merge_pdf</code> — gộp PDF (planned/workflow sau)\n"
+        "• <code>/ocr_image</code> — ảnh sang văn bản\n"
+        "• <code>/ocr_pdf</code> — PDF scan sang văn bản\n\n"
+        "<b>Cách dùng:</b>\n"
+        "1. Gửi file PDF/ảnh vào bot.\n"
+        "2. Reply file đó.\n"
+        "3. Gõ lệnh cần dùng.\n\n"
+        "<b>Giá tham khảo:</b>\n"
+        "• Công cụ cơ bản: 5–10 Xu/lần\n"
+        "• OCR: tính theo ảnh/trang\n"
+        "• Lỗi xử lý: không trừ Xu\n\n"
+        "<b>Giới hạn MVP:</b>\n"
+        f"• PDF tối đa {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB\n"
+        f"• Tối đa {DOC_MAX_PAGES} trang/lần cho công cụ PDF cơ bản\n"
+        f"• OCR tối đa {DOC_OCR_MAX_PAGES} trang/lần\n\n"
+        f"<b>Local engine:</b> <code>{html.escape(doc_tools_status_text())}</code>"
+    )
+
+async def doc_check_can_pay(update: Update, uid, cost: int) -> bool:
+    if is_admin_user(uid) or int(cost or 0) <= 0:
+        return True
+    credits, _, _ = get_user(uid)
+    if int(credits or 0) >= int(cost):
+        return True
+    await update.message.reply_text(
+        "⚠️ Không đủ Xu để dùng công cụ tài liệu.\n\n"
+        f"• Cần: {int(cost)} Xu\n"
+        f"• Số dư hiện tại: {int(credits or 0)} Xu\n\n"
+        "Dùng /naptien để nạp thêm."
+    )
+    return False
+
+async def doc_charge_after_success(update: Update, uid, cost: int, event_type: str, note: str) -> bool:
+    if is_admin_user(uid) or int(cost or 0) <= 0:
+        return True
+    if spend_fixed_credit(uid, int(cost), event_type, note):
+        credits, _, _ = get_user(uid)
+        await update.message.reply_text(f"💼 Đã trừ {int(cost)} Xu. Còn lại: {int(credits)} Xu | /naptien để nạp thêm")
+        return True
+    await update.message.reply_text(
+        "⚠️ File đã tạo xong nhưng số dư thay đổi nên bot chưa trừ Xu. Vui lòng kiểm tra /profile và nạp thêm nếu cần."
+    )
+    return False
+
+def doc_reply_file_info(update: Update) -> dict:
+    reply = update.effective_message.reply_to_message if update.effective_message else None
+    if not reply:
+        return {}
+    if reply.document:
+        doc = reply.document
+        return {
+            "kind": "document",
+            "file_id": doc.file_id,
+            "file_name": doc.file_name or "file",
+            "mime_type": doc.mime_type or "",
+            "file_size": int(doc.file_size or 0),
+        }
+    if reply.photo:
+        photo = reply.photo[-1]
+        return {
+            "kind": "photo",
+            "file_id": photo.file_id,
+            "file_name": "telegram_photo.jpg",
+            "mime_type": "image/jpeg",
+            "file_size": int(photo.file_size or 0),
+        }
+    return {}
+
+def doc_file_ext(file_name: str) -> str:
+    return os.path.splitext(file_name or "")[1].lower()
+
+def doc_is_pdf(info: dict) -> bool:
+    return (info.get("mime_type") or "").lower() == "application/pdf" or doc_file_ext(info.get("file_name")) == ".pdf"
+
+def doc_is_image(info: dict) -> bool:
+    mime = (info.get("mime_type") or "").lower()
+    return info.get("kind") == "photo" or mime.startswith("image/") or doc_file_ext(info.get("file_name")) in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+async def doc_download_reply_to_path(update: Update, context: ContextTypes.DEFAULT_TYPE, tmpdir: str, expected: str) -> tuple[bool, str, dict, str]:
+    info = doc_reply_file_info(update)
+    if not info:
+        return False, "", {}, "Hãy reply file PDF/ảnh rồi gõ lại lệnh."
+    if expected == "pdf" and not doc_is_pdf(info):
+        return False, "", info, "File reply không phải PDF."
+    if expected == "image" and not doc_is_image(info):
+        return False, "", info, "File reply không phải ảnh."
+    if int(info.get("file_size") or 0) > DOC_MAX_FILE_BYTES:
+        return False, "", info, f"File quá lớn. Giới hạn MVP là {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB."
+    suffix = doc_file_ext(info.get("file_name")) or (".pdf" if expected == "pdf" else ".jpg")
+    path = os.path.join(tmpdir, f"input{suffix}")
+    try:
+        tg_file = await context.bot.get_file(info["file_id"])
+        data = bytes(await tg_file.download_as_bytearray())
+    except Exception as e:
+        return False, "", info, f"Không tải được file từ Telegram: {str(e)[:220]}"
+    if len(data) > DOC_MAX_FILE_BYTES:
+        return False, "", info, f"File quá lớn sau khi tải. Giới hạn MVP là {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB."
+    with open(path, "wb") as f:
+        f.write(data)
+    return True, path, info, ""
+
+def doc_pdf_page_count(path: str) -> int:
+    if PdfReader:
+        reader = PdfReader(path)
+        return len(reader.pages)
+    if fitz:
+        doc = fitz.open(path)
+        try:
+            return int(doc.page_count)
+        finally:
+            doc.close()
+    return 0
+
+def doc_parse_page_range(spec: str, total_pages: int) -> list[int]:
+    spec = str(spec or "").strip()
+    if not spec:
+        raise ValueError("Thiếu trang. Ví dụ: /split_pdf 1-3 hoặc /split_pdf 2")
+    if "-" in spec:
+        left, right = spec.split("-", 1)
+        start = int(left.strip())
+        end = int(right.strip())
+        if start > end:
+            start, end = end, start
+        pages = list(range(start, end + 1))
+    else:
+        pages = [int(spec)]
+    if not pages or min(pages) < 1 or max(pages) > int(total_pages):
+        raise ValueError(f"Trang phải nằm trong 1-{total_pages}.")
+    if len(pages) > DOC_MAX_PAGES:
+        raise ValueError(f"Chỉ tách tối đa {DOC_MAX_PAGES} trang/lần.")
+    return [p - 1 for p in pages]
+
+async def doc_send_file(update: Update, path: str, filename: str, caption: str) -> tuple[bool, str]:
+    try:
+        with open(path, "rb") as f:
+            await update.message.reply_document(document=f, filename=filename, caption=caption)
+        return True, ""
+    except Exception as e:
+        return False, f"Không gửi được file output: {str(e)[:220]}"
+
+def doc_pdf_to_word_text(input_pdf: str, output_docx: str) -> tuple[bool, str]:
+    if not PdfReader:
+        return False, "Thiếu pypdf/PyPDF2 để đọc PDF."
+    if not DocxDocument:
+        return False, "Thiếu python-docx để tạo file Word."
+    reader = PdfReader(input_pdf)
+    if len(reader.pages) > DOC_MAX_PAGES:
+        return False, f"PDF có {len(reader.pages)} trang, vượt giới hạn {DOC_MAX_PAGES} trang/lần."
+    doc = DocxDocument()
+    doc.add_heading("TOAN AAS PDF to Word", level=1)
+    has_text = False
+    for idx, page in enumerate(reader.pages, 1):
+        text = (page.extract_text() or "").strip()
+        if text:
+            has_text = True
+        doc.add_heading(f"Trang {idx}", level=2)
+        doc.add_paragraph(text or "[Không trích xuất được text ở trang này]")
+    if not has_text:
+        return False, "PDF này có vẻ là file scan/ảnh. Hãy dùng /ocr_pdf nếu OCR engine khả dụng."
+    doc.save(output_docx)
+    return True, ""
+
+def doc_image_to_pdf(input_image: str, output_pdf: str) -> tuple[bool, str]:
+    if not Image:
+        return False, "Thiếu Pillow để đổi ảnh sang PDF."
+    with Image.open(input_image) as img:
+        rgb = img.convert("RGB")
+        rgb.save(output_pdf, "PDF", resolution=100.0)
+    return True, ""
+
+def doc_pdf_to_images(input_pdf: str, output_dir: str) -> tuple[bool, list[str], str]:
+    if not fitz:
+        return False, [], "Thiếu PyMuPDF/fitz để đổi PDF sang ảnh."
+    doc = fitz.open(input_pdf)
+    paths = []
+    try:
+        if doc.page_count > DOC_MAX_PAGES:
+            return False, [], f"PDF có {doc.page_count} trang, vượt giới hạn {DOC_MAX_PAGES} trang/lần."
+        for idx, page in enumerate(doc, 1):
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            out = os.path.join(output_dir, f"page_{idx:03d}.png")
+            pix.save(out)
+            paths.append(out)
+    finally:
+        doc.close()
+    return True, paths, ""
+
+def doc_zip_files(paths: list[str], output_zip: str):
+    with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in paths:
+            zf.write(path, arcname=os.path.basename(path))
+
+def doc_compress_pdf(input_pdf: str, output_pdf: str) -> tuple[bool, str]:
+    if not fitz:
+        return False, "Thiếu PyMuPDF/fitz để nén PDF local."
+    doc = fitz.open(input_pdf)
+    try:
+        if doc.page_count > DOC_MAX_PAGES:
+            return False, f"PDF có {doc.page_count} trang, vượt giới hạn {DOC_MAX_PAGES} trang/lần."
+        doc.save(output_pdf, garbage=4, deflate=True, clean=True)
+    finally:
+        doc.close()
+    return True, ""
+
+def doc_split_pdf(input_pdf: str, output_pdf: str, spec: str) -> tuple[bool, str]:
+    if not PdfReader or not PdfWriter:
+        return False, "Thiếu pypdf/PyPDF2 để tách PDF."
+    reader = PdfReader(input_pdf)
+    pages = doc_parse_page_range(spec, len(reader.pages))
+    writer = PdfWriter()
+    for page_index in pages:
+        writer.add_page(reader.pages[page_index])
+    with open(output_pdf, "wb") as f:
+        writer.write(f)
+    return True, ""
+
+def doc_ocr_image_to_text(input_image: str) -> tuple[bool, str, str]:
+    if not Image:
+        return False, "", "Thiếu Pillow để mở ảnh."
+    if not pytesseract:
+        return False, "", "OCR local chưa sẵn sàng: thiếu pytesseract/tesseract. Công cụ đang ADMIN_ONLY/PLANNED."
+    with Image.open(input_image) as img:
+        text = (pytesseract.image_to_string(img) or "").strip()
+    if not text:
+        return False, "", "OCR không đọc được nội dung rõ ràng từ ảnh."
+    return True, text, ""
+
+def doc_ocr_pdf_to_text(input_pdf: str, output_dir: str) -> tuple[bool, str, str]:
+    if not fitz:
+        return False, "", "Thiếu PyMuPDF/fitz để render PDF scan."
+    if not pytesseract or not Image:
+        return False, "", "OCR local chưa sẵn sàng: thiếu pytesseract/tesseract/Pillow. Công cụ đang ADMIN_ONLY/PLANNED."
+    doc = fitz.open(input_pdf)
+    chunks = []
+    try:
+        if doc.page_count > DOC_OCR_MAX_PAGES:
+            return False, "", f"OCR PDF tối đa {DOC_OCR_MAX_PAGES} trang/lần."
+        for idx, page in enumerate(doc, 1):
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            img_path = os.path.join(output_dir, f"ocr_page_{idx:03d}.png")
+            pix.save(img_path)
+            with Image.open(img_path) as img:
+                text = (pytesseract.image_to_string(img) or "").strip()
+            chunks.append(f"=== Trang {idx} ===\n{text or '[Không đọc được]'}")
+    finally:
+        doc.close()
+    output = "\n\n".join(chunks).strip()
+    if not output:
+        return False, "", "OCR không đọc được nội dung PDF."
+    return True, output, ""
+
+async def cmd_doc_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(doc_tools_menu_text(), parse_mode="HTML")
+
+async def cmd_tool_test_doc_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    status = doc_tools_status_payload()
+    overall = "PASS" if status["ready_basic"] else "FAIL"
+    detail = doc_tools_status_text()
+    save_tool_test_result("doc_tools", overall, detail, update.effective_user.id)
+    lines = [
+        "📄 <b>Document Tools Smoke Test</b>",
+        "",
+        f"• PDF library: <code>{provider_status_text(status['pdf_library'])}</code> — <code>{html.escape(status['pdf_library_name'])}</code>",
+        f"• DOCX: <code>{provider_status_text(status['docx'])}</code>",
+        f"• PyMuPDF/fitz: <code>{provider_status_text(status['pymupdf'])}</code>",
+        f"• Pillow: <code>{provider_status_text(status['pillow'])}</code>",
+        f"• OCR local: <code>{provider_status_text(status['ocr_local'])}</code>",
+        f"• Overall: <code>{overall}</code>",
+        "",
+        "Không gọi API ngoài. Không xử lý file user trong test này.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_pdf_to_word(update: Update, context: ContextTypes.DEFAULT_TYPE, test_mode: bool = False):
+    uid = update.effective_user.id
+    if test_mode and not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh test này.")
+    cost = 0 if is_admin_user(uid) else doc_cost("pdf_to_word_text")
+    if not await doc_check_can_pay(update, uid, cost):
+        return
+    with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
+        ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "pdf")
+        if not ok:
+            if test_mode:
+                save_tool_test_result("pdf_to_word", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        output_path = os.path.join(tmpdir, "toan_aas_pdf_to_word.docx")
+        try:
+            ok, error = doc_pdf_to_word_text(input_path, output_path)
+        except Exception as e:
+            ok, error = False, f"Lỗi xử lý PDF sang Word: {str(e)[:220]}"
+        if not ok:
+            if test_mode:
+                save_tool_test_result("pdf_to_word", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        sent, send_error = await doc_send_file(update, output_path, "toan_aas_pdf_to_word.docx", "📄 PDF sang Word hoàn tất.")
+        if not sent:
+            return await update.message.reply_text(f"⚠️ {send_error}")
+        await doc_charge_after_success(update, uid, cost, "spend_pdf_to_word", "PDF to Word")
+        save_tool_test_result("pdf_to_word", "PASS", "Created DOCX from text PDF", uid)
+
+async def cmd_image_to_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, test_mode: bool = False):
+    uid = update.effective_user.id
+    if test_mode and not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh test này.")
+    cost = 0 if is_admin_user(uid) else doc_cost("image_to_pdf")
+    if not await doc_check_can_pay(update, uid, cost):
+        return
+    with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
+        ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "image")
+        if not ok:
+            if test_mode:
+                save_tool_test_result("image_to_pdf", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        output_path = os.path.join(tmpdir, "toan_aas_image_to_pdf.pdf")
+        try:
+            ok, error = doc_image_to_pdf(input_path, output_path)
+        except Exception as e:
+            ok, error = False, f"Lỗi đổi ảnh sang PDF: {str(e)[:220]}"
+        if not ok:
+            if test_mode:
+                save_tool_test_result("image_to_pdf", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        sent, send_error = await doc_send_file(update, output_path, "toan_aas_image_to_pdf.pdf", "📄 Ảnh sang PDF hoàn tất.")
+        if not sent:
+            return await update.message.reply_text(f"⚠️ {send_error}")
+        await doc_charge_after_success(update, uid, cost, "spend_image_to_pdf", "Image to PDF")
+        save_tool_test_result("image_to_pdf", "PASS", "Created PDF from image", uid)
+
+async def cmd_pdf_to_images(update: Update, context: ContextTypes.DEFAULT_TYPE, test_mode: bool = False):
+    uid = update.effective_user.id
+    if test_mode and not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh test này.")
+    cost = 0 if is_admin_user(uid) else doc_cost("pdf_to_images")
+    if not await doc_check_can_pay(update, uid, cost):
+        return
+    with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
+        ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "pdf")
+        if not ok:
+            if test_mode:
+                save_tool_test_result("pdf_to_images", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        try:
+            ok, image_paths, error = doc_pdf_to_images(input_path, tmpdir)
+        except Exception as e:
+            ok, image_paths, error = False, [], f"Lỗi đổi PDF sang ảnh: {str(e)[:220]}"
+        if not ok:
+            if test_mode:
+                save_tool_test_result("pdf_to_images", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        if len(image_paths) == 1:
+            sent, send_error = await doc_send_file(update, image_paths[0], "toan_aas_pdf_page_001.png", "🖼 PDF sang ảnh hoàn tất.")
+        else:
+            zip_path = os.path.join(tmpdir, "toan_aas_pdf_pages.zip")
+            doc_zip_files(image_paths, zip_path)
+            sent, send_error = await doc_send_file(update, zip_path, "toan_aas_pdf_pages.zip", f"🖼 PDF sang ảnh hoàn tất: {len(image_paths)} trang.")
+        if not sent:
+            return await update.message.reply_text(f"⚠️ {send_error}")
+        await doc_charge_after_success(update, uid, cost, "spend_pdf_to_images", "PDF to images")
+        save_tool_test_result("pdf_to_images", "PASS", f"Created {len(image_paths)} image(s)", uid)
+
+async def cmd_compress_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, test_mode: bool = False):
+    uid = update.effective_user.id
+    if test_mode and not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh test này.")
+    cost = 0 if is_admin_user(uid) else doc_cost("compress_pdf")
+    if not await doc_check_can_pay(update, uid, cost):
+        return
+    with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
+        ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "pdf")
+        if not ok:
+            if test_mode:
+                save_tool_test_result("compress_pdf", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        output_path = os.path.join(tmpdir, "toan_aas_compressed.pdf")
+        try:
+            ok, error = doc_compress_pdf(input_path, output_path)
+        except Exception as e:
+            ok, error = False, f"Lỗi nén PDF: {str(e)[:220]}"
+        if not ok:
+            if test_mode:
+                save_tool_test_result("compress_pdf", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        sent, send_error = await doc_send_file(update, output_path, "toan_aas_compressed.pdf", "📦 Nén PDF hoàn tất.")
+        if not sent:
+            return await update.message.reply_text(f"⚠️ {send_error}")
+        await doc_charge_after_success(update, uid, cost, "spend_compress_pdf", "Compress PDF")
+        save_tool_test_result("compress_pdf", "PASS", "Compressed PDF locally", uid)
+
+async def cmd_split_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    page_spec = " ".join(context.args or []).strip()
+    cost = 0 if is_admin_user(uid) else doc_cost("split_pdf")
+    if not await doc_check_can_pay(update, uid, cost):
+        return
+    with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
+        ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "pdf")
+        if not ok:
+            return await update.message.reply_text(f"⚠️ {error}")
+        output_path = os.path.join(tmpdir, "toan_aas_split.pdf")
+        try:
+            ok, error = doc_split_pdf(input_path, output_path, page_spec)
+        except Exception as e:
+            ok, error = False, str(e)[:240]
+        if not ok:
+            return await update.message.reply_text(f"⚠️ {error}")
+        sent, send_error = await doc_send_file(update, output_path, "toan_aas_split.pdf", f"📄 Tách PDF hoàn tất: trang {page_spec}.")
+        if not sent:
+            return await update.message.reply_text(f"⚠️ {send_error}")
+        await doc_charge_after_success(update, uid, cost, "spend_split_pdf", f"Split PDF {page_spec}")
+        save_tool_test_result("split_pdf", "PASS", f"Split pages {page_spec}", uid)
+
+async def cmd_merge_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📄 <b>Gộp PDF</b>\n\n"
+        "MVP hiện chưa gom nhiều file PDF trong cùng workflow Telegram.\n"
+        "Tính năng này đang planned/admin test. Hiện bot chưa trừ Xu cho /merge_pdf.\n\n"
+        "Cách xử lý tạm: gửi từng PDF cho admin hoặc chờ workflow queue nhiều file.",
+        parse_mode="HTML",
+    )
+
+async def cmd_ocr_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    cost = 0 if is_admin_user(uid) else doc_cost("ocr_image")
+    if not await doc_check_can_pay(update, uid, cost):
+        return
+    with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
+        ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "image")
+        if not ok:
+            return await update.message.reply_text(f"⚠️ {error}")
+        try:
+            ok, text, error = doc_ocr_image_to_text(input_path)
+        except Exception as e:
+            ok, text, error = False, "", f"Lỗi OCR ảnh: {str(e)[:220]}"
+        if not ok:
+            save_tool_test_result("ocr_image", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        output_path = os.path.join(tmpdir, "toan_aas_ocr_image.txt")
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        sent, send_error = await doc_send_file(update, output_path, "toan_aas_ocr_image.txt", "📝 OCR ảnh hoàn tất.")
+        if not sent:
+            return await update.message.reply_text(f"⚠️ {send_error}")
+        await doc_charge_after_success(update, uid, cost, "spend_ocr_image", "OCR image")
+        save_tool_test_result("ocr_image", "PASS", "OCR image completed", uid)
+
+async def cmd_ocr_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
+        ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "pdf")
+        if not ok:
+            return await update.message.reply_text(f"⚠️ {error}")
+        try:
+            pages = doc_pdf_page_count(input_path)
+        except Exception as e:
+            return await update.message.reply_text(f"⚠️ Không đọc được số trang PDF: {str(e)[:220]}")
+        if pages <= 0:
+            return await update.message.reply_text("⚠️ Không đọc được số trang PDF hoặc thiếu package PDF.")
+        if pages > DOC_OCR_MAX_PAGES:
+            return await update.message.reply_text(f"⚠️ OCR PDF tối đa {DOC_OCR_MAX_PAGES} trang/lần. File này có {pages} trang.")
+        cost = 0 if is_admin_user(uid) else doc_cost("ocr_pdf", pages)
+        if not await doc_check_can_pay(update, uid, cost):
+            return
+        try:
+            ok, text, error = doc_ocr_pdf_to_text(input_path, tmpdir)
+        except Exception as e:
+            ok, text, error = False, "", f"Lỗi OCR PDF: {str(e)[:220]}"
+        if not ok:
+            save_tool_test_result("ocr_pdf", "FAIL", error, uid)
+            return await update.message.reply_text(f"⚠️ {error}")
+        output_path = os.path.join(tmpdir, "toan_aas_ocr_pdf.txt")
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        sent, send_error = await doc_send_file(update, output_path, "toan_aas_ocr_pdf.txt", f"📝 OCR PDF hoàn tất: {pages} trang.")
+        if not sent:
+            return await update.message.reply_text(f"⚠️ {send_error}")
+        await doc_charge_after_success(update, uid, cost, "spend_ocr_pdf", f"OCR PDF {pages} page(s)")
+        save_tool_test_result("ocr_pdf", "PASS", f"OCR PDF {pages} page(s)", uid)
+
+async def cmd_tool_test_pdf_to_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_pdf_to_word(update, context, test_mode=True)
+
+async def cmd_tool_test_image_to_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_image_to_pdf(update, context, test_mode=True)
+
+async def cmd_tool_test_pdf_to_images(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_pdf_to_images(update, context, test_mode=True)
+
+async def cmd_tool_test_compress_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_compress_pdf(update, context, test_mode=True)
 
 def media_factory_ai(prompt: str, user_text: str, uid, fallback_text: str) -> str:
     try:
@@ -45467,11 +46095,25 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_kling_video", cmd_tool_test_kling_video))
     tg_app.add_handler(CommandHandler("tool_test_runway_video", cmd_tool_test_runway_video))
     tg_app.add_handler(CommandHandler("tool_test_heygen_avatar", cmd_tool_test_heygen_avatar))
+    tg_app.add_handler(CommandHandler("tool_test_doc_tools", cmd_tool_test_doc_tools))
+    tg_app.add_handler(CommandHandler("tool_test_pdf_to_word", cmd_tool_test_pdf_to_word))
+    tg_app.add_handler(CommandHandler("tool_test_image_to_pdf", cmd_tool_test_image_to_pdf))
+    tg_app.add_handler(CommandHandler("tool_test_pdf_to_images", cmd_tool_test_pdf_to_images))
+    tg_app.add_handler(CommandHandler("tool_test_compress_pdf", cmd_tool_test_compress_pdf))
     tg_app.add_handler(CommandHandler("tool_test_stt", cmd_tool_test_stt))
     tg_app.add_handler(CommandHandler("tool_test_stt_debug", cmd_tool_test_stt_debug))
     tg_app.add_handler(CommandHandler("tool_test_downloader", cmd_tool_test_downloader))
     tg_app.add_handler(CommandHandler("voiceover", cmd_voiceover))
     tg_app.add_handler(CommandHandler("tts", cmd_voiceover))
+    tg_app.add_handler(CommandHandler("doc_tools", cmd_doc_tools))
+    tg_app.add_handler(CommandHandler("pdf_to_word", cmd_pdf_to_word))
+    tg_app.add_handler(CommandHandler("image_to_pdf", cmd_image_to_pdf))
+    tg_app.add_handler(CommandHandler("pdf_to_images", cmd_pdf_to_images))
+    tg_app.add_handler(CommandHandler("compress_pdf", cmd_compress_pdf))
+    tg_app.add_handler(CommandHandler("split_pdf", cmd_split_pdf))
+    tg_app.add_handler(CommandHandler("merge_pdf", cmd_merge_pdf))
+    tg_app.add_handler(CommandHandler("ocr_image", cmd_ocr_image))
+    tg_app.add_handler(CommandHandler("ocr_pdf", cmd_ocr_pdf))
     tg_app.add_handler(CommandHandler("upscale_image", cmd_upscale_image))
     tg_app.add_handler(CommandHandler("audio_enhance", cmd_audio_enhance))
     tg_app.add_handler(CommandHandler("real_video", cmd_real_video))
