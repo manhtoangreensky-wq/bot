@@ -24118,7 +24118,10 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     except Exception as e:
                         logger.error(f"Edge TTS fallback error: {e}")
                         refund_charged_credit(uid, fallback_cost, "refund", "", "Hoàn gói voice fallback do lỗi", fallback_charged and fallback_cost > 0)
-                        await query.edit_message_text("❌ Cả Fish Audio và Edge TTS đều lỗi. Xu đã hoàn lại.")
+                        await query.edit_message_text(
+                            "❌ Tạo voice đang tạm lỗi.\n"
+                            "Xu đã hoàn lại nếu đã trừ. Vui lòng thử lại sau."
+                        )
             except Exception as e:
                 logger.error(f"Voice paid error: {e}")
                 if not premium_refunded:
@@ -24177,7 +24180,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
             if not ok:
                 refund_charged_credit(uid, image_free_charged, "refund", "", "Hoàn gói tách nền tiết kiệm do lỗi", image_free_charged > 0)
                 await query.edit_message_text(
-                    "❌ Tách nền đang admin test/chưa mở public hoặc provider đang lỗi.\n"
+                    "❌ Tách nền đang admin test/chưa mở public hoặc công cụ đang lỗi.\n"
                     "Bot chưa trừ Xu. Vui lòng thử lại sau."
                 )
         else:
@@ -24283,7 +24286,7 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     if not premium_refunded:
                         refund_charged_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp do lỗi", premium_charged)
                     await query.edit_message_text(
-                        "❌ Tách nền đang admin test/chưa mở public hoặc provider đang lỗi.\n"
+                        "❌ Tách nền đang admin test/chưa mở public hoặc công cụ đang lỗi.\n"
                         "Bot chưa trừ Xu. Vui lòng thử lại sau."
                     )
 
@@ -26065,12 +26068,12 @@ def freeze_block_message(reason: str, state: dict) -> str:
     if reason == "maintenance":
         return (
             "🚧 <b>TOAN AAS đang bảo trì nhẹ.</b>\n\n"
-            "Các tác vụ tốn phí/provider đang tạm dừng để kiểm tra. Bạn vẫn có thể xem /profile, /pricing, /legal."
+            "Các tác vụ tốn phí/công cụ đang tạm dừng để kiểm tra. Bạn vẫn có thể xem /profile, /pricing, /legal."
         )
     if reason in {"tool_freeze", "provider_freeze"}:
         return (
             "🧰 <b>Công cụ AI đang tạm khóa an toàn.</b>\n\n"
-            "TOAN AAS đang kiểm tra provider/API. Bot không trừ Xu cho tác vụ bị khóa. Vui lòng quay lại sau."
+            "TOAN AAS đang kiểm tra công cụ. Bot không trừ Xu cho tác vụ bị khóa. Vui lòng quay lại sau."
         )
     return emergency_user_message()
 
@@ -26703,8 +26706,8 @@ def menu_text_video_factory(is_admin: bool) -> str:
             "• <code>/trend_ai &lt;chủ đề&gt;</code> — tìm ý tưởng/trend\n"
             "• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật\n"
             "• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack\n"
-            "• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật\n"
-            "• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật\n"
+            "• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh AI nếu admin bật\n"
+            "• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa ảnh AI nếu admin bật\n"
             "• <code>/media_factory &lt;chủ đề&gt;</code> — trọn gói trend/script/ảnh/video/caption\n"
             "• <code>/media_factory</code> — xem trung tâm Video & Media\n"
             "• <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
@@ -26935,7 +26938,7 @@ def menu_text_main_image() -> str:
         "• <code>/image_to_video_pack</code> — tạo prompt video từ ý tưởng ảnh\n"
         "• <code>/ai_image</code> — tạo ảnh AI nếu admin đã bật\n"
         "• <code>/ai_image_edit</code> — sửa ảnh AI nếu admin đã bật\n\n"
-        "Lưu ý: tool tốn API vẫn admin-first nếu chưa public. Không trừ Xu nếu provider lỗi."
+        "Lưu ý: công cụ tốn chi phí vẫn admin-first nếu chưa public. Không trừ Xu nếu công cụ lỗi."
     )
 
 def menu_text_main_audio() -> str:
@@ -26962,11 +26965,11 @@ def menu_text_main_audio() -> str:
         "• <code>/translate_file &lt;ngôn ngữ&gt;</code> — gửi/reply file text/doc/pdf để dịch nếu tool đã bật",
         "• <code>/translate_voice &lt;ngôn ngữ&gt;</code> — gửi/reply voice/audio để bóc băng rồi dịch nếu STT đã bật",
         "• <code>/translate_audio &lt;ngôn ngữ&gt;</code> — alias của /translate_voice",
-        "• <code>/vi_en &lt;nội dung&gt;</code> — Việt → Anh nếu provider đã bật",
-        "• <code>/en_vi &lt;nội dung&gt;</code> — Anh → Việt nếu provider đã bật",
-        "• <code>/zh_vi</code>, <code>/ja_vi</code>, <code>/ko_vi</code> — dịch về tiếng Việt nếu provider đã bật",
-        "• Dịch thuật dùng DeepL/Gemini/OpenAI fallback theo cấu hình.",
-        "• Nếu provider lỗi: không trừ Xu hoặc hoàn Xu theo flow hiện có.",
+        "• <code>/vi_en &lt;nội dung&gt;</code> — Việt → Anh nếu công cụ đã bật",
+        "• <code>/en_vi &lt;nội dung&gt;</code> — Anh → Việt nếu công cụ đã bật",
+        "• <code>/zh_vi</code>, <code>/ja_vi</code>, <code>/ko_vi</code> — dịch về tiếng Việt nếu công cụ đã bật",
+        "• Dịch thuật dùng hệ thống dịch của TOAN AAS theo cấu hình.",
+        "• Nếu công cụ lỗi: không trừ Xu hoặc hoàn Xu theo flow hiện có.",
         "• Chỉ dịch nội dung bạn sở hữu hoặc có quyền sử dụng.",
     ])
     return "\n".join(lines)
@@ -26980,7 +26983,7 @@ def menu_text_translate(other: bool = False) -> str:
             "• 🇰🇷 한국어\n"
             "• 🇹🇭 ไทย\n"
             "• 🇸🇦 العربية\n\n"
-            "Provider: DeepL/Gemini/OpenAI fallback theo cấu hình. Nếu provider lỗi, không trừ Xu."
+            "TOAN AAS dùng hệ thống dịch theo cấu hình. Nếu công cụ lỗi, không trừ Xu."
         )
     return (
         "🌐 <b>DỊCH THUẬT TOAN AAS</b>\n\n"
@@ -27010,7 +27013,7 @@ def menu_text_main_quick() -> str:
         ("doc_tools", "📄 <code>/doc_tools</code>\nMở công cụ tài liệu: PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF."),
         ("image_tools", "🖼 <code>/image_tools</code>\nMở công cụ ảnh: prompt ảnh, xử lý ảnh, ảnh sang video prompt."),
         ("media_factory", "🎤 <code>/media_factory</code>\nMở trung tâm Video &amp; Media."),
-        ("translate_text", "🌐 <code>/translate en nội dung</code>\nDịch văn bản bằng DeepL/Gemini/OpenAI fallback nếu provider đã bật."),
+        ("translate_text", "🌐 <code>/translate en nội dung</code>\nDịch văn bản bằng hệ thống dịch TOAN AAS nếu công cụ đã bật."),
         ("naptien", "💳 <code>/naptien</code>\nNạp thêm Xu bằng QR tự động hoặc QR thủ công."),
         ("pricing", "💰 <code>/pricing</code>\nXem bảng giá Xu và chi phí từng công cụ."),
         ("gift", "🎁 <code>/gift &lt;mã&gt;</code>\nNhập mã quà tặng để nhận Xu nếu admin gửi mã."),
@@ -27076,7 +27079,7 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_pricing": ("main_topup", "💰 <b>Bảng giá</b>\n\nCopy lệnh:\n<code>/pricing</code>"),
         "hint_image_tools": ("main_image", "🖼 <b>Công cụ ảnh</b>\n\nCopy lệnh:\n<code>/image_tools</code>"),
         "hint_image_to_video_pack": ("main_image", "🎬 <b>Ảnh sang video prompt</b>\n\nCopy lệnh:\n<code>/image_to_video_pack chủ đề hoặc mô tả ảnh</code>"),
-        "hint_media_factory": ("main_audio", "🎤 <b>Trung tâm Video & Media</b>\n\nCopy lệnh:\n<code>/media_factory</code>\n\nTạo voice, bóc băng và video/content pack tùy provider đã bật."),
+        "hint_media_factory": ("main_audio", "🎤 <b>Trung tâm Video & Media</b>\n\nCopy lệnh:\n<code>/media_factory</code>\n\nTạo voice, bóc băng và video/content pack tùy công cụ đã bật."),
         "hint_film_blueprint": ("video_workflow", "🚀 <b>Film Blueprint</b>\n\nCopy lệnh:\n<code>/film_blueprint</code>"),
         "hint_scene_pack": ("video_workflow", "📦 <b>Scene Pack</b>\n\nCopy lệnh:\n<code>/scene_pack job=&lt;JOB_ID&gt; scene=1</code>"),
         "hint_growth_loop": ("video_workflow", "📈 <b>Growth Loop</b>\n\nCopy lệnh:\n<code>/growth_loop</code>"),
@@ -27101,7 +27104,7 @@ def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
         "hint_pricing": ("main_topup", "💰 <b>Pricing</b>\n\nCopy:\n<code>/pricing</code>"),
         "hint_image_tools": ("main_image", "🖼 <b>Image tools</b>\n\nCopy:\n<code>/image_tools</code>"),
         "hint_image_to_video_pack": ("main_image", "🎬 <b>Image-to-video prompt pack</b>\n\nCopy:\n<code>/image_to_video_pack topic or image description</code>"),
-        "hint_media_factory": ("main_audio", "🎤 <b>Media tools</b>\n\nCopy:\n<code>/media_factory</code>\n\nVoice, transcription and media/content packs depending on enabled providers."),
+        "hint_media_factory": ("main_audio", "🎤 <b>Media tools</b>\n\nCopy:\n<code>/media_factory</code>\n\nVoice, transcription and media/content packs depending on enabled tools."),
         "hint_naptien": ("billing", "💳 <b>Top up Xu</b>\n\nCopy:\n<code>/naptien</code>"),
         "hint_profile": ("billing", "👤 <b>Account</b>\n\nCopy:\n<code>/profile</code>"),
         "hint_terms": ("support", "📜 <b>Terms</b>\n\nCopy:\n<code>/terms</code>\n\nFull policy is currently available in Vietnamese."),
@@ -27160,7 +27163,7 @@ def menu_text_main_docs_i18n(lang: str) -> str:
         "• Send or reply to an image, then use <code>/image_to_pdf</code>\n"
         "• Send or reply to a PDF, then use <code>/pdf_to_word</code>\n"
         "• Send or reply to a PDF, then use <code>/pdf_to_images</code>, <code>/compress_pdf</code> or <code>/split_pdf 1</code>\n\n"
-        "Document tools use local engines. They do not create PayOS orders and do not use image background-removal providers."
+        "Document tools use local engines. They do not create PayOS orders and do not use background-removal tools."
     )
 
 def menu_text_main_image_i18n(lang: str) -> str:
@@ -27168,12 +27171,12 @@ def menu_text_main_image_i18n(lang: str) -> str:
         return menu_text_main_image()
     return (
         "🖼 <b>IMAGE TOOLS</b>\n\n"
-        "Create image prompts, prepare images for video, and use image tools when providers are enabled.\n\n"
+        "Create image prompts, prepare images for video, and use image tools when they are enabled.\n\n"
         "<b>Quick commands:</b>\n"
         "• <code>/image_tools</code> — open image tools\n"
         "• <code>/image_prompt</code> — create image prompts\n"
         "• <code>/image_to_video_pack</code> — create image-to-video prompts\n\n"
-        "Provider-based image tools stay admin-tested until they are ready."
+        "Advanced image tools stay admin-tested until they are ready."
     )
 
 def menu_text_main_audio_i18n(lang: str) -> str:
@@ -27473,8 +27476,8 @@ def help_text_for_user(user_id) -> str:
         "• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack\n"
         "• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật\n"
         "• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack\n"
-        "• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh ChatGPT/OpenAI nếu admin bật\n"
-        "• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa bằng ChatGPT/OpenAI nếu admin bật\n"
+        "• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh AI nếu admin bật\n"
+        "• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa ảnh AI nếu admin bật\n"
         "• <code>/media_factory</code> — xem trung tâm Video & Media\n"
         "• <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
         "• Kết quả gồm outline, storyboard, scene prompt, prompt ảnh, caption, hashtag và CTA để bạn tự đăng.\n"
@@ -28861,7 +28864,11 @@ async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
             "• Nguồn: <code>auto</code>\n"
             "• Đích: <code>Tiếng Việt</code>\n"
-            f"• Provider: <code>{html.escape(result.get('provider') or '-')}</code>\n\n"
+            + (
+                f"• Provider: <code>{html.escape(result.get('provider') or '-')}</code>\n"
+                if is_admin_user(update.effective_user.id) else ""
+            )
+            + "\n"
             f"{html.escape(result.get('text') or '')}",
             parse_mode="HTML",
         )
@@ -28877,15 +28884,21 @@ async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 errors.get(provider_name, ""),
                 update.effective_user.id,
             )
-        await update.message.reply_text(
-            "❌ Dịch văn bản đang lỗi tạm thời.\n\n"
-            f"• DeepL: <code>{html.escape(provider_line_status(statuses.get('deepl', 'MISSING'), errors.get('deepl', '')))}</code>\n"
-            f"• Gemini: <code>{html.escape(provider_line_status(statuses.get('gemini', 'MISSING'), errors.get('gemini', '')))}</code>\n"
-            f"• OpenAI: <code>{html.escape(provider_line_status(statuses.get('openai', 'MISSING'), errors.get('openai', '')))}</code>\n"
-            f"• Error: <code>{html.escape(error_text[:240])}</code>\n"
-            "Không có Xu nào bị trừ cho lần thử này.",
-            parse_mode="HTML",
-        )
+        if is_admin_user(update.effective_user.id):
+            await update.message.reply_text(
+                "❌ Dịch văn bản đang lỗi tạm thời.\n\n"
+                f"• DeepL: <code>{html.escape(provider_line_status(statuses.get('deepl', 'MISSING'), errors.get('deepl', '')))}</code>\n"
+                f"• Gemini: <code>{html.escape(provider_line_status(statuses.get('gemini', 'MISSING'), errors.get('gemini', '')))}</code>\n"
+                f"• OpenAI: <code>{html.escape(provider_line_status(statuses.get('openai', 'MISSING'), errors.get('openai', '')))}</code>\n"
+                f"• Error: <code>{html.escape(error_text[:240])}</code>\n"
+                "Không có Xu nào bị trừ cho lần thử này.",
+                parse_mode="HTML",
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Dịch văn bản đang lỗi tạm thời hoặc quá tải.\n"
+                "Bot chưa trừ Xu. Vui lòng thử lại sau."
+            )
 
 async def cmd_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
@@ -28897,7 +28910,7 @@ async def cmd_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/translate vi nội dung cần dịch</code>\n"
             "• <code>/vi_en nội dung tiếng Việt</code>\n"
             "• <code>/en_vi English text</code>\n\n"
-            "Provider: DeepL/Gemini/OpenAI fallback theo cấu hình. Nếu lỗi, không trừ Xu.",
+            "Nếu hệ thống dịch đang quá tải, bot chưa trừ Xu.",
             parse_mode="HTML",
         )
     target = normalize_translate_target(args[0])
@@ -28909,21 +28922,28 @@ async def cmd_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = await translate_to_language(text, target)
         save_tool_test_result("translation", "PASS", f"provider={result.get('provider')}; translate success target={target}", update.effective_user.id)
+        admin_detail = (
+            f"\n\n<b>Admin detail</b>: <code>Translate provider: {html.escape(result.get('provider') or '-')}</code>"
+            if is_admin_user(update.effective_user.id) else ""
+        )
         await update.message.reply_text(
             "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
-            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
-            f"• Provider: <code>{html.escape(result.get('provider') or '-')}</code>\n\n"
-            f"{html.escape(result.get('text') or '')}",
+            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n\n"
+            f"{html.escape(result.get('text') or '')}"
+            + admin_detail,
             parse_mode="HTML",
         )
     except Exception as e:
         error_text = str(e)[:900]
         save_tool_test_result("translation", "FAIL", error_text[:500], update.effective_user.id)
         await update.message.reply_text(
-            "❌ Dịch văn bản đang lỗi tạm thời hoặc hết quota provider.\n"
-            "Không có Xu nào bị trừ cho lần thử này.\n\n"
-            f"• Error: <code>{html.escape(error_text[:240])}</code>",
-            parse_mode="HTML",
+            (
+                "❌ Dịch văn bản đang lỗi tạm thời hoặc hết quota provider.\n"
+                "Không có Xu nào bị trừ cho lần thử này.\n\n"
+                f"• Error: <code>{html.escape(error_text[:240])}</code>"
+            ) if is_admin_user(update.effective_user.id) else
+            "❌ Dịch văn bản đang lỗi tạm thời hoặc quá tải.\nBot chưa trừ Xu. Vui lòng thử lại sau.",
+            parse_mode="HTML" if is_admin_user(update.effective_user.id) else None,
         )
 
 async def cmd_translate_alias(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str):
@@ -28993,24 +29013,29 @@ async def cmd_translate_status(update: Update, context: ContextTypes.DEFAULT_TYP
     uid = update.effective_user.id
     modes = ensure_user_modes(uid)
     target = modes.get("translate_mode_target") or ""
+    admin_detail = ""
+    if is_admin_user(uid):
+        admin_detail = (
+            f"\n• DeepL: <code>{'configured' if DEEPL_API_KEY else 'missing'}</code>"
+            f"\n• Gemini: <code>{'configured' if gemini_client else 'missing'}</code>"
+            f"\n• OpenAI: <code>{'configured' if openai_client else 'missing'}</code>"
+        )
     await update.message.reply_text(
         "🌐 <b>TRẠNG THÁI DỊCH TỰ ĐỘNG</b>\n\n"
         f"• Translate mode: <code>{'on' if target else 'off'}</code>\n"
-        f"• Target: <b>{html.escape(translate_target_label(target)) if target else '-'}</b>\n"
-        f"• DeepL: <code>{'configured' if DEEPL_API_KEY else 'missing'}</code>\n"
-        f"• Gemini: <code>{'configured' if gemini_client else 'missing'}</code>\n"
-        f"• OpenAI: <code>{'configured' if openai_client else 'missing'}</code>\n\n"
-        "Bật: <code>/translate_mode</code> hoặc <code>/translate_mode en</code>\n"
+        f"• Target: <b>{html.escape(translate_target_label(target)) if target else '-'}</b>"
+        + admin_detail +
+        "\n\nBật: <code>/translate_mode</code> hoặc <code>/translate_mode en</code>\n"
         "Tắt: <code>/translate_mode_off</code>",
         parse_mode="HTML",
     )
 
 TRANSLATE_FILE_NOT_READY_TEXT = "Dịch file đang admin test/chưa mở public. Bot chưa trừ Xu."
 TRANSLATE_FILE_EXTRACT_ERROR_TEXT = "Không đọc được nội dung file này. Bot chưa trừ Xu."
-TRANSLATE_FILE_PROVIDER_ERROR_TEXT = "Dịch file đang lỗi provider. Bot chưa trừ Xu."
+TRANSLATE_FILE_PROVIDER_ERROR_TEXT = "Dịch file đang lỗi tạm thời hoặc quá tải. Bot chưa trừ Xu."
 TRANSLATE_AUDIO_MISSING_STT_TEXT = "Chưa xử lý được audio vì STT chưa cấu hình hoặc đang admin test. Bot chưa trừ Xu."
 TRANSLATE_AUDIO_ERROR_TEXT = "Chưa xử lý được audio. Bot chưa trừ Xu."
-TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT = "Đã bóc băng được nhưng dịch lỗi provider. Bot chưa trừ Xu phần dịch."
+TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT = "Đã bóc băng được nhưng dịch đang lỗi tạm thời. Bot chưa trừ Xu phần dịch."
 
 def translate_voice_missing_target_text() -> str:
     return (
@@ -29044,8 +29069,8 @@ def translate_tools_text() -> str:
         "• <code>/translate_audio en</code> — alias của /translate_voice\n\n"
         "<b>Lưu ý:</b>\n"
         "• Dịch file đang admin test, chỉ xử lý định dạng có engine local.\n"
-        "• Dịch voice/audio cần Deepgram STT hoạt động.\n"
-        "• Provider lỗi hoặc hết quota: bot chưa trừ Xu.\n"
+        "• Dịch voice/audio cần công cụ bóc băng hoạt động.\n"
+        "• Nếu công cụ lỗi hoặc quá tải: bot chưa trừ Xu.\n"
         "• Chỉ dịch nội dung bạn sở hữu hoặc có quyền sử dụng."
     )
 
@@ -29108,14 +29133,19 @@ async def cmd_translate_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         result = await translate_to_language(source_text[:3000], target)
         save_tool_test_result("translation_file", "PASS", f"provider={result.get('provider')}; target={target}", update.effective_user.id)
+        admin_detail = (
+            f"\n\n<b>Admin detail</b>: <code>Translate provider: {html.escape(result.get('provider') or '-')}</code>"
+            if is_admin_user(update.effective_user.id) else ""
+        )
         await update.message.reply_text(
             "🌐 <b>DỊCH FILE TOAN AAS</b>\n\n"
             f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
-            f"• Provider: <code>{html.escape(result.get('provider') or '-')}</code>\n\n"
+            "\n"
             "<b>Nội dung gốc:</b>\n"
             f"<code>{html.escape(source_text[:1000])}</code>\n\n"
             "<b>Bản dịch:</b>\n"
-            f"{html.escape((result.get('text') or '')[:2200])}",
+            f"{html.escape((result.get('text') or '')[:2200])}"
+            + admin_detail,
             parse_mode="HTML",
         )
     except Exception:
@@ -29144,14 +29174,22 @@ async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE
             return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
         if target == "vi" and is_likely_vietnamese_transcript(transcript):
             save_tool_test_result("translation_voice", "PASS", "stt=deepgram; target=vi; transcript_already_vi", update.effective_user.id)
+            admin_detail = (
+                "\n\n<b>Admin detail</b>:\n"
+                "• STT provider: <code>Deepgram</code>\n"
+                "• Translate provider: <code>không cần dịch</code>"
+                if is_admin_user(update.effective_user.id) else ""
+            )
             return await update.message.reply_text(
                 "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
-                "• STT: <code>Deepgram</code>\n"
+                "• Bóc băng: đã bật\n"
+                "• Dịch: không cần dịch thêm\n"
                 "• Đích: <b>Tiếng Việt</b>\n"
-                "• Provider dịch: <code>không cần dịch</code>\n\n"
+                "\n"
                 "<b>Transcript gốc:</b>\n"
                 f"<code>{html.escape(transcript[:1100])}</code>\n\n"
-                "Transcript đã là Tiếng Việt. Bot chưa cần dịch thêm.",
+                "Transcript đã là Tiếng Việt. Bot chưa cần dịch thêm."
+                + admin_detail,
                 parse_mode="HTML",
             )
         try:
@@ -29160,15 +29198,23 @@ async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE
             save_tool_test_result("translation_voice", "FAIL", "translation_provider_failed_after_stt", update.effective_user.id)
             return await update.message.reply_text(TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT)
         save_tool_test_result("translation_voice", "PASS", f"stt=deepgram; provider={result.get('provider')}; target={target}", update.effective_user.id)
+        admin_detail = (
+            "\n\n<b>Admin detail</b>:\n"
+            "• STT provider: <code>Deepgram</code>\n"
+            f"• Translate provider: <code>{html.escape(result.get('provider') or '-')}</code>"
+            if is_admin_user(update.effective_user.id) else ""
+        )
         await update.message.reply_text(
             "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
-            f"• STT: <code>Deepgram</code>\n"
+            "• Bóc băng: đã bật\n"
+            "• Dịch: đã bật\n"
             f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
-            f"• Provider dịch: <code>{html.escape(result.get('provider') or '-')}</code>\n\n"
+            "\n"
             "<b>Transcript gốc:</b>\n"
             f"<code>{html.escape(transcript[:1100])}</code>\n\n"
             "<b>Bản dịch:</b>\n"
-            f"{html.escape((result.get('text') or '')[:2200])}",
+            f"{html.escape((result.get('text') or '')[:2200])}"
+            + admin_detail,
             parse_mode="HTML",
         )
     except Exception:
@@ -29222,9 +29268,13 @@ async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_tool_test_result("stt", "PASS", f"provider=deepgram; source={media_info.get('source')}", uid)
         balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
         await update.message.reply_text(
-            "🎤 TRANSCRIBE TOAN AAS\n\n"
-            f"{transcript[:3500]}\n\n"
+            "🎙 BÓC BĂNG AUDIO TOAN AAS\n\n"
+            "• Bóc băng: đã bật\n\n"
+            "<b>Nội dung:</b>\n"
+            f"{html.escape(transcript[:3500])}\n\n"
             f"💼 Còn lại: {balance} Xu | /naptien để nạp thêm"
+            + ("\n\n<b>Admin detail</b>: <code>STT provider: Deepgram</code>" if is_admin_user(uid) else ""),
+            parse_mode="HTML",
         )
     except Exception:
         save_tool_test_result("stt", "FAIL", "transcribe_provider_failed", uid)
@@ -29252,7 +29302,8 @@ async def handle_auto_translate_message(update: Update, context: ContextTypes.DE
             "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
             "• Nguồn: <code>auto</code>\n"
             f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
-            f"• Provider: <code>{html.escape(provider)}</code>\n\n"
+            + (f"• Provider: <code>{html.escape(provider)}</code>\n" if is_admin_user(uid) else "")
+            + "\n"
             f"{html.escape(translated)}\n\n"
             "<i>/translate_mode_off để tắt</i>",
             parse_mode="HTML",
@@ -29271,13 +29322,21 @@ async def handle_auto_translate_message(update: Update, context: ContextTypes.DE
             provider="translation_router",
             detail=detail,
         )
-        await update.message.reply_text(
-            "❌ Dịch tự động đang tạm lỗi hoặc hết quota provider.\n"
-            f"• Chi tiết: {html.escape(detail[:240])}\n"
-            "Không có Xu nào bị trừ.\n"
-            "Không chuyển sang AI chat để tránh trả lời sai ngữ cảnh.\n"
-            "Tắt dịch: /translate_mode_off",
-        )
+        if is_admin_user(uid):
+            await update.message.reply_text(
+                "❌ Dịch tự động đang tạm lỗi hoặc hết quota provider.\n"
+                f"• Chi tiết: {html.escape(detail[:240])}\n"
+                "Không có Xu nào bị trừ.\n"
+                "Không chuyển sang AI chat để tránh trả lời sai ngữ cảnh.\n"
+                "Tắt dịch: /translate_mode_off",
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Dịch tự động đang tạm lỗi hoặc quá tải.\n"
+                "Bot chưa trừ Xu. Vui lòng thử lại sau.\n"
+                "Không chuyển sang AI chat để tránh trả lời sai ngữ cảnh.\n"
+                "Tắt dịch: /translate_mode_off"
+            )
 
 async def cmd_tool_test_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -29847,20 +29906,24 @@ async def cmd_tool_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Khách hàng đang dùng</b>",
         "• AI chat/script/caption/prompt: <code>public</code>",
         "• Video Factory Lite: <code>/film</code>, <code>/image_prompt</code>, <code>/image_to_video_pack</code>",
-        "• STT/TTS/Image utility: chỉ mở khi provider smoke test PASS.",
+        "• Voice/audio/image utility: chỉ mở khi công cụ đã test PASS.",
         f"• TOAN AAS Memory: <code>{memory_public_stage()}</code> — <code>/memory</code>, <code>/memory_plan</code>",
         "",
-        "<b>Admin/Internal test</b>",
-        f"• Trend Live/SerpAPI: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code>",
-        f"• ElevenLabs/Fish/Edge TTS: <code>{html.escape(tool_test_status_text('tts'))}</code>",
-        f"• Stability Image/Upscale: <code>{html.escape(providers['media_factory'].get('stability_image_stage') or 'DISABLED')}</code> / <code>{html.escape(providers['media_factory'].get('image_upscale_stage') or 'DISABLED')}</code>",
-        f"• Auphonic Audio Enhance: <code>{html.escape(providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED')}</code>",
-        f"• Kling/Runway/HeyGen: <code>{html.escape(providers['media_factory'].get('kling_video_stage') or 'DISABLED')}</code> / <code>{html.escape(providers['media_factory'].get('runway_video_stage') or 'DISABLED')}</code> / <code>{html.escape(providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED')}</code>",
+        "<b>Công cụ nâng cao</b>",
+        "• Một số công cụ nâng cao đang admin test nội bộ.",
+        "• Chỉ mở public khi đã test ổn, có chi phí rõ và không gây lỗi cho khách.",
         "",
         "Customer publish, auto publish và ads assistant vẫn OFF.",
     ]
     if admin:
         lines.extend([
+            "",
+            "<b>Admin/Internal test</b>",
+            f"• Trend Live/SerpAPI: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code>",
+            f"• ElevenLabs/Fish/Edge TTS: <code>{html.escape(tool_test_status_text('tts'))}</code>",
+            f"• Stability Image/Upscale: <code>{html.escape(providers['media_factory'].get('stability_image_stage') or 'DISABLED')}</code> / <code>{html.escape(providers['media_factory'].get('image_upscale_stage') or 'DISABLED')}</code>",
+            f"• Auphonic Audio Enhance: <code>{html.escape(providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED')}</code>",
+            f"• Kling/Runway/HeyGen: <code>{html.escape(providers['media_factory'].get('kling_video_stage') or 'DISABLED')}</code> / <code>{html.escape(providers['media_factory'].get('runway_video_stage') or 'DISABLED')}</code> / <code>{html.escape(providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED')}</code>",
             "",
             "<b>Lệnh admin test</b>",
             "• <code>/tool_audit</code> | <code>/providers</code> | <code>/tool_status</code>",
@@ -30008,7 +30071,7 @@ async def cmd_costs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công",
         f"• <code>/chat_pro</code> Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công",
         f"• <code>/chat_deep</code> Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công",
-        "• Chat AI lỗi/quota/provider fail: không trừ Xu",
+        "• Chat AI lỗi/quota/công cụ quá tải: không trừ Xu",
         f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + block {VOICE_BLOCK_CHARS} ký tự",
         f"• STT/audio: từ <b>{AUDIO_MIN_COST} Xu</b>, +{AUDIO_COST_PER_MB} Xu/MB",
         f"• Image: từ <b>{IMAGE_REMOVE_BG_BASE_COST}-{IMAGE_REMOVE_BG_PREMIUM_COST} Xu</b>",
@@ -32129,7 +32192,7 @@ def doc_tools_menu_text() -> str:
         "3. Gõ lệnh cần dùng.\n\n"
         "<b>Giá:</b>\n"
         "Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n"
-        "Nếu provider lỗi trong quá trình xử lý, bot không trừ Xu hoặc hoàn Xu theo flow hiện có.\n\n"
+        "Nếu công cụ lỗi trong quá trình xử lý, bot không trừ Xu hoặc hoàn Xu theo flow hiện có.\n\n"
         "<b>Giới hạn MVP:</b>\n"
         f"• PDF tối đa {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB\n"
         f"• Tối đa {DOC_MAX_PAGES} trang/lần cho công cụ PDF cơ bản\n"
@@ -32156,7 +32219,7 @@ def doc_tools_menu_text_i18n(lang: str) -> str:
         "2. Reply to that file.\n"
         "3. Send the command you need.\n\n"
         "See pricing at <code>/pricing</code> or <code>/banggia</code>.\n"
-        "Document tools use local engines. They do not create PayOS orders and do not call background-removal providers.\n\n"
+        "Document tools use local engines. They do not create PayOS orders and do not call background-removal tools.\n\n"
         "<b>MVP limits:</b>\n"
         f"• PDF max {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB\n"
         f"• Up to {DOC_MAX_PAGES} pages per basic PDF action\n"
@@ -33909,7 +33972,7 @@ def media_factory_overview_text() -> str:
         "🎬 <b>VIDEO & MEDIA FACTORY — TOAN AAS</b>\n\n"
         "TOAN AAS hỗ trợ xây quy trình tạo nội dung/video đa hướng:\n\n"
         "<b>1. Trend & Ý tưởng</b>\n"
-        "• Gợi ý trend bằng AI content-only; Trend Live chưa bật provider realtime.\n"
+        "• Gợi ý trend bằng AI content-only; dữ liệu live realtime chưa mở public.\n"
         "• Checklist nghiên cứu thủ công cho TikTok, YouTube Shorts, Facebook Reels, Google Trends.\n"
         "• Gợi ý chủ đề, hook, tiêu đề, nội dung phù hợp.\n"
         "• Gợi ý truyện/chủ đề đang hot theo nguồn hợp lệ.\n\n"
@@ -33940,12 +34003,12 @@ def media_factory_overview_text() -> str:
         "• TikTok/YouTube/Facebook API là backlog admin-only sau khi có approval gate.\n\n"
         "<b>Lệnh liên quan:</b>\n"
         "• <code>/trend_ai &lt;chủ đề&gt;</code> — gợi ý trend angle content-only\n"
-        "• <code>/trend_live &lt;chủ đề&gt;</code> — kiểm tra trạng thái trend realtime/provider\n"
+        "• <code>/trend_live &lt;chủ đề&gt;</code> — kiểm tra trạng thái dữ liệu trend realtime\n"
         "• <code>/trend_research &lt;chủ đề&gt;</code> — checklist nghiên cứu trend thủ công\n"
         "• <code>/media_factory &lt;chủ đề&gt;</code> — tạo pack trend/script/ảnh/video/caption\n"
         "• <code>/video_factory_flow</code> — xem quy trình đầy đủ\n"
         "• <code>/image_tools</code> — công cụ ảnh\n"
-        "• <code>/video_provider_status</code> — trạng thái provider video AI thật\n"
+        "• <code>/video_provider_status</code> — trạng thái tạo video AI thật\n"
         "• <code>/image_prompt &lt;chủ đề&gt;</code> — prompt ảnh chân thật\n"
         "• <code>/image_to_video_pack &lt;chủ đề&gt;</code> — prompt video từ ảnh\n"
         "• <code>/content_policy</code> — quy định nội dung/bản quyền\n\n"
@@ -33986,7 +34049,7 @@ def video_factory_flow_text() -> str:
         "<b>Bước 1: Tìm trend</b>\n"
         "→ <code>/trend_ai &lt;chủ đề&gt;</code>\n\n"
         "→ <code>/trend_research &lt;chủ đề&gt;</code> nếu muốn checklist tự kiểm tra nguồn thật.\n"
-        "→ <code>/trend_live &lt;chủ đề&gt;</code> hiện chỉ báo provider missing, không fake dữ liệu live.\n\n"
+        "→ <code>/trend_live &lt;chủ đề&gt;</code> hiện chỉ báo dữ liệu live chưa mở public, không fake dữ liệu live.\n\n"
         "<b>Bước 2: Chọn hướng nội dung</b>\n"
         "→ Bot gợi ý hook, tiêu đề, nội dung và hướng tư liệu hợp lệ.\n\n"
         "<b>Bước 3: Tạo ảnh/cảnh</b>\n"
@@ -34038,7 +34101,7 @@ def fallback_trend_ai_pack(topic: str) -> str:
             f"8. Lệnh tiếp theo: /image_prompt {topic} - {title} | /image_to_video_pack {topic} - {title} | /media_factory {topic} - {title}",
             "",
         ])
-    lines.append("TOAN AAS hiện tạo content/video pack để bạn tự đăng. Trend Live mới nhất cần provider realtime và đang tắt.")
+    lines.append("TOAN AAS hiện tạo content/video pack để bạn tự đăng. Trend Live mới nhất đang tắt trong bản public.")
     return "\n".join(lines)
 
 def fallback_image_prompt_pack(topic: str, advanced: bool = False) -> str:
@@ -34064,7 +34127,7 @@ def fallback_image_prompt_pack(topic: str, advanced: bool = False) -> str:
             "Tỉ lệ: 9:16 cho Reels/TikTok, 1:1 cho feed, 16:9 cho YouTube.",
             "",
         ])
-    lines.append("Trạng thái: provider tạo ảnh thật chưa bật, bot trả prompt pack nâng cao để bạn dùng với công cụ tạo ảnh." if advanced else "Bước tiếp theo: dùng prompt này ở công cụ tạo ảnh bạn chọn hoặc chạy /image_to_video_pack <mô tả ảnh>.")
+    lines.append("Trạng thái: công cụ tạo ảnh thật chưa mở public, bot trả prompt pack nâng cao để bạn dùng với công cụ tạo ảnh." if advanced else "Bước tiếp theo: dùng prompt này ở công cụ tạo ảnh bạn chọn hoặc chạy /image_to_video_pack <mô tả ảnh>.")
     return "\n".join(lines)
 
 def fallback_video_from_image_pack(topic: str) -> str:
@@ -34091,7 +34154,7 @@ def fallback_video_from_image_pack(topic: str) -> str:
         f"Trước khi chọn {topic}, hãy kiểm tra 3 điểm này để tránh mua theo cảm xúc.\n\n"
         "Hashtag:\n#toanaas #reviewthucte #meomuahang #tiktokshop #shorts\n\n"
         "CTA:\nLưu lại để so sánh sau. Nếu cần, xem link/thông tin chi tiết trong mô tả.\n\n"
-        "Trạng thái: provider tạo video thật chưa bật. Đây là gói prompt/video plan để bạn tự dùng hoặc gửi admin xử lý."
+        "Trạng thái: công cụ tạo video thật chưa mở public. Đây là gói prompt/video plan để bạn tự dùng hoặc gửi admin xử lý."
     )
 
 def fallback_media_factory_pack(topic: str) -> str:
@@ -34099,7 +34162,7 @@ def fallback_media_factory_pack(topic: str) -> str:
     return (
         f"🎬 MEDIA FACTORY PACK — TOAN AAS\n\nChủ đề: {topic}\n"
         "Phạm vi: Content/video pack để bạn tự đăng. Chưa mở tự đăng bài cho khách.\n"
-        "Trạng thái: Trend AI content-only; Trend Live admin/internal nếu có provider; video thật admin-only/not public; customer publish OFF.\n\n"
+        "Trạng thái: Trend AI content-only; Trend Live admin/internal; video thật admin-only/not public; customer publish OFF.\n\n"
         "=== 1. TREND & Ý TƯỞNG ===\n"
         "Vì Trend Live realtime chưa mở cho khách, pack dùng Trend AI content-only và checklist nghiên cứu thủ công.\n\n"
         f"{fallback_trend_ai_pack(topic)}\n\n"
@@ -34123,8 +34186,8 @@ def fallback_media_factory_pack(topic: str) -> str:
         "• Kiểm tra lại claim, nguồn ảnh/voice, thương hiệu, caption và CTA trước khi đăng.\n"
         "• Approval workflow tự động cho khách là roadmap; hiện khách tự duyệt bản nháp trước khi dùng.\n\n"
         "=== 7. TẠO VIDEO THẬT ===\n"
-        "• Real video generation: admin-only/not public nếu provider đã cấu hình; khách hiện dùng prompt/video plan.\n"
-        "• Chưa gọi provider video AI thật trong bot khách.\n\n"
+        "• Real video generation: admin-only/not public; khách hiện dùng prompt/video plan.\n"
+        "• Chưa gọi công cụ video AI thật trong bot khách.\n\n"
         "=== 8. ĐĂNG BÀI ===\n"
         "• Customer publish: OFF.\n"
         "• Admin publish: internal test only, cần approval gate.\n"
@@ -34229,6 +34292,22 @@ async def cmd_trend_research(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await reply_long_text(update, text)
 
 async def cmd_trend_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        lines = [
+            "📈 <b>TOAN AAS Trend Status</b>",
+            "",
+            "• Trend AI: <code>enabled — gợi ý ý tưởng bằng AI/prompt</code>",
+            "• Trend Live: <code>admin/internal test</code>",
+            "• Current safe mode: <code>content-only</code>",
+            "",
+            "<b>Lệnh hiện có:</b>",
+            "• <code>/trend_ai &lt;chủ đề&gt;</code> — gợi ý trend angle",
+            "• <code>/trend_research &lt;chủ đề&gt;</code> — checklist nghiên cứu trend",
+            "• <code>/media_factory &lt;chủ đề&gt;</code> — tạo pack nội dung/video từ chủ đề",
+            "",
+            "Không fake dữ liệu live/latest. Khách hiện tự kiểm tra xu hướng trước khi đăng.",
+        ]
+        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
     providers = provider_status_payload()
     serpapi_configured = bool(providers["search"].get("serpapi"))
     trend_live_stage = providers["media_factory"].get("trend_live_stage") or "DISABLED"
@@ -34295,8 +34374,6 @@ async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if normalize_user_language(lang) != "vi":
         return await update.message.reply_text(menu_text_main_image_i18n(lang), parse_mode="HTML", reply_markup=localized_public_back_keyboard(lang))
     readiness = customer_tool_readiness_payload()
-    image_provider_label = readiness["image_remove_bg"]["label"]
-    ai_label = readiness["ai"]["label"]
     openai_image_label = (
         "admin đã bật/test nội bộ" if (ENABLE_OPENAI_IMAGE and openai_client and is_feature_enabled("image_openai_generation", uid, default=False))
         else "tạm khóa để kiểm soát chi phí"
@@ -34311,14 +34388,13 @@ async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Công cụ tiết kiệm:</b>",
         "• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật",
         "• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo prompt video từ ảnh",
-        f"• <code>/remove_bg</code> — hướng dẫn tách nền; provider hiện: <code>{html.escape(image_provider_label)}</code>",
+        "• <code>/remove_bg</code> — tách nền ảnh nếu công cụ đã mở public",
         "",
-        "<b>Công cụ cao cấp ChatGPT/OpenAI:</b>",
+        "<b>Công cụ cao cấp:</b>",
         f"• <code>/ai_image &lt;mô tả ảnh&gt;</code> — tạo ảnh AI thật: <code>{html.escape(openai_image_label)}</code>",
         f"• <code>/ai_image_edit &lt;yêu cầu sửa ảnh&gt;</code> — sửa ảnh AI thật: <code>{html.escape(openai_edit_label)}</code>",
-        f"• AI provider: <code>{html.escape(ai_label)}</code>",
         "",
-        "Lưu ý: ChatGPT/OpenAI tạo và sửa ảnh là gói cao cấp, chỉ hoạt động khi admin bật provider. "
+        "Lưu ý: tạo và sửa ảnh AI là gói cao cấp, chỉ hoạt động khi admin bật công cụ. "
         "Nếu chưa bật, bot không trừ Xu và sẽ gợi ý dùng /image_prompt trước.",
         "",
         "Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.",
@@ -34337,7 +34413,7 @@ async def cmd_image_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     provider_on = is_feature_enabled("image_generation", uid, default=False)
     output = fallback_image_prompt_pack(topic, advanced=True)
     if not provider_on:
-        output = "ℹ️ Hiện provider tạo ảnh thật chưa bật, bot đang trả prompt pack để bạn dùng với công cụ tạo ảnh.\n\n" + output
+        output = "ℹ️ Hiện công cụ tạo ảnh thật chưa mở public, bot đang trả prompt pack để bạn dùng với công cụ tạo ảnh.\n\n" + output
     create_media_factory_job(uid, media_factory_username(update), "image_pack", topic, image_prompt_pack=output, cost_xu=IMAGE_PACK_COST, note="provider_off_prompt_pack" if not provider_on else "provider_not_integrated")
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
@@ -34375,13 +34451,13 @@ async def cmd_video_from_image(update: Update, context: ContextTypes.DEFAULT_TYP
         detail = ai_failure_detail(result.get("statuses") or {}, result.get("errors") or {})
         save_tool_test_result("video_from_image", "FAIL", detail, uid)
         output = (
-            "⚠️ AI provider đang lỗi/quota nên bot trả Video Prompt Pack an toàn dạng fallback. Bot chưa trừ Xu.\n\n"
+            "⚠️ Công cụ AI đang lỗi/quota nên bot trả Video Prompt Pack an toàn dạng fallback. Bot chưa trừ Xu.\n\n"
             + fallback
         )
         charged_cost = 0
         note = "ai_provider_fail_fallback_no_charge"
     if not provider_on:
-        output += "\n\nTrạng thái: provider tạo video thật chưa bật. Đây là Video Prompt Pack để bạn tự dùng."
+        output += "\n\nTrạng thái: công cụ tạo video thật chưa mở public. Đây là Video Prompt Pack để bạn tự dùng hoặc gửi admin xử lý."
     create_media_factory_job(uid, media_factory_username(update), "video_from_image", topic, video_prompt_pack=output, cost_xu=charged_cost, note=note)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
@@ -34566,12 +34642,12 @@ async def cmd_ai_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⚠️ Cú pháp: /ai_image <mô tả ảnh>")
     if not ENABLE_OPENAI_IMAGE or not is_feature_enabled("image_openai_generation", uid, default=False):
         return await update.message.reply_text(
-            "🎨 Tạo ảnh AI đang admin test/chưa mở public hoặc provider đang hết quota.\n"
+            "🎨 Tạo ảnh AI đang admin test/chưa mở public hoặc công cụ đang quá tải.\n"
             "Bot chưa trừ Xu."
         )
     if not openai_client:
         return await update.message.reply_text(
-            "🎨 Tạo ảnh AI đang admin test/chưa mở public hoặc provider đang hết quota.\n"
+            "🎨 Tạo ảnh AI đang admin test/chưa mở public hoặc công cụ đang quá tải.\n"
             "Bot chưa trừ Xu."
         )
     ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, AI_IMAGE_COST, "spend_ai_image")
@@ -34605,7 +34681,7 @@ async def cmd_ai_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         refund_charged_credit(uid, AI_IMAGE_COST, "ai_image_refund", "", "Hoàn phí tạo ảnh AI do lỗi provider", charged)
         logger.warning(f"OpenAI image generation failed: {e}")
         await update.message.reply_text(
-            "🎨 Tạo ảnh AI đang admin test/chưa mở public hoặc provider đang hết quota.\n"
+            "🎨 Tạo ảnh AI đang admin test/chưa mở public hoặc công cụ đang quá tải.\n"
             "Bot chưa trừ Xu." if not charged else "❌ Tạo ảnh AI lỗi. Bot đã hoàn Xu."
         )
 
@@ -34632,9 +34708,9 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not source_file_id:
         return await update.message.reply_text("⚠️ Hãy reply ảnh hoặc gửi ảnh/file ảnh rồi gõ /ai_image_edit <yêu cầu sửa ảnh> trong vòng 10 phút.")
     if not ENABLE_OPENAI_IMAGE_EDIT or not is_feature_enabled("image_openai_edit", uid, default=False):
-        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc provider chưa cấu hình. Bot chưa trừ Xu.")
+        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc công cụ chưa sẵn sàng. Bot chưa trừ Xu.")
     if not openai_client:
-        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc provider chưa cấu hình. Bot chưa trừ Xu.")
+        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc công cụ chưa sẵn sàng. Bot chưa trừ Xu.")
     ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, AI_IMAGE_EDIT_COST, "spend_ai_image_edit")
     if not ok_credit:
         return
@@ -34673,7 +34749,7 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         refund_charged_credit(uid, AI_IMAGE_EDIT_COST, "ai_image_edit_refund", "", "Hoàn phí sửa ảnh AI do lỗi provider", charged)
         logger.warning(f"OpenAI image edit failed: {e}")
         await update.message.reply_text(
-            "Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc provider chưa cấu hình. Bot chưa trừ Xu."
+            "Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc công cụ chưa sẵn sàng. Bot chưa trừ Xu."
             if not charged else "❌ Sửa ảnh AI lỗi. Bot đã hoàn Xu."
         )
 
@@ -34705,13 +34781,13 @@ async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
         detail = ai_failure_detail(result.get("statuses") or {}, result.get("errors") or {})
         save_tool_test_result("media_factory", "FAIL", detail, uid)
         output = (
-            "⚠️ AI provider đang lỗi/quota nên bot trả Media Factory Pack fallback an toàn. Bot chưa trừ Xu.\n\n"
+            "⚠️ Công cụ AI đang lỗi/quota nên bot trả Media Factory Pack fallback an toàn. Bot chưa trừ Xu.\n\n"
             + fallback
         )
         charged_cost = 0
     if "Trend AI content-only" not in output:
         output = (
-            "Trạng thái: Trend AI content-only; Trend Live admin/internal nếu có provider; "
+            "Trạng thái: Trend AI content-only; Trend Live admin/internal; "
             "video thật admin-only/not public; customer publish OFF.\n\n"
         ) + output
     job_id = create_media_factory_job(uid, media_factory_username(update), "media_factory", topic, trend_title=topic, trend_summary=output[:1200], image_prompt_pack=output, video_prompt_pack=output, caption_pack=output, cost_xu=charged_cost)
@@ -34722,6 +34798,18 @@ async def cmd_video_factory_flow(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(video_factory_flow_text(), parse_mode="HTML")
 
 async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        lines = [
+            "🎬 <b>Trạng thái Video AI TOAN AAS</b>",
+            "",
+            "• Tạo video thật: <code>admin/internal test</code>",
+            "• Customer access: <code>OFF</code>",
+            "• Hiện đang mở cho khách: <code>script/storyboard/image prompt/video prompt pack/caption/hashtag/CTA</code>",
+            "• Customer publish: <code>OFF</code>",
+            "",
+            "TOAN AAS hiện tạo content/video pack để bạn tự dựng hoặc tự đăng. Công cụ tạo video thật chỉ mở sau khi admin test ổn.",
+        ]
+        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
     providers = provider_status_payload()
     real_video_configured = bool(providers["video"].get("kling") or providers["video"].get("runway"))
     real_video_stage = providers["media_factory"].get("real_video_stage") or "DISABLED"
@@ -34758,11 +34846,11 @@ async def prepare_remove_bg_from_cached_image(update: Update, context: ContextTy
     if not info or not doc_is_image(info):
         return False
     if not REMOVEBG_API_KEY and not CUTOUT_API_KEY:
-        await update.message.reply_text("Tách nền đang admin test/chưa mở public hoặc provider đang lỗi. Bot chưa trừ Xu.")
+        await update.message.reply_text("❌ Tách nền đang admin test/chưa mở public hoặc công cụ đang lỗi.\nBot chưa trừ Xu. Vui lòng thử lại sau.")
         return True
     image_test = preferred_tool_test_result("image_remove_bg", "image")
     if not is_admin_user(uid) and str(image_test.get("status") or "").upper() != "PASS":
-        await update.message.reply_text("Tách nền đang admin test/chưa mở public hoặc provider đang lỗi. Bot chưa trừ Xu.")
+        await update.message.reply_text("❌ Tách nền đang admin test/chưa mở public hoặc công cụ đang lỗi.\nBot chưa trừ Xu. Vui lòng thử lại sau.")
         return True
     file_size = int(info.get("file_size") or 0)
     raw_cost = calculate_dynamic_cost("image", file_size)
@@ -34798,9 +34886,9 @@ async def prepare_remove_bg_from_cached_image(update: Update, context: ContextTy
     else:
         img_desc = (
             f"🖼️ <b>Chọn gói tách nền:</b>\n\n"
-            f"🖼️ <b>Gói Cao Cấp</b> — RemoveBG HD, trừ <b>{final_cost} Xu</b>\n"
-            f"✂️ <b>Gói Tiết Kiệm</b> — Cutout.pro, trừ <b>{image_free_cost} Xu</b>\n\n"
-            f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển Cutout.pro và hoàn phần chênh lệch.</i>"
+            f"🖼️ <b>Gói Cao Cấp</b> — Chất lượng cao, trừ <b>{final_cost} Xu</b>\n"
+            f"✂️ <b>Gói Tiết Kiệm</b> — Xử lý nhanh, trừ <b>{image_free_cost} Xu</b>\n\n"
+            f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển gói dự phòng và hoàn phần chênh lệch.</i>"
         )
     await update.message.reply_text(img_desc, parse_mode="HTML", reply_markup=kb)
     return True
@@ -34814,27 +34902,31 @@ async def cmd_remove_bg_help(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         if await prepare_remove_bg_from_cached_image(update, context, info):
             return
-    providers = provider_status_payload()
-    image_result = preferred_tool_test_result("image_remove_bg", "image")
-    status = (image_result.get("status") or "NOT_TESTED").upper()
-    public = "ON" if is_feature_public_ready("remove_bg") and providers["image"].get("ready") else "OFF"
+    admin = is_admin_user(update.effective_user.id)
     lines = [
         "🖼 <b>Tách nền ảnh — TOAN AAS</b>",
-        "",
-        f"• RemoveBG/Cutout configured: <code>{'yes' if providers['image'].get('ready') else 'no'}</code>",
-        f"• Last smoke test: <code>{html.escape(status)}</code>",
-        f"• Public stage: <code>{html.escape(providers['media_factory'].get('remove_bg_stage') or 'ADMIN_ONLY')}</code>",
-        f"• Public access: <code>{public}</code>",
         "",
         "Cách dùng hiện tại:",
         "1. Gửi ảnh vào bot hoặc reply ảnh.",
         "2. Gõ <code>/remove_bg</code>.",
-        "3. Chọn provider tách nền nếu bot hiện nút.",
-        "4. Nếu provider chưa PASS/public, công cụ ở trạng thái thử nghiệm để tránh trừ Xu sai.",
-        "• Nếu provider lỗi/quota/missing: Tách nền đang admin test/chưa mở public hoặc provider đang lỗi. Bot chưa trừ Xu.",
-        "",
-        "Admin test: reply ảnh rồi chạy <code>/tool_test_image</code> hoặc <code>/tool_test_image_debug</code>.",
+        "3. Chọn gói xử lý nếu bot hiện nút.",
+        "4. Nếu công cụ chưa mở public hoặc đang lỗi, bot chưa trừ Xu.",
+        "• Nếu lỗi/quota: Tách nền đang admin test/chưa mở public hoặc công cụ đang lỗi. Bot chưa trừ Xu.",
     ]
+    if admin:
+        providers = provider_status_payload()
+        image_result = preferred_tool_test_result("image_remove_bg", "image")
+        status = (image_result.get("status") or "NOT_TESTED").upper()
+        public = "ON" if is_feature_public_ready("remove_bg") and providers["image"].get("ready") else "OFF"
+        lines.extend([
+            "",
+            "<b>Admin detail</b>",
+            f"• RemoveBG/Cutout configured: <code>{'yes' if providers['image'].get('ready') else 'no'}</code>",
+            f"• Last smoke test: <code>{html.escape(status)}</code>",
+            f"• Public stage: <code>{html.escape(providers['media_factory'].get('remove_bg_stage') or 'ADMIN_ONLY')}</code>",
+            f"• Public access: <code>{public}</code>",
+            "• Admin test: reply ảnh rồi chạy <code>/tool_test_image</code> hoặc <code>/tool_test_image_debug</code>.",
+        ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_source_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -34901,7 +34993,7 @@ async def cmd_story_motion_prompt(update: Update, context: ContextTypes.DEFAULT_
         "Slow push-in, slight parallax, gentle handheld feel, keep main subject stable and readable.\n\n"
         "Style:\n"
         "Storytelling, realistic/semi-realistic depending on source, clean composition, safe content.\n\n"
-        "Trạng thái: prompt-only. Chưa gọi provider tạo video thật."
+        "Trạng thái: prompt-only. Chưa gọi công cụ tạo video thật."
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -35050,13 +35142,13 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/image_to_video_pack</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>",
         f"• <code>/ai_image</code>: <b>{AI_IMAGE_COST} Xu</b>",
         f"• <code>/ai_image_edit</code>: <b>{AI_IMAGE_EDIT_COST} Xu</b>",
-        "  ChatGPT/OpenAI ảnh là gói cao cấp. Nếu admin chưa bật provider, bot không trừ Xu và gợi ý prompt pack tiết kiệm hơn.",
+        "  Tạo/sửa ảnh AI là gói cao cấp. Nếu admin chưa bật công cụ, bot không trừ Xu và gợi ý prompt pack tiết kiệm hơn.",
         "",
         "🎞 <b>Media Pack</b>",
         f"• <code>/image_pack</code>: <b>{IMAGE_PACK_COST} Xu</b>",
         f"• <code>/video_from_image</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b> cho prompt pack",
         f"• <code>/media_factory</code>: <b>{MEDIA_FACTORY_PACK_COST} Xu</b>",
-        "  Nếu provider tạo ảnh/video thật chưa bật, bot trả prompt pack để bạn dùng với công cụ AI tương ứng.",
+        "  Nếu công cụ tạo ảnh/video thật chưa mở public, bot trả prompt pack để bạn dùng với công cụ AI tương ứng.",
         "",
         "📈 <b>Báo cáo/tối ưu thủ công</b>",
         f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>",
@@ -35067,7 +35159,7 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công",
         f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công (<code>/chat_pro</code> hoặc <code>/chat_pro_on</code>)",
         f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công (<code>/chat_deep</code> hoặc <code>/chat_deep_on</code>)",
-        "• AI lỗi/quota/provider fail: không trừ Xu",
+        "• AI lỗi/quota/công cụ quá tải: không trừ Xu",
         f"• Voice/TTS: từ <b>{VOICE_BASE_COST} Xu</b> + theo độ dài",
         f"• Bóc băng audio: từ <b>{AUDIO_MIN_COST} Xu</b>, tính theo MB",
         f"• Tách nền ảnh: từ <b>{IMAGE_REMOVE_BG_BASE_COST}-{IMAGE_REMOVE_BG_PREMIUM_COST} Xu</b>",
@@ -35195,7 +35287,7 @@ def chat_pro_usage_text() -> str:
         f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công\n"
         f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công\n"
         "• Hạng thành viên được giảm Xu khi dùng dịch vụ đủ điều kiện; xem /pricing\n"
-        "AI lỗi/quota/provider fail: không trừ Xu."
+        "AI lỗi/quota/công cụ quá tải: không trừ Xu."
     )
 
 def build_chat_pro_prompt(user_prompt, tier=CHAT_TIER_PRO, model_level="standard"):
@@ -35459,7 +35551,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Normal Chat: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công",
         f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công",
         f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công",
-        "• AI lỗi/quota/provider fail: không trừ Xu",
+        "• AI lỗi/quota/công cụ quá tải: không trừ Xu",
         "",
         member_note,
         "",
@@ -35490,7 +35582,7 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
         text = (
             "✅ <b>Đã bật Chat Pro.</b>\n\n"
             f"• Chi phí: <b>{CHAT_COST_PRO} Xu</b> / lượt AI trả lời thành công.\n"
-            "• Nếu AI lỗi hoặc provider hết quota, không trừ Xu.\n\n"
+            "• Nếu AI lỗi hoặc công cụ quá tải, không trừ Xu.\n\n"
             "Bot sẽ dùng Chat Pro cho đến khi bạn tắt bằng <code>/chat_pro_off</code>."
         )
     elif mode == "deep":
@@ -35498,7 +35590,7 @@ async def set_chat_mode_command(update: Update, mode: str, command: str, note: s
             "✅ <b>Đã bật Chat Deep.</b>\n\n"
             f"⚠️ Chi phí: từ <b>{CHAT_COST_DEEP_BASE} Xu</b> / lượt AI trả lời thành công.\n"
             "Tác vụ dài/sâu có thể tốn nhiều Xu hơn khi hệ thống mở tính theo dữ liệu.\n"
-            "Nếu AI lỗi hoặc provider hết quota, không trừ Xu.\n\n"
+            "Nếu AI lỗi hoặc công cụ quá tải, không trừ Xu.\n\n"
             "Gõ <code>/chat_deep_off</code> để tắt."
         )
     else:
@@ -35578,11 +35670,13 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
         detail=f"tier={charge['tier']}; base={charge['base_cost']}; cost={charge['cost']}; benefit={charge.get('reason') or '-'}",
     )
     save_tool_test_result("ai_chat", "PASS", f"provider={provider}; mode={mode}; base={charge['base_cost']}; cost={cost}; tier={charge['tier']}", uid)
-    caption = f"Provider: {provider} | {chat_charge_line(cost, mode, cost == 0, charge.get('reason') or '')} | Còn lại: {credits_after} Xu"
+    provider_caption = f"Provider: {provider}" if is_admin_user(uid) else "AI: đã xử lý"
+    caption = f"{provider_caption} | {chat_charge_line(cost, mode, cost == 0, charge.get('reason') or '')} | Còn lại: {credits_after} Xu"
     await send_chat_pro_output(context, update.effective_chat.id, uid, output, caption)
 
 async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    providers = provider_status_payload()
+    admin = is_admin_user(update.effective_user.id)
+    providers = provider_status_payload() if admin else {}
     lines = [
         "🤖 <b>AI Models trong TOAN AAS</b>",
         "",
@@ -35592,20 +35686,24 @@ async def cmd_models(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Giá: <b>{CHAT_COST_NORMAL} Xu</b>/lượt trả lời thành công.",
         "",
         "<b>Chat Pro</b>",
-        f"• Gemini Pro style: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
-        f"• OpenAI Pro style: <code>{provider_status_text(providers['ai']['openai'])}</code>",
+        "• Chế độ trả lời nâng cao cho nội dung dài hơn, yêu cầu kỹ hơn.",
         f"• Giá: <b>{CHAT_COST_PRO} Xu</b>/lượt trả lời thành công.",
         "",
         "<b>Chat Deep</b>",
         "• Dùng cho chiến lược, hệ thống, code/debug, nội dung lớn.",
         f"• Giá từ <b>{CHAT_COST_DEEP_BASE} Xu</b>/lượt trả lời thành công.",
-        "• Claude/Grok: planned / pending provider setup.",
-        "• AI lỗi/quota/provider fail: không trừ Xu.",
+        "• AI lỗi/quota/công cụ quá tải: không trừ Xu.",
         "",
         "Kiểm tra giá: <code>/pricing</code>",
         "Dùng Chat Pro: <code>/chat_pro nội dung...</code>",
         "Dùng Chat Deep: <code>/chat_deep nội dung...</code>",
     ]
+    if admin:
+        lines.insert(10, f"• OpenAI Pro style: <code>{provider_status_text(providers['ai']['openai'])}</code>")
+        lines.insert(10,
+            f"• Gemini Pro style: <code>{provider_status_text(providers['ai']['gemini'])}</code>",
+        )
+        lines.insert(-4, "• Claude/Grok: planned / pending provider setup.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -50022,7 +50120,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Bạn có thể dùng:\n"
         "• /image_to_pdf — đổi ảnh sang PDF\n"
         "• /remove_bg — tách nền ảnh\n"
-        "• /ai_image_edit &lt;yêu cầu&gt; — reply ảnh để chỉnh sửa AI nếu provider được bật\n\n"
+        "• /ai_image_edit &lt;yêu cầu&gt; — reply ảnh để chỉnh sửa AI nếu công cụ đã bật\n\n"
         "Ảnh đã được lưu tạm 10 phút để dùng cho lệnh tiếp theo.",
         parse_mode="HTML",
     )
@@ -50129,9 +50227,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             voice_desc = (
                 f"🎙️ <b>Chọn gói đọc giọng nói:</b>\n\n"
-                f"🎙️ <b>Gói Cao Cấp</b> — Fish Audio HD, trừ <b>{fish_cost} Xu</b>\n"
-                f"🔊 <b>Gói Tiết Kiệm</b> — Edge TTS, trừ <b>{voice_free_cost} Xu</b>\n\n"
-                f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển Edge TTS và hoàn phần chênh lệch.</i>"
+                f"🎙️ <b>Gói Cao Cấp</b> — Giọng chất lượng cao, trừ <b>{fish_cost} Xu</b>\n"
+                f"🔊 <b>Gói Tiết Kiệm</b> — Giọng chuẩn, trừ <b>{voice_free_cost} Xu</b>\n\n"
+                f"<i>Nếu gói cao cấp lỗi/quota, hệ thống tự chuyển gói dự phòng và hoàn phần chênh lệch.</i>"
             )
         await update.message.reply_text(voice_desc, parse_mode="HTML", reply_markup=kb)
     elif act == "download":
