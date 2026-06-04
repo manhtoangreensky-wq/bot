@@ -822,7 +822,8 @@ def init_db():
         credits INTEGER DEFAULT 0,
         is_vip INTEGER DEFAULT 0,
         join_date TEXT,
-        total_spent INTEGER DEFAULT 0
+        total_spent INTEGER DEFAULT 0,
+        user_language TEXT DEFAULT ''
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS trial_grants (
         user_id TEXT PRIMARY KEY,
@@ -1573,6 +1574,7 @@ def init_db():
         ("total_paid_vnd", "INTEGER DEFAULT 0"),
         ("vip_tier_override", "TEXT DEFAULT ''"),
         ("referred_by", "TEXT DEFAULT ''"),
+        ("user_language", "TEXT DEFAULT ''"),
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
@@ -2155,6 +2157,71 @@ def record_credit_event(conn, user_id, delta, event_type, ref_id="", note=""):
             xu_delta=int(delta or 0),
             detail=f"{event_type}; ref={ref_id}; {note}",
         )
+
+USER_LANGUAGE_LABELS = {
+    "vi": "Tiếng Việt",
+    "en": "English",
+    "zh": "中文",
+    "ja": "日本語",
+    "ko": "한국어",
+    "th": "ไทย",
+    "ar": "العربية",
+}
+PRIMARY_USER_LANGUAGES = ("vi", "en", "zh")
+OTHER_USER_LANGUAGES = ("ja", "ko", "th", "ar")
+
+def normalize_user_language(lang: str | None) -> str:
+    value = str(lang or "").strip().lower()
+    aliases = {
+        "vn": "vi",
+        "vie": "vi",
+        "vietnamese": "vi",
+        "english": "en",
+        "us": "en",
+        "cn": "zh",
+        "zh-cn": "zh",
+        "chinese": "zh",
+        "jp": "ja",
+        "japanese": "ja",
+        "kr": "ko",
+        "korean": "ko",
+        "thai": "th",
+        "arabic": "ar",
+    }
+    value = aliases.get(value, value)
+    return value if value in USER_LANGUAGE_LABELS else ""
+
+def get_user_language(user_id) -> str:
+    uid = str(user_id)
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT user_language FROM users WHERE user_id=?", (uid,))
+            row = cur.fetchone()
+        except sqlite3.OperationalError:
+            row = None
+        return normalize_user_language(row[0] if row else "")
+    finally:
+        conn.close()
+
+def set_user_language(user_id, lang) -> str:
+    uid = str(user_id)
+    selected = normalize_user_language(lang) or "vi"
+    get_user(uid)
+    conn = db_connect()
+    try:
+        conn.execute("UPDATE users SET user_language=? WHERE user_id=?", (selected, uid))
+        conn.commit()
+    finally:
+        conn.close()
+    return selected
+
+def has_user_language(user_id) -> bool:
+    return bool(get_user_language(user_id))
+
+def user_language_label(lang: str) -> str:
+    return USER_LANGUAGE_LABELS.get(normalize_user_language(lang), USER_LANGUAGE_LABELS["vi"])
 
 def get_user(user_id, username="Unknown"):
     uid = str(user_id)
@@ -25641,6 +25708,126 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         ])
     return InlineKeyboardMarkup(rows)
 
+def language_choice_text() -> str:
+    return (
+        "🌐 <b>Chọn ngôn ngữ / Choose language / 选择语言</b>\n\n"
+        "Vui lòng chọn ngôn ngữ để TOAN AAS hiển thị menu và hướng dẫn phù hợp.\n"
+        "Please choose your language.\n"
+        "请选择你的语言。"
+    )
+
+def language_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang|vi")],
+        [InlineKeyboardButton("🇺🇸 English", callback_data="lang|en")],
+        [InlineKeyboardButton("🇨🇳 中文", callback_data="lang|zh")],
+        [InlineKeyboardButton("🌍 Ngôn ngữ khác / More languages", callback_data="lang_more")],
+    ])
+
+def other_language_choice_text() -> str:
+    return (
+        "🌍 <b>Ngôn ngữ khác / More languages</b>\n\n"
+        "Các ngôn ngữ này đang được chuẩn bị giao diện.\n"
+        "Một số phần có thể dùng English/tiếng Việt tạm thời nếu bản dịch chưa đầy đủ."
+    )
+
+def other_language_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇯🇵 日本語", callback_data="lang|ja"), InlineKeyboardButton("🇰🇷 한국어", callback_data="lang|ko")],
+        [InlineKeyboardButton("🇹🇭 ไทย", callback_data="lang|th"), InlineKeyboardButton("🇸🇦 العربية", callback_data="lang|ar")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="back_lang")],
+    ])
+
+def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        rows = [
+            [InlineKeyboardButton("🎬 内容创作", callback_data="menu|main_video"), InlineKeyboardButton("🤖 AI 助手", callback_data="menu|main_ai")],
+            [InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image")],
+            [InlineKeyboardButton("🎤 语音工具", callback_data="menu|main_audio"), InlineKeyboardButton("🌐 翻译", callback_data="menu|translate")],
+            [InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory"), InlineKeyboardButton("💰 价格", callback_data="menu|hint_pricing")],
+            [InlineKeyboardButton("💳 充值 Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 账户", callback_data="menu|main_profile")],
+            [InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🌐 切换语言", callback_data="back_lang")],
+        ]
+        if is_admin:
+            rows.extend([
+                [InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("⚙️ 系统", callback_data="menu|system")],
+            ])
+        return InlineKeyboardMarkup(rows)
+    if lang == "vi":
+        rows = [
+            [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
+            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image")],
+            [InlineKeyboardButton("🎤 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
+            [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("💰 Bảng giá", callback_data="menu|hint_pricing")],
+            [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
+            [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🌐 Đổi ngôn ngữ", callback_data="back_lang")],
+        ]
+        if is_admin:
+            rows.extend([
+                [InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system")],
+            ])
+        return InlineKeyboardMarkup(rows)
+    rows = [
+        [InlineKeyboardButton("🎬 Content", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Ask AI", callback_data="menu|main_ai")],
+        [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
+        [InlineKeyboardButton("🎤 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🌐 Translate", callback_data="menu|translate")],
+        [InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory"), InlineKeyboardButton("💰 Pricing", callback_data="menu|hint_pricing")],
+        [InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Account", callback_data="menu|main_profile")],
+        [InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🌐 Change language", callback_data="back_lang")],
+    ]
+    if is_admin:
+        rows.extend([
+            [InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("⚙️ System", callback_data="menu|system")],
+        ])
+    return InlineKeyboardMarkup(rows)
+
+def localized_start_menu_text(user_id, lang: str) -> str:
+    lang = normalize_user_language(lang) or "vi"
+    display_lang = user_language_label(lang)
+    credits, _total_spent, _is_vip = get_user(user_id)
+    credits_display = "Vô hạn" if is_admin_user(user_id) and lang == "vi" else ("Unlimited" if is_admin_user(user_id) else str(credits))
+    tier = get_role_badge(user_id)
+    if lang == "zh":
+        return (
+            "👑 <b>TOAN AAS</b>\n"
+            "<b>AI AUTOMATION SYSTEM</b>\n\n"
+            "一个 Telegram Bot，集合日常 AI 工具：\n"
+            "内容、视频、图片、语音、文档、翻译和记忆。\n\n"
+            f"🎁 余额: <b>{html.escape(str(credits_display))} Xu</b>\n"
+            f"🪪 等级: <b>{html.escape(tier)}</b>\n"
+            f"🌐 语言: <b>{html.escape(display_lang)}</b>\n\n"
+            "请选择功能："
+        )
+    if lang == "vi":
+        return (
+            "👑 <b>TOAN AAS</b>\n"
+            "<b>AI AUTOMATION SYSTEM</b>\n\n"
+            "Tất cả công cụ AI hằng ngày trong một bot:\n"
+            "tạo nội dung, video, ảnh, voice, tài liệu, dịch thuật và ghi nhớ.\n\n"
+            f"🎁 Số dư: <b>{html.escape(str(credits_display))} Xu</b>\n"
+            f"🪪 Hạng: <b>{html.escape(tier)}</b>\n"
+            f"🌐 Ngôn ngữ: <b>{html.escape(display_lang)}</b>\n\n"
+            "Bạn muốn làm gì hôm nay?"
+        )
+    fallback_note = ""
+    if lang in OTHER_USER_LANGUAGES:
+        fallback_note = f"\n\nSelected language: {html.escape(display_lang)}. Interface fallback: English while this language is being prepared."
+    return (
+        "👑 <b>TOAN AAS</b>\n"
+        "<b>AI AUTOMATION SYSTEM</b>\n\n"
+        "All daily AI tools in one Telegram bot:\n"
+        "content, video, images, voice, documents, translation and memory.\n\n"
+        f"🎁 Balance: <b>{html.escape(str(credits_display))} Xu</b>\n"
+        f"🪪 Tier: <b>{html.escape(tier)}</b>\n"
+        f"🌐 Language: <b>{html.escape(display_lang)}</b>"
+        f"{fallback_note}\n\n"
+        "What would you like to do today?"
+    )
+
 def public_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")]])
 
@@ -26383,15 +26570,32 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif ref_result.get("reason") == "self_ref":
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
     user_is_admin = is_admin_user(uid)
+    if not has_user_language(uid):
+        await update.message.reply_text(
+            language_choice_text(),
+            parse_mode="HTML",
+            reply_markup=language_choice_keyboard(),
+        )
+        return
+    lang = get_user_language(uid) or "vi"
     await update.message.reply_text(
-        build_start_message_text(uid, user_existed_before=user_existed_before) + mode_start_notice(uid),
+        localized_start_menu_text(uid, lang) + mode_start_notice(uid),
         parse_mode="HTML",
-        reply_markup=main_menu_keyboard(user_is_admin),
+        reply_markup=localized_main_menu_keyboard(user_is_admin, lang),
     )
     await maybe_auto_grant_birthday_gift(update, context)
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_start(update, context)
+
+async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    get_user(uid, update.effective_user.first_name)
+    await update.message.reply_text(
+        language_choice_text(),
+        parse_mode="HTML",
+        reply_markup=language_choice_keyboard(),
+    )
 
 async def cmd_quick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -27155,11 +27359,52 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode="HTML",
             reply_markup=translate_language_keyboard(False),
         )
-    if action == "main_profile":
+    if action == "main":
+        lang = get_user_language(query.from_user.id) or "vi"
+        text, keyboard = localized_start_menu_text(query.from_user.id, lang), localized_main_menu_keyboard(user_is_admin, lang)
+    elif action == "main_profile":
         text, keyboard = menu_text_main_profile(query.from_user.id), public_back_keyboard()
     else:
         text, keyboard = menu_content(action, user_is_admin)
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = (query.data or "").strip()
+    uid = query.from_user.id
+    if data == "lang_more":
+        return await query.edit_message_text(
+            other_language_choice_text(),
+            parse_mode="HTML",
+            reply_markup=other_language_choice_keyboard(),
+        )
+    if data == "back_lang":
+        return await query.edit_message_text(
+            language_choice_text(),
+            parse_mode="HTML",
+            reply_markup=language_choice_keyboard(),
+        )
+    if data.startswith("lang|"):
+        lang = normalize_user_language(data.split("|", 1)[1])
+        if not lang:
+            return await query.answer("Language is not supported.", show_alert=True)
+        selected = set_user_language(uid, lang)
+        username = query.from_user.username or query.from_user.first_name or ""
+        record_usage_event(
+            uid,
+            username=username,
+            event_type="language_changed",
+            tool_name="core",
+            command="/language",
+            status=selected,
+            detail=f"user_language={selected}",
+        )
+        return await query.edit_message_text(
+            localized_start_menu_text(uid, selected),
+            parse_mode="HTML",
+            reply_markup=localized_main_menu_keyboard(is_admin_user(uid), selected),
+        )
 
 async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -48477,6 +48722,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("support",     cmd_support))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
+    tg_app.add_handler(CommandHandler("language",    cmd_language))
+    tg_app.add_handler(CommandHandler("lang",        cmd_language))
     tg_app.add_handler(CommandHandler("quick",       cmd_quick))
     tg_app.add_handler(CommandHandler("quickstart",  cmd_quick))
     tg_app.add_handler(CommandHandler("truycapnhanh", cmd_quick))
@@ -48920,6 +49167,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
     tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.Document.MP3 | filters.Document.MP4 | filters.Document.WAV, handle_media_cache_only))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
