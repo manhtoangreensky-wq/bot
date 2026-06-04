@@ -25997,42 +25997,83 @@ def localized_start_menu_text(user_id, lang: str) -> str:
 def public_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")]])
 
-def main_video_keyboard() -> InlineKeyboardMarkup:
+def localized_public_back_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    label = "⬅️ Về menu chính" if normalize_user_language(lang) == "vi" else "⬅️ Main menu"
+    return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data="menu|main")]])
+
+def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎬 Create content", callback_data="menu|hint_film")],
+            [InlineKeyboardButton("⚡ Quick access", callback_data="menu|main_quick")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 Tạo video ngay", callback_data="menu|hint_film")],
         [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def main_ai_keyboard() -> InlineKeyboardMarkup:
+def main_ai_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✍️ Better prompts", callback_data="menu|hint_ai_prompt")],
+            [InlineKeyboardButton("👤 Account", callback_data="menu|main_profile")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ Cách hỏi AI hay", callback_data="menu|hint_ai_prompt")],
         [InlineKeyboardButton("👤 Xem tài khoản", callback_data="menu|main_profile")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def main_memory_keyboard() -> InlineKeyboardMarkup:
+def main_memory_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Save note", callback_data="menu|hint_note"), InlineKeyboardButton("🔎 Search notes", callback_data="menu|hint_search_note")],
+            [InlineKeyboardButton("⏰ Reminders", callback_data="menu|hint_remind")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 Lưu ghi chú", callback_data="menu|hint_note"), InlineKeyboardButton("🔎 Tìm ghi chú", callback_data="menu|hint_search_note")],
         [InlineKeyboardButton("⏰ Nhắc việc", callback_data="menu|hint_remind")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def main_docs_keyboard() -> InlineKeyboardMarkup:
+def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📄 Document tools", callback_data="menu|hint_doc_tools")],
+            [InlineKeyboardButton("💰 Pricing", callback_data="menu|hint_pricing")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📄 Mở công cụ tài liệu", callback_data="menu|hint_doc_tools")],
         [InlineKeyboardButton("💰 Xem giá", callback_data="menu|hint_pricing")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def main_image_keyboard() -> InlineKeyboardMarkup:
+def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Image tools", callback_data="menu|hint_image_tools")],
+            [InlineKeyboardButton("🎬 Image-to-video prompt", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🖼 Mở công cụ ảnh", callback_data="menu|hint_image_tools")],
         [InlineKeyboardButton("🎬 Ảnh sang video prompt", callback_data="menu|hint_image_to_video_pack")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def main_audio_keyboard() -> InlineKeyboardMarkup:
+def main_audio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎤 Media tools", callback_data="menu|hint_media_factory")],
+            [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate")],
+            [InlineKeyboardButton("⚡ Quick access", callback_data="menu|main_quick")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎤 Mở công cụ âm thanh", callback_data="menu|hint_media_factory")],
         [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
@@ -26040,25 +26081,41 @@ def main_audio_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def translate_language_keyboard(other: bool = False) -> InlineKeyboardMarkup:
+def translate_language_keyboard(other: bool = False, lang: str = "vi") -> InlineKeyboardMarkup:
+    english_ui = normalize_user_language(lang) != "vi"
     if other:
+        back_label = "⬅️ Main languages" if english_ui else "⬅️ 3 ngôn ngữ chính"
+        off_label = "🌐 Disable auto-translate" if english_ui else "🌐 Tắt dịch tự động"
+        main_label = "🏠 Main menu" if english_ui else "🏠 Menu chính"
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🇯🇵 日本語", callback_data="menu|translate_set_ja"), InlineKeyboardButton("🇰🇷 한국어", callback_data="menu|translate_set_ko")],
             [InlineKeyboardButton("🇹🇭 ไทย", callback_data="menu|translate_set_th"), InlineKeyboardButton("🇸🇦 العربية", callback_data="menu|translate_set_ar")],
-            [InlineKeyboardButton("⬅️ 3 ngôn ngữ chính", callback_data="menu|translate")],
-            [InlineKeyboardButton("🌐 Tắt dịch tự động", callback_data="menu|translate_off")],
-            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            [InlineKeyboardButton(back_label, callback_data="menu|translate")],
+            [InlineKeyboardButton(off_label, callback_data="menu|translate_off")],
+            [InlineKeyboardButton(main_label, callback_data="menu|main")],
         ])
+    more_label = "🌍 More languages" if english_ui else "🌍 Ngôn ngữ khác / More languages"
+    off_label = "🌐 Disable auto-translate" if english_ui else "🌐 Tắt dịch tự động"
+    back_audio = "⬅️ Voice" if english_ui else "⬅️ Về âm thanh"
+    main_label = "🏠 Main menu" if english_ui else "🏠 Menu chính"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="menu|translate_set_vi")],
         [InlineKeyboardButton("🇺🇸 English", callback_data="menu|translate_set_en")],
         [InlineKeyboardButton("🇨🇳 中文", callback_data="menu|translate_set_zh")],
-        [InlineKeyboardButton("🌍 Ngôn ngữ khác / More languages", callback_data="menu|translate_more")],
-        [InlineKeyboardButton("🌐 Tắt dịch tự động", callback_data="menu|translate_off")],
-        [InlineKeyboardButton("⬅️ Về âm thanh", callback_data="menu|main_audio"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(more_label, callback_data="menu|translate_more")],
+        [InlineKeyboardButton(off_label, callback_data="menu|translate_off")],
+        [InlineKeyboardButton(back_audio, callback_data="menu|main_audio"), InlineKeyboardButton(main_label, callback_data="menu|main")],
     ])
 
-def main_quick_keyboard() -> InlineKeyboardMarkup:
+def main_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎬 Content", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory")],
+            [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
+            [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("👤 Account", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
         [InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
@@ -26067,14 +26124,28 @@ def main_quick_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def main_topup_keyboard() -> InlineKeyboardMarkup:
+def main_topup_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Use /naptien", callback_data="menu|hint_naptien")],
+            [InlineKeyboardButton("💰 Pricing", callback_data="menu|hint_pricing")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien")],
         [InlineKeyboardButton("💰 Xem giá", callback_data="menu|hint_pricing")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def main_guide_keyboard() -> InlineKeyboardMarkup:
+def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📘 Full guide", callback_data="menu|guide")],
+            [InlineKeyboardButton("📜 Terms", callback_data="menu|legal")],
+            [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("💰 Pricing", callback_data="menu|hint_pricing")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📘 Hướng dẫn đầy đủ", callback_data="menu|guide")],
         [InlineKeyboardButton("📜 Điều khoản", callback_data="menu|legal")],
@@ -26102,6 +26173,13 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien"), InlineKeyboardButton("👤 Cú pháp /profile", callback_data="menu|hint_profile")])
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+def menu_nav_keyboard_i18n(section: str = "main", is_admin: bool = False, lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) == "vi":
+        return menu_nav_keyboard(section, is_admin)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Back", callback_data="menu|back"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")]
+    ])
 
 PUBLIC_COMMAND_FUNCTIONS = {
     "film": "cmd_film",
@@ -26630,6 +26708,215 @@ def menu_hint_text(action: str) -> tuple[str, str]:
     }
     return hints.get(action, ("main", "Chọn nhóm chức năng bên dưới."))
 
+def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
+    if normalize_user_language(lang) == "vi":
+        return menu_hint_text(action)
+    hints = {
+        "hint_film": ("main_video", "🎬 <b>Create content</b>\n\nCopy:\n<code>/film your topic</code>\n\nExample:\n<code>/film product review for TikTok, friendly tone, clear CTA</code>"),
+        "hint_ai_prompt": ("main_ai", "✍️ <b>Better AI prompts</b>\n\nTell the bot your goal, audience, platform, tone and desired output."),
+        "hint_note": ("main_memory", "📝 <b>Save a note</b>\n\nCopy:\n<code>/note what you want to save</code>"),
+        "hint_search_note": ("main_memory", "🔎 <b>Search notes</b>\n\nCopy:\n<code>/search_note keyword</code>"),
+        "hint_remind": ("main_memory", "⏰ <b>Create a reminder</b>\n\nCopy:\n<code>/remind 30m reminder text</code>"),
+        "hint_doc_tools": ("main_docs", "📄 <b>Document tools</b>\n\nCopy:\n<code>/doc_tools</code>"),
+        "hint_pricing": ("main_topup", "💰 <b>Pricing</b>\n\nCopy:\n<code>/pricing</code>"),
+        "hint_image_tools": ("main_image", "🖼 <b>Image tools</b>\n\nCopy:\n<code>/image_tools</code>"),
+        "hint_image_to_video_pack": ("main_image", "🎬 <b>Image-to-video prompt pack</b>\n\nCopy:\n<code>/image_to_video_pack topic or image description</code>"),
+        "hint_media_factory": ("main_audio", "🎤 <b>Media tools</b>\n\nCopy:\n<code>/media_factory</code>\n\nVoice, transcription and media/content packs depending on enabled providers."),
+        "hint_naptien": ("billing", "💳 <b>Top up Xu</b>\n\nCopy:\n<code>/naptien</code>"),
+        "hint_profile": ("billing", "👤 <b>Account</b>\n\nCopy:\n<code>/profile</code>"),
+        "hint_terms": ("support", "📜 <b>Terms</b>\n\nCopy:\n<code>/terms</code>\n\nFull policy is currently available in Vietnamese."),
+    }
+    return hints.get(action, ("main", "Choose a function group below."))
+
+def menu_text_main_video_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_video()
+    return (
+        "🎬 <b>CONTENT / VIDEO PACK</b>\n\n"
+        "Create video scripts, scene breakdowns, captions, hashtags and CTA for Facebook, TikTok and YouTube.\n\n"
+        "TOAN AAS currently creates content packs for you to self-post. Public auto-publish is disabled.\n\n"
+        "<b>Quick commands:</b>\n"
+        "• <code>/film &lt;topic&gt;</code> — create a basic video script/content pack\n"
+        "• <code>/video_factory_flow</code> — view the video content workflow\n"
+        "• <code>/media_factory</code> — open Video &amp; Media tools"
+    )
+
+def menu_text_main_ai_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_ai()
+    return (
+        "🤖 <b>ASK AI / WRITING</b>\n\n"
+        "Ask AI to write, edit, brainstorm, code, plan or analyze content.\n\n"
+        "You can send a normal message directly to the bot when auto-translate is OFF.\n\n"
+        "<b>Examples:</b>\n"
+        "• Write a sales caption for this product\n"
+        "• Suggest 10 TikTok video ideas\n"
+        "• Rewrite this post in a professional tone"
+    )
+
+def menu_text_main_memory_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_memory()
+    return (
+        "🧠 <b>MEMORY / REMINDERS</b>\n\n"
+        "Save notes, ideas, customer details and reminders.\n\n"
+        "<b>Quick commands:</b>\n"
+        "• <code>/memory</code> — open memory\n"
+        "• <code>/note &lt;text&gt;</code> — save a note\n"
+        "• <code>/notes</code> — list notes\n"
+        "• <code>/search_note &lt;keyword&gt;</code> — search notes\n"
+        "• <code>/remind 30m &lt;text&gt;</code> — create a reminder\n"
+        "• <code>/reminders</code> — list reminders"
+    )
+
+def menu_text_main_docs_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_docs()
+    return (
+        "📄 <b>DOCUMENTS / PDF / WORD</b>\n\n"
+        "Process office files quickly: PDF to Word, image to PDF, PDF to images, compress or split PDF.\n\n"
+        "<b>Quick commands:</b>\n"
+        "• <code>/doc_tools</code> — open document tools\n"
+        "• Send or reply to an image, then use <code>/image_to_pdf</code>\n"
+        "• Send or reply to a PDF, then use <code>/pdf_to_word</code>\n"
+        "• Send or reply to a PDF, then use <code>/pdf_to_images</code>, <code>/compress_pdf</code> or <code>/split_pdf 1</code>\n\n"
+        "Document tools use local engines. They do not create PayOS orders and do not use image background-removal providers."
+    )
+
+def menu_text_main_image_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_image()
+    return (
+        "🖼 <b>IMAGE TOOLS</b>\n\n"
+        "Create image prompts, prepare images for video, and use image tools when providers are enabled.\n\n"
+        "<b>Quick commands:</b>\n"
+        "• <code>/image_tools</code> — open image tools\n"
+        "• <code>/image_prompt</code> — create image prompts\n"
+        "• <code>/image_to_video_pack</code> — create image-to-video prompts\n\n"
+        "Provider-based image tools stay admin-tested until they are ready."
+    )
+
+def menu_text_main_audio_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_audio()
+    return (
+        "🎤 <b>VOICE / MEDIA</b>\n\n"
+        "Transcribe audio/video or create voice/TTS for content.\n\n"
+        "<b>Quick commands:</b>\n"
+        "• <code>/media_factory</code> — open media tools\n"
+        "• <code>/voiceover &lt;text&gt;</code> — create voice-over when enabled\n"
+        "• Send voice/audio/video to transcribe if STT is enabled.\n\n"
+        "🌐 <b>Translate</b>\n"
+        "Use <code>/translate en text</code> for one-time translation. Auto-translate is OFF by default and only turns on with <code>/translate_mode_on</code> or <code>/translate_mode</code>."
+    )
+
+def menu_text_translate_i18n(other: bool, lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_translate(other)
+    if other:
+        return (
+            "🌍 <b>MORE LANGUAGES</b>\n\n"
+            "Choose a target language for auto-translate mode.\n\n"
+            "Auto-translate only changes normal text routing after you explicitly enable it."
+        )
+    return (
+        "🌐 <b>TOAN AAS TRANSLATE</b>\n\n"
+        "Use one-time translation with:\n"
+        "<code>/translate en your text</code>\n\n"
+        "Auto-translate is OFF by default. Choose a language below only if you want normal text messages to be translated instead of sent to AI chat.\n\n"
+        "Disable anytime with <code>/translate_mode_off</code>."
+    )
+
+def menu_text_main_quick_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_quick()
+    return (
+        "⚡ <b>QUICK ACCESS</b>\n\n"
+        "Common commands:\n\n"
+        "• <code>/film &lt;topic&gt;</code> — create a video/content pack\n"
+        "• <code>/memory</code> — open memory\n"
+        "• <code>/note &lt;text&gt;</code> — save a note\n"
+        "• <code>/remind 30m &lt;text&gt;</code> — create a reminder\n"
+        "• <code>/doc_tools</code> — document tools\n"
+        "• <code>/image_tools</code> — image tools\n"
+        "• <code>/translate en text</code> — one-time translation\n"
+        "• <code>/naptien</code> — top up Xu\n"
+        "• <code>/pricing</code> — pricing\n"
+        "• <code>/profile</code> — account"
+    )
+
+def menu_text_main_topup_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_topup()
+    return (
+        "💳 <b>TOP UP XU</b>\n\n"
+        "Use <code>/naptien</code> to open the top-up flow and select a package.\n"
+        "The bot uses dynamic PayOS QR when available, or manual bank transfer fallback when needed.\n\n"
+        "Never send passwords, OTPs, API keys or card information."
+    )
+
+def menu_text_main_profile_i18n(user_id, lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_profile(user_id)
+    if not str(user_id).isdigit():
+        return "👤 <b>ACCOUNT</b>\n\nUse <code>/profile</code> to view balance, tier and account information."
+    credits, _total_spent, _is_vip = get_user(user_id)
+    balance = "Unlimited" if is_admin_user(user_id) else f"{int(credits)} Xu"
+    return (
+        "👤 <b>ACCOUNT</b>\n\n"
+        f"• ID: <code>{html.escape(str(user_id))}</code>\n"
+        f"• Tier: <b>{html.escape(get_role_badge(user_id))}</b>\n"
+        f"• Balance: <b>{html.escape(balance)}</b>\n\n"
+        "Use <code>/profile</code> for referral, birthday and member details."
+    )
+
+def menu_text_main_guide_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return menu_text_main_guide()
+    return (
+        "📚 <b>GUIDE</b>\n\n"
+        "Useful commands:\n\n"
+        "• <code>/help</code> — bot guide\n"
+        "• <code>/pricing</code> — pricing\n"
+        "• <code>/legal</code> — terms and policies\n"
+        "• <code>/vip_policy</code> — member benefits\n"
+        "• <code>/hub</code> — TOAN AAS Hub\n\n"
+        "Full legal policies are currently available in Vietnamese."
+    )
+
+def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None) -> tuple[str, InlineKeyboardMarkup]:
+    lang = normalize_user_language(lang) or "vi"
+    if action in {"main", "back"}:
+        return localized_start_menu_text(user_id or "__customer__", lang), localized_main_menu_keyboard(is_admin, lang)
+    if action == "main_video":
+        return menu_text_main_video_i18n(lang), main_video_keyboard(lang)
+    if action == "main_ai":
+        return menu_text_main_ai_i18n(lang), main_ai_keyboard(lang)
+    if action == "main_memory":
+        return menu_text_main_memory_i18n(lang), main_memory_keyboard(lang)
+    if action == "main_docs":
+        return menu_text_main_docs_i18n(lang), main_docs_keyboard(lang)
+    if action == "main_image":
+        return menu_text_main_image_i18n(lang), main_image_keyboard(lang)
+    if action == "main_audio":
+        return menu_text_main_audio_i18n(lang), main_audio_keyboard(lang)
+    if action == "translate":
+        return menu_text_translate_i18n(False, lang), translate_language_keyboard(False, lang)
+    if action == "translate_more":
+        return menu_text_translate_i18n(True, lang), translate_language_keyboard(True, lang)
+    if action == "main_quick":
+        return menu_text_main_quick_i18n(lang), main_quick_keyboard(lang)
+    if action == "main_topup":
+        return menu_text_main_topup_i18n(lang), main_topup_keyboard(lang)
+    if action == "main_profile":
+        return menu_text_main_profile_i18n(user_id or "__customer__", lang), localized_public_back_keyboard(lang)
+    if action == "main_guide":
+        return menu_text_main_guide_i18n(lang), main_guide_keyboard(lang)
+    if action.startswith("hint_"):
+        section, hint = menu_hint_text_i18n(action, lang)
+        return hint, menu_nav_keyboard_i18n(section, is_admin, lang)
+    return menu_content(action, is_admin)
+
 def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup]:
     if action in {"main", "back"}:
         return menu_text_main(is_admin), main_menu_keyboard(is_admin)
@@ -26764,10 +27051,12 @@ async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_quick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
     await update.message.reply_text(
-        menu_text_main_quick(),
+        menu_text_main_quick_i18n(lang),
         parse_mode="HTML",
-        reply_markup=main_quick_keyboard(),
+        reply_markup=main_quick_keyboard(lang),
     )
 
 def help_text_for_user(user_id) -> str:
@@ -26841,12 +27130,50 @@ def help_text_for_user(user_id) -> str:
         )
     return text
 
+def help_text_for_user_i18n(user_id) -> str:
+    lang = get_user_language(user_id) or "vi"
+    if normalize_user_language(lang) == "vi":
+        return help_text_for_user(user_id)
+    text = (
+        "📘 <b>TOAN AAS Guide</b>\n\n"
+        "New accounts receive <b>200 trial Xu</b> once per Telegram ID.\n\n"
+        "<b>Account and Xu</b>\n"
+        "• <code>/profile</code> — balance, tier and referral\n"
+        "• <code>/pricing</code> — pricing\n"
+        "• <code>/naptien</code> — top up Xu\n"
+        "• <code>/trial_status</code> — trial status\n\n"
+        "<b>AI tools</b>\n"
+        "• Send normal text to ask AI when auto-translate is OFF.\n"
+        "• <code>/film &lt;topic&gt;</code> — create a script/prompt/caption content pack\n"
+        "• <code>/doc_tools</code> — PDF/Word/image document tools\n"
+        "• <code>/image_tools</code> — image tools and prompt packs\n"
+        "• <code>/media_factory</code> — video/media content workflow\n"
+        "• <code>/memory</code> — memory and reminders\n"
+        "• <code>/translate en text</code> — one-time translation\n\n"
+        "<b>Auto-translate</b>\n"
+        "Auto-translate is OFF by default. Turn it on only with <code>/translate_mode_on &lt;lang&gt;</code> or <code>/translate_mode</code>. "
+        "Turn it off with <code>/translate_mode_off</code>.\n\n"
+        "<b>Support</b>\n"
+        "• <code>/hub</code> — TOAN AAS Hub\n"
+        "• <code>/legal</code> — terms and public policy. Full legal text is currently available in Vietnamese.\n\n"
+        f"{CURRENT_PRODUCT_SCOPE_TEXT}"
+    )
+    if is_admin_user(user_id):
+        text += (
+            "\n\n<b>Admin</b>\n"
+            "• <code>/dashboard</code>, <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code>\n"
+            "• <code>/providers</code>, <code>/tool_audit</code>, <code>/sales_ready</code>\n"
+            "• Internal publish/affiliate/operator tools remain admin-only."
+        )
+    return text
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
     await update.message.reply_text(
-        help_text_for_user(uid),
+        help_text_for_user_i18n(uid),
         parse_mode="HTML",
-        reply_markup=main_menu_keyboard(is_admin_user(uid)),
+        reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang),
     )
 
 async def cmd_huongdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -27279,9 +27606,38 @@ def community_text() -> str:
         "TOAN AAS không bao giờ yêu cầu mật khẩu, OTP, API key, token hoặc thông tin thẻ thanh toán trong nhóm."
     )
 
+def community_text_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return community_text()
+    return (
+        "🌐 <b>TOAN AAS HUB</b>\n\n"
+        "Community for TOAN AAS guides, updates, usage tips and user support.\n\n"
+        "You can use it to:\n"
+        "• View official announcements\n"
+        "• Get bot usage guides\n"
+        "• Learn AI content creation tips\n"
+        "• Follow new feature updates\n"
+        "• Receive maintenance alerts if needed\n"
+        "• Share TOAN AAS usage experience\n\n"
+        "👉 <b>Join here:</b>\n"
+        f"<a href=\"{html.escape(TOAN_AAS_COMMUNITY_URL)}\">{html.escape(TOAN_AAS_COMMUNITY_URL)}</a>\n\n"
+        "<b>Public documents:</b>\n"
+        "• <code>/legal</code> — terms\n"
+        "• <code>/privacy</code> — privacy\n"
+        "• <code>/refund_policy</code> — top-up/support policy\n"
+        "• <code>/pricing</code> — pricing\n"
+        "• <code>/help</code> — guide\n\n"
+        "<b>Internal documents:</b>\n"
+        "Risk plans, NDA, internal B2B files, reporting workbooks, Codex prompts and detailed IP plans are admin-only through <code>/admin_docs</code>.\n\n"
+        "<b>Safety note:</b>\n"
+        "TOAN AAS never asks for passwords, OTPs, API keys, tokens or payment card information in the community group."
+    )
+
 async def cmd_hub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)]])
-    await update.message.reply_text(community_text(), parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
+    await update.message.reply_text(community_text_i18n(lang), parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
 
 def ip_notice_text() -> str:
     return (
@@ -27482,11 +27838,20 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
+async def safe_edit_query_message(query, text: str, reply_markup=None):
+    try:
+        return await query.edit_message_text(text, parse_mode="HTML", reply_markup=reply_markup)
+    except Exception as e:
+        if "Message is not modified" in str(e):
+            return None
+        raise
+
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     user_is_admin = is_admin_user(query.from_user.id)
+    lang = get_user_language(query.from_user.id) or "vi"
     admin_only = {"affiliate", "operator", "admin", "system"}
     public_hints = {
         "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
@@ -27507,12 +27872,19 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             username=query.from_user.username or query.from_user.first_name or "",
             note=f"User enabled translate mode from menu target={target}",
         )
-        text = (
-            f"✅ Đã bật dịch tự động sang <b>{html.escape(translate_target_label(target))}</b>.\n\n"
-            "Từ bây giờ, tin nhắn văn bản thường sẽ được dịch thay vì chat AI.\n"
-            "Tắt bằng <code>/translate_mode_off</code> hoặc nút bên dưới."
-        )
-        return await query.edit_message_text(text, parse_mode="HTML", reply_markup=translate_language_keyboard(False))
+        if normalize_user_language(lang) == "vi":
+            text = (
+                f"✅ Đã bật dịch tự động sang <b>{html.escape(translate_target_label(target))}</b>.\n\n"
+                "Từ bây giờ, tin nhắn văn bản thường sẽ được dịch thay vì chat AI.\n"
+                "Tắt bằng <code>/translate_mode_off</code> hoặc nút bên dưới."
+            )
+        else:
+            text = (
+                f"✅ Auto-translate is ON to <b>{html.escape(translate_target_label(target))}</b>.\n\n"
+                "Normal text messages will be translated instead of going to AI chat.\n"
+                "Disable with <code>/translate_mode_off</code> or the button below."
+            )
+        return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     if action == "translate_off":
         set_user_translate_mode(
             query.from_user.id,
@@ -27520,19 +27892,14 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             username=query.from_user.username or query.from_user.first_name or "",
             note="User disabled translate mode from menu",
         )
-        return await query.edit_message_text(
-            "✅ Đã tắt dịch tự động. Tin nhắn thường sẽ quay về AI chat.",
-            parse_mode="HTML",
-            reply_markup=translate_language_keyboard(False),
+        text = (
+            "✅ Đã tắt dịch tự động. Tin nhắn thường sẽ quay về AI chat."
+            if normalize_user_language(lang) == "vi"
+            else "✅ Auto-translate is OFF. Normal text now goes back to AI chat."
         )
-    if action == "main":
-        lang = get_user_language(query.from_user.id) or "vi"
-        text, keyboard = localized_start_menu_text(query.from_user.id, lang), localized_main_menu_keyboard(user_is_admin, lang)
-    elif action == "main_profile":
-        text, keyboard = menu_text_main_profile(query.from_user.id), public_back_keyboard()
-    else:
-        text, keyboard = menu_content(action, user_is_admin)
-    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+        return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
+    text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
+    await safe_edit_query_message(query, text, reply_markup=keyboard)
 
 async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -27540,15 +27907,15 @@ async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT
     data = (query.data or "").strip()
     uid = query.from_user.id
     if data == "lang_more":
-        return await query.edit_message_text(
+        return await safe_edit_query_message(
+            query,
             other_language_choice_text(),
-            parse_mode="HTML",
             reply_markup=other_language_choice_keyboard(),
         )
     if data == "back_lang":
-        return await query.edit_message_text(
+        return await safe_edit_query_message(
+            query,
             language_choice_text(),
-            parse_mode="HTML",
             reply_markup=language_choice_keyboard(),
         )
     if data.startswith("lang|"):
@@ -27566,9 +27933,9 @@ async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT
             status=selected,
             detail=f"user_language={selected}",
         )
-        return await query.edit_message_text(
+        return await safe_edit_query_message(
+            query,
             localized_start_menu_text(uid, selected),
-            parse_mode="HTML",
             reply_markup=localized_main_menu_keyboard(is_admin_user(uid), selected),
         )
 
@@ -28145,11 +28512,12 @@ async def cmd_ko_vi(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_translate_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name or ""
+    lang = get_user_language(uid) or "vi"
     if not context.args:
         return await update.message.reply_text(
-            menu_text_translate(False),
+            menu_text_translate_i18n(False, lang),
             parse_mode="HTML",
-            reply_markup=translate_language_keyboard(False),
+            reply_markup=translate_language_keyboard(False, lang),
         )
     target = normalize_translate_target(context.args[0])
     if not target:
@@ -28160,18 +28528,29 @@ async def cmd_translate_mode(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode="HTML",
         )
     set_user_translate_mode(uid, target, username=username, note=f"User enabled translate mode target={target}")
-    await update.message.reply_text(
-        f"✅ Đã bật chế độ dịch tự động sang <b>{html.escape(translate_target_label(target))}</b>.\n\n"
-        "Từ bây giờ, tin nhắn văn bản thường sẽ được dịch thay vì chat AI.\n"
-        "Tắt bằng <code>/translate_mode_off</code>.",
-        parse_mode="HTML",
-    )
+    if normalize_user_language(lang) == "vi":
+        msg = (
+            f"✅ Đã bật chế độ dịch tự động sang <b>{html.escape(translate_target_label(target))}</b>.\n\n"
+            "Từ bây giờ, tin nhắn văn bản thường sẽ được dịch thay vì chat AI.\n"
+            "Tắt bằng <code>/translate_mode_off</code>."
+        )
+    else:
+        msg = (
+            f"✅ Auto-translate is ON to <b>{html.escape(translate_target_label(target))}</b>.\n\n"
+            "Normal text messages will be translated instead of going to AI chat.\n"
+            "Disable with <code>/translate_mode_off</code>."
+        )
+    await update.message.reply_text(msg, parse_mode="HTML")
 
 async def cmd_translate_mode_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name or ""
     changed, _ = set_user_translate_mode(uid, "", username=username, note="User disabled translate mode")
-    msg = "✅ Đã tắt chế độ dịch tự động. Tin nhắn thường sẽ quay về AI chat." if changed else "ℹ️ Chế độ dịch tự động đang tắt sẵn."
+    lang = get_user_language(uid) or "vi"
+    if normalize_user_language(lang) == "vi":
+        msg = "✅ Đã tắt chế độ dịch tự động. Tin nhắn thường sẽ quay về AI chat." if changed else "ℹ️ Chế độ dịch tự động đang tắt sẵn."
+    else:
+        msg = "✅ Auto-translate is OFF. Normal text now goes back to AI chat." if changed else "ℹ️ Auto-translate is already OFF."
     await update.message.reply_text(msg)
 
 async def cmd_translate_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -31061,6 +31440,33 @@ def doc_tools_menu_text() -> str:
         f"<b>Local engine:</b> <code>{html.escape(doc_tools_status_text())}</code>"
     )
 
+def doc_tools_menu_text_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return doc_tools_menu_text()
+    return (
+        "📄 <b>TOAN AAS DOCUMENT TOOLS</b>\n\n"
+        "<b>Supported commands:</b>\n"
+        "• <code>/pdf_to_word</code> — PDF to Word\n"
+        "• <code>/image_to_pdf</code> — image to PDF\n"
+        "• <code>/pdf_to_images</code> — PDF to images\n"
+        "• <code>/compress_pdf</code> — compress PDF\n"
+        "• <code>/split_pdf &lt;page&gt;</code> — split PDF\n"
+        "• <code>/merge_pdf</code> — merge PDF, planned/workflow later\n"
+        "• <code>/ocr_image</code> — image to text\n"
+        "• <code>/ocr_pdf</code> — scanned PDF to text\n\n"
+        "<b>How to use:</b>\n"
+        "1. Send a PDF or image to the bot.\n"
+        "2. Reply to that file.\n"
+        "3. Send the command you need.\n\n"
+        "See pricing at <code>/pricing</code> or <code>/banggia</code>.\n"
+        "Document tools use local engines. They do not create PayOS orders and do not call background-removal providers.\n\n"
+        "<b>MVP limits:</b>\n"
+        f"• PDF max {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB\n"
+        f"• Up to {DOC_MAX_PAGES} pages per basic PDF action\n"
+        f"• OCR max {DOC_OCR_MAX_PAGES} pages\n\n"
+        f"<b>Local engine:</b> <code>{html.escape(doc_tools_status_text())}</code>"
+    )
+
 async def doc_check_can_pay(update: Update, uid, cost: int) -> bool:
     if is_admin_user(uid) or int(cost or 0) <= 0:
         return True
@@ -31331,7 +31737,8 @@ def doc_ocr_pdf_to_text(input_pdf: str, output_dir: str) -> tuple[bool, str, str
     return True, output, ""
 
 async def cmd_doc_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(doc_tools_menu_text(), parse_mode="HTML")
+    uid = update.effective_user.id if update.effective_user else 0
+    await update.message.reply_text(doc_tools_menu_text_i18n(get_user_language(uid) or "vi"), parse_mode="HTML")
 
 async def cmd_tool_test_doc_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -32829,6 +33236,32 @@ def media_factory_overview_text() -> str:
         "TOAN AAS không cam kết video chắc chắn viral, đạt view, duyệt ads hoặc có doanh thu."
     )
 
+def media_factory_overview_text_i18n(lang: str) -> str:
+    if normalize_user_language(lang) == "vi":
+        return media_factory_overview_text()
+    return (
+        "🎬 <b>VIDEO & MEDIA FACTORY — TOAN AAS</b>\n\n"
+        "TOAN AAS helps you create content/video packs from a topic or trend.\n\n"
+        "<b>Current customer scope:</b>\n"
+        "• Trend angle and idea suggestions\n"
+        "• Script and storyboard\n"
+        "• Image prompts and video prompts\n"
+        "• Voice-over/caption/hashtag/CTA suggestions\n"
+        "• Content packs for you to self-post\n\n"
+        "<b>Not public yet:</b>\n"
+        "• Real AI video generation\n"
+        "• Customer auto-publish\n"
+        "• Ads management\n"
+        "• Customer social account connection\n\n"
+        "<b>Commands:</b>\n"
+        "• <code>/media_factory &lt;topic&gt;</code> — create a media/content pack\n"
+        "• <code>/film &lt;topic&gt;</code> — create a script/prompt/caption pack\n"
+        "• <code>/image_prompt &lt;topic&gt;</code> — create realistic image prompts\n"
+        "• <code>/image_to_video_pack &lt;topic&gt;</code> — create image-to-video prompts\n"
+        "• <code>/video_factory_flow</code> — view the full workflow\n\n"
+        "TOAN AAS does not guarantee virality, views, ad approval or revenue."
+    )
+
 def video_factory_flow_text() -> str:
     return (
         "🔁 <b>QUY TRÌNH TẠO VIDEO AI TOAN AAS</b>\n\n"
@@ -33117,15 +33550,19 @@ async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
 
 async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
+    if normalize_user_language(lang) != "vi":
+        return await update.message.reply_text(menu_text_main_image_i18n(lang), parse_mode="HTML", reply_markup=localized_public_back_keyboard(lang))
     readiness = customer_tool_readiness_payload()
     image_provider_label = readiness["image_remove_bg"]["label"]
     ai_label = readiness["ai"]["label"]
     openai_image_label = (
-        "admin đã bật/test nội bộ" if (ENABLE_OPENAI_IMAGE and openai_client and is_feature_enabled("image_openai_generation", update.effective_user.id, default=False))
+        "admin đã bật/test nội bộ" if (ENABLE_OPENAI_IMAGE and openai_client and is_feature_enabled("image_openai_generation", uid, default=False))
         else "tạm khóa để kiểm soát chi phí"
     )
     openai_edit_label = (
-        "admin đã bật/test nội bộ" if (ENABLE_OPENAI_IMAGE_EDIT and openai_client and is_feature_enabled("image_openai_edit", update.effective_user.id, default=False))
+        "admin đã bật/test nội bộ" if (ENABLE_OPENAI_IMAGE_EDIT and openai_client and is_feature_enabled("image_openai_edit", uid, default=False))
         else "tạm khóa để kiểm soát chi phí"
     )
     lines = [
@@ -33415,7 +33852,8 @@ async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     topic = media_factory_topic_from_args(context)
     if not topic:
-        return await update.message.reply_text(media_factory_overview_text(), parse_mode="HTML")
+        lang = get_user_language(uid) or "vi"
+        return await update.message.reply_text(media_factory_overview_text_i18n(lang), parse_mode="HTML", reply_markup=main_audio_keyboard(lang))
     if not await charge_media_factory_or_reply(update, uid, MEDIA_FACTORY_PACK_COST, "spend_media_factory", f"Media Factory pack: {topic[:120]}"):
         return
     fallback = fallback_media_factory_pack(topic)
@@ -49098,6 +49536,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("ja_vi", cmd_ja_vi))
     tg_app.add_handler(CommandHandler("ko_vi", cmd_ko_vi))
     tg_app.add_handler(CommandHandler("translate_mode", cmd_translate_mode))
+    tg_app.add_handler(CommandHandler("translate_mode_on", cmd_translate_mode))
     tg_app.add_handler(CommandHandler("translate_mode_off", cmd_translate_mode_off))
     tg_app.add_handler(CommandHandler("translate_status", cmd_translate_status))
     tg_app.add_handler(CommandHandler("costs",       cmd_costs))
