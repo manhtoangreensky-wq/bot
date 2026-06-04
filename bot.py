@@ -29149,8 +29149,9 @@ def audio_voice_received_text() -> str:
         "✅ Đã nhận audio/voice.\n"
         "Bạn có thể dùng:\n"
         "• /translate_voice en — bóc băng rồi dịch sang English\n"
-        "• /translate_voice zh — bóc băng rồi dịch sang 中文\n"
-        "• /transcribe — chỉ bóc băng thành văn bản"
+        "• /translate_voice vi — bóc băng rồi dịch sang Tiếng Việt\n"
+        "• /transcribe — chỉ bóc băng thành văn bản\n"
+        "• /translate_tools — xem thêm ngôn ngữ hỗ trợ"
     )
 
 async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -34315,7 +34316,9 @@ async def cmd_video_from_image(update: Update, context: ContextTypes.DEFAULT_TYP
     uid = update.effective_user.id
     reply = update.message.reply_to_message if update.message else None
     has_reply_photo = bool(reply and getattr(reply, "photo", None))
-    topic = media_factory_topic_from_args(context, "ảnh user reply" if has_reply_photo else "")
+    info, _source = doc_input_file_info(update)
+    has_cached_image = bool(info and doc_is_image(info))
+    topic = media_factory_topic_from_args(context, "ảnh user reply" if has_reply_photo else ("ảnh đã gửi gần nhất" if has_cached_image else ""))
     if not topic:
         return await update.message.reply_text("⚠️ Cú pháp: /image_to_video_pack <mô tả ảnh/chủ đề> hoặc reply ảnh rồi gõ /image_to_video_pack")
     if not is_feature_enabled("image_to_video_prompt", uid, default=True):
@@ -34797,6 +34800,7 @@ async def cmd_remove_bg_help(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "2. Gõ <code>/remove_bg</code>.",
         "3. Chọn provider tách nền nếu bot hiện nút.",
         "4. Nếu provider chưa PASS/public, công cụ ở trạng thái thử nghiệm để tránh trừ Xu sai.",
+        "• Nếu provider lỗi/quota/missing: Tách nền đang admin test/chưa mở public hoặc provider đang lỗi. Bot chưa trừ Xu.",
         "",
         "Admin test: reply ảnh rồi chạy <code>/tool_test_image</code> hoặc <code>/tool_test_image_debug</code>.",
     ]
