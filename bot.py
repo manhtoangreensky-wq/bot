@@ -287,6 +287,7 @@ ENABLE_REMOVE_BG_PUBLIC = env_flag("ENABLE_REMOVE_BG_PUBLIC", "0")
 ENABLE_AUTO_PUBLISH = env_flag("ENABLE_AUTO_PUBLISH", "0")
 ENABLE_CUSTOMER_PUBLISH = env_flag("ENABLE_CUSTOMER_PUBLISH", "0")
 ENABLE_ADS_ASSISTANT = env_flag("ENABLE_ADS_ASSISTANT", "0")
+ENABLE_MEMORY_PUBLIC = env_flag("ENABLE_MEMORY_PUBLIC", "0")
 ADMIN_TEST_OPENAI_IMAGE = env_flag("ADMIN_TEST_OPENAI_IMAGE", "1")
 ADMIN_TEST_OPENAI_IMAGE_EDIT = env_flag("ADMIN_TEST_OPENAI_IMAGE_EDIT", "1")
 ADMIN_TEST_REAL_VIDEO = env_flag("ADMIN_TEST_REAL_VIDEO", "0")
@@ -681,6 +682,47 @@ DOC_COSTS = {
 DOC_MAX_FILE_BYTES = 20 * 1024 * 1024
 DOC_MAX_PAGES = 30
 DOC_OCR_MAX_PAGES = 10
+MEMORY_AI_CLASSIFY_COST = 3
+MEMORY_PRIORITIES = {"low", "normal", "important", "urgent"}
+MEMORY_REPEAT_RULES = {"none", "daily", "weekly", "monthly", "yearly"}
+MEMORY_CATEGORIES = [
+    "Công việc",
+    "Khách hàng/Lead",
+    "Ý tưởng content",
+    "Video/Media",
+    "Tài chính",
+    "Học tập",
+    "Cá nhân",
+    "Việc cần làm",
+    "Tài liệu",
+    "Khác",
+]
+MEMORY_PLANS = {
+    "free": {
+        "note_limit": 30,
+        "storage_limit_mb": 5,
+        "ai_classify_monthly_limit": 10,
+        "price": "0đ",
+    },
+    "lite": {
+        "note_limit": 300,
+        "storage_limit_mb": 100,
+        "ai_classify_monthly_limit": 300,
+        "price": "19.000đ/tháng",
+    },
+    "pro": {
+        "note_limit": 2000,
+        "storage_limit_mb": 1024,
+        "ai_classify_monthly_limit": 2000,
+        "price": "49.000đ/tháng",
+    },
+    "vip": {
+        "note_limit": 10000,
+        "storage_limit_mb": 5120,
+        "ai_classify_monthly_limit": 10000,
+        "price": "99.000đ/tháng",
+    },
+}
 CHAT_TIER_NORMAL = "normal"
 CHAT_TIER_PRO = "pro"
 CHAT_TIER_DEEP = "deep"
@@ -1293,6 +1335,59 @@ def init_db():
         status TEXT DEFAULT 'open',
         created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS memory_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        title TEXT,
+        content TEXT,
+        summary TEXT,
+        tags TEXT,
+        category TEXT,
+        priority TEXT DEFAULT 'normal',
+        status TEXT DEFAULT 'active',
+        source_type TEXT DEFAULT 'text',
+        file_id TEXT,
+        file_name TEXT,
+        file_size INTEGER DEFAULT 0,
+        is_archived INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS memory_plans (
+        user_id TEXT PRIMARY KEY,
+        plan TEXT DEFAULT 'free',
+        note_limit INTEGER DEFAULT 30,
+        storage_limit_mb INTEGER DEFAULT 5,
+        ai_classify_monthly_limit INTEGER DEFAULT 10,
+        ai_classify_used INTEGER DEFAULT 0,
+        renew_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS memory_reminders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        note_id INTEGER,
+        title TEXT,
+        remind_text TEXT,
+        remind_at TEXT,
+        repeat_rule TEXT DEFAULT 'none',
+        timezone TEXT DEFAULT 'Asia/Ho_Chi_Minh',
+        status TEXT DEFAULT 'active',
+        last_sent_at TEXT,
+        next_run_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS memory_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        event_type TEXT,
+        note_id INTEGER,
+        reminder_id INTEGER,
+        xu_delta INTEGER DEFAULT 0,
+        detail TEXT,
+        created_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS tool_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -1413,6 +1508,7 @@ def init_db():
         ("image_openai_edit", 0, "OpenAI image editing is premium and disabled by default."),
         ("image_generation", 0, "Actual image generation requires provider support; fallback to prompt pack."),
         ("image_to_video", 0, "Actual image-to-video generation requires provider support; fallback to video prompt pack."),
+        ("memory_vault", 0, "TOAN AAS Memory notes/reminders are admin-only until tested."),
     ]
     for key, enabled, note in feature_flag_defaults:
         c.execute(
@@ -1423,6 +1519,12 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_published_posts_platform ON published_posts(platform)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_perf_post_id ON manual_performance_events(published_post_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_growth_user_id ON growth_recommendations(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_notes_user_status ON memory_notes(user_id, status, is_archived)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_notes_user_priority ON memory_notes(user_id, priority)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_notes_user_category ON memory_notes(user_id, category)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_reminders_user_status ON memory_reminders(user_id, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_reminders_next_run ON memory_reminders(status, next_run_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_events_user ON memory_events(user_id, created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_promotion_codes_status ON promotion_codes(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_promo_redemptions_user_status ON promotion_redemptions(user_id, status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_promo_redemptions_order ON promotion_redemptions(order_code)")
@@ -24103,6 +24205,10 @@ UNKNOWN_COMMAND_SUGGESTIONS = {
     "naptien": "naptien",
     "nap_tien": "naptien",
     "pricing": "pricing",
+    "memory": "memory",
+    "note": "note",
+    "notes": "notes",
+    "remind": "remind",
 }
 
 async def handle_unknown_or_unmatched_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -24745,6 +24851,9 @@ def sales_readiness_payload() -> dict:
         "campaign_report": callable(globals().get("cmd_campaign_report")),
         "performance_report": callable(globals().get("cmd_performance_report")),
         "doc_tools": callable(globals().get("cmd_doc_tools")),
+        "memory": callable(globals().get("cmd_memory")),
+        "note": callable(globals().get("cmd_note")),
+        "reminders": callable(globals().get("cmd_reminders")),
         "promo": callable(globals().get("cmd_promo")),
         "promo_guide": callable(globals().get("cmd_promo_guide")),
         "promo_seed_policy": callable(globals().get("cmd_promo_seed_policy")),
@@ -25247,6 +25356,11 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_stability_image", "tool_test_upscale_image", "tool_test_audio_enhance",
     "tool_test_kling_video", "tool_test_runway_video", "tool_test_heygen_avatar",
     "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
+    "memory", "note", "note_ai", "notes", "note_view", "search_note", "note_tags",
+    "note_delete", "note_archive", "memory_status", "memory_plan", "note_priority",
+    "note_category", "notes_important", "notes_category", "remind", "repeat_daily",
+    "repeat_weekly", "repeat_monthly", "repeat_yearly", "reminders", "reminder_done",
+    "reminder_cancel", "reminder_pause", "reminder_resume", "note_remind",
 }
 PROVIDER_FREEZE_COMMANDS = set(TOOL_FREEZE_COMMANDS)
 
@@ -25377,7 +25491,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     if is_admin:
         rows = [
             [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
-            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|doc_tools")],
+            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|doc_tools"), InlineKeyboardButton("🧠 Memory", callback_data="menu|memory")],
             [InlineKeyboardButton("💰 Affiliate", callback_data="menu|affiliate"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
             [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
             [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("💳 Billing", callback_data="menu|billing")],
@@ -25387,7 +25501,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     else:
         rows = [
             [InlineKeyboardButton("🤖 AI Cơ Bản", callback_data="menu|ai_basic"), InlineKeyboardButton("🎬 Video & Media", callback_data="menu|video_factory")],
-            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|doc_tools")],
+            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|doc_tools"), InlineKeyboardButton("🧠 Memory", callback_data="menu|memory")],
             [InlineKeyboardButton("💳 Xu Dịch Vụ", callback_data="menu|billing"), InlineKeyboardButton("👤 Tài Khoản", callback_data="menu|billing")],
             [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|guide"), InlineKeyboardButton("📜 Điều Khoản", callback_data="menu|legal")],
             [InlineKeyboardButton("🛟 Hỗ Trợ", callback_data="menu|support")],
@@ -25438,6 +25552,7 @@ def menu_text_main(is_admin: bool) -> str:
         "🎬 Video & Media Factory: tạo script, storyboard, prompt ảnh chân thật, video prompt pack, caption, hashtag, CTA cho Facebook, TikTok, YouTube.\n"
         "🎤 Bóc Băng AI: chuyển âm thanh/video thành văn bản.\n"
         "🔊 Voice-off/TTS: tạo voice tiếng Việt cho nội dung.\n"
+        f"🧠 Memory: lưu ghi chú, tìm kiếm và nhắc việc — <code>{memory_public_stage()}</code>.\n"
         "📥 Hút Media: tải video TikTok/YouTube/Facebook nếu công cụ khả dụng.\n"
         "🖼 Studio Đồ Họa: tách nền, xử lý ảnh, prompt hình ảnh.\n"
         "🖼 Công cụ ảnh: /image_tools, /image_prompt, /image_to_video_pack, /ai_image, /ai_image_edit.\n"
@@ -25681,6 +25796,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return video_factory_flow_text(), menu_nav_keyboard("video_factory", is_admin)
     if action == "doc_tools":
         return doc_tools_menu_text(), menu_nav_keyboard("doc_tools", is_admin)
+    if action == "memory":
+        return memory_menu_text(), menu_nav_keyboard("memory", is_admin)
     if action == "affiliate":
         return menu_text_affiliate(is_admin), menu_nav_keyboard("affiliate", is_admin)
     if action == "operator":
@@ -25794,7 +25911,13 @@ def help_text_for_user(user_id) -> str:
         f"• Bóc băng audio: gửi voice/mp3/m4a — <code>{html.escape(readiness['stt']['label'])}</code>\n"
         f"• Tách nền ảnh: gửi ảnh vào bot — <code>{html.escape(readiness['image_remove_bg']['label'])}</code>\n"
         f"• Tải video qua link: <code>{html.escape(readiness['downloader']['label'])}</code>; nếu link lỗi, hãy gửi file video trực tiếp\n\n"
-        "<b>3. Video & Media Factory</b>\n"
+        "<b>3. TOAN AAS Memory</b>\n"
+        "• <code>/memory</code> — mở kho ghi nhớ AI\n"
+        "• <code>/note &lt;nội dung&gt;</code> — lưu ghi chú nhanh\n"
+        "• <code>/note_ai &lt;nội dung&gt;</code> — lưu + AI tóm tắt/phân loại\n"
+        "• <code>/remind 30m &lt;nội dung&gt;</code> — đặt nhắc việc\n"
+        f"• Trạng thái: <code>{memory_public_stage()}</code>\n\n"
+        "<b>4. Video & Media Factory</b>\n"
         f"• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack ({FILM_SCRIPT_COST} Xu)\n"
         f"• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật ({IMAGE_PROMPT_PACK_COST} Xu)\n"
         f"• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack ({IMAGE_TO_VIDEO_PROMPT_COST} Xu)\n"
@@ -25804,13 +25927,13 @@ def help_text_for_user(user_id) -> str:
         "• <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
         "• Kết quả gồm outline, storyboard, scene prompt, prompt ảnh, caption, hashtag và CTA để bạn tự đăng.\n"
         "• Có thể dán link trực tiếp trong prompt để bot viết caption/CTA tham khảo.\n\n"
-        "<b>4. Báo cáo/tối ưu thủ công</b>\n"
+        "<b>5. Báo cáo/tối ưu thủ công</b>\n"
         f"• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA ({GROWTH_AI_COST} Xu)\n"
         f"• <code>/campaign_report</code> — xuất báo cáo nội dung thủ công ({CAMPAIGN_REPORT_COST} Xu)\n"
         f"• {CURRENT_PRODUCT_SCOPE_TEXT}\n\n"
-        "<b>5. Hỗ trợ</b>\n"
+        "<b>6. Hỗ trợ</b>\n"
         "• <code>/gopy nội dung</code> — góp ý/báo lỗi\n\n"
-        "<b>6. Bán thử/Beta</b>\n"
+        "<b>7. Bán thử/Beta</b>\n"
         "• <code>/beta_offer</code> hoặc <code>/goi_beta</code> — xem gói dùng thử\n"
         "• <code>/pricing</code> hoặc <code>/banggia</code> — xem bảng giá\n"
         "• <code>/naptien</code> — mua/nạp Xu dịch vụ\n"
@@ -25941,6 +26064,7 @@ def privacy_text() -> str:
         "TOAN AAS có thể xử lý các dữ liệu cần thiết để vận hành dịch vụ:\n"
         "• ID Telegram, username, tên hiển thị.\n"
         "• Nội dung lệnh/chat bạn gửi vào bot.\n"
+        "• Ghi chú và reminder bạn lưu trong TOAN AAS Memory.\n"
         "• Ảnh, video, audio, file bạn gửi để xử lý.\n"
         "• Thông tin đơn nạp, mã đơn, ảnh bill nếu bạn gửi để admin kiểm tra.\n"
         "• Log sử dụng công cụ, số dư Xu dịch vụ, lịch sử cộng/trừ Xu dịch vụ.\n\n"
@@ -25950,6 +26074,11 @@ def privacy_text() -> str:
         "• Hỗ trợ khách hàng.\n"
         "• Chống gian lận, spam, lạm dụng.\n"
         "• Sao lưu và kiểm tra lỗi hệ thống.\n\n"
+        "<b>TOAN AAS Memory:</b>\n"
+        "• Nếu dùng <code>/note</code> thường, ghi chú được lưu để bạn tìm lại và đặt nhắc nhở.\n"
+        "• Nếu dùng <code>/note_ai</code>, nội dung có thể được gửi đến AI provider để tóm tắt/phân loại.\n"
+        "• Reminder chỉ dùng để gửi nhắc theo cài đặt của bạn.\n"
+        "• Bạn có thể archive/xóa mềm ghi chú bằng <code>/note_archive</code> hoặc <code>/note_delete</code>.\n\n"
         "<b>Cam kết:</b>\n"
         "• Không bán dữ liệu cá nhân của bạn.\n"
         "• Không công khai bill, ảnh, video, audio của bạn nếu không có yêu cầu/đồng ý.\n"
@@ -27334,6 +27463,7 @@ async def cmd_tool_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• AI chat/script/caption/prompt: <code>public</code>",
         "• Video Factory Lite: <code>/film</code>, <code>/image_prompt</code>, <code>/image_to_video_pack</code>",
         "• STT/TTS/Image utility: chỉ mở khi provider smoke test PASS.",
+        f"• TOAN AAS Memory: <code>{memory_public_stage()}</code> — <code>/memory</code>, <code>/memory_plan</code>",
         "",
         "<b>Admin/Internal test</b>",
         f"• Trend Live/SerpAPI: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code>",
@@ -27355,6 +27485,7 @@ async def cmd_tool_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/tool_test_upscale_image</code> reply ảnh",
             "• <code>/tool_test_audio_enhance</code> reply audio",
             "• <code>/tool_test_kling_video prompt</code> | <code>/tool_test_runway_video prompt</code> | <code>/tool_test_heygen_avatar script</code>",
+            "• <code>/memory_set_plan USER_ID pro</code> | <code>/memory_admin USER_ID</code>",
         ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -27399,6 +27530,9 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("Compress PDF", "compress_pdf", get_tool_test_result("compress_pdf"), "configured" if providers["document"]["compress_pdf"] else "missing PyMuPDF"),
         ("Split PDF", "split_pdf", get_tool_test_result("split_pdf"), "configured" if providers["document"]["split_pdf"] else "missing pypdf/PyPDF2"),
         ("OCR Image/PDF", "ocr_image", get_tool_test_result("ocr_image"), "READY" if providers["document"]["ocr_local"] else "PLANNED/ADMIN_ONLY"),
+        ("Memory Notes", "memory_notes", get_tool_test_result("memory_notes"), memory_public_stage()),
+        ("Memory AI Classify", "memory_ai_classify", get_tool_test_result("memory_ai_classify"), f"{memory_public_stage()} quota-first/{MEMORY_AI_CLASSIFY_COST} Xu after quota"),
+        ("Memory Reminders", "memory_reminders", get_tool_test_result("memory_reminders"), memory_public_stage()),
         ("Trend AI", "trend_ai", {"status": "READY", "tested_at": "content-only", "detail": "Prompt/content-only trend angle generator"}, "READY/content-only"),
         ("Trend Live", "trend_live", get_tool_test_result("trend_live"), f"{providers['media_factory'].get('trend_live_stage') or 'DISABLED'} SerpAPI={provider_status_text(providers['search']['serpapi'])}"),
         ("Image Prompt", "image_prompt", {"status": "READY", "tested_at": "prompt-only", "detail": "Image prompt factory"}, "READY/prompt-only"),
@@ -28281,6 +28415,12 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• PDF to Images: <code>{'configured' if providers['document']['pdf_to_images'] else 'missing PyMuPDF'}</code> | tested <code>{html.escape(tool_test_status_text('pdf_to_images'))}</code>",
         f"• Compress PDF: <code>{'configured' if providers['document']['compress_pdf'] else 'missing PyMuPDF'}</code> | tested <code>{html.escape(tool_test_status_text('compress_pdf'))}</code>",
         f"• OCR: <code>{'READY_FOR_TEST' if providers['document']['ocr_local'] else 'ADMIN_ONLY/PLANNED'}</code>",
+        "",
+        "<b>TOAN AAS Memory</b>",
+        f"• Memory notes: <code>{memory_public_stage()}</code> | tested <code>{html.escape(tool_test_status_text('memory_notes'))}</code>",
+        f"• Memory AI classify: <code>{memory_public_stage()}</code> | tested <code>{html.escape(tool_test_status_text('memory_ai_classify'))}</code>",
+        f"• Memory reminders: <code>{memory_public_stage()}</code> | tested <code>{html.escape(tool_test_status_text('memory_reminders'))}</code>",
+        f"• Commands: <code>{'available' if commands.get('memory') and commands.get('note') and commands.get('reminders') else 'missing'}</code>",
         "",
         "<b>Money</b>",
         f"• Packages: <b>{data['packages']}</b>",
@@ -29887,6 +30027,1124 @@ async def cmd_tool_test_pdf_to_images(update: Update, context: ContextTypes.DEFA
 
 async def cmd_tool_test_compress_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_compress_pdf(update, context, test_mode=True)
+
+def memory_public_stage() -> str:
+    return "PUBLIC_READY" if ENABLE_MEMORY_PUBLIC else "ADMIN_ONLY"
+
+def memory_can_use_full(user_id) -> bool:
+    return bool(ENABLE_MEMORY_PUBLIC or is_admin_user(user_id))
+
+def memory_access_message() -> str:
+    return (
+        "🧠 <b>TOAN AAS Memory đang test nội bộ.</b>\n\n"
+        "Hiện khách có thể xem <code>/memory</code> và <code>/memory_plan</code>. "
+        "Lệnh lưu note/nhắc việc sẽ mở public sau khi admin test ổn.\n\n"
+        "Bạn có thể dùng <code>/film &lt;chủ đề&gt;</code> để tạo content pack trước."
+    )
+
+async def memory_require_access(update: Update) -> bool:
+    uid = update.effective_user.id if update.effective_user else ""
+    if memory_can_use_full(uid):
+        return True
+    await update.message.reply_text(memory_access_message(), parse_mode="HTML")
+    return False
+
+def memory_plan_config(plan: str) -> dict:
+    return dict(MEMORY_PLANS.get(str(plan or "").lower(), MEMORY_PLANS["free"]))
+
+def memory_current_period_key() -> str:
+    return datetime.now(VN_TZ).strftime("%Y-%m")
+
+def memory_next_period_key() -> str:
+    now = datetime.now(VN_TZ)
+    year = now.year + (1 if now.month == 12 else 0)
+    month = 1 if now.month == 12 else now.month + 1
+    return f"{year:04d}-{month:02d}"
+
+def memory_dt_text(dt: datetime) -> str:
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(VN_TZ).replace(tzinfo=None)
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+def memory_now() -> datetime:
+    return datetime.now(VN_TZ).replace(tzinfo=None)
+
+def memory_parse_stored_dt(value: str) -> datetime | None:
+    value = str(value or "").strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(value, fmt)
+        except Exception:
+            pass
+    return None
+
+def ensure_memory_plan(user_id) -> dict:
+    uid = str(user_id)
+    now = now_text()
+    current_period = memory_current_period_key()
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS memory_plans (
+                user_id TEXT PRIMARY KEY,
+                plan TEXT DEFAULT 'free',
+                note_limit INTEGER DEFAULT 30,
+                storage_limit_mb INTEGER DEFAULT 5,
+                ai_classify_monthly_limit INTEGER DEFAULT 10,
+                ai_classify_used INTEGER DEFAULT 0,
+                renew_at TEXT,
+                updated_at TEXT
+            )"""
+        )
+        c.execute("SELECT plan, note_limit, storage_limit_mb, ai_classify_monthly_limit, ai_classify_used, renew_at FROM memory_plans WHERE user_id=?", (uid,))
+        row = c.fetchone()
+        if not row:
+            cfg = memory_plan_config("free")
+            c.execute(
+                """INSERT INTO memory_plans
+                (user_id, plan, note_limit, storage_limit_mb, ai_classify_monthly_limit, ai_classify_used, renew_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (uid, "free", cfg["note_limit"], cfg["storage_limit_mb"], cfg["ai_classify_monthly_limit"], 0, current_period, now),
+            )
+            conn.commit()
+            return {"plan": "free", "ai_classify_used": 0, **cfg}
+        plan, note_limit, storage_limit_mb, ai_limit, ai_used, renew_at = row
+        plan = str(plan or "free").lower()
+        cfg = memory_plan_config(plan)
+        if str(renew_at or "") != current_period:
+            ai_used = 0
+            c.execute(
+                """UPDATE memory_plans
+                SET ai_classify_used=0, renew_at=?, updated_at=?
+                WHERE user_id=?""",
+                (current_period, now, uid),
+            )
+            conn.commit()
+        return {
+            "plan": plan,
+            "note_limit": int(note_limit or cfg["note_limit"]),
+            "storage_limit_mb": int(storage_limit_mb or cfg["storage_limit_mb"]),
+            "ai_classify_monthly_limit": int(ai_limit or cfg["ai_classify_monthly_limit"]),
+            "ai_classify_used": int(ai_used or 0),
+            "price": cfg["price"],
+        }
+    finally:
+        conn.close()
+
+def memory_record_event(user_id, event_type: str, note_id=0, reminder_id=0, xu_delta=0, detail=""):
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO memory_events
+            (user_id, event_type, note_id, reminder_id, xu_delta, detail, created_at)
+            VALUES (?,?,?,?,?,?,?)""",
+            (str(user_id or ""), str(event_type or ""), int(note_id or 0), int(reminder_id or 0), int(xu_delta or 0), str(detail or "")[:1000], now_text()),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Memory event write failed: {e}")
+    finally:
+        conn.close()
+
+def memory_note_count(user_id) -> int:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM memory_notes WHERE user_id=? AND status='active' AND is_archived=0",
+            (str(user_id),),
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+    finally:
+        conn.close()
+
+def memory_storage_used_bytes(user_id) -> int:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT COALESCE(SUM(LENGTH(COALESCE(content,'')) + LENGTH(COALESCE(summary,'')) + COALESCE(file_size,0)),0)
+            FROM memory_notes WHERE user_id=? AND is_archived=0""",
+            (str(user_id),),
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+    finally:
+        conn.close()
+
+def memory_active_reminder_count(user_id) -> int:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM memory_reminders WHERE user_id=? AND status='active'",
+            (str(user_id),),
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+    finally:
+        conn.close()
+
+def memory_status_payload(user_id) -> dict:
+    plan = ensure_memory_plan(user_id)
+    notes = memory_note_count(user_id)
+    storage_bytes = memory_storage_used_bytes(user_id)
+    ai_limit = int(plan["ai_classify_monthly_limit"])
+    ai_used = int(plan["ai_classify_used"])
+    return {
+        "plan": plan,
+        "notes": notes,
+        "storage_bytes": storage_bytes,
+        "storage_mb": storage_bytes / (1024 * 1024),
+        "ai_remaining": max(0, ai_limit - ai_used),
+        "active_reminders": memory_active_reminder_count(user_id),
+    }
+
+def memory_quota_error(user_id, extra_bytes: int = 0) -> str:
+    if is_admin_user(user_id):
+        return ""
+    status = memory_status_payload(user_id)
+    plan = status["plan"]
+    if status["notes"] >= int(plan["note_limit"]):
+        return (
+            "⚠️ Bạn đã dùng hết số lượng ghi chú của gói hiện tại.\n\n"
+            f"• Gói: {plan['plan']}\n"
+            f"• Giới hạn: {plan['note_limit']} ghi chú\n\n"
+            "Dùng /memory_plan để xem gói nâng cấp."
+        )
+    storage_limit = int(plan["storage_limit_mb"]) * 1024 * 1024
+    if status["storage_bytes"] + int(extra_bytes or 0) > storage_limit:
+        return (
+            "⚠️ Kho ghi nhớ đã vượt giới hạn dung lượng gói hiện tại.\n\n"
+            f"• Gói: {plan['plan']}\n"
+            f"• Giới hạn: {plan['storage_limit_mb']}MB\n\n"
+            "Dùng /memory_plan để xem gói nâng cấp."
+        )
+    return ""
+
+def memory_clean_title(text: str) -> str:
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not text:
+        return "Ghi chú TOAN AAS"
+    return text[:80] + ("..." if len(text) > 80 else "")
+
+def memory_default_category(text: str) -> str:
+    lower = str(text or "").lower()
+    if any(x in lower for x in ("khách", "lead", "báo giá", "đơn hàng")):
+        return "Khách hàng/Lead"
+    if any(x in lower for x in ("video", "content", "caption", "tiktok", "facebook", "youtube")):
+        return "Ý tưởng content"
+    if any(x in lower for x in ("tiền", "doanh thu", "chi phí", "thanh toán")):
+        return "Tài chính"
+    if any(x in lower for x in ("học", "khóa", "bài học")):
+        return "Học tập"
+    if any(x in lower for x in ("việc", "todo", "cần làm", "nhắc")):
+        return "Việc cần làm"
+    return "Khác"
+
+def memory_extract_json(text: str) -> dict:
+    raw = str(text or "").strip()
+    if not raw or raw.startswith("❌"):
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", raw, re.S)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            return {}
+    return {}
+
+def memory_ai_classify(content: str, user_id) -> tuple[bool, dict, str]:
+    prompt = (
+        "Bạn là TOAN AAS Memory classifier. Hãy trả về JSON thuần, không markdown.\n"
+        "Schema: title, summary, tags, category, priority.\n"
+        "priority chỉ dùng một trong: low, normal, important, urgent.\n"
+        "category chọn ngắn gọn theo nội dung. tags là list 3-8 tag."
+    )
+    try:
+        output = AgentGemini.chat(prompt, str(content or "")[:6000], f"memory:{user_id}", is_json=False)
+        data = memory_extract_json(output)
+        if not data:
+            return False, {}, "AI trả về không đúng JSON"
+        tags = data.get("tags") or []
+        if isinstance(tags, str):
+            tags = [x.strip() for x in re.split(r"[,;#]", tags) if x.strip()]
+        priority = str(data.get("priority") or "normal").lower()
+        if priority not in MEMORY_PRIORITIES:
+            priority = "normal"
+        result = {
+            "title": memory_clean_title(data.get("title") or content),
+            "summary": str(data.get("summary") or "")[:1000],
+            "tags": ", ".join(str(x).strip() for x in tags[:8] if str(x).strip()),
+            "category": str(data.get("category") or memory_default_category(content))[:80],
+            "priority": priority,
+        }
+        return True, result, ""
+    except Exception as e:
+        return False, {}, str(e)[:220]
+
+def memory_create_note(user_id, content: str, ai_data: dict | None = None, source_type: str = "text", file_id="", file_name="", file_size=0) -> int:
+    content = str(content or "").strip()
+    data = ai_data or {}
+    title = memory_clean_title(data.get("title") or content)
+    summary = str(data.get("summary") or content[:500]).strip()
+    tags = str(data.get("tags") or "").strip()
+    category = str(data.get("category") or memory_default_category(content)).strip()[:80]
+    priority = str(data.get("priority") or "normal").lower()
+    if priority not in MEMORY_PRIORITIES:
+        priority = "normal"
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO memory_notes
+            (user_id, title, content, summary, tags, category, priority, status, source_type,
+             file_id, file_name, file_size, is_archived, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id), title, content, summary, tags, category, priority, "active", source_type,
+                str(file_id or ""), str(file_name or ""), int(file_size or 0), 0, now_text(), now_text(),
+            ),
+        )
+        note_id = int(cur.lastrowid)
+        conn.commit()
+        return note_id
+    finally:
+        conn.close()
+
+def memory_fetch_note(user_id, note_id: int, include_archived: bool = False) -> dict:
+    conn = db_connect()
+    try:
+        query = """SELECT id, user_id, title, content, summary, tags, category, priority, status, source_type,
+                          file_id, file_name, file_size, is_archived, created_at, updated_at
+                   FROM memory_notes WHERE id=? AND user_id=?"""
+        row = conn.execute(query, (int(note_id), str(user_id))).fetchone()
+        if not row:
+            return {}
+        keys = ["id", "user_id", "title", "content", "summary", "tags", "category", "priority", "status", "source_type", "file_id", "file_name", "file_size", "is_archived", "created_at", "updated_at"]
+        data = dict(zip(keys, row))
+        if not include_archived and (int(data.get("is_archived") or 0) or data.get("status") != "active"):
+            return {}
+        return data
+    finally:
+        conn.close()
+
+def memory_format_note_item(note: dict) -> str:
+    tags = f" | #{html.escape(str(note.get('tags') or '').replace(', ', ' #'))}" if note.get("tags") else ""
+    return (
+        f"#{note.get('id')} — <b>{html.escape(note.get('title') or 'Ghi chú')}</b>\n"
+        f"  <code>{html.escape(note.get('priority') or 'normal')}</code> | {html.escape(note.get('category') or 'Khác')}{tags}\n"
+        f"  {html.escape((note.get('summary') or '')[:180])}"
+    )
+
+def memory_list_notes(user_id, where_sql: str = "", params: tuple = (), limit: int = 10) -> list[dict]:
+    conn = db_connect()
+    try:
+        sql = """SELECT id, user_id, title, content, summary, tags, category, priority, status, source_type,
+                        file_id, file_name, file_size, is_archived, created_at, updated_at
+                 FROM memory_notes
+                 WHERE user_id=? AND status='active' AND is_archived=0"""
+        if where_sql:
+            sql += " AND " + where_sql
+        sql += " ORDER BY id DESC LIMIT ?"
+        rows = conn.execute(sql, (str(user_id), *params, int(limit))).fetchall()
+        keys = ["id", "user_id", "title", "content", "summary", "tags", "category", "priority", "status", "source_type", "file_id", "file_name", "file_size", "is_archived", "created_at", "updated_at"]
+        return [dict(zip(keys, row)) for row in rows]
+    finally:
+        conn.close()
+
+def memory_plan_text() -> str:
+    return (
+        "🧠 <b>GÓI KHO GHI NHỚ TOAN AAS</b>\n\n"
+        "<b>Free:</b>\n"
+        "• 30 ghi chú\n• 5MB storage\n• 10 lần AI phân loại/tháng\n• Nhắc nhở cơ bản\n\n"
+        "<b>Lite — 19.000đ/tháng:</b>\n"
+        "• 300 ghi chú\n• 100MB storage\n• 300 lần AI phân loại/tháng\n• Nhắc hằng ngày/hằng tuần\n\n"
+        "<b>Pro — 49.000đ/tháng:</b>\n"
+        "• 2.000 ghi chú\n• 1GB storage\n• 2.000 lần AI phân loại/tháng\n• Export DOCX/PDF sau\n• Nhắc hằng ngày/tuần/tháng\n\n"
+        "<b>Team/VIP — 99.000đ/tháng:</b>\n"
+        "• 10.000 ghi chú\n• 5GB storage\n• 10.000 lần AI phân loại/tháng\n• Tìm kiếm nâng cao/export sau\n• Nhắc hằng ngày/tuần/tháng/năm\n\n"
+        "<b>Xu phụ trợ:</b>\n"
+        "• Lưu note text thường: miễn phí trong quota gói\n"
+        f"• AI phân loại/tóm tắt: dùng quota, sau quota {MEMORY_AI_CLASSIFY_COST} Xu/lần\n"
+        "• OCR ảnh vào note: 10 Xu/ảnh khi mở\n"
+        "• Audio thành note: 10–20 Xu/phút khi mở\n"
+        "• Export PDF/DOCX: 5–10 Xu/lần khi mở\n"
+        "• Tìm kiếm AI nâng cao: 5 Xu/lần khi mở\n\n"
+        f"Trạng thái public: <code>{memory_public_stage()}</code>"
+    )
+
+def memory_menu_text() -> str:
+    return (
+        "🧠 <b>TOAN AAS MEMORY — Kho ghi nhớ AI</b>\n\n"
+        "Lưu ghi chú, ý tưởng, khách hàng, công việc và đặt nhắc nhở tự động.\n\n"
+        "<b>Lệnh nhanh:</b>\n"
+        "• <code>/note &lt;nội dung&gt;</code> — lưu ghi chú nhanh\n"
+        "• <code>/note_ai &lt;nội dung&gt;</code> — lưu + AI tóm tắt/phân loại\n"
+        "• <code>/notes</code> — xem ghi chú gần đây\n"
+        "• <code>/search_note &lt;từ khóa&gt;</code> — tìm ghi chú\n"
+        "• <code>/notes_important</code> — xem ghi chú quan trọng\n"
+        "• <code>/memory_status</code> — xem dung lượng/quota\n\n"
+        "<b>Nhắc nhở:</b>\n"
+        "• <code>/remind 30m &lt;nội dung&gt;</code>\n"
+        "• <code>/remind 20:00 &lt;nội dung&gt;</code>\n"
+        "• <code>/repeat_daily 08:00 &lt;nội dung&gt;</code>\n"
+        "• <code>/reminders</code> — xem nhắc nhở đang bật\n\n"
+        "Ghi chú thường miễn phí trong quota gói. AI phân loại/tóm tắt dùng quota hoặc Xu.\n"
+        f"Public flag: <code>{memory_public_stage()}</code>"
+    )
+
+def memory_status_text(user_id) -> str:
+    status = memory_status_payload(user_id)
+    plan = status["plan"]
+    return (
+        "🧠 <b>Memory Status</b>\n\n"
+        f"• Gói: <code>{html.escape(plan['plan'])}</code>\n"
+        f"• Ghi chú: <b>{status['notes']}/{plan['note_limit']}</b>\n"
+        f"• Storage: <b>{status['storage_mb']:.2f}/{plan['storage_limit_mb']}MB</b>\n"
+        f"• AI classify còn lại: <b>{status['ai_remaining']}/{plan['ai_classify_monthly_limit']}</b>\n"
+        f"• Reminder active: <b>{status['active_reminders']}</b>\n"
+        f"• Public flag: <code>{memory_public_stage()}</code>"
+    )
+
+async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(memory_menu_text(), parse_mode="HTML")
+
+async def cmd_memory_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(memory_plan_text(), parse_mode="HTML")
+
+async def cmd_memory_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    await update.message.reply_text(memory_status_text(uid), parse_mode="HTML")
+
+async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    content = " ".join(context.args).strip()
+    if not content:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/note &lt;nội dung&gt;</code>", parse_mode="HTML")
+    quota_error = memory_quota_error(uid, len(content.encode("utf-8")))
+    if quota_error:
+        return await update.message.reply_text(quota_error, parse_mode="HTML")
+    note_id = memory_create_note(uid, content)
+    memory_record_event(uid, "note_created", note_id=note_id, detail="text")
+    save_tool_test_result("memory_notes", "PASS", "note text saved", uid)
+    await update.message.reply_text(
+        f"✅ Đã lưu ghi chú <code>#{note_id}</code>.\n\n"
+        f"• Tiêu đề: <b>{html.escape(memory_clean_title(content))}</b>\n"
+        "• Xem lại: <code>/note_view {}</code>".format(note_id),
+        parse_mode="HTML",
+    )
+
+async def cmd_note_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    content = " ".join(context.args).strip()
+    if not content:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/note_ai &lt;nội dung&gt;</code>", parse_mode="HTML")
+    quota_error = memory_quota_error(uid, len(content.encode("utf-8")))
+    if quota_error:
+        return await update.message.reply_text(quota_error, parse_mode="HTML")
+    plan = ensure_memory_plan(uid)
+    charge_xu = 0
+    if not is_admin_user(uid) and int(plan["ai_classify_used"]) >= int(plan["ai_classify_monthly_limit"]):
+        charge_xu = MEMORY_AI_CLASSIFY_COST
+        credits, _, _ = get_user(uid)
+        if int(credits or 0) < charge_xu:
+            note_id = memory_create_note(uid, content)
+            memory_record_event(uid, "note_created_ai_quota_no_credit", note_id=note_id, detail="saved as normal note")
+            save_tool_test_result("memory_notes", "PASS", "note saved; AI quota exhausted and insufficient Xu", uid)
+            return await update.message.reply_text(
+                f"✅ Đã lưu ghi chú thường <code>#{note_id}</code>.\n\n"
+                "⚠️ Hết quota AI phân loại và chưa đủ Xu để dùng AI classify.\n"
+                f"• Cần: {MEMORY_AI_CLASSIFY_COST} Xu\n"
+                "Dùng /naptien để nạp thêm hoặc /memory_plan để xem gói.",
+                parse_mode="HTML",
+            )
+    ok, ai_data, error = memory_ai_classify(content, uid)
+    if not ok:
+        note_id = memory_create_note(uid, content)
+        memory_record_event(uid, "note_created_ai_failed", note_id=note_id, detail=error)
+        save_tool_test_result("memory_notes", "PASS", "note saved after AI classify fail", uid)
+        save_tool_test_result("memory_ai_classify", "FAIL", error or "AI classify failed", uid)
+        return await update.message.reply_text(
+            f"✅ Đã lưu ghi chú thường <code>#{note_id}</code>.\n\n"
+            f"⚠️ AI phân loại tạm lỗi: <code>{html.escape(error or 'unknown')}</code>\n"
+            "Bot không trừ Xu.",
+            parse_mode="HTML",
+        )
+    if charge_xu and not spend_fixed_credit(uid, charge_xu, "memory_ai_classify", f"note_ai classify cost={charge_xu}"):
+        note_id = memory_create_note(uid, content)
+        memory_record_event(uid, "note_created_ai_charge_failed", note_id=note_id, detail="saved as normal note after charge failed")
+        save_tool_test_result("memory_notes", "PASS", "note saved; charge failed after AI classify", uid)
+        return await update.message.reply_text(
+            f"✅ Đã lưu ghi chú thường <code>#{note_id}</code>.\n\n"
+            "⚠️ AI đã trả kết quả nhưng thanh toán Xu không hoàn tất, nên không lưu phân loại AI.",
+            parse_mode="HTML",
+        )
+    note_id = memory_create_note(uid, content, ai_data=ai_data)
+    if not is_admin_user(uid) and not charge_xu:
+        conn = db_connect()
+        try:
+            conn.execute(
+                "UPDATE memory_plans SET ai_classify_used=ai_classify_used+1, updated_at=? WHERE user_id=?",
+                (now_text(), str(uid)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    memory_record_event(uid, "note_created_ai", note_id=note_id, xu_delta=-charge_xu, detail=f"charge={charge_xu}")
+    save_tool_test_result("memory_notes", "PASS", "note AI saved", uid)
+    save_tool_test_result("memory_ai_classify", "PASS", "AI classify success", uid)
+    status = memory_status_payload(uid)
+    credits, _, _ = get_user(uid)
+    await update.message.reply_text(
+        f"✅ Đã lưu ghi chú AI <code>#{note_id}</code>.\n\n"
+        f"• Tiêu đề: <b>{html.escape(ai_data.get('title') or '')}</b>\n"
+        f"• Mục: <code>{html.escape(ai_data.get('category') or 'Khác')}</code>\n"
+        f"• Mức độ: <code>{html.escape(ai_data.get('priority') or 'normal')}</code>\n"
+        f"• Tags: <code>{html.escape(ai_data.get('tags') or '-')}</code>\n"
+        f"• AI quota còn lại: <b>{status['ai_remaining']}</b>\n"
+        f"• Đã trừ: <b>{charge_xu}</b> Xu\n"
+        f"💼 Còn lại: <b>{credits}</b> Xu",
+        parse_mode="HTML",
+    )
+
+async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    notes = memory_list_notes(uid, limit=10)
+    if not notes:
+        return await update.message.reply_text("🧠 Bạn chưa có ghi chú active nào.\n\nDùng /note <nội dung> để lưu.")
+    lines = ["🧠 <b>10 ghi chú gần nhất</b>", ""]
+    lines.extend(memory_format_note_item(note) for note in notes)
+    await reply_html_lines(update, lines)
+
+async def cmd_note_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    if not context.args or not str(context.args[0]).isdigit():
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/note_view &lt;id&gt;</code>", parse_mode="HTML")
+    note = memory_fetch_note(uid, int(context.args[0]))
+    if not note:
+        return await update.message.reply_text("⚠️ Không tìm thấy ghi chú của bạn hoặc ghi chú đã archive.")
+    text = (
+        f"🧠 <b>Ghi chú #{note['id']}</b>\n\n"
+        f"• Tiêu đề: <b>{html.escape(note.get('title') or '')}</b>\n"
+        f"• Mục: <code>{html.escape(note.get('category') or 'Khác')}</code>\n"
+        f"• Mức độ: <code>{html.escape(note.get('priority') or 'normal')}</code>\n"
+        f"• Tags: <code>{html.escape(note.get('tags') or '-')}</code>\n"
+        f"• Tạo lúc: <code>{html.escape(note.get('created_at') or '-')}</code>\n\n"
+        f"<b>Tóm tắt:</b>\n{html.escape(note.get('summary') or '')}\n\n"
+        f"<b>Nội dung:</b>\n{html.escape(note.get('content') or '')}"
+    )
+    await reply_html_lines(update, text.splitlines())
+
+async def cmd_search_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    keyword = " ".join(context.args).strip()
+    if not keyword:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/search_note &lt;từ khóa&gt;</code>", parse_mode="HTML")
+    like = f"%{keyword}%"
+    notes = memory_list_notes(uid, "(title LIKE ? OR content LIKE ? OR summary LIKE ? OR tags LIKE ? OR category LIKE ?)", (like, like, like, like, like), limit=15)
+    if not notes:
+        return await update.message.reply_text(f"🔎 Không tìm thấy ghi chú với từ khóa: {html.escape(keyword)}", parse_mode="HTML")
+    lines = [f"🔎 <b>Kết quả tìm: {html.escape(keyword)}</b>", ""]
+    lines.extend(memory_format_note_item(note) for note in notes)
+    await reply_html_lines(update, lines)
+
+async def cmd_note_tags(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            "SELECT tags, category, priority FROM memory_notes WHERE user_id=? AND status='active' AND is_archived=0 ORDER BY id DESC LIMIT 200",
+            (str(uid),),
+        ).fetchall()
+    finally:
+        conn.close()
+    tags: dict[str, int] = {}
+    categories: dict[str, int] = {}
+    priorities: dict[str, int] = {}
+    for tag_text, category, priority in rows:
+        for tag in re.split(r"[,;#]", str(tag_text or "")):
+            tag = tag.strip()
+            if tag:
+                tags[tag] = tags.get(tag, 0) + 1
+        if category:
+            categories[str(category)] = categories.get(str(category), 0) + 1
+        if priority:
+            priorities[str(priority)] = priorities.get(str(priority), 0) + 1
+    def top_items(data: dict[str, int]) -> str:
+        return "\n".join(f"• {html.escape(k)}: <b>{v}</b>" for k, v in sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]) or "• Chưa có"
+    await update.message.reply_text(
+        "🏷 <b>Memory Tags/Categories</b>\n\n"
+        "<b>Tags:</b>\n" + top_items(tags) + "\n\n"
+        "<b>Categories:</b>\n" + top_items(categories) + "\n\n"
+        "<b>Priorities:</b>\n" + top_items(priorities),
+        parse_mode="HTML",
+    )
+
+async def cmd_note_archive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    if not context.args or not str(context.args[0]).isdigit():
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/note_archive &lt;id&gt;</code>", parse_mode="HTML")
+    note_id = int(context.args[0])
+    note = memory_fetch_note(uid, note_id)
+    if not note:
+        return await update.message.reply_text("⚠️ Không tìm thấy ghi chú active của bạn.")
+    conn = db_connect()
+    try:
+        conn.execute("UPDATE memory_notes SET is_archived=1, status='archived', updated_at=? WHERE id=? AND user_id=?", (now_text(), note_id, str(uid)))
+        conn.commit()
+    finally:
+        conn.close()
+    memory_record_event(uid, "note_archived", note_id=note_id)
+    await update.message.reply_text(f"✅ Đã archive ghi chú <code>#{note_id}</code>.", parse_mode="HTML")
+
+async def cmd_note_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_note_archive(update, context)
+
+async def cmd_note_priority(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    if len(context.args) < 2 or not str(context.args[0]).isdigit():
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/note_priority &lt;id&gt; low|normal|important|urgent</code>", parse_mode="HTML")
+    note_id = int(context.args[0])
+    priority = str(context.args[1]).lower()
+    if priority not in MEMORY_PRIORITIES:
+        return await update.message.reply_text("⚠️ Priority hợp lệ: low, normal, important, urgent.")
+    if not memory_fetch_note(uid, note_id):
+        return await update.message.reply_text("⚠️ Không tìm thấy ghi chú active của bạn.")
+    conn = db_connect()
+    try:
+        conn.execute("UPDATE memory_notes SET priority=?, updated_at=? WHERE id=? AND user_id=?", (priority, now_text(), note_id, str(uid)))
+        conn.commit()
+    finally:
+        conn.close()
+    memory_record_event(uid, "note_priority_updated", note_id=note_id, detail=priority)
+    await update.message.reply_text(f"✅ Đã đổi mức độ ghi chú <code>#{note_id}</code> thành <code>{priority}</code>.", parse_mode="HTML")
+
+async def cmd_note_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    if len(context.args) < 2 or not str(context.args[0]).isdigit():
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/note_category &lt;id&gt; &lt;category&gt;</code>", parse_mode="HTML")
+    note_id = int(context.args[0])
+    category = " ".join(context.args[1:]).strip()[:80]
+    if not category:
+        return await update.message.reply_text("⚠️ Thiếu category.")
+    if not memory_fetch_note(uid, note_id):
+        return await update.message.reply_text("⚠️ Không tìm thấy ghi chú active của bạn.")
+    conn = db_connect()
+    try:
+        conn.execute("UPDATE memory_notes SET category=?, updated_at=? WHERE id=? AND user_id=?", (category, now_text(), note_id, str(uid)))
+        conn.commit()
+    finally:
+        conn.close()
+    memory_record_event(uid, "note_category_updated", note_id=note_id, detail=category)
+    await update.message.reply_text(f"✅ Đã đổi phân loại ghi chú <code>#{note_id}</code> thành <b>{html.escape(category)}</b>.", parse_mode="HTML")
+
+async def cmd_notes_important(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    notes = memory_list_notes(uid, "priority IN ('important','urgent')", (), limit=15)
+    if not notes:
+        return await update.message.reply_text("✅ Chưa có ghi chú important/urgent.")
+    lines = ["⭐ <b>Ghi chú quan trọng</b>", ""]
+    lines.extend(memory_format_note_item(note) for note in notes)
+    await reply_html_lines(update, lines)
+
+async def cmd_notes_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    category = " ".join(context.args).strip()
+    if not category:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/notes_category &lt;category&gt;</code>", parse_mode="HTML")
+    notes = memory_list_notes(uid, "category LIKE ?", (f"%{category}%",), limit=15)
+    if not notes:
+        return await update.message.reply_text(f"Không có ghi chú trong mục: {html.escape(category)}", parse_mode="HTML")
+    lines = [f"📂 <b>Ghi chú mục: {html.escape(category)}</b>", ""]
+    lines.extend(memory_format_note_item(note) for note in notes)
+    await reply_html_lines(update, lines)
+
+def memory_parse_time(args: list[str]) -> tuple[datetime | None, int, str]:
+    if not args:
+        return None, 0, "Thiếu thời gian."
+    now = memory_now()
+    first = str(args[0]).strip()
+    rel = re.match(r"^(\d+)(m|h|d)$", first.lower())
+    if rel:
+        amount = int(rel.group(1))
+        unit = rel.group(2)
+        delta = timedelta(minutes=amount) if unit == "m" else timedelta(hours=amount) if unit == "h" else timedelta(days=amount)
+        return now + delta, 1, ""
+    if len(args) >= 2:
+        joined = f"{args[0]} {args[1]}"
+        for fmt in ("%Y-%m-%d %H:%M", "%d-%m %H:%M"):
+            try:
+                parsed = datetime.strptime(joined, fmt)
+                if fmt.startswith("%d"):
+                    parsed = parsed.replace(year=now.year)
+                    if parsed <= now:
+                        parsed = parsed.replace(year=now.year + 1)
+                return parsed, 2, ""
+            except Exception:
+                pass
+    if re.match(r"^\d{1,2}:\d{2}$", first):
+        hour, minute = [int(x) for x in first.split(":", 1)]
+        if hour > 23 or minute > 59:
+            return None, 1, "Giờ không hợp lệ."
+        parsed = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if parsed <= now:
+            parsed += timedelta(days=1)
+        return parsed, 1, ""
+    return None, 0, "Không hiểu thời gian nhắc."
+
+def memory_weekday_index(value: str) -> int | None:
+    aliases = {
+        "mon": 0, "monday": 0, "t2": 0, "thu2": 0, "thứ2": 0,
+        "tue": 1, "tuesday": 1, "t3": 1, "thu3": 1, "thứ3": 1,
+        "wed": 2, "wednesday": 2, "t4": 2, "thu4": 2, "thứ4": 2,
+        "thu": 3, "thursday": 3, "t5": 3, "thu5": 3, "thứ5": 3,
+        "fri": 4, "friday": 4, "t6": 4, "thu6": 4, "thứ6": 4,
+        "sat": 5, "saturday": 5, "t7": 5, "thu7": 5, "thứ7": 5,
+        "sun": 6, "sunday": 6, "cn": 6, "chunhat": 6, "chủnhật": 6,
+    }
+    return aliases.get(str(value or "").lower().replace(" ", ""))
+
+def memory_month_last_day(year: int, month: int) -> int:
+    if month == 12:
+        next_month = datetime(year + 1, 1, 1)
+    else:
+        next_month = datetime(year, month + 1, 1)
+    return (next_month - timedelta(days=1)).day
+
+def memory_next_repeat_after(rule: str, base_dt: datetime | None) -> datetime | None:
+    rule = str(rule or "none").lower()
+    if rule not in MEMORY_REPEAT_RULES or rule == "none":
+        return None
+    now = memory_now()
+    base = base_dt or now
+    if rule == "daily":
+        nxt = base + timedelta(days=1)
+        while nxt <= now:
+            nxt += timedelta(days=1)
+        return nxt
+    if rule == "weekly":
+        nxt = base + timedelta(days=7)
+        while nxt <= now:
+            nxt += timedelta(days=7)
+        return nxt
+    if rule == "monthly":
+        year, month = base.year, base.month
+        while True:
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+            day = min(base.day, memory_month_last_day(year, month))
+            nxt = base.replace(year=year, month=month, day=day)
+            if nxt > now:
+                return nxt
+    if rule == "yearly":
+        year = base.year
+        while True:
+            year += 1
+            day = min(base.day, memory_month_last_day(year, base.month))
+            nxt = base.replace(year=year, day=day)
+            if nxt > now:
+                return nxt
+    return None
+
+def memory_create_reminder(user_id, remind_text: str, run_at: datetime, repeat_rule="none", note_id=0, title="") -> int:
+    repeat_rule = str(repeat_rule or "none").lower()
+    if repeat_rule not in MEMORY_REPEAT_RULES:
+        repeat_rule = "none"
+    title = memory_clean_title(title or remind_text)
+    run_text = memory_dt_text(run_at)
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO memory_reminders
+            (user_id, note_id, title, remind_text, remind_at, repeat_rule, timezone, status, last_sent_at, next_run_at, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (str(user_id), int(note_id or 0), title, str(remind_text or ""), run_text, repeat_rule, "Asia/Ho_Chi_Minh", "active", "", run_text, now_text(), now_text()),
+        )
+        reminder_id = int(cur.lastrowid)
+        conn.commit()
+        return reminder_id
+    finally:
+        conn.close()
+
+def memory_fetch_reminder(user_id, reminder_id: int) -> dict:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT id, user_id, note_id, title, remind_text, remind_at, repeat_rule, timezone, status, last_sent_at, next_run_at, created_at, updated_at
+            FROM memory_reminders WHERE id=? AND user_id=?""",
+            (int(reminder_id), str(user_id)),
+        ).fetchone()
+        if not row:
+            return {}
+        keys = ["id", "user_id", "note_id", "title", "remind_text", "remind_at", "repeat_rule", "timezone", "status", "last_sent_at", "next_run_at", "created_at", "updated_at"]
+        return dict(zip(keys, row))
+    finally:
+        conn.close()
+
+async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    run_at, consumed, error = memory_parse_time(list(context.args))
+    if not run_at:
+        return await update.message.reply_text(
+            "⚠️ Không hiểu thời gian nhắc.\n\nVí dụ: <code>/remind 30m gọi khách</code> hoặc <code>/remind 20:00 đăng bài</code>.",
+            parse_mode="HTML",
+        )
+    text = " ".join(context.args[consumed:]).strip()
+    if not text:
+        return await update.message.reply_text("⚠️ Thiếu nội dung nhắc.")
+    reminder_id = memory_create_reminder(uid, text, run_at)
+    memory_record_event(uid, "reminder_created", reminder_id=reminder_id, detail="none")
+    save_tool_test_result("memory_reminders", "PASS", "reminder created", uid)
+    await update.message.reply_text(
+        f"⏰ Đã đặt nhắc <code>#{reminder_id}</code>\n\n"
+        f"• Lúc: <code>{html.escape(memory_dt_text(run_at))}</code>\n"
+        f"• Nội dung: {html.escape(text[:500])}",
+        parse_mode="HTML",
+    )
+
+async def cmd_repeat_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    run_at, consumed, _ = memory_parse_time(list(context.args[:1]))
+    text = " ".join(context.args[consumed:]).strip()
+    if not run_at or not text:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/repeat_daily 08:00 &lt;nội dung&gt;</code>", parse_mode="HTML")
+    reminder_id = memory_create_reminder(uid, text, run_at, repeat_rule="daily")
+    memory_record_event(uid, "reminder_repeat_daily_created", reminder_id=reminder_id)
+    save_tool_test_result("memory_reminders", "PASS", "daily reminder created", uid)
+    await update.message.reply_text(f"✅ Đã tạo nhắc hằng ngày <code>#{reminder_id}</code> lúc <code>{memory_dt_text(run_at)}</code>.", parse_mode="HTML")
+
+async def cmd_repeat_weekly(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    if len(context.args) < 3:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/repeat_weekly mon 09:00 &lt;nội dung&gt;</code>", parse_mode="HTML")
+    weekday = memory_weekday_index(context.args[0])
+    run_at, consumed, _ = memory_parse_time([context.args[1]])
+    text = " ".join(context.args[2:]).strip()
+    if weekday is None or not run_at or not text:
+        return await update.message.reply_text("⚠️ Ví dụ: <code>/repeat_weekly mon 09:00 lên kế hoạch content</code>", parse_mode="HTML")
+    now = memory_now()
+    days_ahead = (weekday - now.weekday()) % 7
+    first_run = now.replace(hour=run_at.hour, minute=run_at.minute, second=0, microsecond=0) + timedelta(days=days_ahead)
+    if first_run <= now:
+        first_run += timedelta(days=7)
+    reminder_id = memory_create_reminder(uid, text, first_run, repeat_rule="weekly")
+    memory_record_event(uid, "reminder_repeat_weekly_created", reminder_id=reminder_id)
+    save_tool_test_result("memory_reminders", "PASS", "weekly reminder created", uid)
+    await update.message.reply_text(f"✅ Đã tạo nhắc hằng tuần <code>#{reminder_id}</code> lúc <code>{memory_dt_text(first_run)}</code>.", parse_mode="HTML")
+
+async def cmd_repeat_monthly(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    if len(context.args) < 3 or not str(context.args[0]).isdigit():
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/repeat_monthly 1 09:00 &lt;nội dung&gt;</code>", parse_mode="HTML")
+    day = max(1, min(31, int(context.args[0])))
+    time_dt, _, _ = memory_parse_time([context.args[1]])
+    text = " ".join(context.args[2:]).strip()
+    if not time_dt or not text:
+        return await update.message.reply_text("⚠️ Ví dụ: <code>/repeat_monthly 1 09:00 tổng kết doanh thu</code>", parse_mode="HTML")
+    now = memory_now()
+    year, month = now.year, now.month
+    while True:
+        use_day = min(day, memory_month_last_day(year, month))
+        first_run = datetime(year, month, use_day, time_dt.hour, time_dt.minute)
+        if first_run > now:
+            break
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    reminder_id = memory_create_reminder(uid, text, first_run, repeat_rule="monthly")
+    memory_record_event(uid, "reminder_repeat_monthly_created", reminder_id=reminder_id)
+    save_tool_test_result("memory_reminders", "PASS", "monthly reminder created", uid)
+    await update.message.reply_text(f"✅ Đã tạo nhắc hằng tháng <code>#{reminder_id}</code> lúc <code>{memory_dt_text(first_run)}</code>.", parse_mode="HTML")
+
+async def cmd_repeat_yearly(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    if len(context.args) < 3:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/repeat_yearly 20-11 08:00 &lt;nội dung&gt;</code>", parse_mode="HTML")
+    first_run, _, _ = memory_parse_time([context.args[0], context.args[1]])
+    text = " ".join(context.args[2:]).strip()
+    if not first_run or not text:
+        return await update.message.reply_text("⚠️ Ví dụ: <code>/repeat_yearly 20-11 08:00 chúc mừng sinh nhật khách VIP</code>", parse_mode="HTML")
+    reminder_id = memory_create_reminder(uid, text, first_run, repeat_rule="yearly")
+    memory_record_event(uid, "reminder_repeat_yearly_created", reminder_id=reminder_id)
+    save_tool_test_result("memory_reminders", "PASS", "yearly reminder created", uid)
+    await update.message.reply_text(f"✅ Đã tạo nhắc hằng năm <code>#{reminder_id}</code> lúc <code>{memory_dt_text(first_run)}</code>.", parse_mode="HTML")
+
+async def cmd_note_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    if len(context.args) < 2 or not str(context.args[0]).isdigit():
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/note_remind &lt;note_id&gt; &lt;thời_gian&gt;</code>", parse_mode="HTML")
+    note_id = int(context.args[0])
+    note = memory_fetch_note(uid, note_id)
+    if not note:
+        return await update.message.reply_text("⚠️ Không tìm thấy ghi chú active của bạn.")
+    run_at, consumed, _ = memory_parse_time(list(context.args[1:]))
+    if not run_at:
+        return await update.message.reply_text("⚠️ Ví dụ: <code>/note_remind 12 20:00</code>", parse_mode="HTML")
+    text = note.get("title") or note.get("summary") or note.get("content") or f"Ghi chú #{note_id}"
+    reminder_id = memory_create_reminder(uid, text, run_at, note_id=note_id, title=f"Ghi chú #{note_id}")
+    memory_record_event(uid, "note_reminder_created", note_id=note_id, reminder_id=reminder_id)
+    save_tool_test_result("memory_reminders", "PASS", "note reminder created", uid)
+    await update.message.reply_text(
+        f"⏰ Đã đặt nhắc cho ghi chú <code>#{note_id}</code> vào <code>{html.escape(memory_dt_text(run_at))}</code>.\n"
+        f"Reminder: <code>#{reminder_id}</code>",
+        parse_mode="HTML",
+    )
+
+def memory_list_reminders(user_id, admin_user_id=None, limit: int = 15) -> list[dict]:
+    target = str(admin_user_id if admin_user_id is not None else user_id)
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT id, user_id, note_id, title, remind_text, remind_at, repeat_rule, timezone, status, last_sent_at, next_run_at, created_at, updated_at
+            FROM memory_reminders WHERE user_id=? AND status IN ('active','paused')
+            ORDER BY status ASC, next_run_at ASC LIMIT ?""",
+            (target, int(limit)),
+        ).fetchall()
+        keys = ["id", "user_id", "note_id", "title", "remind_text", "remind_at", "repeat_rule", "timezone", "status", "last_sent_at", "next_run_at", "created_at", "updated_at"]
+        return [dict(zip(keys, row)) for row in rows]
+    finally:
+        conn.close()
+
+async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    reminders = memory_list_reminders(uid)
+    if not reminders:
+        return await update.message.reply_text("✅ Bạn chưa có reminder active/paused.")
+    lines = ["⏰ <b>Reminder đang bật</b>", ""]
+    for item in reminders:
+        note_part = f" | note #{item.get('note_id')}" if int(item.get("note_id") or 0) else ""
+        lines.append(
+            f"#{item['id']} — <code>{html.escape(item.get('status') or '')}</code> | <code>{html.escape(item.get('repeat_rule') or 'none')}</code>{note_part}\n"
+            f"  next: <code>{html.escape(item.get('next_run_at') or '-')}</code>\n"
+            f"  {html.escape((item.get('remind_text') or '')[:180])}"
+        )
+    await reply_html_lines(update, lines)
+
+async def memory_update_reminder_status(update: Update, context: ContextTypes.DEFAULT_TYPE, status: str):
+    uid = update.effective_user.id
+    if not await memory_require_access(update):
+        return
+    if not context.args or not str(context.args[0]).isdigit():
+        return await update.message.reply_text(f"⚠️ Cú pháp: <code>/{extract_command_name(update)} &lt;id&gt;</code>", parse_mode="HTML")
+    reminder_id = int(context.args[0])
+    reminder = memory_fetch_reminder(uid, reminder_id)
+    if not reminder:
+        return await update.message.reply_text("⚠️ Không tìm thấy reminder của bạn.")
+    next_run_at = reminder.get("next_run_at") or ""
+    if status == "active":
+        parsed = memory_parse_stored_dt(next_run_at)
+        if not parsed or parsed <= memory_now():
+            next_run_at = memory_dt_text(memory_now() + timedelta(minutes=5))
+    conn = db_connect()
+    try:
+        conn.execute(
+            "UPDATE memory_reminders SET status=?, next_run_at=?, updated_at=? WHERE id=? AND user_id=?",
+            (status, next_run_at, now_text(), reminder_id, str(uid)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    memory_record_event(uid, f"reminder_{status}", reminder_id=reminder_id)
+    await update.message.reply_text(f"✅ Reminder <code>#{reminder_id}</code> đã chuyển sang <code>{status}</code>.", parse_mode="HTML")
+
+async def cmd_reminder_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await memory_update_reminder_status(update, context, "done")
+
+async def cmd_reminder_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await memory_update_reminder_status(update, context, "cancelled")
+
+async def cmd_reminder_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await memory_update_reminder_status(update, context, "paused")
+
+async def cmd_reminder_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await memory_update_reminder_status(update, context, "active")
+
+async def cmd_memory_set_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    if len(context.args) < 2:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/memory_set_plan USER_ID free|lite|pro|vip</code>", parse_mode="HTML")
+    target_id = str(context.args[0]).strip()
+    plan = str(context.args[1]).lower().strip()
+    if plan not in MEMORY_PLANS:
+        return await update.message.reply_text("⚠️ Plan hợp lệ: free, lite, pro, vip.")
+    cfg = memory_plan_config(plan)
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO memory_plans
+            (user_id, plan, note_limit, storage_limit_mb, ai_classify_monthly_limit, ai_classify_used, renew_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                plan=excluded.plan,
+                note_limit=excluded.note_limit,
+                storage_limit_mb=excluded.storage_limit_mb,
+                ai_classify_monthly_limit=excluded.ai_classify_monthly_limit,
+                updated_at=excluded.updated_at""",
+            (target_id, plan, cfg["note_limit"], cfg["storage_limit_mb"], cfg["ai_classify_monthly_limit"], 0, memory_current_period_key(), now_text()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    memory_record_event(target_id, "admin_set_plan", detail=f"plan={plan}; admin={update.effective_user.id}")
+    await update.message.reply_text(
+        f"✅ Đã set Memory plan cho user <code>{html.escape(target_id)}</code>: <code>{plan}</code>.",
+        parse_mode="HTML",
+    )
+
+async def cmd_memory_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    if not context.args:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/memory_admin USER_ID</code>", parse_mode="HTML")
+    target_id = str(context.args[0]).strip()
+    status = memory_status_payload(target_id)
+    plan = status["plan"]
+    await update.message.reply_text(
+        "🧠 <b>Memory Admin</b>\n\n"
+        f"• User: <code>{html.escape(target_id)}</code>\n"
+        f"• Plan: <code>{html.escape(plan['plan'])}</code>\n"
+        f"• Notes: <b>{status['notes']}/{plan['note_limit']}</b>\n"
+        f"• Storage: <b>{status['storage_mb']:.2f}/{plan['storage_limit_mb']}MB</b>\n"
+        f"• AI used: <b>{int(plan['ai_classify_used'])}/{plan['ai_classify_monthly_limit']}</b>\n"
+        f"• Active reminders: <b>{status['active_reminders']}</b>\n\n"
+        "Không hiển thị nội dung note để giữ riêng tư.",
+        parse_mode="HTML",
+    )
+
+async def cmd_memory_reminder_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    if not context.args:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/memory_reminder_admin USER_ID</code>", parse_mode="HTML")
+    target_id = str(context.args[0]).strip()
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) FROM memory_reminders WHERE user_id=? GROUP BY status",
+            (target_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    counts = {str(status): int(count or 0) for status, count in rows}
+    await update.message.reply_text(
+        "⏰ <b>Memory Reminder Admin</b>\n\n"
+        f"• User: <code>{html.escape(target_id)}</code>\n"
+        f"• active: <b>{counts.get('active', 0)}</b>\n"
+        f"• paused: <b>{counts.get('paused', 0)}</b>\n"
+        f"• done: <b>{counts.get('done', 0)}</b>\n"
+        f"• cancelled: <b>{counts.get('cancelled', 0)}</b>\n\n"
+        "Không hiển thị nội dung reminder để giữ riêng tư.",
+        parse_mode="HTML",
+    )
+
+async def process_due_memory_reminders(bot):
+    now = memory_dt_text(memory_now())
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT id, user_id, note_id, title, remind_text, repeat_rule, next_run_at
+            FROM memory_reminders
+            WHERE status='active' AND next_run_at IS NOT NULL AND next_run_at!='' AND next_run_at<=?
+            ORDER BY next_run_at ASC LIMIT 25""",
+            (now,),
+        ).fetchall()
+    finally:
+        conn.close()
+    for reminder_id, user_id, note_id, title, remind_text, repeat_rule, next_run_at in rows:
+        try:
+            note_line = ""
+            if int(note_id or 0):
+                note_line = f"\nGhi chú #{int(note_id)}: {html.escape(str(title or '')[:160])}"
+            await bot.send_message(
+                chat_id=str(user_id),
+                text=(
+                    "⏰ <b>NHẮC NHỞ TOAN AAS</b>\n\n"
+                    f"{html.escape(str(remind_text or title or 'Nhắc việc'))}"
+                    f"{note_line}\n\n"
+                    "<b>Lệnh nhanh:</b>\n"
+                    f"• <code>/reminder_done {int(reminder_id)}</code>\n"
+                    f"• <code>/reminder_cancel {int(reminder_id)}</code>\n"
+                    + (f"• <code>/note_view {int(note_id)}</code>" if int(note_id or 0) else "")
+                ),
+                parse_mode="HTML",
+            )
+            base_dt = memory_parse_stored_dt(next_run_at) or memory_now()
+            next_dt = memory_next_repeat_after(repeat_rule, base_dt)
+            conn = db_connect()
+            try:
+                if next_dt:
+                    conn.execute(
+                        "UPDATE memory_reminders SET last_sent_at=?, next_run_at=?, updated_at=? WHERE id=?",
+                        (now_text(), memory_dt_text(next_dt), now_text(), int(reminder_id)),
+                    )
+                    status = "reminder_sent_repeat"
+                else:
+                    conn.execute(
+                        "UPDATE memory_reminders SET status='done', last_sent_at=?, updated_at=? WHERE id=?",
+                        (now_text(), now_text(), int(reminder_id)),
+                    )
+                    status = "reminder_sent_done"
+                conn.commit()
+            finally:
+                conn.close()
+            memory_record_event(user_id, status, note_id=note_id, reminder_id=reminder_id)
+            save_tool_test_result("memory_reminders", "PASS", "due reminder sent", user_id)
+        except Exception as e:
+            logger.warning(f"Memory reminder send failed id={reminder_id}: {e}")
+            memory_record_event(user_id, "reminder_send_failed", note_id=note_id, reminder_id=reminder_id, detail=str(e)[:220])
+
+async def memory_reminder_loop(bot):
+    await asyncio.sleep(20)
+    while True:
+        try:
+            await process_due_memory_reminders(bot)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"Memory reminder loop error: {e}")
+        await asyncio.sleep(60)
 
 def media_factory_ai(prompt: str, user_text: str, uid, fallback_text: str) -> str:
     try:
@@ -45966,6 +47224,7 @@ tg_app: Application = None
 tg_polling_task: asyncio.Task | None = None
 tg_webhook_watchdog_task: asyncio.Task | None = None
 tg_auto_backup_task: asyncio.Task | None = None
+tg_memory_reminder_task: asyncio.Task | None = None
 TELEGRAM_STARTUP_ERROR = ""
 
 async def run_polling_guarded():
@@ -45995,7 +47254,7 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED
     init_db()
     token_summary = telegram_token_runtime_summary()
     db_summary = runtime_db_status()
@@ -46105,6 +47364,35 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_downloader", cmd_tool_test_downloader))
     tg_app.add_handler(CommandHandler("voiceover", cmd_voiceover))
     tg_app.add_handler(CommandHandler("tts", cmd_voiceover))
+    tg_app.add_handler(CommandHandler("memory", cmd_memory))
+    tg_app.add_handler(CommandHandler("memory_plan", cmd_memory_plan))
+    tg_app.add_handler(CommandHandler("memory_status", cmd_memory_status))
+    tg_app.add_handler(CommandHandler("note", cmd_note))
+    tg_app.add_handler(CommandHandler("note_ai", cmd_note_ai))
+    tg_app.add_handler(CommandHandler("notes", cmd_notes))
+    tg_app.add_handler(CommandHandler("note_view", cmd_note_view))
+    tg_app.add_handler(CommandHandler("search_note", cmd_search_note))
+    tg_app.add_handler(CommandHandler("note_tags", cmd_note_tags))
+    tg_app.add_handler(CommandHandler("note_delete", cmd_note_delete))
+    tg_app.add_handler(CommandHandler("note_archive", cmd_note_archive))
+    tg_app.add_handler(CommandHandler("note_priority", cmd_note_priority))
+    tg_app.add_handler(CommandHandler("note_category", cmd_note_category))
+    tg_app.add_handler(CommandHandler("notes_important", cmd_notes_important))
+    tg_app.add_handler(CommandHandler("notes_category", cmd_notes_category))
+    tg_app.add_handler(CommandHandler("remind", cmd_remind))
+    tg_app.add_handler(CommandHandler("repeat_daily", cmd_repeat_daily))
+    tg_app.add_handler(CommandHandler("repeat_weekly", cmd_repeat_weekly))
+    tg_app.add_handler(CommandHandler("repeat_monthly", cmd_repeat_monthly))
+    tg_app.add_handler(CommandHandler("repeat_yearly", cmd_repeat_yearly))
+    tg_app.add_handler(CommandHandler("reminders", cmd_reminders))
+    tg_app.add_handler(CommandHandler("reminder_done", cmd_reminder_done))
+    tg_app.add_handler(CommandHandler("reminder_cancel", cmd_reminder_cancel))
+    tg_app.add_handler(CommandHandler("reminder_pause", cmd_reminder_pause))
+    tg_app.add_handler(CommandHandler("reminder_resume", cmd_reminder_resume))
+    tg_app.add_handler(CommandHandler("note_remind", cmd_note_remind))
+    tg_app.add_handler(CommandHandler("memory_set_plan", cmd_memory_set_plan))
+    tg_app.add_handler(CommandHandler("memory_admin", cmd_memory_admin))
+    tg_app.add_handler(CommandHandler("memory_reminder_admin", cmd_memory_reminder_admin))
     tg_app.add_handler(CommandHandler("doc_tools", cmd_doc_tools))
     tg_app.add_handler(CommandHandler("pdf_to_word", cmd_pdf_to_word))
     tg_app.add_handler(CommandHandler("image_to_pdf", cmd_image_to_pdf))
@@ -46566,6 +47854,7 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(6 * 3600)
 
         tg_auto_backup_task = asyncio.create_task(auto_backup_loop())
+        tg_memory_reminder_task = asyncio.create_task(memory_reminder_loop(tg_app.bot))
     except Exception as e:
         TELEGRAM_STARTUP_ERROR = str(e)
         ACTIVE_TELEGRAM_UPDATE_MODE = "telegram_startup_error"
@@ -46584,6 +47873,12 @@ async def lifespan(app: FastAPI):
         tg_auto_backup_task.cancel()
         try:
             await tg_auto_backup_task
+        except asyncio.CancelledError:
+            pass
+    if tg_memory_reminder_task:
+        tg_memory_reminder_task.cancel()
+        try:
+            await tg_memory_reminder_task
         except asyncio.CancelledError:
             pass
     if tg_app and telegram_started:
