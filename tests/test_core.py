@@ -274,6 +274,15 @@ def test_payos_create_payment_signature_data_order(monkeypatch):
     assert bot.build_payos_signature_data(payload, "sorted_all_payload_keys") == expected
 
 
+def test_resolve_payment_package_arg_for_payos_debug():
+    assert bot.resolve_payment_package_arg("10k")[0] == "10k"
+    assert bot.resolve_payment_package_arg("10000")[0] == "10k"
+    assert bot.resolve_payment_package_arg("50k")[0] == "50k"
+    assert bot.resolve_payment_package_arg("50000")[0] == "50k"
+    assert bot.resolve_payment_package_arg(None)[0] == "50k"
+    assert bot.resolve_payment_package_arg("99999") is None
+
+
 def test_payos_paid_order_applies_first30_once(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
