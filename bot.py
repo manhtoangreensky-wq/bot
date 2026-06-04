@@ -23568,6 +23568,11 @@ def get_last_user_file(user_id) -> dict:
     return dict(info)
 LAST_MEDIA_CACHE_TTL_SECONDS = 120
 LAST_MEDIA_BY_USER: dict = {}
+LAST_AUDIO_FILE = LAST_MEDIA_BY_USER
+
+def is_audio_timeout_error(error) -> bool:
+    value = f"{type(error).__name__}: {error}".lower()
+    return any(marker in value for marker in ("timedout", "timed out", "timeout", "readtimeout"))
 
 VOICE_FREE_COST  = VOICE_BASE_COST
 IMAGE_FREE_COST  = IMAGE_REMOVE_BG_BASE_COST
@@ -23636,7 +23641,18 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
             "file_size": int(getattr(media, "file_size", 0) or 0),
             "created_at": "",
         }
-        file_obj = await media.get_file()
+        try:
+            file_obj = await media.get_file()
+        except Exception as e:
+            logger.warning(f"audio media get_file failed: {provider_error_summary(e)}")
+            meta.update({
+                "source": source,
+                "content_type": meta.get("mime_type") or "application/octet-stream",
+                "bytes": b"",
+                "error": "telegram_timeout" if is_audio_timeout_error(e) else "telegram_download_error",
+                "error_detail": provider_error_summary(e),
+            })
+            return meta
     else:
         cache = LAST_MEDIA_BY_USER.get(str(update.effective_user.id if update.effective_user else ""))
         if not cache:
@@ -23646,7 +23662,18 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
             return None
         source = "last_media"
         meta = dict(cache)
-        file_obj = await context.bot.get_file(meta.get("file_id") or "")
+        try:
+            file_obj = await context.bot.get_file(meta.get("file_id") or "")
+        except Exception as e:
+            logger.warning(f"cached audio get_file failed: {provider_error_summary(e)}")
+            meta.update({
+                "source": source,
+                "content_type": meta.get("mime_type") or "application/octet-stream",
+                "bytes": b"",
+                "error": "telegram_timeout" if is_audio_timeout_error(e) else "telegram_download_error",
+                "error_detail": provider_error_summary(e),
+            })
+            return meta
     meta.update({
         "source": source,
         "content_type": meta.get("mime_type") or "application/octet-stream",
@@ -23654,7 +23681,14 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
     if int(meta.get("file_size", 0) or 0) > 15 * 1024 * 1024:
         meta["bytes"] = b""
         return meta
-    file_bytes = bytes(await file_obj.download_as_bytearray())
+    try:
+        file_bytes = bytes(await file_obj.download_as_bytearray())
+    except Exception as e:
+        logger.warning(f"audio download failed: {provider_error_summary(e)}")
+        meta["bytes"] = b""
+        meta["error"] = "telegram_timeout" if is_audio_timeout_error(e) else "telegram_download_error"
+        meta["error_detail"] = provider_error_summary(e)
+        return meta
     meta["bytes"] = file_bytes
     return meta
 
@@ -28194,6 +28228,10 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         message_text.startswith("/image_to_pdf")
         or ('unsupported start tag "yêu"' in error_text.lower())
     )
+    audio_timeout_safe_error = (
+        is_audio_timeout_error(error)
+        and message_text.startswith(("/translate_voice", "/translate_audio", "/transcribe"))
+    )
     if error:
         logger.error(
             "Telegram handler error\n%s",
@@ -28205,12 +28243,14 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     try:
         if isinstance(update, Update) and update.effective_chat:
             text = (
+                TRANSLATE_AUDIO_TIMEOUT_TEXT if audio_timeout_safe_error else
                 "❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu. Vui lòng thử lại sau."
-                if image_to_pdf_safe_error
-                else "❌ Có lỗi khi xử lý lệnh. Bot chưa trừ Xu. Vui lòng thử lại sau."
+                if image_to_pdf_safe_error else
+                "❌ Có lỗi khi xử lý lệnh. Bot chưa trừ Xu. Vui lòng thử lại sau."
             )
             if (
                 not image_to_pdf_safe_error
+                and not audio_timeout_safe_error
                 and update.effective_user
                 and is_admin_or_owner(update.effective_user.id)
             ):
@@ -28218,13 +28258,13 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=text,
-                parse_mode=None if image_to_pdf_safe_error else "HTML",
+                parse_mode=None if (image_to_pdf_safe_error or audio_timeout_safe_error) else "HTML",
             )
     except Exception:
         logger.exception("Failed to notify user about Telegram handler error")
 
     try:
-        if ADMIN_ID and not image_to_pdf_safe_error:
+        if ADMIN_ID and not image_to_pdf_safe_error and not audio_timeout_safe_error:
             await context.bot.send_message(
                 chat_id=int(ADMIN_ID),
                 text=(
@@ -29036,6 +29076,10 @@ TRANSLATE_FILE_PROVIDER_ERROR_TEXT = "Dịch file đang lỗi tạm thời hoặ
 TRANSLATE_AUDIO_MISSING_STT_TEXT = "Chưa xử lý được audio vì STT chưa cấu hình hoặc đang admin test. Bot chưa trừ Xu."
 TRANSLATE_AUDIO_ERROR_TEXT = "Chưa xử lý được audio. Bot chưa trừ Xu."
 TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT = "Đã bóc băng được nhưng dịch đang lỗi tạm thời. Bot chưa trừ Xu phần dịch."
+TRANSLATE_AUDIO_TIMEOUT_TEXT = (
+    "⚠️ Audio xử lý quá lâu hoặc kết nối tạm thời bị gián đoạn.\n"
+    "Bot chưa trừ Xu. Vui lòng gửi lại audio ngắn hơn hoặc thử lại sau."
+)
 
 def translate_voice_missing_target_text() -> str:
     return (
@@ -29153,7 +29197,10 @@ async def cmd_translate_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(TRANSLATE_FILE_PROVIDER_ERROR_TEXT)
 
 async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    target = normalize_translate_target((context.args or [""])[0])
+    raw_target = str((context.args or [""])[0] if context.args else "").strip()
+    if not raw_target:
+        return await update.message.reply_text(translate_voice_missing_target_text())
+    target = normalize_translate_target(raw_target)
     if not target:
         return await update.message.reply_text(translate_voice_missing_target_text())
     if not DEEPGRAM_API_KEY:
@@ -29161,6 +29208,11 @@ async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE
     media_info = await resolve_stt_test_media(update, context)
     if not media_info:
         return await update.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ <code>/translate_voice en</code> trong vòng 2 phút.", parse_mode="HTML")
+    if media_info.get("error"):
+        return await update.message.reply_text(
+            TRANSLATE_AUDIO_TIMEOUT_TEXT
+            if media_info.get("error") == "telegram_timeout" else TRANSLATE_AUDIO_ERROR_TEXT
+        )
     if int(media_info.get("file_size", 0) or 0) > 15 * 1024 * 1024 or not media_info.get("bytes"):
         return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
     try:
@@ -29239,6 +29291,11 @@ async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not media_info:
         return await update.message.reply_text(
             "⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ /transcribe trong vòng 2 phút."
+        )
+    if media_info.get("error"):
+        return await update.message.reply_text(
+            TRANSLATE_AUDIO_TIMEOUT_TEXT
+            if media_info.get("error") == "telegram_timeout" else TRANSLATE_AUDIO_ERROR_TEXT
         )
     file_size = int(media_info.get("file_size", 0) or 0)
     if file_size > 15 * 1024 * 1024 or not media_info.get("bytes"):
