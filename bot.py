@@ -2581,10 +2581,16 @@ def payos_checkout_unavailable_text(pkg_key: str, amount: int, order_code: int, 
 
 def payos_unavailable_keyboard(pkg_key: str, uid: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔁 Thử lại PayOS", callback_data=f"pkg|{pkg_key}|{uid}")],
-        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=f"pkg|manual_{pkg_key}|{uid}")],
+        [InlineKeyboardButton("🔁 Thử lại PayOS", callback_data=payos_package_callback_data(pkg_key, uid))],
+        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data(pkg_key, uid))],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main_topup")],
     ])
+
+def payos_package_callback_data(pkg_key: str, uid) -> str:
+    return f"payos_pkg|{pkg_key}|{uid}"
+
+def manual_package_callback_data(pkg_key: str, uid) -> str:
+    return f"manual|start|{pkg_key}|{uid}"
 
 PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT = "standard_sorted"
 PAYOS_CREATE_SIGNATURE_FIELDS = ("amount", "cancelUrl", "description", "orderCode", "returnUrl")
@@ -23922,11 +23928,11 @@ def provider_keyboard(service: str, uid: int, cost: int) -> InlineKeyboardMarkup
 def build_topup_keyboard(uid: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("💳 Nạp 50k", callback_data=f"pkg|50k|{uid}"),
-            InlineKeyboardButton("⭐ Nạp 100k", callback_data=f"pkg|100k|{uid}"),
+            InlineKeyboardButton("💳 Nạp 50k", callback_data=payos_package_callback_data("50k", uid)),
+            InlineKeyboardButton("⭐ Nạp 100k", callback_data=payos_package_callback_data("100k", uid)),
         ],
         [
-            InlineKeyboardButton("🚀 Nạp 200k", callback_data=f"pkg|200k|{uid}"),
+            InlineKeyboardButton("🚀 Nạp 200k", callback_data=payos_package_callback_data("200k", uid)),
             InlineKeyboardButton("📦 Xem tất cả gói", callback_data="menu|billing"),
         ],
     ])
@@ -24487,6 +24493,58 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode="HTML",
             reply_markup=payos_unavailable_keyboard(pkg_key, uid),
         )
+
+async def handle_manual_package_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split("|")
+    if len(parts) not in {3, 4}:
+        return
+    _, action, pkg_key, *rest = parts
+    if action != "start":
+        return
+    uid = int(rest[0]) if rest and str(rest[0]).isdigit() else int(query.from_user.id)
+    if query.from_user.id != uid:
+        await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+        return
+    if pkg_key in PAYMENT_PACKAGES:
+        pkg = PAYMENT_PACKAGES[pkg_key]
+        amount = int(pkg["amount"])
+        get_user(uid, query.from_user.first_name or "Manual payment user")
+        package_credit = calculate_package_credit_for_user(uid, amount)
+        base_xu = int(package_credit.get("base_xu") or pkg["xu"])
+        launch_preview = int(package_credit.get("launch_bonus_xu") or 0)
+        xu = int(package_credit.get("total_xu") or base_xu)
+        order_code = generate_order_code()
+        create_order(
+            order_code,
+            uid,
+            amount,
+            xu,
+            base_xu=base_xu,
+            launch_bonus_xu=launch_preview,
+            package_amount_vnd=amount,
+        )
+        set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=pkg_key)
+        await query.edit_message_text(
+            manual_payment_text(uid, amount, xu, order_code, "Bạn đã chọn nạp thủ công."),
+            parse_mode="HTML",
+        )
+        try:
+            await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=manual_qr_url(uid, amount, order_code),
+                caption="🏦 QR thủ công theo đúng số tiền và nội dung chuyển khoản.",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"Manual QR callback send error: {e}")
+        return
+    set_manual_bill_state(uid, order_code="MANUAL")
+    return await query.edit_message_text(
+        manual_custom_payment_text(uid, "Bạn đã chọn nạp thủ công."),
+        parse_mode="HTML",
+    )
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 def is_admin_user(user_id) -> bool:
@@ -25811,7 +25869,7 @@ async def safe_mode_callback_guard(update: Update, context: ContextTypes.DEFAULT
     reason = ""
     if state.get("emergency_lock"):
         reason = "emergency"
-    elif state.get("payment_freeze") and data.startswith("pkg|"):
+    elif state.get("payment_freeze") and data.startswith(("pkg|", "payos_pkg|", "manual|")):
         reason = ""
     elif (state.get("tool_freeze") or state.get("provider_freeze") or state.get("maintenance_mode")) and data.startswith(("prov|", "job|", "pipe|", "trend|", "creative|", "task|")):
         reason = "tool_freeze"
@@ -33669,6 +33727,43 @@ def openai_image_disabled_text(kind: str = "generation") -> str:
         return "OpenAI Image Edit đang disabled. Set ENABLE_OPENAI_IMAGE_EDIT=1 để admin test."
     return "OpenAI Image đang disabled. Set ENABLE_OPENAI_IMAGE=1 để admin test."
 
+def image_edit_policy_block_reason(instruction: str) -> str:
+    text = str(instruction or "").strip().lower()
+    if not text:
+        return ""
+    identity_markers = (
+        "deepfake", "giả mạo danh tính", "mạo danh", "clone mặt", "clone khuôn mặt",
+        "fake face", "impersonate", "identity fraud",
+    )
+    if any(marker in text for marker in identity_markers):
+        return "Không hỗ trợ chỉnh ảnh theo hướng giả mạo danh tính/deepfake."
+    sensitive_doc_markers = (
+        "bill", "biên lai", "chứng từ", "sao kê", "giao dịch", "chuyển khoản",
+        "hóa đơn", "hoá đơn", "invoice", "receipt", "bank statement",
+        "cccd", "cmnd", "căn cước", "hộ chiếu", "passport", "bằng cấp", "giấy tờ",
+    )
+    manipulation_markers = (
+        "fake", "giả", "làm thật", "trông thật", "sửa", "đổi", "thay", "xóa",
+        "xoá", "tăng", "giảm", "che", "ẩn", "remove", "edit", "change",
+    )
+    if any(marker in text for marker in sensitive_doc_markers) and any(marker in text for marker in manipulation_markers):
+        return "Không hỗ trợ chỉnh sửa bill/chứng từ/giấy tờ/sao kê hoặc tài liệu giao dịch."
+    return ""
+
+def reply_image_file_id_for_edit(reply) -> tuple[str, str]:
+    if not reply:
+        return "", ""
+    if getattr(reply, "photo", None):
+        return reply.photo[-1].file_id, "source.png"
+    doc = getattr(reply, "document", None)
+    if doc:
+        name = doc.file_name or "source_image.png"
+        mime = (doc.mime_type or "").lower()
+        ext = os.path.splitext(name.lower())[1]
+        if mime.startswith("image/") or ext in {".jpg", ".jpeg", ".png", ".webp"}:
+            return doc.file_id, name
+    return "", ""
+
 async def cmd_tool_test_ai_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -33805,10 +33900,18 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     instruction = media_factory_topic_from_args(context)
     if not instruction:
         return await update.message.reply_text("⚠️ Cú pháp: reply ảnh rồi gõ /ai_image_edit <yêu cầu sửa ảnh>")
+    blocked_reason = image_edit_policy_block_reason(instruction)
+    if blocked_reason:
+        return await update.message.reply_text(
+            "⛔ <b>Yêu cầu chỉnh ảnh bị từ chối</b>\n\n"
+            f"{html.escape(blocked_reason)}\n\n"
+            "TOAN AAS chỉ hỗ trợ chỉnh ảnh sản phẩm/nền/màu/ánh sáng/bố cục/xóa vật thể thông thường hợp lệ.",
+            parse_mode="HTML",
+        )
     reply = update.message.reply_to_message if update.message else None
-    has_reply_photo = bool(reply and getattr(reply, "photo", None))
-    if not has_reply_photo:
-        return await update.message.reply_text("⚠️ Hãy reply một ảnh rồi gõ /ai_image_edit <yêu cầu sửa ảnh>.")
+    source_file_id, source_name = reply_image_file_id_for_edit(reply)
+    if not source_file_id:
+        return await update.message.reply_text("⚠️ Hãy reply ảnh dạng photo hoặc file ảnh jpg/jpeg/png/webp rồi gõ /ai_image_edit <yêu cầu sửa ảnh>.")
     if not ENABLE_OPENAI_IMAGE_EDIT or not is_feature_enabled("image_openai_edit", uid, default=False):
         return await update.message.reply_text(
             admin_first_guard_message("AI Image Edit", "/image_prompt <chủ đề>"),
@@ -33820,12 +33923,11 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     charged = not is_admin_user(uid)
     try:
-        photo_size = reply.photo[-1]
-        tg_file = await context.bot.get_file(photo_size.file_id)
+        tg_file = await context.bot.get_file(source_file_id)
         image_file = io.BytesIO()
         await tg_file.download_to_memory(out=image_file)
         image_file.seek(0)
-        image_file.name = "source.png"
+        image_file.name = source_name or "source.png"
         safe_prompt = (
             f"{instruction}\n\n"
             "Edit safely and keep the result realistic. Do not add watermark, fake claims, or deceptive text."
@@ -34977,13 +35079,13 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👇 <b>Vui lòng click chọn gói cước mong muốn dưới đây:</b>"
     )
     buttons = [
-        [InlineKeyboardButton("🧪 Gói Dùng Thử (10k)", callback_data=f"pkg|10k|{uid}")],
-        [InlineKeyboardButton("📦 Gói Nhỏ (20k)", callback_data=f"pkg|20k|{uid}")],
-        [InlineKeyboardButton("⚡ Gói Trung (50k)", callback_data=f"pkg|50k|{uid}")],
-        [InlineKeyboardButton("⭐ Gói Tiêu Chuẩn (100k)", callback_data=f"pkg|100k|{uid}")],
-        [InlineKeyboardButton("🚀 Gói Nâng Cao (200k)", callback_data=f"pkg|200k|{uid}")],
-        [InlineKeyboardButton("🏢 Gói Doanh Nghiệp (500k)", callback_data=f"pkg|500k|{uid}")],
-        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=f"pkg|manual_custom|{uid}")],
+        [InlineKeyboardButton("🧪 Gói Dùng Thử (10k)", callback_data=payos_package_callback_data("10k", uid))],
+        [InlineKeyboardButton("📦 Gói Nhỏ (20k)", callback_data=payos_package_callback_data("20k", uid))],
+        [InlineKeyboardButton("⚡ Gói Trung (50k)", callback_data=payos_package_callback_data("50k", uid))],
+        [InlineKeyboardButton("⭐ Gói Tiêu Chuẩn (100k)", callback_data=payos_package_callback_data("100k", uid))],
+        [InlineKeyboardButton("🚀 Gói Nâng Cao (200k)", callback_data=payos_package_callback_data("200k", uid))],
+        [InlineKeyboardButton("🏢 Gói Doanh Nghiệp (500k)", callback_data=payos_package_callback_data("500k", uid))],
+        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data("manual_custom", uid))],
     ]
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -49842,7 +49944,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
-    tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^pkg\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_manual_package_choice, pattern=r"^manual\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^(payos_pkg|pkg)\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_job_callback, pattern=r"^job\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_pipeline_callback, pattern=r"^pipe\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_callback, pattern=r"^trend\|"))

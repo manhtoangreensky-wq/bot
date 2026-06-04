@@ -70,9 +70,9 @@ def test_admin_menu_contains_grouped_operator_and_system():
 def test_topup_keyboard_preserves_package_callbacks():
     keyboard = bot.build_topup_keyboard(123)
     callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
-    assert "pkg|50k|123" in callbacks
-    assert "pkg|100k|123" in callbacks
-    assert "pkg|200k|123" in callbacks
+    assert "payos_pkg|50k|123" in callbacks
+    assert "payos_pkg|100k|123" in callbacks
+    assert "payos_pkg|200k|123" in callbacks
     assert "menu|billing" in callbacks
 
 
