@@ -965,7 +965,108 @@ Important:
 
 ---
 
-# 18. Kết luận
+# 18. Goal sau khi Bot.py ổn định - TOAN AAS Master Expansion
+
+Phần này là nguyên tắc bắt buộc cho giai đoạn sau, dùng khi mở chat mới hoặc bắt đầu phase lớn. Codex phải đọc kỹ Master Goal Plan V4/V4.1 trước khi làm.
+
+## 18.1. Goal Gate bắt buộc trước khi mở kế hoạch lớn
+
+Chỉ bắt đầu kế hoạch lớn khi bot chính TOAN AAS Bot V1 đã qua đủ Goal Gate:
+
+- `/start` sạch.
+- `/help` sạch.
+- `/naptien` hoạt động.
+- PayOS hoặc manual QR fallback hoạt động.
+- Payment content dùng `AAS`, không còn `DAAS`.
+- Trial 200 Xu hoạt động.
+- Pricing, Launch Bonus, Promo, Gift rõ.
+- `/film`, `/growth_ai`, `/campaign_report` hoạt động.
+- `/providers`, `/backup_db`, `/sales_ready` hoạt động.
+- Website đúng `@toanaasbot`.
+- Không public affiliate vault.
+- Không public auto publish.
+- Không public ads management.
+- `python -m py_compile bot.py` PASS.
+- Git clean.
+- Có ít nhất 1 test nạp thật hoặc manual fallback xác nhận.
+
+Nếu chưa đạt đủ các mục trên, quay lại sửa bot chính. Không làm kế hoạch lớn.
+
+## 18.2. Không nhồi kế hoạch lớn vào bot.py chính
+
+Sau khi đạt Goal Gate, không tiếp tục nhồi tính năng lớn vào `bot.py` chính. Phải tạo branch, project hoặc sandbox riêng cho kế hoạch lớn.
+
+Bot chính giữ vai trò Stable Revenue Bot:
+
+- AI Tools.
+- Video Factory Lite.
+- Nạp Xu / PayOS / manual fallback.
+- Promo / Gift / Launch Bonus.
+- Khách tự đăng nội dung.
+- Bán thử và tạo doanh thu.
+
+## 18.3. Phase 2 - Sandbox Affiliate / Publish / Risk Checker
+
+Mục tiêu:
+
+1. Thiết kế Affiliate Vault riêng, không public mặc định.
+2. Thiết kế Customer Publish Workflow có approval gate.
+3. Thiết kế Platform Risk Checker cho Facebook, TikTok, YouTube, Instagram, Threads.
+4. Thiết kế Admin Review Queue.
+5. Thiết kế Publish Queue.
+6. Thiết kế Audit Log cho mọi hành động.
+7. Thiết kế Permission Model: admin, staff, customer.
+8. Không auto publish nếu chưa có approval.
+9. Không lấy password khách.
+10. Không giữ thẻ thanh toán khách.
+11. Không chạy ads hộ khách nếu chưa có module riêng, phí riêng, hợp đồng/phạm vi trách nhiệm riêng.
+
+## 18.4. Phase 3 - Core Backend / Worker / Dashboard
+
+Mục tiêu:
+
+1. Tách Core Backend khỏi Telegram bot.
+2. Chuẩn bị FastAPI backend riêng.
+3. Chuẩn bị PostgreSQL khi cần.
+4. Thiết kế Worker Queue.
+5. Thiết kế Admin Dashboard nhẹ.
+6. Thiết kế Customer Portal cơ bản.
+7. Giữ Telegram bot làm command/control interface.
+8. Không phá bot chính đang tạo doanh thu.
+
+## 18.5. Phase 4 - ELV / Device Ops / SaaS
+
+Mục tiêu:
+
+1. Project OS.
+2. CRM.
+3. Device inventory.
+4. Installation jobs.
+5. Maintenance schedule.
+6. Warranty tracking.
+7. Technician assignment.
+8. Quotation.
+9. Acceptance report PDF.
+10. SaaS/ERP Automation.
+
+## 18.6. Quy tắc Codex bắt buộc
+
+- Plan First trước khi sửa.
+- Không rewrite toàn bộ `bot.py`.
+- Không `DROP TABLE`.
+- Không xóa DB.
+- Không hardcode secret.
+- Không log secret.
+- Không sửa PayOS/callback nếu không có yêu cầu.
+- Không public affiliate/publish/ads cho khách.
+- Mọi module rủi ro phải admin-first.
+- Chạy test sau code.
+- Chạy `python -m py_compile bot.py` nếu có chạm `bot.py`.
+- Báo ship report: file sửa, logic thêm, test chạy, rủi ro còn lại, commit hash.
+
+---
+
+# 19. Kết luận
 
 TOAN AAS không được chệch khỏi kế hoạch ban đầu. Kế hoạch ban đầu là xây một hệ sinh thái lớn, nhưng phải bắt đầu bằng một bot nhỏ, chắc, kiếm được tiền. Nếu làm thực tế mà thấy chệch hướng, phải sửa ngay vì mỗi chỗ lệch có thể mở ra lỗ hổng: lỗ hổng bảo mật, lỗ hổng thanh toán, lỗ hổng dữ liệu, lỗ hổng pháp lý, lỗ hổng vận hành, lỗ hổng niềm tin khách hàng.
 

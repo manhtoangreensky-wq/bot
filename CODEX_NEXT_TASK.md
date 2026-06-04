@@ -254,6 +254,51 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
 - Keep customer publishing, affiliate vault and ads automation hidden/internal.
 - Do not build the big TOAN AAS platform plan until the current bot is Sales Ready.
 
+## Master Expansion Goal After Bot.py Is Stable
+
+Codex must read `docs/TOAN_AAS_MASTER_GOAL_PLAN_V4_4000_WORDS_CODEX_READY.md` before starting the large TOAN AAS expansion.
+
+Only start the large plan after TOAN AAS Bot V1 passes the Goal Gate:
+
+- `/start` clean.
+- `/help` clean.
+- `/naptien` works.
+- PayOS or manual QR fallback works.
+- Payment content uses `AAS`, not `DAAS`.
+- Trial 200 Xu works.
+- Pricing, Launch Bonus, Promo and Gift are clear.
+- `/film`, `/growth_ai`, `/campaign_report` work.
+- `/providers`, `/backup_db`, `/sales_ready` work.
+- Website points to `@toanaasbot`.
+- Affiliate vault is not public.
+- Auto publish is not public.
+- Ads management is not public.
+- `python -m py_compile bot.py` PASS.
+- Git clean.
+- At least 1 real payment test or confirmed manual fallback.
+
+After Goal Gate:
+
+- Do not add large platform features into production `bot.py`.
+- Create a branch/project/sandbox for the big plan.
+- Phase 2: Sandbox Affiliate Vault, Publish Workflow, Platform Risk Checker, Admin Review Queue, Publish Queue, Audit Log, Permission Model.
+- Phase 3: Core Backend, Worker Queue, Admin Dashboard, Customer Portal, PostgreSQL readiness.
+- Phase 4: ELV / Device Ops / SaaS with Project OS, CRM, inventory, jobs, maintenance, warranty, technicians, quotation and acceptance report.
+
+Required Codex rules:
+
+- Plan First before code.
+- Do not rewrite all of `bot.py`.
+- Do not `DROP TABLE`.
+- Do not delete DB data.
+- Do not hardcode or log secrets.
+- Do not edit PayOS/callback unless explicitly requested.
+- Do not public affiliate/publish/ads for customers.
+- Risky modules must be admin-first.
+- Run tests after code.
+- Run `python -m py_compile bot.py` if `bot.py` is touched.
+- Ship report must include files changed, logic added, tests, remaining risks and commit hash.
+
 Manual sequence:
 
 ```text
