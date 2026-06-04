@@ -24177,9 +24177,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
             if not ok:
                 refund_charged_credit(uid, image_free_charged, "refund", "", "Hoàn gói tách nền tiết kiệm do lỗi", image_free_charged > 0)
                 await query.edit_message_text(
-                    "❌ Provider trả lỗi hoặc file không phải ảnh hợp lệ.\n"
-                    "✅ Xu đã hoàn lại.\n"
-                    "Admin kiểm tra quota/API key/provider."
+                    "❌ Tách nền đang admin test/chưa mở public hoặc provider đang lỗi.\n"
+                    "Bot chưa trừ Xu. Vui lòng thử lại sau."
                 )
         else:
             await query.edit_message_text("⏳ <i>Đang tách nền (Gói Cao Cấp)...</i>", parse_mode="HTML")
@@ -24284,9 +24283,8 @@ async def handle_provider_choice(update: Update, context: ContextTypes.DEFAULT_T
                     if not premium_refunded:
                         refund_charged_credit(uid, cost, "refund", "", "Hoàn phí ảnh cao cấp do lỗi", premium_charged)
                     await query.edit_message_text(
-                        "❌ Provider trả lỗi hoặc file không phải ảnh hợp lệ.\n"
-                        "✅ Xu đã hoàn lại.\n"
-                        "Admin kiểm tra quota/API key/provider."
+                        "❌ Tách nền đang admin test/chưa mở public hoặc provider đang lỗi.\n"
+                        "Bot chưa trừ Xu. Vui lòng thử lại sau."
                     )
 
 
@@ -28364,7 +28362,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = current_system_mode()
     payos_debug_status = (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper()
     payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
-    payos_dynamic_status = "working" if payos_debug_status == "PASS" and payos_checkout_url else "NEED DEBUG"
+    payos_dynamic_status = "working" if payos_debug_status == "PASS" else "NEED DEBUG"
     deepgram_status = "configured — ready_for_smoke_test" if providers["audio"]["deepgram"] else "missing"
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
@@ -28601,7 +28599,7 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Payment</b>",
         f"• PayOS env: <code>{'configured' if providers['payos']['ready'] else 'missing'}</code>",
-        f"• PayOS dynamic checkout: <code>{'working' if payos_debug_status == 'PASS' and payos_checkout_url else 'NEED DEBUG'}</code>",
+        f"• PayOS dynamic checkout: <code>{'working' if payos_debug_status == 'PASS' else 'NEED DEBUG'}</code>",
         "• Manual QR fallback: <code>working/available</code>",
         "",
         "Không gọi API tốn tiền và không hiển thị secret.",
@@ -30901,7 +30899,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Providers</b>",
         f"• PayOS env: <code>{'configured' if providers['payos']['ready'] else 'missing'}</code>",
-        f"• PayOS dynamic checkout: <code>{'working' if payos_debug.get('status') == 'PASS' and payos_debug.get('checkout_url') else 'NEED DEBUG / signature fail possible'}</code>",
+        f"• PayOS dynamic checkout: <code>{'working' if payos_debug.get('status') == 'PASS' else 'NEED DEBUG / signature fail possible'}</code>",
         "• Manual QR fallback: <code>working/available</code>",
         f"• AI: <code>{'READY' if providers['ai']['ready'] else 'NOT READY'}</code>",
         f"• STT: <code>{'READY' if providers['audio']['deepgram'] else 'MISSING'}</code>",
@@ -33815,9 +33813,8 @@ async def reply_ai_provider_failure(update: Update, uid, result: dict, tool_name
     errors = (result or {}).get("errors") or {}
     detail = ai_failure_detail(statuses, errors)
     save_tool_test_result(tool_name, "FAIL", detail, uid)
-    admin_detail = f"\n\nAdmin detail: {html.escape(detail[:500])}" if is_admin_or_owner(uid) else ""
     message = (result or {}).get("message") or ai_failure_user_text(statuses, errors)
-    await update.message.reply_text(message + admin_detail)
+    await update.message.reply_text(message)
 
 def create_media_factory_job(user_id, username, mode, topic, trend_title="", trend_summary="", image_prompt_pack="", video_prompt_pack="", caption_pack="", status="draft", cost_xu=0, note="") -> int:
     conn = db_connect()
@@ -34040,7 +34037,7 @@ def fallback_image_prompt_pack(topic: str, advanced: bool = False) -> str:
 def fallback_video_from_image_pack(topic: str) -> str:
     topic = topic or "ảnh/chủ đề bạn gửi"
     return (
-        f"🎞 VIDEO FROM IMAGE PACK — TOAN AAS\n\nẢnh/chủ đề: {topic}\n\n"
+        f"🎬 Image-to-Video Prompt Pack — TOAN AAS\n\nẢnh/chủ đề: {topic}\n\n"
         "Scene:\n"
         f"Một cảnh đời thường/quảng cáo nhẹ về {topic}, chủ thể rõ, bối cảnh sạch và hợp pháp.\n\n"
         "Camera movement:\n"
@@ -34748,7 +34745,8 @@ async def prepare_remove_bg_from_cached_image(update: Update, context: ContextTy
         tg_file = await context.bot.get_file(info["file_id"])
         img_bytes = bytes(await tg_file.download_as_bytearray())
     except Exception as e:
-        await update.message.reply_text(f"⚠️ Không tải được ảnh để tách nền: {html.escape(str(e)[:180])}", parse_mode="HTML")
+        logger.warning(f"RemoveBG Telegram image download failed: {e}")
+        await update.message.reply_text("⚠️ Không tải được ảnh để tách nền. Bot chưa trừ Xu. Vui lòng gửi lại ảnh nhỏ hơn hoặc thử lại sau.")
         return True
     USER_PENDING[uid] = {
         "type": "image",
@@ -35526,8 +35524,7 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
             detail=detail,
         )
         save_tool_test_result("ai_chat", "FAIL", detail, uid)
-        admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin_or_owner(uid) else ""
-        return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
+        return await update.message.reply_text(result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {}))
 
     if cost > 0 and not spend_fixed_credit_info(uid, cost, f"spend_ai_chat_{mode}", f"AI chat {mode}", apply_member_discount_flag=False).get("ok"):
         credits_now, _, _ = get_user(uid)
@@ -39247,9 +39244,8 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
             detail=f"job={job_id}; {str(e)[:240]}",
         )
         base_message = ai_failure_user_text({}, {})
-        admin_detail = f"\n\nAdmin detail: {html.escape(str(e)[:500])}" if is_admin_or_owner(uid) else ""
         refund_line = f"\n\n✅ Đã hoàn lại <b>{cost} Xu</b>." if refunded else ""
-        return await update.message.reply_text(base_message + admin_detail + refund_line, parse_mode="HTML")
+        return await update.message.reply_text(base_message + refund_line, parse_mode="HTML")
 
 async def cmd_addlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -50134,8 +50130,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 detail=detail,
             )
             save_tool_test_result("ai_chat", "FAIL", detail, uid)
-            admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin_or_owner(uid) else ""
-            return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
+            return await update.message.reply_text(result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {}))
 
         if cost > 0 and not spend_fixed_credit_info(uid, cost, f"spend_ai_chat_{mode_name}", f"AI chat {mode_name}", apply_member_discount_flag=False).get("ok"):
             credits_now, _, _ = get_user(uid)
