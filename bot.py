@@ -2784,7 +2784,8 @@ def manual_payment_text(uid: int, amount: int, xu: int, order_code: int, reason:
         "Bước 4: Chờ admin kiểm tra sao kê thật và duyệt.\n\n"
         "⚠️ <b>Lưu ý chống fake bill:</b>\n"
         "Ảnh bill không đồng nghĩa giao dịch đã thành công.\n"
-        "TOAN AAS chỉ cộng Xu sau khi admin xác minh tiền thật đã vào tài khoản."
+        "TOAN AAS chỉ cộng Xu sau khi admin xác minh tiền thật đã vào tài khoản.\n"
+        "⚠️ TOAN AAS không cộng Xu chỉ dựa vào ảnh bill. Admin chỉ duyệt sau khi tiền thật đã vào tài khoản."
     )
 
 def manual_custom_payment_text(uid: int, reason: str = "") -> str:
@@ -2808,7 +2809,8 @@ def manual_custom_payment_text(uid: int, reason: str = "") -> str:
         "Bước 4: Chờ admin kiểm tra sao kê thật và duyệt.\n\n"
         "⚠️ <b>Lưu ý chống fake bill:</b>\n"
         "Ảnh bill không đồng nghĩa giao dịch đã thành công.\n"
-        "TOAN AAS chỉ cộng Xu sau khi admin xác minh tiền thật đã vào tài khoản."
+        "TOAN AAS chỉ cộng Xu sau khi admin xác minh tiền thật đã vào tài khoản.\n"
+        "⚠️ TOAN AAS không cộng Xu chỉ dựa vào ảnh bill. Admin chỉ duyệt sau khi tiền thật đã vào tài khoản."
     )
 
 def manual_qr_url(uid: int, amount: int, order_code: int) -> str:
@@ -23488,6 +23490,7 @@ def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key=""):
         "amount": int(amount or 0),
         "xu": int(xu or 0),
         "pkg_key": str(pkg_key or ""),
+        "source": "manual_bill_flow",
         "expires_at": time.time() + MANUAL_BILL_STATE_TTL_SECONDS,
     }
 
@@ -23499,6 +23502,9 @@ def get_active_manual_bill_state(uid):
         state = {"expires_at": time.time() + MANUAL_BILL_STATE_TTL_SECONDS}
         USER_BILL_STATE[uid] = state
     if not isinstance(state, dict):
+        USER_BILL_STATE.pop(uid, None)
+        return None
+    if state.get("source") != "manual_bill_flow":
         USER_BILL_STATE.pop(uid, None)
         return None
     if float(state.get("expires_at") or 0) < time.time():
@@ -35968,6 +35974,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    USER_BILL_STATE.pop(uid, None)
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
@@ -49321,7 +49328,9 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{promo_admin_line}"
             f"{referral_admin_line}"
             f"{tier_admin_line}"
-            f"{mismatch_line}",
+            f"{mismatch_line}\n\n"
+            "⚠️ Nhắc lại: /duyet chỉ dùng sau khi admin đã đối soát tiền thật trong tài khoản ngân hàng. "
+            "Không duyệt chỉ dựa vào ảnh bill.",
             parse_mode="HTML",
         )
     except (IndexError, ValueError):
@@ -50152,6 +50161,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🆔 ID: <code>{uid}</code>\n"
             f"{expected_line}"
             f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
+            "⚠️ <b>Chống fake bill:</b>\n"
+            "Chỉ duyệt sau khi đã đối soát tiền thật trong tài khoản ngân hàng. "
+            "Không duyệt chỉ dựa vào ảnh bill.\n\n"
             f"👉 Duyệt: <code>/duyet {deposit_id} {xu or '&lt;Số_Xu&gt;'}</code>\n"
             f"❌ Từ chối: <code>/tuchoi {deposit_id}</code>\n\n"
             f"⚠️ Dùng mã bill <code>#{deposit_id}</code>, không dùng user ID khi có nhiều bill."
@@ -50166,6 +50178,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ <b>Đã gửi bill cho Admin!</b>\n\n"
             f"📋 Mã đơn: <b>#{deposit_id}</b>\n"
             f"🆔 ID của bạn: <code>{uid}</code>\n\n"
+            "⚠️ TOAN AAS không cộng Xu chỉ dựa vào ảnh bill. "
+            "Admin chỉ duyệt sau khi tiền thật đã vào tài khoản.\n\n"
             f"⏳ Vui lòng chờ Admin kiểm tra sao kê và cộng Xu.",
             parse_mode="HTML"
         )
@@ -50178,6 +50192,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /image_to_pdf — đổi ảnh sang PDF\n"
         "• /remove_bg — tách nền ảnh\n"
         "• /ai_image_edit &lt;yêu cầu&gt; — reply ảnh để chỉnh sửa AI nếu công cụ đã bật\n\n"
+        "Nếu đây là ảnh bill nạp tiền: bot không tạo bill ngoài flow <code>/thucong</code>. "
+        "Hãy dùng <code>/naptien</code> hoặc <code>/thucong</code> nếu cần hỗ trợ nạp thủ công.\n\n"
         "Ảnh đã được lưu tạm 10 phút để dùng cho lệnh tiếp theo.",
         parse_mode="HTML",
     )
