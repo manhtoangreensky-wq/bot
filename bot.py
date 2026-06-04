@@ -333,6 +333,7 @@ PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "toanaasbot")
 OFFICIAL_TELEGRAM_URL = _env("OFFICIAL_TELEGRAM_URL", "https://t.me/toanaasbot")
 SUPPORT_TELEGRAM_URL  = _env("SUPPORT_TELEGRAM_URL", "https://t.me/toanaas")
+TOAN_AAS_COMMUNITY_URL = _env("TOAN_AAS_COMMUNITY_URL", "https://t.me/+RLAA18Uqtv05NWQ1")
 if SUPPORT_TELEGRAM_URL.rstrip("/").lower() in {
     "https://t.me/toanaasbot",
     OFFICIAL_TELEGRAM_URL.rstrip("/").lower(),
@@ -25403,7 +25404,7 @@ async def reply_internal_customer_feature(update: Update):
 
 EMERGENCY_ALLOWED_PUBLIC_COMMANDS = {
     "ping", "status", "support", "legal", "terms", "privacy", "profile",
-    "official_channels", "kenh_chinh_thuc", "emergency_status", "ops_plan",
+    "official_channels", "kenh_chinh_thuc", "hub", "community", "toanaas_hub", "emergency_status", "ops_plan",
 }
 EMERGENCY_ALLOWED_ADMIN_COMMANDS = {
     "backup_db", "emergency_status", "emergency_unlock", "ops_plan",
@@ -25627,6 +25628,7 @@ def main_quick_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
         [InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
+        [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -25641,6 +25643,7 @@ def main_guide_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📘 Hướng dẫn đầy đủ", callback_data="menu|guide")],
         [InlineKeyboardButton("📜 Điều khoản", callback_data="menu|legal")],
+        [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
         [InlineKeyboardButton("💰 Bảng giá", callback_data="menu|hint_pricing")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
@@ -26734,6 +26737,7 @@ def official_channels_text() -> str:
     return (
         "🛰 <b>KÊNH CHÍNH THỨC TOAN AAS</b>\n\n"
         f"• Bot chính thức: <a href=\"{html.escape(OFFICIAL_TELEGRAM_URL)}\">{html.escape(OFFICIAL_TELEGRAM_URL)}</a>\n"
+        f"• TOAN AAS Hub: <a href=\"{html.escape(TOAN_AAS_COMMUNITY_URL)}\">{html.escape(TOAN_AAS_COMMUNITY_URL)}</a>\n"
         f"• Hỗ trợ/admin: <a href=\"{html.escape(SUPPORT_TELEGRAM_URL)}\">{html.escape(SUPPORT_TELEGRAM_URL)}</a>\n"
         f"• Website hiện tại: <a href=\"{html.escape(website)}\">{html.escape(website)}</a>\n"
         "• Domain dự kiến sau khi mua/cấu hình: <code>toanaas.vn</code>\n\n"
@@ -26743,6 +26747,27 @@ def official_channels_text() -> str:
 
 async def cmd_official_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(official_channels_text(), parse_mode="HTML", disable_web_page_preview=True)
+
+def community_text() -> str:
+    return (
+        "🌐 <b>TOAN AAS HUB</b>\n\n"
+        "Cộng đồng hướng dẫn, cập nhật, mẹo sử dụng và hỗ trợ người dùng TOAN AAS.\n\n"
+        "Tại đây bạn có thể:\n"
+        "• Xem thông báo chính thức\n"
+        "• Nhận hướng dẫn sử dụng bot\n"
+        "• Xem mẹo tạo nội dung bằng AI\n"
+        "• Cập nhật tính năng mới\n"
+        "• Nhận cảnh báo bảo trì nếu có\n"
+        "• Trao đổi kinh nghiệm dùng TOAN AAS\n\n"
+        "👉 <b>Tham gia tại đây:</b>\n"
+        f"<a href=\"{html.escape(TOAN_AAS_COMMUNITY_URL)}\">{html.escape(TOAN_AAS_COMMUNITY_URL)}</a>\n\n"
+        "<b>Lưu ý:</b>\n"
+        "TOAN AAS không bao giờ yêu cầu mật khẩu, mã OTP, API key, token hoặc thông tin thẻ thanh toán trong nhóm."
+    )
+
+async def cmd_hub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)]])
+    await update.message.reply_text(community_text(), parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
 
 def ip_notice_text() -> str:
     return (
@@ -48167,6 +48192,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("ads_policy",  cmd_ads_policy))
     tg_app.add_handler(CommandHandler("official_channels", cmd_official_channels))
     tg_app.add_handler(CommandHandler("kenh_chinh_thuc", cmd_official_channels))
+    tg_app.add_handler(CommandHandler("hub",         cmd_hub))
+    tg_app.add_handler(CommandHandler("community",   cmd_hub))
+    tg_app.add_handler(CommandHandler("toanaas_hub", cmd_hub))
     tg_app.add_handler(CommandHandler("data_delete", cmd_data_delete))
     tg_app.add_handler(CommandHandler("mydata",      cmd_mydata))
     tg_app.add_handler(CommandHandler("admin_docs",  cmd_admin_docs))
