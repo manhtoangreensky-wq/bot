@@ -28169,6 +28169,13 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     error = context.error
     error_name = type(error).__name__ if error else "UnknownError"
     error_text = sanitize_log_text(str(error or ""))[:1200]
+    message_text = ""
+    if isinstance(update, Update) and update.effective_message:
+        message_text = str(getattr(update.effective_message, "text", "") or "").strip()
+    image_to_pdf_safe_error = (
+        message_text.startswith("/image_to_pdf")
+        or ('unsupported start tag "yêu"' in error_text.lower())
+    )
     if error:
         logger.error(
             "Telegram handler error\n%s",
@@ -28179,19 +28186,27 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if isinstance(update, Update) and update.effective_chat:
-            text = "❌ Có lỗi khi xử lý lệnh. Bot chưa trừ Xu. Vui lòng thử lại sau."
-            if update.effective_user and is_admin_user(update.effective_user.id):
+            text = (
+                "❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu. Vui lòng thử lại sau."
+                if image_to_pdf_safe_error
+                else "❌ Có lỗi khi xử lý lệnh. Bot chưa trừ Xu. Vui lòng thử lại sau."
+            )
+            if (
+                not image_to_pdf_safe_error
+                and update.effective_user
+                and is_admin_or_owner(update.effective_user.id)
+            ):
                 text += f"\n\n<code>{html.escape(error_name)}: {html.escape(error_text[:800])}</code>"
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=text,
-                parse_mode="HTML",
+                parse_mode=None if image_to_pdf_safe_error else "HTML",
             )
     except Exception:
         logger.exception("Failed to notify user about Telegram handler error")
 
     try:
-        if ADMIN_ID:
+        if ADMIN_ID and not image_to_pdf_safe_error:
             await context.bot.send_message(
                 chat_id=int(ADMIN_ID),
                 text=(
@@ -32306,10 +32321,10 @@ async def cmd_image_to_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, t
             if not ok:
                 if test_mode:
                     save_tool_test_result("image_to_pdf", "FAIL", error, uid)
-                return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.", parse_mode=None)
+                return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu. Vui lòng thử lại sau.", parse_mode=None)
             sent, send_error = await doc_send_file(update, output_path, "toan_aas_image_to_pdf.pdf", "📄 Ảnh sang PDF hoàn tất.")
             if not sent:
-                return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.", parse_mode=None)
+                return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu. Vui lòng thử lại sau.", parse_mode=None)
             await doc_charge_after_success(update, uid, cost, "spend_image_to_pdf", "Image to PDF")
             save_tool_test_result("image_to_pdf", "PASS", "Created PDF from image", uid)
     except Exception as e:
@@ -32317,12 +32332,12 @@ async def cmd_image_to_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, t
         if test_mode:
             save_tool_test_result("image_to_pdf", "FAIL", provider_error_summary(e), uid)
         try:
-            return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.", parse_mode=None)
+            return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu. Vui lòng thử lại sau.", parse_mode=None)
         except Exception:
             if update.effective_chat:
                 return await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text="❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.",
+                    text="❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu. Vui lòng thử lại sau.",
                 )
 
 async def cmd_pdf_to_images(update: Update, context: ContextTypes.DEFAULT_TYPE, test_mode: bool = False):
@@ -49720,7 +49735,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Bạn có thể dùng:\n"
         "• /image_to_pdf — đổi ảnh sang PDF\n"
         "• /remove_bg — tách nền ảnh\n"
-        "• /ai_image_edit <yêu cầu> — reply ảnh để chỉnh sửa AI nếu provider được bật\n\n"
+        "• /ai_image_edit &lt;yêu cầu&gt; — reply ảnh để chỉnh sửa AI nếu provider được bật\n\n"
         "Ảnh đã được lưu tạm 10 phút để dùng cho lệnh tiếp theo.",
         parse_mode="HTML",
     )
