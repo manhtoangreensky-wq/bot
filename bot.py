@@ -24554,6 +24554,9 @@ def is_admin_user(user_id) -> bool:
 def is_owner_user(user_id) -> bool:
     return str(user_id) in OWNER_IDS
 
+def is_admin_or_owner(user_id) -> bool:
+    return is_owner_user(user_id) or is_admin_user(user_id)
+
 def owner_and_admin_ids() -> list[str]:
     ids = set(str(x) for x in OWNER_IDS if str(x).strip())
     ids.update(str(x) for x in ADMIN_IDS if str(x).strip())
@@ -32112,7 +32115,7 @@ def doc_parse_page_range(spec: str, total_pages: int) -> list[int]:
 async def doc_send_file(update: Update, path: str, filename: str, caption: str) -> tuple[bool, str]:
     try:
         with open(path, "rb") as f:
-            await update.message.reply_document(document=f, filename=filename, caption=caption)
+            await update.message.reply_document(document=f, filename=filename, caption=caption, parse_mode=None)
         return True, ""
     except Exception as e:
         return False, f"Không gửi được file output: {str(e)[:220]}"
@@ -32285,29 +32288,42 @@ async def cmd_image_to_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE, t
     uid = update.effective_user.id
     if test_mode and not is_admin_user(uid):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh test này.")
-    cost = 0 if is_admin_user(uid) else doc_cost("image_to_pdf")
-    with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
-        ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "image")
-        if not ok:
-            if test_mode:
-                save_tool_test_result("image_to_pdf", "FAIL", error, uid)
-            return await update.message.reply_text(f"⚠️ {error}")
-        if not await doc_check_can_pay(update, uid, cost):
-            return
-        output_path = os.path.join(tmpdir, "toan_aas_image_to_pdf.pdf")
+    try:
+        cost = 0 if is_admin_user(uid) else doc_cost("image_to_pdf")
+        with tempfile.TemporaryDirectory(prefix="toanaas_doc_") as tmpdir:
+            ok, input_path, _, error = await doc_download_reply_to_path(update, context, tmpdir, "image")
+            if not ok:
+                if test_mode:
+                    save_tool_test_result("image_to_pdf", "FAIL", error, uid)
+                return await update.message.reply_text(f"⚠️ {error}", parse_mode=None)
+            if not await doc_check_can_pay(update, uid, cost):
+                return
+            output_path = os.path.join(tmpdir, "toan_aas_image_to_pdf.pdf")
+            try:
+                ok, error = doc_image_to_pdf(input_path, output_path)
+            except Exception as e:
+                ok, error = False, f"Lỗi đổi ảnh sang PDF: {str(e)[:220]}"
+            if not ok:
+                if test_mode:
+                    save_tool_test_result("image_to_pdf", "FAIL", error, uid)
+                return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.", parse_mode=None)
+            sent, send_error = await doc_send_file(update, output_path, "toan_aas_image_to_pdf.pdf", "📄 Ảnh sang PDF hoàn tất.")
+            if not sent:
+                return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.", parse_mode=None)
+            await doc_charge_after_success(update, uid, cost, "spend_image_to_pdf", "Image to PDF")
+            save_tool_test_result("image_to_pdf", "PASS", "Created PDF from image", uid)
+    except Exception as e:
+        logger.warning(f"image_to_pdf failed safely: {provider_error_summary(e)}")
+        if test_mode:
+            save_tool_test_result("image_to_pdf", "FAIL", provider_error_summary(e), uid)
         try:
-            ok, error = doc_image_to_pdf(input_path, output_path)
-        except Exception as e:
-            ok, error = False, f"Lỗi đổi ảnh sang PDF: {str(e)[:220]}"
-        if not ok:
-            if test_mode:
-                save_tool_test_result("image_to_pdf", "FAIL", error, uid)
-            return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.")
-        sent, send_error = await doc_send_file(update, output_path, "toan_aas_image_to_pdf.pdf", "📄 Ảnh sang PDF hoàn tất.")
-        if not sent:
-            return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.")
-        await doc_charge_after_success(update, uid, cost, "spend_image_to_pdf", "Image to PDF")
-        save_tool_test_result("image_to_pdf", "PASS", "Created PDF from image", uid)
+            return await update.message.reply_text("❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.", parse_mode=None)
+        except Exception:
+            if update.effective_chat:
+                return await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="❌ Không tạo được PDF từ ảnh này. Bot chưa trừ Xu.",
+                )
 
 async def cmd_pdf_to_images(update: Update, context: ContextTypes.DEFAULT_TYPE, test_mode: bool = False):
     uid = update.effective_user.id
@@ -35244,7 +35260,7 @@ async def run_one_shot_chat_command(update: Update, context: ContextTypes.DEFAUL
             detail=detail,
         )
         save_tool_test_result("ai_chat", "FAIL", detail, uid)
-        admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin_user(uid) else ""
+        admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin_or_owner(uid) else ""
         return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
 
     if cost > 0 and not spend_fixed_credit_info(uid, cost, f"spend_ai_chat_{mode}", f"AI chat {mode}", apply_member_discount_flag=False).get("ok"):
@@ -49254,6 +49270,12 @@ async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT
         f"• API Key configured: <code>{'yes' if PAYOS_API_KEY else 'no'}</code> len=<code>{len(PAYOS_API_KEY or '')}</code>",
         f"• Checksum configured: <code>{'yes' if PAYOS_CHECKSUM_KEY else 'no'}</code> len=<code>{len(PAYOS_CHECKSUM_KEY or '')}</code>",
         "",
+        "<b>Key fingerprint để đối chiếu dashboard</b>",
+        f"• PAYOS_CLIENT_ID: <code>{html.escape(mask_key_fingerprint(PAYOS_CLIENT_ID))}</code>",
+        f"• PAYOS_API_KEY: <code>{html.escape(mask_key_fingerprint(PAYOS_API_KEY))}</code>",
+        f"• PAYOS_CHECKSUM_KEY: <code>{html.escape(mask_key_fingerprint(PAYOS_CHECKSUM_KEY))}</code>",
+        "Nếu fingerprint không khớp bộ key trong cùng app/kênh PayOS, đây là lỗi key/app mismatch chứ không phải logic cộng Xu.",
+        "",
         "<b>Headers sent by current bot</b>",
     ]
     lines.extend(payos_header_debug_summary())
@@ -49872,7 +49894,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 detail=detail,
             )
             save_tool_test_result("ai_chat", "FAIL", detail, uid)
-            admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin_user(uid) else ""
+            admin_detail = f"\n\nAdmin detail: {detail[:500]}" if is_admin_or_owner(uid) else ""
             return await update.message.reply_text((result.get("message") or ai_failure_user_text(result.get("statuses") or {}, result.get("errors") or {})) + admin_detail)
 
         if cost > 0 and not spend_fixed_credit_info(uid, cost, f"spend_ai_chat_{mode_name}", f"AI chat {mode_name}", apply_member_discount_flag=False).get("ok"):
