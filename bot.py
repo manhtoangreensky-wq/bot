@@ -28530,11 +28530,7 @@ async def handle_translation_callback(update: Update, context: ContextTypes.DEFA
     if data == "tr_transcribe":
         if not has_recent_audio_input(update):
             return await query.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi gõ /transcribe trong vòng 2 phút.")
-        return await query.message.reply_text(
-            "🎙 Bóc băng audio\n\n"
-            "Để giữ đúng cơ chế Xu hiện tại, vui lòng gõ /transcribe trong vòng 2 phút.\n"
-            "Bot sẽ chỉ trừ Xu sau khi bóc băng thành công."
-        )
+        return await cmd_transcribe(update, context)
     if data.startswith("tr_pick|"):
         source_type = data.split("|", 1)[1]
         if source_type == "voice" and not has_recent_audio_input(update):
@@ -29447,20 +29443,22 @@ def audio_voice_received_text() -> str:
 async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not DEEPGRAM_API_KEY:
-        return await update.message.reply_text(TRANSLATE_AUDIO_MISSING_STT_TEXT)
+        return await reply_translation_surface(update, TRANSLATE_AUDIO_MISSING_STT_TEXT)
     media_info = await resolve_stt_test_media(update, context)
     if not media_info:
-        return await update.message.reply_text(
+        return await reply_translation_surface(
+            update,
             "⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ /transcribe trong vòng 2 phút."
         )
     if media_info.get("error"):
-        return await update.message.reply_text(
+        return await reply_translation_surface(
+            update,
             TRANSLATE_AUDIO_TIMEOUT_TEXT
             if media_info.get("error") == "telegram_timeout" else TRANSLATE_AUDIO_ERROR_TEXT
         )
     file_size = int(media_info.get("file_size", 0) or 0)
     if file_size > 15 * 1024 * 1024 or not media_info.get("bytes"):
-        return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+        return await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
     raw_cost = calculate_dynamic_cost("whisper", file_size)
     ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, raw_cost, "spend_transcribe")
     if not ok_credit:
@@ -29473,7 +29471,7 @@ async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ) or "").strip()
         if not transcript or transcript.startswith("❌"):
             save_tool_test_result("stt", "FAIL", transcript[:400] or "empty_transcript", uid)
-            return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+            return await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
         charge_result = await spend_media_factory_after_success_or_reply(
             update,
             uid,
@@ -29485,7 +29483,8 @@ async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         save_tool_test_result("stt", "PASS", f"provider=deepgram; source={media_info.get('source')}", uid)
         balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
-        await update.message.reply_text(
+        await reply_translation_surface(
+            update,
             "🎙 BÓC BĂNG AUDIO TOAN AAS\n\n"
             "• Bóc băng: đã bật\n\n"
             "<b>Nội dung:</b>\n"
@@ -29495,7 +29494,7 @@ async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception:
         save_tool_test_result("stt", "FAIL", "transcribe_provider_failed", uid)
-        await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+        await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
 
 async def handle_auto_translate_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, target: str):
     uid = update.effective_user.id
@@ -32333,7 +32332,7 @@ async def preview_media_factory_credit_or_reply(update: Update, uid, cost: int, 
     credits, _, _ = get_user(uid)
     if int(credits or 0) >= final_cost:
         return True, charge
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "⚠️ Không đủ Xu để dùng tính năng này.\n\n"
         f"• Cần: {final_cost} Xu\n"
         f"• Số dư hiện tại: {int(credits or 0)} Xu\n\n"
@@ -32351,7 +32350,7 @@ async def spend_media_factory_after_success_or_reply(update: Update, uid, cost: 
         return charge_result
     credits_now, _, _ = get_user(uid)
     final_cost = int(charge_result.get("final_cost") or charge_result.get("cost") or base_cost)
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "⚠️ Không đủ Xu để dùng tính năng này.\n\n"
         f"• Cần: {final_cost} Xu\n"
         f"• Số dư hiện tại: {int(credits_now or 0)} Xu\n\n"
