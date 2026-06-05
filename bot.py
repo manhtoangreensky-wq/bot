@@ -23782,13 +23782,16 @@ TRANSLATE_LANGUAGE_OPTIONS = {
     "ja": {"name": "日本語", "deepl": "JA"},
     "ko": {"name": "한국어", "deepl": "KO"},
     "th": {"name": "ไทย", "deepl": "TH"},
+    "fr": {"name": "Français", "deepl": "FR"},
+    "de": {"name": "Deutsch", "deepl": "DE"},
+    "es": {"name": "Español", "deepl": "ES"},
+    "id": {"name": "Indonesia", "deepl": "ID"},
     "ar": {"name": "العربية", "deepl": "AR"},
 }
 
 def normalize_translate_target(value: str) -> str:
     raw = str(value or "").strip().lower().replace("-", "_")
     aliases = {
-        "": "vi",
         "vn": "vi",
         "vie": "vi",
         "vietnamese": "vi",
@@ -23804,6 +23807,12 @@ def normalize_translate_target(value: str) -> str:
         "zh_cn": "zh",
         "thai": "th",
         "thailand": "th",
+        "french": "fr",
+        "france": "fr",
+        "german": "de",
+        "spanish": "es",
+        "indonesian": "id",
+        "indo": "id",
         "arabic": "ar",
     }
     return aliases.get(raw, raw if raw in TRANSLATE_LANGUAGE_OPTIONS else "")
@@ -23811,6 +23820,130 @@ def normalize_translate_target(value: str) -> str:
 def translate_target_label(target: str) -> str:
     key = normalize_translate_target(target)
     return TRANSLATE_LANGUAGE_OPTIONS.get(key, TRANSLATE_LANGUAGE_OPTIONS["vi"])["name"]
+
+def translate_target_button_label(target: str) -> str:
+    key = normalize_translate_target(target)
+    flags = {
+        "vi": "🇻🇳",
+        "en": "🇺🇸",
+        "zh": "🇨🇳",
+        "ja": "🇯🇵",
+        "ko": "🇰🇷",
+        "th": "🇹🇭",
+        "fr": "🇫🇷",
+        "de": "🇩🇪",
+        "es": "🇪🇸",
+        "id": "🇮🇩",
+        "ar": "🇸🇦",
+    }
+    return f"{flags.get(key, '🌐')} {translate_target_label(key)}"
+
+TRANSLATION_PRIMARY_LANGS = ("vi", "en", "zh")
+TRANSLATION_MORE_LANGS = ("ja", "ko", "th", "fr", "de", "es", "id", "ar")
+TRANSLATION_REQUEST_TTL_SECONDS = 10 * 60
+LAST_TRANSLATION_REQUEST: dict = {}
+
+def translation_source_label(source_type: str) -> str:
+    return {
+        "text": "văn bản",
+        "voice": "voice/audio",
+        "file": "file",
+    }.get(str(source_type or ""), "nội dung")
+
+def save_translation_request(user_id, source_type: str, source_text: str = "", source_ref: dict | None = None):
+    LAST_TRANSLATION_REQUEST[str(user_id)] = {
+        "source_type": str(source_type or "").strip(),
+        "source_text": str(source_text or ""),
+        "source_ref": dict(source_ref or {}),
+        "created_at_ts": time.time(),
+        "created_at": now_text(),
+        "pending_target": True,
+    }
+
+def get_translation_request(user_id, source_type: str = "") -> dict:
+    req = LAST_TRANSLATION_REQUEST.get(str(user_id)) or {}
+    if not req:
+        return {}
+    if source_type and req.get("source_type") != source_type:
+        return {}
+    ttl = LAST_MEDIA_CACHE_TTL_SECONDS if req.get("source_type") == "voice" else TRANSLATION_REQUEST_TTL_SECONDS
+    if float(req.get("created_at_ts") or 0) + ttl < time.time():
+        LAST_TRANSLATION_REQUEST.pop(str(user_id), None)
+        return {}
+    return dict(req)
+
+def has_recent_audio_input(update: Update) -> bool:
+    reply = update.effective_message.reply_to_message if update.effective_message else None
+    media, _file_type = message_media_candidate(reply)
+    if media:
+        return True
+    uid = str(update.effective_user.id if update.effective_user else "")
+    cache = LAST_AUDIO_FILE.get(uid) or {}
+    return bool(cache and float(cache.get("created_at_ts") or 0) + LAST_MEDIA_CACHE_TTL_SECONDS >= time.time())
+
+def translation_target_keyboard(source_type: str, more: bool = False) -> InlineKeyboardMarkup:
+    source = str(source_type or "text").strip()
+    if more:
+        codes = TRANSLATION_MORE_LANGS
+        rows = []
+        for i in range(0, len(codes), 2):
+            rows.append([
+                InlineKeyboardButton(translate_target_button_label(code), callback_data=f"tr_target|{source}|{code}")
+                for code in codes[i:i + 2]
+            ])
+        rows.append([
+            InlineKeyboardButton("⬅️ Quay lại", callback_data=f"tr_pick|{source}"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ])
+        return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data=f"tr_target|{source}|vi"),
+            InlineKeyboardButton("🇺🇸 English", callback_data=f"tr_target|{source}|en"),
+        ],
+        [
+            InlineKeyboardButton("🇨🇳 中文", callback_data=f"tr_target|{source}|zh"),
+            InlineKeyboardButton("🌍 Ngôn ngữ khác", callback_data=f"tr_more|{source}"),
+        ],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def voice_translation_action_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎙 Bóc băng", callback_data="tr_transcribe"),
+            InlineKeyboardButton("🌐 Dịch audio", callback_data="tr_pick|voice"),
+        ],
+        [
+            InlineKeyboardButton("🇺🇸 English", callback_data="tr_target|voice|en"),
+            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="tr_target|voice|vi"),
+        ],
+        [InlineKeyboardButton("🌍 Ngôn ngữ khác", callback_data="tr_more|voice")],
+    ])
+
+def translation_pick_text(source_type: str) -> str:
+    source = translation_source_label(source_type)
+    return (
+        "🌐 <b>Chọn ngôn ngữ dịch</b>\n\n"
+        f"Nguồn: <b>{html.escape(source)}</b>\n"
+        "Chọn ngôn ngữ đích bên dưới. Bot chưa trừ Xu."
+    )
+
+async def reply_translation_surface(update: Update, text: str, parse_mode=None, reply_markup=None):
+    if update.callback_query and update.callback_query.message:
+        return await update.callback_query.message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+    return await update.message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+
+async def show_translation_picker(update: Update, source_type: str, edit: bool = False, more: bool = False):
+    text = (
+        "🌍 <b>Ngôn ngữ khác / More languages</b>\n\n"
+        "Chọn ngôn ngữ đích. Một số ngôn ngữ có thể dùng hệ thống dự phòng nếu chưa sẵn sàng đầy đủ."
+        if more else translation_pick_text(source_type)
+    )
+    keyboard = translation_target_keyboard(source_type, more=more)
+    if edit and update.callback_query:
+        return await safe_edit_query_message(update.callback_query, text, reply_markup=keyboard)
+    return await reply_translation_surface(update, text, parse_mode="HTML", reply_markup=keyboard)
 
 def set_user_translate_mode(user_id, target_lang: str, username="", note="") -> tuple[bool, dict]:
     target = normalize_translate_target(target_lang)
@@ -28230,13 +28363,19 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     message_text = ""
     if isinstance(update, Update) and update.effective_message:
         message_text = str(getattr(update.effective_message, "text", "") or "").strip()
+    callback_data = ""
+    if isinstance(update, Update) and update.callback_query:
+        callback_data = str(update.callback_query.data or "").strip()
     image_to_pdf_safe_error = (
         message_text.startswith("/image_to_pdf")
         or ('unsupported start tag "yêu"' in error_text.lower())
     )
     audio_timeout_safe_error = (
         is_audio_timeout_error(error)
-        and message_text.startswith(("/translate_voice", "/translate_audio", "/transcribe"))
+        and (
+            message_text.startswith(("/translate_voice", "/translate_audio", "/transcribe"))
+            or callback_data.startswith("tr_")
+        )
     )
     if error:
         logger.error(
@@ -28382,6 +28521,55 @@ async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT
             localized_start_menu_text(uid, selected),
             reply_markup=localized_main_menu_keyboard(is_admin_user(uid), selected),
         )
+
+async def handle_translation_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = (query.data or "").strip()
+    uid = query.from_user.id
+    if data == "tr_transcribe":
+        if not has_recent_audio_input(update):
+            return await query.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi gõ /transcribe trong vòng 2 phút.")
+        return await query.message.reply_text(
+            "🎙 Bóc băng audio\n\n"
+            "Để giữ đúng cơ chế Xu hiện tại, vui lòng gõ /transcribe trong vòng 2 phút.\n"
+            "Bot sẽ chỉ trừ Xu sau khi bóc băng thành công."
+        )
+    if data.startswith("tr_pick|"):
+        source_type = data.split("|", 1)[1]
+        if source_type == "voice" and not has_recent_audio_input(update):
+            return await query.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi gõ /translate_voice trong vòng 2 phút.")
+        return await show_translation_picker(update, source_type, edit=True)
+    if data.startswith("tr_more|"):
+        source_type = data.split("|", 1)[1]
+        return await show_translation_picker(update, source_type, edit=True, more=True)
+    if not data.startswith("tr_target|"):
+        return await query.answer("Không nhận diện được lựa chọn dịch.", show_alert=True)
+    parts = data.split("|")
+    if len(parts) != 3:
+        return await query.answer("Lựa chọn dịch không hợp lệ.", show_alert=True)
+    _prefix, source_type, target = parts
+    target = normalize_translate_target(target)
+    if not target:
+        return await query.answer("Ngôn ngữ chưa hỗ trợ.", show_alert=True)
+    if source_type == "voice":
+        if not has_recent_audio_input(update):
+            return await query.message.reply_text("⚠️ Audio đã hết hạn. Gửi lại voice/audio/video ngắn rồi chọn dịch trong vòng 2 phút.")
+        save_translation_request(uid, "voice")
+        return await run_translate_voice_to_target(update, context, target)
+    if source_type == "file":
+        req = get_translation_request(uid, "file")
+        info = (req.get("source_ref") or {}) if req else get_last_user_file(uid)
+        if not info:
+            return await query.message.reply_text("⚠️ Gửi file txt/docx/pdf rồi reply hoặc gõ /translate_file trong vòng 10 phút.")
+        return await run_translate_file_to_target(update, context, target, info=info)
+    if source_type == "text":
+        req = get_translation_request(uid, "text")
+        source_text = (req.get("source_text") or "").strip() if req else ""
+        if not source_text:
+            return await query.message.reply_text("⚠️ Gửi nội dung cần dịch, ví dụ: /translate xin chào")
+        return await run_translate_text_to_target(update, context, source_text, target)
+    return await query.answer("Nguồn dịch chưa hỗ trợ.", show_alert=True)
 
 async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -28889,108 +29077,64 @@ async def cmd_tool_test_translate(update: Update, context: ContextTypes.DEFAULT_
         parse_mode="HTML",
     )
 
-async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = " ".join(context.args or []).strip()
+async def run_translate_text_to_target(update: Update, context: ContextTypes.DEFAULT_TYPE, source_text: str, target: str):
+    uid = update.effective_user.id
+    text = str(source_text or "").strip()[:1800]
     if not text:
-        return await update.message.reply_text("⚠️ Cú pháp: <code>/translate_text &lt;nội dung cần dịch&gt;</code>", parse_mode="HTML")
-    text = text[:1800]
+        return await reply_translation_surface(
+            update,
+            "⚠️ Gửi nội dung cần dịch, ví dụ:\n/translate en xin chào\n\nBot chưa trừ Xu."
+        )
     try:
-        result = await translate_to_vietnamese(text)
-        save_tool_test_result("translation", "PASS", f"provider={result.get('provider')}; translate_text success", update.effective_user.id)
-        result_statuses = result.get("statuses") or {}
-        result_errors = result.get("errors") or {}
-        for provider_name in ("deepl", "gemini", "openai"):
-            save_tool_test_result(
-                f"translation:{provider_name}",
-                result_statuses.get(provider_name, "MISSING"),
-                result_errors.get(provider_name, "ok" if result_statuses.get(provider_name) == "PASS" else ""),
-                update.effective_user.id,
-            )
-        await update.message.reply_text(
+        result = await translate_to_language(text, target)
+        save_tool_test_result("translation", "PASS", f"provider={result.get('provider')}; translate success target={target}", uid)
+        return await reply_translation_surface(
+            update,
             "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
-            "• Nguồn: <code>auto</code>\n"
-            "• Đích: <code>Tiếng Việt</code>\n"
-            + (
-                f"• Provider: <code>{html.escape(result.get('provider') or '-')}</code>\n"
-                if is_admin_user(update.effective_user.id) else ""
-            )
-            + "\n"
+            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n\n"
             f"{html.escape(result.get('text') or '')}",
             parse_mode="HTML",
         )
     except Exception as e:
         error_text = str(e)[:900]
-        statuses = getattr(e, "statuses", {}) if isinstance(e, TranslationProviderError) else {}
-        errors = getattr(e, "errors", {}) if isinstance(e, TranslationProviderError) else {"error": provider_error_summary(e)}
-        save_tool_test_result("translation", "FAIL", error_text[:500], update.effective_user.id)
-        for provider_name in ("deepl", "gemini", "openai"):
-            save_tool_test_result(
-                f"translation:{provider_name}",
-                statuses.get(provider_name, "FAIL" if provider_name in errors else "MISSING"),
-                errors.get(provider_name, ""),
-                update.effective_user.id,
-            )
-        if is_admin_user(update.effective_user.id):
-            await update.message.reply_text(
-                "❌ Dịch văn bản đang lỗi tạm thời.\n\n"
-                f"• DeepL: <code>{html.escape(provider_line_status(statuses.get('deepl', 'MISSING'), errors.get('deepl', '')))}</code>\n"
-                f"• Gemini: <code>{html.escape(provider_line_status(statuses.get('gemini', 'MISSING'), errors.get('gemini', '')))}</code>\n"
-                f"• OpenAI: <code>{html.escape(provider_line_status(statuses.get('openai', 'MISSING'), errors.get('openai', '')))}</code>\n"
-                f"• Error: <code>{html.escape(error_text[:240])}</code>\n"
-                "Không có Xu nào bị trừ cho lần thử này.",
+        save_tool_test_result("translation", "FAIL", error_text[:500], uid)
+        if is_admin_user(uid):
+            return await reply_translation_surface(
+                update,
+                "❌ Dịch văn bản đang lỗi tạm thời hoặc hết quota provider.\n"
+                "Không có Xu nào bị trừ cho lần thử này.\n\n"
+                f"• Error: <code>{html.escape(error_text[:240])}</code>",
                 parse_mode="HTML",
             )
-        else:
-            await update.message.reply_text(
-                "❌ Dịch văn bản đang lỗi tạm thời hoặc quá tải.\n"
-                "Bot chưa trừ Xu. Vui lòng thử lại sau."
-            )
+        return await reply_translation_surface(
+            update,
+            "❌ Dịch văn bản đang lỗi tạm thời hoặc quá tải.\nBot chưa trừ Xu. Vui lòng thử lại sau."
+        )
+
+async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args or []
+    raw_first = str(args[0]).strip() if args else ""
+    target = normalize_translate_target(raw_first)
+    if target and len(args) >= 2:
+        return await run_translate_text_to_target(update, context, " ".join(args[1:]).strip(), target)
+    text = " ".join(args).strip()
+    if not text:
+        return await show_translation_picker(update, "text")
+    save_translation_request(update.effective_user.id, "text", source_text=text[:1800])
+    return await show_translation_picker(update, "text")
 
 async def cmd_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
-    if len(args) < 2:
-        return await update.message.reply_text(
-            "🌐 <b>DỊCH THUẬT TOAN AAS</b>\n\n"
-            "Cú pháp:\n"
-            "• <code>/translate en nội dung cần dịch</code>\n"
-            "• <code>/translate vi nội dung cần dịch</code>\n"
-            "• <code>/vi_en nội dung tiếng Việt</code>\n"
-            "• <code>/en_vi English text</code>\n\n"
-            "Nếu hệ thống dịch đang quá tải, bot chưa trừ Xu.",
-            parse_mode="HTML",
-        )
+    if not args:
+        return await show_translation_picker(update, "text")
     target = normalize_translate_target(args[0])
-    if not target:
-        return await update.message.reply_text("⚠️ Ngôn ngữ chưa hỗ trợ. Dùng: <code>vi|en|zh|ja|ko|th|ar</code>", parse_mode="HTML")
-    text = " ".join(args[1:]).strip()[:1800]
-    if not text:
-        return await update.message.reply_text("⚠️ Thiếu nội dung cần dịch.", parse_mode="HTML")
-    try:
-        result = await translate_to_language(text, target)
-        save_tool_test_result("translation", "PASS", f"provider={result.get('provider')}; translate success target={target}", update.effective_user.id)
-        admin_detail = (
-            f"\n\n<b>Admin detail</b>: <code>Translate provider: {html.escape(result.get('provider') or '-')}</code>"
-            if is_admin_user(update.effective_user.id) else ""
-        )
-        await update.message.reply_text(
-            "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
-            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n\n"
-            f"{html.escape(result.get('text') or '')}"
-            + admin_detail,
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        error_text = str(e)[:900]
-        save_tool_test_result("translation", "FAIL", error_text[:500], update.effective_user.id)
-        await update.message.reply_text(
-            (
-                "❌ Dịch văn bản đang lỗi tạm thời hoặc hết quota provider.\n"
-                "Không có Xu nào bị trừ cho lần thử này.\n\n"
-                f"• Error: <code>{html.escape(error_text[:240])}</code>"
-            ) if is_admin_user(update.effective_user.id) else
-            "❌ Dịch văn bản đang lỗi tạm thời hoặc quá tải.\nBot chưa trừ Xu. Vui lòng thử lại sau.",
-            parse_mode="HTML" if is_admin_user(update.effective_user.id) else None,
-        )
+    if target:
+        if len(args) < 2:
+            return await update.message.reply_text("⚠️ Thiếu nội dung cần dịch. Ví dụ: /translate en xin chào")
+        return await run_translate_text_to_target(update, context, " ".join(args[1:]).strip(), target)
+    source_text = " ".join(args).strip()
+    save_translation_request(update.effective_user.id, "text", source_text=source_text[:1800])
+    return await show_translation_picker(update, "text")
 
 async def cmd_translate_alias(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str):
     context.args = [target] + list(context.args or [])
@@ -29108,6 +29252,68 @@ def is_likely_vietnamese_transcript(text: str) -> bool:
     )
     return sum(1 for word in common_words if word in sample) >= 2
 
+async def run_translate_voice_to_target(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str):
+    uid = update.effective_user.id
+    if not DEEPGRAM_API_KEY:
+        return await reply_translation_surface(update, TRANSLATE_AUDIO_MISSING_STT_TEXT)
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info:
+        return await reply_translation_surface(update, f"⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ /translate_voice {target} trong vòng 2 phút.")
+    if media_info.get("error"):
+        return await reply_translation_surface(
+            update,
+            TRANSLATE_AUDIO_TIMEOUT_TEXT
+            if media_info.get("error") == "telegram_timeout" else TRANSLATE_AUDIO_ERROR_TEXT,
+        )
+    if int(media_info.get("file_size", 0) or 0) > 15 * 1024 * 1024 or not media_info.get("bytes"):
+        return await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
+    try:
+        transcript = (await AgentDeepgram.transcribe(
+            media_info["bytes"],
+            context,
+            content_type=media_info.get("content_type") or "application/octet-stream",
+        ) or "").strip()
+        if not transcript or transcript.startswith("❌"):
+            save_tool_test_result("translation_voice", "FAIL", transcript[:400] or "empty_transcript", uid)
+            return await reply_translation_surface(update, TRANSLATE_AUDIO_ERROR_TEXT)
+        if target == "vi" and is_likely_vietnamese_transcript(transcript):
+            save_tool_test_result("translation_voice", "PASS", "target=vi; transcript_already_vi", uid)
+            return await reply_translation_surface(
+                update,
+                "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
+                "• Bóc băng: đã bật\n"
+                "• Dịch: không cần dịch thêm\n"
+                "• Đích: <b>Tiếng Việt</b>\n\n"
+                "<b>Transcript gốc:</b>\n"
+                f"<code>{html.escape(transcript[:1100])}</code>\n\n"
+                "Transcript đã là Tiếng Việt. Bot chưa cần dịch thêm.",
+                parse_mode="HTML",
+            )
+        try:
+            result = await translate_to_language(transcript[:3000], target)
+        except Exception:
+            save_tool_test_result("translation_voice", "FAIL", "translation_provider_failed_after_stt", uid)
+            return await reply_translation_surface(update, TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT)
+        save_tool_test_result("translation_voice", "PASS", f"target={target}", uid)
+        return await reply_translation_surface(
+            update,
+            "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
+            "• Bóc băng: đã bật\n"
+            "• Dịch: đã bật\n"
+            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n\n"
+            "<b>Transcript gốc:</b>\n"
+            f"<code>{html.escape(transcript[:1100])}</code>\n\n"
+            "<b>Bản dịch:</b>\n"
+            f"{html.escape((result.get('text') or '')[:2200])}",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        save_tool_test_result("translation_voice", "FAIL", "stt_or_translation_provider_failed", uid)
+        return await reply_translation_surface(
+            update,
+            TRANSLATE_AUDIO_TIMEOUT_TEXT if is_audio_timeout_error(e) else TRANSLATE_AUDIO_ERROR_TEXT,
+        )
+
 def translate_tools_text() -> str:
     return (
         "🌐 <b>CÔNG CỤ DỊCH TOAN AAS</b>\n\n"
@@ -29127,10 +29333,9 @@ def translate_tools_text() -> str:
 async def cmd_translate_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(translate_tools_text(), parse_mode="HTML")
 
-async def translate_file_extract_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str, str]:
-    info, _source = doc_input_file_info(update)
+async def translate_file_extract_text_from_info(info: dict, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str, str]:
     if not info:
-        return False, "", "Hãy gửi file text/doc/pdf hoặc reply file rồi gõ /translate_file <ngôn_ngữ>."
+        return False, "", "⚠️ Gửi file txt/docx/pdf rồi reply hoặc gõ /translate_file trong vòng 10 phút."
     if int(info.get("file_size") or 0) > DOC_MAX_FILE_BYTES:
         return False, "", f"File quá lớn. Giới hạn MVP là {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB."
     if doc_is_image(info):
@@ -29173,116 +29378,66 @@ async def translate_file_extract_text(update: Update, context: ContextTypes.DEFA
                 return False, "", TRANSLATE_FILE_EXTRACT_ERROR_TEXT
     return False, "", TRANSLATE_FILE_NOT_READY_TEXT
 
-async def cmd_translate_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    target = normalize_translate_target((context.args or [""])[0])
-    if not target:
-        return await update.message.reply_text("⚠️ Cú pháp: <code>/translate_file en</code> hoặc <code>/translate_file vi</code>", parse_mode="HTML")
-    ok, source_text, error = await translate_file_extract_text(update, context)
+async def translate_file_extract_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str, str]:
+    info, _source = doc_input_file_info(update)
+    return await translate_file_extract_text_from_info(info, context)
+
+async def run_translate_file_to_target(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str, info: dict | None = None):
+    uid = update.effective_user.id
+    if info is None:
+        info, _source = doc_input_file_info(update)
+    ok, source_text, error = await translate_file_extract_text_from_info(info or {}, context)
     if not ok:
-        return await update.message.reply_text(error or TRANSLATE_FILE_NOT_READY_TEXT)
+        return await reply_translation_surface(update, error or TRANSLATE_FILE_NOT_READY_TEXT)
     try:
         result = await translate_to_language(source_text[:3000], target)
-        save_tool_test_result("translation_file", "PASS", f"provider={result.get('provider')}; target={target}", update.effective_user.id)
-        admin_detail = (
-            f"\n\n<b>Admin detail</b>: <code>Translate provider: {html.escape(result.get('provider') or '-')}</code>"
-            if is_admin_user(update.effective_user.id) else ""
-        )
-        await update.message.reply_text(
+        save_tool_test_result("translation_file", "PASS", f"provider={result.get('provider')}; target={target}", uid)
+        return await reply_translation_surface(
+            update,
             "🌐 <b>DỊCH FILE TOAN AAS</b>\n\n"
-            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
-            "\n"
+            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n\n"
             "<b>Nội dung gốc:</b>\n"
             f"<code>{html.escape(source_text[:1000])}</code>\n\n"
             "<b>Bản dịch:</b>\n"
-            f"{html.escape((result.get('text') or '')[:2200])}"
-            + admin_detail,
+            f"{html.escape((result.get('text') or '')[:2200])}",
             parse_mode="HTML",
         )
     except Exception:
-        save_tool_test_result("translation_file", "FAIL", "translation provider failed", update.effective_user.id)
-        await update.message.reply_text(TRANSLATE_FILE_PROVIDER_ERROR_TEXT)
+        save_tool_test_result("translation_file", "FAIL", "translation provider failed", uid)
+        return await reply_translation_surface(update, TRANSLATE_FILE_PROVIDER_ERROR_TEXT)
+
+async def cmd_translate_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw_target = str((context.args or [""])[0] if context.args else "").strip()
+    target = normalize_translate_target(raw_target)
+    if not target:
+        info, _source = doc_input_file_info(update)
+        if not info:
+            return await update.message.reply_text("⚠️ Gửi file txt/docx/pdf rồi reply hoặc gõ /translate_file trong vòng 10 phút.")
+        save_translation_request(update.effective_user.id, "file", source_ref=info)
+        return await show_translation_picker(update, "file")
+    return await run_translate_file_to_target(update, context, target)
 
 async def cmd_translate_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_target = str((context.args or [""])[0] if context.args else "").strip()
     if not raw_target:
-        return await update.message.reply_text(translate_voice_missing_target_text())
+        if not has_recent_audio_input(update):
+            return await update.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ /translate_voice trong vòng 2 phút.")
+        save_translation_request(update.effective_user.id, "voice")
+        return await show_translation_picker(update, "voice")
     target = normalize_translate_target(raw_target)
     if not target:
         return await update.message.reply_text(translate_voice_missing_target_text())
-    if not DEEPGRAM_API_KEY:
-        return await update.message.reply_text(TRANSLATE_AUDIO_MISSING_STT_TEXT)
-    media_info = await resolve_stt_test_media(update, context)
-    if not media_info:
-        return await update.message.reply_text("⚠️ Gửi voice/audio/video ngắn rồi reply hoặc gõ <code>/translate_voice en</code> trong vòng 2 phút.", parse_mode="HTML")
-    if media_info.get("error"):
-        return await update.message.reply_text(
-            TRANSLATE_AUDIO_TIMEOUT_TEXT
-            if media_info.get("error") == "telegram_timeout" else TRANSLATE_AUDIO_ERROR_TEXT
-        )
-    if int(media_info.get("file_size", 0) or 0) > 15 * 1024 * 1024 or not media_info.get("bytes"):
-        return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
-    try:
-        transcript = (await AgentDeepgram.transcribe(
-            media_info["bytes"],
-            context,
-            content_type=media_info.get("content_type") or "application/octet-stream",
-        ) or "").strip()
-        if not transcript or transcript.startswith("❌"):
-            save_tool_test_result("translation_voice", "FAIL", transcript[:400] or "empty_transcript", update.effective_user.id)
-            return await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
-        if target == "vi" and is_likely_vietnamese_transcript(transcript):
-            save_tool_test_result("translation_voice", "PASS", "stt=deepgram; target=vi; transcript_already_vi", update.effective_user.id)
-            admin_detail = (
-                "\n\n<b>Admin detail</b>:\n"
-                "• STT provider: <code>Deepgram</code>\n"
-                "• Translate provider: <code>không cần dịch</code>"
-                if is_admin_user(update.effective_user.id) else ""
-            )
-            return await update.message.reply_text(
-                "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
-                "• Bóc băng: đã bật\n"
-                "• Dịch: không cần dịch thêm\n"
-                "• Đích: <b>Tiếng Việt</b>\n"
-                "\n"
-                "<b>Transcript gốc:</b>\n"
-                f"<code>{html.escape(transcript[:1100])}</code>\n\n"
-                "Transcript đã là Tiếng Việt. Bot chưa cần dịch thêm."
-                + admin_detail,
-                parse_mode="HTML",
-            )
-        try:
-            result = await translate_to_language(transcript[:3000], target)
-        except Exception:
-            save_tool_test_result("translation_voice", "FAIL", "translation_provider_failed_after_stt", update.effective_user.id)
-            return await update.message.reply_text(TRANSLATE_AUDIO_TRANSLATION_ERROR_TEXT)
-        save_tool_test_result("translation_voice", "PASS", f"stt=deepgram; provider={result.get('provider')}; target={target}", update.effective_user.id)
-        admin_detail = (
-            "\n\n<b>Admin detail</b>:\n"
-            "• STT provider: <code>Deepgram</code>\n"
-            f"• Translate provider: <code>{html.escape(result.get('provider') or '-')}</code>"
-            if is_admin_user(update.effective_user.id) else ""
-        )
-        await update.message.reply_text(
-            "🌐 <b>DỊCH VOICE/AUDIO TOAN AAS</b>\n\n"
-            "• Bóc băng: đã bật\n"
-            "• Dịch: đã bật\n"
-            f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
-            "\n"
-            "<b>Transcript gốc:</b>\n"
-            f"<code>{html.escape(transcript[:1100])}</code>\n\n"
-            "<b>Bản dịch:</b>\n"
-            f"{html.escape((result.get('text') or '')[:2200])}"
-            + admin_detail,
-            parse_mode="HTML",
-        )
-    except Exception:
-        save_tool_test_result("translation_voice", "FAIL", "stt_or_translation_provider_failed", update.effective_user.id)
-        await update.message.reply_text(TRANSLATE_AUDIO_ERROR_TEXT)
+    return await run_translate_voice_to_target(update, context, target)
 
 def audio_voice_received_text() -> str:
     return (
         "✅ Đã nhận audio/voice.\n"
-        "Bạn có thể dùng:\n"
+        "\n"
+        "Bạn muốn làm gì?\n"
+        "• Bóc băng thành văn bản\n"
+        "• Dịch sang ngôn ngữ khác\n"
+        "• Dùng lệnh nhanh nếu muốn\n\n"
+        "Lệnh nhanh:\n"
         "• /translate_voice en — bóc băng rồi dịch sang English\n"
         "• /translate_voice vi — bóc băng rồi dịch sang Tiếng Việt\n"
         "• /transcribe — chỉ bóc băng thành văn bản\n"
@@ -29335,8 +29490,7 @@ async def cmd_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Bóc băng: đã bật\n\n"
             "<b>Nội dung:</b>\n"
             f"{html.escape(transcript[:3500])}\n\n"
-            f"💼 Còn lại: {balance} Xu | /naptien để nạp thêm"
-            + ("\n\n<b>Admin detail</b>: <code>STT provider: Deepgram</code>" if is_admin_user(uid) else ""),
+            f"💼 Còn lại: {balance} Xu | /naptien để nạp thêm",
             parse_mode="HTML",
         )
     except Exception:
@@ -29365,7 +29519,6 @@ async def handle_auto_translate_message(update: Update, context: ContextTypes.DE
             "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
             "• Nguồn: <code>auto</code>\n"
             f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n"
-            + (f"• Provider: <code>{html.escape(provider)}</code>\n" if is_admin_user(uid) else "")
             + "\n"
             f"{html.escape(translated)}\n\n"
             "<i>/translate_mode_off để tắt</i>",
@@ -50200,14 +50353,31 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_user_file(update)
+    if update.effective_user:
+        info, _source = doc_input_file_info(update)
+        if info:
+            save_translation_request(update.effective_user.id, "file", source_ref=info)
+    await update.message.reply_text(
+        "✅ Đã nhận file.\n\n"
+        "Bạn có thể dùng:\n"
+        "• /translate_file — chọn ngôn ngữ để dịch file\n"
+        "• /translate_file en — dịch file sang English\n"
+        "• /doc_tools — xem công cụ tài liệu khác\n\n"
+        "File đã được lưu tạm 10 phút.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🌐 Dịch file", callback_data="tr_pick|file")]]),
+    )
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_media(update)
-    await update.message.reply_text(audio_voice_received_text())
+    if update.effective_user:
+        save_translation_request(update.effective_user.id, "voice")
+    await update.message.reply_text(audio_voice_received_text(), reply_markup=voice_translation_action_keyboard())
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_media(update)
-    await update.message.reply_text(audio_voice_received_text())
+    if update.effective_user:
+        save_translation_request(update.effective_user.id, "voice")
+    await update.message.reply_text(audio_voice_received_text(), reply_markup=voice_translation_action_keyboard())
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -50908,6 +51078,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.Document.MP3 | filters.Document.MP4 | filters.Document.WAV, handle_media_cache_only))
     tg_app.add_handler(MessageHandler(filters.Document.ALL, handle_document_cache_only))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
