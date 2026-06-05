@@ -29434,8 +29434,7 @@ def audio_voice_received_text() -> str:
         "• Dịch sang ngôn ngữ khác\n"
         "• Dùng lệnh nhanh nếu muốn\n\n"
         "Lệnh nhanh:\n"
-        "• /translate_voice en — bóc băng rồi dịch sang English\n"
-        "• /translate_voice vi — bóc băng rồi dịch sang Tiếng Việt\n"
+        "• /translate_voice — bóc băng rồi chọn ngôn ngữ dịch\n"
         "• /transcribe — chỉ bóc băng thành văn bản\n"
         "• /translate_tools — xem thêm ngôn ngữ hỗ trợ"
     )
