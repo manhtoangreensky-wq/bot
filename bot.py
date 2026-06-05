@@ -23883,6 +23883,27 @@ def has_recent_audio_input(update: Update) -> bool:
 
 def translation_target_keyboard(source_type: str, more: bool = False) -> InlineKeyboardMarkup:
     source = str(source_type or "text").strip()
+    if source == "voice":
+        if more:
+            codes = TRANSLATION_MORE_LANGS
+            rows = []
+            for i in range(0, len(codes), 2):
+                rows.append([
+                    InlineKeyboardButton(translate_target_button_label(code), callback_data=f"tr_target|voice|{code}")
+                    for code in codes[i:i + 2]
+                ])
+            rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="tr_pick|voice")])
+            return InlineKeyboardMarkup(rows)
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🇺🇸 English", callback_data="tr_target|voice|en"),
+                InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="tr_target|voice|vi"),
+            ],
+            [
+                InlineKeyboardButton("🇨🇳 中文", callback_data="tr_target|voice|zh"),
+                InlineKeyboardButton("🌍 Ngôn ngữ khác", callback_data="tr_more|voice"),
+            ],
+        ])
     if more:
         codes = TRANSLATION_MORE_LANGS
         rows = []
@@ -23922,6 +23943,16 @@ def voice_translation_action_keyboard() -> InlineKeyboardMarkup:
     ])
 
 def translation_pick_text(source_type: str) -> str:
+    if str(source_type or "").strip() == "voice":
+        return (
+            "🌐 <b>Dịch voice/audio</b>\n\n"
+            "Vui lòng chọn ngôn ngữ đích:\n"
+            "🇺🇸 English\n"
+            "🇻🇳 Tiếng Việt\n"
+            "🇨🇳 中文\n"
+            "🌍 Ngôn ngữ khác\n\n"
+            "Bot chưa trừ Xu."
+        )
     source = translation_source_label(source_type)
     return (
         "🌐 <b>Chọn ngôn ngữ dịch</b>\n\n"
