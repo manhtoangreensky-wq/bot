@@ -134,6 +134,8 @@ def _log_secret_values() -> list[str]:
         "JAMENDO_CLIENT_ID",
         "JAMENDO_CLIENT_SECRET",
         "FREESOUND_API_KEY",
+        "FREESOUND_CLIENT_ID",
+        "FREESOUND_CLIENT_SECRET",
         "PIXABAY_API_KEY",
         "MUSICFUL_API_KEY",
         "MINIMAX_API_KEY",
@@ -329,6 +331,8 @@ AUPHONIC_USERNAME   = _env("AUPHONIC_USERNAME")
 JAMENDO_CLIENT_ID     = _env("JAMENDO_CLIENT_ID")
 JAMENDO_CLIENT_SECRET = _env("JAMENDO_CLIENT_SECRET")
 FREESOUND_API_KEY     = _env("FREESOUND_API_KEY")
+FREESOUND_CLIENT_ID    = _env("FREESOUND_CLIENT_ID")
+FREESOUND_CLIENT_SECRET = _env("FREESOUND_CLIENT_SECRET")
 PIXABAY_API_KEY       = _env("PIXABAY_API_KEY")
 MUSICFUL_API_KEY      = _env("MUSICFUL_API_KEY")
 MINIMAX_API_KEY       = _env("MINIMAX_API_KEY")
@@ -25414,7 +25418,9 @@ def provider_status_payload() -> dict:
         "music": {
             "jamendo": bool(JAMENDO_CLIENT_ID),
             "jamendo_secret": bool(JAMENDO_CLIENT_SECRET),
-            "freesound": bool(FREESOUND_API_KEY),
+            "freesound": bool(FREESOUND_API_KEY or FREESOUND_CLIENT_SECRET),
+            "freesound_client_id": bool(FREESOUND_CLIENT_ID),
+            "freesound_client_secret": bool(FREESOUND_CLIENT_SECRET),
             "pixabay": bool(PIXABAY_API_KEY),
             "musicful": bool(MUSICFUL_API_KEY),
             "minimax": bool(MINIMAX_API_KEY and MINIMAX_GROUP_ID),
@@ -25426,7 +25432,7 @@ def provider_status_payload() -> dict:
             "soundraw": bool(SOUNDRAW_API_KEY),
             "replicate": bool(REPLICATE_API_TOKEN),
             "clipdrop": bool(CLIPDROP_API_KEY),
-            "library_ready": bool(JAMENDO_CLIENT_ID or FREESOUND_API_KEY or PIXABAY_API_KEY),
+            "library_ready": bool(JAMENDO_CLIENT_ID or FREESOUND_API_KEY or FREESOUND_CLIENT_SECRET or PIXABAY_API_KEY),
             "ai_music_ready": bool(MUSICFUL_API_KEY or (MINIMAX_API_KEY and MINIMAX_GROUP_ID) or STABILITY_API_KEY),
         },
         "search": {
@@ -25457,7 +25463,7 @@ def provider_status_payload() -> dict:
             "image_to_video_prompt": is_feature_enabled("image_to_video_prompt", default=True),
             "music_tools": is_feature_enabled("music_tools", default=True),
             "music_library_stage": "ready_for_smoke_test" if JAMENDO_CLIENT_ID else configured_release_stage("music_library"),
-            "sfx_library_stage": "ready_for_smoke_test" if FREESOUND_API_KEY else configured_release_stage("sfx_library"),
+            "sfx_library_stage": "ready_for_smoke_test" if (FREESOUND_API_KEY or FREESOUND_CLIENT_SECRET) else configured_release_stage("sfx_library"),
             "media_library_stage": "ready_for_smoke_test" if PIXABAY_API_KEY else configured_release_stage("media_library"),
             "music_generation_stage": configured_release_stage("music_generation"),
             "music_bg_stage": configured_release_stage("music_bg"),
@@ -30336,17 +30342,60 @@ async def fetch_jamendo_tracks(query: str, limit: int = 8) -> list[dict]:
         raise RuntimeError(f"Jamendo HTTP {status_code}")
     return data.get("results") or []
 
-async def fetch_freesound_results(query: str, limit: int = 5) -> list[dict]:
-    params = {
+FREESOUND_SEARCH_ENDPOINT = "https://freesound.org/apiv2/search/text/"
+FREESOUND_SEARCH_FIELDS = "id,name,username,duration,license,previews,url,tags"
+
+class FreesoundSearchError(RuntimeError):
+    def __init__(self, attempts: list[dict]):
+        self.attempts = attempts or []
+        status_text = ", ".join(f"{item.get('mode')}={item.get('http_status')}" for item in self.attempts) or "no_auth_candidate"
+        super().__init__(f"Freesound auth failed: {status_text}")
+
+def freesound_auth_candidates() -> list[tuple[str, str, dict]]:
+    candidates: list[tuple[str, str, dict]] = []
+    api_key = (FREESOUND_API_KEY or "").strip()
+    client_secret = (FREESOUND_CLIENT_SECRET or "").strip()
+    if api_key:
+        candidates.append(("query_token", api_key, {}))
+        candidates.append(("header_token", "", {"Authorization": f"Token {api_key}"}))
+    if client_secret and client_secret != api_key:
+        candidates.append(("client_secret_token", client_secret, {}))
+    return candidates
+
+def freesound_attempt_summary(attempts: list[dict]) -> str:
+    parts = []
+    for item in attempts or []:
+        mode = str(item.get("mode") or "-")
+        http_status = str(item.get("http_status") or "-")
+        count = str(item.get("results") if item.get("results") is not None else "-")
+        parts.append(f"{mode}:HTTP {http_status}/results {count}")
+    return "; ".join(parts) or "-"
+
+async def freesound_search(query: str, limit: int = 5) -> dict:
+    base_params = {
         "query": query,
         "page_size": max(1, min(limit, 5)),
-        "fields": "id,name,username,duration,license,previews,url,tags",
-        "token": FREESOUND_API_KEY,
+        "fields": FREESOUND_SEARCH_FIELDS,
     }
-    data, status_code = await provider_get_json("https://freesound.org/apiv2/search/text/", params=params, timeout=18.0)
-    if status_code >= 400:
-        raise RuntimeError(f"Freesound HTTP {status_code}")
-    return data.get("results") or []
+    attempts: list[dict] = []
+    for mode, token_value, headers in freesound_auth_candidates():
+        params = dict(base_params)
+        if token_value:
+            params["token"] = token_value
+        data, status_code = await provider_get_json(FREESOUND_SEARCH_ENDPOINT, params=params, headers=headers, timeout=18.0)
+        results = data.get("results") or []
+        attempts.append({"mode": mode, "http_status": status_code, "results": len(results)})
+        if status_code < 400:
+            return {
+                "results": results,
+                "auth_mode": mode,
+                "http_status": status_code,
+                "attempts": attempts,
+            }
+    raise FreesoundSearchError(attempts)
+
+async def fetch_freesound_results(query: str, limit: int = 5) -> list[dict]:
+    return (await freesound_search(query, limit=limit)).get("results") or []
 
 async def fetch_pixabay_media(query: str, limit: int = 5) -> tuple[list[dict], list[dict]]:
     common = {
@@ -30497,28 +30546,38 @@ async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args or []).strip()
     if not query:
         return await update.message.reply_text("⚠️ Cú pháp: <code>/sfx_library &lt;từ khóa&gt;</code>", parse_mode="HTML")
-    if not FREESOUND_API_KEY:
+    if not (FREESOUND_API_KEY or FREESOUND_CLIENT_SECRET):
         return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh chưa được cấu hình. Bot chưa trừ Xu.")
     try:
-        results = await fetch_freesound_results(query, limit=5)
+        search = await freesound_search(query, limit=5)
+        results = search.get("results") or []
+        auth_mode = search.get("auth_mode") or "-"
+        http_status = int(search.get("http_status") or 0)
+        set_system_setting("freesound_auth_mode", str(auth_mode), f"http={http_status}; results={len(results)}", update.effective_user.id)
     except Exception as e:
+        attempts = getattr(e, "attempts", []) or []
         detail = provider_error_summary(e)
-        record_api_debug("freesound", "sfx_library", "FAIL", 0, detail)
-        if "401" in detail or "403" in detail:
-            return await update.message.reply_text("⚠️ Freesound key chưa hợp lệ hoặc chưa được cấp quyền API. Bot chưa trừ Xu.")
-        if "429" in detail:
+        attempt_detail = freesound_attempt_summary(attempts)
+        record_api_debug("freesound", "sfx_library", "FAIL", 0, f"{detail}; {attempt_detail}")
+        statuses = {int(item.get("http_status") or 0) for item in attempts}
+        if 429 in statuses:
             return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang quá tải/giới hạn lượt. Bot chưa trừ Xu.")
+        if statuses and statuses.issubset({401, 403}):
+            base = "⚠️ Freesound key chưa hợp lệ hoặc chưa được cấp quyền API. Bot chưa trừ Xu."
+            if is_admin_or_owner(update.effective_user.id):
+                base += "\n\nAdmin detail: HTTP 401. Hãy kiểm tra đúng API key ở https://freesound.org/apiv2/apply hoặc regenerate key."
+            return await update.message.reply_text(base)
         if is_admin_or_owner(update.effective_user.id):
             return await update.message.reply_text(
                 "⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.\n\n"
-                f"Admin detail: <code>{html.escape(detail[:240])}</code>",
+                f"Admin detail: <code>{html.escape((detail + '; ' + attempt_detail)[:320])}</code>",
                 parse_mode="HTML",
             )
         return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.")
-    record_api_debug("freesound", "sfx_library", "PASS" if results else "EMPTY", 200, f"results={len(results)}")
+    record_api_debug("freesound", "sfx_library", "PASS" if results else "EMPTY", http_status, f"auth_mode={auth_mode}; results={len(results)}")
     if not results:
         return await update.message.reply_text(
-            "Không tìm thấy hiệu ứng phù hợp. Thử từ khóa khác như: whoosh, click, transition, pop, cinematic hit.\n\n"
+            "Không tìm thấy hiệu ứng phù hợp. Thử: whoosh, click, pop, cinematic hit, transition.\n\n"
             "Bot chưa trừ Xu."
         )
     lines = [
@@ -30686,23 +30745,41 @@ async def cmd_tool_test_sfx_library(update: Update, context: ContextTypes.DEFAUL
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     query = " ".join(context.args or []).strip() or "click"
-    if not FREESOUND_API_KEY:
-        save_tool_test_result("sfx_library", "MISSING", "FREESOUND_API_KEY missing", update.effective_user.id)
+    if not (FREESOUND_API_KEY or FREESOUND_CLIENT_SECRET):
+        save_tool_test_result("sfx_library", "MISSING", "FREESOUND_API_KEY/FREESOUND_CLIENT_SECRET missing", update.effective_user.id)
         return await update.message.reply_text("🔊 <b>SFX Library Test</b>\n\n• Freesound: <code>MISSING</code>", parse_mode="HTML")
     status = "FAIL"
     detail = ""
+    auth_mode = "-"
+    http_status = 0
+    result_count = 0
     try:
-        results = await fetch_freesound_results(query, limit=3)
-        status = "PASS" if results else "EMPTY"
-        detail = f"results={len(results)}"
+        search = await freesound_search(query, limit=5)
+        results = search.get("results") or []
+        status = "PASS"
+        auth_mode = str(search.get("auth_mode") or "-")
+        http_status = int(search.get("http_status") or 0)
+        result_count = len(results)
+        detail = f"http={http_status}; auth_mode={auth_mode}; results={result_count}"
+        set_system_setting("freesound_auth_mode", auth_mode, detail, update.effective_user.id)
     except Exception as e:
-        detail = provider_error_summary(e)[:300]
+        attempts = getattr(e, "attempts", []) or []
+        statuses = {int(item.get("http_status") or 0) for item in attempts}
+        http_status = next((int(item.get("http_status") or 0) for item in reversed(attempts)), 0)
+        detail = (provider_error_summary(e) + "; " + freesound_attempt_summary(attempts))[:500]
+        if statuses and statuses.issubset({401, 403}):
+            detail = "HTTP 401. Hãy kiểm tra đúng API key ở https://freesound.org/apiv2/apply hoặc regenerate key."
+        elif 429 in statuses:
+            detail = "HTTP 429 rate limit"
     save_tool_test_result("sfx_library", status, f"query={query[:80]}; {detail}", update.effective_user.id)
     await update.message.reply_text(
         "🔊 <b>SFX Library Smoke Test</b>\n\n"
         f"• Query: <code>{html.escape(query[:100])}</code>\n"
         f"• Freesound: <code>{html.escape(status)}</code>\n"
-        f"• Detail: <code>{html.escape(detail[:300])}</code>\n\n"
+        f"• HTTP: <code>{html.escape(str(http_status or '-'))}</code>\n"
+        f"• Auth mode: <code>{html.escape(auth_mode)}</code>\n"
+        f"• Results: <code>{html.escape(str(result_count))}</code>\n"
+        f"• Detail: <code>{html.escape(detail[:320])}</code>\n\n"
         "Không hiển thị key.",
         parse_mode="HTML",
     )
