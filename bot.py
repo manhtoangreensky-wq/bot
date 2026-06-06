@@ -30442,6 +30442,248 @@ def format_freesound_result(item: dict, idx: int) -> str:
         f"• Nguồn: <code>{source_url}</code>"
     )
 
+MEDIA_PREVIEW_TTL_SECONDS = 600
+MEDIA_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
+LAST_SFX_RESULTS: dict[int, dict] = {}
+LAST_MUSIC_RESULTS: dict[int, dict] = {}
+
+def jamendo_preview_item(item: dict) -> dict:
+    return {
+        "provider": "Jamendo",
+        "title": str(item.get("name") or "Untitled")[:120],
+        "author": str(item.get("artist_name") or "Unknown")[:100],
+        "duration": format_seconds(item.get("duration")),
+        "license": str(item.get("license_ccurl") or "-")[:240],
+        "source_url": str(item.get("shareurl") or "").strip(),
+        "preview_url": str(item.get("audio") or "").strip(),
+    }
+
+def freesound_preview_item(item: dict) -> dict:
+    previews = item.get("previews") or {}
+    return {
+        "provider": "Freesound",
+        "title": str(item.get("name") or "Untitled")[:120],
+        "author": str(item.get("username") or "Unknown")[:100],
+        "duration": format_seconds(item.get("duration")),
+        "license": str(item.get("license") or "-")[:240],
+        "source_url": str(item.get("url") or "").strip(),
+        "preview_url": str(previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3") or "").strip(),
+    }
+
+def save_media_preview_results(kind: str, user_id, query: str, items: list[dict]):
+    if not user_id:
+        return
+    cache = LAST_SFX_RESULTS if kind == "sfx" else LAST_MUSIC_RESULTS
+    cache[int(user_id)] = {
+        "created_at": time.time(),
+        "query": str(query or "")[:160],
+        "results": [item for item in items if item.get("preview_url")],
+    }
+
+def get_media_preview_item(kind: str, user_id, index_text: str) -> tuple[dict | None, str]:
+    try:
+        idx = int(str(index_text or "").strip())
+    except Exception:
+        return None, "invalid"
+    if idx < 1:
+        return None, "invalid"
+    cache = LAST_SFX_RESULTS if kind == "sfx" else LAST_MUSIC_RESULTS
+    data = cache.get(int(user_id or 0))
+    if not data or time.time() - float(data.get("created_at") or 0) > MEDIA_PREVIEW_TTL_SECONDS:
+        return None, "expired"
+    results = data.get("results") or []
+    if idx > len(results):
+        return None, "invalid"
+    return results[idx - 1], ""
+
+def media_preview_keyboard(kind: str, items: list[dict]) -> InlineKeyboardMarkup | None:
+    available = [item for item in items if item.get("preview_url")][:3]
+    if not available:
+        return None
+    label = "SFX" if kind == "sfx" else "nhạc"
+    rows = [[
+        InlineKeyboardButton(f"▶️ Nghe {label} {idx}", callback_data=f"play_{kind}|{idx}")
+    ] for idx, _ in enumerate(available, start=1)]
+    source_row = []
+    for idx, item in enumerate(available[:3], start=1):
+        if item.get("source_url"):
+            source_row.append(InlineKeyboardButton(f"🔗 Nguồn {idx}", callback_data=f"open_{kind}_source|{idx}"))
+    if source_row:
+        rows.append(source_row)
+    rows.append([InlineKeyboardButton("📜 License", callback_data=f"license_{kind}|1")])
+    return InlineKeyboardMarkup(rows)
+
+def media_preview_caption(item: dict) -> str:
+    return (
+        f"▶️ Nghe thử: {html.escape(str(item.get('title') or 'Untitled')[:120])}\n"
+        f"Nguồn: {html.escape(str(item.get('provider') or '-')[:40])}\n"
+        f"License: {html.escape(str(item.get('license') or '-')[:180])}\n"
+        "Lưu ý: kiểm tra license trước khi dùng thương mại."
+    )
+
+async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
+    user_id = update.effective_user.id if update.effective_user else 0
+    item, error = get_media_preview_item(kind, user_id, index_text)
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
+        return
+    if error == "expired":
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.",
+        )
+    if error or not item:
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.",
+        )
+    preview_url = str(item.get("preview_url") or "").strip()
+    if not is_valid_http_url(preview_url):
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ Preview URL không hợp lệ. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.",
+        )
+    caption = media_preview_caption(item)
+    try:
+        return await context.bot.send_audio(
+            chat_id=chat_id,
+            audio=preview_url,
+            caption=caption,
+            parse_mode="HTML",
+            title=str(item.get("title") or "TOAN AAS preview")[:64],
+            performer=str(item.get("author") or item.get("provider") or "TOAN AAS")[:64],
+        )
+    except Exception as direct_error:
+        record_api_debug(str(item.get("provider") or "media_preview").lower(), "send_preview_url", "FAIL", 0, type(direct_error).__name__)
+    tmp_path = ""
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            res = await client.get(preview_url)
+        if res.status_code >= 400:
+            raise RuntimeError(f"preview_http_{res.status_code}")
+        content = bytes(res.content or b"")
+        if not content:
+            raise RuntimeError("preview_empty")
+        if len(content) > MEDIA_PREVIEW_MAX_BYTES:
+            return await context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ File nghe thử quá lớn nên bot chưa gửi trực tiếp. Vui lòng mở link nguồn trong kết quả tìm kiếm.",
+            )
+        content_type = (res.headers.get("content-type") or "").split(";", 1)[0].strip()
+        suffix = mimetypes.guess_extension(content_type) or os.path.splitext(urlparse(preview_url).path)[1] or ".mp3"
+        if len(suffix) > 8 or not suffix.startswith("."):
+            suffix = ".mp3"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        with open(tmp_path, "rb") as f:
+            return await context.bot.send_audio(
+                chat_id=chat_id,
+                audio=f,
+                caption=caption,
+                parse_mode="HTML",
+                title=str(item.get("title") or "TOAN AAS preview")[:64],
+                performer=str(item.get("author") or item.get("provider") or "TOAN AAS")[:64],
+            )
+    except Exception as e:
+        record_api_debug(str(item.get("provider") or "media_preview").lower(), "send_preview_download", "FAIL", 0, type(e).__name__)
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ Không gửi được file nghe thử lúc này. Bot chưa trừ Xu. Vui lòng thử lại hoặc mở link nguồn.",
+        )
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+async def send_media_preview_source(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
+    user_id = update.effective_user.id if update.effective_user else 0
+    item, error = get_media_preview_item(kind, user_id, index_text)
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
+        return
+    if error == "expired":
+        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+    if error or not item:
+        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+    source_url = str(item.get("source_url") or "").strip()
+    if not source_url:
+        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả này chưa có link nguồn.")
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"🔗 Nguồn: {source_url}\n\nBot chưa trừ Xu.",
+        disable_web_page_preview=True,
+    )
+
+async def send_media_preview_license(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
+    user_id = update.effective_user.id if update.effective_user else 0
+    item, error = get_media_preview_item(kind, user_id, index_text)
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
+        return
+    if error == "expired":
+        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+    if error or not item:
+        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            f"📜 License: {item.get('license') or '-'}\n"
+            "Một số hiệu ứng/nhạc yêu cầu ghi nguồn hoặc có giới hạn thương mại. Hãy kiểm tra license trước khi dùng cho quảng cáo/kiếm tiền.\n\n"
+            "Bot chưa trừ Xu."
+        ),
+    )
+
+async def handle_media_preview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    action, index_text = (query.data or "").split("|", 1)
+    kind = "sfx" if "_sfx" in action or action.endswith("_sfx") else "music"
+    if action.startswith("play_"):
+        return await send_media_preview_audio(update, context, kind, index_text)
+    if action.startswith("open_"):
+        return await send_media_preview_source(update, context, kind, index_text)
+    return await send_media_preview_license(update, context, kind, index_text)
+
+async def cmd_play_sfx(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    index_text = (context.args or [""])[0]
+    return await send_media_preview_audio(update, context, "sfx", index_text)
+
+async def cmd_play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    index_text = (context.args or [""])[0]
+    return await send_media_preview_audio(update, context, "music", index_text)
+
+def is_media_preview_url_text(text: str) -> bool:
+    raw = (text or "").strip()
+    if not re.fullmatch(r"https?://\S+", raw, flags=re.I):
+        return False
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return False
+    host = (parsed.netloc or "").lower()
+    path = parsed.path or ""
+    if host == "cdn.freesound.org":
+        return True
+    if host in {"freesound.org", "www.freesound.org"} and path.startswith("/people"):
+        return True
+    if re.fullmatch(r"prod-[a-z0-9-]+\.storage\.jamendo\.com", host):
+        return True
+    return host in {"jamendo.com", "www.jamendo.com"} and path.startswith("/track")
+
+async def reply_media_preview_url_hint(update: Update):
+    return await update.message.reply_text(
+        "🎧 Đây là link nghe thử từ kho nhạc/SFX.\n"
+        "Bạn có thể bấm nút nghe thử trong kết quả tìm kiếm, hoặc dùng:\n"
+        "• /play_sfx 1\n"
+        "• /play_music 1\n\n"
+        "Bot chưa trừ Xu."
+    )
+
 def format_pixabay_image(item: dict, idx: int) -> str:
     tags = html.escape(str(item.get("tags") or "-")[:120])
     page_url = html.escape(str(item.get("pageURL") or "-")[:180])
@@ -30541,6 +30783,11 @@ async def cmd_music_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
     ]
     await reply_html_lines(update, lines)
+    preview_items = [jamendo_preview_item(item) for item in results[:8]]
+    save_media_preview_results("music", update.effective_user.id, query, preview_items)
+    kb = media_preview_keyboard("music", preview_items)
+    if kb:
+        await update.message.reply_text("🎧 Nghe thử nhanh:", reply_markup=kb)
 
 async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args or []).strip()
@@ -30592,6 +30839,11 @@ async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
     ]
     await reply_html_lines(update, lines)
+    preview_items = [freesound_preview_item(item) for item in results[:5]]
+    save_media_preview_results("sfx", update.effective_user.id, query, preview_items)
+    kb = media_preview_keyboard("sfx", preview_items)
+    if kb:
+        await update.message.reply_text("🎧 Nghe thử nhanh:", reply_markup=kb)
 
 async def cmd_media_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args or []).strip()
@@ -51119,6 +51371,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text.startswith("/"):
         return await handle_unknown_or_unmatched_command(update, context)
 
+    if is_media_preview_url_text(text):
+        return await reply_media_preview_url_hint(update)
+
     if text in {"🏠 TOAN AAS MENU", "🛸 MENU DỊCH VỤ TOAN AAS"}:
         return await cmd_start(update, context)
 
@@ -51494,6 +51749,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("music_prompt", cmd_music_prompt))
     tg_app.add_handler(CommandHandler("music_library", cmd_music_library))
     tg_app.add_handler(CommandHandler("sfx_library", cmd_sfx_library))
+    tg_app.add_handler(CommandHandler("play_sfx", cmd_play_sfx))
+    tg_app.add_handler(CommandHandler("play_music", cmd_play_music))
     tg_app.add_handler(CommandHandler("media_library", cmd_media_library))
     tg_app.add_handler(CommandHandler("music_policy", cmd_music_policy))
     tg_app.add_handler(CommandHandler("music_bg", cmd_music_bg))
@@ -51828,6 +52085,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.Document.MP3 | filters.Document.MP4 | filters.Document.WAV, handle_media_cache_only))
     tg_app.add_handler(MessageHandler(filters.Document.ALL, handle_document_cache_only))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
