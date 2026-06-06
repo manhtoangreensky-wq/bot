@@ -9,6 +9,7 @@ This register defines legal guardrails before opening larger platform modules.
 | Bot AI tools | Public V1 | Wrong output, unsafe advice, user misuse | User must review output; no guarantee of accuracy, revenue, virality, ad approval, or legal/financial result. |
 | Xu service credits/payment | Public V1 | Misunderstood as money, e-money, digital asset, transfer value | Service credits only; no withdrawal, no transfer, no outside payment value, no user trading. |
 | Image/video/voice tools | Public V1 / limited by provider readiness | Copyright, privacy, deepfake, consent, harmful edits | Reject risky requests; require user-owned or authorized content; no impersonation or harmful deepfake. |
+| Music/audio/media tools | Public V1 / admin-test for rendering | Copyright, music license, attribution, commercial-use limits, artist imitation, voice clone misuse | Do not create artist/song clones; require license checks for Jamendo/Freesound/Pixabay/external media; rendering/AI music remains provider-ready/admin-tested before public use. |
 | Downloader | Limited | Reup/copyright/bypass platform protection | Use only for user-owned/authorized content; public downloader provider may remain disabled for safety. |
 | Affiliate content | Customer self-post only | Undisclosed commissions, exaggerated claims, prohibited goods | Require affiliate disclosure and truthful claims; no fake reviews or restricted products. |
 | Admin publish | Future admin-first | Account permission, platform policy, accidental posting | Admin-owned/authorized accounts only; approval gate, audit log, risk check, failure handling. |
@@ -30,3 +31,15 @@ This register defines legal guardrails before opening larger platform modules.
 - No password collection.
 - No payment card collection through the bot.
 - No automatic publishing or ad launch without approval.
+
+## Music, Audio, Media And Copyright Policy
+
+1. TOAN AAS supports music prompts, background music search, sound effect search, public media search, and audio preparation for video workflows.
+2. Users must not request or use music that imitates a copyrighted artist, singer, song, melody, beat, arrangement, vocal style, or music brand.
+3. Users must not use TOAN AAS for unauthorized covers/remixes, voice cloning, copyright evasion, or reuploading content without usage rights.
+4. Sources such as Jamendo, Freesound, Pixabay, or external libraries have item-specific licenses. Users are responsible for checking license terms, attribution requirements, commercial-use limits, and platform rules before posting.
+5. TOAN AAS does not guarantee that every third-party music/media file is valid for every commercial purpose or platform.
+6. AI music generation, audio/video enhancement, and music-to-video rendering may have separate Xu costs and are not unlimited services.
+7. If a provider fails, lacks a configured key, or processing fails, the bot must not charge Xu, or must refund Xu if it already charged before the failure.
+8. TOAN AAS may reject, block, or remove content that appears to violate copyright, imitate artists, or mislead viewers.
+9. Users are legally responsible if they use music/media under the wrong license or violate third-party rights.

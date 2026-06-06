@@ -517,6 +517,49 @@ Viết prompt tạo ảnh thumbnail TikTok cho sản phẩm [tên sản phẩm],
 
 ---
 
+## 14A. NHẠC AI / KHO NHẠC
+
+TOAN AAS hỗ trợ tìm nhạc nền, hiệu ứng âm thanh, media public và tạo prompt nhạc cho video.
+
+Lệnh chính:
+
+| Bạn muốn làm gì? | Lệnh |
+|---|---|
+| Mở trung tâm nhạc | `/music_tools` |
+| Tạo prompt nhạc nền | `/music_prompt <mô tả>` |
+| Tìm nhạc nền | `/music_library <từ khóa>` |
+| Tìm hiệu ứng âm thanh | `/sfx_library <từ khóa>` |
+| Tìm ảnh/video public | `/media_library <từ khóa>` |
+| Nghe thử nhạc | `/play_music <số>` |
+| Nghe thử SFX | `/play_sfx <số>` |
+| Chọn nhạc | `/select_music <số>` |
+| Chọn SFX | `/select_sfx <số>` |
+| Xem chính sách nhạc/media | `/music_policy` |
+
+Quy trình gợi ý:
+
+1. Tìm nhạc bằng `/music_library`.
+2. Nghe thử bằng nút hoặc `/play_music 1`.
+3. Chọn bài bằng `/select_music 1`.
+4. Gửi video/ảnh.
+5. Dùng `/add_music` hoặc `/image_to_music_video` khi công cụ được mở.
+
+Ví dụ:
+
+```text
+/music_library upbeat product review
+/play_music 1
+/select_music 1
+```
+
+Lưu ý:
+
+- Ghép nhạc/video đang admin test nếu chưa mở public.
+- Nhạc/kho public có license riêng. Kiểm tra quyền thương mại, attribution và điều khoản nền tảng trước khi dùng quảng cáo/kiếm tiền.
+- Không yêu cầu bot tạo hoặc dùng nhạc giống nghệ sĩ, ca sĩ, bài hát, giai điệu, beat, bản phối hoặc thương hiệu âm nhạc có bản quyền.
+
+---
+
 ## 15. QUY TRÌNH 8 - DÙNG CHAT AI THƯỜNG VÀ CHAT CHUYÊN SÂU
 
 ### 15.1. Chat thường
