@@ -26508,12 +26508,13 @@ def admin_internal_command(handler):
 
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-        [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs")],
-        [InlineKeyboardButton("🖼 Ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎤 Âm thanh", callback_data="menu|main_audio")],
-        [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
-        [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
+        [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
+        [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
+        [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
+        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
+        [InlineKeyboardButton("💳 Bảng giá", callback_data="menu|hint_pricing"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|main_guide")],
+        [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
     ]
     if is_admin:
         rows.extend([
@@ -26558,12 +26559,11 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         rows = [
             [InlineKeyboardButton("🎬 内容创作", callback_data="menu|main_video"), InlineKeyboardButton("🤖 AI 助手", callback_data="menu|main_ai")],
             [InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image")],
-            [InlineKeyboardButton("🎤 语音工具", callback_data="menu|main_audio"), InlineKeyboardButton("🌐 翻译", callback_data="menu|translate")],
-            [InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music")],
-            [InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory"), InlineKeyboardButton("💰 价格", callback_data="menu|hint_pricing")],
-            [InlineKeyboardButton("💳 充值 Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 账户", callback_data="menu|main_profile")],
-            [InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("🌐 切换语言", callback_data="back_lang")],
+            [InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 语音工具", callback_data="menu|main_audio")],
+            [InlineKeyboardButton("🌐 翻译", callback_data="menu|translate"), InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory")],
+            [InlineKeyboardButton("💳 价格", callback_data="menu|hint_pricing"), InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton("👤 账户", callback_data="menu|main_profile"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
+            [InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")],
         ]
         if is_admin:
             rows.extend([
@@ -26573,13 +26573,12 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     if lang == "vi":
         rows = [
             [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image")],
-            [InlineKeyboardButton("🎤 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
-            [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
-            [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("💰 Bảng giá", callback_data="menu|hint_pricing")],
-            [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
-            [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("🌐 Đổi ngôn ngữ", callback_data="back_lang")],
+            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
+            [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
+            [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
+            [InlineKeyboardButton("💳 Bảng giá", callback_data="menu|hint_pricing"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
+            [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
         ]
         if is_admin:
             rows.extend([
@@ -26589,12 +26588,11 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     rows = [
         [InlineKeyboardButton("🎬 Content", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Ask AI", callback_data="menu|main_ai")],
         [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
-        [InlineKeyboardButton("🎤 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🌐 Translate", callback_data="menu|translate")],
-        [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music")],
-        [InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory"), InlineKeyboardButton("💰 Pricing", callback_data="menu|hint_pricing")],
-        [InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Account", callback_data="menu|main_profile")],
-        [InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton("🌐 Change language", callback_data="back_lang")],
+        [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
+        [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate"), InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory")],
+        [InlineKeyboardButton("💳 Pricing", callback_data="menu|hint_pricing"), InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
+        [InlineKeyboardButton("👤 Account", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
+        [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
     ]
     if is_admin:
         rows.extend([
@@ -26854,16 +26852,14 @@ def main_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🎬 Content", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory")],
             [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
-            [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music")],
-            [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
             [InlineKeyboardButton("👤 Account", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
         [InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🖼 Ảnh", callback_data="menu|main_image")],
-        [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
-        [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -30892,6 +30888,12 @@ def media_preview_keyboard(kind: str, items: list[dict]) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(rows)
 
 def media_preview_caption(item: dict) -> str:
+    if str(item.get("source") or "") == "user_link":
+        return (
+            "🎧 Nghe thử link audio bạn gửi\n"
+            "Nguồn: link người dùng gửi\n"
+            "Chọn dùng: /select_link_audio"
+        )
     provider = str(item.get("provider") or "-")
     license_text = str(item.get("license") or "")
     license_lower = license_text.lower()
@@ -30907,6 +30909,14 @@ def media_preview_caption(item: dict) -> str:
     )
 
 def media_preview_failure_text(item: dict, reason: str = "") -> str:
+    if str(item.get("source") or "") == "user_link":
+        preview_url = str(item.get("preview_url") or item.get("source_url") or "").strip()
+        return (
+            "⚠️ Không gửi được file nghe thử trực tiếp lúc này.\n"
+            "Bạn có thể mở link nguồn hoặc thử link khác.\n"
+            f"Preview: {preview_url}\n"
+            "Bot chưa trừ Xu."
+        )
     source_url = str(item.get("source_url") or "").strip()
     preview_url = str(item.get("preview_url") or "").strip()
     lines = [
@@ -30930,7 +30940,10 @@ async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, i
     caption = media_preview_caption(item)
     tmp_path = ""
     try:
-        headers = {"User-Agent": "TOAN-AAS-Bot/1.0"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 TOAN-AAS-Bot/1.0",
+            "Accept": "audio/mpeg,audio/*,*/*",
+        }
         timeout = httpx.Timeout(60.0, connect=10.0, read=45.0, write=10.0, pool=10.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
             async with client.stream("GET", preview_url) as res:
@@ -30956,7 +30969,7 @@ async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, i
                         if size > MEDIA_PREVIEW_MAX_BYTES:
                             raise RuntimeError("preview_too_large")
                         tmp.write(chunk)
-                if size < 5 * 1024:
+                if size < 1024:
                     raise RuntimeError("preview_too_small")
         with open(tmp_path, "rb") as f:
             return await context.bot.send_audio(
@@ -31132,7 +31145,16 @@ async def cmd_play_link_audio(update: Update, context: ContextTypes.DEFAULT_TYPE
         return await update.message.reply_text(
             "⚠️ Chưa có link audio gần đây. Vui lòng gửi link MP3/WAV/M4A hoặc tìm bằng /music_library."
         )
-    return await send_audio_item_to_chat(context, update.effective_chat.id, audio_link_preview_item(link_state.get("url") or ""))
+    link_url = str(link_state.get("url") or "").strip()
+    if not is_audio_link_url(link_url):
+        return await update.message.reply_text(
+            "⚠️ Không gửi được file nghe thử trực tiếp lúc này.\n"
+            "Bạn có thể mở link nguồn hoặc thử link khác.\n"
+            f"Preview: {link_url}\n"
+            "Bot chưa trừ Xu.",
+            disable_web_page_preview=True,
+        )
+    return await send_audio_item_to_chat(context, update.effective_chat.id, audio_link_preview_item(link_url))
 
 async def cmd_select_link_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else 0
@@ -37476,6 +37498,33 @@ async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/video_from_image</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b> cho prompt pack",
         f"• <code>/media_factory</code>: <b>{MEDIA_FACTORY_PACK_COST} Xu</b>",
         "  Nếu công cụ tạo ảnh/video thật chưa mở public, bot trả prompt pack để bạn dùng với công cụ AI tương ứng.",
+        "",
+        "🎵 <b>Music / Audio Factory</b>",
+        "• <code>/music_prompt</code>: <b>0 Xu</b> trong giai đoạn mở dùng thử",
+        "  Tạo prompt nhạc nền an toàn bản quyền cho video.",
+        "• <code>/music_library</code>: <b>0 Xu</b> trong giai đoạn mở dùng thử",
+        "  Tìm nhạc nền từ kho ngoài, hiển thị source/license/preview.",
+        "• <code>/sfx_library</code>: <b>0 Xu</b> trong giai đoạn mở dùng thử",
+        "  Tìm hiệu ứng âm thanh, whoosh/click/transition/cinematic hit.",
+        "• <code>/media_library</code>: <b>0 Xu</b> trong giai đoạn mở dùng thử",
+        "  Tìm ảnh/video public từ kho media.",
+        "• <code>/play_music</code>, <code>/play_sfx</code>: <b>0 Xu</b>",
+        "  Nghe thử nếu provider/preview gửi được.",
+        "• <code>/select_music</code>, <code>/select_sfx</code>: <b>0 Xu</b>",
+        "  Chọn nhạc/SFX để chuẩn bị ghép video.",
+        "• <code>/music_bg</code>: admin test/chưa mở public",
+        "  Tạo nhạc nền AI thật; sau khi mở public sẽ tính Xu theo provider.",
+        "• <code>/audio_enhance</code>: admin test/chưa mở public",
+        "  Làm rõ/cân âm lượng audio; sau khi mở public sẽ tính Xu theo độ dài/file.",
+        "• <code>/add_music</code>: admin test/chưa mở public",
+        "  Ghép nhạc vào video; sau khi mở public sẽ tính Xu theo dung lượng/thời lượng.",
+        "• <code>/add_voice_to_video</code>: admin test/chưa mở public",
+        "  Ghép voice/audio vào video; sau khi mở public sẽ tính Xu theo dung lượng/thời lượng.",
+        "• <code>/image_to_music_video</code>: admin test/chưa mở public",
+        "  Tạo video từ ảnh + nhạc/voice.",
+        "",
+        "📜 Nhạc/kho public có license riêng từng nguồn. Người dùng cần kiểm tra quyền thương mại, attribution và điều khoản nền tảng trước khi đăng quảng cáo/kiếm tiền.",
+        "Nếu provider lỗi, thiếu key, timeout hoặc không gửi được preview: bot không trừ Xu.",
         "",
         "📈 <b>Báo cáo/tối ưu thủ công</b>",
         f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>",
