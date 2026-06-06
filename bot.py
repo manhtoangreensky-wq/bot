@@ -25456,9 +25456,9 @@ def provider_status_payload() -> dict:
             "image_prompt_factory": is_feature_enabled("image_prompt_factory", default=True),
             "image_to_video_prompt": is_feature_enabled("image_to_video_prompt", default=True),
             "music_tools": is_feature_enabled("music_tools", default=True),
-            "music_library_stage": configured_release_stage("music_library"),
-            "sfx_library_stage": configured_release_stage("sfx_library"),
-            "media_library_stage": configured_release_stage("media_library"),
+            "music_library_stage": "ready_for_smoke_test" if JAMENDO_CLIENT_ID else configured_release_stage("music_library"),
+            "sfx_library_stage": "ready_for_smoke_test" if FREESOUND_API_KEY else configured_release_stage("sfx_library"),
+            "media_library_stage": "ready_for_smoke_test" if PIXABAY_API_KEY else configured_release_stage("media_library"),
             "music_generation_stage": configured_release_stage("music_generation"),
             "music_bg_stage": configured_release_stage("music_bg"),
             "music_song_stage": configured_release_stage("music_song"),
@@ -30241,6 +30241,15 @@ MUSIC_COPYRIGHT_BLOCK_MARKERS = (
     "remix song", "artist style", "same melody",
 )
 
+def normalize_text(value: str, max_len: int = 500) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    text = re.sub(r"\s+", " ", text)
+    if max_len and len(text) > max_len:
+        text = text[:max_len].strip()
+    return text.lower()
+
 def music_copyright_block_reason(text: str) -> str:
     value = normalize_text(str(text or ""))
     for marker in MUSIC_COPYRIGHT_BLOCK_MARKERS:
@@ -30282,24 +30291,24 @@ def format_seconds(value) -> str:
 def build_music_prompt_pack(description: str) -> str:
     desc = (description or "").strip()
     if not desc:
-        desc = "nhạc nền sạch, hiện đại, phù hợp video giới thiệu sản phẩm"
+        desc = "video review sản phẩm vui tươi 30 giây"
     return (
-        "🎼 <b>Music Prompt Pack TOAN AAS</b>\n\n"
-        "<b>Prompt tiếng Việt</b>\n"
-        f"Tạo một bản nhạc nền gốc, an toàn bản quyền, mô tả: {html.escape(desc)}. "
-        "Không bắt chước nghệ sĩ, không dùng giai điệu bài hát có sẵn, không clone giọng. "
-        "Âm thanh sạch, dễ ghép video, phù hợp nội dung thương mại, không có vocal chính nếu không cần.\n\n"
-        "<b>English prompt</b>\n"
-        f"Create an original royalty-safe background music track for: {html.escape(desc)}. "
-        "Do not imitate any artist, song, melody, label sound, or voice. "
-        "Use clean mix, commercial-friendly arrangement, subtle dynamics, and no lead vocal unless requested.\n\n"
-        "<b>Thông số gợi ý</b>\n"
-        "• Mood: clean, modern, positive\n"
-        "• Tempo: 90-120 BPM tùy nội dung\n"
-        "• Structure: intro ngắn, loop thân bài, ending gọn\n"
-        "• Mix: không lấn giọng nói, dễ ghép voiceover\n"
-        "• Negative prompt: copyrighted melody, artist imitation, vocal clone, harsh noise, distorted mix\n\n"
-        f"📜 Lưu ý: {html.escape(music_policy_notice_short())}"
+        "🎼 <b>PROMPT NHẠC NỀN TOAN AAS</b>\n\n"
+        "<b>Nội dung video:</b>\n"
+        f"{html.escape(desc)}\n\n"
+        "<b>Gợi ý:</b>\n"
+        "• Mood: vui tươi, sạch, năng lượng nhẹ\n"
+        "• Tempo: 110-125 BPM\n"
+        "• Style: upbeat electronic, clean commercial, no vocal\n"
+        "• Thời lượng: 15-30 giây\n"
+        "• Phù hợp: TikTok, Reels, Shorts, quảng cáo sản phẩm\n\n"
+        "<b>Prompt tiếng Anh:</b>\n"
+        "A bright upbeat instrumental background music for a short product review video, "
+        "clean commercial style, light drums, soft synth, positive energy, no vocals, "
+        "no famous melody, loopable ending.\n\n"
+        "<b>Negative:</b>\n"
+        "no copyrighted melody, no famous artist style, no vocals, no brand jingle, no recognizable song.\n\n"
+        "Bot chưa trừ Xu."
     )
 
 async def provider_get_json(url: str, params: dict | None = None, headers: dict | None = None, timeout: float = 18.0) -> tuple[dict, int]:
@@ -30332,6 +30341,7 @@ async def fetch_freesound_results(query: str, limit: int = 8) -> list[dict]:
         "query": query,
         "page_size": max(1, min(limit, 10)),
         "fields": "id,name,username,duration,license,previews,url",
+        "token": FREESOUND_API_KEY,
     }
     headers = {"Authorization": f"Token {FREESOUND_API_KEY}"}
     data, status_code = await provider_get_json("https://freesound.org/apiv2/search/text/", params=params, headers=headers)
@@ -30377,10 +30387,11 @@ def format_freesound_result(item: dict, idx: int) -> str:
     preview_url = html.escape(str(previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3") or "-")[:180])
     return (
         f"{idx}. <b>{title}</b> — {username}\n"
-        f"   • Duration: <code>{html.escape(duration)}</code>\n"
-        f"   • License: <code>{license_name}</code>\n"
-        f"   • Source: <code>{source_url}</code>\n"
-        f"   • Preview: <code>{preview_url}</code>"
+        f"• Thời lượng: <code>{html.escape(duration)}</code>\n"
+        f"• License: <code>{license_name}</code>\n"
+        "• Nguồn: <code>Freesound</code>\n"
+        f"• Link: <code>{source_url}</code>\n"
+        f"• Preview: <code>{preview_url}</code>"
     )
 
 def format_pixabay_image(item: dict, idx: int) -> str:
@@ -30444,8 +30455,8 @@ async def cmd_music_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     desc = " ".join(context.args or []).strip()
     if not desc:
         return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/music_prompt &lt;mô tả&gt;</code>\n\n"
-            "Ví dụ: <code>/music_prompt nhạc nền vui tươi cho video review máy xay sinh tố mini</code>",
+            "⚠️ Cú pháp: <code>/music_prompt &lt;mô tả video&gt;</code>\n"
+            "Ví dụ: <code>/music_prompt video review máy xay sinh tố mini vui tươi 30 giây</code>",
             parse_mode="HTML",
         )
     blocked = music_copyright_block_reason(desc)
@@ -30492,13 +30503,18 @@ async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         results = await fetch_freesound_results(query, limit=8)
     except Exception as e:
-        record_api_debug("freesound", "sfx_library", "FAIL", 0, provider_error_summary(e))
-        return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
+        detail = provider_error_summary(e)
+        record_api_debug("freesound", "sfx_library", "FAIL", 0, detail)
+        if "401" in detail or "403" in detail:
+            return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.")
+        return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.")
     record_api_debug("freesound", "sfx_library", "PASS" if results else "EMPTY", 200, f"results={len(results)}")
     if not results:
         return await update.message.reply_text("⚠️ Chưa tìm thấy SFX phù hợp. Bot chưa trừ Xu.")
     lines = [
-        f"🔊 <b>Kho hiệu ứng Freesound</b> — <code>{html.escape(query[:80])}</code>",
+        "🔊 <b>KHO HIỆU ỨNG ÂM THANH TOAN AAS</b>",
+        "",
+        f"<b>Từ khóa:</b> <code>{html.escape(query[:80])}</code>",
         "",
         *[format_freesound_result(item, idx) for idx, item in enumerate(results[:8], start=1)],
         "",
@@ -30558,7 +30574,7 @@ def music_ai_provider_summary() -> str:
 async def cmd_music_bg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     desc = " ".join(context.args or []).strip()
     if not desc:
-        return await update.message.reply_text("⚠️ Cú pháp: <code>/music_bg &lt;mô tả nhạc nền&gt;</code>", parse_mode="HTML")
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/music_bg &lt;mô tả nhạc/video&gt;</code>", parse_mode="HTML")
     blocked = music_copyright_block_reason(desc)
     if blocked:
         return await update.message.reply_text(
@@ -30568,14 +30584,11 @@ async def cmd_music_bg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
     provider_summary = music_ai_provider_summary()
-    prompt_pack = build_music_prompt_pack(desc)
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text(
-            "🎵 Tạo nhạc AI đang admin test/chưa mở public. Bot chưa trừ Xu.\n\n"
-            "Bạn có thể dùng prompt an toàn dưới đây để tạo nhạc ở công cụ ngoài:\n\n"
-            f"{prompt_pack}",
-            parse_mode="HTML",
-            disable_web_page_preview=True,
+            "🎵 Tạo nhạc nền AI đang admin test/chưa mở public hoặc provider chưa sẵn sàng.\n"
+            "Bot chưa trừ Xu.\n\n"
+            "Bạn có thể dùng /music_prompt để tạo prompt nhạc nền trước."
         )
     status = "CONFIGURED / ADMIN_ONLY / NOT_CALLED" if provider_summary != "missing" else "MISSING"
     save_tool_test_result("music_ai", "NOT_TESTED" if provider_summary != "missing" else "MISSING", f"providers={provider_summary}", update.effective_user.id)
@@ -30584,7 +30597,7 @@ async def cmd_music_bg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Providers: <code>{html.escape(provider_summary)}</code>\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
         "• Chưa gọi API tạo nhạc thật trong lệnh này, không fake PASS và không trừ Xu.\n\n"
-        f"{prompt_pack}",
+        "Bạn có thể dùng <code>/music_prompt</code> để tạo prompt nhạc nền trước.",
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
