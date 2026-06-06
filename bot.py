@@ -30336,15 +30336,14 @@ async def fetch_jamendo_tracks(query: str, limit: int = 8) -> list[dict]:
         raise RuntimeError(f"Jamendo HTTP {status_code}")
     return data.get("results") or []
 
-async def fetch_freesound_results(query: str, limit: int = 8) -> list[dict]:
+async def fetch_freesound_results(query: str, limit: int = 5) -> list[dict]:
     params = {
         "query": query,
-        "page_size": max(1, min(limit, 10)),
-        "fields": "id,name,username,duration,license,previews,url",
+        "page_size": max(1, min(limit, 5)),
+        "fields": "id,name,username,duration,license,previews,url,tags",
         "token": FREESOUND_API_KEY,
     }
-    headers = {"Authorization": f"Token {FREESOUND_API_KEY}"}
-    data, status_code = await provider_get_json("https://freesound.org/apiv2/search/text/", params=params, headers=headers)
+    data, status_code = await provider_get_json("https://freesound.org/apiv2/search/text/", params=params, timeout=18.0)
     if status_code >= 400:
         raise RuntimeError(f"Freesound HTTP {status_code}")
     return data.get("results") or []
@@ -30386,12 +30385,12 @@ def format_freesound_result(item: dict, idx: int) -> str:
     previews = item.get("previews") or {}
     preview_url = html.escape(str(previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3") or "-")[:180])
     return (
-        f"{idx}. <b>{title}</b> — {username}\n"
+        f"{idx}. <b>{title}</b>\n"
+        f"• Tác giả: <code>{username}</code>\n"
         f"• Thời lượng: <code>{html.escape(duration)}</code>\n"
         f"• License: <code>{license_name}</code>\n"
-        "• Nguồn: <code>Freesound</code>\n"
-        f"• Link: <code>{source_url}</code>\n"
-        f"• Preview: <code>{preview_url}</code>"
+        f"• Nghe thử: <code>{preview_url}</code>\n"
+        f"• Nguồn: <code>{source_url}</code>"
     )
 
 def format_pixabay_image(item: dict, idx: int) -> str:
@@ -30501,24 +30500,36 @@ async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not FREESOUND_API_KEY:
         return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh chưa được cấu hình. Bot chưa trừ Xu.")
     try:
-        results = await fetch_freesound_results(query, limit=8)
+        results = await fetch_freesound_results(query, limit=5)
     except Exception as e:
         detail = provider_error_summary(e)
         record_api_debug("freesound", "sfx_library", "FAIL", 0, detail)
         if "401" in detail or "403" in detail:
-            return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.")
+            return await update.message.reply_text("⚠️ Freesound key chưa hợp lệ hoặc chưa được cấp quyền API. Bot chưa trừ Xu.")
+        if "429" in detail:
+            return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang quá tải/giới hạn lượt. Bot chưa trừ Xu.")
+        if is_admin_or_owner(update.effective_user.id):
+            return await update.message.reply_text(
+                "⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.\n\n"
+                f"Admin detail: <code>{html.escape(detail[:240])}</code>",
+                parse_mode="HTML",
+            )
         return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.")
     record_api_debug("freesound", "sfx_library", "PASS" if results else "EMPTY", 200, f"results={len(results)}")
     if not results:
-        return await update.message.reply_text("⚠️ Chưa tìm thấy SFX phù hợp. Bot chưa trừ Xu.")
+        return await update.message.reply_text(
+            "Không tìm thấy hiệu ứng phù hợp. Thử từ khóa khác như: whoosh, click, transition, pop, cinematic hit.\n\n"
+            "Bot chưa trừ Xu."
+        )
     lines = [
         "🔊 <b>KHO HIỆU ỨNG ÂM THANH TOAN AAS</b>",
         "",
         f"<b>Từ khóa:</b> <code>{html.escape(query[:80])}</code>",
         "",
-        *[format_freesound_result(item, idx) for idx, item in enumerate(results[:8], start=1)],
+        *[format_freesound_result(item, idx) for idx, item in enumerate(results[:5], start=1)],
         "",
-        "📜 Lưu ý: Freesound có nhiều loại license khác nhau. Kiểm tra license/attribution trước khi dùng.",
+        "Lưu ý:",
+        "Một số hiệu ứng yêu cầu ghi nguồn hoặc có giới hạn thương mại. Hãy kiểm tra license trước khi dùng cho quảng cáo/kiếm tiền.",
         "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
     ]
     await reply_html_lines(update, lines)
