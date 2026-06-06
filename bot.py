@@ -30400,15 +30400,15 @@ def media_library_guide_text() -> str:
 def music_library_quick_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⚡ Sales/product", switch_inline_query_current_chat="/music_library upbeat product review"),
-            InlineKeyboardButton("💼 Tech", switch_inline_query_current_chat="/music_library futuristic technology background"),
+            InlineKeyboardButton("⚡ Sales/product", callback_data="music_quick|sales"),
+            InlineKeyboardButton("💼 Tech", callback_data="music_quick|tech"),
         ],
         [
-            InlineKeyboardButton("🎬 Cinematic", switch_inline_query_current_chat="/music_library cinematic trailer background"),
-            InlineKeyboardButton("🌿 Calm/review", switch_inline_query_current_chat="/music_library calm product review background"),
+            InlineKeyboardButton("🎬 Cinematic", callback_data="music_quick|cinematic"),
+            InlineKeyboardButton("🌿 Calm/review", callback_data="music_quick|calm"),
         ],
         [
-            InlineKeyboardButton("🔥 Trend", switch_inline_query_current_chat="/music_library energetic tiktok short video"),
+            InlineKeyboardButton("🔥 Trend", callback_data="music_quick|trend"),
             InlineKeyboardButton("✍️ Tự nhập từ khóa", callback_data="music_quick|custom_music"),
         ],
     ])
@@ -30416,15 +30416,15 @@ def music_library_quick_keyboard() -> InlineKeyboardMarkup:
 def sfx_library_quick_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("💨 Whoosh", switch_inline_query_current_chat="/sfx_library whoosh transition"),
-            InlineKeyboardButton("🖱 Click", switch_inline_query_current_chat="/sfx_library click"),
+            InlineKeyboardButton("💨 Whoosh", callback_data="sfx_quick|whoosh"),
+            InlineKeyboardButton("🖱 Click", callback_data="sfx_quick|click"),
         ],
         [
-            InlineKeyboardButton("🎬 Cinematic hit", switch_inline_query_current_chat="/sfx_library cinematic hit"),
-            InlineKeyboardButton("🔔 Notification", switch_inline_query_current_chat="/sfx_library notification"),
+            InlineKeyboardButton("🎬 Cinematic hit", callback_data="sfx_quick|cinematic"),
+            InlineKeyboardButton("🔔 Notification", callback_data="sfx_quick|notification"),
         ],
         [
-            InlineKeyboardButton("💥 Pop impact", switch_inline_query_current_chat="/sfx_library pop impact"),
+            InlineKeyboardButton("💥 Pop impact", callback_data="sfx_quick|pop"),
             InlineKeyboardButton("✍️ Tự nhập từ khóa", callback_data="music_quick|custom_sfx"),
         ],
     ])
@@ -30432,37 +30432,79 @@ def sfx_library_quick_keyboard() -> InlineKeyboardMarkup:
 def media_library_quick_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🍳 Kitchen blender", switch_inline_query_current_chat="/media_library modern kitchen blender"),
-            InlineKeyboardButton("🤖 AI dashboard", switch_inline_query_current_chat="/media_library ai technology dashboard"),
+            InlineKeyboardButton("🍳 Kitchen blender", callback_data="media_quick|kitchen"),
+            InlineKeyboardButton("🤖 AI dashboard", callback_data="media_quick|tech"),
         ],
         [
-            InlineKeyboardButton("🏢 Office business", switch_inline_query_current_chat="/media_library modern office business"),
-            InlineKeyboardButton("📦 Product showcase", switch_inline_query_current_chat="/media_library product showcase"),
+            InlineKeyboardButton("🏢 Office business", callback_data="media_quick|office"),
+            InlineKeyboardButton("📦 Product showcase", callback_data="media_quick|product"),
         ],
         [
             InlineKeyboardButton("✍️ Tự nhập từ khóa", callback_data="music_quick|custom_media"),
         ],
     ])
 
+MUSIC_QUICK_QUERIES = {
+    "sales": "upbeat product review",
+    "tech": "futuristic technology background",
+    "cinematic": "cinematic trailer background",
+    "calm": "calm product review background",
+    "trend": "energetic tiktok short video",
+}
+
+SFX_QUICK_QUERIES = {
+    "whoosh": "whoosh transition",
+    "click": "click",
+    "cinematic": "cinematic hit",
+    "notification": "notification",
+    "pop": "pop impact",
+}
+
+MEDIA_QUICK_QUERIES = {
+    "kitchen": "modern kitchen blender",
+    "tech": "ai technology dashboard",
+    "office": "modern office business",
+    "product": "product showcase",
+}
+
 async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
         return
-    await query.answer()
-    action = (query.data or "").split("|", 1)[1]
+    namespace, action = (query.data or "").split("|", 1)
     if action == "prompt":
+        await query.answer()
         return await query.message.reply_text(music_prompt_guide_text(), parse_mode="HTML")
     if action == "music":
+        await query.answer()
         return await query.message.reply_text(music_library_guide_text(), parse_mode="HTML", reply_markup=music_library_quick_keyboard())
     if action == "sfx":
+        await query.answer()
         return await query.message.reply_text(sfx_library_guide_text(), parse_mode="HTML", reply_markup=sfx_library_quick_keyboard())
     if action == "media":
+        await query.answer()
         return await query.message.reply_text(media_library_guide_text(), parse_mode="HTML", reply_markup=media_library_quick_keyboard())
     if action == "custom_music":
+        await query.answer()
         return await query.message.reply_text("✍️ Gõ: <code>/music_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/music_library upbeat product review</code>", parse_mode="HTML")
     if action == "custom_sfx":
+        await query.answer()
         return await query.message.reply_text("✍️ Gõ: <code>/sfx_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/sfx_library whoosh transition</code>", parse_mode="HTML")
-    return await query.message.reply_text("✍️ Gõ: <code>/media_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/media_library modern kitchen blender</code>", parse_mode="HTML")
+    if action == "custom_media":
+        await query.answer()
+        return await query.message.reply_text("✍️ Gõ: <code>/media_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/media_library modern kitchen blender</code>", parse_mode="HTML")
+    user_id = update.effective_user.id if update.effective_user else 0
+    if namespace == "music_quick" and action in MUSIC_QUICK_QUERIES:
+        await query.answer("Đang tìm nhạc...")
+        return await send_music_library_results(query.message, user_id, MUSIC_QUICK_QUERIES[action])
+    if namespace == "sfx_quick" and action in SFX_QUICK_QUERIES:
+        await query.answer("Đang tìm SFX...")
+        return await send_sfx_library_results(query.message, user_id, SFX_QUICK_QUERIES[action])
+    if namespace == "media_quick" and action in MEDIA_QUICK_QUERIES:
+        await query.answer("Đang tìm media...")
+        return await send_media_library_results(query.message, user_id, MEDIA_QUICK_QUERIES[action])
+    await query.answer()
+    return await query.message.reply_text("⚠️ Mẫu nhanh không hợp lệ. Bot chưa trừ Xu.")
 
 def format_seconds(value) -> str:
     try:
@@ -30720,16 +30762,28 @@ def media_preview_caption(item: dict) -> str:
 def media_preview_failure_text(item: dict, reason: str = "") -> str:
     source_url = str(item.get("source_url") or "").strip()
     preview_url = str(item.get("preview_url") or "").strip()
+    provider = str(item.get("provider") or "").lower()
+    reason_lower = str(reason or "").lower()
+    if provider == "jamendo" and any(token in reason_lower for token in ("timeout", "timedout", "readtimeout", "connecttimeout", "pooltimeout")):
+        lines = [
+            "⚠️ Jamendo preview tải chậm nên chưa gửi được audio trực tiếp.",
+            "Bạn có thể mở link nghe thử bên dưới hoặc chọn bài khác.",
+        ]
+        if source_url:
+            lines.append(f"Nguồn: {source_url}")
+        if preview_url:
+            lines.append(f"Preview: {preview_url}")
+        lines.append("Bot chưa trừ Xu.")
+        return "\n".join(lines)
     lines = [
         "⚠️ Không gửi được file nghe thử trực tiếp lúc này.",
-        "Bot chưa trừ Xu.",
+        "Bạn có thể mở link nguồn hoặc thử kết quả khác.",
     ]
-    if reason:
-        lines.append(f"Lý do: {reason[:120]}")
     if source_url:
         lines.append(f"Nguồn: {source_url}")
     if preview_url:
         lines.append(f"Preview: {preview_url}")
+    lines.append("Bot chưa trừ Xu.")
     return "\n".join(lines)
 
 async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
@@ -30758,24 +30812,32 @@ async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT
     tmp_path = ""
     try:
         headers = {"User-Agent": "TOAN-AAS-Bot/1.0"}
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers=headers) as client:
-            res = await client.get(preview_url)
-        if res.status_code != 200:
-            raise RuntimeError(f"preview_http_{res.status_code}")
-        content_type = (res.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-        if not (content_type == "audio/mpeg" or content_type.startswith("audio/")):
-            raise RuntimeError(f"preview_content_type_{content_type or 'missing'}")
-        content = bytes(res.content or b"")
-        if len(content) < 5 * 1024:
-            raise RuntimeError("preview_too_small")
-        if len(content) > MEDIA_PREVIEW_MAX_BYTES:
-            raise RuntimeError("preview_too_large")
-        suffix = mimetypes.guess_extension(content_type) or os.path.splitext(urlparse(preview_url).path)[1] or ".mp3"
-        if len(suffix) > 8 or not suffix.startswith("."):
-            suffix = ".mp3"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(content)
-            tmp_path = tmp.name
+        timeout = httpx.Timeout(60.0, connect=10.0, read=45.0, write=10.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
+            async with client.stream("GET", preview_url) as res:
+                if res.status_code != 200:
+                    raise RuntimeError(f"preview_http_{res.status_code}")
+                content_type = (res.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+                if not (content_type == "audio/mpeg" or content_type.startswith("audio/")):
+                    raise RuntimeError(f"preview_content_type_{content_type or 'missing'}")
+                content_length = int(res.headers.get("content-length") or 0)
+                if content_length and content_length > MEDIA_PREVIEW_MAX_BYTES:
+                    raise RuntimeError("preview_too_large")
+                suffix = mimetypes.guess_extension(content_type) or os.path.splitext(urlparse(preview_url).path)[1] or ".mp3"
+                if len(suffix) > 8 or not suffix.startswith("."):
+                    suffix = ".mp3"
+                size = 0
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp_path = tmp.name
+                    async for chunk in res.aiter_bytes(chunk_size=65536):
+                        if not chunk:
+                            continue
+                        size += len(chunk)
+                        if size > MEDIA_PREVIEW_MAX_BYTES:
+                            raise RuntimeError("preview_too_large")
+                        tmp.write(chunk)
+                if size < 5 * 1024:
+                    raise RuntimeError("preview_too_small")
         with open(tmp_path, "rb") as f:
             return await context.bot.send_audio(
                 chat_id=chat_id,
@@ -30885,11 +30947,12 @@ async def handle_media_preview_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     if not query:
         return
-    await query.answer()
     action, index_text = (query.data or "").split("|", 1)
     kind = "sfx" if "_sfx" in action or action.endswith("_sfx") else "music"
     if action.startswith("play_"):
+        await query.answer("Đang gửi nghe thử...")
         return await send_media_preview_audio(update, context, kind, index_text)
+    await query.answer()
     if action.startswith("select_"):
         return await select_media_preview(update, context, kind, index_text)
     if action.startswith("open_"):
@@ -30912,32 +30975,21 @@ async def cmd_select_sfx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     index_text = (context.args or [""])[0]
     return await select_media_preview(update, context, "sfx", index_text)
 
-def is_media_preview_host_url(url: str) -> bool:
-    raw = (url or "").strip().rstrip(").,;]}>")
-    if not raw:
-        return False
-    try:
-        parsed = urlparse(raw)
-    except Exception:
-        return False
-    host = (parsed.netloc or "").lower()
-    path = parsed.path or ""
-    if host == "cdn.freesound.org":
-        return True
-    if host in {"freesound.org", "www.freesound.org"}:
-        return True
-    if re.fullmatch(r"prod-[a-z0-9-]+\.storage\.jamendo\.com", host):
-        return True
-    if host in {"jamendo.com", "www.jamendo.com"}:
-        return True
-    return host in {"pixabay.com", "www.pixabay.com", "cdn.pixabay.com"}
+MEDIA_LINK_DOMAINS = (
+    "cdn.freesound.org",
+    "freesound.org",
+    "jamendo.com",
+    "storage.jamendo.com",
+    "prod-1.storage.jamendo.com",
+    "pixabay.com",
+    "cdn.pixabay.com",
+)
 
 def is_media_preview_url_text(text: str) -> bool:
-    raw = (text or "").strip()
-    if not raw:
+    lowered = (text or "").strip().lower()
+    if not lowered or "http" not in lowered:
         return False
-    urls = re.findall(r"https?://[^\s<>\"]+", raw, flags=re.I)
-    return any(is_media_preview_host_url(url) for url in urls)
+    return any(domain in lowered for domain in MEDIA_LINK_DOMAINS)
 
 def folded_lower_text(text: str) -> str:
     value = unicodedata.normalize("NFD", str(text or "").lower())
@@ -30950,22 +31002,17 @@ def is_probable_media_tags_text(text: str) -> bool:
         return True
     if len(raw) < 18 or len(raw) > 300 or raw.startswith("/"):
         return False
-    if raw.count(",") < 3:
-        return False
     parts = [part.strip() for part in raw.split(",") if part.strip()]
-    if len(parts) < 4:
-        return False
-    wordlike = sum(1 for part in parts[:8] if re.fullmatch(r"[\wÀ-ỹ\\- ]{2,40}", part, flags=re.I))
-    if wordlike < 4:
+    if len(parts) < 3:
         return False
     media_markers = {
         "kitchen", "blender", "modern", "reside", "kettle", "reflections", "background",
         "photo", "video", "cinematic", "product", "room", "office", "technology",
         "food", "business", "home", "table", "light", "portrait", "landscape",
-        "cooking", "image", "tags", "media",
+        "cooking", "image", "tags", "media", "ai",
     }
     lowered = raw.lower()
-    return any(marker in lowered for marker in media_markers)
+    return any(marker in lowered for marker in media_markers) or len(parts) >= 4
 
 async def reply_media_preview_url_hint(update: Update):
     return await update.message.reply_text(
@@ -31136,10 +31183,11 @@ async def handle_pixabay_media_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     if not query:
         return
-    await query.answer()
     action, index_text = (query.data or "").split("|", 1)
     if action == "play_media":
+        await query.answer("Đang mở media...")
         return await send_pixabay_media_preview(update, context, index_text)
+    await query.answer()
     return await select_pixabay_media(update, context, index_text)
 
 async def cmd_play_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -31239,21 +31287,18 @@ async def cmd_music_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await update.message.reply_text(build_music_prompt_pack(desc), parse_mode="HTML", disable_web_page_preview=True)
 
-async def cmd_music_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = " ".join(context.args or []).strip()
-    if not query:
-        return await update.message.reply_text(music_library_guide_text(), parse_mode="HTML", reply_markup=music_library_quick_keyboard())
+async def send_music_library_results(message, user_id, query: str):
     if not JAMENDO_CLIENT_ID:
-        return await update.message.reply_text("⚠️ Kho nhạc chưa được cấu hình. Bot chưa trừ Xu.")
+        return await message.reply_text("⚠️ Kho nhạc chưa được cấu hình. Bot chưa trừ Xu.")
     try:
         results = await fetch_jamendo_tracks(query, limit=8)
     except Exception as e:
         record_api_debug("jamendo", "music_library", "FAIL", 0, provider_error_summary(e))
-        return await update.message.reply_text("⚠️ Kho nhạc đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
+        return await message.reply_text("⚠️ Kho nhạc đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
     record_api_debug("jamendo", "music_library", "PASS" if results else "EMPTY", 200, f"results={len(results)}")
-    save_tool_test_result("music_library", "PASS" if results else "EMPTY", f"query={query[:80]}; results={len(results)}", update.effective_user.id)
+    save_tool_test_result("music_library", "PASS" if results else "EMPTY", f"query={query[:80]}; results={len(results)}", user_id)
     if not results:
-        return await update.message.reply_text("⚠️ Chưa tìm thấy nhạc phù hợp. Bot chưa trừ Xu.")
+        return await message.reply_text("⚠️ Chưa tìm thấy nhạc phù hợp. Bot chưa trừ Xu.")
     lines = [
         f"🎧 <b>Kho nhạc Jamendo</b> — <code>{html.escape(query[:80])}</code>",
         "",
@@ -31262,25 +31307,28 @@ async def cmd_music_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📜 Lưu ý: kiểm tra license/attribution trên trang nguồn trước khi dùng thương mại hoặc đăng lên nền tảng.",
         "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
     ]
-    await reply_html_lines(update, lines)
+    await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     preview_items = [jamendo_preview_item(item) for item in results[:8]]
-    save_media_preview_results("music", update.effective_user.id, query, preview_items)
+    save_media_preview_results("music", user_id, query, preview_items)
     kb = media_preview_keyboard("music", preview_items)
     if kb:
-        await update.message.reply_text("🎧 Nghe thử nhanh:", reply_markup=kb)
+        await message.reply_text("🎧 Nghe/chọn nhanh:", reply_markup=kb)
 
-async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_music_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args or []).strip()
     if not query:
-        return await update.message.reply_text(sfx_library_guide_text(), parse_mode="HTML", reply_markup=sfx_library_quick_keyboard())
+        return await update.message.reply_text(music_library_guide_text(), parse_mode="HTML", reply_markup=music_library_quick_keyboard())
+    return await send_music_library_results(update.message, update.effective_user.id, query)
+
+async def send_sfx_library_results(message, user_id, query: str):
     if not (FREESOUND_API_KEY or FREESOUND_CLIENT_SECRET):
-        return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh chưa được cấu hình. Bot chưa trừ Xu.")
+        return await message.reply_text("⚠️ Kho hiệu ứng âm thanh chưa được cấu hình. Bot chưa trừ Xu.")
     try:
         search = await freesound_search(query, limit=5)
         results = search.get("results") or []
         auth_mode = search.get("auth_mode") or "-"
         http_status = int(search.get("http_status") or 0)
-        set_system_setting("freesound_auth_mode", str(auth_mode), f"http={http_status}; results={len(results)}", update.effective_user.id)
+        set_system_setting("freesound_auth_mode", str(auth_mode), f"http={http_status}; results={len(results)}", user_id)
     except Exception as e:
         attempts = getattr(e, "attempts", []) or []
         detail = provider_error_summary(e)
@@ -31288,23 +31336,23 @@ async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
         record_api_debug("freesound", "sfx_library", "FAIL", 0, f"{detail}; {attempt_detail}")
         statuses = {int(item.get("http_status") or 0) for item in attempts}
         if 429 in statuses:
-            return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang quá tải/giới hạn lượt. Bot chưa trừ Xu.")
+            return await message.reply_text("⚠️ Kho hiệu ứng âm thanh đang quá tải/giới hạn lượt. Bot chưa trừ Xu.")
         if statuses and statuses.issubset({401, 403}):
             base = "⚠️ Freesound key chưa hợp lệ hoặc chưa được cấp quyền API. Bot chưa trừ Xu."
-            if is_admin_or_owner(update.effective_user.id):
+            if is_admin_or_owner(user_id):
                 base += "\n\nAdmin detail: HTTP 401. Hãy kiểm tra đúng API key ở https://freesound.org/apiv2/apply hoặc regenerate key."
-            return await update.message.reply_text(base)
-        if is_admin_or_owner(update.effective_user.id):
-            return await update.message.reply_text(
+            return await message.reply_text(base)
+        if is_admin_or_owner(user_id):
+            return await message.reply_text(
                 "⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.\n\n"
                 f"Admin detail: <code>{html.escape((detail + '; ' + attempt_detail)[:320])}</code>",
                 parse_mode="HTML",
             )
-        return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.")
+        return await message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.")
     record_api_debug("freesound", "sfx_library", "PASS" if results else "EMPTY", http_status, f"auth_mode={auth_mode}; results={len(results)}")
-    save_tool_test_result("sfx_library", "PASS" if results else "EMPTY", f"query={query[:80]}; auth_mode={auth_mode}; results={len(results)}", update.effective_user.id)
+    save_tool_test_result("sfx_library", "PASS" if results else "EMPTY", f"query={query[:80]}; auth_mode={auth_mode}; results={len(results)}", user_id)
     if not results:
-        return await update.message.reply_text(
+        return await message.reply_text(
             "Không tìm thấy hiệu ứng phù hợp. Thử: whoosh, click, pop, cinematic hit, transition.\n\n"
             "Bot chưa trừ Xu."
         )
@@ -31319,28 +31367,31 @@ async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Một số hiệu ứng yêu cầu ghi nguồn hoặc có giới hạn thương mại. Hãy kiểm tra license trước khi dùng cho quảng cáo/kiếm tiền.",
         "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
     ]
-    await reply_html_lines(update, lines)
+    await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     preview_items = [freesound_preview_item(item) for item in results[:5]]
-    save_media_preview_results("sfx", update.effective_user.id, query, preview_items)
+    save_media_preview_results("sfx", user_id, query, preview_items)
     kb = media_preview_keyboard("sfx", preview_items)
     if kb:
-        await update.message.reply_text("🎧 Nghe thử nhanh:", reply_markup=kb)
+        await message.reply_text("🎧 Nghe/chọn nhanh:", reply_markup=kb)
 
-async def cmd_media_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args or []).strip()
     if not query:
-        return await update.message.reply_text(media_library_guide_text(), parse_mode="HTML", reply_markup=media_library_quick_keyboard())
+        return await update.message.reply_text(sfx_library_guide_text(), parse_mode="HTML", reply_markup=sfx_library_quick_keyboard())
+    return await send_sfx_library_results(update.message, update.effective_user.id, query)
+
+async def send_media_library_results(message, user_id, query: str):
     if not PIXABAY_API_KEY:
-        return await update.message.reply_text("⚠️ Kho media đang tạm chưa sẵn sàng. Bot chưa trừ Xu.")
+        return await message.reply_text("⚠️ Kho media đang tạm chưa sẵn sàng. Bot chưa trừ Xu.")
     try:
         images, videos = await fetch_pixabay_media(query, limit=5)
     except Exception as e:
         record_api_debug("pixabay", "media_library", "FAIL", 0, provider_error_summary(e))
-        return await update.message.reply_text("⚠️ Kho media đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
+        return await message.reply_text("⚠️ Kho media đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
     record_api_debug("pixabay", "media_library", "PASS" if (images or videos) else "EMPTY", 200, f"images={len(images)} videos={len(videos)}")
-    save_tool_test_result("media_library", "PASS" if (images or videos) else "EMPTY", f"query={query[:80]}; images={len(images)} videos={len(videos)}", update.effective_user.id)
+    save_tool_test_result("media_library", "PASS" if (images or videos) else "EMPTY", f"query={query[:80]}; images={len(images)} videos={len(videos)}", user_id)
     if not images and not videos:
-        return await update.message.reply_text("⚠️ Chưa tìm thấy media phù hợp. Bot chưa trừ Xu.")
+        return await message.reply_text("⚠️ Chưa tìm thấy media phù hợp. Bot chưa trừ Xu.")
     lines = [
         f"🖼 <b>Kho media Pixabay</b> — <code>{html.escape(query[:80])}</code>",
         "",
@@ -31358,11 +31409,17 @@ async def cmd_media_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📜 Lưu ý: kiểm tra điều khoản Pixabay và điều khoản nền tảng trước khi dùng thương mại.",
         "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
     ])
-    await reply_html_lines(update, lines)
-    save_pixabay_media_results(update.effective_user.id, query, media_items)
+    await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    save_pixabay_media_results(user_id, query, media_items)
     kb = pixabay_media_keyboard(media_items)
     if kb:
-        await update.message.reply_text("🖼 Xem/chọn media nhanh:", reply_markup=kb)
+        await message.reply_text("🖼 Xem/chọn media nhanh:", reply_markup=kb)
+
+async def cmd_media_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args or []).strip()
+    if not query:
+        return await update.message.reply_text(media_library_guide_text(), parse_mode="HTML", reply_markup=media_library_quick_keyboard())
+    return await send_media_library_results(update.message, update.effective_user.id, query)
 
 def normalize_music_inline_command_text(text: str) -> str:
     raw = (text or "").strip()
@@ -52965,7 +53022,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.Document.MP3 | filters.Document.MP4 | filters.Document.WAV, handle_media_cache_only))
     tg_app.add_handler(MessageHandler(filters.Document.ALL, handle_document_cache_only))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    tg_app.add_handler(CallbackQueryHandler(handle_music_quick_callback, pattern=r"^music_quick\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_music_quick_callback, pattern=r"^(music_quick|sfx_quick|media_quick)\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
