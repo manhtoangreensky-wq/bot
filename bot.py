@@ -28725,6 +28725,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
     if action == "hint_pricing":
         return await send_pricing_lines(query.message, pricing_main_lines(), pricing_main_keyboard())
+    if action == "main_guide":
+        return await safe_edit_query_message(
+            query,
+            help_text_for_user_i18n(query.from_user.id),
+            reply_markup=localized_main_menu_keyboard(user_is_admin, lang),
+        )
     if action.startswith("translate_set_"):
         target = normalize_translate_target(action.replace("translate_set_", "", 1))
         if not target:
