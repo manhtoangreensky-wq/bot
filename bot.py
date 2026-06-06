@@ -131,6 +131,18 @@ def _log_secret_values() -> list[str]:
         "FISH_AUDIO_KEY",
         "ELEVENLABS_API_KEY",
         "AUPHONIC_API_KEY",
+        "JAMENDO_CLIENT_ID",
+        "JAMENDO_CLIENT_SECRET",
+        "FREESOUND_API_KEY",
+        "PIXABAY_API_KEY",
+        "MUSICFUL_API_KEY",
+        "MINIMAX_API_KEY",
+        "MINIMAX_GROUP_ID",
+        "REPLICATE_API_TOKEN",
+        "CLIPDROP_API_KEY",
+        "MUBERT_API_KEY",
+        "BEATOVEN_API_KEY",
+        "SOUNDRAW_API_KEY",
         "SERPAPI_API_KEY",
         "STABILITY_API_KEY",
         "KLING_ACCESS_KEY",
@@ -301,6 +313,7 @@ ADMIN_TEST_AUPHONIC = env_flag("ADMIN_TEST_AUPHONIC", "0")
 ADMIN_TEST_KLING = env_flag("ADMIN_TEST_KLING", "0")
 ADMIN_TEST_RUNWAY = env_flag("ADMIN_TEST_RUNWAY", "0")
 ADMIN_TEST_HEYGEN = env_flag("ADMIN_TEST_HEYGEN", "0")
+ADMIN_TEST_MUSIC_AI = env_flag("ADMIN_TEST_MUSIC_AI", "0")
 
 # Audio
 DEEPGRAM_API_KEY    = env_any("DEEPGRAM_API_KEY", "Deepgram_API_KEY", "DEEPGRAM_KEY", "DEEPGRAM_TOKEN")
@@ -310,6 +323,21 @@ FISH_AUDIO_KEY      = _env("FISH_AUDIO_KEY")
 ELEVENLABS_API_KEY  = _env("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 AUPHONIC_API_KEY    = _env("AUPHONIC_API_KEY")
+AUPHONIC_USERNAME   = _env("AUPHONIC_USERNAME")
+
+# Music / Media providers
+JAMENDO_CLIENT_ID     = _env("JAMENDO_CLIENT_ID")
+JAMENDO_CLIENT_SECRET = _env("JAMENDO_CLIENT_SECRET")
+FREESOUND_API_KEY     = _env("FREESOUND_API_KEY")
+PIXABAY_API_KEY       = _env("PIXABAY_API_KEY")
+MUSICFUL_API_KEY      = _env("MUSICFUL_API_KEY")
+MINIMAX_API_KEY       = _env("MINIMAX_API_KEY")
+MINIMAX_GROUP_ID      = _env("MINIMAX_GROUP_ID")
+REPLICATE_API_TOKEN   = _env("REPLICATE_API_TOKEN")
+CLIPDROP_API_KEY      = _env("CLIPDROP_API_KEY")
+MUBERT_API_KEY        = _env("MUBERT_API_KEY")
+BEATOVEN_API_KEY      = _env("BEATOVEN_API_KEY")
+SOUNDRAW_API_KEY      = _env("SOUNDRAW_API_KEY")
 
 # Image
 REMOVEBG_API_KEY    = _env("REMOVEBG_API_KEY")
@@ -25364,6 +25392,7 @@ def provider_status_payload() -> dict:
             "elevenlabs": bool(ELEVENLABS_API_KEY),
             "fish_audio": bool(FISH_AUDIO_KEY),
             "auphonic": bool(AUPHONIC_API_KEY),
+            "auphonic_username": bool(AUPHONIC_USERNAME),
             "edge_tts": bool(edge_tts),
             "edge_tts_error": EDGE_TTS_IMPORT_ERROR,
         },
@@ -25377,8 +25406,28 @@ def provider_status_payload() -> dict:
             "removebg": bool(REMOVEBG_API_KEY),
             "cutout": bool(CUTOUT_API_KEY),
             "stability": bool(STABILITY_API_KEY),
+            "replicate": bool(REPLICATE_API_TOKEN),
+            "clipdrop": bool(CLIPDROP_API_KEY),
             "upscale": bool(STABILITY_API_KEY),
             "ready": bool(REMOVEBG_API_KEY or CUTOUT_API_KEY),
+        },
+        "music": {
+            "jamendo": bool(JAMENDO_CLIENT_ID),
+            "jamendo_secret": bool(JAMENDO_CLIENT_SECRET),
+            "freesound": bool(FREESOUND_API_KEY),
+            "pixabay": bool(PIXABAY_API_KEY),
+            "musicful": bool(MUSICFUL_API_KEY),
+            "minimax": bool(MINIMAX_API_KEY and MINIMAX_GROUP_ID),
+            "minimax_api_key": bool(MINIMAX_API_KEY),
+            "minimax_group_id": bool(MINIMAX_GROUP_ID),
+            "stability_audio": bool(STABILITY_API_KEY),
+            "mubert": bool(MUBERT_API_KEY),
+            "beatoven": bool(BEATOVEN_API_KEY),
+            "soundraw": bool(SOUNDRAW_API_KEY),
+            "replicate": bool(REPLICATE_API_TOKEN),
+            "clipdrop": bool(CLIPDROP_API_KEY),
+            "library_ready": bool(JAMENDO_CLIENT_ID or FREESOUND_API_KEY or PIXABAY_API_KEY),
+            "ai_music_ready": bool(MUSICFUL_API_KEY or (MINIMAX_API_KEY and MINIMAX_GROUP_ID) or STABILITY_API_KEY),
         },
         "search": {
             "serpapi": bool(SERPAPI_API_KEY),
@@ -25406,6 +25455,14 @@ def provider_status_payload() -> dict:
             "image_tools": is_feature_enabled("image_tools", default=True),
             "image_prompt_factory": is_feature_enabled("image_prompt_factory", default=True),
             "image_to_video_prompt": is_feature_enabled("image_to_video_prompt", default=True),
+            "music_tools": is_feature_enabled("music_tools", default=True),
+            "music_library_stage": configured_release_stage("music_library"),
+            "sfx_library_stage": configured_release_stage("sfx_library"),
+            "media_library_stage": configured_release_stage("media_library"),
+            "music_generation_stage": configured_release_stage("music_generation"),
+            "music_bg_stage": configured_release_stage("music_bg"),
+            "music_song_stage": configured_release_stage("music_song"),
+            "replicate_media_stage": configured_release_stage("replicate_media"),
             "image_openai_generation_env": ENABLE_OPENAI_IMAGE,
             "image_openai_edit_env": ENABLE_OPENAI_IMAGE_EDIT,
             "image_openai_generation": ENABLE_OPENAI_IMAGE and is_feature_enabled("image_openai_generation", default=False),
@@ -26213,6 +26270,9 @@ TOOL_FREEZE_COMMANDS = {
     "film", "video_script", "trend_ai", "trend", "trend_live", "trend_research", "trend_status",
     "image_tools", "image_prompt", "image_pack",
     "video_from_image", "image_to_video_pack", "ai_image", "ai_image_edit",
+    "music_tools", "music_prompt", "music_library", "sfx_library", "media_library",
+    "music_policy", "music_bg", "music_song", "add_music", "video_music",
+    "video_upscale", "video_enhance", "image_enhance", "image_upscale",
     "media_factory", "video_factory_flow", "video_provider_status", "remove_bg",
     "source_help", "dubbing_help", "story_video_factory", "story_motion_prompt", "translate_text",
     "chat_pro", "chat_deep", "chat_pro_on", "chat_deep_on", "growth_ai",
@@ -26222,6 +26282,8 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_stt_debug", "tool_test_downloader", "tool_test_trend_live",
     "tool_test_stability_image", "tool_test_upscale_image", "tool_test_audio_enhance",
     "tool_test_kling_video", "tool_test_runway_video", "tool_test_heygen_avatar",
+    "tool_test_music_library", "tool_test_sfx_library", "tool_test_media_library",
+    "tool_test_music_ai", "tool_test_replicate_media",
     "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
     "memory", "note", "note_ai", "notes", "note_view", "search_note", "note_tags",
     "note_delete", "note_archive", "memory_status", "memory_plan", "note_priority",
@@ -27870,6 +27932,7 @@ def privacy_text() -> str:
         "• Nội dung lệnh/chat bạn gửi vào bot.\n"
         "• Ghi chú và reminder bạn lưu trong TOAN AAS Memory.\n"
         "• Ảnh, video, audio, file bạn gửi để xử lý.\n"
+        "• Từ khóa tìm nhạc/SFX/media bạn gửi cho các kho/provider liên quan nếu bạn dùng công cụ Music/Media.\n"
         "• Thông tin đơn nạp, mã đơn, ảnh bill nếu bạn gửi để admin kiểm tra.\n"
         "• Log sử dụng công cụ, số dư Xu dịch vụ, lịch sử cộng/trừ Xu dịch vụ.\n\n"
         "<b>Mục đích xử lý:</b>\n"
@@ -27905,6 +27968,7 @@ def service_credit_terms_text() -> str:
         "• Không được rút về tiền mặt hoặc chuyển khoản.\n"
         "• Không được chuyển nhượng, mua bán, trao đổi giữa người dùng.\n"
         "• Chỉ dùng để sử dụng công cụ/dịch vụ trong bot TOAN AAS.\n"
+        "• Công cụ nhạc/media chỉ trừ Xu khi chính sách giá và provider đã mở rõ; nếu provider lỗi trước khi có output, bot không trừ Xu.\n"
         "• Có thể được tặng thêm trong chương trình khuyến mãi, hỗ trợ kỹ thuật hoặc sự kiện.\n"
         "• TOAN AAS có quyền khóa/thu hồi Xu dịch vụ khuyến mãi nếu phát hiện gian lận, spam, lạm dụng hoặc lỗi hệ thống.\n\n"
         "Các gói nạp là gói Xu dịch vụ trả trước để sử dụng công cụ trong TOAN AAS. "
@@ -27924,6 +27988,7 @@ def refund_policy_text() -> str:
         "• Không chuyển Xu dịch vụ cho người khác.\n"
         "• Nếu chuyển khoản sai nội dung/sai số tiền, vui lòng gửi bill cho admin kiểm tra.\n"
         "• Nếu lỗi do hệ thống khiến công cụ không xử lý được, TOAN AAS có thể hoàn lại Xu dịch vụ tương ứng.\n"
+        "• Với công cụ nhạc/media/enhance, nếu provider thiếu cấu hình hoặc lỗi trước khi tạo output, bot chưa trừ Xu.\n"
         "• Các trường hợp đã sử dụng Xu dịch vụ thành công thường không hoàn tiền, trừ quyết định hỗ trợ riêng của admin.\n\n"
         f"Liên hệ hỗ trợ: {support_link_html()}"
     )
@@ -27941,8 +28006,10 @@ def content_policy_text() -> str:
         "• Nội dung khiêu dâm, bạo lực cực đoan hoặc gây hại.\n"
         "• Nội dung hướng dẫn hành vi nguy hiểm/phi pháp.\n"
         "• Deepfake/giọng nói/khuôn mặt người khác khi chưa có quyền.\n"
+        "• Nhạc giống nghệ sĩ/bài hát cụ thể, cover/remix trái phép, clone giọng hoặc reup media không có quyền.\n"
         "• Quảng cáo sai sự thật, cam kết quá đà, hàng cấm, hàng giả, sản phẩm không rõ nguồn gốc.\n\n"
         "Người dùng chịu trách nhiệm kiểm tra nội dung trước khi đăng. "
+        "Với nhạc/SFX/media từ kho ngoài, người dùng cần tự kiểm tra license/attribution trước khi dùng thương mại. "
         "TOAN AAS có quyền từ chối xử lý nội dung rủi ro."
     )
 
@@ -28233,6 +28300,7 @@ def ip_notice_text() -> str:
         "cấu hình hệ thống, nội dung vận hành nội bộ và các tài liệu rủi ro/pháp lý/kế toán do TOAN AAS biên soạn.\n\n"
         "Không được sao chép, reverse engineer, bán lại, chia sẻ tài liệu nội bộ hoặc dùng quy trình/source/cấu hình "
         "để tạo dịch vụ cạnh tranh nếu chưa có đồng ý bằng văn bản từ TOAN AAS.\n\n"
+        "Với nhạc/media từ provider bên ngoài, quyền sử dụng phụ thuộc license của nguồn đó; người dùng phải kiểm tra trước khi đăng thương mại.\n\n"
         "Nếu phát hiện giả mạo/bản quyền, admin cần lưu bằng chứng, URL, ảnh chụp, thời gian phát hiện và liên hệ luật sư/kế toán khi cần."
     )
 
@@ -28670,6 +28738,17 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
         f"• STT tested: <code>{html.escape(tool_test_status_text('stt'))}</code>",
         "",
+        "<b>Music / Audio / Media Library</b>",
+        f"• Jamendo music library: <code>{provider_runtime_status_text(providers['music']['jamendo'], 'music_library')}</code> | tested <code>{html.escape(tool_test_status_text('music_library'))}</code> | stage <code>{html.escape(providers['media_factory'].get('music_library_stage') or 'DISABLED')}</code>",
+        f"• Freesound SFX library: <code>{provider_runtime_status_text(providers['music']['freesound'], 'sfx_library')}</code> | tested <code>{html.escape(tool_test_status_text('sfx_library'))}</code> | stage <code>{html.escape(providers['media_factory'].get('sfx_library_stage') or 'DISABLED')}</code>",
+        f"• Pixabay media library: <code>{provider_runtime_status_text(providers['music']['pixabay'], 'media_library')}</code> | tested <code>{html.escape(tool_test_status_text('media_library'))}</code> | stage <code>{html.escape(providers['media_factory'].get('media_library_stage') or 'DISABLED')}</code>",
+        f"• Musicful AI music: <code>{provider_status_text(providers['music']['musicful'])}</code> | tested <code>{html.escape(tool_test_status_text('music_ai'))}</code> | stage <code>{html.escape(providers['media_factory'].get('music_generation_stage') or 'DISABLED')}</code>",
+        f"• MiniMax music/audio: <code>{provider_status_text(providers['music']['minimax'])}</code> | key <code>{provider_status_text(providers['music']['minimax_api_key'])}</code> | group <code>{provider_status_text(providers['music']['minimax_group_id'])}</code>",
+        f"• Stability audio/media: <code>{provider_status_text(providers['music']['stability_audio'])}</code> | tested <code>{html.escape(tool_test_status_text('stability_image'))}</code>",
+        f"• Auphonic audio enhance: <code>{provider_status_text(providers['audio']['auphonic'])}</code> | tested <code>{html.escape(tool_test_status_text('audio_enhance'))}</code>",
+        f"• Replicate image/video enhance: <code>{provider_status_text(providers['music']['replicate'])}</code> | tested <code>{html.escape(tool_test_status_text('replicate_media'))}</code> | stage <code>{html.escape(providers['media_factory'].get('replicate_media_stage') or 'DISABLED')}</code>",
+        f"• Optional music providers: Mubert <code>{provider_status_text(providers['music']['mubert'])}</code> | Beatoven <code>{provider_status_text(providers['music']['beatoven'])}</code> | Soundraw <code>{provider_status_text(providers['music']['soundraw'])}</code>",
+        "",
         "<b>Translation</b>",
         f"• DeepL: <code>{provider_status_text(providers['translation']['deepl'])}</code>",
         f"• Gemini fallback: <code>{provider_status_text(providers['translation']['gemini'])}</code>",
@@ -28766,6 +28845,13 @@ async def cmd_ai_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• TTS Fish Audio: <code>{provider_runtime_status_text(providers['audio']['fish_audio'], 'tts:fish', 'tts')}</code>",
         f"• TTS Edge: <code>{'configured/built_in' if providers['audio']['edge_tts'] else 'missing'}</code>",
         "",
+        "<b>Music / Media</b>",
+        f"• Jamendo music: <code>{provider_runtime_status_text(providers['music']['jamendo'], 'music_library')}</code>",
+        f"• Freesound SFX: <code>{provider_runtime_status_text(providers['music']['freesound'], 'sfx_library')}</code>",
+        f"• Pixabay media: <code>{provider_runtime_status_text(providers['music']['pixabay'], 'media_library')}</code>",
+        f"• AI music providers: <code>{html.escape(music_ai_provider_summary())}</code> | tested <code>{html.escape(tool_test_status_text('music_ai'))}</code>",
+        f"• Replicate media enhance: <code>{provider_runtime_status_text(providers['music']['replicate'], 'replicate_media')}</code>",
+        "",
         "<b>Video</b>",
         f"• Kling: <code>{provider_runtime_status_text(providers['video']['kling'], 'kling_video', 'real_video')}</code>",
         f"• Runway: <code>{provider_runtime_status_text(providers['video']['runway'], 'runway_video', 'real_video')}</code>",
@@ -28835,6 +28921,11 @@ async def cmd_tool_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• OpenAI Image Edit: <code>{html.escape(providers['media_factory'].get('image_openai_edit_stage') or 'DISABLED')}</code> | env <code>{'on' if providers['media_factory'].get('image_openai_edit_env') else 'off'}</code>",
         f"• Stability Image: <code>{html.escape(providers['media_factory'].get('stability_image_stage') or 'DISABLED')}</code> | env <code>{provider_status_text(providers['image']['stability'])}</code>",
         f"• Image Upscale: <code>{html.escape(providers['media_factory'].get('image_upscale_stage') or 'DISABLED')}</code> | env <code>{provider_status_text(providers['image']['upscale'])}</code>",
+        f"• Jamendo Music Library: <code>{provider_runtime_status_text(providers['music']['jamendo'], 'music_library')}</code>",
+        f"• Freesound SFX Library: <code>{provider_runtime_status_text(providers['music']['freesound'], 'sfx_library')}</code>",
+        f"• Pixabay Media Library: <code>{provider_runtime_status_text(providers['music']['pixabay'], 'media_library')}</code>",
+        f"• AI Music Providers: <code>{html.escape(music_ai_provider_summary())}</code> | tested <code>{html.escape(tool_test_status_text('music_ai'))}</code>",
+        f"• Replicate Media Enhance: <code>{provider_runtime_status_text(providers['music']['replicate'], 'replicate_media')}</code>",
         f"• Kling Video: <code>{html.escape(providers['media_factory'].get('kling_video_stage') or 'DISABLED')}</code>",
         f"• Runway Video: <code>{html.escape(providers['media_factory'].get('runway_video_stage') or 'DISABLED')}</code>",
         f"• HeyGen Avatar: <code>{html.escape(providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED')}</code>",
@@ -30142,6 +30233,507 @@ async def cmd_real_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_avatar_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_public_admin_first_placeholder(update, context, "Avatar Video", "/film <chủ đề>")
 
+MUSIC_COPYRIGHT_BLOCK_MARKERS = (
+    "giống nghệ sĩ", "giống ca sĩ", "giống bài", "như bài", "cover bài", "remix bài",
+    "beat giống", "nhạc giống", "giai điệu giống", "style của", "phong cách của",
+    "clone giọng", "nhái giọng", "bắt chước giọng", "sound like", "sounds like",
+    "in the style of", "voice clone", "clone voice", "copy melody", "cover song",
+    "remix song", "artist style", "same melody",
+)
+
+def music_copyright_block_reason(text: str) -> str:
+    value = normalize_text(str(text or ""))
+    for marker in MUSIC_COPYRIGHT_BLOCK_MARKERS:
+        if normalize_text(marker) in value:
+            return marker
+    return ""
+
+def music_policy_notice_short() -> str:
+    return (
+        "Không yêu cầu bot tạo nhạc giống nghệ sĩ/bài hát cụ thể, cover/remix trái phép hoặc clone giọng. "
+        "Khi dùng kho nhạc/media, bạn cần tự kiểm tra license trước khi đăng thương mại."
+    )
+
+def music_tools_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎼 Tạo prompt nhạc", switch_inline_query_current_chat="/music_prompt "),
+            InlineKeyboardButton("🎧 Kho nhạc", switch_inline_query_current_chat="/music_library "),
+        ],
+        [
+            InlineKeyboardButton("🔊 SFX", switch_inline_query_current_chat="/sfx_library "),
+            InlineKeyboardButton("🖼 Kho media", switch_inline_query_current_chat="/media_library "),
+        ],
+        [
+            InlineKeyboardButton("🎚 Làm rõ audio", switch_inline_query_current_chat="/audio_enhance"),
+            InlineKeyboardButton("📜 Chính sách nhạc", switch_inline_query_current_chat="/music_policy"),
+        ],
+    ])
+
+def format_seconds(value) -> str:
+    try:
+        seconds = int(float(value or 0))
+    except Exception:
+        return "-"
+    if seconds <= 0:
+        return "-"
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+def build_music_prompt_pack(description: str) -> str:
+    desc = (description or "").strip()
+    if not desc:
+        desc = "nhạc nền sạch, hiện đại, phù hợp video giới thiệu sản phẩm"
+    return (
+        "🎼 <b>Music Prompt Pack TOAN AAS</b>\n\n"
+        "<b>Prompt tiếng Việt</b>\n"
+        f"Tạo một bản nhạc nền gốc, an toàn bản quyền, mô tả: {html.escape(desc)}. "
+        "Không bắt chước nghệ sĩ, không dùng giai điệu bài hát có sẵn, không clone giọng. "
+        "Âm thanh sạch, dễ ghép video, phù hợp nội dung thương mại, không có vocal chính nếu không cần.\n\n"
+        "<b>English prompt</b>\n"
+        f"Create an original royalty-safe background music track for: {html.escape(desc)}. "
+        "Do not imitate any artist, song, melody, label sound, or voice. "
+        "Use clean mix, commercial-friendly arrangement, subtle dynamics, and no lead vocal unless requested.\n\n"
+        "<b>Thông số gợi ý</b>\n"
+        "• Mood: clean, modern, positive\n"
+        "• Tempo: 90-120 BPM tùy nội dung\n"
+        "• Structure: intro ngắn, loop thân bài, ending gọn\n"
+        "• Mix: không lấn giọng nói, dễ ghép voiceover\n"
+        "• Negative prompt: copyrighted melody, artist imitation, vocal clone, harsh noise, distorted mix\n\n"
+        f"📜 Lưu ý: {html.escape(music_policy_notice_short())}"
+    )
+
+async def provider_get_json(url: str, params: dict | None = None, headers: dict | None = None, timeout: float = 18.0) -> tuple[dict, int]:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        res = await client.get(url, params=params or {}, headers=headers or {})
+    try:
+        data = res.json()
+    except Exception:
+        data = {"error": "provider_non_json_response"}
+    return data if isinstance(data, dict) else {"data": data}, int(res.status_code)
+
+async def fetch_jamendo_tracks(query: str, limit: int = 8) -> list[dict]:
+    params = {
+        "client_id": JAMENDO_CLIENT_ID,
+        "format": "json",
+        "limit": max(1, min(limit, 10)),
+        "search": query,
+        "include": "musicinfo",
+        "audioformat": "mp31",
+        "order": "relevance",
+    }
+    data, status_code = await provider_get_json("https://api.jamendo.com/v3.0/tracks/", params=params)
+    headers = data.get("headers") or {}
+    if status_code >= 400 or str(headers.get("status") or "").lower() not in {"success", ""}:
+        raise RuntimeError(f"Jamendo HTTP {status_code}")
+    return data.get("results") or []
+
+async def fetch_freesound_results(query: str, limit: int = 8) -> list[dict]:
+    params = {
+        "query": query,
+        "page_size": max(1, min(limit, 10)),
+        "fields": "id,name,username,duration,license,previews,url",
+    }
+    headers = {"Authorization": f"Token {FREESOUND_API_KEY}"}
+    data, status_code = await provider_get_json("https://freesound.org/apiv2/search/text/", params=params, headers=headers)
+    if status_code >= 400:
+        raise RuntimeError(f"Freesound HTTP {status_code}")
+    return data.get("results") or []
+
+async def fetch_pixabay_media(query: str, limit: int = 5) -> tuple[list[dict], list[dict]]:
+    common = {
+        "key": PIXABAY_API_KEY,
+        "q": query,
+        "per_page": max(3, min(limit, 10)),
+        "safesearch": "true",
+    }
+    image_data, image_status = await provider_get_json("https://pixabay.com/api/", params=common)
+    video_data, video_status = await provider_get_json("https://pixabay.com/api/videos/", params=common)
+    if image_status >= 400 and video_status >= 400:
+        raise RuntimeError(f"Pixabay HTTP image={image_status} video={video_status}")
+    return image_data.get("hits") or [], video_data.get("hits") or []
+
+def format_jamendo_result(item: dict, idx: int) -> str:
+    title = html.escape(str(item.get("name") or "Untitled")[:90])
+    artist = html.escape(str(item.get("artist_name") or "Unknown")[:80])
+    duration = format_seconds(item.get("duration"))
+    license_url = html.escape(str(item.get("license_ccurl") or "-")[:180])
+    source_url = html.escape(str(item.get("shareurl") or "-")[:180])
+    preview_url = html.escape(str(item.get("audio") or "-")[:180])
+    return (
+        f"{idx}. <b>{title}</b> — {artist}\n"
+        f"   • Duration: <code>{html.escape(duration)}</code>\n"
+        f"   • License: <code>{license_url}</code>\n"
+        f"   • Source: <code>{source_url}</code>\n"
+        f"   • Preview: <code>{preview_url}</code>"
+    )
+
+def format_freesound_result(item: dict, idx: int) -> str:
+    title = html.escape(str(item.get("name") or "Untitled")[:90])
+    username = html.escape(str(item.get("username") or "Unknown")[:80])
+    duration = format_seconds(item.get("duration"))
+    license_name = html.escape(str(item.get("license") or "-")[:160])
+    source_url = html.escape(str(item.get("url") or "-")[:180])
+    previews = item.get("previews") or {}
+    preview_url = html.escape(str(previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3") or "-")[:180])
+    return (
+        f"{idx}. <b>{title}</b> — {username}\n"
+        f"   • Duration: <code>{html.escape(duration)}</code>\n"
+        f"   • License: <code>{license_name}</code>\n"
+        f"   • Source: <code>{source_url}</code>\n"
+        f"   • Preview: <code>{preview_url}</code>"
+    )
+
+def format_pixabay_image(item: dict, idx: int) -> str:
+    tags = html.escape(str(item.get("tags") or "-")[:120])
+    page_url = html.escape(str(item.get("pageURL") or "-")[:180])
+    preview = html.escape(str(item.get("previewURL") or "-")[:180])
+    return f"{idx}. <b>Image</b> — tags: <code>{tags}</code>\n   • Source: <code>{page_url}</code>\n   • Preview: <code>{preview}</code>"
+
+def format_pixabay_video(item: dict, idx: int) -> str:
+    tags = html.escape(str(item.get("tags") or "-")[:120])
+    page_url = html.escape(str(item.get("pageURL") or "-")[:180])
+    videos = item.get("videos") or {}
+    preview = ""
+    if isinstance(videos, dict):
+        for key in ("small", "tiny", "medium"):
+            if isinstance(videos.get(key), dict) and videos[key].get("url"):
+                preview = videos[key]["url"]
+                break
+    return f"{idx}. <b>Video</b> — tags: <code>{tags}</code>\n   • Source: <code>{page_url}</code>\n   • Preview: <code>{html.escape(str(preview or '-')[:180])}</code>"
+
+async def cmd_music_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lines = [
+        "🎵 <b>Nhạc AI / Kho nhạc TOAN AAS</b>",
+        "",
+        "Module này giúp bạn tạo prompt nhạc nền, tìm nhạc/SFX/media tham khảo và chuẩn bị nội dung an toàn hơn trước khi đăng.",
+        "",
+        "• <code>/music_prompt &lt;mô tả&gt;</code> — tạo prompt nhạc gốc, an toàn bản quyền.",
+        "• <code>/music_library &lt;từ khóa&gt;</code> — tìm nhạc Jamendo nếu đã cấu hình.",
+        "• <code>/sfx_library &lt;từ khóa&gt;</code> — tìm hiệu ứng Freesound nếu đã cấu hình.",
+        "• <code>/media_library &lt;từ khóa&gt;</code> — tìm ảnh/video Pixabay nếu đã cấu hình.",
+        "• <code>/music_policy</code> — chính sách bản quyền và an toàn nội dung.",
+        "",
+        "Tạo nhạc thật, ghép nhạc vào video, upscale/enhance nâng cao vẫn admin-test trước khi mở public.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=music_tools_keyboard(), disable_web_page_preview=True)
+
+async def cmd_music_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lines = [
+        "📜 <b>CHÍNH SÁCH NHẠC / MEDIA TOAN AAS</b>",
+        "",
+        "<b>Nguyên tắc sử dụng</b>",
+        "• TOAN AAS chỉ hỗ trợ tạo prompt nhạc gốc, tìm nguồn nhạc/media và chuẩn bị nội dung.",
+        "• Không yêu cầu bot tạo nhạc giống nghệ sĩ, bài hát, giai điệu, beat hoặc giọng nói cụ thể.",
+        "• Không dùng bot để cover/remix trái phép, clone giọng, reup nhạc hoặc né bản quyền.",
+        "• Khi dùng Jamendo/Freesound/Pixabay hoặc nguồn ngoài, bạn phải tự kiểm tra license trước khi đăng thương mại.",
+        "• TOAN AAS không đảm bảo mọi file trong kho ngoài đều dùng được cho mọi nền tảng/mục đích.",
+        "",
+        "<b>Trách nhiệm người dùng</b>",
+        "• Kiểm tra license, attribution, giới hạn thương mại và điều khoản nền tảng trước khi đăng.",
+        "• Không đăng nội dung vi phạm bản quyền, giả mạo hoặc gây hiểu nhầm.",
+        "• Nếu nền tảng yêu cầu ghi nguồn, bạn phải ghi đúng nguồn theo license.",
+        "",
+        "<b>Trạng thái hiện tại</b>",
+        "• Kho nhạc/SFX/media: chỉ hoạt động nếu provider đã cấu hình và pass smoke test.",
+        "• Tạo nhạc AI, ghép nhạc video, audio/video enhance: admin-first, chưa mở public nếu chưa test PASS.",
+        "• Nếu provider lỗi hoặc thiếu key, bot chưa trừ Xu.",
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_music_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    desc = " ".join(context.args or []).strip()
+    if not desc:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/music_prompt &lt;mô tả&gt;</code>\n\n"
+            "Ví dụ: <code>/music_prompt nhạc nền vui tươi cho video review máy xay sinh tố mini</code>",
+            parse_mode="HTML",
+        )
+    blocked = music_copyright_block_reason(desc)
+    if blocked:
+        return await update.message.reply_text(
+            "⛔ Prompt nhạc này có rủi ro bản quyền/clone.\n\n"
+            f"• Dấu hiệu: <code>{html.escape(blocked)}</code>\n"
+            "Hãy mô tả mood, tempo, nhạc cụ, bối cảnh video và cảm xúc thay vì nhắc nghệ sĩ/bài hát cụ thể.\n"
+            "Bot chưa trừ Xu.",
+            parse_mode="HTML",
+        )
+    await update.message.reply_text(build_music_prompt_pack(desc), parse_mode="HTML", disable_web_page_preview=True)
+
+async def cmd_music_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args or []).strip()
+    if not query:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/music_library &lt;từ khóa&gt;</code>", parse_mode="HTML")
+    if not JAMENDO_CLIENT_ID:
+        return await update.message.reply_text("⚠️ Kho nhạc chưa được cấu hình. Bot chưa trừ Xu.")
+    try:
+        results = await fetch_jamendo_tracks(query, limit=8)
+    except Exception as e:
+        record_api_debug("jamendo", "music_library", "FAIL", 0, provider_error_summary(e))
+        return await update.message.reply_text("⚠️ Kho nhạc đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
+    record_api_debug("jamendo", "music_library", "PASS" if results else "EMPTY", 200, f"results={len(results)}")
+    if not results:
+        return await update.message.reply_text("⚠️ Chưa tìm thấy nhạc phù hợp. Bot chưa trừ Xu.")
+    lines = [
+        f"🎧 <b>Kho nhạc Jamendo</b> — <code>{html.escape(query[:80])}</code>",
+        "",
+        *[format_jamendo_result(item, idx) for idx, item in enumerate(results[:8], start=1)],
+        "",
+        "📜 Lưu ý: kiểm tra license/attribution trên trang nguồn trước khi dùng thương mại hoặc đăng lên nền tảng.",
+        "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args or []).strip()
+    if not query:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/sfx_library &lt;từ khóa&gt;</code>", parse_mode="HTML")
+    if not FREESOUND_API_KEY:
+        return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh chưa được cấu hình. Bot chưa trừ Xu.")
+    try:
+        results = await fetch_freesound_results(query, limit=8)
+    except Exception as e:
+        record_api_debug("freesound", "sfx_library", "FAIL", 0, provider_error_summary(e))
+        return await update.message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
+    record_api_debug("freesound", "sfx_library", "PASS" if results else "EMPTY", 200, f"results={len(results)}")
+    if not results:
+        return await update.message.reply_text("⚠️ Chưa tìm thấy SFX phù hợp. Bot chưa trừ Xu.")
+    lines = [
+        f"🔊 <b>Kho hiệu ứng Freesound</b> — <code>{html.escape(query[:80])}</code>",
+        "",
+        *[format_freesound_result(item, idx) for idx, item in enumerate(results[:8], start=1)],
+        "",
+        "📜 Lưu ý: Freesound có nhiều loại license khác nhau. Kiểm tra license/attribution trước khi dùng.",
+        "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_media_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args or []).strip()
+    if not query:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/media_library &lt;từ khóa&gt;</code>", parse_mode="HTML")
+    if not PIXABAY_API_KEY:
+        return await update.message.reply_text("⚠️ Kho media đang tạm chưa sẵn sàng. Bot chưa trừ Xu.")
+    try:
+        images, videos = await fetch_pixabay_media(query, limit=5)
+    except Exception as e:
+        record_api_debug("pixabay", "media_library", "FAIL", 0, provider_error_summary(e))
+        return await update.message.reply_text("⚠️ Kho media đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
+    record_api_debug("pixabay", "media_library", "PASS" if (images or videos) else "EMPTY", 200, f"images={len(images)} videos={len(videos)}")
+    if not images and not videos:
+        return await update.message.reply_text("⚠️ Chưa tìm thấy media phù hợp. Bot chưa trừ Xu.")
+    lines = [
+        f"🖼 <b>Kho media Pixabay</b> — <code>{html.escape(query[:80])}</code>",
+        "",
+    ]
+    for idx, item in enumerate(images[:4], start=1):
+        lines.append(format_pixabay_image(item, idx))
+    offset = len(images[:4])
+    for idx, item in enumerate(videos[:4], start=offset + 1):
+        lines.append(format_pixabay_video(item, idx))
+    lines.extend([
+        "",
+        "📜 Lưu ý: kiểm tra điều khoản Pixabay và điều khoản nền tảng trước khi dùng thương mại.",
+        "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
+    ])
+    await reply_html_lines(update, lines)
+
+def music_ai_provider_summary() -> str:
+    providers = []
+    if MUSICFUL_API_KEY:
+        providers.append("Musicful")
+    if MINIMAX_API_KEY and MINIMAX_GROUP_ID:
+        providers.append("MiniMax")
+    elif MINIMAX_API_KEY:
+        providers.append("MiniMax thiếu group_id")
+    if STABILITY_API_KEY:
+        providers.append("Stability/Stable Audio")
+    if MUBERT_API_KEY:
+        providers.append("Mubert")
+    if BEATOVEN_API_KEY:
+        providers.append("Beatoven")
+    if SOUNDRAW_API_KEY:
+        providers.append("Soundraw")
+    return ", ".join(providers) or "missing"
+
+async def cmd_music_bg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    desc = " ".join(context.args or []).strip()
+    if not desc:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/music_bg &lt;mô tả nhạc nền&gt;</code>", parse_mode="HTML")
+    blocked = music_copyright_block_reason(desc)
+    if blocked:
+        return await update.message.reply_text(
+            "⛔ Yêu cầu tạo nhạc có rủi ro bản quyền/clone.\n\n"
+            f"• Dấu hiệu: <code>{html.escape(blocked)}</code>\n"
+            "Hãy mô tả mood/tempo/nhạc cụ/bối cảnh thay vì nhắc bài hát/nghệ sĩ cụ thể. Bot chưa trừ Xu.",
+            parse_mode="HTML",
+        )
+    provider_summary = music_ai_provider_summary()
+    prompt_pack = build_music_prompt_pack(desc)
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(
+            "🎵 Tạo nhạc AI đang admin test/chưa mở public. Bot chưa trừ Xu.\n\n"
+            "Bạn có thể dùng prompt an toàn dưới đây để tạo nhạc ở công cụ ngoài:\n\n"
+            f"{prompt_pack}",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    status = "CONFIGURED / ADMIN_ONLY / NOT_CALLED" if provider_summary != "missing" else "MISSING"
+    save_tool_test_result("music_ai", "NOT_TESTED" if provider_summary != "missing" else "MISSING", f"providers={provider_summary}", update.effective_user.id)
+    await update.message.reply_text(
+        "🎵 <b>AI Music Admin Test</b>\n\n"
+        f"• Providers: <code>{html.escape(provider_summary)}</code>\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        "• Chưa gọi API tạo nhạc thật trong lệnh này, không fake PASS và không trừ Xu.\n\n"
+        f"{prompt_pack}",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+
+async def cmd_music_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⚠️ Tạo bài hát AI đang admin test/chưa mở public. Bot chưa trừ Xu.")
+    return await cmd_music_bg(update, context)
+
+async def cmd_add_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⚠️ Ghép nhạc vào video đang admin test/chưa mở public. Bot chưa trừ Xu.")
+    await update.message.reply_text(
+        "🎬 <b>Ghép nhạc vào video — ADMIN TEST</b>\n\n"
+        "Flow này chưa mở production trong bot chính.\n"
+        "Yêu cầu tương lai: kiểm tra license nhạc, file video, âm lượng, ducking voiceover, export và audit log.\n"
+        "Không gọi provider, không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_video_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_add_music(update, context)
+
+async def cmd_video_upscale(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⚠️ Video upscale đang admin test/chưa mở public. Bot chưa trừ Xu.")
+    await update.message.reply_text(
+        "🎬 <b>Video Upscale — ADMIN TEST</b>\n\n"
+        f"• Replicate: <code>{provider_status_text(bool(REPLICATE_API_TOKEN))}</code>\n"
+        "• Status: <code>ADMIN_ONLY / NOT_IMPLEMENTED</code>\n"
+        "Không gọi API, không fake PASS, không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_video_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⚠️ Video enhance đang admin test/chưa mở public. Bot chưa trừ Xu.")
+    await update.message.reply_text(
+        "🎞 <b>Video Enhance — ADMIN TEST</b>\n\n"
+        f"• Replicate: <code>{provider_status_text(bool(REPLICATE_API_TOKEN))}</code>\n"
+        "• Status: <code>ADMIN_ONLY / NOT_IMPLEMENTED</code>\n"
+        "Không gọi API, không fake PASS, không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_image_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_public_admin_first_placeholder(update, context, "Image Enhance", "/image_prompt <chủ đề>")
+
+async def cmd_tool_test_music_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    query = " ".join(context.args or []).strip() or "upbeat product review"
+    if not JAMENDO_CLIENT_ID:
+        save_tool_test_result("music_library", "MISSING", "JAMENDO_CLIENT_ID missing", update.effective_user.id)
+        return await update.message.reply_text("🎧 <b>Music Library Test</b>\n\n• Jamendo: <code>MISSING</code>", parse_mode="HTML")
+    status = "FAIL"
+    detail = ""
+    try:
+        results = await fetch_jamendo_tracks(query, limit=3)
+        status = "PASS" if results else "EMPTY"
+        detail = f"results={len(results)}"
+    except Exception as e:
+        detail = provider_error_summary(e)[:300]
+    save_tool_test_result("music_library", status, f"query={query[:80]}; {detail}", update.effective_user.id)
+    await update.message.reply_text(
+        "🎧 <b>Music Library Smoke Test</b>\n\n"
+        f"• Query: <code>{html.escape(query[:100])}</code>\n"
+        f"• Jamendo: <code>{html.escape(status)}</code>\n"
+        f"• Detail: <code>{html.escape(detail[:300])}</code>\n\n"
+        "Không hiển thị key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    query = " ".join(context.args or []).strip() or "click"
+    if not FREESOUND_API_KEY:
+        save_tool_test_result("sfx_library", "MISSING", "FREESOUND_API_KEY missing", update.effective_user.id)
+        return await update.message.reply_text("🔊 <b>SFX Library Test</b>\n\n• Freesound: <code>MISSING</code>", parse_mode="HTML")
+    status = "FAIL"
+    detail = ""
+    try:
+        results = await fetch_freesound_results(query, limit=3)
+        status = "PASS" if results else "EMPTY"
+        detail = f"results={len(results)}"
+    except Exception as e:
+        detail = provider_error_summary(e)[:300]
+    save_tool_test_result("sfx_library", status, f"query={query[:80]}; {detail}", update.effective_user.id)
+    await update.message.reply_text(
+        "🔊 <b>SFX Library Smoke Test</b>\n\n"
+        f"• Query: <code>{html.escape(query[:100])}</code>\n"
+        f"• Freesound: <code>{html.escape(status)}</code>\n"
+        f"• Detail: <code>{html.escape(detail[:300])}</code>\n\n"
+        "Không hiển thị key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_media_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    query = " ".join(context.args or []).strip() or "product"
+    if not PIXABAY_API_KEY:
+        save_tool_test_result("media_library", "MISSING", "PIXABAY_API_KEY missing", update.effective_user.id)
+        return await update.message.reply_text("🖼 <b>Media Library Test</b>\n\n• Pixabay: <code>MISSING</code>", parse_mode="HTML")
+    status = "FAIL"
+    detail = ""
+    try:
+        images, videos = await fetch_pixabay_media(query, limit=3)
+        status = "PASS" if (images or videos) else "EMPTY"
+        detail = f"images={len(images)} videos={len(videos)}"
+    except Exception as e:
+        detail = provider_error_summary(e)[:300]
+    save_tool_test_result("media_library", status, f"query={query[:80]}; {detail}", update.effective_user.id)
+    await update.message.reply_text(
+        "🖼 <b>Media Library Smoke Test</b>\n\n"
+        f"• Query: <code>{html.escape(query[:100])}</code>\n"
+        f"• Pixabay: <code>{html.escape(status)}</code>\n"
+        f"• Detail: <code>{html.escape(detail[:300])}</code>\n\n"
+        "Không hiển thị key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_music_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider_summary = music_ai_provider_summary()
+    status = "CONFIGURED" if provider_summary != "missing" else "MISSING"
+    save_tool_test_result("music_ai", status, f"providers={provider_summary}; no paid call", update.effective_user.id)
+    await update.message.reply_text(
+        "🎵 <b>AI Music Provider Check</b>\n\n"
+        f"• Providers: <code>{html.escape(provider_summary)}</code>\n"
+        f"• Status: <code>{html.escape(status)} / NOT_TESTED</code>\n"
+        "• Không gọi API tạo nhạc, không fake PASS.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_replicate_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    status = "CONFIGURED" if REPLICATE_API_TOKEN else "MISSING"
+    save_tool_test_result("replicate_media", status, "REPLICATE_API_TOKEN configured check only; no paid call", update.effective_user.id)
+    await update.message.reply_text(
+        "🧪 <b>Replicate Media Check</b>\n\n"
+        f"• Replicate: <code>{html.escape(status)}</code>\n"
+        "• Không gọi API video/image enhance, không fake PASS.",
+        parse_mode="HTML",
+    )
+
 async def cmd_tool_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     providers = provider_status_payload()
     admin = is_admin_user(update.effective_user.id)
@@ -30151,6 +30743,7 @@ async def cmd_tool_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Khách hàng đang dùng</b>",
         "• AI chat/script/caption/prompt: <code>public</code>",
         "• Video Factory Lite: <code>/film</code>, <code>/image_prompt</code>, <code>/image_to_video_pack</code>",
+        "• Music/Media: <code>/music_tools</code>, <code>/music_prompt</code>, <code>/music_library</code>, <code>/sfx_library</code>, <code>/media_library</code>",
         "• Voice/audio/image utility: chỉ mở khi công cụ đã test PASS.",
         f"• TOAN AAS Memory: <code>{memory_public_stage()}</code> — <code>/memory</code>, <code>/memory_plan</code>",
         "",
@@ -30175,6 +30768,8 @@ async def cmd_tool_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• <code>/tool_test_trend_live từ khóa</code>",
             "• <code>/tool_test_tts Xin chào TOAN AAS</code>",
             "• <code>/tool_test_stability_image prompt</code>",
+            "• <code>/tool_test_music_library keyword</code> | <code>/tool_test_sfx_library keyword</code> | <code>/tool_test_media_library keyword</code>",
+            "• <code>/tool_test_music_ai</code> | <code>/tool_test_replicate_media</code>",
             "• <code>/tool_test_upscale_image</code> reply ảnh",
             "• <code>/tool_test_audio_enhance</code> reply audio",
             "• <code>/tool_test_kling_video prompt</code> | <code>/tool_test_runway_video prompt</code> | <code>/tool_test_heygen_avatar script</code>",
@@ -30229,6 +30824,12 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("Trend AI", "trend_ai", {"status": "READY", "tested_at": "content-only", "detail": "Prompt/content-only trend angle generator"}, "READY/content-only"),
         ("Trend Live", "trend_live", get_tool_test_result("trend_live"), f"{providers['media_factory'].get('trend_live_stage') or 'DISABLED'} SerpAPI={provider_status_text(providers['search']['serpapi'])}"),
         ("Image Prompt", "image_prompt", {"status": "READY", "tested_at": "prompt-only", "detail": "Image prompt factory"}, "READY/prompt-only"),
+        ("Music Prompt", "music_prompt", {"status": "READY", "tested_at": "prompt-only", "detail": "Royalty-safe music prompt template"}, "READY/prompt-only"),
+        ("Jamendo Music Library", "music_library", get_tool_test_result("music_library"), "configured" if providers["music"]["jamendo"] else "missing JAMENDO_CLIENT_ID"),
+        ("Freesound SFX Library", "sfx_library", get_tool_test_result("sfx_library"), "configured" if providers["music"]["freesound"] else "missing FREESOUND_API_KEY"),
+        ("Pixabay Media Library", "media_library", get_tool_test_result("media_library"), "configured" if providers["music"]["pixabay"] else "missing PIXABAY_API_KEY"),
+        ("AI Music Generation", "music_ai", get_tool_test_result("music_ai"), f"ADMIN_ONLY providers={music_ai_provider_summary()}"),
+        ("Replicate Media Enhance", "replicate_media", get_tool_test_result("replicate_media"), "configured" if providers["music"]["replicate"] else "missing REPLICATE_API_TOKEN"),
         ("OpenAI Image", "ai_image", get_tool_test_result("ai_image"), "env ON" if ENABLE_OPENAI_IMAGE else "DISABLED env"),
         ("OpenAI Image Edit", "ai_image_edit", get_tool_test_result("ai_image_edit"), "env ON" if ENABLE_OPENAI_IMAGE_EDIT else "DISABLED env"),
         ("Stability Image", "stability_image", get_tool_test_result("stability_image"), f"{providers['media_factory'].get('stability_image_stage') or 'DISABLED'}"),
@@ -50729,6 +51330,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_kling_video", cmd_tool_test_kling_video))
     tg_app.add_handler(CommandHandler("tool_test_runway_video", cmd_tool_test_runway_video))
     tg_app.add_handler(CommandHandler("tool_test_heygen_avatar", cmd_tool_test_heygen_avatar))
+    tg_app.add_handler(CommandHandler("tool_test_music_library", cmd_tool_test_music_library))
+    tg_app.add_handler(CommandHandler("tool_test_sfx_library", cmd_tool_test_sfx_library))
+    tg_app.add_handler(CommandHandler("tool_test_media_library", cmd_tool_test_media_library))
+    tg_app.add_handler(CommandHandler("tool_test_music_ai", cmd_tool_test_music_ai))
+    tg_app.add_handler(CommandHandler("tool_test_replicate_media", cmd_tool_test_replicate_media))
     tg_app.add_handler(CommandHandler("tool_test_doc_tools", cmd_tool_test_doc_tools))
     tg_app.add_handler(CommandHandler("tool_test_pdf_to_word", cmd_tool_test_pdf_to_word))
     tg_app.add_handler(CommandHandler("tool_test_image_to_pdf", cmd_tool_test_image_to_pdf))
@@ -50778,9 +51384,23 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("ocr_image", cmd_ocr_image))
     tg_app.add_handler(CommandHandler("ocr_pdf", cmd_ocr_pdf))
     tg_app.add_handler(CommandHandler("upscale_image", cmd_upscale_image))
+    tg_app.add_handler(CommandHandler("image_upscale", cmd_upscale_image))
+    tg_app.add_handler(CommandHandler("image_enhance", cmd_image_enhance))
     tg_app.add_handler(CommandHandler("audio_enhance", cmd_audio_enhance))
     tg_app.add_handler(CommandHandler("real_video", cmd_real_video))
     tg_app.add_handler(CommandHandler("avatar_video", cmd_avatar_video))
+    tg_app.add_handler(CommandHandler("music_tools", cmd_music_tools))
+    tg_app.add_handler(CommandHandler("music_prompt", cmd_music_prompt))
+    tg_app.add_handler(CommandHandler("music_library", cmd_music_library))
+    tg_app.add_handler(CommandHandler("sfx_library", cmd_sfx_library))
+    tg_app.add_handler(CommandHandler("media_library", cmd_media_library))
+    tg_app.add_handler(CommandHandler("music_policy", cmd_music_policy))
+    tg_app.add_handler(CommandHandler("music_bg", cmd_music_bg))
+    tg_app.add_handler(CommandHandler("music_song", cmd_music_song))
+    tg_app.add_handler(CommandHandler("add_music", cmd_add_music))
+    tg_app.add_handler(CommandHandler("video_music", cmd_video_music))
+    tg_app.add_handler(CommandHandler("video_upscale", cmd_video_upscale))
+    tg_app.add_handler(CommandHandler("video_enhance", cmd_video_enhance))
     tg_app.add_handler(CommandHandler("translate", cmd_translate))
     tg_app.add_handler(CommandHandler("translate_text", cmd_translate_text))
     tg_app.add_handler(CommandHandler("translate_tools", cmd_translate_tools))
