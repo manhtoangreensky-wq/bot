@@ -26512,7 +26512,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
         [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
         [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
-        [InlineKeyboardButton("💳 Bảng giá", callback_data="menu|hint_pricing"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
+        [InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|main_guide")],
         [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
     ]
@@ -26561,7 +26561,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
             [InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image")],
             [InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 语音工具", callback_data="menu|main_audio")],
             [InlineKeyboardButton("🌐 翻译", callback_data="menu|translate"), InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory")],
-            [InlineKeyboardButton("💳 价格", callback_data="menu|hint_pricing"), InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton("💳 价格", callback_data="pricing|main"), InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("👤 账户", callback_data="menu|main_profile"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
             [InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")],
         ]
@@ -26576,7 +26576,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
             [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
             [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
             [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
-            [InlineKeyboardButton("💳 Bảng giá", callback_data="menu|hint_pricing"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
             [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
         ]
@@ -26590,7 +26590,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
         [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
         [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate"), InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory")],
-        [InlineKeyboardButton("💳 Pricing", callback_data="menu|hint_pricing"), InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
+        [InlineKeyboardButton("💳 Pricing", callback_data="pricing|main"), InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("👤 Account", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
         [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
     ]
@@ -26783,12 +26783,12 @@ def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📄 Document tools", callback_data="menu|hint_doc_tools")],
-            [InlineKeyboardButton("💰 Pricing", callback_data="menu|hint_pricing")],
+            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📄 Mở công cụ tài liệu", callback_data="menu|hint_doc_tools")],
-        [InlineKeyboardButton("💰 Xem giá", callback_data="menu|hint_pricing")],
+        [InlineKeyboardButton("💰 Xem giá", callback_data="pricing|main")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -26867,12 +26867,12 @@ def main_topup_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Use /naptien", callback_data="menu|hint_naptien")],
-            [InlineKeyboardButton("💰 Pricing", callback_data="menu|hint_pricing")],
+            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien")],
-        [InlineKeyboardButton("💰 Xem giá", callback_data="menu|hint_pricing")],
+        [InlineKeyboardButton("💰 Xem giá", callback_data="pricing|main")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -26882,14 +26882,14 @@ def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("📘 Full guide", callback_data="menu|guide")],
             [InlineKeyboardButton("📜 Terms", callback_data="menu|legal")],
             [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("💰 Pricing", callback_data="menu|hint_pricing")],
+            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📘 Hướng dẫn đầy đủ", callback_data="menu|guide")],
         [InlineKeyboardButton("📜 Điều khoản", callback_data="menu|legal")],
         [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton("💰 Bảng giá", callback_data="menu|hint_pricing")],
+        [InlineKeyboardButton("💰 Bảng giá", callback_data="pricing|main")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -27472,7 +27472,7 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_search_note": ("main_memory", "🔎 <b>Tìm ghi chú</b>\n\nCopy lệnh:\n<code>/search_note từ khóa</code>"),
         "hint_remind": ("main_memory", "⏰ <b>Đặt nhắc việc</b>\n\nCopy lệnh:\n<code>/remind 30m nội dung cần nhắc</code>"),
         "hint_doc_tools": ("main_docs", "📄 <b>Công cụ tài liệu</b>\n\nCopy lệnh:\n<code>/doc_tools</code>"),
-        "hint_pricing": ("main_topup", "💰 <b>Bảng giá</b>\n\nCopy lệnh:\n<code>/pricing</code>"),
+        "hint_pricing": ("main_topup", "💰 <b>Bảng giá</b>\n\nĐang mở bảng giá TOAN AAS."),
         "hint_image_tools": ("main_image", "🖼 <b>Công cụ ảnh</b>\n\nCopy lệnh:\n<code>/image_tools</code>"),
         "hint_image_to_video_pack": ("main_image", "🎬 <b>Ảnh sang video prompt</b>\n\nCopy lệnh:\n<code>/image_to_video_pack chủ đề hoặc mô tả ảnh</code>"),
         "hint_media_factory": ("main_audio", "🎤 <b>Trung tâm Video & Media</b>\n\nCopy lệnh:\n<code>/media_factory</code>\n\nTạo voice, bóc băng và video/content pack tùy công cụ đã bật."),
@@ -27497,7 +27497,7 @@ def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
         "hint_search_note": ("main_memory", "🔎 <b>Search notes</b>\n\nCopy:\n<code>/search_note keyword</code>"),
         "hint_remind": ("main_memory", "⏰ <b>Create a reminder</b>\n\nCopy:\n<code>/remind 30m reminder text</code>"),
         "hint_doc_tools": ("main_docs", "📄 <b>Document tools</b>\n\nCopy:\n<code>/doc_tools</code>"),
-        "hint_pricing": ("main_topup", "💰 <b>Pricing</b>\n\nCopy:\n<code>/pricing</code>"),
+        "hint_pricing": ("main_topup", "💰 <b>Pricing</b>\n\nOpening TOAN AAS pricing."),
         "hint_image_tools": ("main_image", "🖼 <b>Image tools</b>\n\nCopy:\n<code>/image_tools</code>"),
         "hint_image_to_video_pack": ("main_image", "🎬 <b>Image-to-video prompt pack</b>\n\nCopy:\n<code>/image_to_video_pack topic or image description</code>"),
         "hint_media_factory": ("main_audio", "🎤 <b>Media tools</b>\n\nCopy:\n<code>/media_factory</code>\n\nVoice, transcription and media/content packs depending on enabled tools."),
@@ -28723,6 +28723,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
+    if action == "hint_pricing":
+        return await send_pricing_lines(query.message, pricing_main_lines(), pricing_main_keyboard())
     if action.startswith("translate_set_"):
         target = normalize_translate_target(action.replace("translate_set_", "", 1))
         if not target:
