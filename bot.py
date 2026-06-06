@@ -27593,20 +27593,20 @@ def menu_text_main_music_i18n(lang: str) -> str:
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         return (
-            "🎵 <b>音乐 / SFX TOAN AAS</b>\n\n"
-            "查找背景音乐、音效、公共媒体，或为视频生成安全的音乐提示词。\n\n"
+            "🎵 <b>TOAN AAS 音乐 / 音效中心</b>\n\n"
+            "查找背景音乐、音效、公开视频素材，并为视频生成安全的音乐提示词。\n\n"
             "<b>命令:</b>\n"
             "• <code>/music</code> 或 <code>/music_tools</code> — 打开音乐中心\n"
             "• <code>/music_prompt &lt;描述&gt;</code> — 生成音乐提示词\n"
             "• <code>/music_library &lt;关键词&gt;</code> — 查找背景音乐\n"
             "• <code>/sfx_library &lt;关键词&gt;</code> — 查找音效\n"
             "• <code>/media_library &lt;关键词&gt;</code> — 查找公共图片/视频\n\n"
-            "请先检查 license/attribution，再用于商业广告或公开视频。"
+            "公共音乐/媒体来源有各自的授权条款。发布广告或商业内容前，请检查商业使用权。"
         )
     if lang == "vi":
         return menu_text_main_music()
     return (
-        "🎵 <b>MUSIC / SFX TOAN AAS</b>\n\n"
+        "🎵 <b>TOAN AAS MUSIC / SFX CENTER</b>\n\n"
         "Find background music, sound effects, public media, and safe music prompts for video.\n\n"
         "<b>Commands:</b>\n"
         "• <code>/music</code> or <code>/music_tools</code> — open the music center\n"
@@ -27706,7 +27706,7 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "main_image":
         return menu_text_main_image_i18n(lang), main_image_keyboard(lang)
     if action == "main_music":
-        return menu_text_main_music_i18n(lang), music_tools_keyboard()
+        return menu_text_main_music_i18n(lang), music_tools_keyboard(lang)
     if action == "main_audio":
         return menu_text_main_audio_i18n(lang), main_audio_keyboard(lang)
     if action == "translate":
@@ -30469,23 +30469,135 @@ def music_policy_lines() -> list[str]:
         "• Nếu provider lỗi hoặc thiếu key, bot chưa trừ Xu.",
     ]
 
-def music_tools_keyboard() -> InlineKeyboardMarkup:
+def music_policy_lines_i18n(lang: str = "vi") -> list[str]:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        return [
+            "📜 <b>TOAN AAS 音乐 / 媒体政策</b>",
+            "",
+            "• TOAN AAS 支持生成音乐提示词、查找背景音乐、音效和公开视频/图片素材。",
+            "• 不要要求机器人模仿具体艺人、歌曲、旋律、beat、声线或受版权保护的音乐品牌。",
+            "• 不要使用 TOAN AAS 进行未经授权的 cover/remix、声音克隆、规避版权或 reupload。",
+            "• Jamendo、Freesound、Pixabay 等来源有各自的授权条款。",
+            "• 发布广告或变现内容前，请检查商业使用权、署名要求、平台规则和素材来源。",
+            "• AI 生成音乐、音频/视频增强、给视频加音乐可能会单独消耗 Xu，不是无限使用。",
+            "• 如果 provider 缺少 key、出错或处理失败，本次不会扣除 Xu，或已扣除时会按规则退回。",
+            "",
+            f"{music_no_xu_text(lang)}",
+        ]
+    if lang == "en":
+        return [
+            "📜 <b>TOAN AAS MUSIC / MEDIA POLICY</b>",
+            "",
+            "• TOAN AAS helps create music prompts, find background music, sound effects and public media.",
+            "• Do not ask the bot to imitate a specific artist, song, melody, beat, voice or copyrighted music brand.",
+            "• Do not use TOAN AAS for unauthorized covers/remixes, voice cloning, copyright evasion or reuploading.",
+            "• Sources such as Jamendo, Freesound and Pixabay have source-specific licenses.",
+            "• Before ads or monetized content, check commercial rights, attribution, platform rules and source terms.",
+            "• AI music generation, audio/video enhancement and adding music to video may consume Xu separately and are not unlimited.",
+            "• If a provider is missing, fails or times out, the bot does not charge Xu, or refunds according to policy if already charged.",
+            "",
+            f"{music_no_xu_text(lang)}",
+        ]
+    return music_policy_lines()
+
+def music_ui_lang(user_id=None, lang: str = "") -> str:
+    if lang:
+        return normalize_user_language(lang) or "vi"
+    if user_id:
+        return normalize_user_language(get_user_language(user_id)) or "vi"
+    return "vi"
+
+def music_no_xu_text(lang: str) -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        return "本次未扣除 Xu。"
+    if lang == "en":
+        return "The bot has not charged Xu."
+    return "Bot chưa trừ Xu."
+
+def music_provider_error_text(lang: str) -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        return "⚠️ 工具暂时不可用，或需要检查服务提供商配置。\n本次未扣除 Xu。"
+    if lang == "en":
+        return "⚠️ This tool is temporarily unavailable or the provider needs to be checked.\nThe bot has not charged Xu."
+    return "⚠️ Công cụ đang tạm lỗi hoặc provider cần kiểm tra.\nBot chưa trừ Xu."
+
+def music_license_notice_text(lang: str) -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        return "公共音乐/媒体来源有各自的授权条款。发布广告或商业内容前，请检查商业使用权、署名要求和平台规则。"
+    if lang == "en":
+        return "Public music/media sources have their own licenses. Check commercial rights, attribution and platform rules before posting ads or monetized content."
+    return "Nhạc/kho public có license riêng từng nguồn. Kiểm tra quyền thương mại, attribution và điều khoản nền tảng trước khi đăng quảng cáo/kiếm tiền."
+
+def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        labels = {
+            "prompt": "🎼 音乐提示词",
+            "music": "🎧 音乐库",
+            "sfx": "🔊 音效",
+            "media": "🖼 媒体库",
+            "policy": "📜 音乐政策",
+            "main": "🏠 主菜单",
+        }
+    elif lang == "en":
+        labels = {
+            "prompt": "🎼 Music prompt",
+            "music": "🎧 Music library",
+            "sfx": "🔊 SFX",
+            "media": "🖼 Media library",
+            "policy": "📜 Music policy",
+            "main": "🏠 Main menu",
+        }
+    else:
+        labels = {
+            "prompt": "🎼 Tạo prompt nhạc",
+            "music": "🎧 Kho nhạc",
+            "sfx": "🔊 SFX",
+            "media": "🖼 Kho media",
+            "policy": "📜 Chính sách nhạc",
+            "main": "🏠 Menu chính",
+        }
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎼 Tạo prompt nhạc", callback_data="music_quick|prompt"),
-            InlineKeyboardButton("🎧 Kho nhạc", callback_data="music_quick|music"),
+            InlineKeyboardButton(labels["prompt"], callback_data="music_quick|prompt"),
+            InlineKeyboardButton(labels["music"], callback_data="music_quick|music"),
         ],
         [
-            InlineKeyboardButton("🔊 SFX", callback_data="music_quick|sfx"),
-            InlineKeyboardButton("🖼 Kho media", callback_data="music_quick|media"),
+            InlineKeyboardButton(labels["sfx"], callback_data="music_quick|sfx"),
+            InlineKeyboardButton(labels["media"], callback_data="music_quick|media"),
         ],
         [
-            InlineKeyboardButton("📜 Chính sách nhạc", callback_data="music_quick|policy"),
-            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            InlineKeyboardButton(labels["policy"], callback_data="music_quick|policy"),
+            InlineKeyboardButton(labels["main"], callback_data="menu|main"),
         ],
     ])
 
-def music_prompt_guide_text() -> str:
+def music_prompt_guide_text(lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        return (
+            "🎼 <b>生成背景音乐提示词</b>\n\n"
+            "请描述你的视频，机器人会生成更安全的音乐提示词。\n\n"
+            "示例:\n"
+            "• <code>/music_prompt 产品测评视频，轻快，30秒</code>\n"
+            "• <code>/music_prompt 现代AI科技视频，干净，快节奏</code>\n"
+            "• <code>/music_prompt 情感故事视频，轻柔，无人声</code>\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    if lang == "en":
+        return (
+            "🎼 <b>CREATE A BACKGROUND MUSIC PROMPT</b>\n\n"
+            "Describe your video and the bot will create a copyright-safe music prompt.\n\n"
+            "Examples:\n"
+            "• <code>/music_prompt product review video, cheerful, 30 seconds</code>\n"
+            "• <code>/music_prompt modern AI technology video, clean, fast rhythm</code>\n"
+            "• <code>/music_prompt emotional storytelling video, calm, no vocal</code>\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
     return (
         "🎼 <b>TẠO PROMPT NHẠC NỀN</b>\n\n"
         "Gõ mô tả video để bot tạo prompt nhạc an toàn bản quyền.\n\n"
@@ -30496,7 +30608,30 @@ def music_prompt_guide_text() -> str:
         "Bot chưa trừ Xu."
     )
 
-def music_library_guide_text() -> str:
+def music_library_guide_text(lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        return (
+            "🎧 <b>音乐库</b>\n\n"
+            "请选择快速主题，或输入自己的关键词。\n\n"
+            "示例:\n"
+            "• <code>/music_library upbeat product review</code>\n"
+            "• <code>/music_library futuristic technology background</code>\n"
+            "• <code>/music_library energetic tiktok short video</code>\n\n"
+            "找到结果后，点击 ▶️ 试听或 ✅ 选择音乐。\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    if lang == "en":
+        return (
+            "🎧 <b>MUSIC LIBRARY</b>\n\n"
+            "Choose a quick topic or type your own keyword.\n\n"
+            "Examples:\n"
+            "• <code>/music_library upbeat product review</code>\n"
+            "• <code>/music_library futuristic technology background</code>\n"
+            "• <code>/music_library energetic tiktok short video</code>\n\n"
+            "After results appear, tap ▶️ to preview or ✅ to select music.\n"
+            f"{music_no_xu_text(lang)}"
+        )
     return (
         "🎧 <b>KHO NHẠC NỀN</b>\n\n"
         "Chọn nhanh một chủ đề hoặc gõ lệnh với từ khóa riêng.\n\n"
@@ -30508,7 +30643,30 @@ def music_library_guide_text() -> str:
         "Bot chưa trừ Xu."
     )
 
-def sfx_library_guide_text() -> str:
+def sfx_library_guide_text(lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        return (
+            "🔊 <b>音效库</b>\n\n"
+            "请选择快速音效类型，或输入自己的关键词。\n\n"
+            "示例:\n"
+            "• <code>/sfx_library whoosh transition</code>\n"
+            "• <code>/sfx_library click</code>\n"
+            "• <code>/sfx_library cinematic hit</code>\n\n"
+            "找到结果后，点击 ▶️ 试听或 ✅ 选择音效。\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    if lang == "en":
+        return (
+            "🔊 <b>SOUND EFFECTS LIBRARY</b>\n\n"
+            "Choose a quick SFX type or type your own keyword.\n\n"
+            "Examples:\n"
+            "• <code>/sfx_library whoosh transition</code>\n"
+            "• <code>/sfx_library click</code>\n"
+            "• <code>/sfx_library cinematic hit</code>\n\n"
+            "After results appear, tap ▶️ to preview or ✅ to select SFX.\n"
+            f"{music_no_xu_text(lang)}"
+        )
     return (
         "🔊 <b>KHO HIỆU ỨNG ÂM THANH</b>\n\n"
         "Chọn nhanh một loại SFX hoặc gõ lệnh với từ khóa riêng.\n\n"
@@ -30520,7 +30678,30 @@ def sfx_library_guide_text() -> str:
         "Bot chưa trừ Xu."
     )
 
-def media_library_guide_text() -> str:
+def media_library_guide_text(lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        return (
+            "🖼 <b>公开视频/图片素材库</b>\n\n"
+            "请选择快速主题，或输入自己的关键词。\n\n"
+            "示例:\n"
+            "• <code>/media_library modern kitchen blender</code>\n"
+            "• <code>/media_library ai technology dashboard</code>\n"
+            "• <code>/media_library product showcase</code>\n\n"
+            "找到结果后，点击 🖼/🎬 查看或 ✅ 选择素材。\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    if lang == "en":
+        return (
+            "🖼 <b>PUBLIC MEDIA LIBRARY</b>\n\n"
+            "Choose a quick topic or type your own keyword.\n\n"
+            "Examples:\n"
+            "• <code>/media_library modern kitchen blender</code>\n"
+            "• <code>/media_library ai technology dashboard</code>\n"
+            "• <code>/media_library product showcase</code>\n\n"
+            "After results appear, tap 🖼/🎬 to preview or ✅ to select media.\n"
+            f"{music_no_xu_text(lang)}"
+        )
     return (
         "🖼 <b>KHO MEDIA PUBLIC</b>\n\n"
         "Chọn nhanh một chủ đề hoặc gõ lệnh với từ khóa riêng.\n\n"
@@ -30532,23 +30713,35 @@ def media_library_guide_text() -> str:
         "Bot chưa trừ Xu."
     )
 
-def music_library_quick_keyboard() -> InlineKeyboardMarkup:
+def music_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        custom_label = "✍️ 自定义关键词"
+        labels = ("⚡ 销售/产品", "💼 科技", "🎬 电影感", "🌿 轻柔/评测", "🔥 热门短视频")
+    elif lang == "en":
+        custom_label = "✍️ Custom keyword"
+        labels = ("⚡ Sales/product", "💼 Tech", "🎬 Cinematic", "🌿 Calm/review", "🔥 Trend")
+    else:
+        custom_label = "✍️ Tự nhập từ khóa"
+        labels = ("⚡ Sales/product", "💼 Tech", "🎬 Cinematic", "🌿 Calm/review", "🔥 Trend")
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⚡ Sales/product", callback_data="music_quick|sales"),
-            InlineKeyboardButton("💼 Tech", callback_data="music_quick|tech"),
+            InlineKeyboardButton(labels[0], callback_data="music_quick|sales"),
+            InlineKeyboardButton(labels[1], callback_data="music_quick|tech"),
         ],
         [
-            InlineKeyboardButton("🎬 Cinematic", callback_data="music_quick|cinematic"),
-            InlineKeyboardButton("🌿 Calm/review", callback_data="music_quick|calm"),
+            InlineKeyboardButton(labels[2], callback_data="music_quick|cinematic"),
+            InlineKeyboardButton(labels[3], callback_data="music_quick|calm"),
         ],
         [
-            InlineKeyboardButton("🔥 Trend", callback_data="music_quick|trend"),
-            InlineKeyboardButton("✍️ Tự nhập từ khóa", callback_data="music_quick|custom_music"),
+            InlineKeyboardButton(labels[4], callback_data="music_quick|trend"),
+            InlineKeyboardButton(custom_label, callback_data="music_quick|custom_music"),
         ],
     ])
 
-def sfx_library_quick_keyboard() -> InlineKeyboardMarkup:
+def sfx_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = music_ui_lang(lang=lang)
+    custom_label = "✍️ 自定义关键词" if lang == "zh" else ("✍️ Custom keyword" if lang == "en" else "✍️ Tự nhập từ khóa")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("💨 Whoosh", callback_data="sfx_quick|whoosh"),
@@ -30560,11 +30753,13 @@ def sfx_library_quick_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("💥 Pop impact", callback_data="sfx_quick|pop"),
-            InlineKeyboardButton("✍️ Tự nhập từ khóa", callback_data="music_quick|custom_sfx"),
+            InlineKeyboardButton(custom_label, callback_data="music_quick|custom_sfx"),
         ],
     ])
 
-def media_library_quick_keyboard() -> InlineKeyboardMarkup:
+def media_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = music_ui_lang(lang=lang)
+    custom_label = "✍️ 自定义关键词" if lang == "zh" else ("✍️ Custom keyword" if lang == "en" else "✍️ Tự nhập từ khóa")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🍳 Kitchen blender", callback_data="media_quick|kitchen"),
@@ -30575,7 +30770,7 @@ def media_library_quick_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📦 Product showcase", callback_data="media_quick|product"),
         ],
         [
-            InlineKeyboardButton("✍️ Tự nhập từ khóa", callback_data="music_quick|custom_media"),
+            InlineKeyboardButton(custom_label, callback_data="music_quick|custom_media"),
         ],
     ])
 
@@ -30607,45 +30802,68 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if not query:
         return
     namespace, action = (query.data or "").split("|", 1)
+    user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     if action == "prompt":
         await query.answer()
-        return await query.message.reply_text(music_prompt_guide_text(), parse_mode="HTML")
+        return await query.message.reply_text(music_prompt_guide_text(lang), parse_mode="HTML")
     if action == "music":
         await query.answer()
-        return await query.message.reply_text(music_library_guide_text(), parse_mode="HTML", reply_markup=music_library_quick_keyboard())
+        return await query.message.reply_text(music_library_guide_text(lang), parse_mode="HTML", reply_markup=music_library_quick_keyboard(lang))
     if action == "sfx":
         await query.answer()
-        return await query.message.reply_text(sfx_library_guide_text(), parse_mode="HTML", reply_markup=sfx_library_quick_keyboard())
+        return await query.message.reply_text(sfx_library_guide_text(lang), parse_mode="HTML", reply_markup=sfx_library_quick_keyboard(lang))
     if action == "media":
         await query.answer()
-        return await query.message.reply_text(media_library_guide_text(), parse_mode="HTML", reply_markup=media_library_quick_keyboard())
+        return await query.message.reply_text(media_library_guide_text(lang), parse_mode="HTML", reply_markup=media_library_quick_keyboard(lang))
     if action == "policy":
         await query.answer()
         return await query.message.reply_text(
-            "\n".join(music_policy_lines()),
+            "\n".join(music_policy_lines_i18n(lang)),
             parse_mode="HTML",
             disable_web_page_preview=True,
         )
     if action == "custom_music":
         await query.answer()
-        return await query.message.reply_text("✍️ Gõ: <code>/music_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/music_library upbeat product review</code>", parse_mode="HTML")
+        if lang == "zh":
+            text = "✍️ 输入: <code>/music_library &lt;关键词&gt;</code>\n示例: <code>/music_library upbeat product review</code>"
+        elif lang == "en":
+            text = "✍️ Type: <code>/music_library &lt;keyword&gt;</code>\nExample: <code>/music_library upbeat product review</code>"
+        else:
+            text = "✍️ Gõ: <code>/music_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/music_library upbeat product review</code>"
+        return await query.message.reply_text(text, parse_mode="HTML")
     if action == "custom_sfx":
         await query.answer()
-        return await query.message.reply_text("✍️ Gõ: <code>/sfx_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/sfx_library whoosh transition</code>", parse_mode="HTML")
+        if lang == "zh":
+            text = "✍️ 输入: <code>/sfx_library &lt;关键词&gt;</code>\n示例: <code>/sfx_library whoosh transition</code>"
+        elif lang == "en":
+            text = "✍️ Type: <code>/sfx_library &lt;keyword&gt;</code>\nExample: <code>/sfx_library whoosh transition</code>"
+        else:
+            text = "✍️ Gõ: <code>/sfx_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/sfx_library whoosh transition</code>"
+        return await query.message.reply_text(text, parse_mode="HTML")
     if action == "custom_media":
         await query.answer()
-        return await query.message.reply_text("✍️ Gõ: <code>/media_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/media_library modern kitchen blender</code>", parse_mode="HTML")
-    user_id = update.effective_user.id if update.effective_user else 0
+        if lang == "zh":
+            text = "✍️ 输入: <code>/media_library &lt;关键词&gt;</code>\n示例: <code>/media_library modern kitchen blender</code>"
+        elif lang == "en":
+            text = "✍️ Type: <code>/media_library &lt;keyword&gt;</code>\nExample: <code>/media_library modern kitchen blender</code>"
+        else:
+            text = "✍️ Gõ: <code>/media_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/media_library modern kitchen blender</code>"
+        return await query.message.reply_text(text, parse_mode="HTML")
     if namespace == "music_quick" and action in MUSIC_QUICK_QUERIES:
-        await query.answer("Đang tìm nhạc...")
+        await query.answer("Searching music..." if lang == "en" else ("正在查找音乐..." if lang == "zh" else "Đang tìm nhạc..."))
         return await send_music_library_results(query.message, user_id, MUSIC_QUICK_QUERIES[action])
     if namespace == "sfx_quick" and action in SFX_QUICK_QUERIES:
-        await query.answer("Đang tìm SFX...")
+        await query.answer("Searching SFX..." if lang == "en" else ("正在查找音效..." if lang == "zh" else "Đang tìm SFX..."))
         return await send_sfx_library_results(query.message, user_id, SFX_QUICK_QUERIES[action])
     if namespace == "media_quick" and action in MEDIA_QUICK_QUERIES:
-        await query.answer("Đang tìm media...")
+        await query.answer("Searching media..." if lang == "en" else ("正在查找素材..." if lang == "zh" else "Đang tìm media..."))
         return await send_media_library_results(query.message, user_id, MEDIA_QUICK_QUERIES[action])
     await query.answer()
+    if lang == "zh":
+        return await query.message.reply_text("⚠️ 快速模板无效。本次未扣除 Xu。")
+    if lang == "en":
+        return await query.message.reply_text("⚠️ Invalid quick template. The bot has not charged Xu.")
     return await query.message.reply_text("⚠️ Mẫu nhanh không hợp lệ. Bot chưa trừ Xu.")
 
 def format_seconds(value) -> str:
@@ -30657,10 +30875,49 @@ def format_seconds(value) -> str:
         return "-"
     return f"{seconds // 60}:{seconds % 60:02d}"
 
-def build_music_prompt_pack(description: str) -> str:
+def build_music_prompt_pack(description: str, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
     desc = (description or "").strip()
     if not desc:
-        desc = "video review sản phẩm vui tươi 30 giây"
+        desc = "product review video, cheerful, 30 seconds" if lang == "en" else ("产品测评视频，轻快，30秒" if lang == "zh" else "video review sản phẩm vui tươi 30 giây")
+    if lang == "zh":
+        return (
+            "🎼 <b>TOAN AAS 背景音乐提示词</b>\n\n"
+            "<b>视频内容:</b>\n"
+            f"{html.escape(desc)}\n\n"
+            "<b>建议:</b>\n"
+            "• Mood: 明亮、干净、轻松积极\n"
+            "• Tempo: 110-125 BPM\n"
+            "• Style: upbeat electronic, clean commercial, no vocal\n"
+            "• 时长: 15-30 秒\n"
+            "• 适合: TikTok, Reels, Shorts, 产品广告\n\n"
+            "<b>English prompt:</b>\n"
+            "A bright upbeat instrumental background music for a short product review video, "
+            "clean commercial style, light drums, soft synth, positive energy, no vocals, "
+            "no famous melody, loopable ending.\n\n"
+            "<b>Negative:</b>\n"
+            "no copyrighted melody, no famous artist style, no vocals, no brand jingle, no recognizable song.\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    if lang == "en":
+        return (
+            "🎼 <b>TOAN AAS BACKGROUND MUSIC PROMPT</b>\n\n"
+            "<b>Video content:</b>\n"
+            f"{html.escape(desc)}\n\n"
+            "<b>Suggestion:</b>\n"
+            "• Mood: bright, clean, lightly energetic\n"
+            "• Tempo: 110-125 BPM\n"
+            "• Style: upbeat electronic, clean commercial, no vocal\n"
+            "• Duration: 15-30 seconds\n"
+            "• Best for: TikTok, Reels, Shorts, product ads\n\n"
+            "<b>English prompt:</b>\n"
+            "A bright upbeat instrumental background music for a short product review video, "
+            "clean commercial style, light drums, soft synth, positive energy, no vocals, "
+            "no famous melody, loopable ending.\n\n"
+            "<b>Negative:</b>\n"
+            "no copyrighted melody, no famous artist style, no vocals, no brand jingle, no recognizable song.\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
     return (
         "🎼 <b>PROMPT NHẠC NỀN TOAN AAS</b>\n\n"
         "<b>Nội dung video:</b>\n"
@@ -30773,22 +31030,30 @@ async def fetch_pixabay_media(query: str, limit: int = 5) -> tuple[list[dict], l
         raise RuntimeError(f"Pixabay HTTP image={image_status} video={video_status}")
     return image_data.get("hits") or [], video_data.get("hits") or []
 
-def format_jamendo_result(item: dict, idx: int) -> str:
+def format_jamendo_result(item: dict, idx: int, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
     title = html.escape(str(item.get("name") or "Untitled")[:90])
     artist = html.escape(str(item.get("artist_name") or "Unknown")[:80])
     duration = format_seconds(item.get("duration"))
     license_url = html.escape(str(item.get("license_ccurl") or "-")[:180])
     source_url = html.escape(str(item.get("shareurl") or "-")[:180])
     preview_url = html.escape(str(item.get("audio") or "-")[:180])
+    labels = {
+        "duration": "时长" if lang == "zh" else ("Duration" if lang == "en" else "Thời lượng"),
+        "license": "授权" if lang == "zh" else "License",
+        "source": "来源" if lang == "zh" else ("Source" if lang == "en" else "Nguồn"),
+        "preview": "试听" if lang == "zh" else ("Preview" if lang == "en" else "Nghe thử"),
+    }
     return (
         f"{idx}. <b>{title}</b> — {artist}\n"
-        f"   • Duration: <code>{html.escape(duration)}</code>\n"
-        f"   • License: <code>{license_url}</code>\n"
-        f"   • Source: <code>{source_url}</code>\n"
-        f"   • Preview: <code>{preview_url}</code>"
+        f"   • {labels['duration']}: <code>{html.escape(duration)}</code>\n"
+        f"   • {labels['license']}: <code>{license_url}</code>\n"
+        f"   • {labels['source']}: <code>{source_url}</code>\n"
+        f"   • {labels['preview']}: <code>{preview_url}</code>"
     )
 
-def format_freesound_result(item: dict, idx: int) -> str:
+def format_freesound_result(item: dict, idx: int, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
     title = html.escape(str(item.get("name") or "Untitled")[:90])
     username = html.escape(str(item.get("username") or "Unknown")[:80])
     duration = format_seconds(item.get("duration"))
@@ -30796,13 +31061,20 @@ def format_freesound_result(item: dict, idx: int) -> str:
     source_url = html.escape(str(item.get("url") or "-")[:180])
     previews = item.get("previews") or {}
     preview_url = html.escape(str(previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3") or "-")[:180])
+    labels = {
+        "author": "作者" if lang == "zh" else ("Author" if lang == "en" else "Tác giả"),
+        "duration": "时长" if lang == "zh" else ("Duration" if lang == "en" else "Thời lượng"),
+        "license": "授权" if lang == "zh" else "License",
+        "preview": "试听" if lang == "zh" else ("Preview" if lang == "en" else "Nghe thử"),
+        "source": "来源" if lang == "zh" else ("Source" if lang == "en" else "Nguồn"),
+    }
     return (
         f"{idx}. <b>{title}</b>\n"
-        f"• Tác giả: <code>{username}</code>\n"
-        f"• Thời lượng: <code>{html.escape(duration)}</code>\n"
-        f"• License: <code>{license_name}</code>\n"
-        f"• Nghe thử: <code>{preview_url}</code>\n"
-        f"• Nguồn: <code>{source_url}</code>"
+        f"• {labels['author']}: <code>{username}</code>\n"
+        f"• {labels['duration']}: <code>{html.escape(duration)}</code>\n"
+        f"• {labels['license']}: <code>{license_name}</code>\n"
+        f"• {labels['preview']}: <code>{preview_url}</code>\n"
+        f"• {labels['source']}: <code>{source_url}</code>"
     )
 
 MEDIA_PREVIEW_TTL_SECONDS = 600
@@ -30864,31 +31136,47 @@ def get_media_preview_item(kind: str, user_id, index_text: str) -> tuple[dict | 
         return None, "invalid"
     return results[idx - 1], ""
 
-def media_preview_keyboard(kind: str, items: list[dict]) -> InlineKeyboardMarkup | None:
+def media_preview_keyboard(kind: str, items: list[dict], lang: str = "vi") -> InlineKeyboardMarkup | None:
     available = [item for item in items if item.get("preview_url")][:5]
     if not available:
         return None
+    lang = music_ui_lang(lang=lang)
     is_sfx = kind == "sfx"
-    listen_label = "Nghe SFX" if is_sfx else "Nghe"
-    select_label = "Chọn SFX" if is_sfx else "Chọn"
+    if lang == "zh":
+        listen_label = "试听音效" if is_sfx else "试听"
+        select_label = "选择音效" if is_sfx else "选择"
+        find_more = "🔁 查找其他音效" if is_sfx else "🔁 查找其他音乐"
+    elif lang == "en":
+        listen_label = "Preview SFX" if is_sfx else "Preview"
+        select_label = "Select SFX" if is_sfx else "Select"
+        find_more = "🔁 Find more SFX" if is_sfx else "🔁 Find more music"
+    else:
+        listen_label = "Nghe SFX" if is_sfx else "Nghe"
+        select_label = "Chọn SFX" if is_sfx else "Chọn"
+        find_more = "🔁 Tìm SFX khác" if is_sfx else "🔁 Tìm nhạc khác"
     rows = [[
         InlineKeyboardButton(f"▶️ {listen_label} {idx}", callback_data=f"play_{kind}|{idx}"),
         InlineKeyboardButton(f"✅ {select_label} {idx}", callback_data=f"select_{kind}|{idx}"),
     ] for idx, _ in enumerate(available, start=1)]
     if is_sfx:
         rows.append([
-            InlineKeyboardButton("🔁 Tìm SFX khác", callback_data="music_quick|sfx"),
+            InlineKeyboardButton(find_more, callback_data="music_quick|sfx"),
             InlineKeyboardButton("📜 License", callback_data=f"license_{kind}|1"),
         ])
     else:
         rows.append([
-            InlineKeyboardButton("🔁 Tìm nhạc khác", callback_data="music_quick|music"),
+            InlineKeyboardButton(find_more, callback_data="music_quick|music"),
             InlineKeyboardButton("📜 License", callback_data=f"license_{kind}|1"),
         ])
     return InlineKeyboardMarkup(rows)
 
-def media_preview_caption(item: dict) -> str:
+def media_preview_caption(item: dict, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
     if str(item.get("source") or "") == "user_link":
+        if lang == "zh":
+            return "🎧 试听你发送的音频链接\n来源: 用户链接\n选择使用: /select_link_audio"
+        if lang == "en":
+            return "🎧 Previewing your audio link\nSource: user link\nSelect it with: /select_link_audio"
         return (
             "🎧 Nghe thử link audio bạn gửi\n"
             "Nguồn: link người dùng gửi\n"
@@ -30899,7 +31187,28 @@ def media_preview_caption(item: dict) -> str:
     license_lower = license_text.lower()
     warning = ""
     if any(marker in license_lower for marker in ("by-nc", "noncommercial", "nc")):
-        warning = "\n⚠️ License có dấu hiệu giới hạn phi thương mại. Hãy kiểm tra kỹ trước khi dùng quảng cáo/kiếm tiền."
+        if lang == "zh":
+            warning = "\n⚠️ 此授权可能限制商业使用。用于广告/变现内容前请仔细检查。"
+        elif lang == "en":
+            warning = "\n⚠️ This license may restrict commercial use. Check carefully before ads or monetized content."
+        else:
+            warning = "\n⚠️ License có dấu hiệu giới hạn phi thương mại. Hãy kiểm tra kỹ trước khi dùng quảng cáo/kiếm tiền."
+    if lang == "zh":
+        return (
+            f"▶️ 试听: {html.escape(str(item.get('title') or 'Untitled')[:120])}\n"
+            f"来源: {html.escape(provider[:40])}\n"
+            f"授权: {html.escape(license_text[:180] or '-')}\n"
+            "选择使用: /select_music <编号> 或 /select_sfx <编号>"
+            f"{html.escape(warning)}"
+        )
+    if lang == "en":
+        return (
+            f"▶️ Preview: {html.escape(str(item.get('title') or 'Untitled')[:120])}\n"
+            f"Source: {html.escape(provider[:40])}\n"
+            f"License: {html.escape(license_text[:180] or '-')}\n"
+            "Select with: /select_music <number> or /select_sfx <number>"
+            f"{html.escape(warning)}"
+        )
     return (
         f"▶️ Nghe thử: {html.escape(str(item.get('title') or 'Untitled')[:120])}\n"
         f"Nguồn: {html.escape(provider[:40])}\n"
@@ -30908,9 +31217,14 @@ def media_preview_caption(item: dict) -> str:
         f"{html.escape(warning)}"
     )
 
-def media_preview_failure_text(item: dict, reason: str = "") -> str:
+def media_preview_failure_text(item: dict, reason: str = "", lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
     if str(item.get("source") or "") == "user_link":
         preview_url = str(item.get("preview_url") or item.get("source_url") or "").strip()
+        if lang == "zh":
+            return f"⚠️ 暂时无法在 Telegram 直接发送试听文件。\n你可以打开来源链接或尝试其他链接。\nPreview: {preview_url}\n{music_no_xu_text(lang)}"
+        if lang == "en":
+            return f"⚠️ The bot cannot send this preview file directly right now.\nYou can open the source link or try another link.\nPreview: {preview_url}\n{music_no_xu_text(lang)}"
         return (
             "⚠️ Không gửi được file nghe thử trực tiếp lúc này.\n"
             "Bạn có thể mở link nguồn hoặc thử link khác.\n"
@@ -30919,25 +31233,36 @@ def media_preview_failure_text(item: dict, reason: str = "") -> str:
         )
     source_url = str(item.get("source_url") or "").strip()
     preview_url = str(item.get("preview_url") or "").strip()
-    lines = [
-        "⚠️ Không gửi được file nghe thử trực tiếp lúc này.",
-        "Bạn có thể mở link nguồn hoặc thử kết quả khác.",
-    ]
+    if lang == "zh":
+        lines = ["⚠️ 暂时无法在 Telegram 直接发送试听文件。", "你可以打开来源链接或尝试其他结果。"]
+        source_label = "来源"
+    elif lang == "en":
+        lines = ["⚠️ The bot cannot send this preview file directly right now.", "You can open the source link or try another result."]
+        source_label = "Source"
+    else:
+        lines = ["⚠️ Không gửi được file nghe thử trực tiếp lúc này.", "Bạn có thể mở link nguồn hoặc thử kết quả khác."]
+        source_label = "Nguồn"
     if source_url:
-        lines.append(f"Nguồn: {source_url}")
+        lines.append(f"{source_label}: {source_url}")
     if preview_url:
         lines.append(f"Preview: {preview_url}")
-    lines.append("Bot chưa trừ Xu.")
+    lines.append(music_no_xu_text(lang))
     return "\n".join(lines)
 
-async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, item: dict):
+async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, item: dict, lang: str = "vi"):
     preview_url = str(item.get("preview_url") or "").strip()
     if not is_valid_http_url(preview_url):
+        lang = music_ui_lang(lang=lang)
+        text = (
+            "⚠️ Preview URL is invalid. Please search again with /sfx_library or /music_library."
+            if lang == "en"
+            else ("⚠️ Preview URL 无效。请使用 /sfx_library 或 /music_library 重新查找。" if lang == "zh" else "⚠️ Preview URL không hợp lệ. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+        )
         return await context.bot.send_message(
             chat_id=chat_id,
-            text="⚠️ Preview URL không hợp lệ. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.",
+            text=text,
         )
-    caption = media_preview_caption(item)
+    caption = media_preview_caption(item, lang)
     tmp_path = ""
     try:
         headers = {
@@ -30984,7 +31309,7 @@ async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, i
         record_api_debug(str(item.get("provider") or "media_preview").lower(), "send_preview_download", "FAIL", 0, type(e).__name__)
         return await context.bot.send_message(
             chat_id=chat_id,
-            text=media_preview_failure_text(item, str(e) or type(e).__name__),
+            text=media_preview_failure_text(item, str(e) or type(e).__name__, lang),
             disable_web_page_preview=True,
         )
     finally:
@@ -30996,101 +31321,154 @@ async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, i
 
 async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
     user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     item, error = get_media_preview_item(kind, user_id, index_text)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
     if error == "expired":
+        text = "⚠️ Preview results expired. Please search again with /sfx_library or /music_library." if lang == "en" else ("⚠️ 试听结果已过期。请使用 /sfx_library 或 /music_library 重新查找。" if lang == "zh" else "⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
         return await context.bot.send_message(
             chat_id=chat_id,
-            text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.",
+            text=text,
         )
     if error or not item:
+        text = "⚠️ Result number not found. Please choose a number from your latest search list." if lang == "en" else ("⚠️ 未找到这个编号。请从刚才的搜索结果中选择编号。" if lang == "zh" else "⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
         return await context.bot.send_message(
             chat_id=chat_id,
-            text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.",
+            text=text,
         )
-    return await send_audio_item_to_chat(context, chat_id, item)
+    return await send_audio_item_to_chat(context, chat_id, item, lang)
 
 async def send_media_preview_source(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
     user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     item, error = get_media_preview_item(kind, user_id, index_text)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
     if error == "expired":
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+        text = "⚠️ Preview results expired. Please search again with /sfx_library or /music_library." if lang == "en" else ("⚠️ 试听结果已过期。请使用 /sfx_library 或 /music_library 重新查找。" if lang == "zh" else "⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     if error or not item:
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        text = "⚠️ Result number not found. Please choose a number from your latest search list." if lang == "en" else ("⚠️ 未找到这个编号。请从刚才的搜索结果中选择编号。" if lang == "zh" else "⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     source_url = str(item.get("source_url") or "").strip()
     if not source_url:
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả này chưa có link nguồn.")
+        text = "⚠️ This result has no source link." if lang == "en" else ("⚠️ 这个结果没有来源链接。" if lang == "zh" else "⚠️ Kết quả này chưa có link nguồn.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
+    label = "来源" if lang == "zh" else ("Source" if lang == "en" else "Nguồn")
     await context.bot.send_message(
         chat_id=chat_id,
-        text=f"🔗 Nguồn: {source_url}\n\nBot chưa trừ Xu.",
+        text=f"🔗 {label}: {source_url}\n\n{music_no_xu_text(lang)}",
         disable_web_page_preview=True,
     )
 
 async def send_media_preview_license(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
     user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     item, error = get_media_preview_item(kind, user_id, index_text)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
     if error == "expired":
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+        text = "⚠️ Preview results expired. Please search again with /sfx_library or /music_library." if lang == "en" else ("⚠️ 试听结果已过期。请使用 /sfx_library 或 /music_library 重新查找。" if lang == "zh" else "⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     if error or not item:
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        text = "⚠️ Result number not found. Please choose a number from your latest search list." if lang == "en" else ("⚠️ 未找到这个编号。请从刚才的搜索结果中选择编号。" if lang == "zh" else "⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     await context.bot.send_message(
         chat_id=chat_id,
         text=(
             f"📜 License: {item.get('license') or '-'}\n"
-            f"{selected_media_license_warning(item)}\n\n"
-            "Bot chưa trừ Xu."
+            f"{selected_media_license_warning(item, lang)}\n\n"
+            f"{music_no_xu_text(lang)}"
         ),
     )
 
-def selected_media_license_warning(item: dict) -> str:
+def selected_media_license_warning(item: dict, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
     license_text = str(item.get("license") or "").lower()
     if any(marker in license_text for marker in ("by-nc", "noncommercial", "nc")):
+        if lang == "zh":
+            return "⚠️ 这个授权可能限制商业使用。没有合适授权时，不建议用于广告/变现内容。"
+        if lang == "en":
+            return "⚠️ This license may restrict commercial use. Do not use it for ads or monetized content without suitable rights."
         return "⚠️ Bản này có dấu hiệu giới hạn phi thương mại. Không nên dùng cho quảng cáo/kiếm tiền nếu chưa có quyền phù hợp."
     if "cc0" in license_text or "public domain" in license_text:
+        if lang == "zh":
+            return "✅ 来源显示为 CC0/public domain，但仍建议使用前检查来源页面。"
+        if lang == "en":
+            return "✅ Source says CC0/public domain, but you should still check the source page before use."
         return "✅ License CC0/public domain theo nguồn, nhưng vẫn nên kiểm tra trang nguồn trước khi dùng."
+    if lang == "zh":
+        return "📜 公共音乐/素材有各自授权。用于广告/变现内容前，请检查商业使用权、署名和平台规则。"
+    if lang == "en":
+        return "📜 Public music/media has source-specific licenses. Check commercial rights, attribution and platform rules before ads or monetized content."
     return "📜 Nhạc/kho public có license riêng. Hãy kiểm tra quyền sử dụng thương mại, attribution và điều khoản nền tảng trước khi đăng quảng cáo/kiếm tiền."
 
 async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
     user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     item, error = get_media_preview_item(kind, user_id, index_text)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
     if error == "expired":
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+        text = "⚠️ Preview results expired. Please search again with /sfx_library or /music_library." if lang == "en" else ("⚠️ 试听结果已过期。请使用 /sfx_library 或 /music_library 重新查找。" if lang == "zh" else "⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     if error or not item:
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        text = "⚠️ Result number not found. Please choose a number from your latest search list." if lang == "en" else ("⚠️ 未找到这个编号。请从刚才的搜索结果中选择编号。" if lang == "zh" else "⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     selected = dict(item)
     selected["created_at"] = time.time()
     if kind == "sfx":
         SELECTED_SFX[int(user_id)] = selected
-        noun = "SFX"
+        noun = "SFX" if lang != "zh" else "音效"
         cmd_label = "/select_sfx"
     else:
         SELECTED_MUSIC[int(user_id)] = selected
-        noun = "nhạc"
+        noun = "music" if lang == "en" else ("音乐" if lang == "zh" else "nhạc")
         cmd_label = "/select_music"
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=(
+    if lang == "zh":
+        text = (
+            f"✅ 已选择{noun}: {selected.get('title') or 'Untitled'}\n\n"
+            "你可以继续:\n"
+            "• 发送视频，然后使用 /add_music\n"
+            "• 发送图片，然后使用 /image_to_music_video\n"
+            "• 使用 /music_library 或 /sfx_library 选择其他结果\n\n"
+            f"License:\n{selected.get('license') or '-'}\n\n"
+            f"{selected_media_license_warning(selected, lang)}\n"
+            f"重新选择命令: {cmd_label} <编号>\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    elif lang == "en":
+        text = (
+            f"✅ Selected {noun}: {selected.get('title') or 'Untitled'}\n\n"
+            "You can continue with:\n"
+            "• Send a video, then use /add_music\n"
+            "• Send an image, then use /image_to_music_video\n"
+            "• Use /music_library or /sfx_library to choose another result\n\n"
+            f"License:\n{selected.get('license') or '-'}\n\n"
+            f"{selected_media_license_warning(selected, lang)}\n"
+            f"Select again: {cmd_label} <number>\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    else:
+        text = (
             f"✅ Đã chọn {noun}: {selected.get('title') or 'Untitled'}\n\n"
             "Bạn có thể dùng tiếp:\n"
             "• Gửi video rồi dùng /add_music\n"
             "• Gửi ảnh rồi dùng /image_to_music_video\n"
             "• Dùng /music_library hoặc /sfx_library để chọn bài khác\n\n"
             f"License:\n{selected.get('license') or '-'}\n\n"
-            f"{selected_media_license_warning(selected)}\n"
+            f"{selected_media_license_warning(selected, lang)}\n"
             f"Lệnh chọn lại: {cmd_label} <số>\n\n"
-            "Bot chưa trừ Xu."
-        ),
+            f"{music_no_xu_text(lang)}"
+        )
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
         disable_web_page_preview=True,
     )
 
@@ -31100,8 +31478,9 @@ async def handle_media_preview_callback(update: Update, context: ContextTypes.DE
         return
     action, index_text = (query.data or "").split("|", 1)
     kind = "sfx" if "_sfx" in action or action.endswith("_sfx") else "music"
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
     if action.startswith("play_"):
-        await query.answer("Đang gửi nghe thử...")
+        await query.answer("Sending preview..." if lang == "en" else ("正在发送试听..." if lang == "zh" else "Đang gửi nghe thử..."))
         return await send_media_preview_audio(update, context, kind, index_text)
     await query.answer()
     if action.startswith("select_"):
@@ -31140,45 +31519,77 @@ def audio_link_preview_item(url: str) -> dict:
 
 async def cmd_play_link_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     link_state = get_active_audio_link(user_id)
     if not link_state:
+        text = "⚠️ No recent audio link. Please send an MP3/WAV/M4A link or search with /music_library." if lang == "en" else ("⚠️ 最近没有音频链接。请发送 MP3/WAV/M4A 链接，或使用 /music_library 查找。" if lang == "zh" else "⚠️ Chưa có link audio gần đây. Vui lòng gửi link MP3/WAV/M4A hoặc tìm bằng /music_library.")
         return await update.message.reply_text(
-            "⚠️ Chưa có link audio gần đây. Vui lòng gửi link MP3/WAV/M4A hoặc tìm bằng /music_library."
+            text
         )
     link_url = str(link_state.get("url") or "").strip()
     if not is_audio_link_url(link_url):
+        text = (
+            f"⚠️ The bot cannot send this preview file directly right now.\nYou can open the source link or try another link.\nPreview: {link_url}\n{music_no_xu_text(lang)}"
+            if lang == "en"
+            else (f"⚠️ 暂时无法在 Telegram 直接发送试听文件。\n你可以打开来源链接或尝试其他链接。\nPreview: {link_url}\n{music_no_xu_text(lang)}" if lang == "zh" else f"⚠️ Không gửi được file nghe thử trực tiếp lúc này.\nBạn có thể mở link nguồn hoặc thử link khác.\nPreview: {link_url}\nBot chưa trừ Xu.")
+        )
         return await update.message.reply_text(
-            "⚠️ Không gửi được file nghe thử trực tiếp lúc này.\n"
-            "Bạn có thể mở link nguồn hoặc thử link khác.\n"
-            f"Preview: {link_url}\n"
-            "Bot chưa trừ Xu.",
+            text,
             disable_web_page_preview=True,
         )
-    return await send_audio_item_to_chat(context, update.effective_chat.id, audio_link_preview_item(link_url))
+    return await send_audio_item_to_chat(context, update.effective_chat.id, audio_link_preview_item(link_url), lang)
 
 async def cmd_select_link_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     link_state = get_active_audio_link(user_id)
     if not link_state:
-        return await update.message.reply_text("⚠️ Chưa có link audio gần đây.")
+        text = "⚠️ No recent audio link." if lang == "en" else ("⚠️ 最近没有音频链接。" if lang == "zh" else "⚠️ Chưa có link audio gần đây.")
+        return await update.message.reply_text(text)
     selected = audio_link_preview_item(link_state.get("url") or "")
     selected["created_at"] = time.time()
     SELECTED_MUSIC[int(user_id)] = selected
+    if lang == "zh":
+        text = (
+            "✅ 已选择你发送的音频链接。\n\n"
+            "你可以:\n"
+            "• 发送视频，然后使用 /add_music\n"
+            "• 发送图片，然后使用 /image_to_music_video\n"
+            "• 使用 /music_library 选择其他音乐\n\n"
+            "📜 你需要确保自己有权使用此音乐后再发布商业内容。\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    elif lang == "en":
+        text = (
+            "✅ Selected the audio link you sent.\n\n"
+            "You can:\n"
+            "• Send a video, then use /add_music\n"
+            "• Send an image, then use /image_to_music_video\n"
+            "• Use /music_library to choose another track\n\n"
+            "📜 You must make sure you have the right to use this music before commercial posting.\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    else:
+        text = (
+            "✅ Đã chọn nhạc từ link bạn gửi.\n\n"
+            "Bạn có thể:\n"
+            "• Gửi video rồi dùng /add_music\n"
+            "• Gửi ảnh rồi dùng /image_to_music_video\n"
+            "• Dùng /music_library để chọn nhạc khác\n\n"
+            "📜 Bạn cần đảm bảo có quyền sử dụng nhạc này trước khi đăng thương mại.\n\n"
+            "Bot chưa trừ Xu."
+        )
     return await update.message.reply_text(
-        "✅ Đã chọn nhạc từ link bạn gửi.\n\n"
-        "Bạn có thể:\n"
-        "• Gửi video rồi dùng /add_music\n"
-        "• Gửi ảnh rồi dùng /image_to_music_video\n"
-        "• Dùng /music_library để chọn nhạc khác\n\n"
-        "📜 Bạn cần đảm bảo có quyền sử dụng nhạc này trước khi đăng thương mại.\n\n"
-        "Bot chưa trừ Xu."
+        text
     )
 
 async def cmd_select_uploaded_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     audio_state = get_recent_media_state(LAST_USER_AUDIO, user_id)
     if not audio_state:
-        return await update.message.reply_text("⚠️ Chưa có file audio gần đây.")
+        text = "⚠️ No recent audio file." if lang == "en" else ("⚠️ 最近没有音频文件。" if lang == "zh" else "⚠️ Chưa có file audio gần đây.")
+        return await update.message.reply_text(text)
     selected = {
         "provider": "Uploaded audio",
         "title": audio_state.get("file_name") or "Nhạc người dùng gửi",
@@ -31197,14 +31608,38 @@ async def cmd_select_uploaded_audio(update: Update, context: ContextTypes.DEFAUL
         "created_at": time.time(),
     }
     SELECTED_MUSIC[int(user_id)] = selected
+    if lang == "zh":
+        text = (
+            "✅ 已选择你发送的音频文件作为自定义音乐。\n\n"
+            "你可以:\n"
+            "• 发送视频，然后使用 /add_music\n"
+            "• 发送图片，然后使用 /image_to_music_video\n"
+            "• 使用 /music_library 选择其他音乐\n\n"
+            "📜 你需要确保自己有权使用此音频文件后再发布商业内容。\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    elif lang == "en":
+        text = (
+            "✅ Selected your uploaded audio file as custom music.\n\n"
+            "You can:\n"
+            "• Send a video, then use /add_music\n"
+            "• Send an image, then use /image_to_music_video\n"
+            "• Use /music_library to choose another track\n\n"
+            "📜 You must make sure you have the right to use this audio file before commercial posting.\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    else:
+        text = (
+            "✅ Đã chọn file âm thanh bạn gửi làm nhạc riêng.\n\n"
+            "Bạn có thể:\n"
+            "• Gửi video rồi dùng /add_music\n"
+            "• Gửi ảnh rồi dùng /image_to_music_video\n"
+            "• Dùng /music_library để chọn nhạc khác\n\n"
+            "📜 Bạn cần đảm bảo có quyền sử dụng file âm thanh này trước khi đăng thương mại.\n\n"
+            "Bot chưa trừ Xu."
+        )
     return await update.message.reply_text(
-        "✅ Đã chọn file âm thanh bạn gửi làm nhạc riêng.\n\n"
-        "Bạn có thể:\n"
-        "• Gửi video rồi dùng /add_music\n"
-        "• Gửi ảnh rồi dùng /image_to_music_video\n"
-        "• Dùng /music_library để chọn nhạc khác\n\n"
-        "📜 Bạn cần đảm bảo có quyền sử dụng file âm thanh này trước khi đăng thương mại.\n\n"
-        "Bot chưa trừ Xu."
+        text
     )
 
 MEDIA_LINK_DOMAINS = (
@@ -31254,15 +31689,41 @@ def save_audio_link(user_id, url: str):
     }
 
 async def reply_audio_link_received(update: Update, url: str):
-    save_audio_link(update.effective_user.id if update.effective_user else 0, url)
+    user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
+    save_audio_link(user_id, url)
+    if lang == "zh":
+        text = (
+            "🎧 已收到音频/音乐链接。\n\n"
+            "你可以:\n"
+            "• /play_link_audio — 如果可下载，在 Telegram 中试听\n"
+            "• /select_link_audio — 选择这个链接作为自定义音乐\n"
+            "• 发送视频，然后在工具开放时使用 /add_music\n"
+            "• /music_library <关键词> — 查找其他音乐\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    elif lang == "en":
+        text = (
+            "🎧 Received your audio/music link.\n\n"
+            "You can:\n"
+            "• /play_link_audio — preview this link in Telegram if downloadable\n"
+            "• /select_link_audio — select this link as custom music\n"
+            "• Send a video, then use /add_music when the tool is enabled\n"
+            "• /music_library <keyword> — find another track\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    else:
+        text = (
+            "🎧 Đã nhận link audio/nhạc.\n\n"
+            "Bạn có thể:\n"
+            "• /play_link_audio — nghe thử link này trong Telegram nếu tải được\n"
+            "• /select_link_audio — chọn link này làm nhạc riêng\n"
+            "• Gửi video rồi dùng /add_music khi công cụ được mở\n"
+            "• /music_library <từ khóa> để tìm nhạc khác\n\n"
+            "Bot chưa trừ Xu."
+        )
     return await update.message.reply_text(
-        "🎧 Đã nhận link audio/nhạc.\n\n"
-        "Bạn có thể:\n"
-        "• /play_link_audio — nghe thử link này trong Telegram nếu tải được\n"
-        "• /select_link_audio — chọn link này làm nhạc riêng\n"
-        "• Gửi video rồi dùng /add_music khi công cụ được mở\n"
-        "• /music_library <từ khóa> để tìm nhạc khác\n\n"
-        "Bot chưa trừ Xu.",
+        text,
         disable_web_page_preview=True,
     )
 
@@ -31296,35 +31757,93 @@ def is_probable_media_tags_text(text: str) -> bool:
     return any(marker in lowered for marker in media_markers) or len(parts) >= 4
 
 async def reply_media_preview_url_hint(update: Update):
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
+    if lang == "zh":
+        text = (
+            "🎧 这是来自音乐/SFX/媒体库的链接。\n\n"
+            "你可以使用:\n"
+            "• /play_music 1 或 /play_sfx 1 — 试听刚才的结果\n"
+            "• /select_music 1 或 /select_sfx 1 — 选择结果\n"
+            "• /music_library <关键词> — 查找音乐\n"
+            "• /sfx_library <关键词> — 查找音效\n"
+            "• /media_library <关键词> — 查找媒体\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    elif lang == "en":
+        text = (
+            "🎧 This is a music/SFX/media library link.\n\n"
+            "You can use:\n"
+            "• /play_music 1 or /play_sfx 1 — preview the latest result\n"
+            "• /select_music 1 or /select_sfx 1 — select a result\n"
+            "• /music_library <keyword> — find music\n"
+            "• /sfx_library <keyword> — find sound effects\n"
+            "• /media_library <keyword> — find media\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    else:
+        text = (
+            "🎧 Đây là link media/kho nhạc/SFX.\n\n"
+            "Bạn có thể dùng:\n"
+            "• /play_music 1 hoặc /play_sfx 1 để nghe kết quả vừa tìm\n"
+            "• /select_music 1 hoặc /select_sfx 1 để chọn\n"
+            "• /music_library <từ khóa> để tìm nhạc\n"
+            "• /sfx_library <từ khóa> để tìm hiệu ứng\n"
+            "• /media_library <từ khóa> để tìm media\n\n"
+            "Bot chưa trừ Xu."
+        )
     return await update.message.reply_text(
-        "🎧 Đây là link media/kho nhạc/SFX.\n\n"
-        "Bạn có thể dùng:\n"
-        "• /play_music 1 hoặc /play_sfx 1 để nghe kết quả vừa tìm\n"
-        "• /select_music 1 hoặc /select_sfx 1 để chọn\n"
-        "• /music_library <từ khóa> để tìm nhạc\n"
-        "• /sfx_library <từ khóa> để tìm hiệu ứng\n"
-        "• /media_library <từ khóa> để tìm media\n\n"
-        "Bot chưa trừ Xu."
+        text
     )
 
 async def reply_media_tags_hint(update: Update):
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
+    if lang == "zh":
+        text = (
+            "🖼 这看起来像媒体关键词/tags。\n\n"
+            "你可以这样查找媒体:\n"
+            "• /media_library kitchen blender\n"
+            "• /media_library modern kitchen\n"
+            "或者选择刚才的结果:\n"
+            "• /select_media 1\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    elif lang == "en":
+        text = (
+            "🖼 This looks like media keywords/tags.\n\n"
+            "You can search media with:\n"
+            "• /media_library kitchen blender\n"
+            "• /media_library modern kitchen\n"
+            "Or select a recent result with:\n"
+            "• /select_media 1\n\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    else:
+        text = (
+            "🖼 Đây giống từ khóa/tags media.\n\n"
+            "Bạn có thể tìm media bằng:\n"
+            "• /media_library kitchen blender\n"
+            "• /media_library modern kitchen\n"
+            "Hoặc chọn kết quả vừa tìm bằng:\n"
+            "• /select_media 1\n\n"
+            "Bot chưa trừ Xu."
+        )
     return await update.message.reply_text(
-        "🖼 Đây giống từ khóa/tags media.\n\n"
-        "Bạn có thể tìm media bằng:\n"
-        "• /media_library kitchen blender\n"
-        "• /media_library modern kitchen\n"
-        "Hoặc chọn kết quả vừa tìm bằng:\n"
-        "• /select_media 1\n\n"
-        "Bot chưa trừ Xu."
+        text
     )
 
-def format_pixabay_image(item: dict, idx: int) -> str:
+def format_pixabay_image(item: dict, idx: int, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
     tags = html.escape(str(item.get("tags") or "-")[:120])
     page_url = html.escape(str(item.get("pageURL") or "-")[:180])
     preview = html.escape(str(item.get("previewURL") or "-")[:180])
-    return f"{idx}. <b>Image</b> — tags: <code>{tags}</code>\n   • Source: <code>{page_url}</code>\n   • Preview: <code>{preview}</code>"
+    type_label = "图片" if lang == "zh" else ("Image" if lang == "en" else "Ảnh")
+    tags_label = "标签" if lang == "zh" else "tags"
+    source_label = "来源" if lang == "zh" else ("Source" if lang == "en" else "Nguồn")
+    preview_label = "预览" if lang == "zh" else ("Preview" if lang == "en" else "Xem trước")
+    return f"{idx}. <b>{type_label}</b> — {tags_label}: <code>{tags}</code>\n   • {source_label}: <code>{page_url}</code>\n   • {preview_label}: <code>{preview}</code>"
 
-def format_pixabay_video(item: dict, idx: int) -> str:
+def format_pixabay_video(item: dict, idx: int, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
     tags = html.escape(str(item.get("tags") or "-")[:120])
     page_url = html.escape(str(item.get("pageURL") or "-")[:180])
     videos = item.get("videos") or {}
@@ -31334,7 +31853,11 @@ def format_pixabay_video(item: dict, idx: int) -> str:
             if isinstance(videos.get(key), dict) and videos[key].get("url"):
                 preview = videos[key]["url"]
                 break
-    return f"{idx}. <b>Video</b> — tags: <code>{tags}</code>\n   • Source: <code>{page_url}</code>\n   • Preview: <code>{html.escape(str(preview or '-')[:180])}</code>"
+    type_label = "视频" if lang == "zh" else ("Video" if lang == "en" else "Video")
+    tags_label = "标签" if lang == "zh" else "tags"
+    source_label = "来源" if lang == "zh" else ("Source" if lang == "en" else "Nguồn")
+    preview_label = "预览" if lang == "zh" else ("Preview" if lang == "en" else "Xem trước")
+    return f"{idx}. <b>{type_label}</b> — {tags_label}: <code>{tags}</code>\n   • {source_label}: <code>{page_url}</code>\n   • {preview_label}: <code>{html.escape(str(preview or '-')[:180])}</code>"
 
 def pixabay_image_preview_item(item: dict) -> dict:
     return {
@@ -31389,36 +31912,51 @@ def get_pixabay_media_item(user_id, index_text: str) -> tuple[dict | None, str]:
         return None, "invalid"
     return results[idx - 1], ""
 
-def pixabay_media_keyboard(items: list[dict]) -> InlineKeyboardMarkup | None:
+def pixabay_media_keyboard(items: list[dict], lang: str = "vi") -> InlineKeyboardMarkup | None:
     available = [item for item in items if item.get("preview_url") or item.get("source_url")][:5]
     if not available:
         return None
+    lang = music_ui_lang(lang=lang)
     rows = []
     for idx, item in enumerate(available, start=1):
-        view = "🎬 Xem video" if item.get("type") == "video" else "🖼 Xem"
+        if lang == "zh":
+            view = "🎬 查看视频" if item.get("type") == "video" else "🖼 查看"
+            select = "✅ 选择"
+        elif lang == "en":
+            view = "🎬 View video" if item.get("type") == "video" else "🖼 View"
+            select = "✅ Select"
+        else:
+            view = "🎬 Xem video" if item.get("type") == "video" else "🖼 Xem"
+            select = "✅ Chọn"
         rows.append([
             InlineKeyboardButton(f"{view} {idx}", callback_data=f"play_media|{idx}"),
-            InlineKeyboardButton(f"✅ Chọn {idx}", callback_data=f"select_media|{idx}"),
+            InlineKeyboardButton(f"{select} {idx}", callback_data=f"select_media|{idx}"),
         ])
-    rows.append([InlineKeyboardButton("🔁 Tìm media khác", callback_data="music_quick|media")])
+    find_more = "🔁 查找其他素材" if lang == "zh" else ("🔁 Find more media" if lang == "en" else "🔁 Tìm media khác")
+    rows.append([InlineKeyboardButton(find_more, callback_data="music_quick|media")])
     return InlineKeyboardMarkup(rows)
 
 async def send_pixabay_media_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, index_text: str):
     user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
     item, error = get_pixabay_media_item(user_id, index_text)
     if error == "expired":
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả media đã hết hạn. Vui lòng tìm lại bằng /media_library.")
+        text = "⚠️ Media results expired. Please search again with /media_library." if lang == "en" else ("⚠️ 媒体结果已过期。请使用 /media_library 重新查找。" if lang == "zh" else "⚠️ Kết quả media đã hết hạn. Vui lòng tìm lại bằng /media_library.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     if error or not item:
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        text = "⚠️ Result number not found. Please choose a number from your latest search list." if lang == "en" else ("⚠️ 未找到这个编号。请从刚才的搜索结果中选择编号。" if lang == "zh" else "⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     preview_url = str(item.get("preview_url") or "").strip()
     source_url = str(item.get("source_url") or "").strip()
+    note = "发布商业内容前请检查来源条款。" if lang == "zh" else ("Check source terms before commercial use." if lang == "en" else "Lưu ý: kiểm tra điều khoản nguồn trước khi dùng thương mại.")
+    media_label = "媒体" if lang == "zh" else "Media"
     caption = (
-        f"🖼 Media: {html.escape(str(item.get('tags') or item.get('title') or '-')[:160])}\n"
+        f"🖼 {media_label}: {html.escape(str(item.get('tags') or item.get('title') or '-')[:160])}\n"
         f"License: {html.escape(str(item.get('license') or 'Pixabay Content License')[:120])}\n"
-        "Lưu ý: kiểm tra điều khoản nguồn trước khi dùng thương mại."
+        f"{note}"
     )
     try:
         if preview_url and item.get("type") == "video":
@@ -31428,35 +31966,63 @@ async def send_pixabay_media_preview(update: Update, context: ContextTypes.DEFAU
     except Exception as e:
         record_api_debug("pixabay", "send_media_preview", "FAIL", 0, type(e).__name__)
     fallback = source_url or preview_url
+    text = (
+        f"⚠️ Cannot send this preview directly. You can open the source link:\n{fallback}\n\n{music_no_xu_text(lang)}"
+        if lang == "en"
+        else (f"⚠️ 暂时无法直接发送预览。你可以打开来源链接:\n{fallback}\n\n{music_no_xu_text(lang)}" if lang == "zh" else f"⚠️ Không gửi được preview trực tiếp. Bạn có thể mở link nguồn:\n{fallback}\n\nBot chưa trừ Xu.")
+    )
     await context.bot.send_message(
         chat_id=chat_id,
-        text=f"⚠️ Không gửi được preview trực tiếp. Bạn có thể mở link nguồn:\n{fallback}\n\nBot chưa trừ Xu.",
+        text=text,
         disable_web_page_preview=True,
     )
 
 async def select_pixabay_media(update: Update, context: ContextTypes.DEFAULT_TYPE, index_text: str):
     user_id = update.effective_user.id if update.effective_user else 0
+    lang = music_ui_lang(user_id)
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
     item, error = get_pixabay_media_item(user_id, index_text)
     if error == "expired":
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả media đã hết hạn. Vui lòng tìm lại bằng /media_library.")
+        text = "⚠️ Media results expired. Please search again with /media_library." if lang == "en" else ("⚠️ 媒体结果已过期。请使用 /media_library 重新查找。" if lang == "zh" else "⚠️ Kết quả media đã hết hạn. Vui lòng tìm lại bằng /media_library.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     if error or not item:
-        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        text = "⚠️ Result number not found. Please choose a number from your latest search list." if lang == "en" else ("⚠️ 未找到这个编号。请从刚才的搜索结果中选择编号。" if lang == "zh" else "⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+        return await context.bot.send_message(chat_id=chat_id, text=text)
     selected = dict(item)
     selected["created_at"] = time.time()
     SELECTED_MEDIA[int(user_id)] = selected
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=(
+    if lang == "zh":
+        text = (
+            f"✅ 已选择媒体: {selected.get('tags') or selected.get('title') or '-'}\n\n"
+            f"• 类型: {selected.get('type') or '-'}\n"
+            f"• 来源: {selected.get('source_url') or '-'}\n"
+            f"• License: {selected.get('license') or 'Pixabay Content License'}\n\n"
+            "相关模块开放后，你可以在内容工作流中继续使用这个素材。\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    elif lang == "en":
+        text = (
+            f"✅ Selected media: {selected.get('tags') or selected.get('title') or '-'}\n\n"
+            f"• Type: {selected.get('type') or '-'}\n"
+            f"• Source: {selected.get('source_url') or '-'}\n"
+            f"• License: {selected.get('license') or 'Pixabay Content License'}\n\n"
+            "You can use this media in content workflows when the related module is enabled.\n"
+            f"{music_no_xu_text(lang)}"
+        )
+    else:
+        text = (
             f"✅ Đã chọn media: {selected.get('tags') or selected.get('title') or '-'}\n\n"
             f"• Loại: {selected.get('type') or '-'}\n"
             f"• Nguồn: {selected.get('source_url') or '-'}\n"
             f"• License: {selected.get('license') or 'Pixabay Content License'}\n\n"
             "Bạn có thể tiếp tục dùng media này trong workflow nội dung khi module liên quan được mở.\n"
             "Bot chưa trừ Xu."
-        ),
+        )
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
         disable_web_page_preview=True,
     )
 
@@ -31465,8 +32031,9 @@ async def handle_pixabay_media_callback(update: Update, context: ContextTypes.DE
     if not query:
         return
     action, index_text = (query.data or "").split("|", 1)
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
     if action == "play_media":
-        await query.answer("Đang mở media...")
+        await query.answer("Opening media..." if lang == "en" else ("正在打开媒体..." if lang == "zh" else "Đang mở media..."))
         return await send_pixabay_media_preview(update, context, index_text)
     await query.answer()
     return await select_pixabay_media(update, context, index_text)
@@ -31480,107 +32047,91 @@ async def cmd_select_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await select_pixabay_media(update, context, index_text)
 
 async def cmd_music_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lines = [
-        "🎵 <b>NHẠC AI / KHO NHẠC TOAN AAS</b>",
-        "",
-        "Dùng để tìm nhạc nền, hiệu ứng âm thanh, tạo prompt nhạc và chuẩn bị âm thanh cho video.",
-        "",
-        "<code>/music</code> và <code>/music_tools</code> đều mở trung tâm này.",
-        "",
-        "<b>Bạn có thể làm gì?</b>",
-        "",
-        "🎼 <b>1. Tạo prompt nhạc nền</b>",
-        "<code>/music_prompt &lt;mô tả video&gt;</code>",
-        "Ví dụ: <code>/music_prompt video review máy xay sinh tố mini vui tươi 30 giây</code>",
-        "",
-        "🎧 <b>2. Tìm nhạc nền</b>",
-        "<code>/music_library &lt;từ khóa&gt;</code>",
-        "Ví dụ: <code>/music_library upbeat product review</code>",
-        "",
-        "🔊 <b>3. Tìm hiệu ứng âm thanh</b>",
-        "<code>/sfx_library &lt;từ khóa&gt;</code>",
-        "Ví dụ: <code>/sfx_library whoosh transition</code>",
-        "",
-        "🖼 <b>4. Tìm ảnh/video public</b>",
-        "<code>/media_library &lt;từ khóa&gt;</code>",
-        "Ví dụ: <code>/media_library modern kitchen blender</code>",
-        "",
-        "▶️ <b>5. Nghe thử</b>",
-        "Sau khi tìm nhạc/SFX, bấm nút nghe thử hoặc dùng:",
-        "<code>/play_music 1</code>",
-        "<code>/play_sfx 1</code>",
-        "",
-        "✅ <b>6. Chọn nhạc/SFX</b>",
-        "<code>/select_music 1</code>",
-        "<code>/select_sfx 1</code>",
-        "",
-        "🎬 <b>7. Ghép nhạc/voice vào video</b>",
-        "<code>/add_music</code> — admin test",
-        "<code>/add_voice_to_video</code> — admin test",
-        "<code>/image_to_music_video</code> — admin test",
-        "",
-        "📜 <b>8. Chính sách bản quyền</b>",
-        "<code>/music_policy</code>",
-        "",
-        "Lưu ý:",
-        "Nhạc/kho public có license riêng từng nguồn. Kiểm tra quyền thương mại trước khi đăng quảng cáo/kiếm tiền.",
-    ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=music_tools_keyboard(), disable_web_page_preview=True)
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
+    await update.message.reply_text(menu_text_main_music_i18n(lang), parse_mode="HTML", reply_markup=music_tools_keyboard(lang), disable_web_page_preview=True)
 
 async def cmd_music_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await reply_html_lines(update, music_policy_lines())
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
+    await reply_html_lines(update, music_policy_lines_i18n(lang))
 
 async def cmd_music_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
     desc = " ".join(context.args or []).strip()
     if not desc:
-        return await update.message.reply_text(music_prompt_guide_text(), parse_mode="HTML")
+        return await update.message.reply_text(music_prompt_guide_text(lang), parse_mode="HTML")
     blocked = music_copyright_block_reason(desc)
     if blocked:
+        if lang == "zh":
+            text = (
+                "⛔ 这个音乐提示词有版权/声音克隆风险。\n\n"
+                f"• 风险标记: <code>{html.escape(blocked)}</code>\n"
+                "请描述 mood、tempo、乐器、视频场景和情绪，不要提到具体艺人/歌曲。\n"
+                f"{music_no_xu_text(lang)}"
+            )
+        elif lang == "en":
+            text = (
+                "⛔ This music prompt has copyright/voice-clone risk.\n\n"
+                f"• Marker: <code>{html.escape(blocked)}</code>\n"
+                "Describe mood, tempo, instruments, video context and emotion instead of a specific artist/song.\n"
+                f"{music_no_xu_text(lang)}"
+            )
+        else:
+            text = (
+                "⛔ Prompt nhạc này có rủi ro bản quyền/clone.\n\n"
+                f"• Dấu hiệu: <code>{html.escape(blocked)}</code>\n"
+                "Hãy mô tả mood, tempo, nhạc cụ, bối cảnh video và cảm xúc thay vì nhắc nghệ sĩ/bài hát cụ thể.\n"
+                "Bot chưa trừ Xu."
+            )
         return await update.message.reply_text(
-            "⛔ Prompt nhạc này có rủi ro bản quyền/clone.\n\n"
-            f"• Dấu hiệu: <code>{html.escape(blocked)}</code>\n"
-            "Hãy mô tả mood, tempo, nhạc cụ, bối cảnh video và cảm xúc thay vì nhắc nghệ sĩ/bài hát cụ thể.\n"
-            "Bot chưa trừ Xu.",
+            text,
             parse_mode="HTML",
         )
-    await update.message.reply_text(build_music_prompt_pack(desc), parse_mode="HTML", disable_web_page_preview=True)
+    await update.message.reply_text(build_music_prompt_pack(desc, lang), parse_mode="HTML", disable_web_page_preview=True)
 
 async def send_music_library_results(message, user_id, query: str):
+    lang = music_ui_lang(user_id)
     if not JAMENDO_CLIENT_ID:
-        return await message.reply_text("⚠️ Kho nhạc chưa được cấu hình. Bot chưa trừ Xu.")
+        text = "⚠️ Music library is not configured yet.\nThe bot has not charged Xu." if lang == "en" else ("⚠️ 音乐库尚未配置。\n本次未扣除 Xu。" if lang == "zh" else "⚠️ Kho nhạc chưa được cấu hình. Bot chưa trừ Xu.")
+        return await message.reply_text(text)
     try:
         results = await fetch_jamendo_tracks(query, limit=8)
     except Exception as e:
         record_api_debug("jamendo", "music_library", "FAIL", 0, provider_error_summary(e))
-        return await message.reply_text("⚠️ Kho nhạc đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
+        return await message.reply_text(music_provider_error_text(lang))
     record_api_debug("jamendo", "music_library", "PASS" if results else "EMPTY", 200, f"results={len(results)}")
     save_tool_test_result("music_library", "PASS" if results else "EMPTY", f"query={query[:80]}; results={len(results)}", user_id)
     if not results:
-        return await message.reply_text("⚠️ Chưa tìm thấy nhạc phù hợp. Bot chưa trừ Xu.")
+        text = "⚠️ No suitable music found. Try another keyword.\nThe bot has not charged Xu." if lang == "en" else ("⚠️ 未找到合适的音乐。请尝试其他关键词。\n本次未扣除 Xu。" if lang == "zh" else "⚠️ Chưa tìm thấy nhạc phù hợp. Bot chưa trừ Xu.")
+        return await message.reply_text(text)
+    title = "🎧 <b>Music library / Jamendo</b>" if lang == "en" else ("🎧 <b>音乐库 / Jamendo</b>" if lang == "zh" else "🎧 <b>Kho nhạc Jamendo</b>")
     lines = [
-        f"🎧 <b>Kho nhạc Jamendo</b> — <code>{html.escape(query[:80])}</code>",
+        f"{title} — <code>{html.escape(query[:80])}</code>",
         "",
-        *[format_jamendo_result(item, idx) for idx, item in enumerate(results[:8], start=1)],
+        *[format_jamendo_result(item, idx, lang) for idx, item in enumerate(results[:8], start=1)],
         "",
-        "📜 Lưu ý: kiểm tra license/attribution trên trang nguồn trước khi dùng thương mại hoặc đăng lên nền tảng.",
-        "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
+        f"📜 {music_license_notice_text(lang)}",
+        music_no_xu_text(lang),
     ]
     await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     preview_items = [jamendo_preview_item(item) for item in results[:8]]
     save_media_preview_results("music", user_id, query, preview_items)
-    kb = media_preview_keyboard("music", preview_items)
+    kb = media_preview_keyboard("music", preview_items, lang)
     if kb:
-        await message.reply_text("🎧 Nghe/chọn nhanh:", reply_markup=kb)
+        prompt = "🎧 Preview/select quickly:" if lang == "en" else ("🎧 快速试听/选择:" if lang == "zh" else "🎧 Nghe/chọn nhanh:")
+        await message.reply_text(prompt, reply_markup=kb)
 
 async def cmd_music_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
     query = " ".join(context.args or []).strip()
     if not query:
-        return await update.message.reply_text(music_library_guide_text(), parse_mode="HTML", reply_markup=music_library_quick_keyboard())
+        return await update.message.reply_text(music_library_guide_text(lang), parse_mode="HTML", reply_markup=music_library_quick_keyboard(lang))
     return await send_music_library_results(update.message, update.effective_user.id, query)
 
 async def send_sfx_library_results(message, user_id, query: str):
+    lang = music_ui_lang(user_id)
     if not (FREESOUND_API_KEY or FREESOUND_CLIENT_SECRET):
-        return await message.reply_text("⚠️ Kho hiệu ứng âm thanh chưa được cấu hình. Bot chưa trừ Xu.")
+        text = "⚠️ SFX library is not configured yet.\nThe bot has not charged Xu." if lang == "en" else ("⚠️ 音效库尚未配置。\n本次未扣除 Xu。" if lang == "zh" else "⚠️ Kho hiệu ứng âm thanh chưa được cấu hình. Bot chưa trừ Xu.")
+        return await message.reply_text(text)
     try:
         search = await freesound_search(query, limit=5)
         results = search.get("results") or []
@@ -31594,9 +32145,10 @@ async def send_sfx_library_results(message, user_id, query: str):
         record_api_debug("freesound", "sfx_library", "FAIL", 0, f"{detail}; {attempt_detail}")
         statuses = {int(item.get("http_status") or 0) for item in attempts}
         if 429 in statuses:
-            return await message.reply_text("⚠️ Kho hiệu ứng âm thanh đang quá tải/giới hạn lượt. Bot chưa trừ Xu.")
+            text = "⚠️ The SFX library is rate-limited or overloaded.\nThe bot has not charged Xu." if lang == "en" else ("⚠️ 音效库当前过载或达到调用限制。\n本次未扣除 Xu。" if lang == "zh" else "⚠️ Kho hiệu ứng âm thanh đang quá tải/giới hạn lượt. Bot chưa trừ Xu.")
+            return await message.reply_text(text)
         if statuses and statuses.issubset({401, 403}):
-            base = "⚠️ Freesound key chưa hợp lệ hoặc chưa được cấp quyền API. Bot chưa trừ Xu."
+            base = "⚠️ Freesound key is invalid or API access is not enabled.\nThe bot has not charged Xu." if lang == "en" else ("⚠️ Freesound key 无效，或 API 权限尚未开启。\n本次未扣除 Xu。" if lang == "zh" else "⚠️ Freesound key chưa hợp lệ hoặc chưa được cấp quyền API. Bot chưa trừ Xu.")
             if is_admin_or_owner(user_id):
                 base += "\n\nAdmin detail: HTTP 401. Hãy kiểm tra đúng API key ở https://freesound.org/apiv2/apply hoặc regenerate key."
             return await message.reply_text(base)
@@ -31606,77 +32158,91 @@ async def send_sfx_library_results(message, user_id, query: str):
                 f"Admin detail: <code>{html.escape((detail + '; ' + attempt_detail)[:320])}</code>",
                 parse_mode="HTML",
             )
-        return await message.reply_text("⚠️ Kho hiệu ứng âm thanh đang tạm lỗi hoặc key cần kiểm tra. Bot chưa trừ Xu.")
+        return await message.reply_text(music_provider_error_text(lang))
     record_api_debug("freesound", "sfx_library", "PASS" if results else "EMPTY", http_status, f"auth_mode={auth_mode}; results={len(results)}")
     save_tool_test_result("sfx_library", "PASS" if results else "EMPTY", f"query={query[:80]}; auth_mode={auth_mode}; results={len(results)}", user_id)
     if not results:
+        if lang == "zh":
+            text = "未找到合适的音效。可以尝试: whoosh, click, pop, cinematic hit, transition.\n\n本次未扣除 Xu。"
+        elif lang == "en":
+            text = "No suitable sound effects found. Try: whoosh, click, pop, cinematic hit, transition.\n\nThe bot has not charged Xu."
+        else:
+            text = "Không tìm thấy hiệu ứng phù hợp. Thử: whoosh, click, pop, cinematic hit, transition.\n\nBot chưa trừ Xu."
         return await message.reply_text(
-            "Không tìm thấy hiệu ứng phù hợp. Thử: whoosh, click, pop, cinematic hit, transition.\n\n"
-            "Bot chưa trừ Xu."
+            text
         )
+    title = "🔊 <b>SOUND EFFECTS LIBRARY / Freesound</b>" if lang == "en" else ("🔊 <b>音效库 / Freesound</b>" if lang == "zh" else "🔊 <b>KHO HIỆU ỨNG ÂM THANH TOAN AAS</b>")
+    keyword_label = "Keyword" if lang == "en" else ("关键词" if lang == "zh" else "Từ khóa")
     lines = [
-        "🔊 <b>KHO HIỆU ỨNG ÂM THANH TOAN AAS</b>",
+        title,
         "",
-        f"<b>Từ khóa:</b> <code>{html.escape(query[:80])}</code>",
+        f"<b>{keyword_label}:</b> <code>{html.escape(query[:80])}</code>",
         "",
-        *[format_freesound_result(item, idx) for idx, item in enumerate(results[:5], start=1)],
+        *[format_freesound_result(item, idx, lang) for idx, item in enumerate(results[:5], start=1)],
         "",
-        "Lưu ý:",
-        "Một số hiệu ứng yêu cầu ghi nguồn hoặc có giới hạn thương mại. Hãy kiểm tra license trước khi dùng cho quảng cáo/kiếm tiền.",
-        "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
+        f"📜 {music_license_notice_text(lang)}",
+        music_no_xu_text(lang),
     ]
     await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     preview_items = [freesound_preview_item(item) for item in results[:5]]
     save_media_preview_results("sfx", user_id, query, preview_items)
-    kb = media_preview_keyboard("sfx", preview_items)
+    kb = media_preview_keyboard("sfx", preview_items, lang)
     if kb:
-        await message.reply_text("🎧 Nghe/chọn nhanh:", reply_markup=kb)
+        prompt = "🎧 Preview/select quickly:" if lang == "en" else ("🎧 快速试听/选择:" if lang == "zh" else "🎧 Nghe/chọn nhanh:")
+        await message.reply_text(prompt, reply_markup=kb)
 
 async def cmd_sfx_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
     query = " ".join(context.args or []).strip()
     if not query:
-        return await update.message.reply_text(sfx_library_guide_text(), parse_mode="HTML", reply_markup=sfx_library_quick_keyboard())
+        return await update.message.reply_text(sfx_library_guide_text(lang), parse_mode="HTML", reply_markup=sfx_library_quick_keyboard(lang))
     return await send_sfx_library_results(update.message, update.effective_user.id, query)
 
 async def send_media_library_results(message, user_id, query: str):
+    lang = music_ui_lang(user_id)
     if not PIXABAY_API_KEY:
-        return await message.reply_text("⚠️ Kho media đang tạm chưa sẵn sàng. Bot chưa trừ Xu.")
+        text = "⚠️ Media library is not ready yet.\nThe bot has not charged Xu." if lang == "en" else ("⚠️ 媒体库暂时不可用。\n本次未扣除 Xu。" if lang == "zh" else "⚠️ Kho media đang tạm chưa sẵn sàng. Bot chưa trừ Xu.")
+        return await message.reply_text(text)
     try:
         images, videos = await fetch_pixabay_media(query, limit=5)
     except Exception as e:
         record_api_debug("pixabay", "media_library", "FAIL", 0, provider_error_summary(e))
-        return await message.reply_text("⚠️ Kho media đang tạm chưa sẵn sàng. Bot chưa trừ Xu. Vui lòng thử lại sau.")
+        return await message.reply_text(music_provider_error_text(lang))
     record_api_debug("pixabay", "media_library", "PASS" if (images or videos) else "EMPTY", 200, f"images={len(images)} videos={len(videos)}")
     save_tool_test_result("media_library", "PASS" if (images or videos) else "EMPTY", f"query={query[:80]}; images={len(images)} videos={len(videos)}", user_id)
     if not images and not videos:
-        return await message.reply_text("⚠️ Chưa tìm thấy media phù hợp. Bot chưa trừ Xu.")
+        text = "⚠️ No suitable media found. Try another keyword.\nThe bot has not charged Xu." if lang == "en" else ("⚠️ 未找到合适的媒体素材。请尝试其他关键词。\n本次未扣除 Xu。" if lang == "zh" else "⚠️ Chưa tìm thấy media phù hợp. Bot chưa trừ Xu.")
+        return await message.reply_text(text)
+    title = "🖼 <b>Media library / Pixabay</b>" if lang == "en" else ("🖼 <b>媒体库 / Pixabay</b>" if lang == "zh" else "🖼 <b>Kho media Pixabay</b>")
     lines = [
-        f"🖼 <b>Kho media Pixabay</b> — <code>{html.escape(query[:80])}</code>",
+        f"{title} — <code>{html.escape(query[:80])}</code>",
         "",
     ]
     media_items: list[dict] = []
     for idx, item in enumerate(images[:4], start=1):
-        lines.append(format_pixabay_image(item, idx))
+        lines.append(format_pixabay_image(item, idx, lang))
         media_items.append(pixabay_image_preview_item(item))
     offset = len(images[:4])
     for idx, item in enumerate(videos[:4], start=offset + 1):
-        lines.append(format_pixabay_video(item, idx))
+        lines.append(format_pixabay_video(item, idx, lang))
         media_items.append(pixabay_video_preview_item(item))
     lines.extend([
         "",
-        "📜 Lưu ý: kiểm tra điều khoản Pixabay và điều khoản nền tảng trước khi dùng thương mại.",
-        "Bot chưa trừ Xu cho thao tác tìm kiếm này.",
+        f"📜 {music_license_notice_text(lang)}",
+        music_no_xu_text(lang),
     ])
     await message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
     save_pixabay_media_results(user_id, query, media_items)
-    kb = pixabay_media_keyboard(media_items)
+    kb = pixabay_media_keyboard(media_items, lang)
     if kb:
-        await message.reply_text("🖼 Xem/chọn media nhanh:", reply_markup=kb)
+        prompt = "🖼 Preview/select media quickly:" if lang == "en" else ("🖼 快速查看/选择素材:" if lang == "zh" else "🖼 Xem/chọn media nhanh:")
+        await message.reply_text(prompt, reply_markup=kb)
 
 async def cmd_media_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
     query = " ".join(context.args or []).strip()
     if not query:
-        return await update.message.reply_text(media_library_guide_text(), parse_mode="HTML", reply_markup=media_library_quick_keyboard())
+        return await update.message.reply_text(media_library_guide_text(lang), parse_mode="HTML", reply_markup=media_library_quick_keyboard(lang))
     return await send_media_library_results(update.message, update.effective_user.id, query)
 
 def normalize_music_inline_command_text(text: str) -> str:
