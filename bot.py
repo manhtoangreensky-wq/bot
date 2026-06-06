@@ -568,6 +568,45 @@ PAYMENT_PACKAGES = {
     "500k": {"amount": 500000, "xu": 5000,  "text": "Gói Doanh Nghiệp: 500.000đ ➔ 5.000 Xu"}
 }
 
+PLAN_CATALOG = {
+    "starter": {
+        "name": "Starter",
+        "price_vnd": 49000,
+        "duration_days": 30,
+        "required_member_tier": "silver",
+        "plan_xu": 600,
+        "vip_estimate": "2–4 tác vụ VIP nhỏ hoặc nhiều tác vụ nhẹ",
+        "description": "Dành cho người mới làm content",
+    },
+    "creator": {
+        "name": "Creator",
+        "price_vnd": 99000,
+        "duration_days": 30,
+        "required_member_tier": "silver",
+        "plan_xu": 1300,
+        "vip_estimate": "5–8 tác vụ VIP nhỏ hoặc nhiều tác vụ thường",
+        "description": "Dành cho người làm nội dung đều đặn",
+    },
+    "pro": {
+        "name": "Pro",
+        "price_vnd": 199000,
+        "duration_days": 30,
+        "required_member_tier": "gold",
+        "plan_xu": 3000,
+        "vip_estimate": "10–20 tác vụ VIP nhỏ hoặc nhiều tác vụ thường",
+        "description": "Dành cho người dùng thường xuyên",
+    },
+    "business": {
+        "name": "Business",
+        "price_vnd": 499000,
+        "duration_days": 30,
+        "required_member_tier": "gold_or_admin_approve",
+        "plan_xu": 8000,
+        "vip_estimate": "nhiều lượt VIP hơn Pro",
+        "description": "Dành cho đội nhóm nhỏ",
+    },
+}
+
 # ─── MANUAL BANK FALLBACK ────────────────────────────────────────────────────
 MANUAL_BANK_NAME      = _env("MANUAL_BANK_NAME", "ACB")
 MANUAL_BANK_CODE      = _env("MANUAL_BANK_CODE", "ACB")
@@ -893,12 +932,30 @@ def init_db():
         package_amount_vnd INTEGER DEFAULT 0,
         base_xu INTEGER DEFAULT 0,
         launch_bonus_xu INTEGER DEFAULT 0,
+        order_type TEXT DEFAULT 'topup',
+        plan_id TEXT DEFAULT '',
+        plan_name TEXT DEFAULT '',
+        duration_days INTEGER DEFAULT 0,
+        plan_xu INTEGER DEFAULT 0,
+        metadata_json TEXT DEFAULT '',
         status TEXT DEFAULT 'PENDING',
         created_at DATETIME,
         expires_at DATETIME,
         paid_at DATETIME,
         checkout_url TEXT,
         payment_link_id TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_plans (
+        user_id TEXT PRIMARY KEY,
+        current_plan TEXT DEFAULT '',
+        plan_name TEXT DEFAULT '',
+        plan_started_at TEXT,
+        plan_expires_at TEXT,
+        plan_xu_monthly INTEGER DEFAULT 0,
+        plan_xu_remaining INTEGER DEFAULT 0,
+        plan_status TEXT DEFAULT 'inactive',
+        order_code TEXT DEFAULT '',
+        updated_at TEXT
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS launch_bonus_redemptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1596,6 +1653,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_birthday_gifts_user_year ON birthday_gifts(user_id, birthday_year)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_birthday_review_status ON birthday_review_requests(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_birthday_review_user_status ON birthday_review_requests(user_id, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_plans_status ON user_plans(plan_status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_plans_expires ON user_plans(plan_expires_at)")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -1645,9 +1704,30 @@ def init_db():
         ("package_amount_vnd", "INTEGER DEFAULT 0"),
         ("base_xu", "INTEGER DEFAULT 0"),
         ("launch_bonus_xu", "INTEGER DEFAULT 0"),
+        ("order_type", "TEXT DEFAULT 'topup'"),
+        ("plan_id", "TEXT DEFAULT ''"),
+        ("plan_name", "TEXT DEFAULT ''"),
+        ("duration_days", "INTEGER DEFAULT 0"),
+        ("plan_xu", "INTEGER DEFAULT 0"),
+        ("metadata_json", "TEXT DEFAULT ''"),
     ]:
         try:
             c.execute(f"ALTER TABLE payos_orders ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    for col, col_type in [
+        ("current_plan", "TEXT DEFAULT ''"),
+        ("plan_name", "TEXT DEFAULT ''"),
+        ("plan_started_at", "TEXT"),
+        ("plan_expires_at", "TEXT"),
+        ("plan_xu_monthly", "INTEGER DEFAULT 0"),
+        ("plan_xu_remaining", "INTEGER DEFAULT 0"),
+        ("plan_status", "TEXT DEFAULT 'inactive'"),
+        ("order_code", "TEXT DEFAULT ''"),
+        ("updated_at", "TEXT"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE user_plans ADD COLUMN {col} {col_type}")
         except Exception:
             pass
     for col, col_type in [
@@ -2427,16 +2507,35 @@ def mark_payos_order_processed(order_code: str):
     conn.commit()
     conn.close()
 
-def create_order(order_code, user_id, amount, xu, base_xu=0, launch_bonus_xu=0, package_amount_vnd=0):
+def create_order(
+    order_code,
+    user_id,
+    amount,
+    xu,
+    base_xu=0,
+    launch_bonus_xu=0,
+    package_amount_vnd=None,
+    order_type="topup",
+    plan_id="",
+    plan_name="",
+    duration_days=0,
+    plan_xu=0,
+    metadata_json="",
+):
     conn = db_connect()
     c = conn.cursor()
     created_at = datetime.now()
     expires_at = created_at + timedelta(minutes=ORDER_TTL_MINUTES)
+    package_vnd = int(amount if package_amount_vnd is None else package_amount_vnd)
     c.execute(
         """INSERT INTO payos_orders
-        (order_code, user_id, amount, xu, package_amount_vnd, base_xu, launch_bonus_xu, status, created_at, expires_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (str(order_code), str(user_id), amount, xu, int(package_amount_vnd or amount or 0), int(base_xu or 0), int(launch_bonus_xu or 0), PAYOS_STATUS_PENDING,
+        (order_code, user_id, amount, xu, package_amount_vnd, base_xu, launch_bonus_xu,
+         order_type, plan_id, plan_name, duration_days, plan_xu, metadata_json,
+         status, created_at, expires_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (str(order_code), str(user_id), amount, xu, package_vnd, int(base_xu or 0), int(launch_bonus_xu or 0),
+         str(order_type or "topup"), str(plan_id or ""), str(plan_name or ""), int(duration_days or 0), int(plan_xu or 0), str(metadata_json or ""),
+         PAYOS_STATUS_PENDING,
          created_at.strftime("%Y-%m-%d %H:%M:%S"), expires_at.strftime("%Y-%m-%d %H:%M:%S"))
     )
     conn.commit()
@@ -2575,6 +2674,162 @@ def make_payos_return_url(context: ContextTypes.DEFAULT_TYPE) -> str:
 def make_payos_description(pkg_key: str) -> str:
     # payOS giới hạn 9 ký tự mô tả với một số kênh ngân hàng chưa liên kết.
     return f"AAS{pkg_key.upper()}"[:9]
+
+def make_payos_plan_description(plan_id: str) -> str:
+    # Giữ cùng giới hạn mô tả ngắn của payOS; thông tin đầy đủ lưu trong order metadata.
+    return f"AAS{str(plan_id or 'PLAN').upper()}"[:9]
+
+def normalize_plan_id(raw: str | None) -> str:
+    plan_id = str(raw or "").strip().lower()
+    return plan_id if plan_id in PLAN_CATALOG else ""
+
+def plan_label(plan_id: str) -> str:
+    plan = PLAN_CATALOG.get(normalize_plan_id(plan_id) or "")
+    return str(plan.get("name") or plan_id or "").strip()
+
+def plan_required_tier_label(plan_id: str) -> str:
+    plan = PLAN_CATALOG.get(normalize_plan_id(plan_id) or "")
+    required = str(plan.get("required_member_tier") or "").strip()
+    if required == "silver":
+        return "🥈 Silver trở lên"
+    if required == "gold":
+        return "🥇 Gold trở lên"
+    if required == "gold_or_admin_approve":
+        return "🥇 Gold trở lên hoặc admin duyệt"
+    return "Thành viên đủ điều kiện"
+
+def user_can_buy_plan(user_id, plan_id: str) -> tuple[bool, str]:
+    plan_id = normalize_plan_id(plan_id)
+    plan = PLAN_CATALOG.get(plan_id)
+    if not plan:
+        return False, "Gói tháng không tồn tại."
+    if is_admin_user(user_id):
+        return True, "admin_bypass"
+    profile = get_member_profile(user_id)
+    tier = normalize_member_tier(profile.get("tier") or "newbie") or "newbie"
+    required = str(plan.get("required_member_tier") or "").strip()
+    required_tier = "gold" if required == "gold_or_admin_approve" else required
+    if required_tier and member_tier_rank(tier) < member_tier_rank(required_tier):
+        return False, f"Gói này yêu cầu từ {plan_required_tier_label(plan_id)}. Hạng hiện tại của bạn: {get_member_badge(tier)}."
+    return True, "eligible"
+
+def get_user_plan(user_id, conn=None) -> dict:
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT current_plan, plan_name, plan_started_at, plan_expires_at,
+                      plan_xu_monthly, plan_xu_remaining, plan_status, order_code
+               FROM user_plans WHERE user_id=?""",
+            (str(user_id),),
+        ).fetchone()
+        if not row:
+            return {"active": False, "plan_status": "inactive"}
+        status = str(row[6] or "inactive")
+        expires_at = str(row[3] or "")
+        active = status == "active" and (not expires_at or expires_at >= now_text())
+        return {
+            "active": bool(active),
+            "current_plan": row[0] or "",
+            "plan_name": row[1] or "",
+            "plan_started_at": row[2] or "",
+            "plan_expires_at": expires_at,
+            "plan_xu_monthly": int(row[4] or 0),
+            "plan_xu_remaining": int(row[5] or 0),
+            "plan_status": status,
+            "order_code": row[7] or "",
+        }
+    finally:
+        if own_conn:
+            conn.close()
+
+def activate_user_plan_conn(conn, user_id, plan_id: str, days: int | None = None, order_code: str = "", source: str = "payos") -> dict:
+    plan_id = normalize_plan_id(plan_id)
+    if not plan_id:
+        raise ValueError("invalid_plan")
+    plan = PLAN_CATALOG[plan_id]
+    duration_days = int(days or plan["duration_days"])
+    started_dt = datetime.now()
+    expires_dt = started_dt + timedelta(days=duration_days)
+    started_at = started_dt.strftime("%Y-%m-%d %H:%M:%S")
+    expires_at = expires_dt.strftime("%Y-%m-%d %H:%M:%S")
+    plan_xu = int(plan["plan_xu"])
+    conn.execute(
+        """INSERT INTO user_plans
+        (user_id, current_plan, plan_name, plan_started_at, plan_expires_at,
+         plan_xu_monthly, plan_xu_remaining, plan_status, order_code, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            current_plan=excluded.current_plan,
+            plan_name=excluded.plan_name,
+            plan_started_at=excluded.plan_started_at,
+            plan_expires_at=excluded.plan_expires_at,
+            plan_xu_monthly=excluded.plan_xu_monthly,
+            plan_xu_remaining=excluded.plan_xu_remaining,
+            plan_status=excluded.plan_status,
+            order_code=excluded.order_code,
+            updated_at=excluded.updated_at""",
+        (str(user_id), plan_id, plan["name"], started_at, expires_at, plan_xu, plan_xu, "active", str(order_code or ""), now_text()),
+    )
+    record_usage_event_conn(
+        conn,
+        user_id,
+        event_type="plan_activated",
+        tool_name="subscription",
+        command="/buy_plan" if source == "payos" else "/admin_grant_plan",
+        status="active",
+        xu_delta=0,
+        amount_vnd=int(plan.get("price_vnd") or 0) if source == "payos" else 0,
+        provider=source,
+        detail=f"plan={plan_id}; days={duration_days}; plan_xu={plan_xu}; order={order_code}",
+    )
+    record_audit(
+        conn,
+        source,
+        "system" if source == "payos" else "admin",
+        "plan.activated",
+        "user_plan",
+        str(user_id),
+        before=None,
+        after={"plan": plan_id, "expires_at": expires_at, "plan_xu": plan_xu, "order_code": str(order_code or "")},
+        note="Monthly plan activated; not counted as member top-up",
+    )
+    return {
+        "user_id": str(user_id),
+        "plan_id": plan_id,
+        "plan_name": plan["name"],
+        "duration_days": duration_days,
+        "plan_xu": plan_xu,
+        "started_at": started_at,
+        "expires_at": expires_at,
+        "order_code": str(order_code or ""),
+    }
+
+def revoke_user_plan_conn(conn, user_id, admin_id="") -> dict:
+    before = get_user_plan(user_id, conn=conn)
+    conn.execute(
+        """INSERT INTO user_plans
+        (user_id, current_plan, plan_name, plan_status, plan_xu_monthly, plan_xu_remaining, updated_at)
+        VALUES (?,?,?,?,?,?,?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            plan_status='revoked',
+            plan_xu_remaining=0,
+            updated_at=excluded.updated_at""",
+        (str(user_id), "", "", "revoked", 0, 0, now_text()),
+    )
+    record_audit(
+        conn,
+        admin_id or "admin",
+        "admin",
+        "plan.revoked",
+        "user_plan",
+        str(user_id),
+        before=before,
+        after={"plan_status": "revoked"},
+        note="Admin revoked monthly plan",
+    )
+    return before
 
 def resolve_payment_package_arg(raw_arg: str | None, default_key: str = "50k") -> tuple[str, dict] | None:
     token = str(raw_arg or default_key or "").strip().lower()
@@ -3134,7 +3389,7 @@ def user_has_successful_deposit_conn(conn, user_id) -> bool:
     if row and int(row[0] or 0) > 0:
         return True
     paid_count = conn.execute(
-        "SELECT COUNT(*) FROM payos_orders WHERE user_id=? AND status=?",
+        "SELECT COUNT(*) FROM payos_orders WHERE user_id=? AND status=? AND COALESCE(order_type,'topup')='topup'",
         (str(user_id), PAYOS_STATUS_PAID),
     ).fetchone()[0]
     if int(paid_count or 0) > 0:
@@ -3156,7 +3411,7 @@ def member_total_paid_vnd(user_id, conn=None) -> int:
         if row:
             stored = int(row[0] or 0)
         payos_paid = int(conn.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM payos_orders WHERE user_id=? AND status=?",
+            "SELECT COALESCE(SUM(amount),0) FROM payos_orders WHERE user_id=? AND status=? AND COALESCE(order_type,'topup')='topup'",
             (str(user_id), PAYOS_STATUS_PAID),
         ).fetchone()[0] or 0)
         manual_paid = int(conn.execute(
@@ -4248,7 +4503,10 @@ def seed_beta_gift_codes(conn=None, created_by="") -> dict:
 
 def user_paid_payos_count(conn, user_id) -> int:
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM payos_orders WHERE user_id=? AND status=?", (str(user_id), PAYOS_STATUS_PAID))
+    c.execute(
+        "SELECT COUNT(*) FROM payos_orders WHERE user_id=? AND status=? AND COALESCE(order_type,'topup')='topup'",
+        (str(user_id), PAYOS_STATUS_PAID),
+    )
     return int((c.fetchone() or [0])[0] or 0)
 
 def user_successful_topup_count(conn, user_id, exclude_order_code="") -> int:
@@ -4259,7 +4517,7 @@ def user_successful_topup_count(conn, user_id, exclude_order_code="") -> int:
     c = conn.cursor()
 
     c.execute(
-        "SELECT DISTINCT order_code FROM payos_orders WHERE user_id=? AND status=?",
+        "SELECT DISTINCT order_code FROM payos_orders WHERE user_id=? AND status=? AND COALESCE(order_type,'topup')='topup'",
         (uid, PAYOS_STATUS_PAID),
     )
     for row in c.fetchall():
@@ -22304,7 +22562,10 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
     try:
         c.execute("BEGIN IMMEDIATE")
         c.execute(
-            "SELECT user_id, amount, xu, status, expires_at FROM payos_orders WHERE order_code=?",
+            """SELECT user_id, amount, xu, status, expires_at,
+                      COALESCE(order_type,'topup'), COALESCE(plan_id,''), COALESCE(plan_name,''),
+                      COALESCE(duration_days,0), COALESCE(plan_xu,0)
+               FROM payos_orders WHERE order_code=?""",
             (str(order_code),)
         )
         order = c.fetchone()
@@ -22312,7 +22573,8 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             conn.rollback()
             return False, "order_not_found", {}
 
-        target_id, expected_amount, xu, status, expires_at = order
+        target_id, expected_amount, xu, status, expires_at, order_type, plan_id, plan_name, duration_days, plan_xu = order
+        order_type = str(order_type or "topup")
         stored_xu = int(xu or 0)
         calculated_base_xu = package_base_xu(expected_amount)
         base_xu = calculated_base_xu if calculated_base_xu > 0 else stored_xu
@@ -22321,6 +22583,10 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             "expected_amount": expected_amount,
             "xu": base_xu,
             "status": status,
+            "order_type": order_type,
+            "plan_id": plan_id or "",
+            "plan_name": plan_name or "",
+            "plan_xu": int(plan_xu or 0),
         }
 
         if status == PAYOS_STATUS_PAID:
@@ -22341,6 +22607,67 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
         if c.fetchone():
             conn.rollback()
             return False, "duplicate", info
+
+        if order_type == "plan_purchase":
+            if not normalize_plan_id(plan_id):
+                conn.rollback()
+                return False, "invalid_plan_order", info
+            user_row = c.execute("SELECT 1 FROM users WHERE user_id=?", (str(target_id),)).fetchone()
+            if not user_row:
+                c.execute(
+                    "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent, has_deposited) VALUES (?,?,?,?,?,?,?)",
+                    (str(target_id), "PayOS plan user", 0, 0, now_text(), 0, 0),
+                )
+            activation = activate_user_plan_conn(
+                conn,
+                target_id,
+                plan_id,
+                days=int(duration_days or PLAN_CATALOG[plan_id]["duration_days"]),
+                order_code=str(order_code),
+                source="payos",
+            )
+            c.execute(
+                "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
+                (PAYOS_STATUS_PAID, now_text(), str(order_code)),
+            )
+            c.execute(
+                "INSERT INTO payos_processed (order_code, processed_at) VALUES (?,?)",
+                (str(order_code), now_text()),
+            )
+            record_usage_event_conn(
+                conn,
+                target_id,
+                event_type="payment_payos_plan_success",
+                tool_name="subscription",
+                command="/webhook/payos",
+                status="paid",
+                xu_delta=0,
+                amount_vnd=int(amount_vnd or 0),
+                provider="payos",
+                detail=f"order={order_code}; plan={plan_id}; plan_xu={int(plan_xu or 0)}; counts_for_member_tier=false",
+            )
+            record_audit(
+                conn,
+                "payos",
+                "system",
+                "plan.paid",
+                "payos_order",
+                str(order_code),
+                before={"status": status, "amount": expected_amount, "order_type": order_type},
+                after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "plan": plan_id, "amount": amount_vnd},
+                note="PayOS monthly plan paid; not counted as top-up",
+            )
+            emit_event(
+                conn,
+                "plan.paid",
+                "payos",
+                {"order_code": str(order_code), "user_id": str(target_id), "amount": int(amount_vnd), "plan": plan_id},
+                status="processed",
+            )
+            info.update(activation)
+            info["xu"] = 0
+            conn.commit()
+            return True, "plan_success", info
 
         c.execute("SELECT COALESCE(has_deposited,0) FROM users WHERE user_id=?", (str(target_id),))
         user_deposit_row = c.fetchone()
@@ -38327,6 +38654,14 @@ def pricing_xu_keyboard() -> InlineKeyboardMarkup:
 
 def pricing_plans_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🛒 Mua Starter", callback_data="buy_plan|starter"),
+            InlineKeyboardButton("🛒 Mua Creator", callback_data="buy_plan|creator"),
+        ],
+        [
+            InlineKeyboardButton("🛒 Mua Pro", callback_data="buy_plan|pro"),
+            InlineKeyboardButton("🛒 Mua Business", callback_data="buy_plan|business"),
+        ],
         [InlineKeyboardButton("💳 Mua/Nạp Xu", callback_data="menu|main_topup")],
         [
             InlineKeyboardButton("⭐ Dịch vụ VIP", callback_data="pricing|vip"),
@@ -38513,15 +38848,22 @@ def pricing_plans_lines() -> list[str]:
         "• <code>/translate_subtitle</code>: từ 150 Xu/file",
         "• Dịch/lồng tiếng video: từ 800 Xu/video, admin test trước",
         "",
+        "<b>Lệnh mua gói:</b>",
+        "• <code>/buy_plan starter</code>",
+        "• <code>/buy_plan creator</code>",
+        "• <code>/buy_plan pro</code>",
+        "• <code>/buy_plan business</code>",
+        "",
         "<b>Music / Audio Factory:</b>",
         "• Miễn phí: <code>/music</code>, <code>/music_prompt</code>, <code>/music_library</code>, <code>/sfx_library</code>, <code>/media_library</code>, <code>/play_music</code>, <code>/play_sfx</code>, <code>/select_music</code>, <code>/select_sfx</code>, <code>/music_policy</code>",
         "• Trừ Xu/VIP khi xử lý thật: <code>/music_bg</code> từ 300 Xu, <code>/music_song</code> từ 500–1.000 Xu, <code>/audio_enhance</code> từ 80 Xu, <code>/add_music</code> từ 120 Xu, <code>/add_voice_to_video</code> từ 150 Xu, <code>/image_to_music_video</code> từ 150 Xu, <code>/video_music</code> từ 200 Xu.",
         "",
-        "<b>Roadmap PayOS cấp gói — chưa sửa logic:</b>",
-        "• Khi gói tháng được mở chính thức, PayOS thanh toán thành công sẽ cấp gói và hạn mức tương ứng.",
+        "<b>Thanh toán gói tháng:</b>",
+        "• Dùng <code>/buy_plan &lt;plan&gt;</code> hoặc bấm nút mua gói để tạo checkout PayOS.",
+        "• Khi PayOS thanh toán thành công, bot tự kích hoạt gói và hạn mức tương ứng.",
         "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
         "• Nếu PayOS/webhook lỗi, admin có thể cấp gói thủ công.",
-        "• Lệnh định hướng: <code>/admin_grant_plan &lt;user_id&gt; &lt;plan&gt; &lt;days&gt;</code>, <code>/admin_revoke_plan &lt;user_id&gt;</code>, <code>/admin_plan_status &lt;user_id&gt;</code>.",
+        "• Lệnh admin: <code>/admin_grant_plan &lt;user_id&gt; &lt;plan&gt; &lt;days&gt;</code>, <code>/admin_revoke_plan &lt;user_id&gt;</code>, <code>/admin_plan_status &lt;user_id&gt;</code>.",
         "",
         "<b>Ghi chú:</b>",
         "• Số lượt VIP chỉ là ước tính vì mỗi công cụ có mức tốn API/server khác nhau.",
@@ -38633,6 +38975,238 @@ async def cmd_member_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_pricing_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_pricing_lines(update.message, pricing_terms_lines(), pricing_terms_keyboard())
+
+def plan_success_message(info: dict) -> str:
+    return (
+        "✅ <b>KÍCH HOẠT GÓI THÀNH CÔNG</b>\n\n"
+        f"Gói: <b>{html.escape(str(info.get('plan_name') or plan_label(info.get('plan_id'))))}</b>\n"
+        f"Thời hạn: <b>{int(info.get('duration_days') or 0)} ngày</b>\n"
+        f"Hết hạn: <code>{html.escape(str(info.get('expires_at') or '-'))}</code>\n"
+        f"Hạn mức xử lý: <b>{int(info.get('plan_xu') or 0):,} Xu</b>\n\n"
+        "Lưu ý: tiền mua gói không tính vào tổng nạp nâng hạng thành viên.\n\n"
+        "Bạn có thể bắt đầu dùng TOAN AAS ngay: <code>/start</code>"
+    )
+
+def plan_purchase_keyboard(checkout_url: str = "") -> InlineKeyboardMarkup:
+    rows = []
+    if checkout_url:
+        rows.append([InlineKeyboardButton("💳 Thanh toán PayOS", url=checkout_url)])
+    rows.append([InlineKeyboardButton("📦 Xem gói tháng", callback_data="pricing|plans")])
+    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+async def start_plan_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, plan_id: str, message=None):
+    message = message or update.message
+    uid = update.effective_user.id
+    plan_id = normalize_plan_id(plan_id)
+    if not plan_id:
+        return await message.reply_text(
+            "⚠️ Gói tháng không hợp lệ.\n\n"
+            "Dùng: <code>/buy_plan starter</code>, <code>/buy_plan creator</code>, <code>/buy_plan pro</code> hoặc <code>/buy_plan business</code>.",
+            parse_mode="HTML",
+        )
+    plan = PLAN_CATALOG[plan_id]
+    get_user(uid, update.effective_user.first_name or update.effective_user.username or "")
+    allowed, reason = user_can_buy_plan(uid, plan_id)
+    if not allowed:
+        return await message.reply_text(
+            "⚠️ <b>Bạn chưa đủ điều kiện mua gói này.</b>\n\n"
+            f"• Gói: <b>{html.escape(plan['name'])}</b>\n"
+            f"• Điều kiện: <b>{html.escape(plan_required_tier_label(plan_id))}</b>\n"
+            f"• Chi tiết: {html.escape(reason)}\n\n"
+            "Bạn có thể nạp Xu để đạt hạng thành viên phù hợp: <code>/naptien</code>\n"
+            "Lưu ý: tiền mua gói tháng không tính nâng hạng thành viên.\n"
+            "Bot chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
+                [InlineKeyboardButton("📦 Xem gói tháng", callback_data="pricing|plans")],
+            ]),
+        )
+    if flag_on("emergency_lock") or flag_on("payment_freeze"):
+        return await message.reply_text("⚠️ Thanh toán đang tạm khóa an toàn. Bot chưa tạo đơn gói tháng.")
+    if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
+        return await message.reply_text("❌ Chưa cấu hình đủ PayOS để mua gói tháng. Bot chưa tạo đơn.")
+
+    order_code = generate_order_code()
+    amount = int(plan["price_vnd"])
+    duration_days = int(plan["duration_days"])
+    plan_xu = int(plan["plan_xu"])
+    order_note = f"TOAN AAS PLAN {plan['name'].upper()} {duration_days}D USER {uid}"
+    metadata = {
+        "note": order_note,
+        "type": "plan_purchase",
+        "plan_id": plan_id,
+        "plan_name": plan["name"],
+        "telegram_user_id": str(uid),
+        "duration_days": duration_days,
+        "plan_xu": plan_xu,
+    }
+    create_order(
+        order_code,
+        uid,
+        amount,
+        0,
+        base_xu=0,
+        launch_bonus_xu=0,
+        package_amount_vnd=0,
+        order_type="plan_purchase",
+        plan_id=plan_id,
+        plan_name=plan["name"],
+        duration_days=duration_days,
+        plan_xu=plan_xu,
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+    return_url = make_payos_return_url(context)
+    payos_body = {
+        "orderCode": int(order_code),
+        "amount": int(amount),
+        "description": make_payos_plan_description(plan_id),
+        "cancelUrl": return_url,
+        "returnUrl": return_url,
+    }
+    try:
+        res, res_data, raw_preview, _raw_str = await create_payos_payment_request(payos_body)
+        data = res_data if isinstance(res_data, dict) else {}
+        checkout_data = data.get("data") if isinstance(data.get("data"), dict) else {}
+        checkout_url = checkout_data.get("checkoutUrl", "")
+        payment_link_id = checkout_data.get("paymentLinkId", "")
+        if getattr(res, "status_code", "") == 200 and data.get("code") == "00" and checkout_url:
+            update_order_checkout_info(order_code, checkout_url, payment_link_id)
+            record_usage_event(
+                uid,
+                username=update.effective_user.username or update.effective_user.first_name or "",
+                event_type="plan_purchase_created",
+                tool_name="subscription",
+                command="/buy_plan",
+                status="pending",
+                amount_vnd=amount,
+                provider="payos",
+                detail=f"order={order_code}; plan={plan_id}; type=plan_purchase",
+            )
+            return await message.reply_text(
+                f"📦 <b>Thanh toán gói {html.escape(plan['name'])}</b>\n\n"
+                f"• Giá: <b>{amount:,}đ</b>\n"
+                f"• Thời hạn: <b>{duration_days} ngày</b>\n"
+                f"• Hạn mức: <b>{plan_xu:,} Xu xử lý/tháng</b>\n"
+                f"• Điều kiện: <b>{html.escape(plan_required_tier_label(plan_id))}</b>\n"
+                "• Ghi chú: tiền mua gói không tính vào tổng nạp nâng hạng.\n\n"
+                f"• Mã đơn: <code>{order_code}</code>\n"
+                f"• Nội dung nội bộ: <code>{html.escape(order_note)}</code>\n\n"
+                "Bấm thanh toán bên dưới. Sau khi PayOS xác nhận thành công, bot sẽ tự kích hoạt gói.",
+                parse_mode="HTML",
+                reply_markup=plan_purchase_keyboard(checkout_url),
+            )
+        update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        return await message.reply_text(
+            "❌ PayOS chưa tạo được link thanh toán gói tháng.\n"
+            "Bot chưa kích hoạt gói và chưa cộng/trừ Xu.\n\n"
+            f"Chi tiết ngắn: <code>{html.escape(str(data.get('desc') or data.get('message') or raw_preview or '-')[:220])}</code>",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        logger.warning(f"Plan PayOS create failed: {e}")
+        return await message.reply_text(
+            "❌ PayOS chưa tạo được link thanh toán gói tháng.\n"
+            "Bot chưa kích hoạt gói và chưa cộng/trừ Xu.",
+        )
+
+async def cmd_buy_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    plan_id = context.args[0] if context.args else ""
+    return await start_plan_purchase(update, context, plan_id)
+
+async def handle_buy_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    plan_id = (query.data.split("|", 1)[1] if "|" in query.data else "").strip()
+    return await start_plan_purchase(update, context, plan_id, message=query.message)
+
+async def cmd_admin_grant_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = str(context.args[0])
+        plan_id = normalize_plan_id(context.args[1])
+        days = int(context.args[2]) if len(context.args) >= 3 else int(PLAN_CATALOG[plan_id]["duration_days"])
+        if not plan_id or days <= 0:
+            raise ValueError("invalid")
+    except Exception:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/admin_grant_plan &lt;user_id&gt; &lt;starter|creator|pro|business&gt; &lt;days&gt;</code>",
+            parse_mode="HTML",
+        )
+    get_user(target_id)
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        info = activate_user_plan_conn(conn, target_id, plan_id, days=days, order_code="", source=f"admin:{update.effective_user.id}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    try:
+        await context.bot.send_message(
+            chat_id=target_id,
+            text=(
+                f"🎁 <b>Bạn đã được admin cấp gói {html.escape(info['plan_name'])}</b>\n\n"
+                f"Thời hạn: <b>{int(info['duration_days'])} ngày</b>\n"
+                f"Hạn mức xử lý: <b>{int(info['plan_xu']):,} Xu</b>\n"
+                f"Hết hạn: <code>{html.escape(info['expires_at'])}</code>"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.warning(f"Admin grant plan notify failed: {e}")
+    await update.message.reply_text(
+        f"✅ Đã cấp gói <b>{html.escape(info['plan_name'])}</b> cho user <code>{html.escape(target_id)}</code> trong <b>{int(info['duration_days'])} ngày</b>.\n"
+        "Không tính vào tổng nạp nâng hạng.",
+        parse_mode="HTML",
+    )
+
+async def cmd_admin_revoke_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = str(context.args[0])
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/admin_revoke_plan &lt;user_id&gt;</code>", parse_mode="HTML")
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        before = revoke_user_plan_conn(conn, target_id, admin_id=update.effective_user.id)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    await update.message.reply_text(
+        f"✅ Đã thu hồi gói tháng của user <code>{html.escape(target_id)}</code>.\n"
+        f"Gói trước đó: <b>{html.escape(before.get('plan_name') or 'không có')}</b>",
+        parse_mode="HTML",
+    )
+
+async def cmd_admin_plan_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        target_id = str(context.args[0])
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/admin_plan_status &lt;user_id&gt;</code>", parse_mode="HTML")
+    plan = get_user_plan(target_id)
+    await update.message.reply_text(
+        "📦 <b>PLAN STATUS</b>\n\n"
+        f"• User: <code>{html.escape(target_id)}</code>\n"
+        f"• Active: <b>{'YES' if plan.get('active') else 'NO'}</b>\n"
+        f"• Plan: <b>{html.escape(plan.get('plan_name') or 'Không có')}</b>\n"
+        f"• Status: <code>{html.escape(plan.get('plan_status') or '-')}</code>\n"
+        f"• Expires: <code>{html.escape(plan.get('plan_expires_at') or '-')}</code>\n"
+        f"• Plan Xu: <b>{int(plan.get('plan_xu_remaining') or 0):,}/{int(plan.get('plan_xu_monthly') or 0):,}</b>",
+        parse_mode="HTML",
+    )
 
 async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -39289,6 +39863,14 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     birthday = birthday_status.get("birthday") or {}
     birthday_date = birthday.get("birthday_mmdd") if birthday else "chưa lưu (/birthday)"
     birthday_line = f"{birthday_date}; quà bí mật theo hạng thành viên"
+    plan = get_user_plan(user_id)
+    if plan.get("active"):
+        plan_line = (
+            f"{plan.get('plan_name')} — đến {plan.get('plan_expires_at')}; "
+            f"còn {int(plan.get('plan_xu_remaining') or 0):,}/{int(plan.get('plan_xu_monthly') or 0):,} Xu xử lý"
+        )
+    else:
+        plan_line = "Chưa đăng ký — xem /plans"
     if admin_badge:
         service_privilege = "Miễn phí công cụ nội bộ admin khi vận hành/test"
     else:
@@ -39303,6 +39885,8 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Referral pending/rewarded: <b>{ref_stats['pending']}/{ref_stats['rewarded']}</b>\n"
         f"• Xu referral đã nhận: <b>{ref_stats['reward_xu']} Xu</b>\n"
         f"• Link giới thiệu: <code>{html.escape(ref_link)}</code>\n\n"
+        f"• Gói tháng: <b>{html.escape(plan_line)}</b>\n"
+        "• Lưu ý gói tháng: tiền mua gói không tính vào tổng nạp xét hạng.\n\n"
         f"• Ưu đãi dịch vụ: <b>{html.escape(service_privilege)}</b>\n"
         f"• Birthday gift: <b>{html.escape(birthday_line)}</b>\n\n"
         f"👉 /member để xem quyền lợi đầy đủ.\n"
@@ -52707,6 +53291,17 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if res.status_code == 200 and data.get("code") == "00" and status == PAYOS_STATUS_PAID:
             processed, desc, info = process_payos_paid_order(str(order_code), amount_vnd)
             if processed:
+                if info.get("order_type") == "plan_purchase":
+                    target_id = info["target_id"]
+                    await context.bot.send_message(
+                        chat_id=target_id,
+                        text=plan_success_message(info),
+                        parse_mode="HTML",
+                    )
+                    return await update.message.reply_text(
+                        f"✅ Check PayOS: đã kích hoạt gói <b>{html.escape(info.get('plan_name') or '')}</b> cho user <code>{html.escape(str(target_id))}</code>.",
+                        parse_mode="HTML",
+                    )
                 target_id = info["target_id"]
                 base_xu = int(info.get("base_xu") or info.get("xu") or 0)
                 launch_bonus = int(info.get("launch_bonus", 0) or 0)
@@ -54081,6 +54676,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("baogia",      cmd_pricing))
     tg_app.add_handler(CommandHandler("pricing_xu",  cmd_pricing_xu))
     tg_app.add_handler(CommandHandler("pricing_plans", cmd_pricing_plans))
+    tg_app.add_handler(CommandHandler("plans",       cmd_pricing_plans))
+    tg_app.add_handler(CommandHandler("goi_thang",   cmd_pricing_plans))
+    tg_app.add_handler(CommandHandler("buy_plan",    cmd_buy_plan))
+    tg_app.add_handler(CommandHandler("admin_grant_plan", cmd_admin_grant_plan))
+    tg_app.add_handler(CommandHandler("admin_revoke_plan", cmd_admin_revoke_plan))
+    tg_app.add_handler(CommandHandler("admin_plan_status", cmd_admin_plan_status))
     tg_app.add_handler(CommandHandler("vip_services", cmd_vip_services))
     tg_app.add_handler(CommandHandler("member_policy", cmd_member_policy))
     tg_app.add_handler(CommandHandler("pricing_admin", cmd_pricing_admin))
@@ -54359,6 +54960,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_buy_plan_callback, pattern=r"^buy_plan\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_manual_package_choice, pattern=r"^manual\|"))
@@ -57917,6 +58519,32 @@ async def webhook_payos(request: Request):
     if not processed:
         logger.warning(f"PayOS webhook ignored: {desc} | order={order_code} | amount={amount_vnd} | info={info}")
         return JSONResponse({"code": "00", "desc": desc})
+
+    if info.get("order_type") == "plan_purchase":
+        target_id = info["target_id"]
+        logger.info(f"✅ PayOS plan purchase success plan={info.get('plan_id')} user={target_id} | Đơn: {order_code}")
+        if tg_app:
+            try:
+                await tg_app.bot.send_message(
+                    chat_id=target_id,
+                    text=plan_success_message(info),
+                    parse_mode="HTML",
+                )
+                await tg_app.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        "📦 <b>AUTO PLAN PAYOS SUCCESS</b>\n\n"
+                        f"🆔 User: <code>{html.escape(str(target_id))}</code>\n"
+                        f"📦 Gói: <b>{html.escape(info.get('plan_name') or '')}</b>\n"
+                        f"💰 Số tiền: <b>{amount_vnd:,}đ</b>\n"
+                        f"📋 Order Code: <code>{html.escape(str(order_code))}</code>\n"
+                        "Không tính vào tổng nạp nâng hạng; không chạy launch bonus."
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"Plan notify error: {e}")
+        return JSONResponse({"code": "00", "desc": "plan_success"})
 
     target_id = info["target_id"]
     xu = info["xu"]
