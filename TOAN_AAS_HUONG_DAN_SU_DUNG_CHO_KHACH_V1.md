@@ -525,7 +525,7 @@ Lệnh chính:
 
 | Bạn muốn làm gì? | Lệnh |
 |---|---|
-| Mở trung tâm nhạc | `/music_tools` |
+| Mở trung tâm nhạc | `/music` hoặc `/music_tools` |
 | Tạo prompt nhạc nền | `/music_prompt <mô tả>` |
 | Tìm nhạc nền | `/music_library <từ khóa>` |
 | Tìm hiệu ứng âm thanh | `/sfx_library <từ khóa>` |

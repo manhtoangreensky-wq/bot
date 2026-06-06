@@ -26089,6 +26089,25 @@ CUSTOMER_GUIDE_SECTIONS = [
         ),
     ),
     (
+        "music",
+        "Nhạc AI / Kho nhạc",
+        (
+            "🎵 <b>Nhạc AI / Kho nhạc</b>\n\n"
+            "TOAN AAS hỗ trợ tìm nhạc nền, hiệu ứng âm thanh, media public và tạo prompt nhạc cho video.\n\n"
+            "<b>Lệnh chính:</b>\n"
+            "• <code>/music</code> hoặc <code>/music_tools</code> — mở trung tâm nhạc\n"
+            "• <code>/music_prompt &lt;mô tả&gt;</code> — tạo prompt nhạc nền\n"
+            "• <code>/music_library &lt;từ khóa&gt;</code> — tìm nhạc nền\n"
+            "• <code>/sfx_library &lt;từ khóa&gt;</code> — tìm hiệu ứng âm thanh\n"
+            "• <code>/media_library &lt;từ khóa&gt;</code> — tìm ảnh/video public\n"
+            "• <code>/play_music 1</code> hoặc <code>/play_sfx 1</code> — nghe thử\n"
+            "• <code>/select_music 1</code> hoặc <code>/select_sfx 1</code> — chọn nhạc/SFX\n"
+            "• <code>/music_policy</code> — chính sách nhạc/media\n\n"
+            "<b>Quy trình:</b> tìm → nghe thử → chọn → gửi video/ảnh → ghép nhạc khi công cụ được mở.\n\n"
+            "Nhạc/kho public có license riêng. Kiểm tra quyền thương mại, attribution và điều khoản nền tảng trước khi đăng quảng cáo/kiếm tiền."
+        ),
+    ),
+    (
         "optimize",
         "Tối ưu sau khi đăng",
         (
@@ -26339,7 +26358,7 @@ TOOL_FREEZE_COMMANDS = {
     "film", "video_script", "trend_ai", "trend", "trend_live", "trend_research", "trend_status",
     "image_tools", "image_prompt", "image_pack",
     "video_from_image", "image_to_video_pack", "ai_image", "ai_image_edit",
-    "music_tools", "music_prompt", "music_library", "sfx_library", "media_library",
+    "music", "music_tools", "music_prompt", "music_library", "sfx_library", "media_library",
     "play_music", "play_sfx", "play_media", "select_music", "select_sfx", "select_media",
     "music_policy", "music_bg", "music_song", "add_music", "add_voice_to_video",
     "image_to_music_video", "add_music_status", "video_music", "suggest_music",
@@ -26492,6 +26511,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
         [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs")],
         [InlineKeyboardButton("🖼 Ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎤 Âm thanh", callback_data="menu|main_audio")],
+        [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
         [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|main_guide")],
     ]
@@ -26539,6 +26559,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
             [InlineKeyboardButton("🎬 内容创作", callback_data="menu|main_video"), InlineKeyboardButton("🤖 AI 助手", callback_data="menu|main_ai")],
             [InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image")],
             [InlineKeyboardButton("🎤 语音工具", callback_data="menu|main_audio"), InlineKeyboardButton("🌐 翻译", callback_data="menu|translate")],
+            [InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music")],
             [InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory"), InlineKeyboardButton("💰 价格", callback_data="menu|hint_pricing")],
             [InlineKeyboardButton("💳 充值 Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 账户", callback_data="menu|main_profile")],
             [InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
@@ -26554,6 +26575,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
             [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
             [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image")],
             [InlineKeyboardButton("🎤 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
+            [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
             [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("💰 Bảng giá", callback_data="menu|hint_pricing")],
             [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
             [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
@@ -26568,6 +26590,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         [InlineKeyboardButton("🎬 Content", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Ask AI", callback_data="menu|main_ai")],
         [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
         [InlineKeyboardButton("🎤 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🌐 Translate", callback_data="menu|translate")],
+        [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music")],
         [InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory"), InlineKeyboardButton("💰 Pricing", callback_data="menu|hint_pricing")],
         [InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Account", callback_data="menu|main_profile")],
         [InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
@@ -26603,6 +26626,8 @@ def localized_start_menu_text(user_id, lang: str) -> str:
             "PDF 转 Word、图片转 PDF，以及已启用的 PDF 工具。\n\n"
             "🖼 <b>图片工具</b>\n"
             "图片 Prompt、抠图、图片处理和视频素材准备。\n\n"
+            "🎵 <b>音乐 / SFX</b>\n"
+            "查找背景音乐、音效、音乐提示词，并为视频准备音频。\n\n"
             "🎤 <b>语音工具</b>\n"
             "音频/视频转文字，或生成越南语配音。\n\n"
             "🌐 <b>翻译</b>\n"
@@ -26633,6 +26658,8 @@ def localized_start_menu_text(user_id, lang: str) -> str:
             "PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF nếu công cụ đã bật.\n\n"
             "🖼 <b>Hình ảnh</b>\n"
             "Prompt ảnh, tách nền, xử lý ảnh, chuẩn bị ảnh cho video.\n\n"
+            "🎵 <b>Nhạc / SFX</b>\n"
+            "Tìm nhạc nền, hiệu ứng âm thanh, tạo prompt nhạc và chuẩn bị âm thanh cho video.\n\n"
             "🎤 <b>Voice</b>\n"
             "Bóc băng audio/video hoặc tạo giọng đọc tiếng Việt.\n\n"
             "🌐 <b>Dịch thuật</b>\n"
@@ -26666,6 +26693,8 @@ def localized_start_menu_text(user_id, lang: str) -> str:
         "PDF to Word, image to PDF, compress/split/merge PDF when tools are enabled.\n\n"
         "🖼 <b>Images</b>\n"
         "Image prompts, background removal, media preparation and visual workflows.\n\n"
+        "🎵 <b>Music / SFX</b>\n"
+        "Find background music, sound effects, music prompts and prepare audio for video.\n\n"
         "🎤 <b>Voice</b>\n"
         "Transcribe audio/video or create Vietnamese voice-over.\n\n"
         "🌐 <b>Translate</b>\n"
@@ -26693,6 +26722,7 @@ def menu_parent_action(section: str = "main") -> str:
         "main_memory": "main_memory",
         "main_docs": "main_docs",
         "main_image": "main_image",
+        "main_music": "main_music",
         "main_audio": "main_audio",
         "translate": "translate",
         "video_factory": "main_video",
@@ -26824,6 +26854,7 @@ def main_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🎬 Content", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory")],
             [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
+            [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music")],
             [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
             [InlineKeyboardButton("👤 Account", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
@@ -26831,6 +26862,7 @@ def main_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎬 Video", callback_data="menu|main_video"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
         [InlineKeyboardButton("📄 PDF/Word", callback_data="menu|main_docs"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🖼 Ảnh", callback_data="menu|main_image")],
+        [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
         [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
@@ -26904,6 +26936,17 @@ PUBLIC_COMMAND_FUNCTIONS = {
     "image_tools": "cmd_image_tools",
     "image_prompt": "cmd_image_prompt",
     "image_to_video_pack": "cmd_image_to_video_pack",
+    "music": "cmd_music_tools",
+    "music_tools": "cmd_music_tools",
+    "music_prompt": "cmd_music_prompt",
+    "music_library": "cmd_music_library",
+    "sfx_library": "cmd_sfx_library",
+    "media_library": "cmd_media_library",
+    "play_music": "cmd_play_music",
+    "play_sfx": "cmd_play_sfx",
+    "select_music": "cmd_select_music",
+    "select_sfx": "cmd_select_sfx",
+    "music_policy": "cmd_music_policy",
     "media_factory": "cmd_media_factory",
     "video_factory_flow": "cmd_video_factory_flow",
     "memory": "cmd_memory",
@@ -26964,6 +27007,7 @@ def menu_text_main(is_admin: bool) -> str:
         "🧠 <b>Kho ghi nhớ</b>\nLưu ghi chú, tìm lại thông tin, đánh dấu việc quan trọng và đặt nhắc việc.\n\n"
         "📄 <b>Tài liệu / PDF / Word</b>\nChuyển PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF nếu công cụ đã bật.\n\n"
         "🖼 <b>Công cụ ảnh</b>\nTạo prompt ảnh, tách nền, xử lý ảnh, chuẩn bị ảnh cho video.\n\n"
+        "🎵 <b>Nhạc / SFX</b>\nTìm nhạc nền, hiệu ứng âm thanh, tạo prompt nhạc và chuẩn bị âm thanh cho video.\n\n"
         "🎤 <b>Âm thanh / Voice</b>\nBóc băng audio/video thành chữ hoặc tạo giọng đọc tiếng Việt.\n\n"
         "💳 <b>Xu dịch vụ</b>\nNạp Xu, xem bảng giá, dùng mã quà tặng hoặc mã khuyến mãi.\n\n"
         "📚 <b>Hướng dẫn</b>\nXem cách dùng, điều khoản, chính sách Xu và quyền lợi thành viên.\n\n"
@@ -27013,6 +27057,7 @@ def build_start_message_text(user_id, user_existed_before: Optional[bool] = None
         "🧠 <b>Kho ghi nhớ</b>\nLưu ghi chú, tìm lại thông tin, đánh dấu việc quan trọng và đặt nhắc việc.\n\n"
         "📄 <b>Tài liệu / PDF / Word</b>\nChuyển PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF nếu công cụ đã bật.\n\n"
         "🖼 <b>Công cụ ảnh</b>\nTạo prompt ảnh, tách nền, xử lý ảnh, chuẩn bị ảnh cho video.\n\n"
+        "🎵 <b>Nhạc / SFX</b>\nTìm nhạc nền, hiệu ứng âm thanh, tạo prompt nhạc và chuẩn bị âm thanh cho video.\n\n"
         "🎤 <b>Âm thanh / Voice</b>\nBóc băng audio/video thành chữ hoặc tạo giọng đọc tiếng Việt.\n\n"
         "💳 <b>Xu dịch vụ</b>\nNạp Xu, xem bảng giá, dùng mã quà tặng hoặc mã khuyến mãi.\n\n"
         "📚 <b>Hướng dẫn</b>\nXem cách dùng, điều khoản, chính sách Xu và quyền lợi thành viên.\n\n"
@@ -27311,6 +27356,24 @@ def menu_text_main_audio() -> str:
     ])
     return "\n".join(lines)
 
+def menu_text_main_music() -> str:
+    return (
+        "🎵 <b>NHẠC AI / KHO NHẠC TOAN AAS</b>\n\n"
+        "Dùng để tìm nhạc nền, hiệu ứng âm thanh, tạo prompt nhạc và chuẩn bị âm thanh cho video.\n\n"
+        "<b>Lệnh nhanh:</b>\n"
+        "• <code>/music</code> hoặc <code>/music_tools</code> — mở trung tâm nhạc\n"
+        "• <code>/music_prompt &lt;mô tả&gt;</code> — tạo prompt nhạc nền\n"
+        "• <code>/music_library &lt;từ khóa&gt;</code> — tìm nhạc nền\n"
+        "• <code>/sfx_library &lt;từ khóa&gt;</code> — tìm hiệu ứng âm thanh\n"
+        "• <code>/media_library &lt;từ khóa&gt;</code> — tìm ảnh/video public\n"
+        "• <code>/play_music 1</code> hoặc <code>/play_sfx 1</code> — nghe thử\n"
+        "• <code>/select_music 1</code> hoặc <code>/select_sfx 1</code> — chọn nhạc/SFX\n"
+        "• <code>/music_policy</code> — chính sách nhạc/media\n\n"
+        "<b>Quy trình:</b>\n"
+        "Tìm → nghe thử → chọn → gửi video/ảnh → ghép nhạc khi công cụ được mở.\n\n"
+        "Lưu ý: nhạc/kho public có license riêng. Kiểm tra quyền thương mại trước khi đăng quảng cáo/kiếm tiền."
+    )
+
 def menu_text_translate(other: bool = False) -> str:
     if other:
         return (
@@ -27530,6 +27593,34 @@ def menu_text_main_audio_i18n(lang: str) -> str:
         "Use <code>/translate en text</code> for one-time translation. Auto-translate is OFF by default and only turns on with <code>/translate_mode_on</code> or <code>/translate_mode</code>."
     )
 
+def menu_text_main_music_i18n(lang: str) -> str:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return (
+            "🎵 <b>音乐 / SFX TOAN AAS</b>\n\n"
+            "查找背景音乐、音效、公共媒体，或为视频生成安全的音乐提示词。\n\n"
+            "<b>命令:</b>\n"
+            "• <code>/music</code> 或 <code>/music_tools</code> — 打开音乐中心\n"
+            "• <code>/music_prompt &lt;描述&gt;</code> — 生成音乐提示词\n"
+            "• <code>/music_library &lt;关键词&gt;</code> — 查找背景音乐\n"
+            "• <code>/sfx_library &lt;关键词&gt;</code> — 查找音效\n"
+            "• <code>/media_library &lt;关键词&gt;</code> — 查找公共图片/视频\n\n"
+            "请先检查 license/attribution，再用于商业广告或公开视频。"
+        )
+    if lang == "vi":
+        return menu_text_main_music()
+    return (
+        "🎵 <b>MUSIC / SFX TOAN AAS</b>\n\n"
+        "Find background music, sound effects, public media, and safe music prompts for video.\n\n"
+        "<b>Commands:</b>\n"
+        "• <code>/music</code> or <code>/music_tools</code> — open the music center\n"
+        "• <code>/music_prompt &lt;description&gt;</code> — create a music prompt\n"
+        "• <code>/music_library &lt;keyword&gt;</code> — find background music\n"
+        "• <code>/sfx_library &lt;keyword&gt;</code> — find sound effects\n"
+        "• <code>/media_library &lt;keyword&gt;</code> — find public images/video\n\n"
+        "Public music/media sources have their own licenses. Check commercial rights before posting ads or monetized content."
+    )
+
 def menu_text_translate_i18n(other: bool, lang: str) -> str:
     if normalize_user_language(lang) == "vi":
         return menu_text_translate(other)
@@ -27618,6 +27709,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return menu_text_main_docs_i18n(lang), main_docs_keyboard(lang)
     if action == "main_image":
         return menu_text_main_image_i18n(lang), main_image_keyboard(lang)
+    if action == "main_music":
+        return menu_text_main_music_i18n(lang), music_tools_keyboard()
     if action == "main_audio":
         return menu_text_main_audio_i18n(lang), main_audio_keyboard(lang)
     if action == "translate":
@@ -27650,6 +27743,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_main_docs(), main_docs_keyboard()
     if action == "main_image":
         return menu_text_main_image(), main_image_keyboard()
+    if action == "main_music":
+        return menu_text_main_music(), music_tools_keyboard()
     if action == "main_audio":
         return menu_text_main_audio(), main_audio_keyboard()
     if action == "translate":
@@ -27820,6 +27915,19 @@ def help_text_for_user(user_id) -> str:
         "• Kết quả gồm outline, storyboard, scene prompt, prompt ảnh, caption, hashtag và CTA để bạn tự đăng.\n"
         "• Có thể dán link trực tiếp trong prompt để bot viết caption/CTA tham khảo.\n"
         "• Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n\n"
+        "<b>4A. Nhạc AI / Kho nhạc</b>\n"
+        "• <code>/music</code> hoặc <code>/music_tools</code> — mở trung tâm nhạc\n"
+        "• <code>/music_prompt &lt;mô tả&gt;</code> — tạo prompt nhạc nền\n"
+        "• <code>/music_library &lt;từ khóa&gt;</code> — tìm nhạc nền\n"
+        "• <code>/sfx_library &lt;từ khóa&gt;</code> — tìm hiệu ứng âm thanh\n"
+        "• <code>/media_library &lt;từ khóa&gt;</code> — tìm ảnh/video public\n"
+        "• <code>/play_music 1</code> — nghe thử nhạc\n"
+        "• <code>/play_sfx 1</code> — nghe thử hiệu ứng\n"
+        "• <code>/select_music 1</code> — chọn nhạc\n"
+        "• <code>/select_sfx 1</code> — chọn hiệu ứng\n"
+        "• <code>/music_policy</code> — chính sách nhạc/media\n"
+        "• Quy trình: tìm → nghe thử → chọn → gửi video/ảnh → ghép nhạc khi công cụ được mở.\n"
+        "• Nhạc/kho public có license riêng. Kiểm tra quyền thương mại trước khi đăng quảng cáo/kiếm tiền.\n\n"
         "<b>5. Báo cáo/tối ưu thủ công</b>\n"
         "• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA\n"
         "• <code>/campaign_report</code> — xuất báo cáo nội dung thủ công\n"
@@ -27868,6 +27976,10 @@ def help_text_for_user_i18n(user_id) -> str:
         "• <code>/doc_tools</code> — PDF/Word/image document tools\n"
         "• <code>/image_tools</code> — image tools and prompt packs\n"
         "• <code>/media_factory</code> — video/media content workflow\n"
+        "• <code>/music</code> or <code>/music_tools</code> — music/SFX center\n"
+        "• <code>/music_library keyword</code>, <code>/sfx_library keyword</code>, <code>/media_library keyword</code> — find music, SFX and public media\n"
+        "• <code>/play_music 1</code>, <code>/play_sfx 1</code>, <code>/select_music 1</code>, <code>/select_sfx 1</code> — preview/select search results\n"
+        "• <code>/music_policy</code> — music/media license policy\n"
         "• <code>/memory</code> — memory and reminders\n"
         "• <code>/translate en text</code> — one-time translation\n\n"
         "<b>Auto-translate</b>\n"
@@ -30334,6 +30446,33 @@ def music_policy_notice_short() -> str:
         "Khi dùng kho nhạc/media, bạn cần tự kiểm tra license trước khi đăng thương mại."
     )
 
+def music_policy_lines() -> list[str]:
+    return [
+        "📜 <b>CHÍNH SÁCH NHẠC / MEDIA TOAN AAS</b>",
+        "",
+        "<b>CHÍNH SÁCH NHẠC, ÂM THANH, MEDIA VÀ BẢN QUYỀN</b>",
+        "",
+        "1. TOAN AAS hỗ trợ tạo prompt nhạc, tìm nhạc nền, tìm hiệu ứng âm thanh, tìm media public và chuẩn bị âm thanh cho video.",
+        "2. Người dùng không được yêu cầu tạo hoặc sử dụng nhạc mô phỏng nghệ sĩ, ca sĩ, bài hát, giai điệu, beat, bản phối, giọng hát hoặc thương hiệu âm nhạc có bản quyền.",
+        "3. Không được dùng TOAN AAS để cover/remix trái phép, clone giọng, né bản quyền hoặc reup nội dung không có quyền sử dụng.",
+        "4. Các nguồn như Jamendo, Freesound, Pixabay hoặc nguồn ngoài có license riêng từng nội dung. Người dùng chịu trách nhiệm kiểm tra license, attribution, giới hạn thương mại và điều khoản nền tảng trước khi đăng.",
+        "5. TOAN AAS không cam kết mọi file từ kho ngoài đều dùng được cho mọi mục đích thương mại.",
+        "6. Công cụ tạo nhạc AI, làm rõ audio/video, ghép nhạc vào video có thể trừ Xu riêng và không thuộc dạng unlimited.",
+        "7. Nếu provider lỗi, thiếu key hoặc xử lý thất bại, bot không trừ Xu hoặc hoàn Xu nếu đã trừ trước.",
+        "8. TOAN AAS có quyền từ chối, chặn hoặc gỡ nội dung có dấu hiệu vi phạm bản quyền, giả mạo nghệ sĩ hoặc gây hiểu nhầm.",
+        "9. Người dùng tự chịu trách nhiệm pháp lý nếu sử dụng nhạc/media sai license hoặc vi phạm quyền của bên thứ ba.",
+        "",
+        "<b>Trách nhiệm người dùng</b>",
+        "• Kiểm tra license, attribution, giới hạn thương mại và điều khoản nền tảng trước khi đăng.",
+        "• Không đăng nội dung vi phạm bản quyền, giả mạo hoặc gây hiểu nhầm.",
+        "• Nếu nền tảng yêu cầu ghi nguồn, bạn phải ghi đúng nguồn theo license.",
+        "",
+        "<b>Trạng thái hiện tại</b>",
+        "• Kho nhạc/SFX/media: chỉ hoạt động nếu provider đã cấu hình và pass smoke test.",
+        "• Tạo nhạc AI, ghép nhạc video, audio/video enhance: admin-first, chưa mở public nếu chưa test PASS.",
+        "• Nếu provider lỗi hoặc thiếu key, bot chưa trừ Xu.",
+    ]
+
 def music_tools_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
@@ -30345,7 +30484,7 @@ def music_tools_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🖼 Kho media", callback_data="music_quick|media"),
         ],
         [
-            InlineKeyboardButton("📜 Chính sách nhạc", switch_inline_query_current_chat="/music_policy"),
+            InlineKeyboardButton("📜 Chính sách nhạc", callback_data="music_quick|policy"),
             InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
         ],
     ])
@@ -30484,6 +30623,13 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "media":
         await query.answer()
         return await query.message.reply_text(media_library_guide_text(), parse_mode="HTML", reply_markup=media_library_quick_keyboard())
+    if action == "policy":
+        await query.answer()
+        return await query.message.reply_text(
+            "\n".join(music_policy_lines()),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
     if action == "custom_music":
         await query.answer()
         return await query.message.reply_text("✍️ Gõ: <code>/music_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/music_library upbeat product review</code>", parse_mode="HTML")
@@ -31317,6 +31463,8 @@ async def cmd_music_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Dùng để tìm nhạc nền, hiệu ứng âm thanh, tạo prompt nhạc và chuẩn bị âm thanh cho video.",
         "",
+        "<code>/music</code> và <code>/music_tools</code> đều mở trung tâm này.",
+        "",
         "<b>Bạn có thể làm gì?</b>",
         "",
         "🎼 <b>1. Tạo prompt nhạc nền</b>",
@@ -31358,32 +31506,7 @@ async def cmd_music_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=music_tools_keyboard(), disable_web_page_preview=True)
 
 async def cmd_music_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lines = [
-        "📜 <b>CHÍNH SÁCH NHẠC / MEDIA TOAN AAS</b>",
-        "",
-        "<b>CHÍNH SÁCH NHẠC, ÂM THANH, MEDIA VÀ BẢN QUYỀN</b>",
-        "",
-        "1. TOAN AAS hỗ trợ tạo prompt nhạc, tìm nhạc nền, tìm hiệu ứng âm thanh, tìm media public và chuẩn bị âm thanh cho video.",
-        "2. Người dùng không được yêu cầu tạo hoặc sử dụng nhạc mô phỏng nghệ sĩ, ca sĩ, bài hát, giai điệu, beat, bản phối, giọng hát hoặc thương hiệu âm nhạc có bản quyền.",
-        "3. Không được dùng TOAN AAS để cover/remix trái phép, clone giọng, né bản quyền hoặc reup nội dung không có quyền sử dụng.",
-        "4. Các nguồn như Jamendo, Freesound, Pixabay hoặc nguồn ngoài có license riêng từng nội dung. Người dùng chịu trách nhiệm kiểm tra license, attribution, giới hạn thương mại và điều khoản nền tảng trước khi đăng.",
-        "5. TOAN AAS không cam kết mọi file từ kho ngoài đều dùng được cho mọi mục đích thương mại.",
-        "6. Công cụ tạo nhạc AI, làm rõ audio/video, ghép nhạc vào video có thể trừ Xu riêng và không thuộc dạng unlimited.",
-        "7. Nếu provider lỗi, thiếu key hoặc xử lý thất bại, bot không trừ Xu hoặc hoàn Xu nếu đã trừ trước.",
-        "8. TOAN AAS có quyền từ chối, chặn hoặc gỡ nội dung có dấu hiệu vi phạm bản quyền, giả mạo nghệ sĩ hoặc gây hiểu nhầm.",
-        "9. Người dùng tự chịu trách nhiệm pháp lý nếu sử dụng nhạc/media sai license hoặc vi phạm quyền của bên thứ ba.",
-        "",
-        "<b>Trách nhiệm người dùng</b>",
-        "• Kiểm tra license, attribution, giới hạn thương mại và điều khoản nền tảng trước khi đăng.",
-        "• Không đăng nội dung vi phạm bản quyền, giả mạo hoặc gây hiểu nhầm.",
-        "• Nếu nền tảng yêu cầu ghi nguồn, bạn phải ghi đúng nguồn theo license.",
-        "",
-        "<b>Trạng thái hiện tại</b>",
-        "• Kho nhạc/SFX/media: chỉ hoạt động nếu provider đã cấu hình và pass smoke test.",
-        "• Tạo nhạc AI, ghép nhạc video, audio/video enhance: admin-first, chưa mở public nếu chưa test PASS.",
-        "• Nếu provider lỗi hoặc thiếu key, bot chưa trừ Xu.",
-    ]
-    await reply_html_lines(update, lines)
+    await reply_html_lines(update, music_policy_lines())
 
 async def cmd_music_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     desc = " ".join(context.args or []).strip()
@@ -52798,6 +52921,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("audio_enhance", cmd_audio_enhance))
     tg_app.add_handler(CommandHandler("real_video", cmd_real_video))
     tg_app.add_handler(CommandHandler("avatar_video", cmd_avatar_video))
+    tg_app.add_handler(CommandHandler("music", cmd_music_tools))
     tg_app.add_handler(CommandHandler("music_tools", cmd_music_tools))
     tg_app.add_handler(CommandHandler("music_prompt", cmd_music_prompt))
     tg_app.add_handler(CommandHandler("music_library", cmd_music_library))
