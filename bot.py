@@ -30668,6 +30668,7 @@ MEDIA_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 LAST_SFX_RESULTS: dict[int, dict] = {}
 LAST_MUSIC_RESULTS: dict[int, dict] = {}
 LAST_MEDIA_RESULTS: dict[int, dict] = {}
+LAST_AUDIO_LINK: dict[int, dict] = {}
 SELECTED_MUSIC: dict[int, dict] = {}
 SELECTED_SFX: dict[int, dict] = {}
 SELECTED_MEDIA: dict[int, dict] = {}
@@ -30762,19 +30763,6 @@ def media_preview_caption(item: dict) -> str:
 def media_preview_failure_text(item: dict, reason: str = "") -> str:
     source_url = str(item.get("source_url") or "").strip()
     preview_url = str(item.get("preview_url") or "").strip()
-    provider = str(item.get("provider") or "").lower()
-    reason_lower = str(reason or "").lower()
-    if provider == "jamendo" and any(token in reason_lower for token in ("timeout", "timedout", "readtimeout", "connecttimeout", "pooltimeout")):
-        lines = [
-            "⚠️ Jamendo preview tải chậm nên chưa gửi được audio trực tiếp.",
-            "Bạn có thể mở link nghe thử bên dưới hoặc chọn bài khác.",
-        ]
-        if source_url:
-            lines.append(f"Nguồn: {source_url}")
-        if preview_url:
-            lines.append(f"Preview: {preview_url}")
-        lines.append("Bot chưa trừ Xu.")
-        return "\n".join(lines)
     lines = [
         "⚠️ Không gửi được file nghe thử trực tiếp lúc này.",
         "Bạn có thể mở link nguồn hoặc thử kết quả khác.",
@@ -30786,22 +30774,7 @@ def media_preview_failure_text(item: dict, reason: str = "") -> str:
     lines.append("Bot chưa trừ Xu.")
     return "\n".join(lines)
 
-async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
-    user_id = update.effective_user.id if update.effective_user else 0
-    item, error = get_media_preview_item(kind, user_id, index_text)
-    chat_id = update.effective_chat.id if update.effective_chat else None
-    if not chat_id:
-        return
-    if error == "expired":
-        return await context.bot.send_message(
-            chat_id=chat_id,
-            text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.",
-        )
-    if error or not item:
-        return await context.bot.send_message(
-            chat_id=chat_id,
-            text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.",
-        )
+async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, item: dict):
     preview_url = str(item.get("preview_url") or "").strip()
     if not is_valid_http_url(preview_url):
         return await context.bot.send_message(
@@ -30818,7 +30791,8 @@ async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT
                 if res.status_code != 200:
                     raise RuntimeError(f"preview_http_{res.status_code}")
                 content_type = (res.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-                if not (content_type == "audio/mpeg" or content_type.startswith("audio/")):
+                url_has_audio_ext = urlparse(preview_url).path.lower().endswith(AUDIO_LINK_EXTENSIONS)
+                if not (content_type == "audio/mpeg" or content_type.startswith("audio/") or url_has_audio_ext):
                     raise RuntimeError(f"preview_content_type_{content_type or 'missing'}")
                 content_length = int(res.headers.get("content-length") or 0)
                 if content_length and content_length > MEDIA_PREVIEW_MAX_BYTES:
@@ -30860,6 +30834,24 @@ async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT
                 os.remove(tmp_path)
             except Exception:
                 pass
+
+async def send_media_preview_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
+    user_id = update.effective_user.id if update.effective_user else 0
+    item, error = get_media_preview_item(kind, user_id, index_text)
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
+        return
+    if error == "expired":
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.",
+        )
+    if error or not item:
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.",
+        )
+    return await send_audio_item_to_chat(context, chat_id, item)
 
 async def send_media_preview_source(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
     user_id = update.effective_user.id if update.effective_user else 0
@@ -30975,6 +30967,78 @@ async def cmd_select_sfx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     index_text = (context.args or [""])[0]
     return await select_media_preview(update, context, "sfx", index_text)
 
+def audio_link_preview_item(url: str) -> dict:
+    return {
+        "provider": "User link",
+        "title": "Nhạc từ link bạn gửi",
+        "author": "User upload/link",
+        "duration": "-",
+        "license": "Người dùng tự chịu trách nhiệm quyền sử dụng",
+        "source_url": str(url or "").strip(),
+        "preview_url": str(url or "").strip(),
+        "source": "user_link",
+    }
+
+async def cmd_play_link_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else 0
+    link_state = get_active_audio_link(user_id)
+    if not link_state:
+        return await update.message.reply_text(
+            "⚠️ Chưa có link audio gần đây. Vui lòng gửi link MP3/WAV/M4A hoặc tìm bằng /music_library."
+        )
+    return await send_audio_item_to_chat(context, update.effective_chat.id, audio_link_preview_item(link_state.get("url") or ""))
+
+async def cmd_select_link_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else 0
+    link_state = get_active_audio_link(user_id)
+    if not link_state:
+        return await update.message.reply_text("⚠️ Chưa có link audio gần đây.")
+    selected = audio_link_preview_item(link_state.get("url") or "")
+    selected["created_at"] = time.time()
+    SELECTED_MUSIC[int(user_id)] = selected
+    return await update.message.reply_text(
+        "✅ Đã chọn nhạc từ link bạn gửi.\n\n"
+        "Bạn có thể:\n"
+        "• Gửi video rồi dùng /add_music\n"
+        "• Gửi ảnh rồi dùng /image_to_music_video\n"
+        "• Dùng /music_library để chọn nhạc khác\n\n"
+        "📜 Bạn cần đảm bảo có quyền sử dụng nhạc này trước khi đăng thương mại.\n\n"
+        "Bot chưa trừ Xu."
+    )
+
+async def cmd_select_uploaded_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else 0
+    audio_state = get_recent_media_state(LAST_USER_AUDIO, user_id)
+    if not audio_state:
+        return await update.message.reply_text("⚠️ Chưa có file audio gần đây.")
+    selected = {
+        "provider": "Uploaded audio",
+        "title": audio_state.get("file_name") or "Nhạc người dùng gửi",
+        "author": "User upload",
+        "duration": str(audio_state.get("duration") or "-"),
+        "license": "Người dùng tự chịu trách nhiệm quyền sử dụng",
+        "source_url": "",
+        "preview_url": "",
+        "file_id": audio_state.get("file_id") or "",
+        "file_unique_id": audio_state.get("file_unique_id") or "",
+        "file_type": audio_state.get("file_type") or "audio",
+        "mime_type": audio_state.get("mime_type") or "",
+        "file_name": audio_state.get("file_name") or "",
+        "file_size": int(audio_state.get("file_size") or 0),
+        "source": "uploaded_audio",
+        "created_at": time.time(),
+    }
+    SELECTED_MUSIC[int(user_id)] = selected
+    return await update.message.reply_text(
+        "✅ Đã chọn file âm thanh bạn gửi làm nhạc riêng.\n\n"
+        "Bạn có thể:\n"
+        "• Gửi video rồi dùng /add_music\n"
+        "• Gửi ảnh rồi dùng /image_to_music_video\n"
+        "• Dùng /music_library để chọn nhạc khác\n\n"
+        "📜 Bạn cần đảm bảo có quyền sử dụng file âm thanh này trước khi đăng thương mại.\n\n"
+        "Bot chưa trừ Xu."
+    )
+
 MEDIA_LINK_DOMAINS = (
     "cdn.freesound.org",
     "freesound.org",
@@ -30984,6 +31048,55 @@ MEDIA_LINK_DOMAINS = (
     "pixabay.com",
     "cdn.pixabay.com",
 )
+AUDIO_LINK_EXTENSIONS = (".mp3", ".wav", ".m4a", ".ogg")
+
+def extract_first_http_url(text: str) -> str:
+    for token in str(text or "").strip().split():
+        value = token.strip().strip("()[]{}<>\"'").rstrip(".,;")
+        if value.lower().startswith(("http://", "https://")):
+            return value
+    match = re.search(r"https?://[^\s<>\"]+", str(text or ""), flags=re.I)
+    return match.group(0).rstrip(").,;]}>") if match else ""
+
+def is_audio_link_url(url: str) -> bool:
+    value = str(url or "").strip().lower().rstrip(").,;]}>")
+    if not value.startswith(("http://", "https://")):
+        return False
+    path = urlparse(value).path.lower()
+    if path.endswith(AUDIO_LINK_EXTENSIONS):
+        return True
+    return any(domain in value for domain in ("cdn.freesound.org", "storage.jamendo.com", "prod-1.storage.jamendo.com"))
+
+def get_active_audio_link(user_id) -> dict:
+    item = LAST_AUDIO_LINK.get(int(user_id or 0)) or {}
+    if not item:
+        return {}
+    if time.time() - float(item.get("created_at") or 0) > MEDIA_PREVIEW_TTL_SECONDS:
+        LAST_AUDIO_LINK.pop(int(user_id or 0), None)
+        return {}
+    return dict(item)
+
+def save_audio_link(user_id, url: str):
+    if not user_id or not is_valid_http_url(url):
+        return
+    LAST_AUDIO_LINK[int(user_id)] = {
+        "url": str(url).strip(),
+        "created_at": time.time(),
+        "source": "user_link",
+    }
+
+async def reply_audio_link_received(update: Update, url: str):
+    save_audio_link(update.effective_user.id if update.effective_user else 0, url)
+    return await update.message.reply_text(
+        "🎧 Đã nhận link audio/nhạc.\n\n"
+        "Bạn có thể:\n"
+        "• /play_link_audio — nghe thử link này trong Telegram nếu tải được\n"
+        "• /select_link_audio — chọn link này làm nhạc riêng\n"
+        "• Gửi video rồi dùng /add_music khi công cụ được mở\n"
+        "• /music_library <từ khóa> để tìm nhạc khác\n\n"
+        "Bot chưa trừ Xu.",
+        disable_web_page_preview=True,
+    )
 
 def is_media_preview_url_text(text: str) -> bool:
     lowered = (text or "").strip().lower()
@@ -31659,6 +31772,11 @@ async def resolve_audio_source(update: Update, context: ContextTypes.DEFAULT_TYP
             selected["source"] = "selected_music"
             selected["file_type"] = "url_audio"
             selected["mime_type"] = "audio/mpeg"
+            return selected
+        if selected and selected.get("file_id"):
+            selected["source"] = "selected_music_upload"
+            selected["file_type"] = selected.get("file_type") or "audio"
+            selected["mime_type"] = selected.get("mime_type") or "audio/mpeg"
             return selected
     source = get_recent_media_state(LAST_USER_AUDIO, uid)
     if source:
@@ -52248,10 +52366,11 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             "✅ Đã nhận file âm thanh.\n\n"
             "Bạn có thể dùng:\n"
-            "• /add_music — ghép nhạc này vào video, admin test\n"
-            "• /add_voice_to_video — ghép giọng nói/audio vào video, admin test\n"
+            "• /select_uploaded_audio — chọn file này làm nhạc riêng\n"
+            "• Gửi video rồi dùng /add_music khi công cụ được mở\n"
             "• /audio_enhance — làm rõ/cân âm lượng audio\n"
             "• /translate_voice — bóc băng rồi chọn ngôn ngữ dịch\n\n"
+            "📜 Bạn cần đảm bảo có quyền sử dụng file âm thanh này.\n\n"
             "Bot chưa trừ Xu."
         )
     await update.message.reply_text(audio_voice_received_text(), reply_markup=voice_translation_action_keyboard())
@@ -52275,9 +52394,10 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
         return await update.message.reply_text(
             "✅ Đã nhận file âm thanh.\n\n"
             "Bạn có thể dùng:\n"
-            "• /add_music — ghép nhạc này vào video, admin test\n"
-            "• /add_voice_to_video — ghép giọng nói/audio vào video, admin test\n"
-            "• /audio_enhance — làm rõ/cân âm lượng audio\n\n"
+            "• /select_uploaded_audio — chọn file này làm nhạc riêng\n"
+            "• Gửi video rồi dùng /add_music khi công cụ được mở\n"
+            "• /audio_enhance — làm rõ/cân âm lượng audio nếu công cụ bật\n\n"
+            "📜 Bạn cần đảm bảo có quyền sử dụng file âm thanh này.\n\n"
             "Bot chưa trừ Xu."
         )
     await update.message.reply_text(audio_voice_received_text(), reply_markup=voice_translation_action_keyboard())
@@ -52296,6 +52416,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text.startswith("/"):
         return await handle_unknown_or_unmatched_command(update, context)
+
+    audio_url = extract_first_http_url(text)
+    if audio_url and is_audio_link_url(audio_url):
+        return await reply_audio_link_received(update, audio_url)
 
     if is_media_preview_url_text(text):
         return await reply_media_preview_url_hint(update)
@@ -52680,8 +52804,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("sfx_library", cmd_sfx_library))
     tg_app.add_handler(CommandHandler("play_sfx", cmd_play_sfx))
     tg_app.add_handler(CommandHandler("play_music", cmd_play_music))
+    tg_app.add_handler(CommandHandler("play_link_audio", cmd_play_link_audio))
     tg_app.add_handler(CommandHandler("select_sfx", cmd_select_sfx))
     tg_app.add_handler(CommandHandler("select_music", cmd_select_music))
+    tg_app.add_handler(CommandHandler("select_link_audio", cmd_select_link_audio))
+    tg_app.add_handler(CommandHandler("select_uploaded_audio", cmd_select_uploaded_audio))
     tg_app.add_handler(CommandHandler("suggest_music", cmd_suggest_music))
     tg_app.add_handler(CommandHandler("media_library", cmd_media_library))
     tg_app.add_handler(CommandHandler("play_media", cmd_play_media))
