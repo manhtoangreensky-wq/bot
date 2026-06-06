@@ -23607,6 +23607,10 @@ def get_last_user_file(user_id) -> dict:
 LAST_MEDIA_CACHE_TTL_SECONDS = 120
 LAST_MEDIA_BY_USER: dict = {}
 LAST_AUDIO_FILE = LAST_MEDIA_BY_USER
+MEDIA_FACTORY_STATE_TTL_SECONDS = 10 * 60
+LAST_USER_AUDIO: dict[int, dict] = {}
+LAST_USER_VIDEO: dict[int, dict] = {}
+LAST_USER_IMAGE: dict[int, dict] = {}
 
 def is_audio_timeout_error(error) -> bool:
     value = f"{type(error).__name__}: {error}".lower()
@@ -23643,6 +23647,65 @@ def media_content_type(media, file_type: str = "") -> str:
     if not content_type:
         content_type = "audio/ogg" if file_type == "voice" else "application/octet-stream"
     return content_type
+
+def cache_recent_media_state(update: Update) -> str:
+    try:
+        message = update.message
+        user_id = int(update.effective_user.id) if update.effective_user else 0
+        if not message or not user_id:
+            return ""
+        created = {"created_at": time.time(), "created_at_text": now_text()}
+        if getattr(message, "photo", None):
+            photo = message.photo[-1]
+            LAST_USER_IMAGE[user_id] = {
+                **created,
+                "file_id": str(photo.file_id or ""),
+                "file_size": int(photo.file_size or 0),
+                "mime_type": "image/jpeg",
+                "file_name": "telegram_photo.jpg",
+            }
+            return "image"
+        media, file_type = message_media_candidate(message)
+        if not media:
+            return ""
+        info = {
+            **created,
+            "file_id": str(getattr(media, "file_id", "") or ""),
+            "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
+            "file_type": file_type,
+            "mime_type": media_content_type(media, file_type),
+            "file_name": str(getattr(media, "file_name", "") or ""),
+            "file_size": int(getattr(media, "file_size", 0) or 0),
+            "duration": int(getattr(media, "duration", 0) or 0),
+        }
+        mime = info.get("mime_type") or ""
+        if file_type == "video" or mime.startswith("video/"):
+            LAST_USER_VIDEO[user_id] = info
+            return "video"
+        if file_type in {"voice", "audio"} or mime.startswith("audio/"):
+            LAST_USER_AUDIO[user_id] = info
+            return "audio"
+    except Exception as e:
+        logger.warning(f"media factory state cache failed: {e}")
+    return ""
+
+def get_recent_media_state(store: dict[int, dict], user_id) -> dict:
+    item = store.get(int(user_id or 0)) or {}
+    if not item:
+        return {}
+    if time.time() - float(item.get("created_at") or 0) > MEDIA_FACTORY_STATE_TTL_SECONDS:
+        store.pop(int(user_id or 0), None)
+        return {}
+    return dict(item)
+
+def get_selected_media_state(store: dict[int, dict], user_id) -> dict:
+    item = store.get(int(user_id or 0)) or {}
+    if not item:
+        return {}
+    if time.time() - float(item.get("created_at") or 0) > MEDIA_PREVIEW_TTL_SECONDS:
+        store.pop(int(user_id or 0), None)
+        return {}
+    return dict(item)
 
 def remember_last_media(update: Update):
     try:
@@ -30446,6 +30509,8 @@ MEDIA_PREVIEW_TTL_SECONDS = 600
 MEDIA_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 LAST_SFX_RESULTS: dict[int, dict] = {}
 LAST_MUSIC_RESULTS: dict[int, dict] = {}
+SELECTED_MUSIC: dict[int, dict] = {}
+SELECTED_SFX: dict[int, dict] = {}
 
 def jamendo_preview_item(item: dict) -> dict:
     return {
@@ -30502,7 +30567,8 @@ def media_preview_keyboard(kind: str, items: list[dict]) -> InlineKeyboardMarkup
         return None
     label = "SFX" if kind == "sfx" else "nhạc"
     rows = [[
-        InlineKeyboardButton(f"▶️ Nghe {label} {idx}", callback_data=f"play_{kind}|{idx}")
+        InlineKeyboardButton(f"▶️ Nghe {label} {idx}", callback_data=f"play_{kind}|{idx}"),
+        InlineKeyboardButton(f"✅ Chọn {idx}", callback_data=f"select_{kind}|{idx}"),
     ] for idx, _ in enumerate(available, start=1)]
     source_row = []
     for idx, item in enumerate(available[:3], start=1):
@@ -30636,6 +30702,46 @@ async def send_media_preview_license(update: Update, context: ContextTypes.DEFAU
         ),
     )
 
+def selected_media_license_warning(item: dict) -> str:
+    license_text = str(item.get("license") or "").lower()
+    if any(marker in license_text for marker in ("by-nc", "noncommercial", "nc")):
+        return "⚠️ Bản này có dấu hiệu giới hạn phi thương mại. Không nên dùng cho quảng cáo/kiếm tiền nếu chưa có quyền phù hợp."
+    if "cc0" in license_text or "public domain" in license_text:
+        return "✅ License CC0/public domain theo nguồn, nhưng vẫn nên kiểm tra trang nguồn trước khi dùng."
+    return "📜 Nhạc/kho public có license riêng. Hãy kiểm tra quyền sử dụng thương mại, attribution và điều khoản nền tảng trước khi đăng quảng cáo/kiếm tiền."
+
+async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
+    user_id = update.effective_user.id if update.effective_user else 0
+    item, error = get_media_preview_item(kind, user_id, index_text)
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
+        return
+    if error == "expired":
+        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Kết quả nghe thử đã hết hạn. Vui lòng tìm lại bằng /sfx_library hoặc /music_library.")
+    if error or not item:
+        return await context.bot.send_message(chat_id=chat_id, text="⚠️ Không tìm thấy kết quả số này. Vui lòng chọn số từ danh sách vừa tìm.")
+    selected = dict(item)
+    selected["created_at"] = time.time()
+    if kind == "sfx":
+        SELECTED_SFX[int(user_id)] = selected
+        noun = "SFX"
+    else:
+        SELECTED_MUSIC[int(user_id)] = selected
+        noun = "nhạc"
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            f"✅ Đã chọn {noun}: {selected.get('title') or 'Untitled'}\n\n"
+            "Bạn có thể:\n"
+            "• Gửi video rồi dùng /add_music\n"
+            "• Gửi ảnh rồi dùng /image_to_music_video\n"
+            "• Gửi voice/audio rồi dùng /add_voice_to_video nếu cần\n\n"
+            f"{selected_media_license_warning(selected)}\n\n"
+            "Bot chưa trừ Xu."
+        ),
+        disable_web_page_preview=True,
+    )
+
 async def handle_media_preview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
@@ -30645,6 +30751,8 @@ async def handle_media_preview_callback(update: Update, context: ContextTypes.DE
     kind = "sfx" if "_sfx" in action or action.endswith("_sfx") else "music"
     if action.startswith("play_"):
         return await send_media_preview_audio(update, context, kind, index_text)
+    if action.startswith("select_"):
+        return await select_media_preview(update, context, kind, index_text)
     if action.startswith("open_"):
         return await send_media_preview_source(update, context, kind, index_text)
     return await send_media_preview_license(update, context, kind, index_text)
@@ -30656,6 +30764,14 @@ async def cmd_play_sfx(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_play_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
     index_text = (context.args or [""])[0]
     return await send_media_preview_audio(update, context, "music", index_text)
+
+async def cmd_select_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    index_text = (context.args or [""])[0]
+    return await select_media_preview(update, context, "music", index_text)
+
+async def cmd_select_sfx(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    index_text = (context.args or [""])[0]
+    return await select_media_preview(update, context, "sfx", index_text)
 
 def is_media_preview_url_text(text: str) -> bool:
     raw = (text or "").strip()
@@ -30669,18 +30785,21 @@ def is_media_preview_url_text(text: str) -> bool:
     path = parsed.path or ""
     if host == "cdn.freesound.org":
         return True
-    if host in {"freesound.org", "www.freesound.org"} and path.startswith("/people"):
+    if host in {"freesound.org", "www.freesound.org"}:
         return True
     if re.fullmatch(r"prod-[a-z0-9-]+\.storage\.jamendo\.com", host):
         return True
-    return host in {"jamendo.com", "www.jamendo.com"} and path.startswith("/track")
+    if host in {"jamendo.com", "www.jamendo.com"}:
+        return True
+    return host in {"pixabay.com", "www.pixabay.com", "cdn.pixabay.com"}
 
 async def reply_media_preview_url_hint(update: Update):
     return await update.message.reply_text(
-        "🎧 Đây là link nghe thử từ kho nhạc/SFX.\n"
-        "Bạn có thể bấm nút nghe thử trong kết quả tìm kiếm, hoặc dùng:\n"
+        "🎧 Đây là link media/kho nhạc/SFX.\n"
+        "Bạn có thể bấm nút nghe thử/chọn nhạc trong kết quả tìm kiếm, hoặc dùng:\n"
         "• /play_sfx 1\n"
-        "• /play_music 1\n\n"
+        "• /play_music 1\n"
+        "• /select_music 1\n\n"
         "Bot chưa trừ Xu."
     )
 
@@ -30929,19 +31048,318 @@ async def cmd_music_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⚠️ Tạo bài hát AI đang admin test/chưa mở public. Bot chưa trừ Xu.")
     return await cmd_music_bg(update, context)
 
-async def cmd_add_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("⚠️ Ghép nhạc vào video đang admin test/chưa mở public. Bot chưa trừ Xu.")
-    await update.message.reply_text(
-        "🎬 <b>Ghép nhạc vào video — ADMIN TEST</b>\n\n"
-        "Flow này chưa mở production trong bot chính.\n"
-        "Yêu cầu tương lai: kiểm tra license nhạc, file video, âm lượng, ducking voiceover, export và audit log.\n"
-        "Không gọi provider, không trừ Xu.",
+def suggest_music_query(description: str) -> str:
+    value = (description or "").lower()
+    if any(token in value for token in ("bán hàng", "ban hang", "review", "product", "sản phẩm", "san pham")):
+        return "upbeat product review"
+    if any(token in value for token in ("công nghệ", "cong nghe", "app", "ai", "software", "tech")):
+        return "futuristic technology background"
+    if any(token in value for token in ("cảm xúc", "cam xuc", "câu chuyện", "cau chuyen", "story", "inspiring")):
+        return "inspiring emotional background"
+    if any(token in value for token in ("cinematic", "trailer", "mạnh mẽ", "manh me", "epic")):
+        return "cinematic trailer hit"
+    if any(token in value for token in ("tiktok", "trend", "viral", "năng lượng", "nang luong")):
+        return "upbeat energetic short video"
+    return "upbeat product review"
+
+def suggest_music_style_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ Vui tươi / bán hàng", callback_data="suggest_music|sales")],
+        [InlineKeyboardButton("💼 Công nghệ / hiện đại", callback_data="suggest_music|tech")],
+        [InlineKeyboardButton("🎬 Cinematic / mạnh mẽ", callback_data="suggest_music|cinematic")],
+        [InlineKeyboardButton("🌿 Nhẹ nhàng / review", callback_data="suggest_music|review")],
+        [InlineKeyboardButton("🔥 Trend TikTok / năng lượng cao", callback_data="suggest_music|trend")],
+    ])
+
+SUGGEST_MUSIC_PRESET_QUERIES = {
+    "sales": "upbeat product review",
+    "tech": "futuristic technology background",
+    "cinematic": "cinematic trailer hit",
+    "review": "light inspiring review background",
+    "trend": "upbeat energetic short video",
+}
+
+async def reply_suggest_music(update: Update, context: ContextTypes.DEFAULT_TYPE, description: str):
+    desc = (description or "").strip()
+    if not desc and get_recent_media_state(LAST_USER_VIDEO, update.effective_user.id if update.effective_user else 0):
+        return await update.effective_message.reply_text(
+            "🎵 Bạn muốn video theo phong cách nào?",
+            reply_markup=suggest_music_style_keyboard(),
+        )
+    query = suggest_music_query(desc)
+    await update.effective_message.reply_text(
+        "🎵 <b>TOAN AAS gợi ý nhạc nền phù hợp</b>\n\n"
+        f"• Từ khóa tìm kiếm: <code>{html.escape(query)}</code>\n\n"
+        f"Dùng: <code>/music_library {html.escape(query)}</code>\n"
+        "Sau khi có kết quả, bấm ▶️ để nghe thử hoặc ✅ để chọn nhạc.\n\n"
+        "Bot chưa trừ Xu.",
         parse_mode="HTML",
     )
 
+async def handle_suggest_music_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    preset = (query.data or "").split("|", 1)[1]
+    keyword = SUGGEST_MUSIC_PRESET_QUERIES.get(preset, "upbeat product review")
+    await query.message.reply_text(
+        "🎵 <b>TOAN AAS gợi ý nhạc nền phù hợp</b>\n\n"
+        f"• Từ khóa tìm kiếm: <code>{html.escape(keyword)}</code>\n\n"
+        f"Dùng: <code>/music_library {html.escape(keyword)}</code>\n"
+        "Sau đó bấm ▶️ nghe thử hoặc ✅ chọn nhạc.\n\n"
+        "Bot chưa trừ Xu.",
+        parse_mode="HTML",
+    )
+
+def reply_media_candidate(message, wanted: set[str]) -> dict:
+    if not message:
+        return {}
+    if "image" in wanted and getattr(message, "photo", None):
+        photo = message.photo[-1]
+        return {"file_id": str(photo.file_id or ""), "mime_type": "image/jpeg", "file_name": "telegram_photo.jpg", "file_size": int(photo.file_size or 0), "file_type": "image"}
+    media, file_type = message_media_candidate(message)
+    if not media:
+        return {}
+    mime = media_content_type(media, file_type)
+    category = "video" if file_type == "video" or mime.startswith("video/") else "audio"
+    if category not in wanted:
+        return {}
+    return {
+        "file_id": str(getattr(media, "file_id", "") or ""),
+        "mime_type": mime,
+        "file_name": str(getattr(media, "file_name", "") or ""),
+        "file_size": int(getattr(media, "file_size", 0) or 0),
+        "file_type": category,
+        "duration": int(getattr(media, "duration", 0) or 0),
+    }
+
+async def telegram_file_to_path(context: ContextTypes.DEFAULT_TYPE, file_id: str, path: str):
+    tg_file = await context.bot.get_file(file_id)
+    data = bytes(await tg_file.download_as_bytearray())
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+async def url_to_path(url: str, path: str, max_bytes: int = MEDIA_PREVIEW_MAX_BYTES):
+    async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
+        res = await client.get(url)
+    if res.status_code >= 400:
+        raise RuntimeError(f"media_url_http_{res.status_code}")
+    data = bytes(res.content or b"")
+    if not data:
+        raise RuntimeError("media_url_empty")
+    if len(data) > max_bytes:
+        raise RuntimeError("media_url_too_large")
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+async def resolve_video_source(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict:
+    reply = update.message.reply_to_message if update.message else None
+    source = reply_media_candidate(reply, {"video"})
+    if source:
+        source["source"] = "reply"
+        return source
+    source = get_recent_media_state(LAST_USER_VIDEO, update.effective_user.id if update.effective_user else 0)
+    if source:
+        source["source"] = "last_video"
+    return source
+
+async def resolve_image_source(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict:
+    reply = update.message.reply_to_message if update.message else None
+    source = reply_media_candidate(reply, {"image"})
+    if source:
+        source["source"] = "reply"
+        return source
+    source = get_recent_media_state(LAST_USER_IMAGE, update.effective_user.id if update.effective_user else 0)
+    if source:
+        source["source"] = "last_image"
+    return source
+
+async def resolve_audio_source(update: Update, context: ContextTypes.DEFAULT_TYPE, prefer_selected: bool = True) -> dict:
+    reply = update.message.reply_to_message if update.message else None
+    source = reply_media_candidate(reply, {"audio"})
+    if source:
+        source["source"] = "reply"
+        return source
+    uid = update.effective_user.id if update.effective_user else 0
+    if prefer_selected:
+        selected = get_selected_media_state(SELECTED_MUSIC, uid)
+        if selected and selected.get("preview_url"):
+            selected["source"] = "selected_music"
+            selected["file_type"] = "url_audio"
+            selected["mime_type"] = "audio/mpeg"
+            return selected
+    source = get_recent_media_state(LAST_USER_AUDIO, uid)
+    if source:
+        source["source"] = "last_audio"
+    return source
+
+def ffmpeg_status_text() -> str:
+    return "yes" if shutil.which("ffmpeg") else "no"
+
+async def run_ffmpeg_command(cmd: list[str], timeout: float = 120.0) -> tuple[bool, str]:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode == 0:
+            return True, "ok"
+        detail = (stderr or stdout or b"").decode("utf-8", errors="ignore")[-500:]
+        return False, detail or f"ffmpeg_return_{proc.returncode}"
+    except asyncio.TimeoutError:
+        return False, "ffmpeg_timeout"
+    except Exception as e:
+        return False, type(e).__name__
+
+def media_temp_suffix(info: dict, default_suffix: str) -> str:
+    name = str(info.get("file_name") or "")
+    mime = str(info.get("mime_type") or "")
+    suffix = os.path.splitext(name)[1] or mimetypes.guess_extension(mime) or default_suffix
+    if not suffix.startswith(".") or len(suffix) > 8:
+        suffix = default_suffix
+    return suffix
+
+async def materialize_media_source(context: ContextTypes.DEFAULT_TYPE, info: dict, directory: str, default_suffix: str) -> str:
+    suffix = media_temp_suffix(info, default_suffix)
+    path = os.path.join(directory, f"input_{abs(hash(str(info.get('source', 'media'))))}{suffix}")
+    if info.get("file_type") == "url_audio" or info.get("preview_url"):
+        return await url_to_path(str(info.get("preview_url") or ""), path)
+    return await telegram_file_to_path(context, str(info.get("file_id") or ""), path)
+
+async def render_video_with_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, video_info: dict, audio_info: dict, mode: str):
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return await update.message.reply_text("⚠️ Server chưa có ffmpeg. Admin cần cài ffmpeg để ghép nhạc/voice vào video. Bot chưa trừ Xu.")
+    if not video_info:
+        return await update.message.reply_text("⚠️ Chưa có video. Hãy gửi video hoặc reply video rồi dùng lệnh này. Bot chưa trừ Xu.")
+    if not audio_info:
+        return await update.message.reply_text("⚠️ Chưa có audio/nhạc. Hãy chọn nhạc bằng /select_music hoặc gửi audio rồi dùng lại lệnh. Bot chưa trừ Xu.")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        video_path = await materialize_media_source(context, video_info, tmpdir, ".mp4")
+        audio_path = await materialize_media_source(context, audio_info, tmpdir, ".mp3")
+        out_path = os.path.join(tmpdir, f"toan_aas_{mode}.mp4")
+        cmd = [
+            ffmpeg, "-y",
+            "-i", video_path,
+            "-i", audio_path,
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-shortest",
+            out_path,
+        ]
+        ok, detail = await run_ffmpeg_command(cmd)
+        if not ok or not os.path.exists(out_path):
+            safe_detail = html.escape(str(detail or "ffmpeg_failed")[:300])
+            return await update.message.reply_text(
+                "❌ Render video chưa thành công trong admin test.\n"
+                f"Admin detail: <code>{safe_detail}</code>\n\n"
+                "Bot chưa trừ Xu.",
+                parse_mode="HTML",
+            )
+        caption = "✅ Đã ghép nhạc vào video." if mode == "add_music" else "✅ Đã ghép voice/audio vào video."
+        with open(out_path, "rb") as f:
+            await context.bot.send_video(chat_id=update.effective_chat.id, video=f, caption=f"{caption}\nBot chưa trừ Xu trong admin test.")
+
+async def render_image_music_video(update: Update, context: ContextTypes.DEFAULT_TYPE, image_info: dict, audio_info: dict):
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return await update.message.reply_text("⚠️ Server chưa có ffmpeg. Admin cần cài ffmpeg để tạo video từ ảnh + nhạc. Bot chưa trừ Xu.")
+    if not image_info:
+        return await update.message.reply_text("⚠️ Chưa có ảnh. Hãy gửi ảnh hoặc reply ảnh rồi dùng /image_to_music_video. Bot chưa trừ Xu.")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        image_path = await materialize_media_source(context, image_info, tmpdir, ".jpg")
+        out_path = os.path.join(tmpdir, "toan_aas_image_music.mp4")
+        if audio_info:
+            audio_path = await materialize_media_source(context, audio_info, tmpdir, ".mp3")
+            cmd = [
+                ffmpeg, "-y",
+                "-loop", "1",
+                "-i", image_path,
+                "-i", audio_path,
+                "-t", "30",
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-shortest",
+                out_path,
+            ]
+        else:
+            cmd = [
+                ffmpeg, "-y",
+                "-loop", "1",
+                "-t", "10",
+                "-i", image_path,
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+                "-c:v", "libx264",
+                out_path,
+            ]
+        ok, detail = await run_ffmpeg_command(cmd)
+        if not ok or not os.path.exists(out_path):
+            safe_detail = html.escape(str(detail or "ffmpeg_failed")[:300])
+            return await update.message.reply_text(
+                "❌ Tạo video từ ảnh + nhạc chưa thành công trong admin test.\n"
+                f"Admin detail: <code>{safe_detail}</code>\n\n"
+                "Bot chưa trừ Xu.",
+                parse_mode="HTML",
+            )
+        with open(out_path, "rb") as f:
+            await context.bot.send_video(chat_id=update.effective_chat.id, video=f, caption="✅ Đã tạo video từ ảnh và nhạc.\nBot chưa trừ Xu trong admin test.")
+
+async def cmd_add_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⚠️ Ghép nhạc vào video đang admin test/chưa mở public. Bot chưa trừ Xu.")
+    video_info = await resolve_video_source(update, context)
+    audio_info = await resolve_audio_source(update, context, prefer_selected=True)
+    return await render_video_with_audio(update, context, video_info, audio_info, "add_music")
+
 async def cmd_video_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await cmd_add_music(update, context)
+    desc = " ".join(context.args or []).strip()
+    return await reply_suggest_music(update, context, desc)
+
+async def cmd_suggest_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    desc = " ".join(context.args or []).strip()
+    return await reply_suggest_music(update, context, desc)
+
+async def cmd_add_voice_to_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⚠️ Ghép giọng nói vào video đang admin test/chưa mở public. Bot chưa trừ Xu.")
+    video_info = await resolve_video_source(update, context)
+    audio_info = await resolve_audio_source(update, context, prefer_selected=False)
+    return await render_video_with_audio(update, context, video_info, audio_info, "add_voice_to_video")
+
+async def cmd_image_to_music_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⚠️ Tạo video từ ảnh + nhạc đang admin test/chưa mở public. Bot chưa trừ Xu.")
+    image_info = await resolve_image_source(update, context)
+    audio_info = await resolve_audio_source(update, context, prefer_selected=True)
+    return await render_image_music_video(update, context, image_info, audio_info)
+
+async def cmd_add_music_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    lines = [
+        "🎚 <b>ADD MUSIC STATUS — ADMIN TEST</b>",
+        "",
+        f"• ffmpeg available: <code>{ffmpeg_status_text()}</code>",
+        f"• LAST_USER_VIDEO exists: <code>{'yes' if get_recent_media_state(LAST_USER_VIDEO, uid) else 'no'}</code>",
+        f"• LAST_USER_AUDIO exists: <code>{'yes' if get_recent_media_state(LAST_USER_AUDIO, uid) else 'no'}</code>",
+        f"• LAST_USER_IMAGE exists: <code>{'yes' if get_recent_media_state(LAST_USER_IMAGE, uid) else 'no'}</code>",
+        f"• SELECTED_MUSIC exists: <code>{'yes' if get_selected_media_state(SELECTED_MUSIC, uid) else 'no'}</code>",
+        "• admin_only status: <code>ON</code>",
+        "• max preview download: <code>10MB</code>",
+        f"• temp dir writable: <code>{'yes' if os.access(tempfile.gettempdir(), os.W_OK) else 'no'}</code>",
+        "",
+        "Không hiển thị key. Không trừ Xu trong admin test.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_upscale(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -51322,10 +51740,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     remember_last_user_file(update)
+    cache_recent_media_state(update)
     await update.message.reply_text(
         "✅ Đã nhận ảnh.\n\n"
         "Bạn có thể dùng:\n"
         "• /image_to_pdf — đổi ảnh sang PDF\n"
+        "• /image_to_music_video — tạo video ảnh tĩnh có nhạc, admin test\n"
         "• /remove_bg — tách nền ảnh\n"
         "• /ai_image_edit &lt;yêu cầu&gt; — reply ảnh để chỉnh sửa AI nếu công cụ đã bật\n\n"
         "Nếu đây là ảnh bill nạp tiền: bot không tạo bill ngoài flow <code>/thucong</code>. "
@@ -51351,15 +51771,46 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
     )
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    media_kind = cache_recent_media_state(update)
     remember_last_media(update)
     if update.effective_user:
         save_translation_request(update.effective_user.id, "voice")
+    if media_kind == "audio" and getattr(update.message, "audio", None):
+        return await update.message.reply_text(
+            "✅ Đã nhận file âm thanh.\n\n"
+            "Bạn có thể dùng:\n"
+            "• /add_music — ghép nhạc này vào video, admin test\n"
+            "• /add_voice_to_video — ghép giọng nói/audio vào video, admin test\n"
+            "• /audio_enhance — làm rõ/cân âm lượng audio\n"
+            "• /translate_voice — bóc băng rồi chọn ngôn ngữ dịch\n\n"
+            "Bot chưa trừ Xu."
+        )
     await update.message.reply_text(audio_voice_received_text(), reply_markup=voice_translation_action_keyboard())
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    media_kind = cache_recent_media_state(update)
     remember_last_media(update)
     if update.effective_user:
         save_translation_request(update.effective_user.id, "voice")
+    if media_kind == "video":
+        return await update.message.reply_text(
+            "✅ Đã nhận video.\n\n"
+            "Bạn có thể dùng:\n"
+            "• /add_music — ghép nhạc nền, admin test\n"
+            "• /add_voice_to_video — ghép voice/audio, admin test\n"
+            "• /video_music — bot gợi ý nhạc phù hợp\n"
+            "• /video_enhance — làm rõ video, admin test\n\n"
+            "Bot chưa trừ Xu."
+        )
+    if media_kind == "audio":
+        return await update.message.reply_text(
+            "✅ Đã nhận file âm thanh.\n\n"
+            "Bạn có thể dùng:\n"
+            "• /add_music — ghép nhạc này vào video, admin test\n"
+            "• /add_voice_to_video — ghép giọng nói/audio vào video, admin test\n"
+            "• /audio_enhance — làm rõ/cân âm lượng audio\n\n"
+            "Bot chưa trừ Xu."
+        )
     await update.message.reply_text(audio_voice_received_text(), reply_markup=voice_translation_action_keyboard())
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -51751,11 +52202,17 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("sfx_library", cmd_sfx_library))
     tg_app.add_handler(CommandHandler("play_sfx", cmd_play_sfx))
     tg_app.add_handler(CommandHandler("play_music", cmd_play_music))
+    tg_app.add_handler(CommandHandler("select_sfx", cmd_select_sfx))
+    tg_app.add_handler(CommandHandler("select_music", cmd_select_music))
+    tg_app.add_handler(CommandHandler("suggest_music", cmd_suggest_music))
     tg_app.add_handler(CommandHandler("media_library", cmd_media_library))
     tg_app.add_handler(CommandHandler("music_policy", cmd_music_policy))
     tg_app.add_handler(CommandHandler("music_bg", cmd_music_bg))
     tg_app.add_handler(CommandHandler("music_song", cmd_music_song))
     tg_app.add_handler(CommandHandler("add_music", cmd_add_music))
+    tg_app.add_handler(CommandHandler("add_voice_to_video", cmd_add_voice_to_video))
+    tg_app.add_handler(CommandHandler("image_to_music_video", cmd_image_to_music_video))
+    tg_app.add_handler(CommandHandler("add_music_status", cmd_add_music_status))
     tg_app.add_handler(CommandHandler("video_music", cmd_video_music))
     tg_app.add_handler(CommandHandler("video_upscale", cmd_video_upscale))
     tg_app.add_handler(CommandHandler("video_enhance", cmd_video_enhance))
@@ -52085,7 +52542,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.AUDIO | filters.Document.VIDEO | filters.Document.MP3 | filters.Document.MP4 | filters.Document.WAV, handle_media_cache_only))
     tg_app.add_handler(MessageHandler(filters.Document.ALL, handle_document_cache_only))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
