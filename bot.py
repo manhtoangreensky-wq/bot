@@ -38036,7 +38036,7 @@ async def cmd_reject_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ Không tìm thấy job.")
     await update.message.reply_text(f"✅ Đã reject job #{job_id}. Lý do: {reason}")
 
-async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "💎 <b>BẢNG GIÁ TOAN AAS</b>",
         "",
@@ -38290,6 +38290,363 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Video/render thật sau này phải có bảng giá riêng.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+def pricing_main_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💰 Bảng giá Xu", callback_data="pricing|xu"),
+            InlineKeyboardButton("📦 Gói tháng", callback_data="pricing|plans"),
+        ],
+        [
+            InlineKeyboardButton("⭐ Dịch vụ VIP", callback_data="pricing|vip"),
+            InlineKeyboardButton("🪪 Thành viên", callback_data="pricing|member"),
+        ],
+        [
+            InlineKeyboardButton("📜 Điều khoản Xu", callback_data="pricing|terms"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
+    ])
+
+def pricing_xu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
+        [
+            InlineKeyboardButton("📦 Xem gói tháng", callback_data="pricing|plans"),
+            InlineKeyboardButton("🪪 Thành viên", callback_data="pricing|member"),
+        ],
+        [InlineKeyboardButton("↩️ Quay lại bảng giá", callback_data="pricing|main")],
+    ])
+
+def pricing_plans_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💳 Mua/Nạp Xu", callback_data="menu|main_topup")],
+        [
+            InlineKeyboardButton("⭐ Dịch vụ VIP", callback_data="pricing|vip"),
+            InlineKeyboardButton("🪪 Điều kiện thành viên", callback_data="pricing|member"),
+        ],
+        [
+            InlineKeyboardButton("📜 Điều khoản gói tháng", callback_data="pricing|terms"),
+            InlineKeyboardButton("↩️ Quay lại bảng giá", callback_data="pricing|main"),
+        ],
+    ])
+
+def vip_services_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📦 Xem gói tháng", callback_data="pricing|plans"),
+            InlineKeyboardButton("💰 Bảng giá Xu", callback_data="pricing|xu"),
+        ],
+        [InlineKeyboardButton("↩️ Quay lại bảng giá", callback_data="pricing|main")],
+    ])
+
+def member_policy_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📦 Gói tháng", callback_data="pricing|plans"),
+            InlineKeyboardButton("💰 Bảng giá Xu", callback_data="pricing|xu"),
+        ],
+        [InlineKeyboardButton("↩️ Quay lại bảng giá", callback_data="pricing|main")],
+    ])
+
+def pricing_terms_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💰 Bảng giá Xu", callback_data="pricing|xu"),
+            InlineKeyboardButton("📦 Gói tháng", callback_data="pricing|plans"),
+        ],
+        [InlineKeyboardButton("↩️ Quay lại bảng giá", callback_data="pricing|main")],
+    ])
+
+async def send_pricing_lines(message, lines: list[str], reply_markup: InlineKeyboardMarkup | None = None, limit: int = 3600):
+    chunk: list[str] = []
+    current_len = 0
+    for line in lines:
+        line = str(line)
+        add_len = len(line) + 1
+        if chunk and current_len + add_len > limit:
+            await message.reply_text("\n".join(chunk), parse_mode="HTML")
+            chunk = []
+            current_len = 0
+        chunk.append(line)
+        current_len += add_len
+    if chunk:
+        await message.reply_text("\n".join(chunk), parse_mode="HTML", reply_markup=reply_markup)
+
+def pricing_main_lines() -> list[str]:
+    return [
+        "💎 <b>BẢNG GIÁ TOAN AAS</b>",
+        "",
+        "TOAN AAS dùng 2 cách thanh toán:",
+        "",
+        "1. 💰 <b>Nạp Xu thủ công</b>",
+        "Dùng linh hoạt cho từng tác vụ AI, file, audio, video, nhạc, dịch thuật.",
+        "",
+        "2. 📦 <b>Gói tháng</b>",
+        "Dành cho thành viên đủ điều kiện, gồm quyền dùng công cụ + hạn mức xử lý + lượt dịch vụ VIP.",
+        "",
+        "3. ⭐ <b>Dịch vụ VIP</b>",
+        "Các tác vụ tốn AI/API/server như tạo ảnh AI, tạo nhạc AI, dịch file, ghép nhạc/video, làm rõ audio/video.",
+        "",
+        "4. 🪪 <b>Thành viên</b>",
+        "Hạng thành viên dùng để nhận giảm Xu khi dùng dịch vụ và mở điều kiện mua gói tháng.",
+        "",
+        "<b>Lưu ý:</b>",
+        "• Xu là đơn vị nội bộ trong TOAN AAS, không phải tiền/tiền điện tử, không rút tiền, không chuyển nhượng.",
+        "• Nếu provider lỗi/quota/timeout hoặc xử lý thất bại: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
+        "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
+    ]
+
+def pricing_xu_lines() -> list[str]:
+    return [
+        "💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>",
+        "",
+        "<b>Quy đổi nội bộ:</b>",
+        "10.000đ = 100 Xu dịch vụ",
+        "",
+        "<b>Gói nạp:</b>",
+        "• 10.000đ → 100 Xu",
+        "• 50.000đ → 500 Xu",
+        "• 100.000đ → 1.000 Xu",
+        "• 200.000đ → 2.000 Xu",
+        "• 500.000đ → 5.000 Xu",
+        "• 1.000.000đ → 10.000 Xu nếu có mở",
+        "",
+        "<b>Launch Bonus lần đầu mua gói:</b>",
+        "• 50k: 500 Xu gốc + 30 Xu = 530 Xu",
+        "• 100k: 1.000 Xu gốc + 50 Xu = 1.050 Xu",
+        "• 200k: 2.000 Xu gốc + 150 Xu = 2.150 Xu",
+        "• 500k: 5.000 Xu gốc + 500 Xu = 5.500 Xu",
+        "",
+        "<b>Quy tắc:</b>",
+        "• Nạp Xu thủ công CÓ tính vào tổng nạp để xét hạng thành viên.",
+        "• Gói nạp nhận Xu gốc giống nhau cho mọi user.",
+        "• Hạng thành viên không làm tăng Xu gói nạp.",
+        "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ đủ điều kiện.",
+        "• Gói tháng là sản phẩm tách biệt, không nằm trong bảng nạp Xu.",
+        "• Xu không rút tiền, không chuyển nhượng.",
+    ]
+
+def pricing_plans_lines() -> list[str]:
+    return [
+        "📦 <b>GÓI THÁNG TOAN AAS</b>",
+        "",
+        "Gói tháng = quyền dùng công cụ + hạn mức xử lý + lượt dịch vụ VIP.",
+        "Gói tháng không phải nạp Xu thô và không phải unlimited mọi tác vụ nặng.",
+        "",
+        "<b>ĐIỀU KIỆN MUA GÓI:</b>",
+        "• Chỉ thành viên từ 🥈 Silver / Bạc trở lên mới được mua gói tháng.",
+        "• Tiền mua gói tháng KHÔNG tính vào tổng nạp để nâng hạng thành viên.",
+        "• Hạn mức trong gói dùng trong kỳ gói, không rút tiền, không chuyển nhượng.",
+        "• Vượt hạn mức gói có thể nạp thêm Xu để dùng tiếp.",
+        "• Admin có thể cấp gói thủ công khi thanh toán lỗi, tặng quà hoặc khuyến mãi.",
+        "",
+        "<b>Gói Free — 0đ/tháng</b>",
+        "• Tặng 200 Xu trải nghiệm một lần",
+        "• Dùng kho nhạc/SFX/media miễn phí",
+        "• Tạo prompt nhạc, prompt ảnh, xem hướng dẫn",
+        "• Dịch văn bản ngắn dùng thử giới hạn",
+        "• Tác vụ VIP/file/audio/video dài cần Xu xử lý",
+        "",
+        "<b>Gói Starter — 49.000đ/tháng</b>",
+        "Điều kiện: từ 🥈 Silver trở lên",
+        "Dành cho người mới làm content.",
+        "• Dùng công cụ cơ bản",
+        "• Kho nhạc/SFX/media miễn phí",
+        "• Tạo prompt nhạc, prompt ảnh, caption, hashtag",
+        "• Dịch văn bản ngắn dùng thử trong giới hạn",
+        "• Có 600 Xu xử lý/tháng",
+        "• Có hạn mức nhỏ cho tác vụ thường",
+        "• Tác vụ VIP dùng Xu xử lý hoặc mua thêm",
+        "• Phù hợp người mới làm TikTok, Reels, Shorts, bán hàng cá nhân",
+        "",
+        "<b>Gói Creator — 99.000đ/tháng</b>",
+        "Điều kiện: từ 🥈 Silver trở lên",
+        "Dành cho người làm nội dung đều đặn.",
+        "• Bao gồm quyền Starter",
+        "• Dịch văn bản ngắn miễn phí trong giới hạn chống spam",
+        "• Chat AI thường miễn phí trong giới hạn chống spam",
+        "• Có 1.300 Xu xử lý/tháng",
+        "• Có khoảng 5–8 tác vụ VIP nhỏ/tháng hoặc nhiều tác vụ thường",
+        "• Phù hợp affiliate, TikTok Shop, creator cá nhân, shop nhỏ",
+        "",
+        "<b>Gói Pro — 199.000đ/tháng</b>",
+        "Điều kiện khuyến nghị: từ 🥇 Gold trở lên",
+        "Dành cho người dùng thường xuyên.",
+        "• Bao gồm quyền Creator",
+        "• Dịch văn bản ngắn/dài trong giới hạn gói",
+        "• Chat AI thường và một phần chat nâng cao trong giới hạn",
+        "• Có 3.000 Xu xử lý/tháng",
+        "• Có khoảng 10–20 tác vụ VIP nhỏ/tháng hoặc nhiều tác vụ thường",
+        "• Ưu tiên xử lý file/audio/video khi công cụ được mở",
+        "• Phù hợp shop, affiliate team nhỏ, người làm content mỗi ngày",
+        "",
+        "<b>Gói Business — 499.000đ/tháng</b>",
+        "Điều kiện khuyến nghị: từ 🥇 Gold trở lên hoặc admin duyệt",
+        "Dành cho đội nhóm nhỏ.",
+        "• Bao gồm quyền Pro",
+        "• Hạn mức cao hơn cho chat/dịch/tác vụ thường",
+        "• Có 8.000 Xu xử lý/tháng",
+        "• Có nhiều lượt dịch vụ VIP hơn Pro",
+        "• Phù hợp chiến dịch nội dung, shop, team affiliate, agency nhỏ",
+        "• Ưu tiên xử lý nhiều nội dung hơn theo chính sách đang bật",
+        "",
+        "<b>Chat AI &amp; Dịch thuật theo gói:</b>",
+        "• Free: dịch văn bản ngắn dùng thử giới hạn; chat thường trừ Xu nếu vượt thử nghiệm.",
+        "• Starter: dịch ngắn dùng thử trong giới hạn; dịch dài/file/audio/video tính Xu.",
+        "• Creator: dịch ngắn/chat thường miễn phí trong giới hạn chống spam; voice/audio/file/video là VIP.",
+        "• Pro/Business: hạn mức cao hơn cho chat/dịch/tác vụ thường; tác vụ voice/audio/file/video dùng hạn mức VIP hoặc trừ Xu nếu vượt.",
+        "",
+        "<b>Giá tác vụ dịch tham khảo:</b>",
+        "• Dịch văn bản ngắn: miễn phí trong giới hạn gói hoặc từ 5 Xu/lượt thành công",
+        "• Dịch văn bản dài: từ 20 Xu/lượt tùy độ dài",
+        "• <code>/translate_voice</code>: từ 30–80 Xu/audio ngắn",
+        "• <code>/transcribe</code>: từ 80 Xu/audio, tính theo MB/thời lượng",
+        "• <code>/translate_file</code>: từ 100 Xu/file",
+        "• <code>/translate_subtitle</code>: từ 150 Xu/file",
+        "• Dịch/lồng tiếng video: từ 800 Xu/video, admin test trước",
+        "",
+        "<b>Music / Audio Factory:</b>",
+        "• Miễn phí: <code>/music</code>, <code>/music_prompt</code>, <code>/music_library</code>, <code>/sfx_library</code>, <code>/media_library</code>, <code>/play_music</code>, <code>/play_sfx</code>, <code>/select_music</code>, <code>/select_sfx</code>, <code>/music_policy</code>",
+        "• Trừ Xu/VIP khi xử lý thật: <code>/music_bg</code> từ 300 Xu, <code>/music_song</code> từ 500–1.000 Xu, <code>/audio_enhance</code> từ 80 Xu, <code>/add_music</code> từ 120 Xu, <code>/add_voice_to_video</code> từ 150 Xu, <code>/image_to_music_video</code> từ 150 Xu, <code>/video_music</code> từ 200 Xu.",
+        "",
+        "<b>Roadmap PayOS cấp gói — chưa sửa logic:</b>",
+        "• Khi gói tháng được mở chính thức, PayOS thanh toán thành công sẽ cấp gói và hạn mức tương ứng.",
+        "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
+        "• Nếu PayOS/webhook lỗi, admin có thể cấp gói thủ công.",
+        "• Lệnh định hướng: <code>/admin_grant_plan &lt;user_id&gt; &lt;plan&gt; &lt;days&gt;</code>, <code>/admin_revoke_plan &lt;user_id&gt;</code>, <code>/admin_plan_status &lt;user_id&gt;</code>.",
+        "",
+        "<b>Ghi chú:</b>",
+        "• Số lượt VIP chỉ là ước tính vì mỗi công cụ có mức tốn API/server khác nhau.",
+        "• Tác vụ nặng như tạo video AI thật, làm rõ video dài, dịch video dài, tạo nhạc AI/vocal có thể tính Xu riêng cao hơn.",
+        "• Gói tháng không tự nâng hạng thành viên và không cộng vào tổng nạp thành viên.",
+    ]
+
+def vip_services_lines() -> list[str]:
+    return [
+        "⭐ <b>DỊCH VỤ VIP TOAN AAS</b>",
+        "",
+        "Dịch vụ VIP là các tác vụ tốn nhiều AI/API/server hơn.",
+        "",
+        "<b>Bao gồm:</b>",
+        "• Chat nâng cao / chat dài / deep nếu mở",
+        "• Dịch văn bản dài nhiều lần",
+        "• <code>/translate_voice</code>",
+        "• <code>/transcribe</code> audio/video dài",
+        "• <code>/translate_file</code>",
+        "• <code>/translate_subtitle</code>",
+        "• Tạo ảnh AI",
+        "• Chỉnh sửa ảnh AI",
+        "• Làm rõ ảnh",
+        "• Tạo nhạc AI thật",
+        "• Làm rõ audio",
+        "• Ghép nhạc vào video",
+        "• Ghép voice vào video",
+        "• Tạo video từ ảnh + nhạc",
+        "• Làm rõ video",
+        "• Tạo video AI thật khi được mở",
+        "",
+        "<b>Cách tính:</b>",
+        "• Gói tháng có một lượng hạn mức VIP tương ứng.",
+        "• Vượt hạn mức thì dùng Xu xử lý.",
+        "• Nếu provider lỗi/quota/timeout: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
+    ]
+
+def member_policy_lines() -> list[str]:
+    return [
+        "🪪 <b>ĐIỀU KIỆN MUA GÓI THÁNG</b>",
+        "",
+        "TOAN AAS tách riêng:",
+        "1. Hạng thành viên",
+        "2. Gói tháng",
+        "3. Xu xử lý",
+        "",
+        "<b>Hạng thành viên:</b>",
+        "• Tính theo tổng nạp Xu thủ công thành công.",
+        "• Dùng để mở điều kiện mua gói tháng và giảm Xu khi dùng dịch vụ đủ điều kiện.",
+        "• Không chia quá nhiều quyền công cụ phức tạp theo hạng.",
+        "",
+        "<b>Gói tháng:</b>",
+        "• Là quyền dùng/hạn mức dịch vụ theo tháng.",
+        "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
+        "• Hạn mức gói không rút tiền, không chuyển nhượng.",
+        "• Hết kỳ gói, hạn mức còn lại có thể hết hạn theo chính sách đang bật.",
+        "",
+        "<b>Điều kiện đề xuất:</b>",
+        "• Starter / Creator: từ 🥈 Silver trở lên.",
+        "• Pro / Business: từ 🥇 Gold trở lên hoặc admin duyệt.",
+        "• Admin có quyền cấp gói thủ công cho khách đặc biệt, tặng quà, khuyến mãi hoặc xử lý lỗi thanh toán.",
+        "",
+        "<b>Member policy giữ đơn giản:</b>",
+        "• Các hạng thành viên gần như dùng cùng bộ công cụ public.",
+        "• Khác biệt chính là % giảm Xu khi dùng dịch vụ đủ điều kiện.",
+        "• Có bonus lên hạng một lần nếu chính sách đang bật.",
+        "• Không giảm tiền nạp theo hạng.",
+        "• Không cộng thêm Xu định kỳ theo hạng.",
+        "• Gói nạp Xu gốc giống nhau cho mọi user.",
+        "",
+        "<b>Lý do:</b>",
+        "Điều kiện này giúp tránh lạm dụng/lạm phát hạn mức, đồng thời giữ gói tháng cho khách có nhu cầu thật.",
+    ]
+
+def pricing_terms_lines() -> list[str]:
+    return [
+        "📜 <b>ĐIỀU KHOẢN XU / GÓI THÁNG</b>",
+        "",
+        service_credit_legal_note(),
+        "",
+        "• Xu dịch vụ là đơn vị nội bộ trong TOAN AAS.",
+        "• Xu không phải tiền, không phải tiền điện tử, không rút tiền, không chuyển nhượng.",
+        "• Nạp Xu thủ công có tính vào tổng nạp để xét hạng thành viên.",
+        "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
+        "• Hạn mức gói tháng dùng trong kỳ gói, không rút tiền, không chuyển nhượng.",
+        "• Nếu provider lỗi/quota/timeout hoặc xử lý thất bại: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
+        "",
+        "Xem chi tiết đầy đủ: <code>/dieukhoan_xu</code>, <code>/legal</code>, <code>/refund_policy</code>.",
+    ]
+
+async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "\n".join(pricing_main_lines()),
+        parse_mode="HTML",
+        reply_markup=pricing_main_keyboard(),
+    )
+
+async def cmd_pricing_xu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_pricing_lines(update.message, pricing_xu_lines(), pricing_xu_keyboard())
+
+async def cmd_pricing_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_pricing_lines(update.message, pricing_plans_lines(), pricing_plans_keyboard())
+
+async def cmd_vip_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_pricing_lines(update.message, vip_services_lines(), vip_services_keyboard())
+
+async def cmd_member_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_pricing_lines(update.message, member_policy_lines(), member_policy_keyboard())
+
+async def cmd_pricing_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_pricing_lines(update.message, pricing_terms_lines(), pricing_terms_keyboard())
+
+async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
+    if action == "xu":
+        return await send_pricing_lines(query.message, pricing_xu_lines(), pricing_xu_keyboard())
+    if action == "plans":
+        return await send_pricing_lines(query.message, pricing_plans_lines(), pricing_plans_keyboard())
+    if action == "vip":
+        return await send_pricing_lines(query.message, vip_services_lines(), vip_services_keyboard())
+    if action == "member":
+        return await send_pricing_lines(query.message, member_policy_lines(), member_policy_keyboard())
+    if action == "terms":
+        return await send_pricing_lines(query.message, pricing_terms_lines(), pricing_terms_keyboard())
+    return await query.message.reply_text(
+        "\n".join(pricing_main_lines()),
+        parse_mode="HTML",
+        reply_markup=pricing_main_keyboard(),
+    )
 
 def parse_chat_pro_args(raw: str) -> dict:
     kv, remainder = parse_loose_kv_args(raw)
@@ -53714,6 +54071,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("pricing",     cmd_pricing))
     tg_app.add_handler(CommandHandler("banggia",     cmd_pricing))
     tg_app.add_handler(CommandHandler("baogia",      cmd_pricing))
+    tg_app.add_handler(CommandHandler("pricing_xu",  cmd_pricing_xu))
+    tg_app.add_handler(CommandHandler("pricing_plans", cmd_pricing_plans))
+    tg_app.add_handler(CommandHandler("vip_services", cmd_vip_services))
+    tg_app.add_handler(CommandHandler("member_policy", cmd_member_policy))
     tg_app.add_handler(CommandHandler("pricing_admin", cmd_pricing_admin))
     tg_app.add_handler(CommandHandler("mode",        cmd_mode))
     tg_app.add_handler(CommandHandler("chat_pro_on", cmd_chat_pro_on))
@@ -53989,6 +54350,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_manual_package_choice, pattern=r"^manual\|"))
