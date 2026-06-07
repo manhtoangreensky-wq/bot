@@ -18,9 +18,19 @@ Backend/runtime: Railway `PUBLIC_BASE_URL`
 ## Automated Test Result
 
 - `python -m py_compile bot.py`: PASS.
-- `pytest -q`: PASS, 13 tests.
+- `python -m py_compile local_worker.py`: PASS.
+- `pytest -q`: PASS, 29 tests on 2026-06-07 after commit `706998a`.
 - Import test: PASS, `cmd_help` and `help_text_for_user` exist.
 - Local route smoke: PASS for `/`, `/landing`, `/health`, `/banner.png`.
+
+## 2026-06-07 Current Evidence Snapshot
+
+- Latest pushed commit: `706998a Add admin provider orchestrator v1`.
+- Git status after push: clean.
+- Local Worker Phase 1: admin-reported LIVE PASS for Railway ENV, Windows heartbeat, worker poll, worker ping and ffmpeg health.
+- PayOS: admin-reported real payment PASS, checkout URL creation PASS and automatic Xu credit PASS. Keep PayOS logic locked unless a direct PayOS task is given.
+- Provider Orchestrator V1: CODE READY/admin-only with `/orchestrator_status`, `/provider_matrix`, `/tool_test_openrouter`, `/tool_test_kling_status`, `/tool_test_replicate_status`, `/tool_test_elevenlabs_status`, `/tool_test_deepgram_status`, `/shopaikey_status`, `/tool_test_shopaikey`.
+- ShopAIKey: experimental admin-only provider, disabled by default, not public and not default.
 
 ## Telegram Smoke Test
 
@@ -32,7 +42,7 @@ Backend/runtime: Railway `PUBLIC_BASE_URL`
 | `/commands` | Same as `/help` | Added in Step 6 | Registered alias. |
 | `/profile` | Balance/profile | Need live Telegram verification | No external API. |
 | `/naptien` | Package buttons | Need live Telegram verification | `pkg|` callback unchanged. |
-| `pkg|` callback | PayOS/manual fallback | Need real payment test | PayOS code not changed in Step 6. |
+| `pkg|` callback | PayOS/manual fallback | Admin-reported PayOS real PASS | PayOS code locked; manual fallback remains available. |
 | `/film` | Script Lite + file | Need live Telegram verification | Requires AI key and enough Xu. |
 | `/addlink` as normal user | Internal/backlog lock message | Need live Telegram verification | Admin can still test internally. |
 | `/links` as normal user | Internal/backlog lock message | Need live Telegram verification | No public affiliate vault. |
@@ -72,5 +82,5 @@ Backend/runtime: Railway `PUBLIC_BASE_URL`
 
 - Run `/runtime` and confirm build matches the latest Git commit.
 - Run `/customer_surface` and confirm no A-TOOLS/operator leak.
-- Run `/naptien`, click 10k/50k/100k, and confirm PayOS/manual fallback text.
-- Run a small real PayOS 10k test only after Railway deploy is healthy.
+- Run `/naptien`, click 10k/50k/100k, and confirm PayOS/manual fallback text still matches the locked flow.
+- Run `/orchestrator_status` and `/provider_matrix` after deploy to confirm new admin-only provider layer is visible.

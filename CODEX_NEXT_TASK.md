@@ -20,6 +20,14 @@ TOAN AAS is following this model:
 - Use `/emergency_lock <reason>` only for real incident drills or urgent safety lock. Only owner should run `/emergency_unlock`.
 - Emergency mode must preserve DB, balances, payment history, ledger events and backups.
 
+## 2026-06-07 Current Evidence Snapshot
+
+- Latest pushed commit: `706998a Add admin provider orchestrator v1`.
+- Local checks after commit: `python -m py_compile bot.py` PASS, `python -m py_compile local_worker.py` PASS, `pytest -q` PASS with 29 tests, `git diff --check` PASS.
+- PayOS: admin-reported live PASS for checkout URL creation, real payment and automatic Xu credit. Keep PayOS logic locked unless a direct payment task is given.
+- Local Worker Phase 1: admin-reported LIVE PASS for Railway ENV, Windows heartbeat/poll, worker ping and ffmpeg health.
+- Provider Orchestrator V1: code-ready/admin-only. Live test after deploy: `/orchestrator_status`, `/provider_matrix`, `/tool_test_openrouter`, `/tool_test_kling_status`, `/tool_test_replicate_status`, `/tool_test_elevenlabs_status`, `/tool_test_deepgram_status`, `/shopaikey_status`, `/tool_test_shopaikey`.
+
 ## Verified Live - LOCKED / STABLE
 
 Do not modify the sections below unless the admin gives a direct request for that exact flow. These flows were tested live and are considered stable.
@@ -81,7 +89,7 @@ The current phase is not the large app/dashboard phase. Priority number one is t
 Goals:
 
 1. Telegram bot runs stably.
-2. Service Xu top-up works reliably with manual QR first; PayOS dynamic checkout is debugged later.
+2. Service Xu top-up works reliably through PayOS dynamic checkout, with manual QR kept as fallback.
 3. User balances are managed by Telegram ID.
 4. Trial 200 Xu can be claimed only once.
 5. Only tools that pass smoke tests can be opened to customers.
@@ -98,7 +106,7 @@ Goals:
 - Do not open ads assistant before there is a clear workflow.
 - Do not run the Big Plan while basic tools/API providers still fail.
 - Do not make broad changes to parts already stable.
-- PayOS checkout/debug is the final payment blocker before sales; do not mark real payment PASS until admin performs a real payment test.
+- PayOS real payment has admin-reported PASS; keep monitoring `/sales_ready`, duplicate-credit protection and manual fallback after deploys.
 - Future USD/international payment receiving accounts belong to a later billing expansion, separate from the current VND PayOS/manual QR flow.
 
 ### Next Phase - Big Plan / TOAN AAS SaaS Platform
@@ -241,10 +249,10 @@ Chưa mở customer affiliate vault, auto publish hoặc ads management.
 3. Test website `/`, `/landing`, `/LOGO.png`, `/banner.png` and the legal footer.
 4. Test `/media_factory`.
 5. Test `/video_factory_flow`.
-6. Test `/providers` and confirm PayOS still reports NEED DEBUG if checkout remains invalid.
+6. Test `/providers` and confirm PayOS status remains `working` after deploy.
 7. Test `/sales_ready`.
 8. Test image tools and tool audit commands.
-9. Fix PayOS separately if checkout remains invalid.
+9. Do not change PayOS unless a new direct PayOS task identifies a real regression.
 10. Do not open customer publish or ads.
 11. Do not collect social passwords/cards.
 12. Keep legal gates before big plan modules.
@@ -306,6 +314,8 @@ Manual sequence:
 ```text
 /backup_db
 /providers
+/orchestrator_status
+/provider_matrix
 /payos_debug_create
 /promo_seed_policy
 /promo FIRST30

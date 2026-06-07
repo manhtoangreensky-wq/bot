@@ -2,6 +2,14 @@
 
 Date: 2026-06-02
 
+## Current Evidence - 2026-06-07
+
+- Latest pushed commit: `706998a Add admin provider orchestrator v1`.
+- Local checks: `python -m py_compile bot.py` PASS, `python -m py_compile local_worker.py` PASS, `pytest -q` PASS with 29 tests, `git diff --check` PASS.
+- PayOS: admin-reported live PASS for checkout URL creation, real payment and automatic Xu credit.
+- Local Worker Phase 1: admin-reported LIVE PASS for Railway ENV, Windows worker heartbeat/poll, worker ping and ffmpeg health.
+- New provider orchestrator is admin-only/code-ready and needs live Telegram smoke after deploy.
+
 ## Website
 
 - [ ] `/` shows TOAN AAS landing.
@@ -25,7 +33,7 @@ Date: 2026-06-02
 - [ ] `/profile`.
 - [ ] `/naptien`.
 - [ ] `/promo FIRST30` activates once for a beta test user after admin `/promo_seed_policy`.
-- [ ] PayOS 10k real payment test.
+- [x] PayOS real payment test - admin-reported PASS on 2026-06-07.
 - [ ] First PayOS 50k + FIRST30 real payment gives exactly 680 Xu: 500 base + 30 Launch Bonus + 150 promo.
 - [ ] PayOS first 100k real payment gives exactly 1,050 Xu without promo: 1,000 base + 50 Launch Bonus.
 - [ ] Manual fallback.
@@ -65,6 +73,15 @@ Date: 2026-06-02
 - [ ] `/mark_payos_test`.
 - [ ] `/backup_db`.
 - [ ] `/runtime`.
+- [ ] `/orchestrator_status`.
+- [ ] `/provider_matrix`.
+- [ ] `/tool_test_openrouter`.
+- [ ] `/tool_test_kling_status`.
+- [ ] `/tool_test_replicate_status`.
+- [ ] `/tool_test_elevenlabs_status`.
+- [ ] `/tool_test_deepgram_status`.
+- [ ] `/shopaikey_status`.
+- [ ] `/tool_test_shopaikey`.
 
 ## Safety
 
@@ -93,4 +110,4 @@ Command:
 /mark_payos_test pass order=<order_code> note="Test 10k OK"
 ```
 
-Rule: never mark `SALES READY` until PayOS real test is `PASS`.
+Rule: never mark `SALES READY` until PayOS real test is `PASS` and the current deployed bot passes the core live Telegram smoke checks.

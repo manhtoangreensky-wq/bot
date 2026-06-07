@@ -11,6 +11,8 @@
 - Step 10 compile: PASS after Pricing Engine V2 and higher Xu defaults.
 - Step 11 compile: PASS after Chat AI Tier System and `/chat_pro`.
 - Trial bonus update: `TRIAL_CREDITS = 200` so new users can try one `/film` Basic.
+- 2026-06-07 current verification: `python -m py_compile bot.py` PASS, `python -m py_compile local_worker.py` PASS, `pytest -q` PASS with 29 tests, `git diff --check` PASS.
+- Latest pushed commit: `706998a Add admin provider orchestrator v1`.
 
 ## Verified Live - Locked Stable Flows
 
@@ -56,6 +58,7 @@ Operational note:
 - webhook: `/webhook/payos` exists.
 - duplicate protection: `payos_processed` plus order status checks.
 - manual fallback: `/thucong`, `pending_deposits`, `/duyet`, `/tuchoi`.
+- 2026-06-07 admin live result: PayOS checkout URL creation PASS, real payment PASS and automatic Xu credit PASS. PayOS logic is locked unless a direct payment task is given.
 
 ## Promo / Beta Codes
 
@@ -72,7 +75,7 @@ Operational note:
 - Promo bonus is applied inside `process_payos_paid_order()` transaction after PayOS success.
 - Duplicate paid order replay does not apply base Xu or promo Xu twice.
 - One order uses one promo only; new pending code replaces the previous pending code.
-- Real PayOS promo test still requires admin execution on Railway.
+- Real PayOS promo/package replay checks still require careful admin testing when changing promo/package logic. Do not change the locked PayOS success path without a direct task.
 
 ## Credits
 
@@ -103,12 +106,21 @@ Operational note:
 - `/costs`: added in Step 8 and updated in Step 10; documents `/film` 200/500/1,200 Xu, `/growth_ai` 120 Xu, `/campaign_report` 50 Xu, trial 200 Xu, free chat daily 20.
 - `/payos_test_plan`: added in Step 8; guides real 10k payment validation.
 - `/payos_test_plan`: now includes BETA50 real payment test steps.
-- PayOS real payment test: still manual and required before public selling.
+- PayOS real payment test: admin-reported PASS on 2026-06-07; keep monitoring `/sales_ready`, `/checkpayos` and duplicate-credit protection after deploys.
 - API key setup docs: `docs/API_KEYS_SETUP.md`.
 - Cost control docs: `docs/COST_CONTROL.md`.
 - Sales readiness docs: `docs/SALES_READINESS_CHECKLIST.md`.
 - Provider security audit: `docs/PROVIDER_SECURITY_AUDIT.md`.
-- Current status: SALES READY only after admin runs `/mark_payos_test pass ...`; no automatic payment/order mutation is performed.
+- Current status rule: SALES READY depends on live Telegram smoke tests, provider/tool readiness and the stored PayOS real test status. Admin-reported PayOS real payment is PASS; verify `/sales_ready` after each deploy.
+
+## Provider Orchestrator V1
+
+- Added in commit `706998a`.
+- Admin-only commands: `/orchestrator_status`, `/provider_matrix`, `/tool_test_openrouter`, `/tool_test_kling_status`, `/tool_test_replicate_status`, `/tool_test_elevenlabs_status`, `/tool_test_deepgram_status`, `/shopaikey_status`, `/tool_test_shopaikey`.
+- Capability map covers `text_brain`, `image_generate`, `video_generate`, `image_to_video`, `tts`, `stt` and `ffmpeg`.
+- Providers represented: OpenRouter, Kling, Replicate, ElevenLabs, Deepgram, Local Worker ffmpeg and ShopAIKey.
+- ShopAIKey is experimental, admin-only, disabled by default and never replaces OpenRouter/OpenAI/Gemini.
+- Smoke tests do not deduct Xu, do not open public render and do not log API keys/secrets.
 
 ## Sales Hardening Status
 
@@ -154,9 +166,9 @@ Operational note:
 
 1. Verify Railway Volume and DB persistence after redeploy.
 2. Run real `/backup_db` on Telegram admin account.
-3. Audit PayOS security and money flow without changing package/callback logic.
+3. Keep PayOS/payment path locked; only monitor with `/sales_ready`, `/checkpayos`, `/dashboard`.
 4. Audit refund coverage for paid API failures.
-5. Improve trial upsell after foundation is verified.
+5. Run admin-only provider orchestrator smoke tests after deploy.
 
 ## Phase 1 Money Flow Completion
 
@@ -170,10 +182,10 @@ Operational note:
 
 ## Remaining blockers before Video Script Lite
 
-1. Real PayOS payment test on Railway.
-2. Real `/backup_db` Telegram test.
-3. Real provider failure tests for Fish/Deepgram/RemoveBG/Cutout/Cobalt.
-4. Confirm Railway Volume persistence after redeploy.
+1. Real `/backup_db` Telegram test.
+2. Real provider failure tests for Fish/Deepgram/RemoveBG/Cutout/Cobalt and the new orchestrator status commands.
+3. Confirm Railway Volume persistence after redeploy.
+4. Continue monitoring PayOS duplicate-credit safety after deploys.
 
 ## Video Script Lite Status
 
@@ -258,8 +270,8 @@ Operational note:
 - Status: YES after Railway deploy passes live Telegram smoke test.
 - Blockers:
   1. Real Telegram verification for `/film` plus non-admin internal locks on `/addlink`, `/publish_done`, `/performance_report`.
-  2. Real PayOS 10k payment test.
-  3. Railway Volume persistence confirmation.
+  2. Railway Volume persistence confirmation.
+  3. New provider orchestrator admin-only smoke commands need live Telegram verification after deploy.
 
 ## Head Brain Control Status
 
