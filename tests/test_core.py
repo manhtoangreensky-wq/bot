@@ -200,11 +200,40 @@ def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
         bot.save_tool_test_result("shopaikey", "PASS", detail, "test")
         bot.save_tool_test_result("shopaikey_chat", "PASS", detail, "test")
         bot.save_shopaikey_chat_snapshot(result, detail, "test")
+        bot.save_tool_test_result("shopaikey_tts", "PASS", "model=tts-1/alloy; http=200; output_sent=yes", "test")
+        bot.save_shopaikey_component_snapshot(
+            "tts",
+            {"status": "PASS", "model": "tts-1/alloy", "http_status": 200, "latency_ms": 0},
+            "model=tts-1/alloy; http=200; output_sent=yes",
+            "test",
+        )
+        bot.save_tool_test_result("shopaikey_image", "PASS", "model=nano-banana; http=200; size=768x1344; output_sent=yes", "test")
+        bot.save_shopaikey_component_snapshot(
+            "image",
+            {"status": "PASS", "model": "nano-banana", "http_status": 200, "latency_ms": 321},
+            "model=nano-banana; http=200; size=768x1344; output_sent=yes",
+            "test",
+        )
         chat_snapshot = bot.shopaikey_chat_status_snapshot()
         assert chat_snapshot["status"] == "PASS"
         assert chat_snapshot["model"] == "gpt-4o-mini"
         assert "PASS" in bot.shopaikey_chat_status_text()
         assert "gpt-4o-mini" in bot.shopaikey_chat_status_text()
+        assert bot.shopaikey_tts_status_snapshot()["status"] == "PASS"
+        assert "tts-1/alloy" in bot.shopaikey_tts_status_text()
+        assert bot.shopaikey_image_status_snapshot()["status"] == "PASS"
+        assert "nano-banana" in bot.shopaikey_image_status_text()
+
+        bot.save_tool_test_result("shopaikey_image", "PASS", "model=nano-banana; http=200; size=768x1344; output_sent=yes", "test")
+        bot.save_shopaikey_component_snapshot(
+            "image",
+            {"status": "PASS", "model": "nano-banana", "http_status": 200, "latency_ms": 555},
+            "model=nano-banana; http=200; size=768x1344; output_sent=yes",
+            "test",
+        )
+        assert bot.shopaikey_chat_status_snapshot()["status"] == "PASS"
+        assert bot.shopaikey_tts_status_snapshot()["status"] == "PASS"
+        assert bot.shopaikey_image_status_snapshot()["status"] == "PASS"
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
@@ -241,6 +270,22 @@ def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
         assert chat["status"] == "PASS"
         assert chat["model"] == "gpt-4o-mini"
         assert "PASS" in bot.shopaikey_chat_status_text()
+        bot.record_api_debug(
+            "shopaikey",
+            "tool_test_shopaikey_tts",
+            "PASS",
+            200,
+            "model=tts-1/alloy; http=200; output_sent=yes",
+        )
+        assert bot.shopaikey_tts_status_snapshot()["status"] == "PASS"
+        bot.record_api_debug(
+            "shopaikey",
+            "tool_test_shopaikey_image",
+            "PASS",
+            200,
+            "model=nano-banana; http=200; size=768x1344; output_sent=yes",
+        )
+        assert bot.shopaikey_image_status_snapshot()["status"] == "PASS"
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)

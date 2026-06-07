@@ -26655,24 +26655,41 @@ def shopaikey_usage_summary_text(usage: dict) -> str:
     return f"remaining {remaining} / total {total} ({percent}%) | group {group} | last {last_at}"
 
 def save_shopaikey_chat_snapshot(result: dict, detail: str, updated_by=""):
-    status = str(result.get("status") or "UNKNOWN").upper()
-    set_system_setting("shopaikey_chat_last_status", status, detail, updated_by)
-    set_system_setting("shopaikey_chat_last_model", str(result.get("model") or SHOPAIKEY_CHAT_MODEL or ""), detail, updated_by)
-    set_system_setting("shopaikey_chat_last_http", str(result.get("http_status") or 0), detail, updated_by)
-    set_system_setting("shopaikey_chat_last_latency_ms", str(result.get("latency_ms") or 0), detail, updated_by)
-    set_system_setting("shopaikey_chat_last_detail", str(detail or "")[:1000], detail, updated_by)
-    set_system_setting("shopaikey_chat_last_at", now_text(), detail, updated_by)
+    save_shopaikey_component_snapshot("chat", result, detail, updated_by)
 
-def shopaikey_chat_status_snapshot() -> dict:
-    result = preferred_tool_test_result("shopaikey", "shopaikey_chat")
+def save_shopaikey_component_snapshot(component: str, result: dict, detail: str, updated_by=""):
+    component = re.sub(r"[^a-z0-9_:-]", "_", str(component or "").strip().lower())
+    if component not in {"chat", "tts", "image"}:
+        return
+    status = str(result.get("status") or "UNKNOWN").upper()
+    model = str(result.get("model") or "")
+    if component == "chat":
+        model = model or SHOPAIKEY_CHAT_MODEL or SHOPAIKEY_DEFAULT_MODEL or ""
+    elif component == "tts":
+        model = model or f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}"
+    elif component == "image":
+        model = model or SHOPAIKEY_IMAGE_MODEL or "nano-banana"
+    safe_detail = str(detail or "")[:1000]
+    prefix = f"shopaikey_{component}_last"
+    set_system_setting(f"{prefix}_status", status, safe_detail, updated_by)
+    set_system_setting(f"{prefix}_model", model, safe_detail, updated_by)
+    set_system_setting(f"{prefix}_http", str(result.get("http_status") or 0), safe_detail, updated_by)
+    set_system_setting(f"{prefix}_latency_ms", str(result.get("latency_ms") or 0), safe_detail, updated_by)
+    set_system_setting(f"{prefix}_detail", safe_detail, safe_detail, updated_by)
+    set_system_setting(f"{prefix}_at", now_text(), safe_detail, updated_by)
+
+def shopaikey_component_status_snapshot(component: str, tool_names: list[str], debug_actions: list[str]) -> dict:
+    component = re.sub(r"[^a-z0-9_:-]", "_", str(component or "").strip().lower())
+    result = preferred_tool_test_result(*tool_names)
     status = str(result.get("status") or "NOT_TESTED").upper()
-    model = get_system_setting("shopaikey_chat_last_model", "")
-    detail = result.get("detail") or get_system_setting("shopaikey_chat_last_detail", "")
-    tested_at = result.get("tested_at") or get_system_setting("shopaikey_chat_last_at", "")
+    prefix = f"shopaikey_{component}_last"
+    model = get_system_setting(f"{prefix}_model", "")
+    detail = result.get("detail") or get_system_setting(f"{prefix}_detail", "")
+    tested_at = result.get("tested_at") or get_system_setting(f"{prefix}_at", "")
     if status in {"", "NOT_TESTED"}:
-        status = get_system_setting("shopaikey_chat_last_status", "NOT_TESTED") or "NOT_TESTED"
+        status = get_system_setting(f"{prefix}_status", "NOT_TESTED") or "NOT_TESTED"
     if str(status or "").upper() in {"", "NOT_TESTED"}:
-        event = latest_api_debug_event("shopaikey", ["tool_test_shopaikey", "chat_smoke", "shopaikey_chat"])
+        event = latest_api_debug_event("shopaikey", debug_actions)
         if event:
             status = str(event.get("status") or "NOT_TESTED").upper()
             detail = detail or event.get("detail") or ""
@@ -26686,8 +26703,28 @@ def shopaikey_chat_status_snapshot() -> dict:
         "tested_at": tested_at,
     }
 
-def shopaikey_chat_status_text() -> str:
-    snapshot = shopaikey_chat_status_snapshot()
+def shopaikey_chat_status_snapshot() -> dict:
+    return shopaikey_component_status_snapshot(
+        "chat",
+        ["shopaikey_chat", "shopaikey"],
+        ["tool_test_shopaikey", "chat_smoke", "shopaikey_chat"],
+    )
+
+def shopaikey_tts_status_snapshot() -> dict:
+    return shopaikey_component_status_snapshot(
+        "tts",
+        ["shopaikey_tts"],
+        ["tool_test_shopaikey_tts", "shopaikey_tts"],
+    )
+
+def shopaikey_image_status_snapshot() -> dict:
+    return shopaikey_component_status_snapshot(
+        "image",
+        ["shopaikey_image"],
+        ["tool_test_shopaikey_image", "shopaikey_image"],
+    )
+
+def shopaikey_component_status_text(snapshot: dict) -> str:
     status = str(snapshot.get("status") or "NOT_TESTED").upper()
     tested_at = snapshot.get("tested_at") or ""
     model = snapshot.get("model") or ""
@@ -26697,6 +26734,15 @@ def shopaikey_chat_status_text() -> str:
     if tested_at:
         suffix.append(f"at {tested_at}")
     return status + (f" ({' | '.join(suffix)})" if suffix else "")
+
+def shopaikey_chat_status_text() -> str:
+    return shopaikey_component_status_text(shopaikey_chat_status_snapshot())
+
+def shopaikey_tts_status_text() -> str:
+    return shopaikey_component_status_text(shopaikey_tts_status_snapshot())
+
+def shopaikey_image_status_text() -> str:
+    return shopaikey_component_status_text(shopaikey_image_status_snapshot())
 
 async def get_shopaikey_usage() -> dict:
     if not SHOPAIKEY_API_KEY:
@@ -30317,9 +30363,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Group: <code>{html.escape(str(shopaikey_usage.get('group_name') or '-'))}</code>",
         f"• Chat tested: <code>{html.escape(shopaikey_chat_status_text())}</code>",
         f"• Chat manual baseline: <code>gpt-4o-mini PASS; gpt-4.1-mini PASS; qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY</code>",
-        f"• TTS tested: <code>{html.escape(tool_test_status_text('shopaikey_tts'))}</code>",
+        f"• TTS tested: <code>{html.escape(shopaikey_tts_status_text())}</code>",
         "• TTS manual baseline: <code>/v1/audio/speech tts-1 PASS</code>",
-        f"• Image tested: <code>{html.escape(tool_test_status_text('shopaikey_image'))}</code>",
+        f"• Image tested: <code>{html.escape(shopaikey_image_status_text())}</code>",
         "• Image: <code>admin-only custom Google image endpoint; public OFF; OpenAI /v1 images group no channel</code>",
         "• Video: <code>disabled/admin-only/not live tested</code>",
         "• Stage: <code>experimental/admin-only</code>",
@@ -30979,8 +31025,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     result = shopaikey_chat_status_snapshot()
-    tts_result = get_tool_test_result("shopaikey_tts")
-    image_result = get_tool_test_result("shopaikey_image")
+    tts_result = shopaikey_tts_status_snapshot()
+    image_result = shopaikey_image_status_snapshot()
     usage = shopaikey_last_usage_snapshot()
     lines = [
         "🧪 <b>ShopAIKey Experimental Provider</b>",
@@ -30996,8 +31042,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>OFF</code>",
         f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | enabled <code>{'yes' if SHOPAIKEY_VIDEO_ENABLED else 'no'}</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
         f"• Chat test: <code>{html.escape(shopaikey_chat_status_text())}</code>",
-        f"• TTS test: <code>{html.escape(tool_test_status_text('shopaikey_tts'))}</code>",
-        f"• Image test: <code>{html.escape(tool_test_status_text('shopaikey_image'))}</code>",
+        f"• TTS test: <code>{html.escape(shopaikey_tts_status_text())}</code>",
+        f"• Image test: <code>{html.escape(shopaikey_image_status_text())}</code>",
         f"• Chat detail: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>",
         f"• TTS detail: <code>{html.escape(str(tts_result.get('detail') or '-')[:220])}</code>",
         f"• Image detail: <code>{html.escape(str(image_result.get('detail') or '-')[:220])}</code>",
@@ -31134,8 +31180,6 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
             parse_mode="HTML",
         )
     status, audio_bytes, detail, http_status = await shopaikey_tts_smoke_test()
-    save_tool_test_result("shopaikey_tts", status, detail, uid)
-    record_api_debug("shopaikey", "tool_test_shopaikey_tts", status, int(http_status or 0), detail)
     output_sent = False
     if status == "PASS" and audio_bytes:
         audio = io.BytesIO(audio_bytes)
@@ -31146,13 +31190,23 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
             caption="🔊 ShopAIKey TTS Smoke Test — PASS\nKhông trừ Xu.",
         )
         output_sent = True
+    final_detail = f"{detail}; output_sent={'yes' if output_sent else 'no'}"
+    tts_snapshot = {
+        "status": status,
+        "model": f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}",
+        "http_status": int(http_status or 0),
+        "latency_ms": 0,
+    }
+    save_tool_test_result("shopaikey_tts", status, final_detail, uid)
+    save_shopaikey_component_snapshot("tts", tts_snapshot, final_detail, uid)
+    record_api_debug("shopaikey", "tool_test_shopaikey_tts", status, int(http_status or 0), final_detail)
     await update.message.reply_text(
         "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
         f"• HTTP: <code>{html.escape(str(http_status or 0))}</code>\n"
         f"• Model: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code>\n"
         f"• Voice: <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>\n"
-        f"• Detail: <code>{html.escape(str(detail or '-')[:220])}</code>\n"
+        f"• Detail: <code>{html.escape(str(final_detail or '-')[:220])}</code>\n"
         f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n\n"
         "Không log prompt/response/key. Không trừ Xu.",
         parse_mode="HTML",
@@ -31214,6 +31268,7 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         f"error_class={result.get('error_class') or '-'}; detail={result.get('detail') or '-'}"
     )
     save_tool_test_result("shopaikey_image", status, detail, uid)
+    save_shopaikey_component_snapshot("image", result, detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey_image", status, int(result.get("http_status") or 0), detail)
     await update.message.reply_text(
         "🖼 <b>ShopAIKey Image Smoke Test</b>\n\n"
