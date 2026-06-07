@@ -803,3 +803,74 @@ Chưa. TOAN AAS hiện không nhận tài khoản, mật khẩu hoặc thẻ tha
 
 **Tại sao nên dùng?**  
 Vì bot gom quy trình tạo nội dung vào một nơi, dễ dùng bằng Telegram, có tiếng Việt, có Xu dịch vụ rõ ràng, có kịch bản/caption/prompt/CTA theo nền tảng, giúp tiết kiệm thời gian hơn so với tự dùng nhiều công cụ rời rạc.
+
+---
+
+## 23. NHẠC AI / KHO NHẠC / SFX / MEDIA
+
+TOAN AAS có nhóm công cụ hỗ trợ phần âm thanh và kho media public cho video:
+
+- `/music_tools` - mở trung tâm nhạc/SFX/media.
+- `/music_prompt <mô tả video>` - tạo prompt nhạc nền an toàn bản quyền.
+- `/music_library <từ khóa>` - tìm nhạc nền từ kho public.
+- `/sfx_library <từ khóa>` - tìm hiệu ứng âm thanh.
+- `/media_library <từ khóa>` - tìm ảnh/video public.
+- `/play_music 1` - nghe thử nhạc từ kết quả vừa tìm.
+- `/play_sfx 1` - nghe thử SFX từ kết quả vừa tìm.
+- `/select_music 1` - chọn nhạc để dùng tiếp trong workflow.
+- `/select_sfx 1` - chọn SFX để dùng tiếp trong workflow.
+- `/music_policy` - xem chính sách nhạc/media/bản quyền.
+
+Quy trình gợi ý:
+
+1. Gõ `/music_tools`.
+2. Chọn Kho nhạc, SFX hoặc Kho media.
+3. Tìm theo mẫu nhanh hoặc tự nhập từ khóa.
+4. Nghe thử bằng `/play_music 1` hoặc `/play_sfx 1`.
+5. Chọn bằng `/select_music 1` hoặc `/select_sfx 1`.
+6. Khi công cụ ghép nhạc/video được mở, gửi video/ảnh rồi dùng lệnh ghép tương ứng.
+
+Lưu ý: Jamendo, Freesound, Pixabay và các nguồn ngoài có license riêng. Trước khi dùng cho quảng cáo/kiếm tiền, bạn cần kiểm tra quyền thương mại, yêu cầu ghi nguồn và điều khoản nền tảng.
+
+---
+
+## 24. ẢNH THÀNH VIDEO PACK / IMAGE STORY
+
+Image Story giúp bạn gửi một ảnh rồi tạo bộ shot/góc/cảnh để dựng thành video ngắn.
+
+Cách dùng:
+
+1. Gửi ảnh vào bot.
+2. Gõ `/image_story <mục tiêu video>`.
+
+Ví dụ:
+
+```text
+/image_story video quảng cáo sản phẩm 15 giây phong cách hiện đại
+```
+
+Bot sẽ tạo 6-10 shot gồm hook mở đầu, cận cảnh, góc nghiêng, toàn cảnh, chuyển động nhẹ, cận chi tiết, lifestyle/context và CTA/end frame.
+
+Bạn có thể chọn hướng tỉ lệ:
+
+- 9:16 cho TikTok/Reels/Shorts.
+- 1:1 cho feed vuông.
+- 16:9 cho YouTube/web.
+
+Render ảnh/video thật là phần admin-test trước. Khách hiện dùng Image Story để lấy shot pack/prompt và tự dựng hoặc gửi admin xử lý.
+
+---
+
+## 25. AI IMAGE STUDIO
+
+AI Image Studio là workflow chuẩn bị ảnh cho nội dung/video:
+
+- `/image_studio` - xem trung tâm hướng dẫn ảnh AI.
+- `/image_prompt <mô tả>` - tạo prompt ảnh.
+- `/image_story <mục tiêu video>` - gửi ảnh rồi tạo bộ shot video.
+- `/image_to_video_pack <mô tả>` - tạo prompt video từ ảnh/chủ đề.
+- `/ai_image <mô tả>` - tạo ảnh AI nếu provider đã bật.
+- `/ai_image_edit <yêu cầu>` - chỉnh ảnh AI nếu provider đã bật.
+- `/image_variations` hoặc `/image_to_story_pack` - hướng dẫn workflow biến thể/shot pack.
+
+Lưu ý: tạo ảnh/chỉnh ảnh/render video thật phụ thuộc provider và có thể ở trạng thái admin-test. Nếu provider chưa bật hoặc lỗi, bot chưa trừ Xu.

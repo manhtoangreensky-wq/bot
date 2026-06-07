@@ -2,7 +2,8 @@
 
 Date: 2026-06-02
 App: TOAN AAS V15.2
-Domain: `https://bot-production-2dd7.up.railway.app`
+Public website: `https://www.toanaas.vn/`
+Backend/runtime: Railway `PUBLIC_BASE_URL`
 
 ## Deploy
 

@@ -280,9 +280,14 @@ PUBLIC_BASE_URL, PUBLIC_BASE_URL_SOURCE = detect_public_base_url()
 TOAN_AAS_FALLBACK_PUBLIC_URL = normalize_public_base_url(
     _env("TOAN_AAS_FALLBACK_PUBLIC_URL", "https://bot-production-2dd7.up.railway.app")
 )
+WEBSITE_URL = normalize_public_base_url(_env("WEBSITE_URL", "https://www.toanaas.vn"))
+PUBLIC_SITE_URL = normalize_public_base_url(_env("PUBLIC_SITE_URL", WEBSITE_URL))
 
 def effective_public_base_url() -> str:
     return (PUBLIC_BASE_URL or TOAN_AAS_FALLBACK_PUBLIC_URL or "").strip().rstrip("/")
+
+def effective_public_site_url() -> str:
+    return (PUBLIC_SITE_URL or WEBSITE_URL or "").strip().rstrip("/")
 
 ACTIVE_TELEGRAM_UPDATE_MODE = ""
 ACTIVE_TELEGRAM_WEBHOOK_URL = ""
@@ -25851,6 +25856,9 @@ def provider_status_payload() -> dict:
             "image_tools": is_feature_enabled("image_tools", default=True),
             "image_prompt_factory": is_feature_enabled("image_prompt_factory", default=True),
             "image_to_video_prompt": is_feature_enabled("image_to_video_prompt", default=True),
+            "image_story_pack": is_feature_enabled("image_story_pack", default=True),
+            "ai_image_studio": is_feature_enabled("ai_image_studio", default=True),
+            "image_story_render_stage": configured_release_stage("image_story_render"),
             "music_tools": is_feature_enabled("music_tools", default=True),
             "music_library_stage": "ready_for_smoke_test" if JAMENDO_CLIENT_ID else configured_release_stage("music_library"),
             "sfx_library_stage": "ready_for_smoke_test" if (FREESOUND_API_KEY or FREESOUND_CLIENT_SECRET) else configured_release_stage("sfx_library"),
@@ -26683,7 +26691,8 @@ PAYMENT_FREEZE_COMMANDS = {
 }
 TOOL_FREEZE_COMMANDS = {
     "film", "video_script", "trend_ai", "trend", "trend_live", "trend_research", "trend_status",
-    "image_tools", "image_prompt", "image_pack",
+    "image_tools", "image_prompt", "image_pack", "image_studio", "image_story", "image_story_prompt",
+    "story_video", "shot_variations", "image_to_story_pack", "image_variations", "creative_flow",
     "video_from_image", "image_to_video_pack", "ai_image", "ai_image_edit",
     "music", "music_tools", "music_prompt", "music_library", "sfx_library", "media_library",
     "play_music", "play_sfx", "play_media", "select_music", "select_sfx", "select_media",
@@ -27257,8 +27266,16 @@ PUBLIC_COMMAND_FUNCTIONS = {
     "birthday": "cmd_birthday",
     "legal": "cmd_legal",
     "image_tools": "cmd_image_tools",
+    "image_studio": "cmd_image_studio",
     "image_prompt": "cmd_image_prompt",
+    "image_story": "cmd_image_story",
+    "image_story_prompt": "cmd_image_story",
+    "story_video": "cmd_image_story",
+    "shot_variations": "cmd_image_story",
+    "image_to_story_pack": "cmd_image_story",
+    "image_variations": "cmd_image_studio",
     "image_to_video_pack": "cmd_image_to_video_pack",
+    "creative_flow": "cmd_creative_flow",
     "music": "cmd_music_tools",
     "music_tools": "cmd_music_tools",
     "music_prompt": "cmd_music_prompt",
@@ -27683,17 +27700,31 @@ def menu_text_main_music() -> str:
     return (
         "🎵 <b>NHẠC AI / KHO NHẠC TOAN AAS</b>\n\n"
         "Dùng để tìm nhạc nền, hiệu ứng âm thanh, tạo prompt nhạc và chuẩn bị âm thanh cho video.\n\n"
-        "<b>Lệnh nhanh:</b>\n"
-        "• <code>/music</code> hoặc <code>/music_tools</code> — mở trung tâm nhạc\n"
-        "• <code>/music_prompt &lt;mô tả&gt;</code> — tạo prompt nhạc nền\n"
-        "• <code>/music_library &lt;từ khóa&gt;</code> — tìm nhạc nền\n"
-        "• <code>/sfx_library &lt;từ khóa&gt;</code> — tìm hiệu ứng âm thanh\n"
-        "• <code>/media_library &lt;từ khóa&gt;</code> — tìm ảnh/video public\n"
-        "• <code>/play_music 1</code> hoặc <code>/play_sfx 1</code> — nghe thử\n"
-        "• <code>/select_music 1</code> hoặc <code>/select_sfx 1</code> — chọn nhạc/SFX\n"
-        "• <code>/music_policy</code> — chính sách nhạc/media\n\n"
-        "<b>Quy trình:</b>\n"
-        "Tìm → nghe thử → chọn → gửi video/ảnh → ghép nhạc khi công cụ được mở.\n\n"
+        "<b>Bạn có thể làm gì?</b>\n\n"
+        "🎼 <b>1. Tạo prompt nhạc nền</b>\n"
+        "<code>/music_prompt &lt;mô tả video&gt;</code>\n"
+        "Ví dụ: <code>/music_prompt video review máy xay sinh tố mini vui tươi 30 giây</code>\n\n"
+        "🎧 <b>2. Tìm nhạc nền</b>\n"
+        "<code>/music_library &lt;từ khóa&gt;</code>\n"
+        "Ví dụ: <code>/music_library upbeat product review</code>\n\n"
+        "🔊 <b>3. Tìm hiệu ứng âm thanh</b>\n"
+        "<code>/sfx_library &lt;từ khóa&gt;</code>\n"
+        "Ví dụ: <code>/sfx_library whoosh transition</code>\n\n"
+        "🖼 <b>4. Tìm ảnh/video public</b>\n"
+        "<code>/media_library &lt;từ khóa&gt;</code>\n"
+        "Ví dụ: <code>/media_library modern kitchen blender</code>\n\n"
+        "▶️ <b>5. Nghe thử</b>\n"
+        "<code>/play_music 1</code>\n"
+        "<code>/play_sfx 1</code>\n\n"
+        "✅ <b>6. Chọn nhạc/SFX</b>\n"
+        "<code>/select_music 1</code>\n"
+        "<code>/select_sfx 1</code>\n\n"
+        "🎬 <b>7. Ghép nhạc/voice vào video</b>\n"
+        "<code>/add_music</code> — admin test\n"
+        "<code>/add_voice_to_video</code> — admin test\n"
+        "<code>/image_to_music_video</code> — admin test\n\n"
+        "📜 <b>8. Chính sách bản quyền</b>\n"
+        "<code>/music_policy</code>\n\n"
         "Lưu ý: nhạc/kho public có license riêng. Kiểm tra quyền thương mại trước khi đăng quảng cáo/kiếm tiền."
     )
 
@@ -28726,14 +28757,13 @@ async def cmd_admin_doc_sources(update: Update, context: ContextTypes.DEFAULT_TY
     await send_admin_doc_by_key(update, context, "sources")
 
 def official_channels_text() -> str:
-    website = effective_public_base_url() or "https://bot-production-2dd7.up.railway.app"
+    website = effective_public_site_url() or "https://www.toanaas.vn"
     return (
         "🛰 <b>KÊNH CHÍNH THỨC TOAN AAS</b>\n\n"
         f"• Bot chính thức: <a href=\"{html.escape(OFFICIAL_TELEGRAM_URL)}\">{html.escape(OFFICIAL_TELEGRAM_URL)}</a>\n"
         f"• TOAN AAS Hub: <a href=\"{html.escape(TOAN_AAS_COMMUNITY_URL)}\">{html.escape(TOAN_AAS_COMMUNITY_URL)}</a>\n"
         f"• Hỗ trợ/admin: <a href=\"{html.escape(SUPPORT_TELEGRAM_URL)}\">{html.escape(SUPPORT_TELEGRAM_URL)}</a>\n"
-        f"• Website hiện tại: <a href=\"{html.escape(website)}\">{html.escape(website)}</a>\n"
-        "• Domain dự kiến sau khi mua/cấu hình: <code>toanaas.vn</code>\n\n"
+        f"• Website chính thức: <a href=\"{html.escape(website)}\">{html.escape(website)}</a>\n\n"
         "<b>Cảnh báo chống giả mạo:</b>\n"
         "TOAN AAS không yêu cầu mật khẩu mạng xã hội, mã OTP, thông tin thẻ thanh toán hoặc private key qua Telegram."
     )
@@ -29298,6 +29328,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Image Tools Menu: <code>{'enabled/menu' if providers['media_factory']['image_tools'] else 'disabled'}</code>",
         f"• Image Prompt Factory: <code>{'enabled/prompt-only' if providers['media_factory']['image_prompt_factory'] else 'disabled'}</code>",
         f"• Image-to-Video Prompt Pack: <code>{'enabled/prompt-only' if providers['media_factory']['image_to_video_prompt'] else 'disabled'}</code>",
+        f"• Image Story Pack: <code>{'enabled/prompt-only' if providers['media_factory'].get('image_story_pack') else 'disabled'}</code>",
+        f"• AI Image Studio: <code>{'enabled/prompt-only' if providers['media_factory'].get('ai_image_studio') else 'disabled'}</code>",
         f"• OpenAI Image Generation: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_image')}</code> | tested <code>{html.escape(tool_test_status_text('ai_image'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_generation_stage') or 'DISABLED')}</code>",
         f"• OpenAI Image Edit: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_image_edit')}</code> | tested <code>{html.escape(tool_test_status_text('ai_image_edit'))}</code> | public <code>{'ON' if is_feature_public_ready('ai_image_edit') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('image_openai_edit_stage') or 'DISABLED')}</code>",
         f"• Stability Image: configured <code>{provider_status_text(providers['image']['stability'])}</code> | tested <code>{html.escape(tool_test_status_text('stability_image'))}</code> | stage <code>{html.escape(providers['media_factory'].get('stability_image_stage') or 'DISABLED')}</code>",
@@ -29306,6 +29338,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Runway Video: configured <code>{provider_status_text(providers['video']['runway'])}</code> | tested <code>{html.escape(tool_test_status_text('runway_video'))}</code> | stage <code>{html.escape(providers['media_factory'].get('runway_video_stage') or 'DISABLED')}</code>",
         f"• HeyGen Avatar: configured <code>{provider_status_text(providers['video']['heygen'])}</code> | tested <code>{html.escape(tool_test_status_text('heygen_avatar'))}</code> | stage <code>{html.escape(providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED')}</code>",
         f"• Real Video Generation: configured <code>{'yes' if providers['video']['ready'] else 'no'}</code> | tested <code>{html.escape(tool_test_status_text('real_video'))}</code> | public <code>{'ON' if is_feature_public_ready('real_video') else 'OFF'}</code> | stage <code>{html.escape(providers['media_factory'].get('real_video_stage') or 'DISABLED')}</code>",
+        f"• Video render from image story: <code>admin-only</code> | stage <code>{html.escape(providers['media_factory'].get('image_story_render_stage') or 'ADMIN_ONLY')}</code>",
         f"• Admin Publish: <code>{'enabled/internal' if providers['media_factory']['admin_publish'] else 'disabled/internal'}</code>",
         f"• YouTube Publish: <code>{'enabled/admin-only' if providers['media_factory']['youtube_publish_admin'] else 'planned/admin-only/disabled'}</code>",
         f"• TikTok Publish: <code>{'enabled/admin-only' if providers['media_factory']['tiktok_publish_admin'] else 'planned/admin-only/disabled'}</code>",
@@ -30798,6 +30831,13 @@ def music_policy_lines() -> list[str]:
         "• Không đăng nội dung vi phạm bản quyền, giả mạo hoặc gây hiểu nhầm.",
         "• Nếu nền tảng yêu cầu ghi nguồn, bạn phải ghi đúng nguồn theo license.",
         "",
+        "<b>CHÍNH SÁCH HÌNH ẢNH / IMAGE STORY / VIDEO AI</b>",
+        "1. Người dùng phải có quyền sử dụng ảnh/video/giọng nói/tài liệu tải lên.",
+        "2. Không dùng công cụ để giả mạo người thật, gây hiểu nhầm, bôi nhọ, lừa đảo hoặc xâm phạm quyền riêng tư.",
+        "3. Không cam kết giữ nhân vật/khuôn mặt/logo giống 100% nếu provider chưa ổn.",
+        "4. Tạo ảnh/chỉnh ảnh/render video thật phụ thuộc provider và có thể admin-test trước.",
+        "5. Nội dung tạo ra phải tuân thủ pháp luật, bản quyền và điều khoản nền tảng đăng tải.",
+        "",
         "<b>Trạng thái hiện tại</b>",
         "• Kho nhạc/SFX/media: chỉ hoạt động nếu provider đã cấu hình và pass smoke test.",
         "• Tạo nhạc AI, ghép nhạc video, audio/video enhance: admin-first, chưa mở public nếu chưa test PASS.",
@@ -30817,6 +30857,7 @@ def music_policy_lines_i18n(lang: str = "vi") -> list[str]:
             "• 发布广告或变现内容前，请检查商业使用权、署名要求、平台规则和素材来源。",
             "• AI 生成音乐、音频/视频增强、给视频加音乐可能会单独消耗 Xu，不是无限使用。",
             "• 如果 provider 缺少 key、出错或处理失败，本次不会扣除 Xu，或已扣除时会按规则退回。",
+            "• Image Story / Video AI 需要用户拥有上传图片、视频和声音的使用权；真实渲染可能先由 admin 测试。",
             "",
             f"{music_no_xu_text(lang)}",
         ]
@@ -30831,6 +30872,7 @@ def music_policy_lines_i18n(lang: str = "vi") -> list[str]:
             "• Before ads or monetized content, check commercial rights, attribution, platform rules and source terms.",
             "• AI music generation, audio/video enhancement and adding music to video may consume Xu separately and are not unlimited.",
             "• If a provider is missing, fails or times out, the bot does not charge Xu, or refunds according to policy if already charged.",
+            "• Image Story / Video AI requires rights to uploaded images, videos and voice. Real rendering may stay admin-test first.",
             "",
             f"{music_no_xu_text(lang)}",
         ]
@@ -31601,10 +31643,10 @@ async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, i
     tmp_path = ""
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 TOAN-AAS-Bot/1.0",
+            "User-Agent": "TOAN-AAS-Bot/1.0",
             "Accept": "audio/mpeg,audio/*,*/*",
         }
-        timeout = httpx.Timeout(60.0, connect=10.0, read=45.0, write=10.0, pool=10.0)
+        timeout = httpx.Timeout(20.0, connect=8.0, read=20.0, write=8.0, pool=8.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
             async with client.stream("GET", preview_url) as res:
                 if res.status_code != 200:
@@ -31629,7 +31671,7 @@ async def send_audio_item_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, i
                         if size > MEDIA_PREVIEW_MAX_BYTES:
                             raise RuntimeError("preview_too_large")
                         tmp.write(chunk)
-                if size < 1024:
+                if size < 5 * 1024:
                     raise RuntimeError("preview_too_small")
         with open(tmp_path, "rb") as f:
             return await context.bot.send_audio(
@@ -32554,11 +32596,13 @@ async def send_media_library_results(message, user_id, query: str):
         "",
     ]
     media_items: list[dict] = []
-    for idx, item in enumerate(images[:4], start=1):
+    display_images = images[:5]
+    remaining_video_slots = max(0, 5 - len(display_images))
+    for idx, item in enumerate(display_images, start=1):
         lines.append(format_pixabay_image(item, idx, lang))
         media_items.append(pixabay_image_preview_item(item))
-    offset = len(images[:4])
-    for idx, item in enumerate(videos[:4], start=offset + 1):
+    offset = len(display_images)
+    for idx, item in enumerate(videos[:remaining_video_slots], start=offset + 1):
         lines.append(format_pixabay_video(item, idx, lang))
         media_items.append(pixabay_video_preview_item(item))
     lines.extend([
@@ -37617,6 +37661,185 @@ async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     create_media_factory_job(uid, media_factory_username(update), "image_prompt", topic, image_prompt_pack=output, cost_xu=IMAGE_PROMPT_PACK_COST)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+def image_story_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📱 9:16", callback_data="image_story_aspect|9:16"),
+            InlineKeyboardButton("⬛ 1:1", callback_data="image_story_aspect|1:1"),
+            InlineKeyboardButton("🖥 16:9", callback_data="image_story_aspect|16:9"),
+        ],
+        [
+            InlineKeyboardButton("🎵 Gợi ý nhạc", callback_data="music_quick|music"),
+            InlineKeyboardButton("🧪 Admin render", callback_data="image_story_render_hint"),
+        ],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def image_story_pack_text(goal: str, aspect: str = "9:16") -> str:
+    safe_goal = (goal or "video quảng cáo sản phẩm 15 giây").strip()
+    shot_templates = [
+        ("Hook mở đầu", "Ảnh/sản phẩm xuất hiện rõ trong 1-2 giây đầu", "slow push-in", "micro movement, subtle parallax"),
+        ("Cận cảnh", "Cận chi tiết nổi bật nhất của sản phẩm/nhân vật", "macro close-up", "soft glide, product detail reveal"),
+        ("Góc nghiêng", "Góc 45 độ để tạo chiều sâu và cảm giác cao cấp", "side dolly", "gentle turntable motion"),
+        ("Toàn cảnh", "Đặt sản phẩm trong bối cảnh sử dụng thật", "wide establishing shot", "light handheld movement"),
+        ("Chuyển động nhẹ", "Tạo cảm giác sản phẩm đang được dùng", "tilt up", "smooth motion, no jitter"),
+        ("Cận chi tiết", "Nhấn mạnh texture, logo hoặc lợi ích chính nếu có quyền dùng", "detail pan", "clean highlight sweep"),
+        ("Lifestyle/context", "Ngữ cảnh đời sống: bàn làm việc, bếp, studio hoặc không gian thương hiệu", "tracking shot", "natural lifestyle motion"),
+        ("CTA/end frame", "Khung cuối có thông điệp hành động, không nhồi quá nhiều chữ", "static clean frame", "soft fade-in"),
+    ]
+    lines = [
+        "🎬 <b>IMAGE STORY PACK — TOAN AAS</b>",
+        "",
+        "<b>Mục tiêu:</b>",
+        html.escape(safe_goal[:500]),
+        "",
+        f"<b>Tỉ lệ đề xuất:</b> {html.escape(aspect)} TikTok/Reels/Shorts" if aspect == "9:16" else f"<b>Tỉ lệ đề xuất:</b> {html.escape(aspect)}",
+        "",
+    ]
+    for idx, (title, desc, camera, motion) in enumerate(shot_templates, start=1):
+        lines.extend([
+            f"<b>Shot {idx} — {html.escape(title)}</b>",
+            f"• Mô tả: {html.escape(desc)}",
+            f"• Camera: {html.escape(camera)}",
+            f"• Motion: {html.escape(motion)}",
+            f"• Prompt ảnh: Realistic product/lifestyle image, {html.escape(safe_goal[:180])}, clean composition, natural light, high detail, no watermark.",
+            f"• Prompt video: {html.escape(camera)}, {html.escape(motion)}, 5 seconds, realistic motion, clean lighting, keep subject consistent.",
+            "",
+        ])
+    lines.extend([
+        "<b>Negative prompt:</b>",
+        "blur, distortion, extra fingers, broken logo, watermark, fake text, duplicated product, low quality, flicker, face mismatch.",
+        "",
+        "<b>Music suggestion:</b>",
+        "Upbeat clean commercial background, light percussion, no vocal, loopable ending. Gợi ý tìm: <code>/music_library upbeat product review</code>",
+        "",
+        "<b>Caption:</b>",
+        "Biến một hình ảnh thành video ngắn có câu chuyện rõ: mở đầu cuốn, chi tiết đẹp, bối cảnh thật và CTA gọn.",
+        "",
+        "<b>Hashtag:</b> #toanaas #contentcreator #videopack #shortvideo #aivideo",
+        "<b>CTA:</b> Xem thêm sản phẩm/dịch vụ và lưu lại ý tưởng này để dựng video.",
+        "",
+        "<b>Chính sách:</b>",
+        "• Nếu ảnh có người thật, bạn phải có quyền sử dụng ảnh.",
+        "• Không tạo nội dung giả mạo, nhạy cảm, bôi nhọ hoặc xâm phạm quyền riêng tư.",
+        "• Không cam kết giữ mặt/nhân vật/logo giống 100% nếu provider chưa ổn.",
+        "• Render video thật là admin-test trước.",
+        "",
+        "Bot chưa trừ Xu.",
+    ])
+    return "\n".join(lines)
+
+async def cmd_image_story(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    goal = media_factory_topic_from_args(context)
+    source = get_recent_media_state(LAST_USER_IMAGE, uid)
+    reply = update.message.reply_to_message if update.message else None
+    has_reply_photo = bool(reply and getattr(reply, "photo", None))
+    if not (source or has_reply_photo):
+        return await update.message.reply_text(
+            "⚠️ Vui lòng gửi ảnh trước, sau đó gõ /image_story <mục tiêu video>.\n\n"
+            "Ví dụ: /image_story video quảng cáo sản phẩm 15 giây phong cách hiện đại\n\n"
+            "Bot chưa trừ Xu."
+        )
+    if not goal:
+        goal = "video quảng cáo sản phẩm 15 giây phong cách hiện đại"
+    output = image_story_pack_text(goal, "9:16")
+    create_media_factory_job(uid, media_factory_username(update), "image_story", goal, video_prompt_pack=output, cost_xu=0, note="prompt_only")
+    await reply_html_lines(update, output.splitlines())
+    await update.message.reply_text("Chọn thao tác tiếp theo:", reply_markup=image_story_keyboard())
+
+async def cmd_image_story_render(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return await update.message.reply_text(
+            "🧪 Image Story Render đang admin test.\n\n"
+            "Hiện tại khách dùng /image_story để tạo shot pack/prompt và tự dựng hoặc gửi admin xử lý.\n"
+            "Bot chưa trừ Xu."
+        )
+    providers = provider_status_payload()
+    return await update.message.reply_text(
+        "🧪 <b>ADMIN IMAGE STORY RENDER</b>\n\n"
+        "Render ảnh/video thật đang ở chế độ admin-first.\n"
+        f"• Kling: <code>{provider_status_text(providers['video'].get('kling'))}</code>\n"
+        f"• Runway: <code>{provider_status_text(providers['video'].get('runway'))}</code>\n"
+        f"• Stability/OpenAI image: <code>{provider_status_text(providers['image'].get('stability') or providers['ai'].get('openai'))}</code>\n\n"
+        "Chưa gọi provider thật trong lệnh public này.",
+        parse_mode="HTML",
+    )
+
+async def handle_image_story_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    data = query.data or ""
+    if data == "image_story_render_hint":
+        await query.answer()
+        return await query.message.reply_text(
+            "🧪 Render thật đang admin-test. Khách dùng /image_story để lấy shot pack/prompt trước. Bot chưa trừ Xu."
+        )
+    if data.startswith("image_story_aspect|"):
+        aspect = data.split("|", 1)[1]
+        await query.answer(f"Tỉ lệ {aspect}")
+        return await query.message.reply_text(
+            f"✅ Đã chọn tỉ lệ gợi ý: {html.escape(aspect)}\n\n"
+            "Gửi ảnh rồi dùng lại: /image_story <mục tiêu video>\n"
+            "Bot sẽ tạo shot pack theo hướng tỉ lệ này. Bot chưa trừ Xu.",
+            parse_mode="HTML",
+        )
+
+async def cmd_image_studio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "🎨 <b>AI IMAGE STUDIO TOAN AAS</b>\n\n"
+        "Dùng để tạo prompt hình, chuẩn bị ảnh cho video, tạo nhiều biến thể/góc chụp và kết nối sang Video Pack.\n\n"
+        "Bạn có thể dùng:\n"
+        "• <code>/image_prompt &lt;mô tả&gt;</code> — tạo prompt ảnh\n"
+        "• <code>/image_story &lt;mục tiêu video&gt;</code> — gửi ảnh rồi tạo bộ shot video\n"
+        "• <code>/image_to_video_pack &lt;mô tả&gt;</code> — tạo prompt video từ ảnh/chủ đề\n"
+        "• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh AI nếu provider đã bật\n"
+        "• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — chỉnh ảnh nếu provider đã bật\n\n"
+        "Ví dụ:\n"
+        "• <code>/image_prompt mèo đeo kính đen, phong cách quảng cáo vui nhộn</code>\n"
+        "• <code>/image_story video quảng cáo sản phẩm 15 giây, vui tươi</code>\n"
+        "• <code>/image_to_video_pack máy xay sinh tố mini, TikTok 15 giây</code>\n\n"
+        "Lưu ý: tạo ảnh/chỉnh ảnh AI đang phụ thuộc provider và có thể admin-test trước. Bot chưa trừ Xu nếu provider chưa bật."
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+def creative_flow_text(idea: str) -> str:
+    topic = (idea or "video quảng cáo máy xay sinh tố mini TikTok 15 giây").strip()
+    return (
+        "🧭 <b>CREATIVE FLOW TOAN AAS</b>\n\n"
+        f"<b>Ý tưởng:</b> {html.escape(topic[:500])}\n\n"
+        "<b>1. Kịch bản ngắn</b>\n"
+        "Hook 2 giây đầu → vấn đề của khách → sản phẩm/giải pháp → lợi ích chính → CTA.\n\n"
+        "<b>2. Prompt ảnh</b>\n"
+        f"Realistic product/lifestyle image for {html.escape(topic[:180])}, clean commercial lighting, natural background, high detail, no watermark.\n\n"
+        "<b>3. Image Story Shot Pack</b>\n"
+        "Gửi ảnh rồi dùng: <code>/image_story " + html.escape(topic[:120]) + "</code>\n\n"
+        "<b>4. Nhạc gợi ý</b>\n"
+        "Tìm nhạc: <code>/music_library upbeat product review</code>\n\n"
+        "<b>5. SFX gợi ý</b>\n"
+        "Tìm SFX: <code>/sfx_library whoosh transition</code> hoặc <code>/sfx_library click</code>\n\n"
+        "<b>6. Caption/hashtag</b>\n"
+        "Caption ngắn, một lợi ích chính, CTA rõ. Hashtag: #toanaas #review #shortvideo #contentcreator\n\n"
+        "<b>7. CTA</b>\n"
+        "Nhắn tin để nhận tư vấn / xem thêm sản phẩm / lưu video để dùng sau.\n\n"
+        "<b>8. Lệnh tiếp theo nên dùng</b>\n"
+        "• <code>/image_prompt ...</code>\n"
+        "• <code>/image_story ...</code>\n"
+        "• <code>/music_library ...</code>\n"
+        "• <code>/sfx_library ...</code>\n\n"
+        "Nếu AI provider đang lỗi/quota, flow này vẫn dùng template local. Bot chưa trừ Xu."
+    )
+
+async def cmd_creative_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    idea = media_factory_topic_from_args(context)
+    if not idea:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: /creative_flow <ý tưởng>\n\n"
+            "Ví dụ: /creative_flow video quảng cáo máy xay sinh tố mini TikTok 15 giây vui tươi"
+        )
+    await reply_html_lines(update, creative_flow_text(idea).splitlines())
 
 async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -54817,8 +55040,17 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("trend_research", cmd_trend_research))
     tg_app.add_handler(CommandHandler("trend_status", cmd_trend_status))
     tg_app.add_handler(CommandHandler("image_tools", cmd_image_tools))
+    tg_app.add_handler(CommandHandler("image_studio", cmd_image_studio))
     tg_app.add_handler(CommandHandler("image_prompt", cmd_image_prompt))
     tg_app.add_handler(CommandHandler("image_pack", cmd_image_pack))
+    tg_app.add_handler(CommandHandler("image_story", cmd_image_story))
+    tg_app.add_handler(CommandHandler("image_story_prompt", cmd_image_story))
+    tg_app.add_handler(CommandHandler("story_video", cmd_image_story))
+    tg_app.add_handler(CommandHandler("shot_variations", cmd_image_story))
+    tg_app.add_handler(CommandHandler("image_to_story_pack", cmd_image_story))
+    tg_app.add_handler(CommandHandler("image_variations", cmd_image_studio))
+    tg_app.add_handler(CommandHandler("image_story_render", cmd_image_story_render))
+    tg_app.add_handler(CommandHandler("creative_flow", cmd_creative_flow))
     tg_app.add_handler(CommandHandler("video_from_image", cmd_video_from_image))
     tg_app.add_handler(CommandHandler("image_to_video_pack", cmd_image_to_video_pack))
     tg_app.add_handler(CommandHandler("ai_image", cmd_ai_image))
@@ -54956,6 +55188,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_music_quick_callback, pattern=r"^(music_quick|sfx_quick|media_quick)\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))

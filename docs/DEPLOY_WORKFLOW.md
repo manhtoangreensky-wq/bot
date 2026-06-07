@@ -1,8 +1,10 @@
 # TOAN AAS Deploy Workflow
 
-Production domain:
+Production website:
 
-`https://bot-production-2dd7.up.railway.app`
+`https://www.toanaas.vn/`
+
+Railway remains the backend/runtime host for webhook, health checks and internal routes when configured through `PUBLIC_BASE_URL`.
 
 Do not use GitHub Pages for this project:
 
@@ -44,17 +46,20 @@ git push origin main
 
 7. Railway auto deploys from GitHub.
 
-## Production Smoke Test
+## Production Website Smoke Test
 
-Test the Railway domain only:
+Test the official website domain for public website/download UX:
 
-- `https://bot-production-2dd7.up.railway.app/`
-- `https://bot-production-2dd7.up.railway.app/health`
-- `https://bot-production-2dd7.up.railway.app/asset_check`
-- `https://bot-production-2dd7.up.railway.app/LOGO.png?v=20260603`
-- `https://bot-production-2dd7.up.railway.app/banner.png?v=20260603`
-- `https://bot-production-2dd7.up.railway.app/download/huong-dan-toan-aas.docx`
-- `https://bot-production-2dd7.up.railway.app/download/dieu-khoan-su-dung-toan-aas.pdf`
+- `https://www.toanaas.vn/`
+- `https://www.toanaas.vn/LOGO.png?v=20260603`
+- `https://www.toanaas.vn/banner.png?v=20260603`
+- `https://www.toanaas.vn/download/huong-dan-toan-aas.docx`
+- `https://www.toanaas.vn/download/dieu-khoan-su-dung-toan-aas.pdf`
+
+Backend/runtime smoke checks can still use the configured Railway `PUBLIC_BASE_URL`:
+
+- `/health`
+- `/asset_check`
 
 ## Rules
 
