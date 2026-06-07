@@ -205,6 +205,42 @@ def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
             os.unlink(db_path)
 
 
+def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        bot.record_api_debug(
+            "shopaikey",
+            "usage",
+            "PASS",
+            200,
+            "http=200; latency_ms=111; total=16; used=0.3; remaining=15.7; remaining_percent=98.12; group=cheap,gemini,claude_code; error_class=-",
+        )
+        usage = bot.shopaikey_last_usage_snapshot()
+        assert usage["total"] == "16"
+        assert usage["remaining"] == "15.7"
+        assert usage["remaining_percent"] == "98.12"
+        assert usage["group_name"] == "cheap,gemini,claude_code"
+        assert "98.12%" in bot.shopaikey_usage_summary_text(usage)
+
+        bot.record_api_debug(
+            "shopaikey",
+            "tool_test_shopaikey",
+            "PASS",
+            200,
+            "model=gpt-4o-mini; http=200; latency_ms=222; error_class=-; attempts=gpt-4o-mini=PASS",
+        )
+        chat = bot.shopaikey_chat_status_snapshot()
+        assert chat["status"] == "PASS"
+        assert chat["model"] == "gpt-4o-mini"
+        assert "PASS" in bot.shopaikey_chat_status_text()
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_critical_sales_ready_commands_remain_registered():
     source = bot_source_text()
     handler_lines = [line.strip() for line in source.splitlines() if "CommandHandler(" in line]

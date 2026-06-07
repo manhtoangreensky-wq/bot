@@ -2195,6 +2195,42 @@ def record_api_debug(provider: str, action: str, status: str, http_status: int =
         if conn:
             conn.close()
 
+def latest_api_debug_event(provider: str, actions: list[str]) -> dict:
+    action_list = [str(item or "")[:80] for item in actions if str(item or "").strip()]
+    if not action_list:
+        return {}
+    conn = None
+    try:
+        conn = db_connect()
+        placeholders = ",".join("?" for _ in action_list)
+        row = conn.execute(
+            f"""SELECT provider, action, status, http_status, detail, created_at
+            FROM api_debug_events
+            WHERE provider=? AND action IN ({placeholders})
+            ORDER BY id DESC LIMIT 1""",
+            [str(provider or "")[:60], *action_list],
+        ).fetchone()
+        if not row:
+            return {}
+        return {
+            "provider": row[0] or "",
+            "action": row[1] or "",
+            "status": row[2] or "",
+            "http_status": int(row[3] or 0),
+            "detail": row[4] or "",
+            "created_at": row[5] or "",
+        }
+    except sqlite3.OperationalError as e:
+        if "no such table" not in str(e).lower():
+            logger.warning(f"API debug read failed: {e}")
+        return {}
+    except Exception as e:
+        logger.warning(f"API debug read failed: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
 def record_usage_event_conn(
     conn,
     user_id,
@@ -26538,6 +26574,29 @@ def format_quota_number(value) -> str:
         return str(int(number))
     return f"{number:.2f}".rstrip("0").rstrip(".")
 
+def parse_key_value_detail(detail: str) -> dict:
+    parsed = {}
+    for part in str(detail or "").split(";"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        parsed[key.strip()] = value.strip()
+    return parsed
+
+def shopaikey_usage_from_debug_detail(event: dict) -> dict:
+    detail = parse_key_value_detail(event.get("detail") or "")
+    usage = {
+        "total": detail.get("total", ""),
+        "used": detail.get("used", ""),
+        "balance": detail.get("balance", ""),
+        "remaining": detail.get("remaining", ""),
+        "remaining_percent": detail.get("remaining_percent", ""),
+        "group_name": detail.get("group", ""),
+        "token_name": "",
+        "last_at": event.get("created_at") or "",
+    }
+    return {key: str(value or "") for key, value in usage.items()}
+
 def save_shopaikey_usage_snapshot(usage: dict, updated_by=""):
     safe_usage = {
         "total": format_quota_number(usage.get("total")),
@@ -26577,6 +26636,11 @@ def shopaikey_last_usage_snapshot() -> dict:
                     snapshot[key] = str(data.get(key) or "")
         except Exception:
             pass
+    if not any(snapshot.get(key) for key in ("total", "remaining", "group_name", "remaining_percent")):
+        debug_usage = shopaikey_usage_from_debug_detail(latest_api_debug_event("shopaikey", ["usage", "shopaikey_usage"]))
+        for key, value in debug_usage.items():
+            if value:
+                snapshot[key] = value
     return snapshot
 
 def shopaikey_usage_summary_text(usage: dict) -> str:
@@ -26606,6 +26670,14 @@ def shopaikey_chat_status_snapshot() -> dict:
     tested_at = result.get("tested_at") or get_system_setting("shopaikey_chat_last_at", "")
     if status in {"", "NOT_TESTED"}:
         status = get_system_setting("shopaikey_chat_last_status", "NOT_TESTED") or "NOT_TESTED"
+    if str(status or "").upper() in {"", "NOT_TESTED"}:
+        event = latest_api_debug_event("shopaikey", ["tool_test_shopaikey", "chat_smoke", "shopaikey_chat"])
+        if event:
+            status = str(event.get("status") or "NOT_TESTED").upper()
+            detail = detail or event.get("detail") or ""
+            tested_at = tested_at or event.get("created_at") or ""
+            detail_map = parse_key_value_detail(detail)
+            model = model or detail_map.get("model", "")
     return {
         "status": status,
         "model": model,
