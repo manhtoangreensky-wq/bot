@@ -159,6 +159,7 @@ def _log_secret_values() -> list[str]:
         "TELEGRAM_WEBHOOK_SECRET",
         "LEAD_WEBHOOK_SECRET",
         "OPERATOR_API_TOKEN",
+        "LOCAL_WORKER_TOKEN",
         "AFFILIATE_POSTBACK_TOKEN",
     ]
     values = []
@@ -210,6 +211,12 @@ def env_any(*names: str, default: str = "") -> str:
 
 def env_flag(name: str, default: str = "0") -> bool:
     return str(os.environ.get(name, default) or default).strip().lower() in {"1", "true", "yes", "on"}
+
+def env_int(name: str, default: int = 0) -> int:
+    try:
+        return int(str(os.environ.get(name, str(default)) or str(default)).strip())
+    except Exception:
+        return int(default)
 
 def normalize_public_base_url(value: str = "") -> str:
     value = (value or "").strip().rstrip("/")
@@ -413,6 +420,13 @@ MAX_OPERATOR_UPLOAD_MB = int(_env("MAX_OPERATOR_UPLOAD_MB", "200") or "200")
 META_GRAPH_VERSION = _env("META_GRAPH_VERSION", "v24.0")
 REFERENCE_VIDEO_DIR = _env("REFERENCE_VIDEO_DIR", r"D:\mybot\video AI tham khảo")
 TOAN_AAS_DOCS_DIR = _env("TOAN_AAS_DOCS_DIR")
+LOCAL_WORKER_ENABLED = env_flag("LOCAL_WORKER_ENABLED", "false")
+LOCAL_WORKER_TOKEN = _env("LOCAL_WORKER_TOKEN")
+LOCAL_WORKER_POLL_ENABLED = env_flag("LOCAL_WORKER_POLL_ENABLED", "true")
+LOCAL_WORKER_MAX_JOB_SECONDS = max(30, env_int("LOCAL_WORKER_MAX_JOB_SECONDS", 600))
+LOCAL_FFMPEG_PATH = _env("LOCAL_FFMPEG_PATH", r"D:\TOANAAS\ffmpeg-8.1.1\bin\ffmpeg.exe")
+LOCAL_COMFY_URL = _env("LOCAL_COMFY_URL", "http://127.0.0.1:8188")
+LOCAL_COMFY_ENABLED = env_flag("LOCAL_COMFY_ENABLED", "false")
 
 def is_railway_runtime() -> bool:
     return any(
@@ -960,6 +974,25 @@ def init_db():
         plan_xu_remaining INTEGER DEFAULT 0,
         plan_status TEXT DEFAULT 'inactive',
         order_code TEXT DEFAULT '',
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS local_worker_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        command TEXT,
+        job_type TEXT,
+        status TEXT DEFAULT 'queued',
+        provider TEXT,
+        input_file_id TEXT,
+        output_file_id TEXT,
+        output_url TEXT,
+        error_short TEXT,
+        created_at TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        xu_cost INTEGER DEFAULT 0,
+        admin_only INTEGER DEFAULT 1,
+        worker_id TEXT,
         updated_at TEXT
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS launch_bonus_redemptions (
@@ -1660,6 +1693,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_birthday_review_user_status ON birthday_review_requests(user_id, status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_plans_status ON user_plans(plan_status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_plans_expires ON user_plans(plan_expires_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_status ON local_worker_jobs(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_created ON local_worker_jobs(created_at)")
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -25847,6 +25882,7 @@ def provider_status_payload() -> dict:
             "rapidapi": bool(RAPIDAPI_KEY),
             "rapidapi_host": bool(RAPIDAPI_HOST),
         },
+        "local_worker": local_worker_status_payload(),
         "document": doc_tools_status_payload(),
         "media_factory": {
             "trend_finder": is_feature_enabled("trend_finder", default=True),
@@ -25989,6 +26025,213 @@ def preferred_tool_test_status_text(*tool_names: str) -> str:
     status = str(result.get("status") or "NOT_TESTED").upper()
     tested_at = result.get("tested_at") or ""
     return f"{status}" + (f" at {tested_at}" if tested_at else "")
+
+LOCAL_WORKER_JOB_TYPES = {
+    "worker_ping",
+    "ffmpeg_health",
+    "ffmpeg_probe",
+    "add_music_to_video_planned",
+    "add_voice_to_video_planned",
+    "image_to_music_video_planned",
+    "comfy_health_planned",
+    "comfy_image_test_planned",
+}
+LOCAL_WORKER_JOB_STATUSES = {"queued", "running", "succeeded", "failed", "cancelled"}
+
+def parse_now_text(value: str):
+    try:
+        return datetime.strptime(str(value or ""), "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+def local_worker_last_heartbeat() -> dict:
+    heartbeat_at = get_system_setting("local_worker:last_heartbeat", "")
+    worker_id = get_system_setting("local_worker:worker_id", "")
+    heartbeat_dt = parse_now_text(heartbeat_at)
+    age_seconds = None
+    connected = False
+    if heartbeat_dt:
+        age_seconds = max(0, int((datetime.now() - heartbeat_dt).total_seconds()))
+        connected = age_seconds <= 90
+    return {
+        "worker_id": worker_id,
+        "last_heartbeat": heartbeat_at,
+        "age_seconds": age_seconds,
+        "connected": connected,
+    }
+
+def local_worker_job_from_row(row) -> dict:
+    if not row:
+        return {}
+    fields = [
+        "id", "user_id", "command", "job_type", "status", "provider",
+        "input_file_id", "output_file_id", "output_url", "error_short",
+        "created_at", "started_at", "finished_at", "xu_cost", "admin_only",
+        "worker_id", "updated_at",
+    ]
+    return {fields[i]: row[i] if i < len(row) else "" for i in range(len(fields))}
+
+def create_local_worker_job(
+    user_id="",
+    command="",
+    job_type="worker_ping",
+    provider="local_worker",
+    input_file_id="",
+    xu_cost=0,
+    admin_only=True,
+) -> int:
+    job_type = str(job_type or "").strip()
+    if job_type not in LOCAL_WORKER_JOB_TYPES:
+        raise ValueError("unsupported local worker job type")
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        now = now_text()
+        c.execute(
+            """INSERT INTO local_worker_jobs
+            (user_id, command, job_type, status, provider, input_file_id, created_at, xu_cost, admin_only, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id or ""),
+                str(command or ""),
+                job_type,
+                "queued",
+                str(provider or "local_worker"),
+                str(input_file_id or ""),
+                now,
+                int(xu_cost or 0),
+                1 if admin_only else 0,
+                now,
+            ),
+        )
+        conn.commit()
+        return int(c.lastrowid)
+    finally:
+        conn.close()
+
+def get_local_worker_job(job_id) -> dict:
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at
+               FROM local_worker_jobs WHERE id=?""",
+            (str(job_id),),
+        )
+        return local_worker_job_from_row(c.fetchone())
+    finally:
+        conn.close()
+
+def list_local_worker_jobs(limit: int = 10) -> list[dict]:
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at
+               FROM local_worker_jobs
+               ORDER BY id DESC
+               LIMIT ?""",
+            (max(1, min(int(limit or 10), 50)),),
+        )
+        return [local_worker_job_from_row(row) for row in c.fetchall()]
+    finally:
+        conn.close()
+
+def count_local_worker_jobs() -> dict:
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT status, COUNT(*) FROM local_worker_jobs GROUP BY status")
+        counts = {str(status or "unknown"): int(count or 0) for status, count in c.fetchall()}
+        return {
+            "queued": counts.get("queued", 0),
+            "running": counts.get("running", 0),
+            "succeeded": counts.get("succeeded", 0),
+            "failed": counts.get("failed", 0),
+            "cancelled": counts.get("cancelled", 0),
+            "total": sum(counts.values()),
+        }
+    except sqlite3.OperationalError:
+        return {"queued": 0, "running": 0, "succeeded": 0, "failed": 0, "cancelled": 0, "total": 0}
+    finally:
+        conn.close()
+
+def update_local_worker_job(job_id, status: str, worker_id: str = "", error_short: str = "", output_file_id: str = "", output_url: str = "") -> dict:
+    status = str(status or "").strip().lower()
+    if status not in LOCAL_WORKER_JOB_STATUSES:
+        raise ValueError("invalid local worker job status")
+    job = get_local_worker_job(job_id)
+    if not job:
+        raise ValueError("local worker job not found")
+    now = now_text()
+    started_at = job.get("started_at") or (now if status == "running" else "")
+    finished_at = job.get("finished_at") or (now if status in {"succeeded", "failed", "cancelled"} else "")
+    conn = db_connect()
+    try:
+        conn.execute(
+            """UPDATE local_worker_jobs
+               SET status=?, worker_id=?, error_short=?, output_file_id=?, output_url=?,
+                   started_at=?, finished_at=?, updated_at=?
+               WHERE id=?""",
+            (
+                status,
+                str(worker_id or job.get("worker_id") or "")[:120],
+                str(error_short or "")[:500],
+                str(output_file_id or job.get("output_file_id") or "")[:500],
+                str(output_url or job.get("output_url") or "")[:1000],
+                started_at,
+                finished_at,
+                now,
+                str(job_id),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    updated = get_local_worker_job(job_id)
+    if updated.get("job_type") == "ffmpeg_health":
+        save_tool_test_result(
+            "ffmpeg_local",
+            "PASS" if status == "succeeded" else ("FAIL" if status == "failed" else "RUNNING"),
+            updated.get("error_short") or "local ffmpeg health queued/running",
+            updated.get("worker_id") or "local_worker",
+        )
+    if updated.get("job_type") == "worker_ping":
+        save_tool_test_result(
+            "local_worker",
+            "PASS" if status == "succeeded" else ("FAIL" if status == "failed" else "RUNNING"),
+            updated.get("error_short") or "local worker ping queued/running",
+            updated.get("worker_id") or "local_worker",
+        )
+    return updated
+
+def local_worker_status_payload() -> dict:
+    heartbeat = local_worker_last_heartbeat()
+    counts = count_local_worker_jobs()
+    ffmpeg_test = get_tool_test_result("ffmpeg_local")
+    worker_test = get_tool_test_result("local_worker")
+    return {
+        "enabled": LOCAL_WORKER_ENABLED,
+        "poll_enabled": LOCAL_WORKER_POLL_ENABLED,
+        "token_configured": bool(LOCAL_WORKER_TOKEN),
+        "connected": bool(heartbeat.get("connected")),
+        "worker_id": heartbeat.get("worker_id") or "",
+        "last_heartbeat": heartbeat.get("last_heartbeat") or "",
+        "heartbeat_age_seconds": heartbeat.get("age_seconds"),
+        "job_counts": counts,
+        "ffmpeg_path_configured": bool(LOCAL_FFMPEG_PATH),
+        "ffmpeg_path": LOCAL_FFMPEG_PATH,
+        "ffmpeg_test_status": ffmpeg_test.get("status") or "NOT_TESTED",
+        "ffmpeg_test_at": ffmpeg_test.get("tested_at") or "",
+        "worker_test_status": worker_test.get("status") or "NOT_TESTED",
+        "comfy_url_configured": bool(LOCAL_COMFY_URL),
+        "comfy_enabled": LOCAL_COMFY_ENABLED,
+        "comfy_status": "installed_but_not_ready/planned" if not LOCAL_COMFY_ENABLED else "admin_only/not_tested",
+        "comfy_render": "admin-only/planned",
+        "render_queue": "admin-only",
+    }
 
 FEATURE_RELEASE_STAGES = {"PLANNED", "ADMIN_ONLY", "BETA_PRIVATE", "PUBLIC_READY", "DISABLED"}
 FEATURE_RELEASE_DEFAULTS = {
@@ -26710,6 +26953,8 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_kling_video", "tool_test_runway_video", "tool_test_heygen_avatar",
     "tool_test_music_library", "tool_test_sfx_library", "tool_test_media_library",
     "tool_test_music_ai", "tool_test_replicate_media",
+    "local_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
+    "local_jobs", "local_job", "render_center",
     "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
     "memory", "note", "note_ai", "notes", "note_view", "search_note", "note_tags",
     "note_delete", "note_archive", "memory_status", "memory_plan", "note_priority",
@@ -29356,6 +29601,14 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Downloader tested: <code>{html.escape(tool_test_status_text('downloader'))}</code>",
         f"• Downloader note: <code>{html.escape(cobalt_note)}</code>",
         "",
+        "<b>Local Worker / Render Queue</b>",
+        f"• Local Worker: <code>{'connected' if providers['local_worker'].get('connected') else 'planned/not_connected'}</code>",
+        f"• Local Worker enabled: <code>{'ON' if providers['local_worker'].get('enabled') else 'OFF'}</code> | poll <code>{'ON' if providers['local_worker'].get('poll_enabled') else 'OFF'}</code> | token <code>{'configured' if providers['local_worker'].get('token_configured') else 'missing'}</code>",
+        f"• Local ffmpeg: <code>{'configured' if providers['local_worker'].get('ffmpeg_path_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('ffmpeg_local'))}</code>",
+        f"• Local ComfyUI: <code>{html.escape(providers['local_worker'].get('comfy_status') or 'planned/not_ready')}</code>",
+        f"• ComfyUI render: <code>{html.escape(providers['local_worker'].get('comfy_render') or 'admin-only/planned')}</code>",
+        f"• Render queue: <code>{html.escape(providers['local_worker'].get('render_queue') or 'admin-only')}</code> | queued <code>{providers['local_worker'].get('job_counts', {}).get('queued', 0)}</code> | running <code>{providers['local_worker'].get('job_counts', {}).get('running', 0)}</code>",
+        "",
         "<b>Security</b>",
         f"• Lead webhook secret: <code>{provider_status_text(providers['security']['lead_webhook_secret'])}</code>",
         f"• Telegram webhook secret: <code>{provider_status_text(providers['security']['telegram_webhook_secret'])}</code>",
@@ -29367,6 +29620,173 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not db_status["ok"]:
         lines.append(f"DB error: <code>{html.escape(db_status.get('error') or '-')}</code>")
     await reply_html_lines(update, lines)
+
+LOCAL_RENDER_ADMIN_ONLY_MESSAGE = "⚠️ Công cụ local render đang admin test. Bot chưa trừ Xu."
+
+def local_worker_status_lines() -> list[str]:
+    status = local_worker_status_payload()
+    counts = status.get("job_counts") or {}
+    heartbeat_age = status.get("heartbeat_age_seconds")
+    heartbeat_text = status.get("last_heartbeat") or "chưa có"
+    if heartbeat_age is not None:
+        heartbeat_text += f" ({heartbeat_age}s trước)"
+    return [
+        f"• Enabled: <code>{'ON' if status.get('enabled') else 'OFF'}</code>",
+        f"• Poll enabled: <code>{'ON' if status.get('poll_enabled') else 'OFF'}</code>",
+        f"• Token: <code>{'configured' if status.get('token_configured') else 'missing'}</code>",
+        f"• Connected: <code>{'yes' if status.get('connected') else 'no'}</code>",
+        f"• Worker ID: <code>{html.escape(status.get('worker_id') or '-')}</code>",
+        f"• Last heartbeat: <code>{html.escape(heartbeat_text)}</code>",
+        f"• Local ffmpeg: <code>{'configured' if status.get('ffmpeg_path_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('ffmpeg_local'))}</code>",
+        f"• Local ComfyUI: <code>{html.escape(status.get('comfy_status') or 'planned/not_ready')}</code>",
+        f"• ComfyUI render: <code>{html.escape(status.get('comfy_render') or 'admin-only/planned')}</code>",
+        f"• Queue: queued <code>{counts.get('queued', 0)}</code> | running <code>{counts.get('running', 0)}</code> | done <code>{counts.get('succeeded', 0)}</code> | failed <code>{counts.get('failed', 0)}</code>",
+    ]
+
+async def cmd_local_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(LOCAL_RENDER_ADMIN_ONLY_MESSAGE)
+    lines = [
+        "🖥 <b>TOAN AAS Local Worker Status</b>",
+        "",
+        *local_worker_status_lines(),
+        "",
+        "Admin commands:",
+        "• <code>/local_worker_ping</code>",
+        "• <code>/tool_test_ffmpeg_local</code>",
+        "• <code>/tool_test_comfy_local</code>",
+        "• <code>/local_jobs</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_local_worker_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(LOCAL_RENDER_ADMIN_ONLY_MESSAGE)
+    job_id = create_local_worker_job(
+        user_id=update.effective_user.id,
+        command="/local_worker_ping",
+        job_type="worker_ping",
+        provider="local_worker",
+        admin_only=True,
+    )
+    save_tool_test_result("local_worker", "QUEUED", f"worker_ping job #{job_id}", update.effective_user.id)
+    await update.message.reply_text(
+        "📡 <b>Local worker ping queued</b>\n\n"
+        f"• Job ID: <code>{job_id}</code>\n"
+        "• Chạy <code>local_worker.py</code> trên máy Windows để worker poll job.\n"
+        "• Bot chưa trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_ffmpeg_local(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(LOCAL_RENDER_ADMIN_ONLY_MESSAGE)
+    job_id = create_local_worker_job(
+        user_id=update.effective_user.id,
+        command="/tool_test_ffmpeg_local",
+        job_type="ffmpeg_health",
+        provider="local_ffmpeg",
+        admin_only=True,
+    )
+    save_tool_test_result("ffmpeg_local", "QUEUED", f"ffmpeg_health job #{job_id}", update.effective_user.id)
+    await update.message.reply_text(
+        "🧪 <b>Local ffmpeg health queued</b>\n\n"
+        f"• Job ID: <code>{job_id}</code>\n"
+        f"• Expected local path: <code>{html.escape(LOCAL_FFMPEG_PATH or '-')}</code>\n"
+        "• Worker sẽ chạy <code>ffmpeg -version</code> và cập nhật kết quả.\n"
+        "• Bot chưa trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_comfy_local(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(LOCAL_RENDER_ADMIN_ONLY_MESSAGE)
+    save_tool_test_result(
+        "comfy_local",
+        "NOT_READY",
+        "ComfyUI Phase 1 is planned/not_ready; no render call is made.",
+        update.effective_user.id,
+    )
+    await update.message.reply_text(
+        "🎛 <b>ComfyUI Local Status</b>\n\n"
+        "⚠️ ComfyUI local đang planned/not_ready. Hiện Comfy Desktop cài lỗi, chưa bật test. Bot chưa trừ Xu.\n\n"
+        "• Stage: <code>installed_but_not_ready/planned</code>\n"
+        f"• LOCAL_COMFY_ENABLED: <code>{'ON' if LOCAL_COMFY_ENABLED else 'OFF'}</code>\n"
+        "• Phase 1 không gọi ComfyUI và không render ảnh/video.\n"
+        "• Ghi chú live: ComfyUI đang lỗi khởi động nên chỉ để backlog/admin planned.",
+        parse_mode="HTML",
+    )
+
+def local_worker_job_line(job: dict) -> str:
+    return (
+        f"#{job.get('id')} — <code>{html.escape(str(job.get('status') or '-'))}</code> "
+        f"— <code>{html.escape(str(job.get('job_type') or '-'))}</code> "
+        f"— created <code>{html.escape(str(job.get('created_at') or '-'))}</code>"
+    )
+
+async def cmd_local_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(LOCAL_RENDER_ADMIN_ONLY_MESSAGE)
+    jobs = list_local_worker_jobs(10)
+    if not jobs:
+        return await update.message.reply_text("✅ Chưa có local worker job nào.")
+    lines = ["🧾 <b>Local Worker Jobs</b>", ""]
+    for job in jobs:
+        lines.append(local_worker_job_line(job))
+        lines.append(f"   Xem: <code>/local_job {job.get('id')}</code>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_local_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(LOCAL_RENDER_ADMIN_ONLY_MESSAGE)
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /local_job <id>")
+    job = get_local_worker_job(context.args[0])
+    if not job:
+        return await update.message.reply_text("Không tìm thấy local worker job này.")
+    lines = [
+        "🧾 <b>Local Worker Job Detail</b>",
+        "",
+        f"• ID: <code>{job.get('id')}</code>",
+        f"• Type: <code>{html.escape(str(job.get('job_type') or '-'))}</code>",
+        f"• Status: <code>{html.escape(str(job.get('status') or '-'))}</code>",
+        f"• Provider: <code>{html.escape(str(job.get('provider') or '-'))}</code>",
+        f"• User: <code>{html.escape(str(job.get('user_id') or '-'))}</code>",
+        f"• Worker: <code>{html.escape(str(job.get('worker_id') or '-'))}</code>",
+        f"• Created: <code>{html.escape(str(job.get('created_at') or '-'))}</code>",
+        f"• Started: <code>{html.escape(str(job.get('started_at') or '-'))}</code>",
+        f"• Finished: <code>{html.escape(str(job.get('finished_at') or '-'))}</code>",
+        f"• Error: <code>{html.escape(str(job.get('error_short') or '-'))}</code>",
+        f"• Output URL: <code>{html.escape(str(job.get('output_url') or '-'))}</code>",
+        f"• Xu cost: <code>{int(job.get('xu_cost') or 0)}</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_render_center(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(LOCAL_RENDER_ADMIN_ONLY_MESSAGE)
+    lines = [
+        "🧪 <b>RENDER CENTER TOAN AAS</b>",
+        "",
+        "Trạng thái:",
+        *local_worker_status_lines(),
+        "• Ghép nhạc vào video: <code>admin test/planned</code>",
+        "• Ghép voice vào video: <code>admin test/planned</code>",
+        "• Ảnh + nhạc thành video: <code>admin test/planned</code>",
+        "• Render ảnh AI local: <code>planned</code>",
+        "• Render video AI local: <code>planned</code>",
+        "",
+        "Admin commands:",
+        "• <code>/local_status</code>",
+        "• <code>/tool_test_ffmpeg_local</code>",
+        "• <code>/tool_test_comfy_local</code>",
+        "• <code>/local_jobs</code>",
+        "• <code>/local_worker_ping</code>",
+        "• <code>/local_job &lt;id&gt;</code>",
+        "",
+        "Không mở customer render, không gọi ComfyUI, không trừ Xu ở Phase 1.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_ai_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -33289,6 +33709,9 @@ async def cmd_tool_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("HeyGen Avatar", "heygen_avatar", get_tool_test_result("heygen_avatar"), f"{providers['media_factory'].get('heygen_avatar_stage') or 'DISABLED'}"),
         ("Auphonic Enhance", "audio_enhance", get_tool_test_result("audio_enhance"), f"{providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED'}"),
         ("Downloader", "downloader", get_tool_test_result("downloader"), "Cobalt self-host" if providers["downloader"].get("cobalt_self_host") else "MISSING Cobalt"),
+        ("Local Worker", "local_worker", get_tool_test_result("local_worker"), "connected" if providers["local_worker"].get("connected") else "planned/not_connected"),
+        ("Local ffmpeg", "ffmpeg_local", get_tool_test_result("ffmpeg_local"), "configured" if providers["local_worker"].get("ffmpeg_path_configured") else "missing LOCAL_FFMPEG_PATH"),
+        ("Local ComfyUI", "comfy_local", get_tool_test_result("comfy_local"), providers["local_worker"].get("comfy_status") or "planned/not_ready"),
     ]
     lines = ["🧪 <b>Tool Test Status</b>", ""]
     for label, _, result, note in items:
@@ -54768,6 +55191,13 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_stt", cmd_tool_test_stt))
     tg_app.add_handler(CommandHandler("tool_test_stt_debug", cmd_tool_test_stt_debug))
     tg_app.add_handler(CommandHandler("tool_test_downloader", cmd_tool_test_downloader))
+    tg_app.add_handler(CommandHandler("local_status", cmd_local_status))
+    tg_app.add_handler(CommandHandler("local_worker_ping", cmd_local_worker_ping))
+    tg_app.add_handler(CommandHandler("tool_test_ffmpeg_local", cmd_tool_test_ffmpeg_local))
+    tg_app.add_handler(CommandHandler("tool_test_comfy_local", cmd_tool_test_comfy_local))
+    tg_app.add_handler(CommandHandler("local_jobs", cmd_local_jobs))
+    tg_app.add_handler(CommandHandler("local_job", cmd_local_job))
+    tg_app.add_handler(CommandHandler("render_center", cmd_render_center))
     tg_app.add_handler(CommandHandler("voiceover", cmd_voiceover))
     tg_app.add_handler(CommandHandler("tts", cmd_voiceover))
     tg_app.add_handler(CommandHandler("memory", cmd_memory))
@@ -55394,6 +55824,117 @@ def verify_runtime_access(request: Request):
     token = token or bearer
     if not OPERATOR_API_TOKEN or not token or not hmac.compare_digest(str(token), OPERATOR_API_TOKEN):
         raise HTTPException(status_code=403, detail="runtime admin only")
+
+def verify_local_worker_access(request: Request):
+    token = (
+        request.headers.get("x-local-worker-token")
+        or request.query_params.get("token", "")
+        or ""
+    )
+    auth = request.headers.get("authorization", "")
+    bearer = auth.replace("Bearer ", "", 1).strip() if auth.lower().startswith("bearer ") else ""
+    token = token or bearer
+    if not LOCAL_WORKER_TOKEN:
+        raise HTTPException(status_code=503, detail="LOCAL_WORKER_TOKEN is not configured")
+    if not token or not hmac.compare_digest(str(token), LOCAL_WORKER_TOKEN):
+        raise HTTPException(status_code=401, detail="invalid worker token")
+
+async def read_json_body(request: Request) -> dict:
+    try:
+        payload = await request.json()
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+@fastapi_app.post("/internal/worker/heartbeat")
+async def internal_worker_heartbeat(request: Request):
+    verify_local_worker_access(request)
+    payload = await read_json_body(request)
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
+    set_system_setting("local_worker:last_heartbeat", now_text(), "last local worker heartbeat", worker_id)
+    set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+    ffmpeg_path = str(payload.get("ffmpeg_path") or "")
+    if ffmpeg_path:
+        set_system_setting("local_worker:ffmpeg_path_seen", ffmpeg_path[:500], "worker reported ffmpeg path", worker_id)
+    return {"ok": True, "time": now_text(), "worker_id": worker_id}
+
+@fastapi_app.get("/internal/worker/poll")
+async def internal_worker_poll(request: Request):
+    verify_local_worker_access(request)
+    worker_id = str(request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
+    set_system_setting("local_worker:last_heartbeat", now_text(), "poll heartbeat", worker_id)
+    set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+    if not LOCAL_WORKER_ENABLED or not LOCAL_WORKER_POLL_ENABLED:
+        return {"ok": True, "enabled": LOCAL_WORKER_ENABLED, "poll_enabled": LOCAL_WORKER_POLL_ENABLED, "job": None}
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
+                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at
+               FROM local_worker_jobs
+               WHERE status='queued'
+               ORDER BY id ASC
+               LIMIT 1"""
+        )
+        row = c.fetchone()
+        if not row:
+            return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
+        job = local_worker_job_from_row(row)
+        now = now_text()
+        c.execute(
+            "UPDATE local_worker_jobs SET status='running', started_at=?, worker_id=?, updated_at=? WHERE id=? AND status='queued'",
+            (now, worker_id, now, job["id"]),
+        )
+        conn.commit()
+        if c.rowcount < 1:
+            return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
+        job = get_local_worker_job(job["id"])
+        return {
+            "ok": True,
+            "enabled": True,
+            "poll_enabled": True,
+            "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
+            "job": job,
+        }
+    finally:
+        conn.close()
+
+@fastapi_app.post("/internal/worker/job_update")
+async def internal_worker_job_update(request: Request):
+    verify_local_worker_access(request)
+    payload = await read_json_body(request)
+    job_id = payload.get("id") or payload.get("job_id")
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id required")
+    status = str(payload.get("status") or "").strip().lower()
+    worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")
+    try:
+        job = update_local_worker_job(
+            job_id,
+            status=status,
+            worker_id=worker_id,
+            error_short=str(payload.get("error_short") or "")[:500],
+            output_file_id=str(payload.get("output_file_id") or "")[:500],
+            output_url=str(payload.get("output_url") or "")[:1000],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "job": job}
+
+@fastapi_app.post("/internal/worker/upload_result")
+async def internal_worker_upload_result(request: Request, job_id: str = Form(default=""), file: UploadFile | None = File(default=None)):
+    verify_local_worker_access(request)
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id required")
+    if not file:
+        raise HTTPException(status_code=400, detail="file required")
+    return {
+        "ok": False,
+        "status": "planned",
+        "detail": "upload_result is reserved for later local render phases",
+        "job_id": str(job_id),
+    }
 
 # ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 @fastapi_app.get("/")
