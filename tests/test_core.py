@@ -3,6 +3,7 @@ import hashlib
 import os
 import sqlite3
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -47,6 +48,26 @@ def test_customer_guide_download_routes_are_word_only():
     assert "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx" in docx.headers["content-disposition"]
 
 
+def test_public_branding_and_scope_static_guard():
+    repo_root = Path(bot.__file__).resolve().parent
+    bot_source = (repo_root / "bot.py").read_text(encoding="utf-8")
+    index_html = (repo_root / "index.html").read_text(encoding="utf-8")
+    public_surface = bot_source + "\n" + index_html
+
+    assert bot.BOT_USERNAME == "toanaasbot"
+    assert bot.make_payos_description("50k") == "AAS50K"
+    assert bot.manual_qr_url(123, 50000, 999).find("AAS+123+999") >= 0
+    assert "https://t.me/toanaasbot" in index_html
+    assert "https://t.me/Httdhtoan" not in public_surface
+    assert "@Httdhtoan" not in public_surface
+    assert "TOAN DAAS" not in public_surface
+    assert "DAAS10K" not in public_surface
+    assert "DAAS50K" not in public_surface
+    assert "affiliate_id=1" not in public_surface
+    assert "kho affiliate" not in public_surface
+    assert "Lưu link affiliate" not in public_surface
+
+
 def test_public_start_menu_does_not_leak_admin_commands():
     text = bot.build_start_message_text("customer-test")
     forbidden = ["/operator_menu", "/telegram_takeover", "/runtime", "/dashboard", "/stats", "/pending", "/duyet", "/tuchoi", "/add", "/setvip"]
@@ -65,6 +86,52 @@ def test_admin_menu_contains_grouped_operator_and_system():
     button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
     assert "🧠 Operator" in button_texts
     assert "⚙️ Hệ Thống" in button_texts
+
+
+def test_provider_orchestrator_registry_is_admin_first(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "OPENROUTER_API_KEY", "openrouter-test-key")
+    monkeypatch.setattr(bot, "KLING_ACCESS_KEY", "kling-access")
+    monkeypatch.setattr(bot, "KLING_SECRET_KEY", "kling-secret")
+    monkeypatch.setattr(bot, "REPLICATE_API_TOKEN", "replicate-token")
+    monkeypatch.setattr(bot, "ELEVENLABS_API_KEY", "elevenlabs-key")
+    monkeypatch.setattr(bot, "DEEPGRAM_API_KEY", "deepgram-key")
+    monkeypatch.setattr(bot, "LOCAL_FFMPEG_PATH", r"C:\ffmpeg\bin\ffmpeg.exe")
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", False)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "shopaikey-key")
+    try:
+        bot.init_db()
+        registry = bot.provider_registry()
+        expected = {
+            "openrouter",
+            "kling",
+            "replicate",
+            "elevenlabs",
+            "deepgram",
+            "local_worker_ffmpeg",
+            "shopaikey",
+        }
+        assert expected.issubset(registry.keys())
+        assert all(payload["admin_only"] is True for payload in registry.values())
+        assert registry["openrouter"]["stage"] == "ready_for_smoke_test"
+        assert registry["kling"]["stage"] == "admin_only"
+        assert registry["replicate"]["stage"] == "admin_only"
+        assert registry["shopaikey"]["stage"] == "disabled"
+        assert "text_brain" in registry["openrouter"]["capabilities"]
+        assert "video_generate" in registry["kling"]["capabilities"]
+        assert "image_generate" in registry["replicate"]["capabilities"]
+        assert "tts" in registry["elevenlabs"]["capabilities"]
+        assert "stt" in registry["deepgram"]["capabilities"]
+        assert "ffmpeg" in registry["local_worker_ffmpeg"]["capabilities"]
+        matrix = "\n".join(bot.provider_matrix_lines())
+        assert "Admin-first only" in matrix
+        assert "Không mở public render" in matrix
+        assert "không hiển thị secret" in matrix
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
 
 
 def test_topup_keyboard_preserves_package_callbacks():
