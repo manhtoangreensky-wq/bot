@@ -11,6 +11,16 @@ from fastapi.testclient import TestClient
 import bot
 
 
+def bot_source_text() -> str:
+    return Path(bot.__file__).resolve().read_text(encoding="utf-8")
+
+
+def source_between(source: str, start_marker: str, end_marker: str) -> str:
+    start = source.index(start_marker)
+    end = source.index(end_marker, start)
+    return source[start:end]
+
+
 def test_env_loader_default(monkeypatch):
     monkeypatch.delenv("TOAN_AAS_TEST_MISSING", raising=False)
     assert bot._env("TOAN_AAS_TEST_MISSING", "fallback") == "fallback"
@@ -129,6 +139,80 @@ def test_provider_orchestrator_registry_is_admin_first(monkeypatch):
         assert "Admin-first only" in matrix
         assert "Không mở public render" in matrix
         assert "không hiển thị secret" in matrix
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_critical_sales_ready_commands_remain_registered():
+    source = bot_source_text()
+    handler_lines = [line.strip() for line in source.splitlines() if "CommandHandler(" in line]
+    expected_handlers = {
+        "start": "cmd_start",
+        "language": "cmd_language",
+        "lang": "cmd_language",
+        "naptien": "cmd_naptien",
+        "thucong": "cmd_thanhtoan_thucong",
+        "duyet": "cmd_duyet",
+        "pending": "cmd_pending",
+        "sales_ready": "cmd_sales_ready",
+        "backup_db": "cmd_backup_db",
+        "providers": "cmd_providers",
+        "film": "cmd_film",
+        "growth_ai": "cmd_growth_ai",
+        "campaign_report": "cmd_campaign_report",
+        "promo": "cmd_promo",
+        "khuyenmai": "cmd_promo_guide",
+        "gift": "cmd_gift",
+        "nhanqua": "cmd_gift",
+        "trial_status": "cmd_trial_status",
+        "image_to_pdf": "cmd_image_to_pdf",
+        "translate_voice": "cmd_translate_voice",
+        "local_status": "cmd_local_status",
+        "local_worker_ping": "cmd_local_worker_ping",
+        "tool_test_ffmpeg_local": "cmd_tool_test_ffmpeg_local",
+        "orchestrator_status": "cmd_orchestrator_status",
+        "provider_matrix": "cmd_provider_matrix",
+        "tool_test_openrouter": "cmd_tool_test_openrouter",
+        "tool_test_shopaikey": "cmd_tool_test_shopaikey",
+        "shopaikey_status": "cmd_shopaikey_status",
+    }
+    for command, handler in expected_handlers.items():
+        assert any(f'CommandHandler("{command}"' in line and handler in line for line in handler_lines), command
+
+
+def test_naptien_does_not_enable_manual_bill_state_by_default():
+    source = bot_source_text()
+    cmd_naptien_source = source_between(source, "async def cmd_naptien", "async def cmd_thanhtoan_thucong")
+    assert "USER_BILL_STATE.pop(uid, None)" in cmd_naptien_source
+    assert "set_manual_bill_state" not in cmd_naptien_source
+    assert 'callback_data=payos_package_callback_data("50k", uid)' in cmd_naptien_source
+    assert 'callback_data=manual_package_callback_data("manual_custom", uid)' in cmd_naptien_source
+
+
+def test_sales_readiness_requires_payos_checkout_and_real_payment_marker(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "PAYOS_CLIENT_ID", "payos-client")
+    monkeypatch.setattr(bot, "PAYOS_API_KEY", "payos-api")
+    monkeypatch.setattr(bot, "PAYOS_CHECKSUM_KEY", "payos-checksum")
+    monkeypatch.setattr(bot, "GEMINI_API_KEY", "gemini-key")
+    try:
+        bot.init_db()
+        bot.set_system_setting("payos_debug_create_status", "PASS", "test", "pytest")
+        bot.set_system_setting("payos_debug_create_checkout_url", "https://pay.payos.vn/test", "test", "pytest")
+        payload = bot.sales_readiness_payload()
+        assert payload["payos_debug_create"]["status"] == "PASS"
+        assert payload["payos_debug_create"]["checkout_url"] == "https://pay.payos.vn/test"
+        assert payload["payos_real_test"]["status"] == "NOT_TESTED"
+        assert payload["status"] == "BETA READY"
+        assert "SALES READY chỉ bật" in payload["note"]
+
+        bot.set_system_setting("payos_real_payment_test_status", "PASS", "real payment confirmed", "pytest")
+        payload = bot.sales_readiness_payload()
+        assert payload["payos_real_test"]["status"] == "PASS"
+        assert payload["status"] == "SALES READY"
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
