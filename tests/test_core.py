@@ -144,6 +144,29 @@ def test_provider_orchestrator_registry_is_admin_first(monkeypatch):
             os.unlink(db_path)
 
 
+def test_shopaikey_smoke_test_is_admin_only_and_experimental():
+    repo_root = Path(bot.__file__).resolve().parent
+    source = bot_source_text()
+    env_example = (repo_root / ".env.example").read_text(encoding="utf-8")
+    command_source = source_between(source, "async def cmd_tool_test_shopaikey", "class TranslationProviderError")
+
+    assert 'SHOPAIKEY_DEFAULT_MODEL = _env("SHOPAIKEY_DEFAULT_MODEL") or "gpt-4o-mini"' in source
+    assert "SHOPAIKEY_ENABLED=false" in env_example
+    assert "SHOPAIKEY_ADMIN_ONLY=true" in env_example
+    assert "SHOPAIKEY_DEFAULT_MODEL=gpt-4o-mini" in env_example
+    assert "SHOPAIKEY_USAGE_URL=https://api.shopaikey.com/usage" in env_example
+    assert "SHOPAIKEY_USAGE_ALERT_PERCENT=10" in env_example
+    assert "if not is_admin_user(update.effective_user.id)" in command_source
+    assert "Trả lời đúng một câu tiếng Việt có chữ TEST_OK." in source
+    assert 'required_text="TEST_OK"' in source
+    assert "Không log prompt/response/key" in command_source
+    assert "Không trừ Xu" in command_source
+    assert "add_credit(" not in command_source
+    assert "deduct_dynamic_credit(" not in command_source
+    assert "apiKey=***" in source
+    assert "FAIL_CONTENT_EMPTY" in source
+
+
 def test_critical_sales_ready_commands_remain_registered():
     source = bot_source_text()
     handler_lines = [line.strip() for line in source.splitlines() if "CommandHandler(" in line]
@@ -175,7 +198,10 @@ def test_critical_sales_ready_commands_remain_registered():
         "provider_matrix": "cmd_provider_matrix",
         "tool_test_openrouter": "cmd_tool_test_openrouter",
         "tool_test_shopaikey": "cmd_tool_test_shopaikey",
+        "tool_test_shopaikey_tts": "cmd_tool_test_shopaikey_tts",
         "shopaikey_status": "cmd_shopaikey_status",
+        "shopaikey_usage": "cmd_shopaikey_usage",
+        "trial_bonus_status": "cmd_trial_bonus_status",
     }
     for command, handler in expected_handlers.items():
         assert any(f'CommandHandler("{command}"' in line and handler in line for line in handler_lines), command
@@ -610,6 +636,8 @@ def test_trial_grant_locked_per_telegram_id(monkeypatch):
             c = conn.cursor()
             c.execute("SELECT granted_xu FROM trial_grants WHERE user_id=?", ("trial-user",))
             assert c.fetchone()[0] == bot.TRIAL_CREDITS
+            c.execute("SELECT bonus_amount, status, claim_source FROM trial_bonus_claims WHERE telegram_user_id=? AND status='granted'", ("trial-user",))
+            assert c.fetchone() == (bot.TRIAL_CREDITS, "granted", "telegram_start")
             c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id=? AND event_type='trial_grant'", ("trial-user",))
             assert c.fetchone()[0] == 1
         finally:
@@ -639,6 +667,8 @@ def test_trial_grant_locked_per_telegram_id(monkeypatch):
                 ("trial-user",),
             )
             assert c.fetchone()[0] == 0
+            c.execute("SELECT COUNT(*) FROM trial_bonus_claims WHERE telegram_user_id=? AND status='blocked_duplicate_user'", ("trial-user",))
+            assert c.fetchone()[0] >= 1
         finally:
             conn.close()
     finally:
@@ -681,6 +711,41 @@ def test_trial_grants_backfill_existing_users(monkeypatch):
             row = c.fetchone()
             assert row[0] == bot.TRIAL_CREDITS
             assert row[1] == "Backfilled from existing users"
+            c.execute("SELECT bonus_amount, status, claim_source FROM trial_bonus_claims WHERE telegram_user_id=? AND status='granted'", ("existing-user",))
+            assert c.fetchone() == (bot.TRIAL_CREDITS, "granted", "legacy_trial_grants")
+        finally:
+            conn.close()
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_trial_bonus_antispam_is_free_trial_only(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    try:
+        bot.init_db()
+        user_id = "paid-user"
+        initial_credits, _, _ = bot.get_user(user_id)
+        bot.create_order("paid-50", user_id, 50000, 500)
+        processed, desc, paid_info = bot.process_payos_paid_order("paid-50", 50000)
+        assert processed is True
+        assert desc == "success"
+        assert paid_info["launch_bonus"] == 30
+        credits_after_paid, _, _ = bot.get_user(user_id)
+        assert credits_after_paid == initial_credits + 530
+
+        conn = bot.db_connect()
+        try:
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM trial_bonus_claims WHERE telegram_user_id=? AND status='granted'", (user_id,))
+            assert c.fetchone()[0] == 1
+            c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id=? AND event_type='trial_grant'", (user_id,))
+            assert c.fetchone()[0] == 1
+            c.execute("SELECT COUNT(*) FROM credit_events WHERE user_id=? AND event_type='payos_deposit'", (user_id,))
+            assert c.fetchone()[0] == 1
         finally:
             conn.close()
     finally:

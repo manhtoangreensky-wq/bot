@@ -318,6 +318,23 @@ SHOPAIKEY_BASE_URL = _env("SHOPAIKEY_BASE_URL", "https://api.shopaikey.com/v1")
 SHOPAIKEY_ENABLED = env_flag("SHOPAIKEY_ENABLED", "false")
 SHOPAIKEY_ADMIN_ONLY = env_flag("SHOPAIKEY_ADMIN_ONLY", "true")
 SHOPAIKEY_DEFAULT_MODEL = _env("SHOPAIKEY_DEFAULT_MODEL") or "gpt-4o-mini"
+SHOPAIKEY_USAGE_URL = _env("SHOPAIKEY_USAGE_URL", "https://api.shopaikey.com/usage")
+SHOPAIKEY_USAGE_ALERT_PERCENT = env_int("SHOPAIKEY_USAGE_ALERT_PERCENT", 10)
+SHOPAIKEY_USAGE_CHECK_ENABLED = env_flag("SHOPAIKEY_USAGE_CHECK_ENABLED", "true")
+SHOPAIKEY_USAGE_CHECK_INTERVAL_MINUTES = env_int("SHOPAIKEY_USAGE_CHECK_INTERVAL_MINUTES", 60)
+SHOPAIKEY_USAGE_ALERT_COOLDOWN_HOURS = env_int("SHOPAIKEY_USAGE_ALERT_COOLDOWN_HOURS", 6)
+SHOPAIKEY_CHAT_MODEL = _env("SHOPAIKEY_CHAT_MODEL") or SHOPAIKEY_DEFAULT_MODEL
+SHOPAIKEY_CHAT_FALLBACK_MODELS = _env("SHOPAIKEY_CHAT_FALLBACK_MODELS", "gpt-4.1-mini,qwen-plus")
+SHOPAIKEY_CHAT_MAX_TOKENS = env_int("SHOPAIKEY_CHAT_MAX_TOKENS", 120)
+SHOPAIKEY_CHAT_TIMEOUT_SECONDS = env_int("SHOPAIKEY_CHAT_TIMEOUT_SECONDS", 30)
+SHOPAIKEY_TTS_MODEL = _env("SHOPAIKEY_TTS_MODEL", "tts-1")
+SHOPAIKEY_TTS_VOICE = _env("SHOPAIKEY_TTS_VOICE", "alloy")
+SHOPAIKEY_TTS_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TIMEOUT_SECONDS", 60)
+SHOPAIKEY_IMAGE_MODEL = _env("SHOPAIKEY_IMAGE_MODEL", "nano-banana")
+SHOPAIKEY_IMAGE_STATUS = _env("SHOPAIKEY_IMAGE_STATUS", "not_ready/fail_group_no_channel")
+SHOPAIKEY_VIDEO_ENABLED = env_flag("SHOPAIKEY_VIDEO_ENABLED", "false")
+SHOPAIKEY_VIDEO_ADMIN_ONLY = env_flag("SHOPAIKEY_VIDEO_ADMIN_ONLY", "true")
+SHOPAIKEY_VIDEO_MODEL = _env("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
 ENABLE_OPENAI_IMAGE = env_flag("ENABLE_OPENAI_IMAGE", "0")
 ENABLE_OPENAI_IMAGE_EDIT = env_flag("ENABLE_OPENAI_IMAGE_EDIT", "0")
 ENABLE_REAL_VIDEO = env_flag("ENABLE_REAL_VIDEO", "0")
@@ -646,6 +663,14 @@ MANUAL_BANK_OWNER     = _env("MANUAL_BANK_OWNER", "NGUYEN MANH TOAN")
 DB_FILE           = _env("DB_FILE", "toandaas_system.db")
 BACKUP_MAX_BYTES  = 45 * 1024 * 1024
 TRIAL_CREDITS     = 200
+TRIAL_BONUS_ENABLED = env_flag("TRIAL_BONUS_ENABLED", "true")
+TRIAL_BONUS_AMOUNT = env_int("TRIAL_BONUS_AMOUNT", TRIAL_CREDITS)
+TRIAL_BONUS_REQUIRE_IP = env_flag("TRIAL_BONUS_REQUIRE_IP", "false")
+TRIAL_BONUS_IP_CHECK_ENABLED = env_flag("TRIAL_BONUS_IP_CHECK_ENABLED", "true")
+TRIAL_BONUS_WEB_CLAIM_ENABLED = env_flag("TRIAL_BONUS_WEB_CLAIM_ENABLED", "true")
+TRIAL_BONUS_HASH_SALT = _env("TRIAL_BONUS_HASH_SALT", "")
+TRIAL_BONUS_IP_HEADER_MODE = _env("TRIAL_BONUS_IP_HEADER_MODE", "auto")
+TRIAL_BONUS_ALLOW_TELEGRAM_ONLY_FALLBACK = env_flag("TRIAL_BONUS_ALLOW_TELEGRAM_ONLY_FALLBACK", "true")
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
 GUIDE_DOCX_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx"
@@ -931,6 +956,20 @@ def init_db():
         granted_at TEXT,
         username TEXT,
         note TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS trial_bonus_claims (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_user_id TEXT,
+        ip_hash TEXT,
+        ip_prefix_hash TEXT,
+        user_agent_hash TEXT,
+        claim_source TEXT,
+        bonus_amount INTEGER NOT NULL DEFAULT 200,
+        status TEXT NOT NULL DEFAULT 'granted',
+        reason TEXT,
+        created_at TEXT,
+        updated_at TEXT,
+        metadata_json TEXT
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS feedback (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1685,6 +1724,10 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_promo_usage_period ON promo_usage_periods(code, period_key)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_promo_state_user ON user_promo_state(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_trial_grants_user_id ON trial_grants(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_trial_bonus_claims_user ON trial_bonus_claims(telegram_user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_trial_bonus_claims_ip ON trial_bonus_claims(ip_hash)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_trial_bonus_claims_prefix ON trial_bonus_claims(ip_prefix_hash)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_trial_bonus_claims_created ON trial_bonus_claims(created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_media_factory_jobs_user ON media_factory_jobs(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_media_factory_jobs_status ON media_factory_jobs(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_launch_bonus_user ON launch_bonus_redemptions(user_id)")
@@ -1840,6 +1883,19 @@ def init_db():
                'Backfilled from existing users'
         FROM users""",
         (TRIAL_CREDITS,),
+    )
+    c.execute(
+        """INSERT INTO trial_bonus_claims
+           (telegram_user_id, claim_source, bonus_amount, status, reason, created_at, updated_at, metadata_json)
+           SELECT tg.user_id, 'legacy_trial_grants', tg.granted_xu, 'granted',
+                  'Backfilled from trial_grants; free trial only, paid top-ups unaffected',
+                  COALESCE(tg.granted_at, ?), COALESCE(tg.granted_at, ?), '{}'
+           FROM trial_grants tg
+           WHERE NOT EXISTS (
+               SELECT 1 FROM trial_bonus_claims tbc
+               WHERE tbc.telegram_user_id=tg.user_id AND tbc.status='granted'
+           )""",
+        (now_text(), now_text()),
     )
     for col, col_type in [
         ("order_code", "TEXT"),
@@ -2385,6 +2441,48 @@ def has_user_language(user_id) -> bool:
 def user_language_label(lang: str) -> str:
     return USER_LANGUAGE_LABELS.get(normalize_user_language(lang), USER_LANGUAGE_LABELS["vi"])
 
+def trial_bonus_hash_value(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    salt = TRIAL_BONUS_HASH_SALT or TELEGRAM_WEBHOOK_SECRET or OPERATOR_API_TOKEN or "toan-aas-trial-bonus-local-salt"
+    return hmac.new(str(salt).encode("utf-8"), raw.encode("utf-8"), hashlib.sha256).hexdigest()
+
+def record_trial_bonus_claim_conn(
+    conn,
+    telegram_user_id,
+    amount: int,
+    status: str,
+    source: str = "telegram_start",
+    reason: str = "",
+    ip_hash: str = "",
+    ip_prefix_hash: str = "",
+    user_agent_hash: str = "",
+    metadata: dict | None = None,
+):
+    try:
+        conn.execute(
+            """INSERT INTO trial_bonus_claims
+               (telegram_user_id, ip_hash, ip_prefix_hash, user_agent_hash, claim_source, bonus_amount,
+                status, reason, created_at, updated_at, metadata_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(telegram_user_id or ""),
+                str(ip_hash or ""),
+                str(ip_prefix_hash or ""),
+                str(user_agent_hash or ""),
+                str(source or "unknown"),
+                int(amount or 0),
+                str(status or ""),
+                str(reason or "")[:300],
+                now_text(),
+                now_text(),
+                json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+    except Exception as e:
+        logger.warning(f"trial bonus audit write failed: {type(e).__name__}")
+
 def get_user(user_id, username="Unknown"):
     uid = str(user_id)
     clean_username = str(username or "Unknown")
@@ -2406,22 +2504,45 @@ def get_user(user_id, username="Unknown"):
             (uid, clean_username, initial_credits, 0, now_text(), 0)
         )
         record_credit_event(conn, uid, 0, "trial_already_granted_recreated", "", note)
+        record_trial_bonus_claim_conn(
+            conn,
+            uid,
+            0,
+            "blocked_duplicate_user",
+            "telegram_start",
+            "trial_grants already has this Telegram user; no new free trial",
+            metadata={"paid_topups_unaffected": True},
+        )
         conn.commit()
         conn.close()
         return initial_credits, 0, 0
 
-    initial_credits = TRIAL_CREDITS
+    initial_credits = TRIAL_BONUS_AMOUNT if TRIAL_BONUS_ENABLED else 0
     now = now_text()
     c.execute(
         "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
         (uid, clean_username, initial_credits, 0, now, 0)
     )
-    c.execute(
-        """INSERT OR IGNORE INTO trial_grants (user_id, granted_xu, granted_at, username, note)
-        VALUES (?,?,?,?,?)""",
-        (uid, TRIAL_CREDITS, now, clean_username, "First trial grant"),
-    )
-    record_credit_event(conn, uid, TRIAL_CREDITS, "trial_grant", "", "Tặng 200 Xu trải nghiệm lần đầu")
+    if TRIAL_BONUS_ENABLED and initial_credits > 0:
+        c.execute(
+            """INSERT OR IGNORE INTO trial_grants (user_id, granted_xu, granted_at, username, note)
+            VALUES (?,?,?,?,?)""",
+            (uid, initial_credits, now, clean_username, "First trial grant"),
+        )
+        record_trial_bonus_claim_conn(
+            conn,
+            uid,
+            initial_credits,
+            "granted",
+            "telegram_start",
+            "one_time_free_trial_by_telegram_user_id; no IP available from Telegram bot",
+            metadata={
+                "ip_available": False,
+                "ip_check_applies_only_when_ip_available": bool(TRIAL_BONUS_IP_CHECK_ENABLED),
+                "paid_topups_unaffected": True,
+            },
+        )
+        record_credit_event(conn, uid, initial_credits, "trial_grant", "", f"Tặng {initial_credits} Xu trải nghiệm lần đầu")
     conn.commit()
     conn.close()
     return initial_credits, 0, 0
@@ -26352,7 +26473,7 @@ def provider_registry() -> dict:
         "shopaikey": {
             "label": "ShopAIKey",
             "configured": shopaikey_configured,
-            "capabilities": ["text_brain"],
+            "capabilities": ["text_brain", "tts"],
             "stage": "disabled" if not SHOPAIKEY_ENABLED else orchestrator_config_stage(shopaikey_configured, "shopaikey", "admin_only"),
             "admin_only": True,
             "test_name": "shopaikey",
@@ -26371,6 +26492,186 @@ def provider_registry_by_capability(capability: str) -> list[dict]:
         for name, payload in registry.items()
         if capability in set(payload.get("capabilities") or [])
     ]
+
+def shopaikey_is_configured() -> bool:
+    return bool(SHOPAIKEY_API_KEY and SHOPAIKEY_ENABLED and SHOPAIKEY_ADMIN_ONLY)
+
+def shopaikey_chat_fallback_models() -> list[str]:
+    return [m.strip() for m in str(SHOPAIKEY_CHAT_FALLBACK_MODELS or "").split(",") if m.strip()]
+
+def shopaikey_sanitize_error(value: str) -> str:
+    safe = sanitize_log_text(str(value or ""))
+    safe = re.sub(r"apiKey=([^&\\s]+)", "apiKey=***", safe, flags=re.IGNORECASE)
+    safe = re.sub(r"Bearer\\s+[^\\s\"']+", "Bearer ***", safe, flags=re.IGNORECASE)
+    return safe[:500]
+
+def parse_shopaikey_usage(payload: dict) -> dict:
+    data = payload if isinstance(payload, dict) else {}
+    def num(name):
+        try:
+            value = data.get(name)
+            return float(value) if value is not None and value != "" else 0.0
+        except Exception:
+            return 0.0
+    total = num("total")
+    used = num("used")
+    balance = num("balance")
+    remaining = num("remaining")
+    remaining_percent = round((remaining / total * 100), 2) if total > 0 else 0.0
+    return {
+        "total": total,
+        "used": used,
+        "balance": balance,
+        "remaining": remaining,
+        "remaining_percent": remaining_percent,
+        "group_name": str(data.get("group_name") or ""),
+        "token_name": str(data.get("token_name") or ""),
+        "schema_known": any(key in data for key in ("total", "used", "balance", "remaining")),
+    }
+
+def format_quota_number(value) -> str:
+    try:
+        number = float(value)
+    except Exception:
+        return "0"
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.2f}".rstrip("0").rstrip(".")
+
+def save_shopaikey_usage_snapshot(usage: dict, updated_by=""):
+    set_system_setting("shopaikey_usage_total", format_quota_number(usage.get("total")), "ShopAIKey usage total", updated_by)
+    set_system_setting("shopaikey_usage_used", format_quota_number(usage.get("used")), "ShopAIKey usage used", updated_by)
+    set_system_setting("shopaikey_usage_balance", format_quota_number(usage.get("balance")), "ShopAIKey usage balance", updated_by)
+    set_system_setting("shopaikey_usage_remaining", format_quota_number(usage.get("remaining")), "ShopAIKey usage remaining", updated_by)
+    set_system_setting("shopaikey_usage_remaining_percent", str(usage.get("remaining_percent") or 0), "ShopAIKey usage remaining percent", updated_by)
+    set_system_setting("shopaikey_usage_group_name", usage.get("group_name") or "", "ShopAIKey usage group", updated_by)
+    set_system_setting("shopaikey_usage_token_name", mask_key_fingerprint(usage.get("token_name") or ""), "ShopAIKey usage token masked", updated_by)
+    set_system_setting("shopaikey_usage_last_at", now_text(), "ShopAIKey usage checked", updated_by)
+
+def shopaikey_last_usage_snapshot() -> dict:
+    return {
+        "total": get_system_setting("shopaikey_usage_total", ""),
+        "used": get_system_setting("shopaikey_usage_used", ""),
+        "balance": get_system_setting("shopaikey_usage_balance", ""),
+        "remaining": get_system_setting("shopaikey_usage_remaining", ""),
+        "remaining_percent": get_system_setting("shopaikey_usage_remaining_percent", ""),
+        "group_name": get_system_setting("shopaikey_usage_group_name", ""),
+        "token_name": get_system_setting("shopaikey_usage_token_name", ""),
+        "last_at": get_system_setting("shopaikey_usage_last_at", ""),
+    }
+
+async def get_shopaikey_usage() -> dict:
+    if not SHOPAIKEY_API_KEY:
+        return {"status": "MISSING", "http_status": 0, "usage": {}, "error_class": "missing_api_key", "detail": "SHOPAIKEY_API_KEY missing"}
+    started = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.get(SHOPAIKEY_USAGE_URL, params={"apiKey": SHOPAIKEY_API_KEY})
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        if res.status_code >= 400:
+            detail = shopaikey_sanitize_error(res.text[:400] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+            return {"status": "FAIL", "http_status": int(res.status_code), "latency_ms": latency_ms, "usage": {}, "error_class": f"HTTP_{res.status_code}", "detail": detail}
+        data = res.json()
+        usage = parse_shopaikey_usage(data)
+        status = "PASS" if usage.get("schema_known") else "FAIL_SCHEMA_UNKNOWN"
+        return {"status": status, "http_status": int(res.status_code), "latency_ms": latency_ms, "usage": usage, "error_class": "" if status == "PASS" else "FAIL_SCHEMA_UNKNOWN", "detail": ""}
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return {"status": "FAIL", "http_status": 0, "latency_ms": latency_ms, "usage": {}, "error_class": type(e).__name__, "detail": shopaikey_sanitize_error(str(e))}
+
+def shopaikey_low_quota_alert_due(remaining_percent: float) -> bool:
+    if remaining_percent > float(SHOPAIKEY_USAGE_ALERT_PERCENT or 10):
+        return False
+    last_at = get_system_setting("shopaikey_low_quota_alert_at", "")
+    if not last_at:
+        return True
+    try:
+        last_dt = datetime.strptime(last_at, "%Y-%m-%d %H:%M:%S")
+        return datetime.now() - last_dt >= timedelta(hours=max(1, int(SHOPAIKEY_USAGE_ALERT_COOLDOWN_HOURS or 6)))
+    except Exception:
+        return True
+
+async def maybe_alert_shopaikey_low_quota(bot_client, usage: dict, updated_by="monitor") -> bool:
+    if not bot_client or not ADMIN_ID or not usage:
+        return False
+    remaining_percent = float(usage.get("remaining_percent") or 0)
+    if not shopaikey_low_quota_alert_due(remaining_percent):
+        return False
+    text = (
+        "⚠️ SHOPAIKEY QUOTA LOW\n\n"
+        f"Remaining: {format_quota_number(usage.get('remaining'))} / total {format_quota_number(usage.get('total'))} ({remaining_percent:.2f}%)\n"
+        f"Used: {format_quota_number(usage.get('used'))}\n"
+        f"Balance: {format_quota_number(usage.get('balance'))}\n"
+        f"Group: {usage.get('group_name') or '-'}\n\n"
+        "Action: nạp thêm credit hoặc dùng fallback provider. Không có key/URL secret trong cảnh báo."
+    )
+    await bot_client.send_message(chat_id=ADMIN_ID, text=text)
+    set_system_setting("shopaikey_low_quota_alert_at", now_text(), f"remaining_percent={remaining_percent:.2f}", updated_by)
+    return True
+
+def shopaikey_classify_error(http_status: int = 0, detail: str = "") -> str:
+    value = str(detail or "").lower()
+    if "no available channel" in value:
+        return "FAIL_NO_AVAILABLE_CHANNEL"
+    if "quota" in value or "balance" in value:
+        return "FAIL_QUOTA_OR_BALANCE"
+    if "rate" in value or int(http_status or 0) == 429:
+        return "FAIL_RATE_LIMIT"
+    if int(http_status or 0) >= 400:
+        return "FAIL_HTTP_STATUS"
+    return "FAIL_PROVIDER_ERROR"
+
+async def shopaikey_chat_smoke_test() -> dict:
+    models = []
+    primary = SHOPAIKEY_CHAT_MODEL or SHOPAIKEY_DEFAULT_MODEL
+    if primary:
+        models.append(primary)
+    for item in shopaikey_chat_fallback_models():
+        if item not in models:
+            models.append(item)
+    attempts = []
+    for model in models:
+        result = await openai_compatible_tiny_smoke(
+            "shopaikey",
+            SHOPAIKEY_BASE_URL,
+            SHOPAIKEY_API_KEY,
+            model,
+            timeout_seconds=float(SHOPAIKEY_CHAT_TIMEOUT_SECONDS or 30),
+            user_prompt="Trả lời đúng một câu tiếng Việt có chữ TEST_OK.",
+            max_tokens=min(80, int(SHOPAIKEY_CHAT_MAX_TOKENS or 80)),
+            temperature=0.2,
+            required_text="TEST_OK",
+        )
+        attempts.append({"model": model, **result})
+        if result.get("status") == "PASS":
+            return {"status": "PASS", "model": model, "attempts": attempts, **result}
+    last = attempts[-1] if attempts else {"status": "MISSING", "error_class": "no_models"}
+    return {"status": last.get("status") or "FAIL", "model": last.get("model") or "", "attempts": attempts, **last}
+
+async def shopaikey_tts_smoke_test() -> tuple[str, bytes, str, int]:
+    if not SHOPAIKEY_API_KEY:
+        return "MISSING", b"", "SHOPAIKEY_API_KEY missing", 0
+    endpoint = (SHOPAIKEY_BASE_URL or "").rstrip("/") + "/audio/speech"
+    try:
+        async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60)) as client:
+            res = await client.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": SHOPAIKEY_TTS_MODEL or "tts-1",
+                    "voice": SHOPAIKEY_TTS_VOICE or "alloy",
+                    "input": "Xin chào, đây là bài kiểm tra giọng nói của TOAN AAS.",
+                    "response_format": "mp3",
+                    "speed": 1.0,
+                },
+            )
+        content_type = str(res.headers.get("content-type") or "")
+        if res.status_code < 400 and res.content and (len(res.content) > 1024 or "audio" in content_type):
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; model={SHOPAIKEY_TTS_MODEL}; voice={SHOPAIKEY_TTS_VOICE}", int(res.status_code)
+        detail = shopaikey_sanitize_error(res.text[:400] if getattr(res, "text", "") else f"HTTP {res.status_code}; bytes={len(res.content or b'')}")
+        return shopaikey_classify_error(res.status_code, detail), b"", detail, int(res.status_code)
+    except Exception as e:
+        return "FAIL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(e)), 0
 
 def provider_matrix_lines() -> list[str]:
     registry = provider_registry()
@@ -26405,6 +26706,10 @@ async def openai_compatible_tiny_smoke(
     api_key: str,
     model: str,
     timeout_seconds: float = 30.0,
+    user_prompt: str = "Reply exactly: OK TOAN AAS",
+    max_tokens: int = 8,
+    temperature: float = 0,
+    required_text: str = "",
 ) -> dict:
     if not api_key:
         return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "error_class": "missing_api_key"}
@@ -26414,10 +26719,10 @@ async def openai_compatible_tiny_smoke(
         "model": model,
         "messages": [
             {"role": "system", "content": "Smoke test. Reply with a tiny acknowledgement only."},
-            {"role": "user", "content": "Reply exactly: OK TOAN AAS"},
+            {"role": "user", "content": user_prompt},
         ],
-        "max_tokens": 8,
-        "temperature": 0,
+        "max_tokens": min(max(1, int(max_tokens or 8)), 80),
+        "temperature": float(temperature or 0),
     }
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -26434,10 +26739,25 @@ async def openai_compatible_tiny_smoke(
         try:
             response_data = res.json()
             has_choices = bool(response_data.get("choices"))
+            content = str(((response_data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
         except Exception:
             has_choices = False
-        status = "PASS" if res.status_code < 400 and has_choices else "FAIL"
-        error_class = "" if status == "PASS" else (f"HTTP_{res.status_code}" if res.status_code >= 400 else "EMPTY_CHOICES")
+            content = ""
+        if res.status_code >= 400:
+            status = "FAIL"
+            error_class = f"HTTP_{res.status_code}"
+        elif not has_choices:
+            status = "FAIL"
+            error_class = "FAIL_NO_CHOICES"
+        elif not content.strip():
+            status = "FAIL"
+            error_class = "FAIL_CONTENT_EMPTY"
+        elif required_text and required_text not in content:
+            status = "FAIL"
+            error_class = "FAIL_REQUIRED_TEXT_MISSING"
+        else:
+            status = "PASS"
+            error_class = ""
         record_api_debug(provider_name, f"tool_test_{provider_name}", status, int(res.status_code), f"model={model}; latency_ms={latency_ms}; error_class={error_class or '-'}")
         return {"status": status, "http_status": int(res.status_code), "latency_ms": latency_ms, "error_class": error_class}
     except Exception as e:
@@ -27185,7 +27505,7 @@ TOOL_FREEZE_COMMANDS = {
     "orchestrator_status", "provider_matrix", "tool_test_openrouter",
     "tool_test_kling_status", "tool_test_replicate_status",
     "tool_test_elevenlabs_status", "tool_test_deepgram_status",
-    "shopaikey_status", "tool_test_shopaikey",
+    "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_tts", "trial_bonus_status",
     "local_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
     "local_jobs", "local_job", "render_center",
     "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
@@ -29718,6 +30038,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
     payos_dynamic_status = "working" if providers["payos"]["ready"] else "missing"
     deepgram_status = "configured — ready_for_smoke_test" if providers["audio"]["deepgram"] else "missing"
+    shopaikey_usage = shopaikey_last_usage_snapshot()
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
         cobalt_note = "OK to smoke test"
@@ -29750,6 +30071,21 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Router normal/pro/deep: <code>{'configured' if providers['ai']['ready'] else 'missing'}</code>",
         f"• AI tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
         "• AI quota guide: <code>Gemini quota exhausted/OpenAI 429/rate limit → đổi key, nạp billing, tăng quota hoặc tạm dùng fallback provider.</code>",
+        "",
+        "<b>ShopAIKey / Unified AI Proxy</b>",
+        f"• API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}</code>",
+        f"• Base URL: <code>{'configured' if SHOPAIKEY_BASE_URL else 'missing'}</code>",
+        f"• Enabled: <code>{'true' if SHOPAIKEY_ENABLED else 'false'}</code>",
+        f"• Admin-only: <code>{'true' if SHOPAIKEY_ADMIN_ONLY else 'false'}</code>",
+        "• Public: <code>OFF</code>",
+        f"• Usage: remaining <code>{html.escape(str(shopaikey_usage.get('remaining') or '-'))}</code> / total <code>{html.escape(str(shopaikey_usage.get('total') or '-'))}</code> (<code>{html.escape(str(shopaikey_usage.get('remaining_percent') or '-'))}%</code>)",
+        f"• Group: <code>{html.escape(str(shopaikey_usage.get('group_name') or '-'))}</code>",
+        "• Chat: <code>gpt-4o-mini manual PASS; gpt-4.1-mini manual PASS; qwen-plus manual PASS; gpt-5-mini FAIL_CONTENT_EMPTY</code>",
+        "• TTS: <code>/v1/audio/speech tts-1 manual PASS</code>",
+        "• Image: <code>not_ready/fail_group_no_channel; do not use public image/video yet</code>",
+        "• Video: <code>disabled/admin-only/not live tested</code>",
+        "• Stage: <code>experimental/admin-only</code>",
+        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -30405,6 +30741,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     result = get_tool_test_result("shopaikey")
+    tts_result = get_tool_test_result("shopaikey_tts")
+    usage = shopaikey_last_usage_snapshot()
     lines = [
         "🧪 <b>ShopAIKey Experimental Provider</b>",
         "",
@@ -30413,12 +30751,72 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}</code>",
         f"• Base URL: <code>{html.escape(SHOPAIKEY_BASE_URL or '-')}</code>",
         f"• Default model: <code>{html.escape(SHOPAIKEY_DEFAULT_MODEL or '-')}</code>",
-        f"• Last test: <code>{html.escape(tool_test_status_text('shopaikey'))}</code>",
-        f"• Detail: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>",
+        f"• Chat model: <code>{html.escape(SHOPAIKEY_CHAT_MODEL or '-')}</code>",
+        f"• Chat fallbacks: <code>{html.escape(', '.join(shopaikey_chat_fallback_models()) or '-')}</code>",
+        f"• TTS: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code> / <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>",
+        f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | <code>{html.escape(SHOPAIKEY_IMAGE_STATUS or 'not_ready')}</code>",
+        f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | enabled <code>{'yes' if SHOPAIKEY_VIDEO_ENABLED else 'no'}</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
+        f"• Chat test: <code>{html.escape(tool_test_status_text('shopaikey'))}</code>",
+        f"• TTS test: <code>{html.escape(tool_test_status_text('shopaikey_tts'))}</code>",
+        f"• Chat detail: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>",
+        f"• TTS detail: <code>{html.escape(str(tts_result.get('detail') or '-')[:220])}</code>",
+        "",
+        "<b>Usage last known</b>",
+        f"• Total: <code>{html.escape(str(usage.get('total') or '-'))}</code>",
+        f"• Used: <code>{html.escape(str(usage.get('used') or '-'))}</code>",
+        f"• Remaining: <code>{html.escape(str(usage.get('remaining') or '-'))}</code>",
+        f"• Remaining percent: <code>{html.escape(str(usage.get('remaining_percent') or '-'))}%</code>",
+        f"• Group: <code>{html.escape(str(usage.get('group_name') or '-'))}</code>",
+        f"• Token: <code>{html.escape(str(usage.get('token_name') or '-'))}</code>",
+        f"• Last check: <code>{html.escape(str(usage.get('last_at') or '-'))}</code>",
+        "",
+        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; image/video not public.",
         "",
         "ShopAIKey không thay OpenRouter/OpenAI/Gemini và không mở public.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_shopaikey_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    result = await get_shopaikey_usage()
+    usage = result.get("usage") or {}
+    detail = (
+        f"http={result.get('http_status')}; latency_ms={result.get('latency_ms')}; "
+        f"remaining_percent={usage.get('remaining_percent', '-')}; error_class={result.get('error_class') or '-'}"
+    )
+    save_tool_test_result("shopaikey_usage", result.get("status") or "FAIL", detail, uid)
+    record_api_debug("shopaikey", "usage", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    if result.get("status") == "PASS":
+        save_shopaikey_usage_snapshot(usage, uid)
+        alert_sent = await maybe_alert_shopaikey_low_quota(context.bot, usage, uid)
+        remaining_percent = float(usage.get("remaining_percent") or 0)
+        status_label = "LOW" if remaining_percent <= float(SHOPAIKEY_USAGE_ALERT_PERCENT or 10) else "OK"
+        return await update.message.reply_text(
+            "📊 <b>ShopAIKey Usage</b>\n\n"
+            f"• Status: <code>{status_label}</code>\n"
+            f"• Total: <code>{format_quota_number(usage.get('total'))}</code>\n"
+            f"• Used: <code>{format_quota_number(usage.get('used'))}</code>\n"
+            f"• Balance: <code>{format_quota_number(usage.get('balance'))}</code>\n"
+            f"• Remaining: <code>{format_quota_number(usage.get('remaining'))}</code>\n"
+            f"• Remaining percent: <code>{remaining_percent:.2f}%</code>\n"
+            f"• Group: <code>{html.escape(usage.get('group_name') or '-')}</code>\n"
+            f"• Token: <code>{html.escape(mask_key_fingerprint(usage.get('token_name') or ''))}</code>\n"
+            f"• Alert threshold: <code>{SHOPAIKEY_USAGE_ALERT_PERCENT}%</code>\n"
+            f"• Alert sent now: <code>{'yes' if alert_sent else 'no'}</code>\n\n"
+            "Không hiển thị API key hoặc usage URL đầy đủ.",
+            parse_mode="HTML",
+        )
+    await update.message.reply_text(
+        "📊 <b>ShopAIKey Usage</b>\n\n"
+        f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n"
+        f"• Detail: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>\n\n"
+        "Không hiển thị API key hoặc usage URL đầy đủ.",
+        parse_mode="HTML",
+    )
 
 async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -30445,26 +30843,70 @@ async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_
     if not SHOPAIKEY_API_KEY:
         save_tool_test_result("shopaikey", "MISSING", "SHOPAIKEY_API_KEY missing", uid)
         return await update.message.reply_text("🧪 <b>ShopAIKey Smoke Test</b>\n\n• Status: <code>MISSING</code>", parse_mode="HTML")
-    result = await openai_compatible_tiny_smoke(
-        "shopaikey",
-        SHOPAIKEY_BASE_URL,
-        SHOPAIKEY_API_KEY,
-        SHOPAIKEY_DEFAULT_MODEL,
-        timeout_seconds=30.0,
-    )
+    result = await shopaikey_chat_smoke_test()
+    attempts = result.get("attempts") or []
+    attempt_text = ", ".join(f"{item.get('model')}={item.get('status')}" for item in attempts) or "-"
     detail = (
-        f"model={SHOPAIKEY_DEFAULT_MODEL}; http={result.get('http_status')}; "
-        f"latency_ms={result.get('latency_ms')}; error_class={result.get('error_class') or '-'}"
+        f"model={result.get('model') or SHOPAIKEY_CHAT_MODEL}; http={result.get('http_status')}; "
+        f"latency_ms={result.get('latency_ms')}; error_class={result.get('error_class') or '-'}; attempts={attempt_text}"
     )
     save_tool_test_result("shopaikey", result.get("status") or "FAIL", detail, uid)
     await update.message.reply_text(
         "🧪 <b>ShopAIKey Smoke Test</b>\n\n"
         f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
         f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
-        f"• Model: <code>{html.escape(SHOPAIKEY_DEFAULT_MODEL)}</code>\n"
+        f"• Model used: <code>{html.escape(str(result.get('model') or '-'))}</code>\n"
+        f"• Attempts: <code>{html.escape(attempt_text)}</code>\n"
         f"• Latency: <code>{html.escape(str(result.get('latency_ms') or 0))}ms</code>\n"
         f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n\n"
         "Tiny prompt only. Không log prompt/response/key. Không trừ Xu. Không ảnh hưởng provider khác.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not SHOPAIKEY_ENABLED:
+        save_tool_test_result("shopaikey_tts", "DISABLED", "SHOPAIKEY_ENABLED=false; no call", uid)
+        return await update.message.reply_text(
+            "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
+            "• Status: <code>DISABLED</code>\n"
+            "• Set <code>SHOPAIKEY_ENABLED=true</code> only for admin testing.\n\n"
+            "Không gọi API và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    if not SHOPAIKEY_ADMIN_ONLY:
+        save_tool_test_result("shopaikey_tts", "DISABLED", "SHOPAIKEY_ADMIN_ONLY=false unsafe; no call", uid)
+        return await update.message.reply_text(
+            "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
+            "• Status: <code>DISABLED</code>\n"
+            "• Reason: <code>SHOPAIKEY_ADMIN_ONLY must remain true</code>\n\n"
+            "Không gọi API và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    status, audio_bytes, detail, http_status = await shopaikey_tts_smoke_test()
+    save_tool_test_result("shopaikey_tts", status, detail, uid)
+    record_api_debug("shopaikey", "tool_test_shopaikey_tts", status, int(http_status or 0), detail)
+    output_sent = False
+    if status == "PASS" and audio_bytes:
+        audio = io.BytesIO(audio_bytes)
+        audio.name = "toan_aas_shopaikey_tts_test.mp3"
+        await context.bot.send_audio(
+            chat_id=update.effective_chat.id,
+            audio=audio,
+            caption="🔊 ShopAIKey TTS Smoke Test — PASS\nKhông trừ Xu.",
+        )
+        output_sent = True
+    await update.message.reply_text(
+        "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        f"• HTTP: <code>{html.escape(str(http_status or 0))}</code>\n"
+        f"• Model: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code>\n"
+        f"• Voice: <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>\n"
+        f"• Detail: <code>{html.escape(str(detail or '-')[:220])}</code>\n"
+        f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n\n"
+        "Không log prompt/response/key. Không trừ Xu.",
         parse_mode="HTML",
     )
 
@@ -36003,6 +36445,52 @@ async def cmd_trial_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Xóa đoạn chat hoặc đổi username không làm reset quà tặng.",
         parse_mode="HTML",
     )
+
+async def cmd_trial_bonus_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    conn = db_connect()
+    try:
+        total_granted = sql_scalar(conn, "SELECT COUNT(*) FROM trial_bonus_claims WHERE status='granted'", default=0) or 0
+        total_blocked_user = sql_scalar(conn, "SELECT COUNT(*) FROM trial_bonus_claims WHERE status='blocked_duplicate_user'", default=0) or 0
+        rows = conn.execute(
+            """SELECT telegram_user_id, claim_source, bonus_amount, status, created_at, reason
+               FROM trial_bonus_claims
+               ORDER BY id DESC
+               LIMIT 5"""
+        ).fetchall()
+    finally:
+        conn.close()
+    lines = [
+        "🎁 <b>Trial Bonus Anti-Spam Status</b>",
+        "",
+        "Scope: <code>chỉ áp dụng 200 Xu miễn phí, không áp dụng gói nạp trả phí/promo trả phí</code>",
+        f"• Enabled: <code>{'yes' if TRIAL_BONUS_ENABLED else 'no'}</code>",
+        f"• Amount: <code>{int(TRIAL_BONUS_AMOUNT or 0)} Xu</code>",
+        f"• Require IP: <code>{'yes' if TRIAL_BONUS_REQUIRE_IP else 'no'}</code>",
+        f"• IP check enabled: <code>{'yes' if TRIAL_BONUS_IP_CHECK_ENABLED else 'no'}</code>",
+        f"• Telegram-only fallback: <code>{'yes' if TRIAL_BONUS_ALLOW_TELEGRAM_ONLY_FALLBACK else 'no'}</code>",
+        f"• Web claim enabled: <code>{'yes' if TRIAL_BONUS_WEB_CLAIM_ENABLED else 'no'}</code>",
+        f"• Granted rows: <code>{int(total_granted)}</code>",
+        f"• Duplicate user blocked rows: <code>{int(total_blocked_user)}</code>",
+        "",
+        "<b>Last claims</b>",
+    ]
+    if rows:
+        for user_id, source, amount, status, created_at, reason in rows:
+            lines.append(
+                f"• <code>{html.escape(str(user_id or '-'))}</code> | <code>{html.escape(str(source or '-'))}</code> | "
+                f"<code>{html.escape(str(status or '-'))}</code> | <code>{int(amount or 0)} Xu</code> | "
+                f"<code>{html.escape(str(created_at or '-'))}</code> | {html.escape(str(reason or '-')[:90])}"
+            )
+    else:
+        lines.append("• <code>chưa có dữ liệu</code>")
+    lines.extend([
+        "",
+        "Telegram /start không có IP người dùng; IP hash chỉ enforce khi có web/HTTP/WebApp claim an toàn.",
+        "Không lưu raw IP và không đụng PayOS/top-up/member tier.",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -55495,6 +55983,29 @@ tg_polling_task: asyncio.Task | None = None
 tg_webhook_watchdog_task: asyncio.Task | None = None
 tg_auto_backup_task: asyncio.Task | None = None
 tg_memory_reminder_task: asyncio.Task | None = None
+tg_shopaikey_usage_task: asyncio.Task | None = None
+
+async def shopaikey_usage_monitor_loop(bot_client):
+    await asyncio.sleep(20)
+    interval_seconds = max(300, int(SHOPAIKEY_USAGE_CHECK_INTERVAL_MINUTES or 60) * 60)
+    while True:
+        try:
+            if SHOPAIKEY_USAGE_CHECK_ENABLED and SHOPAIKEY_API_KEY:
+                result = await get_shopaikey_usage()
+                usage = result.get("usage") or {}
+                detail = (
+                    f"http={result.get('http_status')}; latency_ms={result.get('latency_ms')}; "
+                    f"remaining_percent={usage.get('remaining_percent', '-')}; error_class={result.get('error_class') or '-'}"
+                )
+                save_tool_test_result("shopaikey_usage", result.get("status") or "FAIL", detail, "monitor")
+                if result.get("status") == "PASS":
+                    save_shopaikey_usage_snapshot(usage, "monitor")
+                    await maybe_alert_shopaikey_low_quota(bot_client, usage, "monitor")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"ShopAIKey usage monitor skipped: {type(e).__name__}")
+        await asyncio.sleep(interval_seconds)
 TELEGRAM_STARTUP_ERROR = ""
 
 async def run_polling_guarded():
@@ -55524,7 +56035,7 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED
     init_db()
     token_summary = telegram_token_runtime_summary()
     db_summary = runtime_db_status()
@@ -55634,6 +56145,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("orchestrator_status", cmd_orchestrator_status))
     tg_app.add_handler(CommandHandler("provider_matrix", cmd_provider_matrix))
     tg_app.add_handler(CommandHandler("shopaikey_status", cmd_shopaikey_status))
+    tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
     tg_app.add_handler(CommandHandler("tool_catalog", cmd_tool_catalog))
     tg_app.add_handler(CommandHandler("admin_api_roadmap", cmd_admin_api_roadmap))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
@@ -55642,6 +56154,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_ai", cmd_tool_test_ai))
     tg_app.add_handler(CommandHandler("tool_test_openrouter", cmd_tool_test_openrouter))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey", cmd_tool_test_shopaikey))
+    tg_app.add_handler(CommandHandler("tool_test_shopaikey_tts", cmd_tool_test_shopaikey_tts))
     tg_app.add_handler(CommandHandler("tool_test_translate", cmd_tool_test_translate))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
     tg_app.add_handler(CommandHandler("tool_test_image_debug", cmd_tool_test_image_debug))
@@ -55804,6 +56317,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("birthday_reject", cmd_birthday_reject))
     tg_app.add_handler(CommandHandler("myid",        cmd_myid))
     tg_app.add_handler(CommandHandler("trial_status", cmd_trial_status))
+    tg_app.add_handler(CommandHandler("trial_bonus_status", cmd_trial_bonus_status))
     tg_app.add_handler(CommandHandler("naptien",     cmd_naptien))
     tg_app.add_handler(CommandHandler("pricing",     cmd_pricing))
     tg_app.add_handler(CommandHandler("banggia",     cmd_pricing))
@@ -56261,6 +56775,8 @@ async def lifespan(app: FastAPI):
 
         tg_auto_backup_task = asyncio.create_task(auto_backup_loop())
         tg_memory_reminder_task = asyncio.create_task(memory_reminder_loop(tg_app.bot))
+        if SHOPAIKEY_USAGE_CHECK_ENABLED and SHOPAIKEY_API_KEY:
+            tg_shopaikey_usage_task = asyncio.create_task(shopaikey_usage_monitor_loop(tg_app.bot))
     except Exception as e:
         TELEGRAM_STARTUP_ERROR = str(e)
         ACTIVE_TELEGRAM_UPDATE_MODE = "telegram_startup_error"
@@ -56285,6 +56801,12 @@ async def lifespan(app: FastAPI):
         tg_memory_reminder_task.cancel()
         try:
             await tg_memory_reminder_task
+        except asyncio.CancelledError:
+            pass
+    if tg_shopaikey_usage_task:
+        tg_shopaikey_usage_task.cancel()
+        try:
+            await tg_shopaikey_usage_task
         except asyncio.CancelledError:
             pass
     if tg_app and telegram_started:
