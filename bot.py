@@ -26539,17 +26539,27 @@ def format_quota_number(value) -> str:
     return f"{number:.2f}".rstrip("0").rstrip(".")
 
 def save_shopaikey_usage_snapshot(usage: dict, updated_by=""):
-    set_system_setting("shopaikey_usage_total", format_quota_number(usage.get("total")), "ShopAIKey usage total", updated_by)
-    set_system_setting("shopaikey_usage_used", format_quota_number(usage.get("used")), "ShopAIKey usage used", updated_by)
-    set_system_setting("shopaikey_usage_balance", format_quota_number(usage.get("balance")), "ShopAIKey usage balance", updated_by)
-    set_system_setting("shopaikey_usage_remaining", format_quota_number(usage.get("remaining")), "ShopAIKey usage remaining", updated_by)
-    set_system_setting("shopaikey_usage_remaining_percent", str(usage.get("remaining_percent") or 0), "ShopAIKey usage remaining percent", updated_by)
-    set_system_setting("shopaikey_usage_group_name", usage.get("group_name") or "", "ShopAIKey usage group", updated_by)
-    set_system_setting("shopaikey_usage_token_name", mask_key_fingerprint(usage.get("token_name") or ""), "ShopAIKey usage token masked", updated_by)
+    safe_usage = {
+        "total": format_quota_number(usage.get("total")),
+        "used": format_quota_number(usage.get("used")),
+        "balance": format_quota_number(usage.get("balance")),
+        "remaining": format_quota_number(usage.get("remaining")),
+        "remaining_percent": format_quota_number(usage.get("remaining_percent")),
+        "group_name": str(usage.get("group_name") or "")[:120],
+        "token_name": mask_key_fingerprint(usage.get("token_name") or ""),
+    }
+    set_system_setting("shopaikey_usage_total", safe_usage["total"], "ShopAIKey usage total", updated_by)
+    set_system_setting("shopaikey_usage_used", safe_usage["used"], "ShopAIKey usage used", updated_by)
+    set_system_setting("shopaikey_usage_balance", safe_usage["balance"], "ShopAIKey usage balance", updated_by)
+    set_system_setting("shopaikey_usage_remaining", safe_usage["remaining"], "ShopAIKey usage remaining", updated_by)
+    set_system_setting("shopaikey_usage_remaining_percent", safe_usage["remaining_percent"], "ShopAIKey usage remaining percent", updated_by)
+    set_system_setting("shopaikey_usage_group_name", safe_usage["group_name"], "ShopAIKey usage group", updated_by)
+    set_system_setting("shopaikey_usage_token_name", safe_usage["token_name"], "ShopAIKey usage token masked", updated_by)
+    set_system_setting("shopaikey_usage_snapshot_json", json.dumps(safe_usage, ensure_ascii=False), "ShopAIKey usage sanitized snapshot", updated_by)
     set_system_setting("shopaikey_usage_last_at", now_text(), "ShopAIKey usage checked", updated_by)
 
 def shopaikey_last_usage_snapshot() -> dict:
-    return {
+    snapshot = {
         "total": get_system_setting("shopaikey_usage_total", ""),
         "used": get_system_setting("shopaikey_usage_used", ""),
         "balance": get_system_setting("shopaikey_usage_balance", ""),
@@ -26559,6 +26569,61 @@ def shopaikey_last_usage_snapshot() -> dict:
         "token_name": get_system_setting("shopaikey_usage_token_name", ""),
         "last_at": get_system_setting("shopaikey_usage_last_at", ""),
     }
+    if not any(snapshot.get(key) for key in ("total", "remaining", "group_name")):
+        try:
+            data = json.loads(get_system_setting("shopaikey_usage_snapshot_json", "{}") or "{}")
+            if isinstance(data, dict):
+                for key in ("total", "used", "balance", "remaining", "remaining_percent", "group_name", "token_name"):
+                    snapshot[key] = str(data.get(key) or "")
+        except Exception:
+            pass
+    return snapshot
+
+def shopaikey_usage_summary_text(usage: dict) -> str:
+    if not any(usage.get(key) for key in ("total", "remaining", "group_name", "last_at")):
+        return "not_checked"
+    remaining = str(usage.get("remaining") or "-")
+    total = str(usage.get("total") or "-")
+    percent = str(usage.get("remaining_percent") or "-")
+    group = str(usage.get("group_name") or "-")
+    last_at = str(usage.get("last_at") or "-")
+    return f"remaining {remaining} / total {total} ({percent}%) | group {group} | last {last_at}"
+
+def save_shopaikey_chat_snapshot(result: dict, detail: str, updated_by=""):
+    status = str(result.get("status") or "UNKNOWN").upper()
+    set_system_setting("shopaikey_chat_last_status", status, detail, updated_by)
+    set_system_setting("shopaikey_chat_last_model", str(result.get("model") or SHOPAIKEY_CHAT_MODEL or ""), detail, updated_by)
+    set_system_setting("shopaikey_chat_last_http", str(result.get("http_status") or 0), detail, updated_by)
+    set_system_setting("shopaikey_chat_last_latency_ms", str(result.get("latency_ms") or 0), detail, updated_by)
+    set_system_setting("shopaikey_chat_last_detail", str(detail or "")[:1000], detail, updated_by)
+    set_system_setting("shopaikey_chat_last_at", now_text(), detail, updated_by)
+
+def shopaikey_chat_status_snapshot() -> dict:
+    result = preferred_tool_test_result("shopaikey", "shopaikey_chat")
+    status = str(result.get("status") or "NOT_TESTED").upper()
+    model = get_system_setting("shopaikey_chat_last_model", "")
+    detail = result.get("detail") or get_system_setting("shopaikey_chat_last_detail", "")
+    tested_at = result.get("tested_at") or get_system_setting("shopaikey_chat_last_at", "")
+    if status in {"", "NOT_TESTED"}:
+        status = get_system_setting("shopaikey_chat_last_status", "NOT_TESTED") or "NOT_TESTED"
+    return {
+        "status": status,
+        "model": model,
+        "detail": detail,
+        "tested_at": tested_at,
+    }
+
+def shopaikey_chat_status_text() -> str:
+    snapshot = shopaikey_chat_status_snapshot()
+    status = str(snapshot.get("status") or "NOT_TESTED").upper()
+    tested_at = snapshot.get("tested_at") or ""
+    model = snapshot.get("model") or ""
+    suffix = []
+    if model:
+        suffix.append(f"model {model}")
+    if tested_at:
+        suffix.append(f"at {tested_at}")
+    return status + (f" ({' | '.join(suffix)})" if suffix else "")
 
 async def get_shopaikey_usage() -> dict:
     if not SHOPAIKEY_API_KEY:
@@ -30078,10 +30143,12 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Enabled: <code>{'true' if SHOPAIKEY_ENABLED else 'false'}</code>",
         f"• Admin-only: <code>{'true' if SHOPAIKEY_ADMIN_ONLY else 'false'}</code>",
         "• Public: <code>OFF</code>",
-        f"• Usage: remaining <code>{html.escape(str(shopaikey_usage.get('remaining') or '-'))}</code> / total <code>{html.escape(str(shopaikey_usage.get('total') or '-'))}</code> (<code>{html.escape(str(shopaikey_usage.get('remaining_percent') or '-'))}%</code>)",
+        f"• Usage: <code>{html.escape(shopaikey_usage_summary_text(shopaikey_usage))}</code>",
         f"• Group: <code>{html.escape(str(shopaikey_usage.get('group_name') or '-'))}</code>",
-        "• Chat: <code>gpt-4o-mini manual PASS; gpt-4.1-mini manual PASS; qwen-plus manual PASS; gpt-5-mini FAIL_CONTENT_EMPTY</code>",
-        "• TTS: <code>/v1/audio/speech tts-1 manual PASS</code>",
+        f"• Chat tested: <code>{html.escape(shopaikey_chat_status_text())}</code>",
+        f"• Chat manual baseline: <code>gpt-4o-mini PASS; gpt-4.1-mini PASS; qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY</code>",
+        f"• TTS tested: <code>{html.escape(tool_test_status_text('shopaikey_tts'))}</code>",
+        "• TTS manual baseline: <code>/v1/audio/speech tts-1 PASS</code>",
         "• Image: <code>not_ready/fail_group_no_channel; do not use public image/video yet</code>",
         "• Video: <code>disabled/admin-only/not live tested</code>",
         "• Stage: <code>experimental/admin-only</code>",
@@ -30740,7 +30807,7 @@ async def cmd_tool_test_deepgram_status(update: Update, context: ContextTypes.DE
 async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
-    result = get_tool_test_result("shopaikey")
+    result = shopaikey_chat_status_snapshot()
     tts_result = get_tool_test_result("shopaikey_tts")
     usage = shopaikey_last_usage_snapshot()
     lines = [
@@ -30756,12 +30823,13 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• TTS: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code> / <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>",
         f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | <code>{html.escape(SHOPAIKEY_IMAGE_STATUS or 'not_ready')}</code>",
         f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | enabled <code>{'yes' if SHOPAIKEY_VIDEO_ENABLED else 'no'}</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
-        f"• Chat test: <code>{html.escape(tool_test_status_text('shopaikey'))}</code>",
+        f"• Chat test: <code>{html.escape(shopaikey_chat_status_text())}</code>",
         f"• TTS test: <code>{html.escape(tool_test_status_text('shopaikey_tts'))}</code>",
         f"• Chat detail: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>",
         f"• TTS detail: <code>{html.escape(str(tts_result.get('detail') or '-')[:220])}</code>",
         "",
         "<b>Usage last known</b>",
+        f"• Summary: <code>{html.escape(shopaikey_usage_summary_text(usage))}</code>",
         f"• Total: <code>{html.escape(str(usage.get('total') or '-'))}</code>",
         f"• Used: <code>{html.escape(str(usage.get('used') or '-'))}</code>",
         f"• Remaining: <code>{html.escape(str(usage.get('remaining') or '-'))}</code>",
@@ -30784,7 +30852,10 @@ async def cmd_shopaikey_usage(update: Update, context: ContextTypes.DEFAULT_TYPE
     usage = result.get("usage") or {}
     detail = (
         f"http={result.get('http_status')}; latency_ms={result.get('latency_ms')}; "
-        f"remaining_percent={usage.get('remaining_percent', '-')}; error_class={result.get('error_class') or '-'}"
+        f"total={format_quota_number(usage.get('total'))}; used={format_quota_number(usage.get('used'))}; "
+        f"remaining={format_quota_number(usage.get('remaining'))}; "
+        f"remaining_percent={format_quota_number(usage.get('remaining_percent'))}; "
+        f"group={str(usage.get('group_name') or '-')[:120]}; error_class={result.get('error_class') or '-'}"
     )
     save_tool_test_result("shopaikey_usage", result.get("status") or "FAIL", detail, uid)
     record_api_debug("shopaikey", "usage", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
@@ -30851,6 +30922,9 @@ async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_
         f"latency_ms={result.get('latency_ms')}; error_class={result.get('error_class') or '-'}; attempts={attempt_text}"
     )
     save_tool_test_result("shopaikey", result.get("status") or "FAIL", detail, uid)
+    save_tool_test_result("shopaikey_chat", result.get("status") or "FAIL", detail, uid)
+    save_shopaikey_chat_snapshot(result, detail, uid)
+    record_api_debug("shopaikey", "tool_test_shopaikey", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
     await update.message.reply_text(
         "🧪 <b>ShopAIKey Smoke Test</b>\n\n"
         f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"

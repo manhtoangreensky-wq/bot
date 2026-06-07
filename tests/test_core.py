@@ -167,6 +167,44 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "FAIL_CONTENT_EMPTY" in source
 
 
+def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        usage = {
+            "total": 10,
+            "used": 0,
+            "balance": 10,
+            "remaining": 10,
+            "remaining_percent": 100,
+            "group_name": "cheap,gemini,claude_code",
+            "token_name": "cheap_4037_1780837250240",
+        }
+        bot.save_shopaikey_usage_snapshot(usage, "test")
+        snapshot = bot.shopaikey_last_usage_snapshot()
+        assert snapshot["total"] == "10"
+        assert snapshot["remaining"] == "10"
+        assert snapshot["remaining_percent"] == "100"
+        assert snapshot["group_name"] == "cheap,gemini,claude_code"
+        assert "remaining 10 / total 10 (100%)" in bot.shopaikey_usage_summary_text(snapshot)
+
+        result = {"status": "PASS", "model": "gpt-4o-mini", "http_status": 200, "latency_ms": 123}
+        detail = "model=gpt-4o-mini; http=200; latency_ms=123; error_class=-"
+        bot.save_tool_test_result("shopaikey", "PASS", detail, "test")
+        bot.save_tool_test_result("shopaikey_chat", "PASS", detail, "test")
+        bot.save_shopaikey_chat_snapshot(result, detail, "test")
+        chat_snapshot = bot.shopaikey_chat_status_snapshot()
+        assert chat_snapshot["status"] == "PASS"
+        assert chat_snapshot["model"] == "gpt-4o-mini"
+        assert "PASS" in bot.shopaikey_chat_status_text()
+        assert "gpt-4o-mini" in bot.shopaikey_chat_status_text()
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_critical_sales_ready_commands_remain_registered():
     source = bot_source_text()
     handler_lines = [line.strip() for line in source.splitlines() if "CommandHandler(" in line]
