@@ -156,8 +156,13 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_DEFAULT_MODEL=gpt-4o-mini" in env_example
     assert "SHOPAIKEY_USAGE_URL=https://api.shopaikey.com/usage" in env_example
     assert "SHOPAIKEY_USAGE_ALERT_PERCENT=10" in env_example
+    assert "SHOPAIKEY_IMAGE_URL=https://api.shopaikey.com/images/google/generations" in env_example
+    assert "SHOPAIKEY_IMAGE_MODEL=nano-banana" in env_example
     assert "if not is_admin_user(update.effective_user.id)" in command_source
     assert "Trả lời đúng một câu tiếng Việt có chữ TEST_OK." in source
+    assert "TOAN AAS image smoke test: simple turquoise AI automation logo" in source
+    assert "cmd_tool_test_shopaikey_image" in source
+    assert "shopaikey_image" in source
     assert 'required_text="TEST_OK"' in source
     assert "Không log prompt/response/key" in command_source
     assert "Không trừ Xu" in command_source
@@ -273,6 +278,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "tool_test_openrouter": "cmd_tool_test_openrouter",
         "tool_test_shopaikey": "cmd_tool_test_shopaikey",
         "tool_test_shopaikey_tts": "cmd_tool_test_shopaikey_tts",
+        "tool_test_shopaikey_image": "cmd_tool_test_shopaikey_image",
         "shopaikey_status": "cmd_shopaikey_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
         "trial_bonus_status": "cmd_trial_bonus_status",
