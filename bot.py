@@ -125,6 +125,8 @@ def _log_secret_values() -> list[str]:
         "PAYOS_API_KEY",
         "PAYOS_CHECKSUM_KEY",
         "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "SHOPAIKEY_API_KEY",
         "GEMINI_API_KEY",
         "DEEPGRAM_API_KEY",
         "DEEPL_API_KEY",
@@ -308,6 +310,14 @@ GEMINI_API_KEY      = _env("GEMINI_API_KEY")
 OPENAI_API_KEY      = _env("OPENAI_API_KEY")
 OPENAI_TEXT_MODEL   = env_any("OPENAI_TEXT_MODEL", default="gpt-4o-mini")
 OPENAI_IMAGE_MODEL  = _env("OPENAI_IMAGE_MODEL", "gpt-image-1")
+OPENROUTER_API_KEY  = _env("OPENROUTER_API_KEY")
+OPENROUTER_BASE_URL = _env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_DEFAULT_MODEL = _env("OPENROUTER_DEFAULT_MODEL") or "openai/gpt-4o-mini"
+SHOPAIKEY_API_KEY = _env("SHOPAIKEY_API_KEY")
+SHOPAIKEY_BASE_URL = _env("SHOPAIKEY_BASE_URL", "https://api.shopaikey.com/v1")
+SHOPAIKEY_ENABLED = env_flag("SHOPAIKEY_ENABLED", "false")
+SHOPAIKEY_ADMIN_ONLY = env_flag("SHOPAIKEY_ADMIN_ONLY", "true")
+SHOPAIKEY_DEFAULT_MODEL = _env("SHOPAIKEY_DEFAULT_MODEL") or "gpt-4o-mini"
 ENABLE_OPENAI_IMAGE = env_flag("ENABLE_OPENAI_IMAGE", "0")
 ENABLE_OPENAI_IMAGE_EDIT = env_flag("ENABLE_OPENAI_IMAGE_EDIT", "0")
 ENABLE_REAL_VIDEO = env_flag("ENABLE_REAL_VIDEO", "0")
@@ -25814,6 +25824,8 @@ def provider_status_payload() -> dict:
         "ai": {
             "gemini": bool(GEMINI_API_KEY),
             "openai": bool(OPENAI_API_KEY),
+            "openrouter": bool(OPENROUTER_API_KEY),
+            "shopaikey": bool(SHOPAIKEY_API_KEY and SHOPAIKEY_ENABLED),
             "claude": False,
             "grok": False,
             "router_normal": ai_ready,
@@ -26232,6 +26244,223 @@ def local_worker_status_payload() -> dict:
         "comfy_render": "admin-only/planned",
         "render_queue": "admin-only",
     }
+
+PROVIDER_ORCHESTRATOR_CAPABILITIES = {
+    "text_brain",
+    "image_generate",
+    "video_generate",
+    "image_to_video",
+    "tts",
+    "stt",
+    "ffmpeg",
+}
+PROVIDER_ORCHESTRATOR_STAGES = {
+    "disabled",
+    "planned",
+    "admin_only",
+    "ready_for_smoke_test",
+    "live_pass",
+}
+
+def orchestrator_test_status(tool_name: str) -> str:
+    return str(get_tool_test_result(tool_name).get("status") or "NOT_TESTED").upper()
+
+def orchestrator_config_stage(configured: bool, tool_name: str = "", default_stage: str = "ready_for_smoke_test") -> str:
+    if not configured:
+        return "planned"
+    if tool_name and orchestrator_test_status(tool_name) == "PASS":
+        return "live_pass"
+    return default_stage
+
+def provider_registry() -> dict:
+    local_status = local_worker_status_payload()
+    ffmpeg_configured = bool(local_status.get("ffmpeg_path_configured") or local_status.get("connected"))
+    shopaikey_configured = bool(SHOPAIKEY_API_KEY and SHOPAIKEY_ENABLED and SHOPAIKEY_ADMIN_ONLY)
+    return {
+        "openrouter": {
+            "label": "OpenRouter",
+            "configured": bool(OPENROUTER_API_KEY),
+            "capabilities": ["text_brain"],
+            "stage": orchestrator_config_stage(bool(OPENROUTER_API_KEY), "openrouter", "ready_for_smoke_test"),
+            "admin_only": True,
+            "test_name": "openrouter",
+            "cost_guard": "tiny_prompt_only; no_xu_deduction",
+            "timeout_seconds": 30,
+            "fallback": ["openai", "gemini"],
+            "health": get_tool_test_result("openrouter"),
+        },
+        "kling": {
+            "label": "Kling Video",
+            "configured": bool(KLING_ACCESS_KEY and KLING_SECRET_KEY),
+            "capabilities": ["video_generate", "image_to_video"],
+            "stage": orchestrator_config_stage(bool(KLING_ACCESS_KEY and KLING_SECRET_KEY), "kling_status", "admin_only"),
+            "admin_only": True,
+            "test_name": "kling_status",
+            "cost_guard": "status_check_only; no_video_generation",
+            "timeout_seconds": 30,
+            "fallback": ["replicate"],
+            "health": get_tool_test_result("kling_status"),
+        },
+        "replicate": {
+            "label": "Replicate",
+            "configured": bool(REPLICATE_API_TOKEN),
+            "capabilities": ["image_generate", "video_generate", "image_to_video"],
+            "stage": orchestrator_config_stage(bool(REPLICATE_API_TOKEN), "replicate_status", "admin_only"),
+            "admin_only": True,
+            "test_name": "replicate_status",
+            "cost_guard": "status_check_only; no_prediction_start",
+            "timeout_seconds": 30,
+            "fallback": [],
+            "health": get_tool_test_result("replicate_status"),
+        },
+        "elevenlabs": {
+            "label": "ElevenLabs",
+            "configured": bool(ELEVENLABS_API_KEY),
+            "capabilities": ["tts"],
+            "stage": orchestrator_config_stage(bool(ELEVENLABS_API_KEY), "elevenlabs_status", "ready_for_smoke_test"),
+            "admin_only": True,
+            "test_name": "elevenlabs_status",
+            "cost_guard": "auth_status_only; no_audio_generation",
+            "timeout_seconds": 30,
+            "fallback": ["fish_audio", "edge_tts"],
+            "health": get_tool_test_result("elevenlabs_status"),
+        },
+        "deepgram": {
+            "label": "Deepgram",
+            "configured": bool(DEEPGRAM_API_KEY),
+            "capabilities": ["stt"],
+            "stage": orchestrator_config_stage(bool(DEEPGRAM_API_KEY), "deepgram_status", "ready_for_smoke_test"),
+            "admin_only": True,
+            "test_name": "deepgram_status",
+            "cost_guard": "auth_status_only; no_transcription_without_audio",
+            "timeout_seconds": 30,
+            "fallback": [],
+            "health": get_tool_test_result("deepgram_status"),
+        },
+        "local_worker_ffmpeg": {
+            "label": "Local Worker ffmpeg",
+            "configured": ffmpeg_configured,
+            "capabilities": ["ffmpeg"],
+            "stage": orchestrator_config_stage(ffmpeg_configured, "ffmpeg_local", "ready_for_smoke_test"),
+            "admin_only": True,
+            "test_name": "ffmpeg_local",
+            "cost_guard": "local_worker_queue_only; no_xu_deduction",
+            "timeout_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
+            "fallback": [],
+            "health": get_tool_test_result("ffmpeg_local"),
+        },
+        "shopaikey": {
+            "label": "ShopAIKey",
+            "configured": shopaikey_configured,
+            "capabilities": ["text_brain"],
+            "stage": "disabled" if not SHOPAIKEY_ENABLED else orchestrator_config_stage(shopaikey_configured, "shopaikey", "admin_only"),
+            "admin_only": True,
+            "test_name": "shopaikey",
+            "cost_guard": "experimental_tiny_prompt_only; no_public_routing",
+            "timeout_seconds": 30,
+            "fallback": [],
+            "health": get_tool_test_result("shopaikey"),
+        },
+    }
+
+def provider_registry_by_capability(capability: str) -> list[dict]:
+    capability = str(capability or "").strip()
+    registry = provider_registry()
+    return [
+        {**payload, "name": name}
+        for name, payload in registry.items()
+        if capability in set(payload.get("capabilities") or [])
+    ]
+
+def provider_matrix_lines() -> list[str]:
+    registry = provider_registry()
+    lines = [
+        "🧭 <b>TOAN AAS Provider Matrix</b>",
+        "",
+        "Admin-first only. Không mở public render, không trừ Xu, không hiển thị secret.",
+        "",
+    ]
+    for name, payload in registry.items():
+        health = payload.get("health") or {}
+        tested = str(health.get("status") or "NOT_TESTED").upper()
+        tested_at = health.get("tested_at") or "-"
+        capabilities = ", ".join(payload.get("capabilities") or [])
+        fallback = ", ".join(payload.get("fallback") or []) or "-"
+        lines.extend([
+            f"<b>{html.escape(payload.get('label') or name)}</b>",
+            f"• key: <code>{html.escape(name)}</code>",
+            f"• configured: <code>{'yes' if payload.get('configured') else 'no'}</code>",
+            f"• stage: <code>{html.escape(str(payload.get('stage') or 'planned'))}</code>",
+            f"• capabilities: <code>{html.escape(capabilities)}</code>",
+            f"• tested: <code>{html.escape(tested)}</code> at <code>{html.escape(str(tested_at))}</code>",
+            f"• cost guard: <code>{html.escape(str(payload.get('cost_guard') or '-'))}</code>",
+            f"• fallback: <code>{html.escape(fallback)}</code>",
+            "",
+        ])
+    return lines
+
+async def openai_compatible_tiny_smoke(
+    provider_name: str,
+    base_url: str,
+    api_key: str,
+    model: str,
+    timeout_seconds: float = 30.0,
+) -> dict:
+    if not api_key:
+        return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "error_class": "missing_api_key"}
+    endpoint = (base_url or "").rstrip("/") + "/chat/completions"
+    started = time.perf_counter()
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Smoke test. Reply with a tiny acknowledgement only."},
+            {"role": "user", "content": "Reply exactly: OK TOAN AAS"},
+        ],
+        "max_tokens": 8,
+        "temperature": 0,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if provider_name == "openrouter":
+        headers["X-Title"] = "TOAN AAS Admin Provider Smoke Test"
+        if WEBSITE_URL:
+            headers["HTTP-Referer"] = WEBSITE_URL
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            res = await client.post(endpoint, headers=headers, json=payload)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            response_data = res.json()
+            has_choices = bool(response_data.get("choices"))
+        except Exception:
+            has_choices = False
+        status = "PASS" if res.status_code < 400 and has_choices else "FAIL"
+        error_class = "" if status == "PASS" else (f"HTTP_{res.status_code}" if res.status_code >= 400 else "EMPTY_CHOICES")
+        record_api_debug(provider_name, f"tool_test_{provider_name}", status, int(res.status_code), f"model={model}; latency_ms={latency_ms}; error_class={error_class or '-'}")
+        return {"status": status, "http_status": int(res.status_code), "latency_ms": latency_ms, "error_class": error_class}
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        error_class = type(e).__name__
+        record_api_debug(provider_name, f"tool_test_{provider_name}", "FAIL", 0, f"model={model}; latency_ms={latency_ms}; error_class={error_class}")
+        return {"status": "FAIL", "http_status": 0, "latency_ms": latency_ms, "error_class": error_class}
+
+async def provider_auth_get_smoke(provider_name: str, url: str, headers: dict, timeout_seconds: float = 30.0) -> dict:
+    started = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            res = await client.get(url, headers=headers)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        status = "PASS" if res.status_code < 400 else "FAIL"
+        error_class = "" if status == "PASS" else f"HTTP_{res.status_code}"
+        record_api_debug(provider_name, f"tool_test_{provider_name}_status", status, int(res.status_code), f"latency_ms={latency_ms}; error_class={error_class or '-'}")
+        return {"status": status, "http_status": int(res.status_code), "latency_ms": latency_ms, "error_class": error_class}
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        error_class = type(e).__name__
+        record_api_debug(provider_name, f"tool_test_{provider_name}_status", "FAIL", 0, f"latency_ms={latency_ms}; error_class={error_class}")
+        return {"status": "FAIL", "http_status": 0, "latency_ms": latency_ms, "error_class": error_class}
 
 FEATURE_RELEASE_STAGES = {"PLANNED", "ADMIN_ONLY", "BETA_PRIVATE", "PUBLIC_READY", "DISABLED"}
 FEATURE_RELEASE_DEFAULTS = {
@@ -26953,6 +27182,10 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_kling_video", "tool_test_runway_video", "tool_test_heygen_avatar",
     "tool_test_music_library", "tool_test_sfx_library", "tool_test_media_library",
     "tool_test_music_ai", "tool_test_replicate_media",
+    "orchestrator_status", "provider_matrix", "tool_test_openrouter",
+    "tool_test_kling_status", "tool_test_replicate_status",
+    "tool_test_elevenlabs_status", "tool_test_deepgram_status",
+    "shopaikey_status", "tool_test_shopaikey",
     "local_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
     "local_jobs", "local_job", "render_center",
     "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
@@ -29993,6 +30226,245 @@ async def cmd_tool_test_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Provider used: <code>{'Gemini' if gemini_status == 'PASS' else ('OpenAI' if openai_status == 'PASS' else '-')}</code>\n"
         f"• Result: <code>{html.escape(result_preview or '-')}</code>\n\n"
         "Không hiển thị API key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_orchestrator_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    registry = provider_registry()
+    lines = [
+        "🧭 <b>TOAN AAS Provider Orchestrator V1</b>",
+        "",
+        "Trạng thái: <code>ADMIN_FIRST</code>",
+        "Public paid render: <code>OFF</code>",
+        "Xu deduction in smoke tests: <code>OFF</code>",
+        "Secret logging: <code>OFF</code>",
+        "",
+        "<b>Capabilities</b>",
+    ]
+    for capability in sorted(PROVIDER_ORCHESTRATOR_CAPABILITIES):
+        candidates = provider_registry_by_capability(capability)
+        summary = ", ".join(
+            f"{item.get('label')}:{item.get('stage')}"
+            for item in candidates
+        ) or "-"
+        lines.append(f"• {html.escape(capability)}: <code>{html.escape(summary)}</code>")
+    lines.extend([
+        "",
+        "<b>Provider health</b>",
+    ])
+    for name, payload in registry.items():
+        health = payload.get("health") or {}
+        status = str(health.get("status") or "NOT_TESTED").upper()
+        lines.append(
+            f"• {html.escape(payload.get('label') or name)}: "
+            f"configured=<code>{'yes' if payload.get('configured') else 'no'}</code> | "
+            f"stage=<code>{html.escape(str(payload.get('stage') or 'planned'))}</code> | "
+            f"tested=<code>{html.escape(status)}</code>"
+        )
+    lines.extend([
+        "",
+        "<b>Smoke commands</b>",
+        "• <code>/provider_matrix</code>",
+        "• <code>/tool_test_openrouter</code>",
+        "• <code>/tool_test_kling_status</code>",
+        "• <code>/tool_test_replicate_status</code>",
+        "• <code>/tool_test_elevenlabs_status</code>",
+        "• <code>/tool_test_deepgram_status</code>",
+        "• <code>/shopaikey_status</code> | <code>/tool_test_shopaikey</code>",
+    ])
+    await reply_html_lines(update, lines)
+
+async def cmd_provider_matrix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await reply_html_lines(update, provider_matrix_lines())
+
+async def cmd_tool_test_openrouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not OPENROUTER_API_KEY:
+        save_tool_test_result("openrouter", "MISSING", "OPENROUTER_API_KEY missing", uid)
+        return await update.message.reply_text(
+            "🧠 <b>OpenRouter Smoke Test</b>\n\n"
+            "• Status: <code>MISSING</code>\n"
+            "• Env: <code>OPENROUTER_API_KEY</code>\n\n"
+            "Không gọi API và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    result = await openai_compatible_tiny_smoke(
+        "openrouter",
+        OPENROUTER_BASE_URL,
+        OPENROUTER_API_KEY,
+        OPENROUTER_DEFAULT_MODEL,
+        timeout_seconds=30.0,
+    )
+    detail = (
+        f"model={OPENROUTER_DEFAULT_MODEL}; http={result.get('http_status')}; "
+        f"latency_ms={result.get('latency_ms')}; error_class={result.get('error_class') or '-'}"
+    )
+    save_tool_test_result("openrouter", result.get("status") or "FAIL", detail, uid)
+    await update.message.reply_text(
+        "🧠 <b>OpenRouter Smoke Test</b>\n\n"
+        f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Model: <code>{html.escape(OPENROUTER_DEFAULT_MODEL)}</code>\n"
+        f"• Latency: <code>{html.escape(str(result.get('latency_ms') or 0))}ms</code>\n"
+        f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n\n"
+        "Tiny prompt only. Không log prompt/response/key. Không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_kling_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    configured = bool(KLING_ACCESS_KEY and KLING_SECRET_KEY)
+    status = "CONFIGURED" if configured else "MISSING"
+    save_tool_test_result("kling_status", status, "KLING_ACCESS_KEY/KLING_SECRET_KEY configured check only; no video generation", update.effective_user.id)
+    await update.message.reply_text(
+        "🎬 <b>Kling Provider Status</b>\n\n"
+        f"• Configured: <code>{'yes' if configured else 'no'}</code>\n"
+        "• Stage: <code>ADMIN_ONLY</code>\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        "• Action: <code>no video generation</code>\n\n"
+        "Không fake PASS, không trừ Xu, không hiển thị key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_replicate_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    configured = bool(REPLICATE_API_TOKEN)
+    status = "CONFIGURED" if configured else "MISSING"
+    save_tool_test_result("replicate_status", status, "REPLICATE_API_TOKEN configured check only; no prediction started", update.effective_user.id)
+    await update.message.reply_text(
+        "🧪 <b>Replicate Provider Status</b>\n\n"
+        f"• Configured: <code>{'yes' if configured else 'no'}</code>\n"
+        "• Stage: <code>ADMIN_ONLY</code>\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        "• Action: <code>no prediction started</code>\n\n"
+        "Không fake PASS, không trừ Xu, không hiển thị key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_elevenlabs_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not ELEVENLABS_API_KEY:
+        save_tool_test_result("elevenlabs_status", "MISSING", "ELEVENLABS_API_KEY missing", uid)
+        return await update.message.reply_text("🔊 <b>ElevenLabs Status</b>\n\n• Status: <code>MISSING</code>", parse_mode="HTML")
+    result = await provider_auth_get_smoke(
+        "elevenlabs",
+        "https://api.elevenlabs.io/v1/user/subscription",
+        {"xi-api-key": ELEVENLABS_API_KEY},
+        timeout_seconds=30.0,
+    )
+    detail = f"http={result.get('http_status')}; latency_ms={result.get('latency_ms')}; error_class={result.get('error_class') or '-'}; no_audio_generation"
+    save_tool_test_result("elevenlabs_status", result.get("status") or "FAIL", detail, uid)
+    await update.message.reply_text(
+        "🔊 <b>ElevenLabs Status</b>\n\n"
+        f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Latency: <code>{html.escape(str(result.get('latency_ms') or 0))}ms</code>\n"
+        f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n"
+        "• Action: <code>auth/status only; no audio generation</code>\n\n"
+        "Không trừ Xu và không hiển thị key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_deepgram_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not DEEPGRAM_API_KEY:
+        save_tool_test_result("deepgram_status", "MISSING", "DEEPGRAM_API_KEY missing", uid)
+        return await update.message.reply_text("🎤 <b>Deepgram Status</b>\n\n• Status: <code>MISSING</code>", parse_mode="HTML")
+    result = await provider_auth_get_smoke(
+        "deepgram",
+        "https://api.deepgram.com/v1/projects",
+        {"Authorization": f"Token {DEEPGRAM_API_KEY}"},
+        timeout_seconds=30.0,
+    )
+    detail = f"http={result.get('http_status')}; latency_ms={result.get('latency_ms')}; error_class={result.get('error_class') or '-'}; no_stt_audio"
+    save_tool_test_result("deepgram_status", result.get("status") or "FAIL", detail, uid)
+    await update.message.reply_text(
+        "🎤 <b>Deepgram Status</b>\n\n"
+        f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Latency: <code>{html.escape(str(result.get('latency_ms') or 0))}ms</code>\n"
+        f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n"
+        "• Action: <code>auth/status only; no transcription</code>\n\n"
+        "Không trừ Xu và không hiển thị key.",
+        parse_mode="HTML",
+    )
+
+async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    result = get_tool_test_result("shopaikey")
+    lines = [
+        "🧪 <b>ShopAIKey Experimental Provider</b>",
+        "",
+        f"• Enabled: <code>{'yes' if SHOPAIKEY_ENABLED else 'no'}</code>",
+        f"• Admin only: <code>{'yes' if SHOPAIKEY_ADMIN_ONLY else 'no'}</code>",
+        f"• API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}</code>",
+        f"• Base URL: <code>{html.escape(SHOPAIKEY_BASE_URL or '-')}</code>",
+        f"• Default model: <code>{html.escape(SHOPAIKEY_DEFAULT_MODEL or '-')}</code>",
+        f"• Last test: <code>{html.escape(tool_test_status_text('shopaikey'))}</code>",
+        f"• Detail: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>",
+        "",
+        "ShopAIKey không thay OpenRouter/OpenAI/Gemini và không mở public.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not SHOPAIKEY_ENABLED:
+        save_tool_test_result("shopaikey", "DISABLED", "SHOPAIKEY_ENABLED=false; no call", uid)
+        return await update.message.reply_text(
+            "🧪 <b>ShopAIKey Smoke Test</b>\n\n"
+            "• Status: <code>DISABLED</code>\n"
+            "• Set <code>SHOPAIKEY_ENABLED=true</code> only for admin testing.\n\n"
+            "Không gọi API và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    if not SHOPAIKEY_ADMIN_ONLY:
+        save_tool_test_result("shopaikey", "DISABLED", "SHOPAIKEY_ADMIN_ONLY=false unsafe; no call", uid)
+        return await update.message.reply_text(
+            "🧪 <b>ShopAIKey Smoke Test</b>\n\n"
+            "• Status: <code>DISABLED</code>\n"
+            "• Reason: <code>SHOPAIKEY_ADMIN_ONLY must remain true</code>\n\n"
+            "Không gọi API và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    if not SHOPAIKEY_API_KEY:
+        save_tool_test_result("shopaikey", "MISSING", "SHOPAIKEY_API_KEY missing", uid)
+        return await update.message.reply_text("🧪 <b>ShopAIKey Smoke Test</b>\n\n• Status: <code>MISSING</code>", parse_mode="HTML")
+    result = await openai_compatible_tiny_smoke(
+        "shopaikey",
+        SHOPAIKEY_BASE_URL,
+        SHOPAIKEY_API_KEY,
+        SHOPAIKEY_DEFAULT_MODEL,
+        timeout_seconds=30.0,
+    )
+    detail = (
+        f"model={SHOPAIKEY_DEFAULT_MODEL}; http={result.get('http_status')}; "
+        f"latency_ms={result.get('latency_ms')}; error_class={result.get('error_class') or '-'}"
+    )
+    save_tool_test_result("shopaikey", result.get("status") or "FAIL", detail, uid)
+    await update.message.reply_text(
+        "🧪 <b>ShopAIKey Smoke Test</b>\n\n"
+        f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Model: <code>{html.escape(SHOPAIKEY_DEFAULT_MODEL)}</code>\n"
+        f"• Latency: <code>{html.escape(str(result.get('latency_ms') or 0))}ms</code>\n"
+        f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n\n"
+        "Tiny prompt only. Không log prompt/response/key. Không trừ Xu. Không ảnh hưởng provider khác.",
         parse_mode="HTML",
     )
 
@@ -55159,12 +55631,17 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("api_recommend", cmd_api_recommend))
     tg_app.add_handler(CommandHandler("feature_status", cmd_feature_status))
     tg_app.add_handler(CommandHandler("feature_set", cmd_feature_set))
+    tg_app.add_handler(CommandHandler("orchestrator_status", cmd_orchestrator_status))
+    tg_app.add_handler(CommandHandler("provider_matrix", cmd_provider_matrix))
+    tg_app.add_handler(CommandHandler("shopaikey_status", cmd_shopaikey_status))
     tg_app.add_handler(CommandHandler("tool_catalog", cmd_tool_catalog))
     tg_app.add_handler(CommandHandler("admin_api_roadmap", cmd_admin_api_roadmap))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
     tg_app.add_handler(CommandHandler("tool_status", cmd_tool_status))
     tg_app.add_handler(CommandHandler("api_debug_status", cmd_api_debug_status))
     tg_app.add_handler(CommandHandler("tool_test_ai", cmd_tool_test_ai))
+    tg_app.add_handler(CommandHandler("tool_test_openrouter", cmd_tool_test_openrouter))
+    tg_app.add_handler(CommandHandler("tool_test_shopaikey", cmd_tool_test_shopaikey))
     tg_app.add_handler(CommandHandler("tool_test_translate", cmd_tool_test_translate))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
     tg_app.add_handler(CommandHandler("tool_test_image_debug", cmd_tool_test_image_debug))
@@ -55176,6 +55653,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_upscale_image", cmd_tool_test_upscale_image))
     tg_app.add_handler(CommandHandler("tool_test_audio_enhance", cmd_tool_test_audio_enhance))
     tg_app.add_handler(CommandHandler("tool_test_kling_video", cmd_tool_test_kling_video))
+    tg_app.add_handler(CommandHandler("tool_test_kling_status", cmd_tool_test_kling_status))
     tg_app.add_handler(CommandHandler("tool_test_runway_video", cmd_tool_test_runway_video))
     tg_app.add_handler(CommandHandler("tool_test_heygen_avatar", cmd_tool_test_heygen_avatar))
     tg_app.add_handler(CommandHandler("tool_test_music_library", cmd_tool_test_music_library))
@@ -55183,6 +55661,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_media_library", cmd_tool_test_media_library))
     tg_app.add_handler(CommandHandler("tool_test_music_ai", cmd_tool_test_music_ai))
     tg_app.add_handler(CommandHandler("tool_test_replicate_media", cmd_tool_test_replicate_media))
+    tg_app.add_handler(CommandHandler("tool_test_replicate_status", cmd_tool_test_replicate_status))
+    tg_app.add_handler(CommandHandler("tool_test_elevenlabs_status", cmd_tool_test_elevenlabs_status))
+    tg_app.add_handler(CommandHandler("tool_test_deepgram_status", cmd_tool_test_deepgram_status))
     tg_app.add_handler(CommandHandler("tool_test_doc_tools", cmd_tool_test_doc_tools))
     tg_app.add_handler(CommandHandler("tool_test_pdf_to_word", cmd_tool_test_pdf_to_word))
     tg_app.add_handler(CommandHandler("tool_test_image_to_pdf", cmd_tool_test_image_to_pdf))
