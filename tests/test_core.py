@@ -158,11 +158,17 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_USAGE_ALERT_PERCENT=10" in env_example
     assert "SHOPAIKEY_IMAGE_URL=https://api.shopaikey.com/images/google/generations" in env_example
     assert "SHOPAIKEY_IMAGE_MODEL=nano-banana" in env_example
+    assert "SHOPAIKEY_VIDEO_URL=https://api.shopaikey.com/v1/video/generations" in env_example
+    assert "SHOPAIKEY_VIDEO_MODEL=veo3.1-fast" in env_example
     assert "if not is_admin_user(update.effective_user.id)" in command_source
     assert "Trả lời đúng một câu tiếng Việt có chữ TEST_OK." in source
     assert "TOAN AAS image smoke test: simple turquoise AI automation logo" in source
+    assert "A 3-second clean futuristic turquoise AI automation logo animation" in source
     assert "cmd_tool_test_shopaikey_image" in source
+    assert "cmd_tool_test_shopaikey_video" in source
+    assert "cmd_shopaikey_video_job" in source
     assert "shopaikey_image" in source
+    assert "shopaikey_video" in source
     assert 'required_text="TEST_OK"' in source
     assert "Không log prompt/response/key" in command_source
     assert "Không trừ Xu" in command_source
@@ -214,6 +220,13 @@ def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
             "model=nano-banana; http=200; size=768x1344; output_sent=yes",
             "test",
         )
+        bot.save_tool_test_result("shopaikey_video", "PASS_SUBMITTED", "model=veo3.1-fast; http=200; task_id=task_1", "test")
+        bot.save_shopaikey_component_snapshot(
+            "video",
+            {"status": "PASS_SUBMITTED", "model": "veo3.1-fast", "http_status": 200, "latency_ms": 444},
+            "model=veo3.1-fast; http=200; task_id=task_1",
+            "test",
+        )
         chat_snapshot = bot.shopaikey_chat_status_snapshot()
         assert chat_snapshot["status"] == "PASS"
         assert chat_snapshot["model"] == "gpt-4o-mini"
@@ -223,6 +236,8 @@ def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
         assert "tts-1/alloy" in bot.shopaikey_tts_status_text()
         assert bot.shopaikey_image_status_snapshot()["status"] == "PASS"
         assert "nano-banana" in bot.shopaikey_image_status_text()
+        assert bot.shopaikey_video_status_snapshot()["status"] == "PASS_SUBMITTED"
+        assert "veo3.1-fast" in bot.shopaikey_video_status_text()
 
         bot.save_tool_test_result("shopaikey_image", "PASS", "model=nano-banana; http=200; size=768x1344; output_sent=yes", "test")
         bot.save_shopaikey_component_snapshot(
@@ -234,6 +249,7 @@ def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
         assert bot.shopaikey_chat_status_snapshot()["status"] == "PASS"
         assert bot.shopaikey_tts_status_snapshot()["status"] == "PASS"
         assert bot.shopaikey_image_status_snapshot()["status"] == "PASS"
+        assert bot.shopaikey_video_status_snapshot()["status"] == "PASS_SUBMITTED"
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
@@ -286,6 +302,14 @@ def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
             "model=nano-banana; http=200; size=768x1344; output_sent=yes",
         )
         assert bot.shopaikey_image_status_snapshot()["status"] == "PASS"
+        bot.record_api_debug(
+            "shopaikey",
+            "tool_test_shopaikey_video",
+            "PASS_SUBMITTED",
+            200,
+            "model=veo3.1-fast; http=200; task_id=task_1; provider_status=queued",
+        )
+        assert bot.shopaikey_video_status_snapshot()["status"] == "PASS_SUBMITTED"
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
@@ -324,6 +348,8 @@ def test_critical_sales_ready_commands_remain_registered():
         "tool_test_shopaikey": "cmd_tool_test_shopaikey",
         "tool_test_shopaikey_tts": "cmd_tool_test_shopaikey_tts",
         "tool_test_shopaikey_image": "cmd_tool_test_shopaikey_image",
+        "tool_test_shopaikey_video": "cmd_tool_test_shopaikey_video",
+        "shopaikey_video_job": "cmd_shopaikey_video_job",
         "shopaikey_status": "cmd_shopaikey_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
         "trial_bonus_status": "cmd_trial_bonus_status",

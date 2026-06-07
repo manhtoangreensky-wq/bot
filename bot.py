@@ -333,6 +333,7 @@ SHOPAIKEY_TTS_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TIMEOUT_SECONDS", 60)
 SHOPAIKEY_IMAGE_URL = _env("SHOPAIKEY_IMAGE_URL", "https://api.shopaikey.com/images/google/generations")
 SHOPAIKEY_IMAGE_MODEL = _env("SHOPAIKEY_IMAGE_MODEL", "nano-banana")
 SHOPAIKEY_IMAGE_STATUS = _env("SHOPAIKEY_IMAGE_STATUS", "not_ready/fail_group_no_channel")
+SHOPAIKEY_VIDEO_URL = _env("SHOPAIKEY_VIDEO_URL", "https://api.shopaikey.com/v1/video/generations")
 SHOPAIKEY_VIDEO_ENABLED = env_flag("SHOPAIKEY_VIDEO_ENABLED", "false")
 SHOPAIKEY_VIDEO_ADMIN_ONLY = env_flag("SHOPAIKEY_VIDEO_ADMIN_ONLY", "true")
 SHOPAIKEY_VIDEO_MODEL = _env("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
@@ -26510,7 +26511,7 @@ def provider_registry() -> dict:
         "shopaikey": {
             "label": "ShopAIKey",
             "configured": shopaikey_configured,
-            "capabilities": ["text_brain", "tts", "image_generate"],
+            "capabilities": ["text_brain", "tts", "image_generate", "video_generate"],
             "stage": "disabled" if not SHOPAIKEY_ENABLED else orchestrator_config_stage(shopaikey_configured, "shopaikey", "admin_only"),
             "admin_only": True,
             "test_name": "shopaikey",
@@ -26659,7 +26660,7 @@ def save_shopaikey_chat_snapshot(result: dict, detail: str, updated_by=""):
 
 def save_shopaikey_component_snapshot(component: str, result: dict, detail: str, updated_by=""):
     component = re.sub(r"[^a-z0-9_:-]", "_", str(component or "").strip().lower())
-    if component not in {"chat", "tts", "image"}:
+    if component not in {"chat", "tts", "image", "video"}:
         return
     status = str(result.get("status") or "UNKNOWN").upper()
     model = str(result.get("model") or "")
@@ -26669,6 +26670,8 @@ def save_shopaikey_component_snapshot(component: str, result: dict, detail: str,
         model = model or f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}"
     elif component == "image":
         model = model or SHOPAIKEY_IMAGE_MODEL or "nano-banana"
+    elif component == "video":
+        model = model or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast"
     safe_detail = str(detail or "")[:1000]
     prefix = f"shopaikey_{component}_last"
     set_system_setting(f"{prefix}_status", status, safe_detail, updated_by)
@@ -26724,6 +26727,13 @@ def shopaikey_image_status_snapshot() -> dict:
         ["tool_test_shopaikey_image", "shopaikey_image"],
     )
 
+def shopaikey_video_status_snapshot() -> dict:
+    return shopaikey_component_status_snapshot(
+        "video",
+        ["shopaikey_video"],
+        ["tool_test_shopaikey_video", "shopaikey_video_job", "shopaikey_video"],
+    )
+
 def shopaikey_component_status_text(snapshot: dict) -> str:
     status = str(snapshot.get("status") or "NOT_TESTED").upper()
     tested_at = snapshot.get("tested_at") or ""
@@ -26743,6 +26753,9 @@ def shopaikey_tts_status_text() -> str:
 
 def shopaikey_image_status_text() -> str:
     return shopaikey_component_status_text(shopaikey_image_status_snapshot())
+
+def shopaikey_video_status_text() -> str:
+    return shopaikey_component_status_text(shopaikey_video_status_snapshot())
 
 async def get_shopaikey_usage() -> dict:
     if not SHOPAIKEY_API_KEY:
@@ -26952,6 +26965,161 @@ async def shopaikey_image_smoke_test() -> dict:
             "error_class": error_class,
             "detail": shopaikey_sanitize_error(str(e)),
         }
+
+def shopaikey_video_payload_data(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    data = payload.get("data")
+    if isinstance(data, dict):
+        return data
+    return payload
+
+def shopaikey_video_result_url(payload: dict) -> str:
+    data = shopaikey_video_payload_data(payload)
+    candidates = [
+        data.get("result_url"),
+        data.get("video_url"),
+        data.get("url"),
+        data.get("output_url"),
+        data.get("download_url"),
+    ]
+    result = data.get("result") or data.get("output") or data.get("outputs")
+    if isinstance(result, dict):
+        candidates.extend([result.get("url"), result.get("video_url"), result.get("result_url")])
+    elif isinstance(result, list) and result:
+        first = result[0]
+        if isinstance(first, dict):
+            candidates.extend([first.get("url"), first.get("video_url"), first.get("result_url")])
+        else:
+            candidates.append(first)
+    for item in candidates:
+        value = str(item or "").strip()
+        if value.startswith("http://") or value.startswith("https://"):
+            return value
+    return ""
+
+async def shopaikey_video_create_smoke_test() -> dict:
+    if not SHOPAIKEY_API_KEY:
+        return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "model": SHOPAIKEY_VIDEO_MODEL, "task_id": "", "provider_status": "", "message": "SHOPAIKEY_API_KEY missing", "error_class": "missing_api_key"}
+    started = time.perf_counter()
+    payload = {
+        "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+        "prompt": "A 3-second clean futuristic turquoise AI automation logo animation, white background, minimal, no text except TOAN AAS",
+        "metadata": {
+            "aspect_ratio": "16:9",
+            "enhance_prompt": False,
+            "enable_upsample": False,
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(
+                SHOPAIKEY_VIDEO_URL,
+                headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        response_data = shopaikey_video_payload_data(data)
+        task_id = str(response_data.get("task_id") or response_data.get("id") or "").strip()
+        provider_status = str(response_data.get("status") or data.get("status") or data.get("code") or "").strip()
+        provider_message = shopaikey_sanitize_error(str(data.get("message") or response_data.get("message") or "")[:260])
+        if res.status_code < 400 and task_id:
+            return {
+                "status": "PASS_SUBMITTED",
+                "http_status": int(res.status_code),
+                "latency_ms": latency_ms,
+                "model": payload["model"],
+                "task_id": task_id,
+                "provider_status": provider_status,
+                "message": provider_message,
+                "error_class": "",
+                "detail": f"model={payload['model']}; http={res.status_code}; latency_ms={latency_ms}; task_id={task_id}; provider_status={provider_status or '-'}",
+            }
+        provider_code, provider_error = shopaikey_provider_error_from_payload(data)
+        detail = provider_error or provider_message or shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        return {
+            "status": shopaikey_classify_error(res.status_code, detail),
+            "http_status": int(res.status_code),
+            "latency_ms": latency_ms,
+            "model": payload["model"],
+            "task_id": task_id,
+            "provider_status": provider_status,
+            "provider_error_code": provider_code,
+            "message": detail,
+            "error_class": shopaikey_classify_error(res.status_code, detail),
+            "detail": detail,
+        }
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        error_class = "FAIL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "FAIL_PROVIDER_ERROR"
+        return {"status": error_class, "http_status": 0, "latency_ms": latency_ms, "model": payload["model"], "task_id": "", "provider_status": "", "message": shopaikey_sanitize_error(str(e)), "error_class": error_class, "detail": shopaikey_sanitize_error(str(e))}
+
+async def shopaikey_video_job_status(task_id: str) -> dict:
+    task_id = str(task_id or "").strip()
+    if not SHOPAIKEY_API_KEY:
+        return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "task_id": task_id, "provider_status": "", "progress": "", "result_url": "", "fail_reason": "SHOPAIKEY_API_KEY missing", "error_class": "missing_api_key"}
+    if not re.match(r"^[A-Za-z0-9_.:-]{3,160}$", task_id):
+        return {"status": "INVALID_TASK_ID", "http_status": 0, "latency_ms": 0, "task_id": "", "provider_status": "", "progress": "", "result_url": "", "fail_reason": "task_id invalid", "error_class": "invalid_task_id"}
+    started = time.perf_counter()
+    endpoint = (SHOPAIKEY_VIDEO_URL or "").rstrip("/") + "/" + task_id
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            res = await client.get(endpoint, headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Accept": "application/json"})
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        response_data = shopaikey_video_payload_data(data)
+        provider_status = str(response_data.get("status") or data.get("status") or data.get("code") or "").strip()
+        progress = str(response_data.get("progress") or data.get("progress") or "").strip()
+        result_url = shopaikey_video_result_url(data)
+        fail_reason = shopaikey_sanitize_error(str(response_data.get("fail_reason") or response_data.get("error") or data.get("message") or "")[:260])
+        if res.status_code < 400:
+            status_upper = provider_status.upper()
+            if result_url and status_upper in {"", "SUCCESS", "SUCCEEDED", "COMPLETED", "DONE"}:
+                status = "SUCCESS"
+            elif status_upper in {"SUCCESS", "SUCCEEDED", "COMPLETED", "DONE"}:
+                status = "SUCCESS"
+            elif status_upper in {"FAIL", "FAILED", "FAILURE", "ERROR"}:
+                status = "FAILURE"
+            else:
+                status = provider_status or "PENDING"
+            return {
+                "status": status,
+                "http_status": int(res.status_code),
+                "latency_ms": latency_ms,
+                "task_id": task_id,
+                "provider_status": provider_status,
+                "progress": progress,
+                "result_url": result_url,
+                "fail_reason": fail_reason,
+                "error_class": "",
+                "detail": f"http={res.status_code}; task_id={task_id}; provider_status={provider_status or '-'}; progress={progress or '-'}; result_url={'yes' if result_url else 'no'}",
+            }
+        provider_code, provider_error = shopaikey_provider_error_from_payload(data)
+        detail = provider_error or fail_reason or shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        return {
+            "status": shopaikey_classify_error(res.status_code, detail),
+            "http_status": int(res.status_code),
+            "latency_ms": latency_ms,
+            "task_id": task_id,
+            "provider_status": provider_status,
+            "progress": progress,
+            "result_url": "",
+            "fail_reason": detail,
+            "provider_error_code": provider_code,
+            "error_class": shopaikey_classify_error(res.status_code, detail),
+            "detail": detail,
+        }
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        error_class = "FAIL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "FAIL_PROVIDER_ERROR"
+        return {"status": error_class, "http_status": 0, "latency_ms": latency_ms, "task_id": task_id, "provider_status": "", "progress": "", "result_url": "", "fail_reason": shopaikey_sanitize_error(str(e)), "error_class": error_class, "detail": shopaikey_sanitize_error(str(e))}
 
 def provider_matrix_lines() -> list[str]:
     registry = provider_registry()
@@ -27786,7 +27954,7 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_kling_status", "tool_test_replicate_status",
     "tool_test_elevenlabs_status", "tool_test_deepgram_status",
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_tts",
-    "tool_test_shopaikey_image", "trial_bonus_status",
+    "tool_test_shopaikey_image", "tool_test_shopaikey_video", "shopaikey_video_job", "trial_bonus_status",
     "local_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
     "local_jobs", "local_job", "render_center",
     "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
@@ -30367,9 +30535,10 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• TTS manual baseline: <code>/v1/audio/speech tts-1 PASS</code>",
         f"• Image tested: <code>{html.escape(shopaikey_image_status_text())}</code>",
         "• Image: <code>admin-only custom Google image endpoint; public OFF; OpenAI /v1 images group no channel</code>",
-        "• Video: <code>disabled/admin-only/not live tested</code>",
+        f"• Video tested: <code>{html.escape(shopaikey_video_status_text())}</code>",
+        "• Video: <code>admin-only custom video endpoint; public OFF; customer video disabled</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code>",
+        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -31027,6 +31196,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     result = shopaikey_chat_status_snapshot()
     tts_result = shopaikey_tts_status_snapshot()
     image_result = shopaikey_image_status_snapshot()
+    video_result = shopaikey_video_status_snapshot()
     usage = shopaikey_last_usage_snapshot()
     lines = [
         "🧪 <b>ShopAIKey Experimental Provider</b>",
@@ -31040,13 +31210,15 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Chat fallbacks: <code>{html.escape(', '.join(shopaikey_chat_fallback_models()) or '-')}</code>",
         f"• TTS: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code> / <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>",
         f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>OFF</code>",
-        f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | enabled <code>{'yes' if SHOPAIKEY_VIDEO_ENABLED else 'no'}</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
+        f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code> | public <code>OFF</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
         f"• Chat test: <code>{html.escape(shopaikey_chat_status_text())}</code>",
         f"• TTS test: <code>{html.escape(shopaikey_tts_status_text())}</code>",
         f"• Image test: <code>{html.escape(shopaikey_image_status_text())}</code>",
+        f"• Video test: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Chat detail: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>",
         f"• TTS detail: <code>{html.escape(str(tts_result.get('detail') or '-')[:220])}</code>",
         f"• Image detail: <code>{html.escape(str(image_result.get('detail') or '-')[:220])}</code>",
+        f"• Video detail: <code>{html.escape(str(video_result.get('detail') or '-')[:220])}</code>",
         "",
         "<b>Usage last known</b>",
         f"• Summary: <code>{html.escape(shopaikey_usage_summary_text(usage))}</code>",
@@ -31058,7 +31230,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Token: <code>{html.escape(str(usage.get('token_name') or '-'))}</code>",
         f"• Last check: <code>{html.escape(str(usage.get('last_at') or '-'))}</code>",
         "",
-        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; custom Google image endpoint nano-banana PASS; public image/video OFF.",
+        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; custom Google image endpoint nano-banana PASS; custom video endpoint admin-only; public image/video OFF.",
         "",
         "ShopAIKey không thay OpenRouter/OpenAI/Gemini và không mở public.",
     ]
@@ -31282,6 +31454,119 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         f"• Provider message: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>\n\n"
         "Endpoint admin-only. Không log prompt/response/key. Không trừ Xu. Public image/video vẫn OFF.",
         parse_mode="HTML",
+    )
+
+async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not SHOPAIKEY_ENABLED:
+        save_tool_test_result("shopaikey_video", "DISABLED", "SHOPAIKEY_ENABLED=false; no call", uid)
+        return await update.message.reply_text(
+            "🎞 <b>ShopAIKey Video Smoke Test</b>\n\n"
+            "• Status: <code>DISABLED</code>\n"
+            "• Set <code>SHOPAIKEY_ENABLED=true</code> only for admin testing.\n\n"
+            "Không gọi API và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    if not SHOPAIKEY_ADMIN_ONLY or not SHOPAIKEY_VIDEO_ADMIN_ONLY:
+        save_tool_test_result("shopaikey_video", "DISABLED", "admin-only flag unsafe; no call", uid)
+        return await update.message.reply_text(
+            "🎞 <b>ShopAIKey Video Smoke Test</b>\n\n"
+            "• Status: <code>DISABLED</code>\n"
+            "• Reason: <code>SHOPAIKEY_ADMIN_ONLY and SHOPAIKEY_VIDEO_ADMIN_ONLY must remain true</code>\n\n"
+            "Không gọi API và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    result = await shopaikey_video_create_smoke_test()
+    status = str(result.get("status") or "FAIL")
+    detail = (
+        f"model={result.get('model') or SHOPAIKEY_VIDEO_MODEL}; http={result.get('http_status')}; "
+        f"latency_ms={result.get('latency_ms')}; task_id={result.get('task_id') or '-'}; "
+        f"provider_status={result.get('provider_status') or '-'}; "
+        f"error_class={result.get('error_class') or '-'}; message={result.get('message') or result.get('detail') or '-'}"
+    )
+    save_tool_test_result("shopaikey_video", status, detail, uid)
+    save_shopaikey_component_snapshot("video", result, detail, uid)
+    record_api_debug("shopaikey", "tool_test_shopaikey_video", status, int(result.get("http_status") or 0), detail)
+    task_id = str(result.get("task_id") or "")
+    await update.message.reply_text(
+        "🎞 <b>ShopAIKey Video Smoke Test</b>\n\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Model: <code>{html.escape(str(result.get('model') or SHOPAIKEY_VIDEO_MODEL or '-'))}</code>\n"
+        f"• Task ID: <code>{html.escape(task_id or '-')}</code>\n"
+        f"• Provider status: <code>{html.escape(str(result.get('provider_status') or '-'))}</code>\n"
+        f"• Message: <code>{html.escape(str(result.get('message') or result.get('detail') or '-')[:220])}</code>\n"
+        f"• No Xu deducted: <code>yes</code>\n\n"
+        + (f"Kiểm tra tiếp: <code>/shopaikey_video_job {html.escape(task_id)}</code>\n\n" if task_id else "")
+        + "Endpoint admin-only. Không log prompt/response/key. Public video vẫn OFF.",
+        parse_mode="HTML",
+    )
+
+async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not SHOPAIKEY_ADMIN_ONLY or not SHOPAIKEY_VIDEO_ADMIN_ONLY:
+        return await update.message.reply_text("⛔ ShopAIKey video chỉ cho admin smoke test. Public video OFF.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /shopaikey_video_job <task_id>")
+    task_id = str(context.args[0] or "").strip()
+    result = await shopaikey_video_job_status(task_id)
+    status = str(result.get("status") or "FAIL")
+    result_url = str(result.get("result_url") or "")
+    output_sent = False
+    if result_url:
+        try:
+            await context.bot.send_video(
+                chat_id=update.effective_chat.id,
+                video=result_url,
+                caption=f"🎞 ShopAIKey video result\nTask: {task_id}\nKhông trừ Xu.",
+            )
+            output_sent = True
+        except Exception:
+            try:
+                await update.message.reply_text(
+                    "🎞 <b>ShopAIKey Video Result</b>\n\n"
+                    f"• <a href=\"{html.escape(result_url, quote=True)}\">Mở video kết quả</a>",
+                    parse_mode="HTML",
+                    disable_web_page_preview=False,
+                )
+                output_sent = True
+            except Exception:
+                output_sent = False
+    detail = (
+        f"http={result.get('http_status')}; task_id={task_id}; provider_status={result.get('provider_status') or '-'}; "
+        f"progress={result.get('progress') or '-'}; result_url={'yes' if result_url else 'no'}; "
+        f"output_sent={'yes' if output_sent else 'no'}; fail_reason={result.get('fail_reason') or '-'}; "
+        f"error_class={result.get('error_class') or '-'}"
+    )
+    snapshot_payload = {
+        "status": status,
+        "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+        "http_status": int(result.get("http_status") or 0),
+        "latency_ms": int(result.get("latency_ms") or 0),
+    }
+    save_tool_test_result("shopaikey_video", status, detail, uid)
+    save_shopaikey_component_snapshot("video", snapshot_payload, detail, uid)
+    record_api_debug("shopaikey", "shopaikey_video_job", status, int(result.get("http_status") or 0), detail)
+    completed = bool(result_url)
+    result_line = f"• Result URL: <a href=\"{html.escape(result_url, quote=True)}\">open</a>\n" if completed else ""
+    await update.message.reply_text(
+        "🎞 <b>ShopAIKey Video Job</b>\n\n"
+        f"• Task ID: <code>{html.escape(str(result.get('task_id') or task_id or '-'))}</code>\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Provider status: <code>{html.escape(str(result.get('provider_status') or '-'))}</code>\n"
+        f"• Progress: <code>{html.escape(str(result.get('progress') or '-'))}</code>\n"
+        + result_line
+        + f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n"
+        f"• Fail reason: <code>{html.escape(str(result.get('fail_reason') or '-')[:220])}</code>\n"
+        f"• No Xu deducted: <code>yes</code>\n\n"
+        "Admin-only. Public video vẫn OFF. Không hiển thị API key.",
+        parse_mode="HTML",
+        disable_web_page_preview=False,
     )
 
 class TranslationProviderError(RuntimeError):
@@ -56530,6 +56815,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_shopaikey", cmd_tool_test_shopaikey))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_tts", cmd_tool_test_shopaikey_tts))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_image", cmd_tool_test_shopaikey_image))
+    tg_app.add_handler(CommandHandler("tool_test_shopaikey_video", cmd_tool_test_shopaikey_video))
+    tg_app.add_handler(CommandHandler("shopaikey_video_job", cmd_shopaikey_video_job))
     tg_app.add_handler(CommandHandler("tool_test_translate", cmd_tool_test_translate))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
     tg_app.add_handler(CommandHandler("tool_test_image_debug", cmd_tool_test_image_debug))
