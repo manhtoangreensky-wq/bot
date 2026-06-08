@@ -1,6 +1,7 @@
 import hmac
 import hashlib
 import os
+import re
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -738,7 +739,7 @@ def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
     callback_source = source_between(source, "async def handle_trend_video_flow_callback", "async def cmd_tool_test_workflow_image")
     create_source = source_between(source, "async def shopaikey_workflow_image_to_video_create", "async def shopaikey_video_create_smoke_test")
 
-    assert 'CommandHandler("tool_test_workflow_image_to_video", cmd_tool_test_workflow_image_to_video)' in source
+    assert 'CommandHandler("tool_test_wf_i2v", cmd_tool_test_workflow_image_to_video)' in source
     assert "workflow_image_assets" in source
     assert "LAST_WORKFLOW_IMAGES" in source
     assert "metadata" in source and '"images"' in source
@@ -906,6 +907,9 @@ def test_generation_waiting_duplicate_and_guidance_helpers():
 def test_critical_sales_ready_commands_remain_registered():
     source = bot_source_text()
     handler_lines = [line.strip() for line in source.splitlines() if "CommandHandler(" in line]
+    literal_commands = re.findall(r'CommandHandler\("([^"]+)"', source)
+    assert literal_commands
+    assert all(len(command) <= 32 for command in literal_commands), [command for command in literal_commands if len(command) > 32]
     expected_handlers = {
         "start": "cmd_start",
         "language": "cmd_language",
@@ -937,7 +941,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "tool_test_shopaikey_tts": "cmd_tool_test_shopaikey_tts",
         "tool_test_shopaikey_image": "cmd_tool_test_shopaikey_image",
         "tool_test_workflow_image": "cmd_tool_test_workflow_image",
-        "tool_test_workflow_image_to_video": "cmd_tool_test_workflow_image_to_video",
+        "tool_test_wf_i2v": "cmd_tool_test_workflow_image_to_video",
         "tool_test_shopaikey_video": "cmd_tool_test_shopaikey_video",
         "shopaikey_video_job": "cmd_shopaikey_video_job",
         "shopaikey_image": "cmd_shopaikey_image_public",

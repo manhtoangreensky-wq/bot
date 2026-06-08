@@ -29322,7 +29322,7 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_kling_status", "tool_test_replicate_status",
     "tool_test_elevenlabs_status", "tool_test_deepgram_status",
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_tts",
-    "tool_test_shopaikey_image", "tool_test_workflow_image_to_video",
+    "tool_test_shopaikey_image", "tool_test_wf_i2v",
     "tool_test_shopaikey_video", "shopaikey_video_job", "trial_bonus_status",
     "local_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
     "local_jobs", "local_job", "render_center",
@@ -31934,7 +31934,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | image cost <code>{pricing['workflow_image_cost']} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code> | workflow video cost <code>{pricing['workflow_video_cost']} Xu</code> | standalone video cost <code>{pricing['quick_video_cost']} Xu</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_workflow_image_to_video</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
+        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -42519,7 +42519,7 @@ async def cmd_tool_test_workflow_image_to_video(update: Update, context: Context
         return await update.message.reply_text("⏳ Bạn đang có tác vụ video đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
     prompt = shopaikey_workflow_image_to_video_prompt(asset)
     model = SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast"
-    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_workflow_image_to_video")
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_wf_i2v")
     job_id = create_shopaikey_job(
         uid,
         update.effective_chat.id,
@@ -59538,7 +59538,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_tts", cmd_tool_test_shopaikey_tts))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_image", cmd_tool_test_shopaikey_image))
     tg_app.add_handler(CommandHandler("tool_test_workflow_image", cmd_tool_test_workflow_image))
-    tg_app.add_handler(CommandHandler("tool_test_workflow_image_to_video", cmd_tool_test_workflow_image_to_video))
+    tg_app.add_handler(CommandHandler("tool_test_wf_i2v", cmd_tool_test_workflow_image_to_video))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_video", cmd_tool_test_shopaikey_video))
     tg_app.add_handler(CommandHandler("shopaikey_video_job", cmd_shopaikey_video_job))
     tg_app.add_handler(CommandHandler("shopaikey_image", cmd_shopaikey_image_public))
