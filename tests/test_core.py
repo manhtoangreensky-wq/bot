@@ -325,8 +325,12 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_VIDEO_URL=https://api.shopaikey.com/v1/video/generations" in env_example
     assert "SHOPAIKEY_VIDEO_MODEL=veo3.1-fast" in env_example
     assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
-    assert "SHOPAIKEY_PUBLIC_IMAGE_ENABLED=false" in env_example
+    assert "SHOPAIKEY_PUBLIC_IMAGE_ENABLED=true" in env_example
     assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED=false" in env_example
+    assert "IMAGE_TIER_LOW_ENABLED=true" in env_example
+    assert "IMAGE_TIER_STANDARD_ENABLED=true" in env_example
+    assert "IMAGE_TIER_HIGH_ENABLED=true" in env_example
+    assert "SHOPAIKEY_IMAGE_DEFAULT_TIER=low" in env_example
     assert "IMAGE_BASE_COST_XU=50" in env_example
     assert "VIDEO_BASE_COST_XU=300" in env_example
     assert "MEDIA_PRICE_MULTIPLIER=2" in env_example
@@ -838,7 +842,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "add_credit(" not in admin_smoke_source
     assert "update_trend_workflow_generated_image" in shopai_callback_source
     assert "trend_workflow_image_success_keyboard" in shopai_callback_source
-    assert "Bạn hài lòng với ảnh này chưa" in shopai_callback_source
+    assert "Bạn muốn làm gì tiếp" in shopai_callback_source
     assert "🎞 Tạo video từ ảnh này" in source
 
     monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ENABLED", True)
@@ -891,7 +895,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
         "nhạc",
         "caption",
         "cta",
-        "public image/video: off",
+            "public image: off; public video: off",
         "không tạo ảnh-video thật",
     ]:
         assert marker in joined
@@ -995,6 +999,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'CommandHandler("quick_image_test", cmd_quick_image_test)' in source
     assert 'CommandHandler("quick_video_test", cmd_quick_video_test)' in source
     assert 'CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\\|")' in source
+    assert "def public_image_tier_selection_text" in source
+    assert "def public_image_tier_keyboard" in source
+    assert "def public_image_success_keyboard" in source
+    assert "async def handle_public_image_prompt_pending_text" in source
     assert "🎨 TOAN AAS Media Creator" in helper_source
     assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
     assert 'InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")' in source
@@ -1012,7 +1020,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "create_media|main",
         "create_media|cancel",
     ]:
-        assert callback_data in helper_source
+        assert callback_data in source
+    assert 'callback_data=f"create_media|image_tier_{tier}"' in source
     create_media_keyboard_source = source_between(source, "def create_media_menu_keyboard", "def create_media_pricing_text")
     assert "create_media|trend" not in create_media_keyboard_source
     assert "create_media|pricing" not in create_media_keyboard_source
@@ -1032,7 +1041,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "set_quick_media_pending(uid, action)" in source
     assert 'set_quick_media_pending(uid, "quick_image_prompt")' not in source  # action is centralized through start/callback helpers.
     assert "quick_image_prompt" in source and "quick_video_prompt" in source
+    assert "public_image_prompt" in source
+    assert "set_public_image_prompt_pending(uid, tier)" in source
+    assert "clear_public_image_prompt_pending(uid)" in source
     assert "handle_quick_media_pending_text(update, context)" in message_source
+    assert "handle_public_image_prompt_pending_text(update, context)" in message_source
+    assert message_source.index("handle_public_image_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_quick_media_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
     assert "clear_quick_media_pending(uid)" in quick_source
     assert "clear_media_creator_pending_states(uid)" in source_between(source, "async def cmd_cancel", "async def cmd_create_media")
@@ -1047,7 +1061,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "USER_JOB_LOCK_MESSAGE" in quick_source
     assert "/quick_image_test" in quick_source and "/quick_video_test" in quick_source
     assert "No Xu deducted" in quick_source or "Không trừ Xu" in quick_source
-    assert "Quick media menu: <code>enabled/admin-only</code>" in source
+    assert "Quick media menu: <code>enabled/guarded</code>" in source
+    assert "Image tier public:" in source
+    assert "Image pricing source: <code>tiered_media_pricing</code>" in source
     assert "Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>" in source
     assert "Price table source: <code>{html.escape(pricing['price_table_source'])}</code>" in source
 
@@ -1058,6 +1074,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 654)
     monkeypatch.setattr(bot, "IMAGE_STANDARD_COST_XU", 777)
     monkeypatch.setattr(bot, "IMAGE_HIGH_COST_XU", 888)
+    monkeypatch.setattr(bot, "IMAGE_TIER_LOW_ENABLED", True)
+    monkeypatch.setattr(bot, "IMAGE_TIER_STANDARD_ENABLED", True)
+    monkeypatch.setattr(bot, "IMAGE_TIER_HIGH_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_IMAGE_DEFAULT_TIER", "low")
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_STANDARD_COST_XU", 999)
     monkeypatch.setattr(bot, "VIDEO_HIGH_COST_XU", 1111)
     monkeypatch.setattr(bot, "VIDEO_PREMIUM_COST_XU", 2222)
@@ -1075,6 +1097,23 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert pricing["video_tiers"]["premium"]["cost"] == 2222
     assert pricing["quick_image_cost"] == 321
     assert pricing["quick_video_cost"] == 654
+    assert bot.image_tier_cost_xu("low") == 321
+    assert bot.image_tier_cost_xu("standard") == 777
+    assert bot.image_tier_cost_xu("high") == 888
+    assert bot.image_tier_payload("pro")["tier"] == "high"
+    assert bot.image_tier_public_status_text() == "low:ON / standard:ON / high:ON"
+    tier_text = bot.public_image_tier_selection_text()
+    assert "Bạn muốn tạo ảnh chất lượng nào" in tier_text
+    tier_buttons = [button for row in bot.public_image_tier_keyboard().inline_keyboard for button in row]
+    assert any(button.callback_data == "create_media|image_tier_low" for button in tier_buttons)
+    assert any(button.callback_data == "create_media|image_tier_standard" for button in tier_buttons)
+    assert any(button.callback_data == "create_media|image_tier_high" for button in tier_buttons)
+    assert any("Ảnh tiết kiệm" in button.text and "321 Xu" in button.text for button in tier_buttons)
+    assert "Gửi mô tả ảnh bạn muốn tạo" in bot.public_image_prompt_request_text("standard")
+    assert "777 Xu" in bot.public_image_confirm_text("standard", "ảnh sản phẩm", 1000)
+    success_buttons = [button for row in bot.public_image_success_keyboard(123, "low").inline_keyboard for button in row]
+    assert any(button.callback_data == "tvflow|video_from_image_123" for button in success_buttons)
+    assert any(button.callback_data == "create_media|image_tier_low" for button in success_buttons)
     assert "321 Xu" not in bot.create_media_pricing_text()
     assert "654 Xu" not in bot.create_media_pricing_text()
     pricing_text = "\n".join(bot.pricing_main_lines())
@@ -1162,6 +1201,16 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     pending = bot.get_quick_media_pending("u6")
     assert pending and pending["pending_action"] == "quick_image_prompt"
     assert bot.clear_quick_media_pending("u6") is True
+    bot.set_public_image_prompt_pending("u6", "high")
+    public_pending = bot.get_public_image_prompt_pending("u6")
+    assert public_pending and public_pending["pending_action"] == "public_image_prompt"
+    assert public_pending["tier"] == "high"
+    assert bot.clear_public_image_prompt_pending("u6") is True
+    bot.set_public_image_prompt_pending("u6", "standard")
+    public_key = bot.public_image_pending_key("u6")
+    bot.USER_PENDING[public_key]["created_at_ts"] = 0
+    assert bot.get_public_image_prompt_pending("u6") is None
+    assert public_key not in bot.USER_PENDING
     bot.set_quick_media_pending("u6", "quick_video_prompt")
     bot.USER_PENDING[key]["created_at_ts"] = 0
     assert bot.get_quick_media_pending("u6") is None
@@ -1169,18 +1218,25 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     bot.set_quick_media_pending("u7", "quick_image_prompt")
     assert bot.create_media_open_text("u7").startswith("ℹ️ Đã hủy thao tác cũ")
     assert bot.get_quick_media_pending("u7") is None
+    bot.set_public_image_prompt_pending("u7", "low")
+    assert bot.create_media_open_text("u7").startswith("ℹ️ Đã hủy thao tác cũ")
+    assert bot.get_public_image_prompt_pending("u7") is None
     bot.set_trend_video_flow_pending("u7")
     assert bot.create_media_open_text("u7").startswith("ℹ️ Đã hủy thao tác cũ")
     assert bot.get_trend_video_flow_pending("u7") is None
     bot.set_quick_media_pending("u8", "quick_video_prompt")
+    bot.set_public_image_prompt_pending("u8", "low")
     bot.set_trend_video_flow_pending("u8")
     assert bot.create_media_open_text("u8").startswith("ℹ️ Đã hủy thao tác cũ")
     assert bot.get_quick_media_pending("u8") is None
+    assert bot.get_public_image_prompt_pending("u8") is None
     assert bot.get_trend_video_flow_pending("u8") is None
     bot.set_quick_media_pending("u9", "quick_image_prompt")
+    bot.set_public_image_prompt_pending("u9", "standard")
     bot.set_trend_video_flow_pending("u9")
     assert bot.clear_pending_start_notice("u9").startswith("❌ Đã hủy thao tác đang chờ")
     assert bot.get_quick_media_pending("u9") is None
+    assert bot.get_public_image_prompt_pending("u9") is None
     assert bot.get_trend_video_flow_pending("u9") is None
 
 

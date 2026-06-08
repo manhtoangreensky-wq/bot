@@ -338,8 +338,12 @@ SHOPAIKEY_VIDEO_ENABLED = env_flag("SHOPAIKEY_VIDEO_ENABLED", "false")
 SHOPAIKEY_VIDEO_ADMIN_ONLY = env_flag("SHOPAIKEY_VIDEO_ADMIN_ONLY", "true")
 SHOPAIKEY_VIDEO_MODEL = _env("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
 SHOPAIKEY_VIDEO_FALLBACK_MODELS = _env("SHOPAIKEY_VIDEO_FALLBACK_MODELS", "veo3.1,veo3.1-fast,veo3.1-pro,veo3.1-4k,veo3.1-fast-components,grok-video-3,grok-video-3-10s")
-SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "false")
+SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "true")
 SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "false")
+IMAGE_TIER_LOW_ENABLED = env_flag("IMAGE_TIER_LOW_ENABLED", "true")
+IMAGE_TIER_STANDARD_ENABLED = env_flag("IMAGE_TIER_STANDARD_ENABLED", "true")
+IMAGE_TIER_HIGH_ENABLED = env_flag("IMAGE_TIER_HIGH_ENABLED", "true")
+SHOPAIKEY_IMAGE_DEFAULT_TIER = _env("SHOPAIKEY_IMAGE_DEFAULT_TIER", "low")
 SHOPAIKEY_IMAGE_COST_XU = env_int("SHOPAIKEY_IMAGE_COST_XU", 50)
 SHOPAIKEY_VIDEO_COST_XU = env_int("SHOPAIKEY_VIDEO_COST_XU", 200)
 SHOPAIKEY_TREND_COST_XU = env_int("SHOPAIKEY_TREND_COST_XU", 10)
@@ -27523,6 +27527,49 @@ def image_tier_pricing_payload() -> dict:
         },
     }
 
+def image_tier_enabled_map() -> dict:
+    return {
+        "low": bool(IMAGE_TIER_LOW_ENABLED),
+        "standard": bool(IMAGE_TIER_STANDARD_ENABLED),
+        "high": bool(IMAGE_TIER_HIGH_ENABLED),
+    }
+
+def normalize_image_tier(value: str = "") -> str:
+    tier = str(value or "").strip().lower()
+    if tier in {"standard", "std", "normal", "medium"}:
+        return "standard"
+    if tier in {"high", "pro", "premium"}:
+        return "high"
+    if tier in {"low", "basic", "cheap", "eco", "economy"}:
+        return "low"
+    fallback = str(SHOPAIKEY_IMAGE_DEFAULT_TIER or "low").strip().lower()
+    return fallback if fallback in {"low", "standard", "high"} else "low"
+
+def image_tier_payload(tier: str = "") -> dict:
+    tier_norm = normalize_image_tier(tier)
+    pricing = image_tier_pricing_payload()
+    payload = dict(pricing.get(tier_norm) or pricing["low"])
+    payload["tier"] = tier_norm
+    payload["enabled"] = bool(image_tier_enabled_map().get(tier_norm, False))
+    payload["model"] = payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana"
+    return payload
+
+def image_tier_cost_xu(tier: str = "") -> int:
+    return int(image_tier_payload(tier).get("cost") or 0)
+
+def image_tier_public_status_text() -> str:
+    enabled_map = image_tier_enabled_map()
+    return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in ["low", "standard", "high"])
+
+def image_tier_prompt_for_generation(prompt: str, tier: str = "") -> str:
+    prompt = re.sub(r"\s+", " ", str(prompt or "").strip())[:1200]
+    tier_norm = normalize_image_tier(tier)
+    if tier_norm == "standard":
+        return f"{prompt}. High quality, clean composition, professional lighting, detailed but natural, no watermark, no extra text."
+    if tier_norm == "high":
+        return f"{prompt}. Premium commercial quality, refined composition, sharp details, professional studio lighting, polished brand-safe look, no watermark, no extra text."
+    return f"{prompt}. Clean simple composition, fast draft quality, clear subject, no watermark, no extra text."
+
 def video_tier_pricing_payload() -> dict:
     return {
         "low": {
@@ -27659,9 +27706,10 @@ def support_contact_keyboard(back_to_media: bool = False) -> InlineKeyboardMarku
 
 def clear_media_creator_pending_states(user_id) -> bool:
     quick_cleared = clear_quick_media_pending(user_id)
+    public_image_cleared = clear_public_image_prompt_pending(user_id)
     trend_cleared = clear_trend_video_flow_pending(user_id)
     trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
-    return bool(quick_cleared or trend_cleared or trend_confirm_cleared)
+    return bool(quick_cleared or public_image_cleared or trend_cleared or trend_confirm_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -32712,8 +32760,10 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
         f"• Price table source: <code>{html.escape(pricing['price_table_source'])}</code>",
         f"• Media markup multiplier: <code>{pricing['media_price_multiplier']}x</code>",
-        "• Quick media menu: <code>enabled/admin-only</code>",
+        "• Quick media menu: <code>enabled/guarded</code>",
         f"• Image tiers: <code>{'/'.join(pricing['image_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
+        f"• Image tier public: <code>{html.escape(image_tier_public_status_text())}</code>",
+        "• Image pricing source: <code>tiered_media_pricing</code>",
         f"• Video tiers: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
@@ -33420,8 +33470,10 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
         f"• Price table source: <code>{html.escape(pricing['price_table_source'])}</code>",
         f"• Media markup multiplier: <code>{pricing['media_price_multiplier']}x</code>",
-        "• Quick media menu: <code>enabled/admin-only</code>",
+        "• Quick media menu: <code>enabled/guarded</code>",
         f"• Image tiers: <code>{'/'.join(pricing['image_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
+        f"• Image tier public: <code>{html.escape(image_tier_public_status_text())}</code>",
+        "• Image pricing source: <code>tiered_media_pricing</code>",
         f"• Image provider cost: low <code>{pricing['image_tiers']['low']['provider_cost']} Xu</code> / standard <code>{pricing['image_tiers']['standard']['provider_cost']} Xu</code> / high <code>{pricing['image_tiers']['high']['provider_cost']} Xu</code>",
         f"• Image model mapping: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
         f"• Video tiers: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
@@ -33465,7 +33517,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Token: <code>{html.escape(str(usage.get('token_name') or '-'))}</code>",
         f"• Last check: <code>{html.escape(str(usage.get('last_at') or '-'))}</code>",
         "",
-        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; custom Google image endpoint nano-banana PASS; custom video endpoint admin-only; public image/video OFF.",
+        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; custom Google image endpoint nano-banana PASS; custom video endpoint admin-only; public image controlled by ENV; public video OFF.",
         "",
         "ShopAIKey không thay OpenRouter/OpenAI/Gemini và không mở public.",
     ]
@@ -33868,7 +33920,7 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         f"• Provider error code: <code>{html.escape(str(result.get('provider_error_code') or '-'))}</code>\n"
         f"• Provider message: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>\n\n"
         f"• Friendly message: <code>{html.escape(shopaikey_generation_unavailable_message(status, result.get('detail') or '') if status != 'PASS' else '-')}</code>\n\n"
-        "Endpoint admin-only. Không log prompt/response/key. Không trừ Xu. Public image/video vẫn OFF.",
+        "Endpoint admin-only. Không log prompt/response/key. Không trừ Xu. Public image controlled by ENV; public video vẫn OFF.",
         parse_mode="HTML",
     )
     finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
@@ -34094,18 +34146,26 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
     if shopaikey_active_job_for_user(uid, "image"):
         return await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
-    base_cost = image_base_cost_xu()
+    tier = normalize_image_tier(SHOPAIKEY_IMAGE_DEFAULT_TIER)
+    tier_payload = image_tier_payload(tier)
+    base_cost = int(tier_payload.get("cost") or image_base_cost_xu())
     final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
     if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+        record_shopaikey_billing_event(uid, 0, "insufficient_balance", 0, int(credits or 0), int(credits or 0), f"shopaikey_image; tier={tier}; required={final_preview_cost}")
         return await reply_insufficient_credits(update, int(credits or 0), final_preview_cost)
     token = set_shopaikey_pending_confirmation(uid, {
         "job_type": "image",
-        "prompt": prompt,
+        "prompt": image_tier_prompt_for_generation(prompt, tier),
+        "original_prompt": prompt,
         "base_cost": base_cost,
         "from_image": False,
+        "image_tier": tier,
+        "tier_label": tier_payload.get("label") or "Ảnh tiết kiệm",
+        "model": tier_payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
     })
     await update.message.reply_text(
         "🖼 <b>Xác nhận tạo ảnh ShopAIKey</b>\n\n"
+        f"• Tier: <b>{html.escape(tier_payload.get('label') or tier)}</b>\n"
         f"• Chi phí dự kiến: <b>{base_cost} Xu</b>\n"
         f"• Số Xu sẽ trừ: <b>{final_preview_cost} Xu</b>\n"
         f"• Số dư hiện tại: <b>{int(credits or 0)} Xu</b>\n"
@@ -34117,6 +34177,62 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
             [InlineKeyboardButton("❌ Huỷ", callback_data=f"shopai|cancel|{token}")],
         ]),
     )
+
+async def start_public_image_prompt_from_tier_message(message, user_id, tier: str) -> None:
+    payload = image_tier_payload(tier)
+    if not payload.get("enabled"):
+        return await message.reply_text("🧪 Tier ảnh này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.")
+    if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
+        return await message.reply_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
+    if shopaikey_active_job_for_user(user_id, "image"):
+        return await message.reply_text(USER_JOB_LOCK_MESSAGE)
+    set_public_image_prompt_pending(user_id, payload["tier"])
+    await message.reply_text(public_image_prompt_request_text(payload["tier"]), parse_mode="HTML")
+
+async def handle_public_image_prompt_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_public_image_prompt_pending(uid)
+    if not pending:
+        return False
+    prompt = re.sub(r"\s+", " ", update.message.text.strip())
+    if not prompt:
+        return False
+    clear_public_image_prompt_pending(uid)
+    tier = normalize_image_tier(pending.get("tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
+    payload = image_tier_payload(tier)
+    if not payload.get("enabled"):
+        await update.message.reply_text("🧪 Tier ảnh này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.")
+        return True
+    enabled, message = shopaikey_public_generation_guard("image")
+    if not enabled:
+        await update.message.reply_text(f"{message}\nBot chưa trừ Xu.")
+        return True
+    if shopaikey_active_job_for_user(uid, "image"):
+        await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
+        return True
+    credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Image user")
+    base_cost = int(payload.get("cost") or 0)
+    token = set_shopaikey_pending_confirmation(uid, {
+        "job_type": "image",
+        "prompt": image_tier_prompt_for_generation(prompt, tier),
+        "original_prompt": prompt,
+        "base_cost": base_cost,
+        "from_image": False,
+        "image_tier": tier,
+        "tier_label": payload.get("label") or tier,
+        "model": payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+    })
+    await update.message.reply_text(
+        public_image_confirm_text(tier, prompt, int(credits or 0)),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Đồng ý tạo ảnh", callback_data=f"shopai|confirm|{token}")],
+            [InlineKeyboardButton("❌ Hủy", callback_data=f"shopai|cancel|{token}")],
+        ]),
+    )
+    return True
 
 async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAULT_TYPE, from_image: bool = False):
     uid = update.effective_user.id
@@ -34175,8 +34291,12 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     _, action, token = parts
     uid = query.from_user.id
     if action == "cancel":
-        pop_shopaikey_pending_confirmation(token, uid)
-        record_shopaikey_billing_event(uid, 0, "cancel", 0, 0, 0, "user_cancelled_confirmation")
+        pending_cancel = pop_shopaikey_pending_confirmation(token, uid) or {}
+        cancel_tier = normalize_image_tier(pending_cancel.get("image_tier") or "")
+        cancel_reason = "user_cancelled_confirmation"
+        if str(pending_cancel.get("job_type") or "").lower() == "image":
+            cancel_reason += f"; tier={cancel_tier}"
+        record_shopaikey_billing_event(uid, 0, "cancel", 0, 0, 0, cancel_reason)
         return await query.edit_message_text("❌ Đã huỷ. Bot chưa trừ Xu.")
     pending = pop_shopaikey_pending_confirmation(token, uid)
     if not pending:
@@ -34184,6 +34304,9 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     job_type = str(pending.get("job_type") or "").lower()
     prompt = str(pending.get("prompt") or "").strip()
     base_cost = int(pending.get("base_cost") or 0)
+    image_tier = normalize_image_tier(pending.get("image_tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
+    tier_label = str(pending.get("tier_label") or image_tier_payload(image_tier).get("label") or image_tier).strip()
+    pending_model = str(pending.get("model") or "").strip()
     source_job_id = str(pending.get("source_job_id") or "").strip()
     workflow_id = str(pending.get("workflow_id") or "").strip()
     trend_output_id = int(pending.get("trend_output_id") or 0)
@@ -34208,10 +34331,12 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     )
     if not charge.get("ok"):
         credits_now, _, _ = get_user(uid)
+        if job_type == "image":
+            record_shopaikey_billing_event(uid, 0, "insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_image; tier={image_tier}; required={int(charge.get('final_cost') or base_cost)}")
         return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or base_cost), uid)
     deducted = int(charge.get("final_cost") or 0)
     balance_after, _, _ = get_user(uid)
-    model = SHOPAIKEY_IMAGE_MODEL if job_type == "image" else (SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")
+    model = (pending_model or SHOPAIKEY_IMAGE_MODEL or "nano-banana") if job_type == "image" else (SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")
     job_id = create_shopaikey_job(
         uid,
         query.message.chat_id,
@@ -34231,11 +34356,12 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         confirm_required=1 if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 0,
         confirmed_at=confirmed_at,
     )
-    record_shopaikey_billing_event(uid, job_id, "confirm", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}")
-    record_shopaikey_billing_event(uid, job_id, "deduct", deducted, int(balance_before or 0), int(balance_after or 0), f"shopaikey_{job_type}")
+    tier_reason = f"; tier={image_tier}; label={tier_label}" if job_type == "image" else ""
+    record_shopaikey_billing_event(uid, job_id, "confirm", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}{tier_reason}")
+    record_shopaikey_billing_event(uid, job_id, "deduct", deducted, int(balance_before or 0), int(balance_after or 0), f"shopaikey_{job_type}{tier_reason}")
     if job_type == "image":
         await query.edit_message_text(USER_WAIT_IMAGE_MESSAGE)
-        result = await shopaikey_image_generate(prompt)
+        result = await shopaikey_image_generate(prompt, model)
         status = str(result.get("status") or "FAIL")
         image_url = str(result.get("image_url") or "")
         output_sent = False
@@ -34258,10 +34384,10 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                     source="workflow_image_generation",
                     job_id=job_id,
                 )
-            success_markup = trend_workflow_image_success_keyboard(job_id, scene_index) if (workflow_id or trend_output_id) else None
+            success_markup = trend_workflow_image_success_keyboard(job_id, scene_index) if (workflow_id or trend_output_id) else public_image_success_keyboard(job_id, image_tier)
             success_caption = (
-                f"✅ Ảnh ShopAIKey đã tạo xong.\nJob #{job_id}\nĐã trừ: {deducted} Xu."
-                + ("\n\nBạn hài lòng với ảnh này chưa?" if success_markup else "")
+                f"✅ Ảnh {tier_label} đã tạo xong.\nJob #{job_id}\nĐã trừ: {deducted} Xu.\n\n"
+                "Bạn muốn làm gì tiếp?"
             )
             try:
                 await context.bot.send_photo(
@@ -34293,9 +34419,11 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             update_shopaikey_job(job_id=job_id, status="FAILED", error_class=result.get("error_class") or status, provider_error_code=result.get("provider_error_code") or "", provider_message=result.get("detail") or "", attempts=1, finished_at=now_text())
             return await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text=shopaikey_generation_unavailable_message(status, result.get("detail") or "") + ("\n✅ Bot đã hoàn Xu đã trừ." if refunded else ""),
+                text="⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn Xu cho bạn, vui lòng thử lại sau." if refunded else "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu hoặc chưa thể hoàn tự động, vui lòng thử lại sau.",
             )
         update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, result_sent=1 if output_sent else 0, model=result.get("model") or model, attempts=1, finished_at=now_text())
+        credits_after_success, _, _ = get_user(uid)
+        record_shopaikey_billing_event(uid, job_id, "success", 0, int(credits_after_success or 0), int(credits_after_success or 0), f"shopaikey_image_success; tier={image_tier}")
         credits_after, _, _ = get_user(uid)
         return await context.bot.send_message(chat_id=query.message.chat_id, text=f"💼 Số dư còn lại: {credits_after} Xu")
     if job_type == "video":
@@ -42672,6 +42800,86 @@ def trend_workflow_image_generation_status_text() -> str:
 
 QUICK_MEDIA_PENDING_TTL_SECONDS = 10 * 60
 
+def public_image_pending_key(user_id) -> str:
+    return f"public_image_prompt:{user_id}"
+
+def set_public_image_prompt_pending(user_id, tier: str) -> None:
+    tier_payload = image_tier_payload(tier)
+    USER_PENDING[public_image_pending_key(user_id)] = {
+        "pending_action": "public_image_prompt",
+        "tier": tier_payload["tier"],
+        "created_at_ts": time.time(),
+    }
+
+def get_public_image_prompt_pending(user_id) -> dict | None:
+    key = public_image_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "public_image_prompt":
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_public_image_prompt_pending(user_id) -> bool:
+    return USER_PENDING.pop(public_image_pending_key(user_id), None) is not None
+
+def public_image_tier_selection_text() -> str:
+    return "🖼 <b>Bạn muốn tạo ảnh chất lượng nào?</b>\n\nChọn tier ảnh bên dưới. Giá lấy từ <b>💳 Bảng giá</b>."
+
+def public_image_tier_keyboard() -> InlineKeyboardMarkup:
+    pricing = image_tier_pricing_payload()
+    enabled_map = image_tier_enabled_map()
+    rows = []
+    tier_meta = [
+        ("low", "🟢"),
+        ("standard", "🔵"),
+        ("high", "🟣"),
+    ]
+    for tier, icon in tier_meta:
+        payload = pricing[tier]
+        state = "" if enabled_map.get(tier) else " — tạm tắt"
+        rows.append([InlineKeyboardButton(
+            f"{icon} {payload['label']} — {int(payload['cost'])} Xu{state}",
+            callback_data=f"create_media|image_tier_{tier}",
+        )])
+    rows.append([InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main_image")])
+    rows.append([InlineKeyboardButton("❌ Hủy", callback_data="create_media|cancel")])
+    return InlineKeyboardMarkup(rows)
+
+def public_image_prompt_request_text(tier: str) -> str:
+    payload = image_tier_payload(tier)
+    return (
+        f"🖼 <b>{html.escape(payload['label'])}</b>\n\n"
+        "Gửi mô tả ảnh bạn muốn tạo.\n\n"
+        "Ví dụ: logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản.\n\n"
+        "Timeout: 10 phút. Gõ /cancel để hủy.\n"
+        "Bot chưa gọi API và chưa trừ Xu."
+    )
+
+def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0) -> str:
+    payload = image_tier_payload(tier)
+    cost = int(payload.get("cost") or 0)
+    return (
+        f"🖼 <b>Tạo ảnh {html.escape(payload['label'])} sẽ tốn {cost} Xu.</b>\n\n"
+        f"• Số dư hiện tại: <b>{int(current_credits or 0)} Xu</b>\n"
+        f"• Prompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\n"
+        "Bạn có muốn tiếp tục không?\n"
+        "Bot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn Xu theo chính sách."
+    )
+
+def public_image_success_keyboard(job_id: int, tier: str = "") -> InlineKeyboardMarkup:
+    tier_norm = normalize_image_tier(tier)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎞 Tạo video từ ảnh này", callback_data=f"tvflow|video_from_image_{int(job_id or 0)}")],
+        [
+            InlineKeyboardButton("🔁 Tạo lại ảnh", callback_data=f"create_media|image_tier_{tier_norm}"),
+            InlineKeyboardButton("✍️ Sửa prompt", callback_data=f"create_media|image_tier_{tier_norm}"),
+        ],
+        [InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")],
+    ])
+
 def quick_media_pending_key(user_id) -> str:
     return f"quick_media:{user_id}"
 
@@ -43155,7 +43363,7 @@ def trend_video_flow_sections(topic: str, billing_note: str = "") -> list[str]:
             f"Chủ đề: {safe_topic}\n"
             "Trạng thái: content-only / prompt-only / không tạo ảnh-video thật.\n"
             f"Trend workflow content-only: {content_only_status}.\n"
-            "Public image/video: OFF mặc định.\n"
+            f"Public image: {'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}; Public video: {'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}.\n"
             f"{safe_billing_note}\n\n"
             "Mục tiêu gợi ý:\n"
             "• Bán hàng hoặc affiliate nhưng không cam kết doanh thu.\n"
@@ -43644,7 +43852,7 @@ async def run_quick_image_admin_smoke(update: Update, context: ContextTypes.DEFA
                     f"Model: {result.get('model') or SHOPAIKEY_IMAGE_MODEL}\n"
                     f"Size: {result.get('size') or '-'}\n"
                     "No Xu deducted: yes\n"
-                    "Public image: OFF"
+                    f"Public image: {'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}"
                 ),
             )
             output_sent = True
@@ -43813,19 +44021,47 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         )
     if action == "trend":
         clear_quick_media_pending(uid)
+        clear_public_image_prompt_pending(uid)
         if not TREND_VIDEO_WORKFLOW_ENABLED:
             return await query.edit_message_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
         if not trend_video_workflow_can_access(uid):
             return await query.edit_message_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
         set_trend_video_flow_pending(uid)
         return await query.edit_message_text(trend_video_pending_prompt_text(), reply_markup=trend_video_pending_keyboard())
-    if action in {"quick_image", "quick_video"}:
+    if action == "quick_image":
+        clear_trend_video_flow_pending(uid)
+        clear_quick_media_pending(uid)
+        clear_public_image_prompt_pending(uid)
+        if shopaikey_active_job_for_user(uid, "image"):
+            return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
+        enabled, message = shopaikey_public_generation_guard("image")
+        if not enabled and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
+            return await query.edit_message_text(f"{message}\nBot chưa trừ Xu.")
+        return await query.edit_message_text(
+            public_image_tier_selection_text(),
+            parse_mode="HTML",
+            reply_markup=public_image_tier_keyboard(),
+        )
+    if action.startswith("image_tier_"):
+        clear_trend_video_flow_pending(uid)
+        clear_quick_media_pending(uid)
+        tier = normalize_image_tier(action.replace("image_tier_", "", 1))
+        payload = image_tier_payload(tier)
+        if not payload.get("enabled"):
+            return await query.edit_message_text("🧪 Tier ảnh này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.")
+        enabled, message = shopaikey_public_generation_guard("image")
+        if not enabled:
+            return await query.edit_message_text(f"{message}\nBot chưa trừ Xu.")
+        if shopaikey_active_job_for_user(uid, "image"):
+            return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
+        set_public_image_prompt_pending(uid, tier)
+        return await query.edit_message_text(public_image_prompt_request_text(tier), parse_mode="HTML")
+    if action == "quick_video":
         clear_trend_video_flow_pending(uid)
         if not is_admin_user(uid):
             return await query.edit_message_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
-        pending_action = "quick_video_prompt" if action == "quick_video" else "quick_image_prompt"
-        job_type = "video" if action == "quick_video" else "image"
-        if shopaikey_active_job_for_user(uid, job_type):
+        pending_action = "quick_video_prompt"
+        if shopaikey_active_job_for_user(uid, "video"):
             return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
         set_quick_media_pending(uid, pending_action)
         return await query.edit_message_text(quick_media_prompt_text(pending_action), parse_mode="HTML")
@@ -60669,6 +60905,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid  = update.effective_user.id
 
     if await handle_trend_video_flow_pending_text(update, context):
+        return
+
+    if await handle_public_image_prompt_pending_text(update, context):
         return
 
     if await handle_quick_media_pending_text(update, context):
