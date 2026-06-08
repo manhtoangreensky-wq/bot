@@ -705,6 +705,87 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
             os.unlink(db_path)
 
 
+def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
+    source = bot_source_text()
+    command_source = source_between(source, "async def cmd_tool_test_workflow_image_to_video", "async def cmd_image_tools")
+    callback_source = source_between(source, "async def handle_trend_video_flow_callback", "async def cmd_tool_test_workflow_image")
+    create_source = source_between(source, "async def shopaikey_workflow_image_to_video_create", "async def shopaikey_video_create_smoke_test")
+
+    assert 'CommandHandler("tool_test_workflow_image_to_video", cmd_tool_test_workflow_image_to_video)' in source
+    assert "workflow_image_assets" in source
+    assert "LAST_WORKFLOW_IMAGES" in source
+    assert "metadata" in source and '"images"' in source
+    assert "shopaikey_workflow_image_to_video_create" in command_source
+    assert "auto_poll_shopaikey_video_job" in command_source
+    assert "No Xu deducted" in command_source
+    assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED" in callback_source
+    assert "Tính năng tạo video từ ảnh đang thử nghiệm nội bộ" in callback_source
+    assert "spend_fixed_credit_info" not in command_source
+    assert "deduct_dynamic_credit" not in command_source
+    assert "add_credit(" not in command_source
+    assert "PAYOS" not in command_source.upper()
+    assert "metadata.images" not in create_source  # Keep provider response/detail free of raw image URL wording.
+
+    payload = bot.shopaikey_workflow_image_to_video_payload(
+        "veo3.1-fast",
+        "https://example.com/workflow-image.png",
+        "TOAN AAS workflow image to video test",
+    )
+    assert payload["model"] == "veo3.1-fast"
+    assert payload["metadata"]["images"] == ["https://example.com/workflow-image.png"]
+    assert payload["metadata"]["aspect_ratio"] == "9:16"
+    assert payload["metadata"]["enhance_prompt"] is False
+    assert payload["metadata"]["enable_upsample"] is False
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED", True)
+    try:
+        bot.LAST_WORKFLOW_IMAGES.pop("u5", None)
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(workflow_image_assets)").fetchall()}
+        finally:
+            conn.close()
+        assert {
+            "user_id",
+            "image_url",
+            "prompt_preview",
+            "workflow_id",
+            "scene_index",
+            "source",
+            "shopaikey_job_id",
+            "created_at",
+        }.issubset(cols)
+        bot.save_latest_workflow_image(
+            "u5",
+            "https://example.com/workflow-image.png",
+            prompt="very long workflow prompt " * 20,
+            workflow_id="workflow_1",
+            scene_index=2,
+            source="unit_test",
+            job_id=44,
+        )
+        asset = bot.latest_workflow_image_for_user("u5")
+        assert asset
+        assert asset["image_url"] == "https://example.com/workflow-image.png"
+        assert asset["workflow_id"] == "workflow_1"
+        assert int(asset["scene_index"]) == 2
+        assert len(asset["prompt_preview"]) <= 120
+        video_job_id = bot.create_shopaikey_job("u5", "chat", "video", model="veo3.1-fast", prompt="workflow image to video", status="QUEUED", admin_only=True, xu_cost_planned=0)
+        active = bot.shopaikey_active_job_for_user("u5", "video")
+        assert active and int(active["id"]) == video_job_id
+        bot.update_shopaikey_job(job_id=video_job_id, status="SUCCESS", finished_at=bot.now_text())
+        assert bot.shopaikey_active_job_for_user("u5", "video") is None
+    finally:
+        bot.LAST_WORKFLOW_IMAGES.pop("u5", None)
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -829,6 +910,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "tool_test_shopaikey_tts": "cmd_tool_test_shopaikey_tts",
         "tool_test_shopaikey_image": "cmd_tool_test_shopaikey_image",
         "tool_test_workflow_image": "cmd_tool_test_workflow_image",
+        "tool_test_workflow_image_to_video": "cmd_tool_test_workflow_image_to_video",
         "tool_test_shopaikey_video": "cmd_tool_test_shopaikey_video",
         "shopaikey_video_job": "cmd_shopaikey_video_job",
         "shopaikey_image": "cmd_shopaikey_image_public",

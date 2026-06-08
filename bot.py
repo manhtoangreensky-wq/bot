@@ -1148,6 +1148,17 @@ def init_db():
         shopaikey_job_id INTEGER DEFAULT 0,
         created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS workflow_image_assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        image_url TEXT,
+        prompt_preview TEXT,
+        workflow_id TEXT DEFAULT '',
+        scene_index INTEGER DEFAULT 0,
+        source TEXT DEFAULT '',
+        shopaikey_job_id INTEGER DEFAULT 0,
+        created_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS launch_bonus_redemptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -1865,6 +1876,7 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_plans_expires ON user_plans(plan_expires_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_status ON local_worker_jobs(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_created ON local_worker_jobs(created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_workflow_image_assets_user ON workflow_image_assets(user_id, created_at)")
     for col, col_type in [
         ("refund_status", "TEXT DEFAULT ''"),
         ("refund_amount", "INTEGER DEFAULT 0"),
@@ -24192,6 +24204,7 @@ USER_PENDING: dict = {}
 GENERATION_PENDING_JOBS: dict[tuple, dict] = {}
 SHOPAIKEY_PENDING_CONFIRMATIONS: dict[str, dict] = {}
 LAST_TREND_VIDEO_WORKFLOWS: dict[str, dict] = {}
+LAST_WORKFLOW_IMAGES: dict[str, dict] = {}
 MANUAL_BILL_STATE_TTL_SECONDS = 10 * 60
 LAST_USER_FILE_TTL_SECONDS = 10 * 60
 GENERATION_PENDING_TTL_SECONDS = 10 * 60
@@ -27463,6 +27476,29 @@ def shopaikey_video_request_payload(model: str, prompt: str = "") -> dict:
     }
     return payload
 
+def shopaikey_workflow_image_to_video_prompt(asset: dict | None = None) -> str:
+    preview = shopaikey_safe_prompt_preview((asset or {}).get("prompt_preview") or "")
+    base = (
+        "Create a short vertical 9:16 video from this workflow image. "
+        "Clean futuristic turquoise AI automation style, smooth slow push-in, subtle motion, white/bright background, "
+        "minimal, no extra text except TOAN AAS if already present."
+    )
+    return (base + (f" Source image context: {preview}" if preview else ""))[:1200]
+
+def shopaikey_workflow_image_to_video_payload(model: str, image_url: str, prompt: str = "") -> dict:
+    model = str(model or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast").strip()
+    safe_prompt = str(prompt or "").strip()[:1200] or shopaikey_video_smoke_prompt()
+    return {
+        "model": model,
+        "prompt": safe_prompt,
+        "metadata": {
+            "images": [str(image_url or "").strip()[:1000]],
+            "aspect_ratio": "9:16",
+            "enhance_prompt": False,
+            "enable_upsample": False,
+        },
+    }
+
 def shopaikey_video_attempts_summary(attempts: list[dict]) -> str:
     parts = []
     for attempt in attempts or []:
@@ -28167,6 +28203,61 @@ async def shopaikey_video_create_for_model(model: str, prompt: str = "") -> dict
                 "message": provider_message,
                 "error_class": "",
                 "detail": f"model={payload['model']}; http={res.status_code}; latency_ms={latency_ms}; task_id={task_id}; provider_status={provider_status or '-'}",
+            }
+        provider_code, provider_error = shopaikey_provider_error_from_payload(data)
+        detail = provider_error or provider_message or shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        status = shopaikey_classify_video_error(res.status_code, detail)
+        return {
+            "status": status,
+            "http_status": int(res.status_code),
+            "latency_ms": latency_ms,
+            "model": payload["model"],
+            "task_id": task_id,
+            "provider_status": provider_status,
+            "provider_error_code": provider_code,
+            "message": detail,
+            "error_class": status,
+            "detail": detail,
+        }
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        error_class = "FAIL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "FAIL_PROVIDER_ERROR"
+        return {"status": error_class, "http_status": 0, "latency_ms": latency_ms, "model": payload["model"], "task_id": "", "provider_status": "", "message": shopaikey_sanitize_error(str(e)), "error_class": error_class, "detail": shopaikey_sanitize_error(str(e))}
+
+async def shopaikey_workflow_image_to_video_create(image_url: str, prompt: str = "", model: str = "") -> dict:
+    if not SHOPAIKEY_API_KEY:
+        return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "model": model or SHOPAIKEY_VIDEO_MODEL, "task_id": "", "provider_status": "", "message": "SHOPAIKEY_API_KEY missing", "error_class": "missing_api_key"}
+    if not str(image_url or "").strip().startswith(("http://", "https://")):
+        return {"status": "FAIL_BAD_REQUEST", "http_status": 0, "latency_ms": 0, "model": model or SHOPAIKEY_VIDEO_MODEL, "task_id": "", "provider_status": "", "message": "workflow image url missing", "error_class": "missing_image_url"}
+    started = time.perf_counter()
+    payload = shopaikey_workflow_image_to_video_payload(model or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast", image_url, prompt)
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(
+                SHOPAIKEY_VIDEO_URL,
+                headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        response_data = shopaikey_video_payload_data(data)
+        task_id = shopaikey_extract_task_id(data)
+        provider_status = str(response_data.get("status") or data.get("status") or data.get("code") or "").strip()
+        provider_message = shopaikey_sanitize_error(str(data.get("message") or response_data.get("message") or "")[:260])
+        if res.status_code < 400 and task_id:
+            return {
+                "status": "PASS_SUBMITTED",
+                "http_status": int(res.status_code),
+                "latency_ms": latency_ms,
+                "model": payload["model"],
+                "task_id": task_id,
+                "provider_status": provider_status,
+                "message": provider_message,
+                "error_class": "",
+                "detail": f"model={payload['model']}; http={res.status_code}; latency_ms={latency_ms}; task_id={task_id}; provider_status={provider_status or '-'}; image=yes",
             }
         provider_code, provider_error = shopaikey_provider_error_from_payload(data)
         detail = provider_error or provider_message or shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}")
@@ -29198,7 +29289,8 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_kling_status", "tool_test_replicate_status",
     "tool_test_elevenlabs_status", "tool_test_deepgram_status",
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_tts",
-    "tool_test_shopaikey_image", "tool_test_shopaikey_video", "shopaikey_video_job", "trial_bonus_status",
+    "tool_test_shopaikey_image", "tool_test_workflow_image_to_video",
+    "tool_test_shopaikey_video", "shopaikey_video_job", "trial_bonus_status",
     "local_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
     "local_jobs", "local_job", "render_center",
     "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
@@ -31734,6 +31826,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     shopaikey_usage = shopaikey_last_usage_snapshot()
     shopaikey_video_reason = shopaikey_video_reason_text()
     shopaikey_freeze = provider_freeze_display("shopaikey")
+    workflow_video_from_image_cost = max(0, int(SHOPAIKEY_VIDEO_COST_XU or 0) - int(SHOPAIKEY_IMAGE_COST_XU or 0))
     maintenance_on, _maintenance_message = is_system_maintenance()
     provider_freeze_on = provider_freeze_runtime_on("shopaikey")
     if providers["downloader"].get("cobalt_self_host"):
@@ -31801,8 +31894,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Video: <code>custom video endpoint; customer public controlled by ENV</code>",
         f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | prompt cost <code>{int(TREND_PROMPT_COST_XU or 0)} Xu</code>",
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | image cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
+        f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code> | later cost <code>{workflow_video_from_image_cost} Xu from workflow image / {int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu standalone</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
+        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_workflow_image_to_video</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -32465,6 +32559,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     usage = shopaikey_last_usage_snapshot()
     provider_freeze = provider_freeze_display("shopaikey")
     maintenance_on, _maintenance_message = is_system_maintenance()
+    workflow_video_from_image_cost = max(0, int(SHOPAIKEY_VIDEO_COST_XU or 0) - int(SHOPAIKEY_IMAGE_COST_XU or 0))
     lines = [
         "🧪 <b>ShopAIKey Experimental Provider</b>",
         "",
@@ -32484,6 +32579,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Job lock: <code>{'ON' if SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED else 'OFF'}</code>",
         f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code>",
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
+        f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
+        f"• Image-to-video cost later: <code>{workflow_video_from_image_cost} Xu if workflow image already charged / {int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu standalone</code>",
         f"• Maintenance mode: <code>{'ON' if maintenance_on else 'OFF'}</code>",
         f"• Provider freeze: <code>{'ON' if provider_freeze.get('frozen') else 'OFF'}</code>",
         f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason') or '-'))}</code>",
@@ -33294,6 +33391,15 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                     scene_index=scene_index,
                     user_id=uid,
                     image_url=image_url,
+                    job_id=job_id,
+                )
+                save_latest_workflow_image(
+                    uid,
+                    image_url,
+                    prompt=prompt,
+                    workflow_id=workflow_id,
+                    scene_index=scene_index,
+                    source="workflow_image_generation",
                     job_id=job_id,
                 )
             success_markup = trend_workflow_image_success_keyboard(job_id, scene_index) if (workflow_id or trend_output_id) else None
@@ -41896,6 +42002,90 @@ def update_trend_workflow_generated_image(output_id: int = 0, workflow_id: str =
     finally:
         conn.close()
 
+def ensure_workflow_image_assets_table(conn=None):
+    own_conn = conn is None
+    conn = conn or db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS workflow_image_assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            image_url TEXT,
+            prompt_preview TEXT,
+            workflow_id TEXT DEFAULT '',
+            scene_index INTEGER DEFAULT 0,
+            source TEXT DEFAULT '',
+            shopaikey_job_id INTEGER DEFAULT 0,
+            created_at TEXT
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_image_assets_user ON workflow_image_assets(user_id, created_at)")
+        if own_conn:
+            conn.commit()
+    finally:
+        if own_conn:
+            conn.close()
+
+def save_latest_workflow_image(user_id, image_url: str, prompt: str = "", workflow_id: str = "", scene_index: int = 0, source: str = "", job_id: int = 0) -> None:
+    uid = str(user_id or "")
+    url = str(image_url or "").strip()
+    if not uid or not url:
+        return
+    payload = {
+        "user_id": uid,
+        "image_url": url[:1000],
+        "prompt_preview": shopaikey_safe_prompt_preview(prompt),
+        "workflow_id": str(workflow_id or "")[:80],
+        "scene_index": int(scene_index or 0),
+        "source": str(source or "")[:80],
+        "shopaikey_job_id": int(job_id or 0),
+        "created_at": now_text(),
+    }
+    LAST_WORKFLOW_IMAGES[uid] = {**payload, "created_at_ts": time.time()}
+    conn = db_connect()
+    try:
+        ensure_workflow_image_assets_table(conn)
+        conn.execute(
+            """INSERT INTO workflow_image_assets
+            (user_id, image_url, prompt_preview, workflow_id, scene_index, source, shopaikey_job_id, created_at)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                payload["user_id"],
+                payload["image_url"],
+                payload["prompt_preview"],
+                payload["workflow_id"],
+                payload["scene_index"],
+                payload["source"],
+                payload["shopaikey_job_id"],
+                payload["created_at"],
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def latest_workflow_image_for_user(user_id) -> dict | None:
+    uid = str(user_id or "")
+    if not uid:
+        return None
+    cached = LAST_WORKFLOW_IMAGES.get(uid) or {}
+    if cached and str(cached.get("image_url") or "").startswith(("http://", "https://")):
+        return cached
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        ensure_workflow_image_assets_table(conn)
+        row = conn.execute(
+            """SELECT * FROM workflow_image_assets
+            WHERE user_id=?
+            ORDER BY id DESC LIMIT 1""",
+            (uid,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def workflow_image_to_video_status_text() -> str:
+    return "admin-only/guarded"
+
 def trend_video_flow_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🖼 Tạo ảnh từ Scene 1", callback_data="tvflow|image_scene_1")],
@@ -42138,9 +42328,14 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             ]),
         )
     if action.startswith("video_from_image_"):
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+            return await query.edit_message_text(
+                "🧪 Tính năng tạo video từ ảnh đang thử nghiệm nội bộ, chưa mở công khai.\n"
+                "Bot chưa gọi API và chưa trừ Xu."
+            )
         return await query.edit_message_text(
-            "🎞 Public video vẫn đang OFF trong task này.\n"
-            "Bạn có thể dùng ảnh đã tạo với prompt video trong workflow, hoặc chờ admin mở video public sau khi đủ guard.\n"
+            "🎞 Public video cần đi qua billing/confirmation guard riêng.\n"
+            "Hiện hãy dùng /shopaikey_video_from_image khi admin đã bật public video bằng ENV.\n"
             "Bot chưa trừ Xu."
         )
     guidance = {
@@ -42208,6 +42403,15 @@ async def cmd_tool_test_workflow_image(update: Update, context: ContextTypes.DEF
     image_url = str(result.get("image_url") or "")
     output_sent = False
     if status == "PASS" and image_url:
+        save_latest_workflow_image(
+            uid,
+            image_url,
+            prompt=prompt,
+            workflow_id="workflow_image_smoke",
+            scene_index=1,
+            source="tool_test_workflow_image",
+            job_id=0,
+        )
         try:
             await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
@@ -42234,6 +42438,113 @@ async def cmd_tool_test_workflow_image(update: Update, context: ContextTypes.DEF
         "Không log API key/prompt/raw response.",
         parse_mode="HTML",
     )
+
+async def cmd_tool_test_workflow_image_to_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
+        save_tool_test_result("workflow_image_to_video", "MISSING", "SHOPAIKEY disabled or key missing; no video call", uid)
+        return await update.message.reply_text(
+            "🎞 <b>Workflow Image-to-Video Smoke Test</b>\n\n"
+            "• Status: <code>MISSING</code>\n"
+            "• Env: <code>SHOPAIKEY_ENABLED / SHOPAIKEY_API_KEY</code>\n"
+            "• No Xu deducted: <code>yes</code>\n"
+            "• Public video: <code>OFF</code>",
+            parse_mode="HTML",
+        )
+    if not SHOPAIKEY_ADMIN_ONLY or not SHOPAIKEY_VIDEO_ADMIN_ONLY:
+        save_tool_test_result("workflow_image_to_video", "DISABLED", "admin-only flag unsafe; no video call", uid)
+        return await update.message.reply_text(
+            "🎞 <b>Workflow Image-to-Video Smoke Test</b>\n\n"
+            "• Status: <code>DISABLED</code>\n"
+            "• Reason: <code>SHOPAIKEY_ADMIN_ONLY and SHOPAIKEY_VIDEO_ADMIN_ONLY must remain true</code>\n"
+            "• No Xu deducted: <code>yes</code>",
+            parse_mode="HTML",
+        )
+    asset = latest_workflow_image_for_user(uid)
+    image_url = str((asset or {}).get("image_url") or "").strip()
+    if not image_url:
+        save_tool_test_result("workflow_image_to_video", "NO_IMAGE", "latest workflow image missing; no video call", uid)
+        return await update.message.reply_text("Chưa có ảnh workflow để tạo video. Hãy chạy /tool_test_workflow_image trước.")
+    active_job = shopaikey_active_job_for_user(uid, "video")
+    if active_job:
+        return await update.message.reply_text("⏳ Bạn đang có tác vụ video đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
+    tool_type = "workflow_image_to_video"
+    normalized_prompt = normalize_generation_prompt(f"workflow image to video {uid} {image_url[-80:]}")
+    if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
+        return await update.message.reply_text("⏳ Bạn đang có tác vụ video đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
+    prompt = shopaikey_workflow_image_to_video_prompt(asset)
+    model = SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast"
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_workflow_image_to_video")
+    job_id = create_shopaikey_job(
+        uid,
+        update.effective_chat.id,
+        "video",
+        model=model,
+        prompt=prompt,
+        status="QUEUED",
+        admin_only=True,
+        xu_cost_planned=0,
+        source_job_id=str((asset or {}).get("shopaikey_job_id") or (asset or {}).get("id") or ""),
+    )
+    waiting = await update.message.reply_text(
+        "🎞 Đang tạo video từ ảnh workflow. Quá trình này có thể mất 1–5 phút. Bot sẽ tự gửi kết quả khi hoàn tất."
+    )
+    result = await shopaikey_workflow_image_to_video_create(image_url, prompt, model)
+    status = str(result.get("status") or "FAIL")
+    task_id = str(result.get("task_id") or "")
+    detail = (
+        f"model={result.get('model') or model}; http={result.get('http_status') or 0}; "
+        f"latency_ms={result.get('latency_ms') or 0}; task_id={task_id or '-'}; "
+        f"provider_status={result.get('provider_status') or '-'}; image=yes; "
+        f"error_class={result.get('error_class') or '-'}; message={result.get('message') or result.get('detail') or '-'}"
+    )
+    save_tool_test_result("workflow_image_to_video", status, detail, uid)
+    save_shopaikey_component_snapshot("video", result, detail, uid)
+    record_api_debug("shopaikey", "tool_test_workflow_image_to_video", status, int(result.get("http_status") or 0), detail)
+    db_status = "IN_PROGRESS" if status == "PASS_SUBMITTED" and task_id else "FAILED"
+    update_shopaikey_job(
+        job_id=job_id,
+        task_id=task_id,
+        status=db_status,
+        model=result.get("model") or model,
+        error_class=result.get("error_class") or "",
+        provider_error_code=result.get("provider_error_code") or "",
+        provider_message=result.get("message") or result.get("detail") or "",
+        attempts=1,
+        finished_at="" if db_status == "IN_PROGRESS" else now_text(),
+    )
+    update_generation_pending_job(uid, tool_type, normalized_prompt, task_id=task_id, status=status)
+    if status != "PASS_SUBMITTED":
+        record_provider_error(
+            "shopaikey",
+            "video",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("message") or result.get("detail") or detail),
+            result.get("message") or result.get("detail") or detail,
+        )
+    try:
+        await waiting.edit_text("✅ Workflow image-to-video submit đã xử lý xong. Không trừ Xu.")
+    except Exception:
+        pass
+    if task_id and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
+        asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, update.effective_chat.id, uid, task_id))
+    await update.message.reply_text(
+        "🎞 <b>Workflow Image-to-Video Smoke Test</b>\n\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Model: <code>{html.escape(str(result.get('model') or model))}</code>\n"
+        f"• Task ID: <code>{html.escape(task_id or '-')}</code>\n"
+        f"• Provider status: <code>{html.escape(str(result.get('provider_status') or '-'))}</code>\n"
+        f"• Message: <code>{html.escape(str(result.get('message') or result.get('detail') or '-')[:220])}</code>\n"
+        f"• No Xu deducted: <code>yes</code>\n"
+        f"• Public video: <code>OFF</code>\n"
+        f"• Auto poll: <code>{'ON' if (task_id and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED) else 'OFF'}</code>\n"
+        + (f"• Kiểm tra tiếp: <code>/shopaikey_video_job {html.escape(task_id)}</code>\n" if task_id else "")
+        + "\nAdmin-only. Không log API key/prompt/raw provider response.",
+        parse_mode="HTML",
+    )
+    finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
 
 async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -59184,6 +59495,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_tts", cmd_tool_test_shopaikey_tts))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_image", cmd_tool_test_shopaikey_image))
     tg_app.add_handler(CommandHandler("tool_test_workflow_image", cmd_tool_test_workflow_image))
+    tg_app.add_handler(CommandHandler("tool_test_workflow_image_to_video", cmd_tool_test_workflow_image_to_video))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_video", cmd_tool_test_shopaikey_video))
     tg_app.add_handler(CommandHandler("shopaikey_video_job", cmd_shopaikey_video_job))
     tg_app.add_handler(CommandHandler("shopaikey_image", cmd_shopaikey_image_public))
