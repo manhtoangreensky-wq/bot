@@ -574,13 +574,17 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
 
 def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     source = bot_source_text()
+    shared_source = source_between(source, "async def send_trend_video_flow_for_topic", "async def cmd_trend_video_flow")
     command_source = source_between(source, "async def cmd_trend_video_flow", "async def handle_trend_video_flow_callback")
     callback_source = source_between(source, "async def handle_trend_video_flow_callback", "async def cmd_tool_test_workflow_image")
+    pending_source = source_between(source, "async def handle_trend_video_flow_pending_text", "async def cmd_cancel")
+    message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
     admin_smoke_source = source_between(source, "async def cmd_tool_test_workflow_image", "async def cmd_image_tools")
     shopai_callback_source = source_between(source, "async def handle_shopaikey_public_callback", "class TranslationProviderError")
-    combined_source = command_source + callback_source
+    combined_source = shared_source + command_source + callback_source
 
     assert 'CommandHandler("trend_video_flow", cmd_trend_video_flow)' in source
+    assert 'CommandHandler("cancel", cmd_cancel)' in source
     assert 'CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\\|")' in source
     assert 'CommandHandler("tool_test_workflow_image", cmd_tool_test_workflow_image)' in source
     assert "trend_video_workflow_status_text()" in source
@@ -591,6 +595,14 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "tvflow|image_scene_1" in source
     assert "tvflow|image_scene_2" in source
     assert "tvflow|image_scene_3" in source
+    assert "set_trend_video_flow_pending(uid)" in command_source
+    assert "trend_video_pending_prompt_text()" in command_source
+    assert "pending_action" in source and "trend_video_flow" in source
+    assert "TREND_VIDEO_PENDING_TTL_SECONDS" in source
+    assert "handle_trend_video_flow_pending_text(update, context)" in message_source
+    assert message_source.index("handle_trend_video_flow_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
+    assert "send_trend_video_flow_for_topic(update, topic)" in pending_source
+    assert "clear_trend_video_flow_pending(uid)" in pending_source
     assert "shopaikey_image_generate" not in combined_source
     assert "shopaikey_video_create" not in combined_source
     assert "spend_fixed_credit_info" not in combined_source
@@ -616,6 +628,16 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert bot.trend_video_workflow_status_text() == "enabled/admin-only"
     assert bot.trend_workflow_image_generation_status_text() == "guarded/public OFF"
     assert bot.trend_video_workflow_can_access(0) is False
+    key = bot.trend_video_pending_key("u4")
+    bot.USER_PENDING.pop(key, None)
+    bot.set_trend_video_flow_pending("u4")
+    pending = bot.get_trend_video_flow_pending("u4")
+    assert pending and pending["pending_action"] == "trend_video_flow"
+    assert bot.clear_trend_video_flow_pending("u4") is True
+    bot.set_trend_video_flow_pending("u4")
+    bot.USER_PENDING[key]["created_at_ts"] = 0
+    assert bot.get_trend_video_flow_pending("u4") is None
+    assert key not in bot.USER_PENDING
 
     sections = bot.trend_video_flow_sections("affiliate AI tool cho người mới")
     assert len(sections) >= 6

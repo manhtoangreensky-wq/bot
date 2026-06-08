@@ -24197,6 +24197,7 @@ LAST_USER_FILE_TTL_SECONDS = 10 * 60
 GENERATION_PENDING_TTL_SECONDS = 10 * 60
 SHOPAIKEY_CONFIRMATION_TTL_SECONDS = 10 * 60
 TREND_WORKFLOW_TTL_SECONDS = 30 * 60
+TREND_VIDEO_PENDING_TTL_SECONDS = 10 * 60
 LAST_USER_FILE: dict = {}
 
 def normalize_generation_prompt(value: str) -> str:
@@ -41707,6 +41708,44 @@ def trend_workflow_image_generation_status_text() -> str:
         return "guarded/public OFF"
     return "guarded/public ON"
 
+def trend_video_pending_key(user_id) -> str:
+    return f"trend_video_flow:{user_id}"
+
+def set_trend_video_flow_pending(user_id) -> None:
+    USER_PENDING[trend_video_pending_key(user_id)] = {
+        "pending_action": "trend_video_flow",
+        "created_at_ts": time.time(),
+    }
+
+def get_trend_video_flow_pending(user_id) -> dict | None:
+    key = trend_video_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "trend_video_flow":
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > TREND_VIDEO_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_trend_video_flow_pending(user_id) -> bool:
+    return USER_PENDING.pop(trend_video_pending_key(user_id), None) is not None
+
+def trend_video_pending_prompt_text() -> str:
+    return (
+        "🎬 Trend → Video Workflow TOAN AAS\n\n"
+        "Bạn hãy gửi chủ đề/sản phẩm/ngành + mục tiêu + phong cách + nền tảng.\n\n"
+        "Ví dụ:\n"
+        "affiliate AI tool cho người mới, mục tiêu bán hàng, phong cách faceless, nền tảng TikTok\n\n"
+        "Bot sẽ tạo gói hook/script/storyboard/prompt ảnh/prompt video/TTS/nhạc/caption/CTA.\n"
+        "Timeout: 10 phút.\n"
+        "Gõ /cancel để hủy.\n\n"
+        "Bot chưa gọi image/video API và chưa trừ Xu."
+    )
+
+def trend_video_pending_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="tvflow|cancel_pending")]])
+
 def trend_workflow_id(user_id) -> str:
     raw = f"{user_id}:{time.time()}:{random.random()}"
     return "twf_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:14]
@@ -42015,6 +42054,15 @@ async def send_trend_video_flow_sections(update: Update, sections: list[str]):
         reply_markup = trend_video_flow_keyboard() if idx == len(sections) - 1 else None
         await update.message.reply_text(section[:3900], reply_markup=reply_markup)
 
+async def send_trend_video_flow_for_topic(update: Update, topic: str) -> None:
+    uid = update.effective_user.id if update.effective_user else 0
+    workflow_id = trend_workflow_id(uid)
+    scene_outputs = trend_video_scene_outputs(topic)
+    save_trend_workflow_outputs(uid, workflow_id, scene_outputs)
+    cache_trend_workflow(uid, workflow_id, scene_outputs)
+    sections = trend_video_flow_sections(topic)
+    await send_trend_video_flow_sections(update, sections)
+
 async def cmd_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not TREND_VIDEO_WORKFLOW_ENABLED:
@@ -42023,19 +42071,18 @@ async def cmd_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYP
         return await update.message.reply_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
     topic = media_factory_topic_from_args(context)
     if not topic:
-        return await update.message.reply_text(trend_video_flow_help_text())
-    workflow_id = trend_workflow_id(uid)
-    scene_outputs = trend_video_scene_outputs(topic)
-    save_trend_workflow_outputs(uid, workflow_id, scene_outputs)
-    cache_trend_workflow(uid, workflow_id, scene_outputs)
-    sections = trend_video_flow_sections(topic)
-    await send_trend_video_flow_sections(update, sections)
+        set_trend_video_flow_pending(uid)
+        return await update.message.reply_text(trend_video_pending_prompt_text(), reply_markup=trend_video_pending_keyboard())
+    await send_trend_video_flow_for_topic(update, topic)
 
 async def handle_trend_video_flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
     uid = query.from_user.id if query.from_user else 0
+    if action in {"cancel_pending", "cancel"}:
+        clear_trend_video_flow_pending(uid)
+        return await query.edit_message_text("❌ Đã hủy Trend → Video Workflow. Bot chưa gọi API và chưa trừ Xu.")
     if not trend_video_workflow_can_access(uid):
         return await query.edit_message_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
     if action.startswith("regen_scene_"):
@@ -42109,6 +42156,32 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         "save": "📌 Hiện V1 chưa lưu project tự động. Hãy copy pack này vào note/project của bạn. Không có Xu nào bị trừ.",
     }.get(action, "ℹ️ Workflow V1 chỉ tạo plan/prompt/script. Không gọi image/video thật.")
     await query.edit_message_text(guidance)
+
+async def handle_trend_video_flow_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_trend_video_flow_pending(uid)
+    if not pending:
+        return False
+    topic = re.sub(r"\s+", " ", update.message.text.strip())
+    if not topic:
+        return False
+    clear_trend_video_flow_pending(uid)
+    if not TREND_VIDEO_WORKFLOW_ENABLED:
+        await update.message.reply_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
+        return True
+    if not trend_video_workflow_can_access(uid):
+        await update.message.reply_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+        return True
+    await send_trend_video_flow_for_topic(update, topic)
+    return True
+
+async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if clear_trend_video_flow_pending(uid):
+        return await update.message.reply_text("❌ Đã hủy Trend → Video Workflow. Bot chưa gọi API và chưa trừ Xu.")
+    await update.message.reply_text("ℹ️ Không có tác vụ Trend → Video Workflow nào đang chờ. Bot chưa trừ Xu.")
 
 async def cmd_tool_test_workflow_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -58755,6 +58828,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     uid  = update.effective_user.id
 
+    if await handle_trend_video_flow_pending_text(update, context):
+        return
+
     normalized_music_command = normalize_music_inline_command_text(text)
     if normalized_music_command:
         handled = await dispatch_music_inline_command(update, context, normalized_music_command)
@@ -59423,6 +59499,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("trend_research", cmd_trend_research))
     tg_app.add_handler(CommandHandler("trend_status", cmd_trend_status))
     tg_app.add_handler(CommandHandler("trend_video_flow", cmd_trend_video_flow))
+    tg_app.add_handler(CommandHandler("cancel", cmd_cancel))
     tg_app.add_handler(CommandHandler("image_tools", cmd_image_tools))
     tg_app.add_handler(CommandHandler("image_studio", cmd_image_studio))
     tg_app.add_handler(CommandHandler("image_prompt", cmd_image_prompt))
