@@ -27752,6 +27752,42 @@ def shopaikey_sanitize_error(value: str) -> str:
     safe = re.sub(r"Bearer\s+[^\s\"']+", "Bearer ***", safe, flags=re.IGNORECASE)
     return safe[:500]
 
+def public_image_provider_fail_message(amount_xu: int = 0, refund_done: bool = False) -> str:
+    amount = int(amount_xu or 0)
+    if amount <= 0:
+        return "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau."
+    if refund_done:
+        return f"⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau."
+    return (
+        "⚠️ Tác vụ tạo ảnh lỗi sau khi đã trừ Xu. Bot chưa hoàn tự động được. "
+        "Admin đã được ghi nhận để kiểm tra và hoàn Xu thủ công nếu hợp lệ."
+    )
+
+async def alert_public_image_refund_failure(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id,
+    job_id: int,
+    tier: str,
+    amount_xu: int,
+    balance_before: int,
+    balance_after: int,
+    provider_error: str = "",
+    refund_error: str = "",
+) -> None:
+    safe_provider_error = shopaikey_sanitize_error(provider_error)
+    safe_refund_error = shopaikey_sanitize_error(refund_error or "auto_refund_failed")
+    detail = (
+        f"user_id={user_id}; job_id={int(job_id or 0)}; tier={normalize_image_tier(tier)}; "
+        f"amount_xu={int(amount_xu or 0)}; balance_before={int(balance_before or 0)}; "
+        f"balance_after={int(balance_after or 0)}; provider_error={safe_provider_error}; "
+        f"refund_error={safe_refund_error}; timestamp={now_text()}"
+    )
+    record_api_debug("shopaikey", "public_image_refund_failed", "REFUND_FAILED", 0, detail)
+    try:
+        await alert_admin(context, "ShopAIKey public image refund", detail)
+    except Exception:
+        logger.warning("ShopAIKey public image refund alert failed")
+
 def parse_shopaikey_usage(payload: dict) -> dict:
     data = payload if isinstance(payload, dict) else {}
     def num(name):
@@ -32756,7 +32792,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Base URL: <code>{'configured' if SHOPAIKEY_BASE_URL else 'missing'}</code>",
         f"• Enabled: <code>{'true' if SHOPAIKEY_ENABLED else 'false'}</code>",
         f"• Admin-only: <code>{'true' if SHOPAIKEY_ADMIN_ONLY else 'false'}</code>",
-        "• Public: <code>OFF</code>",
+        "• Raw provider public access: <code>OFF</code> | guarded customer flows use flags below",
         f"• Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
         f"• Price table source: <code>{html.escape(pricing['price_table_source'])}</code>",
         f"• Media markup multiplier: <code>{pricing['media_price_multiplier']}x</code>",
@@ -32783,10 +32819,13 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• TTS tested: <code>{html.escape(shopaikey_tts_status_text())}</code>",
         "• TTS manual baseline: <code>/v1/audio/speech tts-1 PASS</code>",
         f"• Image tested: <code>{html.escape(shopaikey_image_status_text())}</code>",
-        "• Image: <code>admin-only custom Google image endpoint; public OFF; OpenAI /v1 images group no channel</code>",
+        f"• Public image generation: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
+        "• Admin smoke image tests: <code>admin-only / no Xu</code>",
+        "• Image endpoint note: <code>custom Google image endpoint; OpenAI /v1 images group no channel</code>",
         f"• Video tested: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Video reason: <code>{html.escape(shopaikey_video_reason or '-')}</code>",
-        "• Video: <code>custom video endpoint; customer public controlled by ENV</code>",
+        f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
+        "• Admin smoke video tests: <code>admin-only / no Xu</code>",
         f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | content-only <code>{'ON' if pricing['trend_workflow_content_only'] else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
         f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | image/video generation priced by tier, separate from content workflow",
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
@@ -33519,7 +33558,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         "",
         "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; custom Google image endpoint nano-banana PASS; custom video endpoint admin-only; public image controlled by ENV; public video OFF.",
         "",
-        "ShopAIKey không thay OpenRouter/OpenAI/Gemini và không mở public.",
+        "ShopAIKey không thay OpenRouter/OpenAI/Gemini; raw provider public vẫn đóng, customer flow đi qua guard ENV/billing.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -34409,17 +34448,56 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 )
                 output_sent = True
         if status != "PASS":
+            provider_error_text = result.get("detail") or result.get("provider_error_code") or result.get("error_class") or status
             record_provider_error(
                 "shopaikey",
                 "image",
-                classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("detail") or status),
-                result.get("detail") or status,
+                classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, provider_error_text),
+                provider_error_text,
             )
-            refunded = refund_shopaikey_job_if_needed(uid, job_id, "", result.get("detail") or status)
-            update_shopaikey_job(job_id=job_id, status="FAILED", error_class=result.get("error_class") or status, provider_error_code=result.get("provider_error_code") or "", provider_message=result.get("detail") or "", attempts=1, finished_at=now_text())
+            deducted_amount = int(deducted or 0)
+            record_shopaikey_billing_event(uid, job_id, "provider_fail", 0, int(balance_after or 0), int(balance_after or 0), f"shopaikey_image; tier={image_tier}; error={provider_error_text}")
+            refunded = refund_shopaikey_job_if_needed(uid, job_id, "", provider_error_text) if deducted_amount > 0 else False
+            balance_after_failure, _, _ = get_user(uid)
+            refund_status = "refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged")
+            update_shopaikey_job(
+                job_id=job_id,
+                status="FAILED",
+                error_class=result.get("error_class") or status,
+                provider_error_code=result.get("provider_error_code") or "",
+                provider_message=provider_error_text,
+                attempts=1,
+                finished_at=now_text(),
+                refund_status=refund_status,
+                refund_amount=deducted_amount if refunded else 0,
+                refund_reason=provider_error_text,
+                billing_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "failed_not_charged"),
+            )
+            if deducted_amount > 0 and not refunded:
+                refund_error = "auto_refund_failed"
+                record_shopaikey_billing_event(
+                    uid,
+                    job_id,
+                    "refund_failed",
+                    deducted_amount,
+                    int(balance_after or 0),
+                    int(balance_after_failure or 0),
+                    f"shopaikey_image; tier={image_tier}; provider_error={provider_error_text}; refund_error={refund_error}",
+                )
+                await alert_public_image_refund_failure(
+                    context,
+                    uid,
+                    job_id,
+                    image_tier,
+                    deducted_amount,
+                    int(balance_before or 0),
+                    int(balance_after_failure or 0),
+                    provider_error_text,
+                    refund_error,
+                )
             return await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text="⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn Xu cho bạn, vui lòng thử lại sau." if refunded else "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu hoặc chưa thể hoàn tự động, vui lòng thử lại sau.",
+                text=public_image_provider_fail_message(deducted_amount, refunded),
             )
         update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, result_sent=1 if output_sent else 0, model=result.get("model") or model, attempts=1, finished_at=now_text())
         credits_after_success, _, _ = get_user(uid)

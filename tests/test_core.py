@@ -529,6 +529,17 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert "Price table source:" in source
     assert "deduct_dynamic_credit(" not in callback_source
     assert "add_credit(" not in callback_source
+    assert "Bot chưa trừ Xu hoặc chưa thể hoàn tự động" not in callback_source
+    assert "public_image_provider_fail_message" in callback_source
+    assert "alert_public_image_refund_failure" in callback_source
+    assert "refund_failed" in callback_source
+    assert "provider_fail" in callback_source
+    assert "Public image generation:" in source
+    assert "Admin smoke image tests:" in source
+    assert "Image: <code>admin-only custom Google image endpoint; public OFF" not in source
+    assert bot.public_image_provider_fail_message(0, False) == "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau."
+    assert bot.public_image_provider_fail_message(50, True) == "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại 50 Xu cho bạn. Vui lòng thử lại sau."
+    assert "Admin đã được ghi nhận" in bot.public_image_provider_fail_message(50, False)
 
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", False)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
@@ -614,6 +625,34 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
             assert [(row[0], row[1]) for row in billing_events] == [("confirm", 0), ("deduct", 320)]
         finally:
             conn.close()
+        bot.get_user("no_deduct_user", "No deduct")
+        conn = bot.db_connect()
+        try:
+            conn.execute("UPDATE users SET credits=100, total_spent=0 WHERE user_id=?", ("no_deduct_user",))
+            conn.commit()
+        finally:
+            conn.close()
+        assert bot.public_image_provider_fail_message(0, False).startswith("⚙️ Model tạo ảnh")
+        credits_before_no_deduct, _, _ = bot.get_user("no_deduct_user")
+        assert int(credits_before_no_deduct) == 100
+
+        bot.get_user("refund_user", "Refund user")
+        conn = bot.db_connect()
+        try:
+            conn.execute("UPDATE users SET credits=100, total_spent=0 WHERE user_id=?", ("refund_user",))
+            conn.commit()
+        finally:
+            conn.close()
+        charge = bot.spend_fixed_credit_info("refund_user", 50, "shopaikey_image", "unit public image", True)
+        assert charge["ok"] is True
+        assert int(charge["final_cost"]) == 50
+        credits_after_deduct, _, _ = bot.get_user("refund_user")
+        assert int(credits_after_deduct) == 50
+        refund_job_id = bot.create_shopaikey_job("refund_user", "c2", "image", model="nano-banana", prompt="prompt", status="FAILED", admin_only=False, xu_cost_planned=50)
+        bot.update_shopaikey_job(job_id=refund_job_id, xu_deducted=50, refund_status="pending", refund_reason="provider_fail")
+        assert bot.refund_shopaikey_job_if_needed("refund_user", refund_job_id, "", "provider fail") is True
+        credits_after_refund, _, _ = bot.get_user("refund_user")
+        assert int(credits_after_refund) == 100
         assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
         image_job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="SUCCESS", admin_only=False, xu_cost_planned=320)
         bot.update_shopaikey_job(job_id=image_job_id, xu_deducted=320)
