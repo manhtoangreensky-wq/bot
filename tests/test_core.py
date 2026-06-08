@@ -161,6 +161,11 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_VIDEO_URL=https://api.shopaikey.com/v1/video/generations" in env_example
     assert "SHOPAIKEY_VIDEO_MODEL=veo3.1-fast" in env_example
     assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
+    assert "SHOPAIKEY_PUBLIC_IMAGE_ENABLED=false" in env_example
+    assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED=false" in env_example
+    assert "SHOPAIKEY_IMAGE_COST_XU=50" in env_example
+    assert "SHOPAIKEY_VIDEO_COST_XU=200" in env_example
+    assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=true" in env_example
     assert "if not is_admin_user(update.effective_user.id)" in command_source
     assert "Trả lời đúng một câu tiếng Việt có chữ TEST_OK." in source
     assert "TOAN AAS image smoke test: simple turquoise AI automation logo" in source
@@ -180,6 +185,64 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "deduct_dynamic_credit(" not in command_source
     assert "apiKey=***" in source
     assert "FAIL_CONTENT_EMPTY" in source
+
+
+def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
+    source = bot_source_text()
+    image_source = source_between(source, "async def cmd_shopaikey_image_public", "async def cmd_shopaikey_video_public")
+    callback_source = source_between(source, "async def handle_shopaikey_public_callback", "class TranslationProviderError")
+    assert "shopaikey_public_generation_guard" in image_source
+    assert "set_shopaikey_pending_confirmation" in image_source
+    assert "spend_fixed_credit_info" not in image_source
+    assert "spend_fixed_credit_info" in callback_source
+    assert "refund_shopaikey_job_if_needed" in callback_source
+    assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL" in source
+    assert "deduct_dynamic_credit(" not in callback_source
+    assert "add_credit(" not in callback_source
+
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", False)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
+    assert bot.shopaikey_public_generation_guard("image") == (False, "Chức năng đang thử nghiệm nội bộ, chưa mở công khai.")
+    assert bot.shopaikey_public_generation_guard("video") == (False, "Chức năng đang thử nghiệm nội bộ, chưa mở công khai.")
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
+    assert bot.shopaikey_public_generation_guard("image")[0] is True
+
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_COST_XU", 200)
+    monkeypatch.setattr(bot, "SHOPAIKEY_IMAGE_COST_XU", 50)
+    assert bot.shopaikey_video_cost_for_flow(False) == 200
+    assert bot.shopaikey_video_cost_for_flow(True) == 150
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(shopaikey_jobs)").fetchall()}
+        finally:
+            conn.close()
+        assert {"xu_cost_planned", "xu_deducted", "refund_status", "refund_reason", "source_job_id"}.issubset(cols)
+        job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="IN_PROGRESS", admin_only=False, xu_cost_planned=50)
+        bot.update_shopaikey_job(job_id=job_id, xu_deducted=50, refund_status="pending", refund_reason="provider_fail")
+        active = bot.shopaikey_active_job_for_user("u2", "image")
+        assert active["xu_cost_planned"] == 50
+        assert active["xu_deducted"] == 50
+        assert active["refund_status"] == "pending"
+        assert bot.shopaikey_video_cost_for_flow(True, "u2") == 200
+        image_job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="SUCCESS", admin_only=False, xu_cost_planned=50)
+        bot.update_shopaikey_job(job_id=image_job_id, xu_deducted=50)
+        assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is True
+        assert bot.shopaikey_video_cost_for_flow(True, "u2") == 150
+        video_job_id = bot.create_shopaikey_job("u2", "c2", "video", model="veo3.1-fast", prompt="video", status="QUEUED", admin_only=False, xu_cost_planned=150, source_job_id=str(image_job_id))
+        assert video_job_id > 0
+        assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is False
+        assert bot.shopaikey_video_cost_for_flow(True, "u2") == 200
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
 
 
 def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
@@ -313,6 +376,8 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
     assert bot.shopaikey_public_generation_guard("image")[0] is False
     assert bot.shopaikey_public_generation_guard("video")[0] is False
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
     assert bot.shopaikey_public_generation_guard("image")[0] is True
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
@@ -460,6 +525,9 @@ def test_critical_sales_ready_commands_remain_registered():
         "tool_test_shopaikey_image": "cmd_tool_test_shopaikey_image",
         "tool_test_shopaikey_video": "cmd_tool_test_shopaikey_video",
         "shopaikey_video_job": "cmd_shopaikey_video_job",
+        "shopaikey_image": "cmd_shopaikey_image_public",
+        "shopaikey_video": "cmd_shopaikey_video_public",
+        "shopaikey_video_from_image": "cmd_shopaikey_video_from_image_public",
         "shopaikey_status": "cmd_shopaikey_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
         "trial_bonus_status": "cmd_trial_bonus_status",

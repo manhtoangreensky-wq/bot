@@ -340,6 +340,10 @@ SHOPAIKEY_VIDEO_MODEL = _env("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
 SHOPAIKEY_VIDEO_FALLBACK_MODELS = _env("SHOPAIKEY_VIDEO_FALLBACK_MODELS", "veo3.1,veo3.1-fast,veo3.1-pro,veo3.1-4k,veo3.1-fast-components,grok-video-3,grok-video-3-10s")
 SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "false")
 SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "false")
+SHOPAIKEY_IMAGE_COST_XU = env_int("SHOPAIKEY_IMAGE_COST_XU", 50)
+SHOPAIKEY_VIDEO_COST_XU = env_int("SHOPAIKEY_VIDEO_COST_XU", 200)
+SHOPAIKEY_TREND_COST_XU = env_int("SHOPAIKEY_TREND_COST_XU", 10)
+SHOPAIKEY_REFUND_ON_PROVIDER_FAIL = env_flag("SHOPAIKEY_REFUND_ON_PROVIDER_FAIL", "true")
 SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED = env_flag("SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED", "true")
 SHOPAIKEY_VIDEO_POLL_INTERVAL_SECONDS = env_int("SHOPAIKEY_VIDEO_POLL_INTERVAL_SECONDS", 25)
 SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS = env_int("SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS", 24)
@@ -1074,6 +1078,9 @@ def init_db():
         output_file_id TEXT,
         xu_cost_planned INTEGER DEFAULT 0,
         xu_deducted INTEGER DEFAULT 0,
+        refund_status TEXT DEFAULT '',
+        refund_reason TEXT DEFAULT '',
+        source_job_id TEXT DEFAULT '',
         admin_only INTEGER DEFAULT 1,
         error_class TEXT,
         provider_error_code TEXT,
@@ -1791,6 +1798,15 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_plans_expires ON user_plans(plan_expires_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_status ON local_worker_jobs(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_created ON local_worker_jobs(created_at)")
+    for col, col_type in [
+        ("refund_status", "TEXT DEFAULT ''"),
+        ("refund_reason", "TEXT DEFAULT ''"),
+        ("source_job_id", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE shopaikey_jobs ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
                         ("free_chat_count","0"), ("free_chat_date","''")]:
         try:
@@ -24090,9 +24106,11 @@ class AgentDownloader:
 USER_BILL_STATE: dict = {}
 USER_PENDING: dict = {}
 GENERATION_PENDING_JOBS: dict[tuple, dict] = {}
+SHOPAIKEY_PENDING_CONFIRMATIONS: dict[str, dict] = {}
 MANUAL_BILL_STATE_TTL_SECONDS = 10 * 60
 LAST_USER_FILE_TTL_SECONDS = 10 * 60
 GENERATION_PENDING_TTL_SECONDS = 10 * 60
+SHOPAIKEY_CONFIRMATION_TTL_SECONDS = 10 * 60
 LAST_USER_FILE: dict = {}
 
 def normalize_generation_prompt(value: str) -> str:
@@ -26731,6 +26749,108 @@ def shopaikey_video_model_sequence(model_override: str = "") -> list[str]:
         models.append(value)
     return models or ["veo3.1-fast"]
 
+def shopaikey_confirmation_token() -> str:
+    return hashlib.sha256(f"{time.time()}:{random.random()}".encode("utf-8")).hexdigest()[:18]
+
+def set_shopaikey_pending_confirmation(user_id, payload: dict) -> str:
+    token = shopaikey_confirmation_token()
+    SHOPAIKEY_PENDING_CONFIRMATIONS[token] = {
+        **(payload or {}),
+        "user_id": str(user_id or ""),
+        "created_at_ts": time.time(),
+    }
+    return token
+
+def pop_shopaikey_pending_confirmation(token: str, user_id) -> dict | None:
+    token = str(token or "").strip()
+    item = SHOPAIKEY_PENDING_CONFIRMATIONS.get(token)
+    if not item:
+        return None
+    if str(item.get("user_id") or "") != str(user_id or ""):
+        return None
+    if time.time() - float(item.get("created_at_ts") or 0) > SHOPAIKEY_CONFIRMATION_TTL_SECONDS:
+        SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+        return None
+    return SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+
+def shopaikey_paid_image_source_job(user_id) -> dict | None:
+    uid = str(user_id or "")
+    if not uid:
+        return None
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT image.*
+            FROM shopaikey_jobs image
+            WHERE image.user_id=?
+              AND image.job_type='image'
+              AND UPPER(image.status)='SUCCESS'
+              AND image.admin_only=0
+              AND image.xu_deducted > 0
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM shopaikey_jobs video
+                  WHERE video.job_type='video'
+                    AND video.source_job_id=CAST(image.id AS TEXT)
+              )
+            ORDER BY image.id DESC
+            LIMIT 1
+            """,
+            (uid,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def shopaikey_paid_image_source_available(user_id, source_job_id: str) -> bool:
+    uid = str(user_id or "")
+    source = str(source_job_id or "").strip()
+    if not uid or not source:
+        return False
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT image.id
+            FROM shopaikey_jobs image
+            WHERE image.id=?
+              AND image.user_id=?
+              AND image.job_type='image'
+              AND UPPER(image.status)='SUCCESS'
+              AND image.admin_only=0
+              AND image.xu_deducted > 0
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM shopaikey_jobs video
+                  WHERE video.job_type='video'
+                    AND video.source_job_id=CAST(image.id AS TEXT)
+              )
+            LIMIT 1
+            """,
+            (int(source), uid),
+        ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+def shopaikey_video_cost_for_flow(from_image: bool = False, user_id=None) -> int:
+    base_video = max(0, int(SHOPAIKEY_VIDEO_COST_XU or 200))
+    if from_image:
+        if user_id is not None and not shopaikey_paid_image_source_job(user_id):
+            return base_video
+        return max(0, base_video - max(0, int(SHOPAIKEY_IMAGE_COST_XU or 50)))
+    return base_video
+
+def shopaikey_preview_final_cost(user_id, base_cost: int, event_type: str) -> int:
+    if is_admin_user(user_id):
+        return 0
+    charge = apply_member_service_discount(user_id, int(base_cost or 0), event_type)
+    return int(charge.get("final_cost") or 0)
+
 def shopaikey_sanitize_error(value: str) -> str:
     safe = sanitize_log_text(str(value or ""))
     safe = re.sub(r"apiKey=([^&\s]+)", "apiKey=***", safe, flags=re.IGNORECASE)
@@ -27102,13 +27222,16 @@ def shopaikey_provider_error_from_payload(payload: dict) -> tuple[str, str]:
         return "", shopaikey_sanitize_error(str(error)[:260])
     return "", ""
 
-async def shopaikey_image_smoke_test() -> dict:
+async def shopaikey_image_generate(prompt: str, model: str = "") -> dict:
     if not SHOPAIKEY_API_KEY:
         return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "error_class": "missing_api_key", "detail": "SHOPAIKEY_API_KEY missing"}
+    safe_prompt = str(prompt or "").strip()[:1200]
+    if not safe_prompt:
+        return {"status": "FAIL_BAD_REQUEST", "http_status": 0, "latency_ms": 0, "model": model or SHOPAIKEY_IMAGE_MODEL or "nano-banana", "size": "9:16", "image_url": "", "provider_error_code": "", "error_class": "empty_prompt", "detail": "empty prompt"}
     started = time.perf_counter()
     payload = {
-        "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
-        "prompt": "TOAN AAS image smoke test: simple turquoise AI automation logo, clean white background, no extra text",
+        "model": model or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+        "prompt": safe_prompt,
         "size": "9:16",
         "format": "png",
         "response_format": "url",
@@ -27183,6 +27306,9 @@ async def shopaikey_image_smoke_test() -> dict:
             "detail": shopaikey_sanitize_error(str(e)),
         }
 
+async def shopaikey_image_smoke_test() -> dict:
+    return await shopaikey_image_generate("TOAN AAS image smoke test: simple turquoise AI automation logo, clean white background, no extra text")
+
 def shopaikey_video_payload_data(payload: dict) -> dict:
     if not isinstance(payload, dict):
         return {}
@@ -27230,11 +27356,12 @@ def shopaikey_video_result_url(payload: dict) -> str:
 def shopaikey_video_smoke_prompt() -> str:
     return "A short clean futuristic turquoise AI automation logo animation, white background, minimal, no extra text except TOAN AAS"
 
-def shopaikey_video_request_payload(model: str) -> dict:
+def shopaikey_video_request_payload(model: str, prompt: str = "") -> dict:
     model = str(model or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast").strip()
+    safe_prompt = str(prompt or "").strip()[:1200] or shopaikey_video_smoke_prompt()
     payload = {
         "model": model,
-        "prompt": shopaikey_video_smoke_prompt(),
+        "prompt": safe_prompt,
     }
     if model == "grok-video-3":
         return payload
@@ -27321,6 +27448,8 @@ def shopaikey_public_generation_guard(job_type: str) -> tuple[bool, str]:
         return False, "Chức năng đang thử nghiệm nội bộ, chưa mở công khai."
     if job == "video" and not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
         return False, "Chức năng đang thử nghiệm nội bộ, chưa mở công khai."
+    if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
+        return False, "Hệ thống tạo ảnh/video đang bảo trì ngắn hoặc chưa sẵn sàng."
     return True, ""
 
 def shopaikey_active_job_for_user(user_id, job_type: str = "") -> dict | None:
@@ -27348,7 +27477,7 @@ def shopaikey_active_job_for_user(user_id, job_type: str = "") -> dict | None:
     finally:
         conn.close()
 
-def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", prompt: str = "", status: str = "QUEUED", admin_only: bool = True, xu_cost_planned: int = 0) -> int:
+def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", prompt: str = "", status: str = "QUEUED", admin_only: bool = True, xu_cost_planned: int = 0, source_job_id: str = "") -> int:
     now = now_text()
     conn = db_connect()
     try:
@@ -27356,8 +27485,8 @@ def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", promp
             """
             INSERT INTO shopaikey_jobs
             (user_id, chat_id, job_type, provider, model, status, prompt_hash, prompt_preview,
-             xu_cost_planned, xu_deducted, admin_only, attempts, poll_count, created_at, updated_at)
-            VALUES (?, ?, ?, 'shopaikey', ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?)
+             xu_cost_planned, xu_deducted, source_job_id, admin_only, attempts, poll_count, created_at, updated_at)
+            VALUES (?, ?, ?, 'shopaikey', ?, ?, ?, ?, ?, 0, ?, ?, 0, 0, ?, ?)
             """,
             (
                 str(user_id or ""),
@@ -27368,6 +27497,7 @@ def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", promp
                 shopaikey_prompt_hash(prompt),
                 shopaikey_safe_prompt_preview(prompt),
                 int(xu_cost_planned or 0),
+                str(source_job_id or "")[:80],
                 1 if admin_only else 0,
                 now,
                 now,
@@ -27382,7 +27512,8 @@ def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
     allowed = {
         "model", "task_id", "status", "result_url", "result_sent", "output_file_id",
         "error_class", "provider_error_code", "provider_message", "fail_reason",
-        "attempts", "poll_count", "finished_at",
+        "attempts", "poll_count", "finished_at", "xu_deducted", "refund_status", "refund_reason",
+        "source_job_id",
     }
     updates = {}
     if job_id and str(task_id or "").strip():
@@ -27396,8 +27527,12 @@ def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
             updates[key] = shopaikey_sanitize_error(str(value or ""))[:260]
         elif key == "result_url":
             updates[key] = str(value or "").strip()[:1000]
-        elif key in {"result_sent", "attempts", "poll_count"}:
+        elif key in {"result_sent", "attempts", "poll_count", "xu_deducted"}:
             updates[key] = int(value or 0)
+        elif key in {"refund_status", "refund_reason"}:
+            updates[key] = shopaikey_sanitize_error(str(value or ""))[:160]
+        elif key == "source_job_id":
+            updates[key] = str(value or "")[:80]
         elif key == "status":
             updates[key] = str(value or "").upper()[:40]
         else:
@@ -27429,11 +27564,47 @@ def shopaikey_job_by_task_id(task_id: str) -> dict | None:
     finally:
         conn.close()
 
-async def shopaikey_video_create_for_model(model: str) -> dict:
+def refund_shopaikey_job_if_needed(user_id, job_id: int = 0, task_id: str = "", reason: str = "provider_fail") -> bool:
+    if not SHOPAIKEY_REFUND_ON_PROVIDER_FAIL:
+        return False
+    job = shopaikey_job_by_task_id(task_id) if task_id else None
+    if not job and job_id:
+        conn = db_connect()
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT * FROM shopaikey_jobs WHERE id=?", (int(job_id),)).fetchone()
+            job = dict(row) if row else None
+        finally:
+            conn.close()
+    if not job:
+        return False
+    if str(job.get("refund_status") or "").lower() == "refunded":
+        return False
+    amount = int(job.get("xu_deducted") or 0)
+    if amount <= 0:
+        return False
+    refunded = refund_charged_credit(
+        user_id,
+        amount,
+        "shopaikey_refund",
+        str(job.get("id") or job_id or task_id or ""),
+        f"Hoàn Xu ShopAIKey do {shopaikey_sanitize_error(reason)}",
+        True,
+    )
+    if refunded:
+        update_shopaikey_job(
+            job_id=int(job.get("id") or job_id or 0),
+            task_id=str(job.get("task_id") or task_id or ""),
+            refund_status="refunded",
+            refund_reason=reason,
+        )
+    return refunded
+
+async def shopaikey_video_create_for_model(model: str, prompt: str = "") -> dict:
     if not SHOPAIKEY_API_KEY:
         return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "model": SHOPAIKEY_VIDEO_MODEL, "task_id": "", "provider_status": "", "message": "SHOPAIKEY_API_KEY missing", "error_class": "missing_api_key"}
     started = time.perf_counter()
-    payload = shopaikey_video_request_payload(model)
+    payload = shopaikey_video_request_payload(model, prompt)
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post(
@@ -27482,11 +27653,11 @@ async def shopaikey_video_create_for_model(model: str) -> dict:
         error_class = "FAIL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "FAIL_PROVIDER_ERROR"
         return {"status": error_class, "http_status": 0, "latency_ms": latency_ms, "model": payload["model"], "task_id": "", "provider_status": "", "message": shopaikey_sanitize_error(str(e)), "error_class": error_class, "detail": shopaikey_sanitize_error(str(e))}
 
-async def shopaikey_video_create_smoke_test(model_override: str = "") -> dict:
+async def shopaikey_video_create_smoke_test(model_override: str = "", prompt: str = "") -> dict:
     models = shopaikey_video_model_sequence(model_override)
     attempts = []
     for model in models:
-        result = await shopaikey_video_create_for_model(model)
+        result = await shopaikey_video_create_for_model(model, prompt)
         attempts.append({
             "model": result.get("model") or model,
             "status": result.get("status") or "FAIL",
@@ -27626,23 +27797,27 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
             )
             return
         if status in {"FAILED", "FAILURE"} or str(result.get("error_class") or "").upper().startswith("FAIL_"):
+            refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, result.get("fail_reason") or result.get("detail") or "video_provider_failed")
             try:
                 await bot_client.send_message(
                     chat_id=chat_id,
                     text=(
                         "⚙️ Video chưa tạo được do nhà cung cấp bận hoặc model tạm lỗi. Vui lòng thử lại sau.\n"
                         f"Lý do: {shopaikey_generation_unavailable_message(status, result.get('fail_reason') or result.get('detail') or '')}"
+                        + ("\n✅ Bot đã hoàn Xu đã trừ." if refunded else "")
                     ),
                 )
             except Exception:
                 pass
             update_shopaikey_job(job_id=job_id, task_id=task_id, status="FAILED", finished_at=now_text())
             return
+    refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, "video_poll_timeout")
     update_shopaikey_job(job_id=job_id, task_id=task_id, status="TIMEOUT", poll_count=max_attempts, finished_at=now_text())
     try:
         await bot_client.send_message(
             chat_id=chat_id,
-            text="⏳ Video đang xử lý lâu hơn dự kiến. Bạn có thể kiểm tra lại sau bằng /shopaikey_video_job <task_id>.",
+            text="⏳ Video đang xử lý lâu hơn dự kiến. Bạn có thể kiểm tra lại sau bằng /shopaikey_video_job <task_id>."
+                 + ("\n✅ Bot đã hoàn Xu đã trừ." if refunded else ""),
         )
     except Exception:
         return
@@ -31054,6 +31229,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Enabled: <code>{'true' if SHOPAIKEY_ENABLED else 'false'}</code>",
         f"• Admin-only: <code>{'true' if SHOPAIKEY_ADMIN_ONLY else 'false'}</code>",
         "• Public: <code>OFF</code>",
+        f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code>",
+        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu</code>",
+        f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Usage: <code>{html.escape(shopaikey_usage_summary_text(shopaikey_usage))}</code>",
         f"• Group: <code>{html.escape(str(shopaikey_usage.get('group_name') or '-'))}</code>",
         f"• Chat tested: <code>{html.escape(shopaikey_chat_status_text())}</code>",
@@ -31064,7 +31242,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Image: <code>admin-only custom Google image endpoint; public OFF; OpenAI /v1 images group no channel</code>",
         f"• Video tested: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Video reason: <code>{html.escape(shopaikey_video_reason or '-')}</code>",
-        "• Video: <code>admin-only custom video endpoint; public OFF; customer video disabled</code>",
+        "• Video: <code>custom video endpoint; customer public controlled by ENV</code>",
         "• Stage: <code>experimental/admin-only</code>",
         "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
         "",
@@ -31738,8 +31916,9 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Chat model: <code>{html.escape(SHOPAIKEY_CHAT_MODEL or '-')}</code>",
         f"• Chat fallbacks: <code>{html.escape(', '.join(shopaikey_chat_fallback_models()) or '-')}</code>",
         f"• TTS: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code> / <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>",
-        f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>OFF</code>",
-        f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code> | public <code>OFF</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
+        f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code>",
+        f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
+        f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Chat test: <code>{html.escape(shopaikey_chat_status_text())}</code>",
         f"• TTS test: <code>{html.escape(shopaikey_tts_status_text())}</code>",
         f"• Image test: <code>{html.escape(shopaikey_image_status_text())}</code>",
@@ -32230,6 +32409,208 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
         disable_web_page_preview=False,
     )
     finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
+
+def shopaikey_public_prompt_from_args(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return " ".join(context.args or []).strip()
+
+async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    prompt = shopaikey_public_prompt_from_args(context)
+    if not prompt:
+        return await update.message.reply_text("⚠️ Cú pháp: /shopaikey_image <mô tả ảnh>")
+    enabled, message = shopaikey_public_generation_guard("image")
+    if not enabled:
+        return await update.message.reply_text(f"🖼 {message}\nBot chưa trừ Xu.")
+    if shopaikey_active_job_for_user(uid, "image"):
+        return await update.message.reply_text("⏳ Bạn đang có một tác vụ đang chạy. Vui lòng chờ kết quả hoặc kiểm tra trạng thái.")
+    credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
+    base_cost = max(0, int(SHOPAIKEY_IMAGE_COST_XU or 50))
+    final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
+    if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+        return await reply_insufficient_credits(update, int(credits or 0), final_preview_cost)
+    token = set_shopaikey_pending_confirmation(uid, {
+        "job_type": "image",
+        "prompt": prompt,
+        "base_cost": base_cost,
+        "from_image": False,
+    })
+    await update.message.reply_text(
+        "🖼 <b>Xác nhận tạo ảnh ShopAIKey</b>\n\n"
+        f"• Chi phí dự kiến: <b>{base_cost} Xu</b>\n"
+        f"• Số Xu sẽ trừ: <b>{final_preview_cost} Xu</b>\n"
+        f"• Số dư hiện tại: <b>{int(credits or 0)} Xu</b>\n"
+        f"• Prompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\n"
+        "Bot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn Xu theo chính sách.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"✅ Tạo ảnh -{final_preview_cost} Xu", callback_data=f"shopai|confirm|{token}")],
+            [InlineKeyboardButton("❌ Huỷ", callback_data=f"shopai|cancel|{token}")],
+        ]),
+    )
+
+async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAULT_TYPE, from_image: bool = False):
+    uid = update.effective_user.id
+    prompt = shopaikey_public_prompt_from_args(context)
+    if not prompt:
+        command = "/shopaikey_video_from_image" if from_image else "/shopaikey_video"
+        return await update.message.reply_text(f"⚠️ Cú pháp: {command} <mô tả video>")
+    enabled, message = shopaikey_public_generation_guard("video")
+    if not enabled:
+        return await update.message.reply_text(f"🎞 {message}\nBot chưa trừ Xu.")
+    if shopaikey_active_job_for_user(uid, "video"):
+        return await update.message.reply_text("⏳ Bạn đang có một tác vụ đang chạy. Vui lòng chờ kết quả hoặc kiểm tra trạng thái.")
+    credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
+    source_job = shopaikey_paid_image_source_job(uid) if from_image else None
+    base_cost = shopaikey_video_cost_for_flow(from_image, uid)
+    final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video")
+    if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+        return await reply_insufficient_credits(update, int(credits or 0), final_preview_cost)
+    token = set_shopaikey_pending_confirmation(uid, {
+        "job_type": "video",
+        "prompt": prompt,
+        "base_cost": base_cost,
+        "from_image": from_image,
+        "source_job_id": str(source_job.get("id") or "") if source_job else "",
+    })
+    if from_image and source_job:
+        note = f"Video từ ảnh job #{source_job.get('id')}: chỉ trừ phần còn lại."
+    elif from_image:
+        note = "Chưa tìm thấy ảnh ShopAIKey đã trừ Xu chưa dùng; tính như video độc lập."
+    else:
+        note = "Video độc lập."
+    await update.message.reply_text(
+        "🎞 <b>Xác nhận tạo video ShopAIKey</b>\n\n"
+        f"• Chi phí dự kiến: <b>{base_cost} Xu</b>\n"
+        f"• Số Xu sẽ trừ: <b>{final_preview_cost} Xu</b>\n"
+        f"• Số dư hiện tại: <b>{int(credits or 0)} Xu</b>\n"
+        f"• Ghi chú: <code>{html.escape(note)}</code>\n"
+        f"• Prompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\n"
+        "Bot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn phần Xu đã trừ.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"✅ Tạo video -{final_preview_cost} Xu", callback_data=f"shopai|confirm|{token}")],
+            [InlineKeyboardButton("❌ Huỷ", callback_data=f"shopai|cancel|{token}")],
+        ]),
+    )
+
+async def cmd_shopaikey_video_from_image_public(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_shopaikey_video_public(update, context, from_image=True)
+
+async def handle_shopaikey_public_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split("|")
+    if len(parts) != 3:
+        return await query.edit_message_text("⚠️ Yêu cầu không hợp lệ.")
+    _, action, token = parts
+    uid = query.from_user.id
+    if action == "cancel":
+        pop_shopaikey_pending_confirmation(token, uid)
+        return await query.edit_message_text("❌ Đã huỷ. Bot chưa trừ Xu.")
+    pending = pop_shopaikey_pending_confirmation(token, uid)
+    if not pending:
+        return await query.edit_message_text("⏰ Yêu cầu đã hết hạn hoặc đã xử lý. Bot chưa trừ Xu.")
+    job_type = str(pending.get("job_type") or "").lower()
+    prompt = str(pending.get("prompt") or "").strip()
+    base_cost = int(pending.get("base_cost") or 0)
+    source_job_id = str(pending.get("source_job_id") or "").strip()
+    enabled, message = shopaikey_public_generation_guard(job_type)
+    if not enabled:
+        return await query.edit_message_text(f"{message}\nBot chưa trừ Xu.")
+    if shopaikey_active_job_for_user(uid, job_type):
+        return await query.edit_message_text("⏳ Bạn đang có một tác vụ đang chạy. Vui lòng chờ kết quả hoặc kiểm tra trạng thái.")
+    if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
+        return await query.edit_message_text(
+            "⚠️ Ảnh nguồn đã được dùng hoặc không còn hợp lệ để giảm phần video. Bot chưa trừ Xu.\n"
+            "Vui lòng gửi lại lệnh tạo video để hệ thống tính chi phí hiện tại."
+        )
+    charge = spend_fixed_credit_info(
+        uid,
+        base_cost,
+        f"shopaikey_{job_type}",
+        f"ShopAIKey {job_type}: {shopaikey_safe_prompt_preview(prompt)}",
+        True,
+    )
+    if not charge.get("ok"):
+        credits_now, _, _ = get_user(uid)
+        return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or base_cost), uid)
+    deducted = int(charge.get("final_cost") or 0)
+    model = SHOPAIKEY_IMAGE_MODEL if job_type == "image" else (SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")
+    job_id = create_shopaikey_job(
+        uid,
+        query.message.chat_id,
+        job_type,
+        model=model,
+        prompt=prompt,
+        status="IN_PROGRESS" if job_type == "image" else "QUEUED",
+        admin_only=False,
+        xu_cost_planned=base_cost,
+        source_job_id=source_job_id,
+    )
+    update_shopaikey_job(job_id=job_id, xu_deducted=deducted)
+    if job_type == "image":
+        await query.edit_message_text("🖼 Đang tạo ảnh cho bạn, vui lòng chờ một chút. Không cần gửi lại lệnh, bot sẽ tự báo khi xong.")
+        result = await shopaikey_image_generate(prompt)
+        status = str(result.get("status") or "FAIL")
+        image_url = str(result.get("image_url") or "")
+        output_sent = False
+        if status == "PASS" and image_url:
+            try:
+                await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=image_url,
+                    caption=f"✅ Ảnh ShopAIKey đã tạo xong.\nJob #{job_id}\nĐã trừ: {deducted} Xu.",
+                )
+                output_sent = True
+            except Exception:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=(
+                        "✅ Ảnh ShopAIKey đã tạo xong nhưng Telegram không gửi trực tiếp được.\n"
+                        f"<a href=\"{html.escape(image_url, quote=True)}\">Mở ảnh</a>"
+                    ),
+                    parse_mode="HTML",
+                    disable_web_page_preview=False,
+                )
+                output_sent = True
+        if status != "PASS":
+            refunded = refund_shopaikey_job_if_needed(uid, job_id, "", result.get("detail") or status)
+            update_shopaikey_job(job_id=job_id, status="FAILED", error_class=result.get("error_class") or status, provider_error_code=result.get("provider_error_code") or "", provider_message=result.get("detail") or "", attempts=1, finished_at=now_text())
+            return await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=shopaikey_generation_unavailable_message(status, result.get("detail") or "") + ("\n✅ Bot đã hoàn Xu đã trừ." if refunded else ""),
+            )
+        update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, result_sent=1 if output_sent else 0, model=result.get("model") or model, attempts=1, finished_at=now_text())
+        credits_after, _, _ = get_user(uid)
+        return await context.bot.send_message(chat_id=query.message.chat_id, text=f"💼 Số dư còn lại: {credits_after} Xu")
+    if job_type == "video":
+        await query.edit_message_text("🎞 Đang tạo video, quá trình này có thể mất 1–5 phút. Không cần gửi lại lệnh, bot sẽ tự gửi kết quả khi hoàn tất.")
+        result = await shopaikey_video_create_smoke_test("", prompt)
+        status = str(result.get("status") or "FAIL")
+        task_id = str(result.get("task_id") or "")
+        attempts = result.get("attempts") or []
+        if status == "PASS_SUBMITTED" and task_id:
+            update_shopaikey_job(
+                job_id=job_id,
+                task_id=task_id,
+                status="IN_PROGRESS",
+                model=result.get("selected_model") or result.get("model") or model,
+                attempts=len(attempts),
+            )
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=f"✅ Video đã gửi vào queue.\nTask: {task_id}\nAuto poll: {'ON' if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED else 'OFF'}",
+            )
+            if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
+                asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, query.message.chat_id, uid, task_id))
+            return
+        refunded = refund_shopaikey_job_if_needed(uid, job_id, "", result.get("message") or result.get("detail") or status)
+        update_shopaikey_job(job_id=job_id, status="FAILED", error_class=result.get("error_class") or status, provider_error_code=result.get("provider_error_code") or "", provider_message=result.get("message") or result.get("detail") or "", attempts=len(attempts), finished_at=now_text())
+        return await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=shopaikey_generation_unavailable_message(status, result.get("message") or result.get("detail") or "") + ("\n✅ Bot đã hoàn Xu đã trừ." if refunded else ""),
+        )
+    return await query.edit_message_text("⚠️ Loại job không hợp lệ. Bot chưa gọi provider.")
 
 class TranslationProviderError(RuntimeError):
     def __init__(self, statuses: dict, errors: dict):
@@ -57489,6 +57870,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_image", cmd_tool_test_shopaikey_image))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_video", cmd_tool_test_shopaikey_video))
     tg_app.add_handler(CommandHandler("shopaikey_video_job", cmd_shopaikey_video_job))
+    tg_app.add_handler(CommandHandler("shopaikey_image", cmd_shopaikey_image_public))
+    tg_app.add_handler(CommandHandler("shopaikey_video", cmd_shopaikey_video_public))
+    tg_app.add_handler(CommandHandler("shopaikey_video_from_image", cmd_shopaikey_video_from_image_public))
     tg_app.add_handler(CommandHandler("tool_test_translate", cmd_tool_test_translate))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
     tg_app.add_handler(CommandHandler("tool_test_image_debug", cmd_tool_test_image_debug))
@@ -57949,6 +58333,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
