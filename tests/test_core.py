@@ -166,6 +166,12 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_IMAGE_COST_XU=50" in env_example
     assert "SHOPAIKEY_VIDEO_COST_XU=200" in env_example
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=true" in env_example
+    assert "SYSTEM_MAINTENANCE_MODE=false" in env_example
+    assert "PROVIDER_FREEZE_ENABLED=false" in env_example
+    assert "TOOL_FREEZE_IMAGE=false" in env_example
+    assert "SHOPAIKEY_AUTO_FREEZE_ENABLED=true" in env_example
+    assert "SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT=5" in env_example
+    assert "SHOPAIKEY_ERROR_FREEZE_THRESHOLD=5" in env_example
     assert "if not is_admin_user(update.effective_user.id)" in command_source
     assert "Trả lời đúng một câu tiếng Việt có chữ TEST_OK." in source
     assert "TOAN AAS image smoke test: simple turquoise AI automation logo" in source
@@ -185,6 +191,95 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "deduct_dynamic_credit(" not in command_source
     assert "apiKey=***" in source
     assert "FAIL_CONTENT_EMPTY" in source
+
+
+def test_provider_maintenance_error_classify_sanitize_and_freeze(monkeypatch):
+    assert bot.classify_provider_error(401, "", "invalid token") == "AUTH_FAILED"
+    assert bot.classify_provider_error(200, "", "no available channel for model") == "NO_CHANNEL"
+    assert bot.classify_provider_error(429, "", "rate limit") == "RATE_LIMITED"
+    assert bot.classify_provider_error(503, "", "provider down") == "PROVIDER_UNAVAILABLE"
+    assert bot.classify_provider_error(0, "", "TimedOut: timed out") == "TIMEOUT"
+    assert bot.classify_provider_error(200, "", "insufficient balance credit quota") == "CREDIT_LOW_OR_EMPTY"
+    assert bot.classify_provider_error(400, "", "invalid params") == "BAD_REQUEST"
+
+    sanitized = bot.sanitize_provider_error("sk-testsecret123456789 apiKey=secret Bearer tokenvalue https://example.com/private/path " + "x" * 500)
+    assert "sk-testsecret" not in sanitized
+    assert "secret" not in sanitized
+    assert "tokenvalue" not in sanitized
+    assert "https://example.com" not in sanitized
+    assert len(sanitized) <= 300
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "SYSTEM_MAINTENANCE_MODE", False)
+    monkeypatch.setattr(bot, "PROVIDER_FREEZE_ENABLED", False)
+    monkeypatch.setattr(bot, "TOOL_FREEZE_IMAGE", False)
+    monkeypatch.setattr(bot, "TOOL_FREEZE_VIDEO", False)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
+    try:
+        bot.init_db()
+        assert bot.shopaikey_public_generation_guard("image")[0] is True
+        bot.set_provider_freeze_state("shopaikey", True, "NO_CHANNEL", "no available channel sk-hidden", "test")
+        ok, message = bot.shopaikey_public_generation_guard("image")
+        assert ok is False
+        assert "API" not in message
+        assert bot.provider_freeze_row("shopaikey")["reason_code"] == "NO_CHANNEL"
+        bot.set_provider_freeze_state("shopaikey", False, "manual_unfreeze", "ok", "test")
+        assert bot.shopaikey_public_generation_guard("image")[0] is True
+        monkeypatch.setattr(bot, "TOOL_FREEZE_IMAGE", True)
+        assert bot.shopaikey_public_generation_guard("image")[0] is False
+        monkeypatch.setattr(bot, "TOOL_FREEZE_IMAGE", False)
+        monkeypatch.setattr(bot, "SYSTEM_MAINTENANCE_MODE", True)
+        assert bot.shopaikey_public_generation_guard("image")[0] is False
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_provider_auto_freeze_and_status_commands(monkeypatch):
+    source = bot_source_text()
+    assert "async def cmd_maintenance_status" in source
+    assert "async def cmd_provider_freeze" in source
+    assert "async def cmd_provider_unfreeze" in source
+    assert 'CommandHandler("maintenance_status", cmd_maintenance_status)' in source
+    assert 'CommandHandler("provider_freeze", cmd_provider_freeze)' in source
+    assert 'CommandHandler("provider_unfreeze", cmd_provider_unfreeze)' in source
+    assert "No Xu deducted" in source or "Không trừ Xu" in source
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "SHOPAIKEY_AUTO_FREEZE_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ERROR_FREEZE_THRESHOLD", 2)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES", 15)
+    monkeypatch.setattr(bot, "SHOPAIKEY_FREEZE_COOLDOWN_MINUTES", 1)
+    try:
+        bot.init_db()
+        bot.record_provider_error("shopaikey", "image", "NO_CHANNEL", "first no available channel")
+        assert int(bot.provider_freeze_row("shopaikey").get("is_frozen") or 0) == 0
+        bot.record_provider_error("shopaikey", "image", "NO_CHANNEL", "second no available channel")
+        row = bot.provider_freeze_row("shopaikey")
+        assert int(row.get("is_frozen") or 0) == 1
+        assert row["reason_code"] == "NO_CHANNEL"
+        assert bot.provider_error_count("shopaikey", 15) >= 2
+        bot.set_provider_freeze_state("shopaikey", True, "TEST_COOLDOWN", "cooldown", "test", cooldown_minutes=1)
+        conn = bot.db_connect()
+        try:
+            conn.execute("UPDATE provider_freeze_state SET unfreeze_after=? WHERE provider='shopaikey'", ("2000-01-01 00:00:00",))
+            conn.commit()
+        finally:
+            conn.close()
+        assert bot.maybe_auto_unfreeze_provider("shopaikey") is True
+        assert int(bot.provider_freeze_row("shopaikey").get("is_frozen") or 0) == 0
+        events = bot.recent_system_events(5)
+        assert any(event.get("event_type") == "provider_auto_unfreeze" for event in events)
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
 
 
 def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):

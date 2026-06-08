@@ -344,6 +344,24 @@ SHOPAIKEY_IMAGE_COST_XU = env_int("SHOPAIKEY_IMAGE_COST_XU", 50)
 SHOPAIKEY_VIDEO_COST_XU = env_int("SHOPAIKEY_VIDEO_COST_XU", 200)
 SHOPAIKEY_TREND_COST_XU = env_int("SHOPAIKEY_TREND_COST_XU", 10)
 SHOPAIKEY_REFUND_ON_PROVIDER_FAIL = env_flag("SHOPAIKEY_REFUND_ON_PROVIDER_FAIL", "true")
+SYSTEM_MAINTENANCE_MODE = env_flag("SYSTEM_MAINTENANCE_MODE", "false")
+SYSTEM_MAINTENANCE_MESSAGE = _env("SYSTEM_MAINTENANCE_MESSAGE", "⚙️ TOAN AAS đang bảo trì ngắn để nâng cấp hệ thống. Vui lòng quay lại sau ít phút.")
+PROVIDER_FREEZE_ENABLED = env_flag("PROVIDER_FREEZE_ENABLED", "false")
+PROVIDER_FREEZE_MESSAGE = _env("PROVIDER_FREEZE_MESSAGE", "⚙️ Nhà cung cấp AI đang bận hoặc tạm giới hạn. Vui lòng thử lại sau ít phút.")
+TOOL_FREEZE_IMAGE = env_flag("TOOL_FREEZE_IMAGE", "false")
+TOOL_FREEZE_VIDEO = env_flag("TOOL_FREEZE_VIDEO", "false")
+TOOL_FREEZE_TTS = env_flag("TOOL_FREEZE_TTS", "false")
+TOOL_FREEZE_CHAT = env_flag("TOOL_FREEZE_CHAT", "false")
+TOOL_FREEZE_TREND = env_flag("TOOL_FREEZE_TREND", "false")
+SHOPAIKEY_AUTO_FREEZE_ENABLED = env_flag("SHOPAIKEY_AUTO_FREEZE_ENABLED", "true")
+SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT = env_int("SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT", 5)
+SHOPAIKEY_LOW_CREDIT_WARN_PERCENT = env_int("SHOPAIKEY_LOW_CREDIT_WARN_PERCENT", 10)
+SHOPAIKEY_ERROR_FREEZE_THRESHOLD = env_int("SHOPAIKEY_ERROR_FREEZE_THRESHOLD", 5)
+SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES = env_int("SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES", 15)
+SHOPAIKEY_FREEZE_COOLDOWN_MINUTES = env_int("SHOPAIKEY_FREEZE_COOLDOWN_MINUTES", 30)
+USER_BUSY_MESSAGE = _env("USER_BUSY_MESSAGE", "⏳ Tác vụ của bạn đang được xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
+USER_PROVIDER_BUSY_MESSAGE = _env("USER_PROVIDER_BUSY_MESSAGE", "⚙️ Hệ thống AI đang bận. TOAN AAS đã ghi nhận, vui lòng thử lại sau ít phút.")
+USER_PROVIDER_MAINTENANCE_MESSAGE = _env("USER_PROVIDER_MAINTENANCE_MESSAGE", "🛠 Tính năng này đang được bảo trì ngắn để đảm bảo chất lượng. Vui lòng quay lại sau.")
 SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED = env_flag("SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED", "true")
 SHOPAIKEY_VIDEO_POLL_INTERVAL_SECONDS = env_int("SHOPAIKEY_VIDEO_POLL_INTERVAL_SECONDS", 25)
 SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS = env_int("SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS", 24)
@@ -1709,6 +1727,17 @@ def init_db():
         created_at DATETIME,
         processed_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS provider_freeze_state (
+        provider TEXT PRIMARY KEY,
+        is_frozen INTEGER DEFAULT 0,
+        reason_code TEXT,
+        reason_message TEXT,
+        frozen_at TEXT,
+        unfreeze_after TEXT,
+        error_count INTEGER DEFAULT 0,
+        last_error_at TEXT,
+        updated_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS system_settings (
         key TEXT PRIMARY KEY,
         value TEXT,
@@ -1805,6 +1834,19 @@ def init_db():
     ]:
         try:
             c.execute(f"ALTER TABLE shopaikey_jobs ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    for col, col_type in [
+        ("provider", "TEXT"),
+        ("tool", "TEXT"),
+        ("severity", "TEXT"),
+        ("code", "TEXT"),
+        ("message", "TEXT"),
+        ("count", "INTEGER DEFAULT 1"),
+        ("updated_at", "TEXT"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE system_events ADD COLUMN {col} {col_type}")
         except Exception:
             pass
     for col, defval in [("total_spent","0"), ("is_vip","0"), ("has_deposited","0"),
@@ -26932,6 +26974,7 @@ def save_shopaikey_usage_snapshot(usage: dict, updated_by=""):
     set_system_setting("shopaikey_usage_token_name", safe_usage["token_name"], "ShopAIKey usage token masked", updated_by)
     set_system_setting("shopaikey_usage_snapshot_json", json.dumps(safe_usage, ensure_ascii=False), "ShopAIKey usage sanitized snapshot", updated_by)
     set_system_setting("shopaikey_usage_last_at", now_text(), "ShopAIKey usage checked", updated_by)
+    evaluate_shopaikey_usage_freeze(safe_usage, updated_by)
 
 def shopaikey_last_usage_snapshot() -> dict:
     snapshot = {
@@ -27427,23 +27470,385 @@ def shopaikey_safe_prompt_preview(prompt: str) -> str:
 def shopaikey_prompt_hash(prompt: str) -> str:
     return hashlib.sha256(str(prompt or "").encode("utf-8", errors="ignore")).hexdigest()[:32]
 
+def parse_now_text(value: str) -> datetime | None:
+    try:
+        return datetime.strptime(str(value or "")[:19], "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+def datetime_text(value: datetime | None) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S") if value else ""
+
+def sanitize_provider_error(message) -> str:
+    safe = sanitize_log_text(str(message or ""))
+    safe = re.sub(r"sk-[A-Za-z0-9_\-]{8,}", "sk-***", safe)
+    safe = re.sub(r"apiKey=([^&\s]+)", "apiKey=***", safe, flags=re.IGNORECASE)
+    safe = re.sub(r"Bearer\s+[^\s\"']+", "Bearer ***", safe, flags=re.IGNORECASE)
+    safe = re.sub(r"https?://[^\s\"'<>)]+", "<url>", safe)
+    safe = re.sub(r"\s+", " ", safe).strip()
+    return safe[:300]
+
+def classify_provider_error(http=0, error_code: str = "", message: str = "") -> str:
+    try:
+        status = int(http or 0)
+    except Exception:
+        status = 0
+    value = f"{error_code or ''} {message or ''}".lower()
+    if status in {401, 403} or "fail_auth" in value or "invalid token" in value or "unauthorized" in value or "auth" in value:
+        return "AUTH_FAILED"
+    if any(marker in value for marker in ("fail_quota_or_balance", "insufficient balance", "balance", "credit", "quota", "no quota", "usage exhausted", "money exhausted")):
+        return "CREDIT_LOW_OR_EMPTY"
+    if any(marker in value for marker in ("fail_no_available_channel", "no available channel", "get_channel_failed", "model_not_found", "model not found", "no channel")):
+        return "NO_CHANNEL"
+    if status == 429 or "fail_rate_limit" in value or "rate limit" in value or "ratelimit" in value or "too many requests" in value:
+        return "RATE_LIMITED"
+    if "fail_timeout" in value or "timeout" in value or "timed out" in value:
+        return "TIMEOUT"
+    if status == 503:
+        return "PROVIDER_UNAVAILABLE"
+    if status == 400 or "fail_bad_request" in value or "bad request" in value or "invalid params" in value or "invalid parameter" in value:
+        return "BAD_REQUEST"
+    return "UNKNOWN_PROVIDER_ERROR"
+
+def user_friendly_error(error_class: str, tool: str = "") -> str:
+    error_class = str(error_class or "").upper()
+    if error_class == "CREDIT_LOW_OR_EMPTY":
+        return "⚙️ Tính năng này đang bảo trì ngắn để nạp thêm tài nguyên. Vui lòng thử lại sau."
+    if error_class == "NO_CHANNEL":
+        return "⚙️ Model AI đang bận. Vui lòng thử lại sau ít phút."
+    if error_class == "RATE_LIMITED":
+        return "⏳ Hệ thống đang nhận nhiều yêu cầu. Vui lòng chờ một chút rồi thử lại."
+    if error_class in {"PROVIDER_UNAVAILABLE", "TIMEOUT"}:
+        return "⚙️ Nhà cung cấp AI đang chậm hoặc tạm gián đoạn. Vui lòng thử lại sau."
+    if error_class == "BAD_REQUEST":
+        return "Yêu cầu chưa hợp lệ. Vui lòng thử lại với nội dung ngắn/rõ hơn."
+    return "⚙️ Hệ thống đang bận. Vui lòng thử lại sau ít phút."
+
+def record_system_event(event_type: str, provider: str = "", tool: str = "", severity: str = "info", code: str = "", message: str = "", count: int = 1):
+    safe_message = sanitize_provider_error(message)
+    now = now_text()
+    conn = db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS system_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT,
+            source TEXT,
+            payload_json TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at DATETIME,
+            processed_at DATETIME,
+            provider TEXT,
+            tool TEXT,
+            severity TEXT,
+            code TEXT,
+            message TEXT,
+            count INTEGER DEFAULT 1,
+            updated_at TEXT
+        )""")
+        for col, col_type in [
+            ("provider", "TEXT"),
+            ("tool", "TEXT"),
+            ("severity", "TEXT"),
+            ("code", "TEXT"),
+            ("message", "TEXT"),
+            ("count", "INTEGER DEFAULT 1"),
+            ("updated_at", "TEXT"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE system_events ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
+        conn.execute(
+            """INSERT INTO system_events
+            (event_type, source, payload_json, status, created_at, provider, tool, severity, code, message, count, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(event_type or "system_event")[:120],
+                str(provider or tool or "system")[:120],
+                json.dumps({"code": str(code or "")[:120], "message": safe_message}, ensure_ascii=False),
+                "recorded",
+                now,
+                str(provider or "")[:80],
+                str(tool or "")[:80],
+                str(severity or "info")[:40],
+                str(code or "")[:120],
+                safe_message,
+                int(count or 1),
+                now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def provider_freeze_row(provider: str) -> dict:
+    provider = str(provider or "").strip().lower()
+    if not provider:
+        return {}
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS provider_freeze_state (
+            provider TEXT PRIMARY KEY,
+            is_frozen INTEGER DEFAULT 0,
+            reason_code TEXT,
+            reason_message TEXT,
+            frozen_at TEXT,
+            unfreeze_after TEXT,
+            error_count INTEGER DEFAULT 0,
+            last_error_at TEXT,
+            updated_at TEXT
+        )""")
+        row = conn.execute("SELECT * FROM provider_freeze_state WHERE provider=?", (provider,)).fetchone()
+        return dict(row) if row else {
+            "provider": provider,
+            "is_frozen": 0,
+            "reason_code": "",
+            "reason_message": "",
+            "frozen_at": "",
+            "unfreeze_after": "",
+            "error_count": 0,
+            "last_error_at": "",
+            "updated_at": "",
+        }
+    finally:
+        conn.close()
+
+def set_provider_freeze_state(provider: str, is_frozen: bool, reason_code: str = "", reason_message: str = "", updated_by="", cooldown_minutes: int = 0, error_count: int | None = None):
+    provider = str(provider or "").strip().lower()
+    if not provider:
+        return
+    now = now_text()
+    unfreeze_after = ""
+    if is_frozen and int(cooldown_minutes or 0) > 0:
+        unfreeze_after = datetime_text(datetime.now() + timedelta(minutes=max(1, int(cooldown_minutes or 0))))
+    safe_reason = sanitize_provider_error(reason_message or reason_code)
+    current = provider_freeze_row(provider)
+    count_value = int(error_count if error_count is not None else (current.get("error_count") or 0))
+    conn = db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS provider_freeze_state (
+            provider TEXT PRIMARY KEY,
+            is_frozen INTEGER DEFAULT 0,
+            reason_code TEXT,
+            reason_message TEXT,
+            frozen_at TEXT,
+            unfreeze_after TEXT,
+            error_count INTEGER DEFAULT 0,
+            last_error_at TEXT,
+            updated_at TEXT
+        )""")
+        conn.execute(
+            """INSERT INTO provider_freeze_state
+            (provider, is_frozen, reason_code, reason_message, frozen_at, unfreeze_after, error_count, last_error_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(provider) DO UPDATE SET
+                is_frozen=excluded.is_frozen,
+                reason_code=excluded.reason_code,
+                reason_message=excluded.reason_message,
+                frozen_at=excluded.frozen_at,
+                unfreeze_after=excluded.unfreeze_after,
+                error_count=excluded.error_count,
+                last_error_at=excluded.last_error_at,
+                updated_at=excluded.updated_at""",
+            (
+                provider,
+                1 if is_frozen else 0,
+                str(reason_code or "")[:120],
+                safe_reason,
+                now if is_frozen else "",
+                unfreeze_after,
+                count_value,
+                current.get("last_error_at") or "",
+                now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    record_system_event(
+        "provider_freeze" if is_frozen else "provider_unfreeze",
+        provider=provider,
+        severity="warning" if is_frozen else "info",
+        code=reason_code,
+        message=safe_reason,
+        count=count_value,
+    )
+
+def provider_error_count(provider: str, window_minutes: int) -> int:
+    provider = str(provider or "").strip().lower()
+    cutoff = datetime_text(datetime.now() - timedelta(minutes=max(1, int(window_minutes or 15))))
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT COUNT(*) FROM system_events
+            WHERE event_type='provider_error' AND provider=? AND created_at>=?""",
+            (provider, cutoff),
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+    except Exception:
+        return 0
+    finally:
+        conn.close()
+
+def maybe_auto_unfreeze_provider(provider: str) -> bool:
+    row = provider_freeze_row(provider)
+    if not int(row.get("is_frozen") or 0):
+        return False
+    unfreeze_after = parse_now_text(row.get("unfreeze_after") or "")
+    if unfreeze_after and datetime.now() >= unfreeze_after:
+        set_provider_freeze_state(provider, False, "auto_unfreeze", "Auto unfreeze after cooldown", "system")
+        record_system_event("provider_auto_unfreeze", provider=provider, severity="info", code="auto_unfreeze", message="cooldown elapsed")
+        return True
+    return False
+
+def record_provider_error(provider: str, tool: str, error_class: str, message: str = "") -> dict:
+    provider = str(provider or "unknown").strip().lower()
+    tool = str(tool or "").strip().lower()
+    error_class = str(error_class or "UNKNOWN_PROVIDER_ERROR").upper()
+    safe_message = sanitize_provider_error(message or error_class)
+    record_system_event("provider_error", provider=provider, tool=tool, severity="warning", code=error_class, message=safe_message)
+    count = provider_error_count(provider, SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES if provider == "shopaikey" else 15)
+    row = provider_freeze_row(provider)
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO provider_freeze_state
+            (provider, is_frozen, reason_code, reason_message, frozen_at, unfreeze_after, error_count, last_error_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(provider) DO UPDATE SET
+                error_count=excluded.error_count,
+                last_error_at=excluded.last_error_at,
+                updated_at=excluded.updated_at""",
+            (
+                provider,
+                int(row.get("is_frozen") or 0),
+                row.get("reason_code") or "",
+                row.get("reason_message") or "",
+                row.get("frozen_at") or "",
+                row.get("unfreeze_after") or "",
+                count,
+                now_text(),
+                now_text(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    if provider == "shopaikey" and SHOPAIKEY_AUTO_FREEZE_ENABLED:
+        if error_class == "CREDIT_LOW_OR_EMPTY" or count >= max(1, int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 5)):
+            set_provider_freeze_state(
+                provider,
+                True,
+                error_class,
+                safe_message,
+                "auto_provider_error",
+                cooldown_minutes=max(1, int(SHOPAIKEY_FREEZE_COOLDOWN_MINUTES or 30)),
+                error_count=count,
+            )
+    return provider_freeze_row(provider)
+
+def evaluate_shopaikey_usage_freeze(usage: dict, updated_by="") -> str:
+    try:
+        remaining_percent = float(usage.get("remaining_percent") or 0)
+    except Exception:
+        return ""
+    if remaining_percent <= float(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 5) and SHOPAIKEY_AUTO_FREEZE_ENABLED:
+        set_provider_freeze_state(
+            "shopaikey",
+            True,
+            "CREDIT_LOW_OR_EMPTY",
+            f"remaining_percent={remaining_percent:.2f}",
+            updated_by or "usage_check",
+            cooldown_minutes=max(1, int(SHOPAIKEY_FREEZE_COOLDOWN_MINUTES or 30)),
+        )
+        return "freeze"
+    if remaining_percent <= float(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 10):
+        record_system_event(
+            "provider_low_credit_warning",
+            provider="shopaikey",
+            severity="warning",
+            code="LOW_CREDIT_WARN",
+            message=f"remaining_percent={remaining_percent:.2f}",
+        )
+        return "warn"
+    return ""
+
+def is_system_maintenance() -> tuple[bool, str]:
+    if SYSTEM_MAINTENANCE_MODE:
+        return True, SYSTEM_MAINTENANCE_MESSAGE
+    if flag_on("maintenance_mode"):
+        return True, SYSTEM_MAINTENANCE_MESSAGE
+    return False, ""
+
+def is_provider_frozen(provider: str) -> tuple[bool, dict, str]:
+    provider = str(provider or "").strip().lower()
+    if PROVIDER_FREEZE_ENABLED:
+        return True, {"provider": provider, "is_frozen": 1, "reason_code": "ENV_PROVIDER_FREEZE", "reason_message": PROVIDER_FREEZE_MESSAGE}, PROVIDER_FREEZE_MESSAGE
+    maybe_auto_unfreeze_provider(provider)
+    row = provider_freeze_row(provider)
+    if int(row.get("is_frozen") or 0):
+        return True, row, PROVIDER_FREEZE_MESSAGE
+    return False, row, ""
+
+def tool_env_freeze(tool: str) -> bool:
+    tool = str(tool or "").strip().lower()
+    return {
+        "image": TOOL_FREEZE_IMAGE,
+        "video": TOOL_FREEZE_VIDEO,
+        "tts": TOOL_FREEZE_TTS,
+        "chat": TOOL_FREEZE_CHAT,
+        "trend": TOOL_FREEZE_TREND,
+    }.get(tool, False)
+
+def is_tool_frozen(tool: str, provider: str = "shopaikey") -> dict:
+    tool = str(tool or "").strip().lower()
+    system_on, system_msg = is_system_maintenance()
+    if system_on:
+        return {"frozen": True, "reason": "SYSTEM_MAINTENANCE", "message": system_msg, "provider_state": {}}
+    if tool_env_freeze(tool):
+        return {"frozen": True, "reason": f"TOOL_FREEZE_{tool.upper()}", "message": USER_PROVIDER_MAINTENANCE_MESSAGE, "provider_state": {}}
+    state = current_system_mode()
+    if state.get("tool_freeze") or state.get("provider_freeze"):
+        return {"frozen": True, "reason": "SYSTEM_FLAG_FREEZE", "message": USER_PROVIDER_MAINTENANCE_MESSAGE, "provider_state": {}}
+    frozen, row, message = is_provider_frozen(provider)
+    if frozen:
+        return {"frozen": True, "reason": row.get("reason_code") or "PROVIDER_FREEZE", "message": message or USER_PROVIDER_BUSY_MESSAGE, "provider_state": row}
+    return {"frozen": False, "reason": "", "message": "", "provider_state": row}
+
+def recent_system_events(limit: int = 5) -> list[dict]:
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """SELECT event_type, provider, tool, severity, code, message, count, created_at, updated_at
+            FROM system_events
+            ORDER BY id DESC
+            LIMIT ?""",
+            (max(1, min(20, int(limit or 5))),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+def shopaikey_admin_freeze_warning_text() -> str:
+    frozen, row, _message = is_provider_frozen("shopaikey")
+    if not frozen:
+        return "OFF"
+    reason = row.get("reason_code") or "provider_freeze"
+    return f"ON ({reason}) — admin smoke test only, không mở public."
+
 def shopaikey_generation_unavailable_message(status: str = "", detail: str = "") -> str:
-    status_upper = str(status or "").upper()
-    detail_lower = str(detail or "").lower()
-    if status_upper in {"FAIL_NO_AVAILABLE_CHANNEL", "FAIL_PROVIDER_ERROR"} or "no available channel" in detail_lower:
-        return "Provider/model tạm không có kênh khả dụng. Vui lòng thử model khác hoặc thử lại sau."
-    if status_upper in {"FAIL_AUTH", "MISSING"}:
-        return "API key không hợp lệ hoặc đã hết hiệu lực."
-    if status_upper in {"FAIL_RATE_LIMIT"} or "rate" in detail_lower:
-        return "Nhà cung cấp đang giới hạn lượt gọi. Vui lòng thử lại sau."
-    if status_upper in {"FAIL_QUOTA_OR_BALANCE"} or "quota" in detail_lower or "balance" in detail_lower:
-        return "ShopAIKey có thể đang hết credit/quota. Vui lòng kiểm tra /shopaikey_usage."
-    if status_upper in {"FAIL_TIMEOUT", "TIMEOUT"} or "timeout" in detail_lower:
-        return "Nhà cung cấp xử lý quá lâu hoặc kết nối tạm gián đoạn. Vui lòng thử lại sau."
-    return "⚙️ Hệ thống tạo ảnh/video đang bận hoặc bảo trì ngắn. TOAN AAS đã ghi nhận tác vụ, vui lòng thử lại sau ít phút."
+    error_class = classify_provider_error(0, status, detail)
+    return user_friendly_error(error_class, "shopaikey")
 
 def shopaikey_public_generation_guard(job_type: str) -> tuple[bool, str]:
     job = str(job_type or "").lower()
+    freeze = is_tool_frozen(job, "shopaikey")
+    if freeze.get("frozen"):
+        return False, freeze.get("message") or USER_PROVIDER_BUSY_MESSAGE
     if job == "image" and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
         return False, "Chức năng đang thử nghiệm nội bộ, chưa mở công khai."
     if job == "video" and not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
@@ -27797,6 +28202,12 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
             )
             return
         if status in {"FAILED", "FAILURE"} or str(result.get("error_class") or "").upper().startswith("FAIL_"):
+            record_provider_error(
+                "shopaikey",
+                "video",
+                classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("fail_reason") or result.get("detail") or "video_provider_failed"),
+                result.get("fail_reason") or result.get("detail") or "video_provider_failed",
+            )
             refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, result.get("fail_reason") or result.get("detail") or "video_provider_failed")
             try:
                 await bot_client.send_message(
@@ -27811,6 +28222,7 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
                 pass
             update_shopaikey_job(job_id=job_id, task_id=task_id, status="FAILED", finished_at=now_text())
             return
+    record_provider_error("shopaikey", "video", "TIMEOUT", "video_poll_timeout")
     refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, "video_poll_timeout")
     update_shopaikey_job(job_id=job_id, task_id=task_id, status="TIMEOUT", poll_count=max_attempts, finished_at=now_text())
     try:
@@ -28626,6 +29038,7 @@ EMERGENCY_ALLOWED_ADMIN_COMMANDS = {
     "export_accounting_month", "export_accounting_year", "billing_report", "xu_ledger_export",
     "admin_doc_ip", "admin_doc_risk", "admin_doc_checklist", "admin_doc_b2c",
     "admin_doc_b2b", "admin_doc_nda", "admin_doc_tax", "admin_doc_converter", "admin_doc_sources",
+    "maintenance_status", "provider_freeze", "provider_unfreeze",
 }
 PAYMENT_FREEZE_COMMANDS = {
     "duyet", "tuchoi", "checkpayos", "payos_status", "payos_verify", "payos_debug_create", "mark_payos_test",
@@ -31190,6 +31603,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deepgram_status = "configured — ready_for_smoke_test" if providers["audio"]["deepgram"] else "missing"
     shopaikey_usage = shopaikey_last_usage_snapshot()
     shopaikey_video_reason = shopaikey_video_reason_text()
+    shopaikey_frozen, shopaikey_freeze, _freeze_message = is_provider_frozen("shopaikey")
+    maintenance_on, _maintenance_message = is_system_maintenance()
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
         cobalt_note = "OK to smoke test"
@@ -31202,7 +31617,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "🔐 <b>TOAN AAS Provider Status</b>",
         "configured = có ENV/key. tested = đã smoke test bằng /tool_test_*; configured không đồng nghĩa provider hoạt động.",
-        f"System mode: <code>{html.escape(state.get('label') or 'NORMAL')}</code> | payment_freeze=<code>{'on' if state.get('payment_freeze') else 'off'}</code> | tool_freeze=<code>{'on' if state.get('tool_freeze') else 'off'}</code> | provider_freeze=<code>{'on' if state.get('provider_freeze') else 'off'}</code>",
+        f"System mode: <code>{'MAINTENANCE' if maintenance_on else html.escape(state.get('label') or 'NORMAL')}</code> | payment_freeze=<code>{'on' if state.get('payment_freeze') else 'off'}</code> | tool_freeze=<code>{'on' if state.get('tool_freeze') else 'off'}</code> | provider_freeze=<code>{'on' if state.get('provider_freeze') or PROVIDER_FREEZE_ENABLED else 'off'}</code>",
         "",
         "<b>Core</b>",
         f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
@@ -31232,6 +31647,12 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code>",
         f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
+        f"• Freeze: <code>{'ON' if shopaikey_frozen else 'OFF'}</code>",
+        f"• Freeze reason: <code>{html.escape(str(shopaikey_freeze.get('reason_code') or '-'))}</code>",
+        f"• Unfreeze after: <code>{html.escape(str(shopaikey_freeze.get('unfreeze_after') or '-'))}</code>",
+        f"• Auto freeze: <code>{'enabled' if SHOPAIKEY_AUTO_FREEZE_ENABLED else 'disabled'}</code>",
+        f"• Low credit threshold: <code>warn {int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / freeze {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
+        f"• Error threshold: <code>{int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)} errors / {int(SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES or 0)} min</code>",
         f"• Usage: <code>{html.escape(shopaikey_usage_summary_text(shopaikey_usage))}</code>",
         f"• Group: <code>{html.escape(str(shopaikey_usage.get('group_name') or '-'))}</code>",
         f"• Chat tested: <code>{html.escape(shopaikey_chat_status_text())}</code>",
@@ -31905,6 +32326,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     video_result = shopaikey_video_status_snapshot()
     video_reason = shopaikey_video_reason_text(video_result)
     usage = shopaikey_last_usage_snapshot()
+    provider_frozen, provider_freeze, _freeze_message = is_provider_frozen("shopaikey")
+    maintenance_on, _maintenance_message = is_system_maintenance()
     lines = [
         "🧪 <b>ShopAIKey Experimental Provider</b>",
         "",
@@ -31919,6 +32342,14 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code>",
         f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
+        f"• Maintenance mode: <code>{'ON' if maintenance_on else 'OFF'}</code>",
+        f"• Provider freeze: <code>{'ON' if provider_frozen else 'OFF'}</code>",
+        f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason_code') or '-'))}</code>",
+        f"• Freeze message: <code>{html.escape(str(provider_freeze.get('reason_message') or '-'))}</code>",
+        f"• Unfreeze after: <code>{html.escape(str(provider_freeze.get('unfreeze_after') or '-'))}</code>",
+        f"• Recent provider errors: <code>{int(provider_freeze.get('error_count') or 0)}</code>",
+        f"• Low credit warn/freeze: <code>{int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
+        f"• Error threshold: <code>{int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)} / {int(SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES or 0)} min</code>",
         f"• Chat test: <code>{html.escape(shopaikey_chat_status_text())}</code>",
         f"• TTS test: <code>{html.escape(shopaikey_tts_status_text())}</code>",
         f"• Image test: <code>{html.escape(shopaikey_image_status_text())}</code>",
@@ -31944,6 +32375,105 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         "ShopAIKey không thay OpenRouter/OpenAI/Gemini và không mở public.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_maintenance_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    state = current_system_mode()
+    maintenance_on, _maintenance_message = is_system_maintenance()
+    shopaikey_frozen, shopaikey_freeze, _freeze_message = is_provider_frozen("shopaikey")
+    usage = shopaikey_last_usage_snapshot()
+    events = recent_system_events(5)
+    lines = [
+        "🛠 <b>TOAN AAS Maintenance / Provider Freeze</b>",
+        "",
+        f"• System maintenance ENV/flag: <code>{'ON' if maintenance_on else 'OFF'}</code>",
+        f"• Existing maintenance flag: <code>{'ON' if state.get('maintenance_mode') else 'OFF'}</code>",
+        f"• Payment freeze: <code>{'ON' if state.get('payment_freeze') else 'OFF'}</code>",
+        f"• Tool freeze flag: <code>{'ON' if state.get('tool_freeze') else 'OFF'}</code>",
+        f"• Provider freeze flag: <code>{'ON' if state.get('provider_freeze') or PROVIDER_FREEZE_ENABLED else 'OFF'}</code>",
+        "",
+        "<b>Tool ENV Freeze</b>",
+        f"• image: <code>{'ON' if TOOL_FREEZE_IMAGE else 'OFF'}</code>",
+        f"• video: <code>{'ON' if TOOL_FREEZE_VIDEO else 'OFF'}</code>",
+        f"• tts: <code>{'ON' if TOOL_FREEZE_TTS else 'OFF'}</code>",
+        f"• chat: <code>{'ON' if TOOL_FREEZE_CHAT else 'OFF'}</code>",
+        f"• trend: <code>{'ON' if TOOL_FREEZE_TREND else 'OFF'}</code>",
+        "",
+        "<b>ShopAIKey</b>",
+        f"• Freeze: <code>{'ON' if shopaikey_frozen else 'OFF'}</code>",
+        f"• Reason: <code>{html.escape(str(shopaikey_freeze.get('reason_code') or '-'))}</code>",
+        f"• Message: <code>{html.escape(str(shopaikey_freeze.get('reason_message') or '-'))}</code>",
+        f"• Error count: <code>{int(shopaikey_freeze.get('error_count') or 0)}</code>",
+        f"• Last error: <code>{html.escape(str(shopaikey_freeze.get('last_error_at') or '-'))}</code>",
+        f"• Frozen at: <code>{html.escape(str(shopaikey_freeze.get('frozen_at') or '-'))}</code>",
+        f"• Unfreeze after: <code>{html.escape(str(shopaikey_freeze.get('unfreeze_after') or '-'))}</code>",
+        f"• Auto freeze: <code>{'enabled' if SHOPAIKEY_AUTO_FREEZE_ENABLED else 'disabled'}</code>",
+        f"• Thresholds: <code>warn {int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / freeze {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}% / errors {int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)}</code>",
+        f"• Usage last known: <code>{html.escape(shopaikey_usage_summary_text(usage))}</code>",
+        "",
+        "<b>Recent events</b>",
+    ]
+    if not events:
+        lines.append("• <code>none</code>")
+    else:
+        for event in events:
+            lines.append(
+                "• "
+                f"<code>{html.escape(str(event.get('created_at') or '-'))}</code> "
+                f"<code>{html.escape(str(event.get('event_type') or '-'))}</code> "
+                f"<code>{html.escape(str(event.get('provider') or '-'))}</code>/"
+                f"<code>{html.escape(str(event.get('tool') or '-'))}</code> "
+                f"<code>{html.escape(str(event.get('code') or '-'))}</code> "
+                f"{html.escape(str(event.get('message') or '-')[:120])}"
+            )
+    lines.extend([
+        "",
+        "Commands: <code>/provider_freeze shopaikey &lt;reason&gt;</code> | <code>/provider_unfreeze shopaikey</code>",
+        "Không hiển thị API key/token/raw response.",
+    ])
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_provider_freeze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /provider_freeze shopaikey <reason>")
+    provider = str(context.args[0] or "").strip().lower()
+    if not re.match(r"^[a-z0-9_:-]{2,80}$", provider):
+        return await update.message.reply_text("⚠️ Provider không hợp lệ.")
+    reason = " ".join(context.args[1:]).strip() or "manual_freeze"
+    set_provider_freeze_state(
+        provider,
+        True,
+        reason_code=reason[:120],
+        reason_message=reason,
+        updated_by=update.effective_user.id,
+        cooldown_minutes=0,
+    )
+    await update.message.reply_text(
+        "✅ Đã freeze provider.\n"
+        f"• Provider: <code>{html.escape(provider)}</code>\n"
+        f"• Reason: <code>{html.escape(sanitize_provider_error(reason))}</code>\n\n"
+        "Public tool sẽ không gọi API và không trừ Xu. Admin smoke test vẫn có thể chạy để kiểm tra.",
+        parse_mode="HTML",
+    )
+
+async def cmd_provider_unfreeze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /provider_unfreeze shopaikey")
+    provider = str(context.args[0] or "").strip().lower()
+    if not re.match(r"^[a-z0-9_:-]{2,80}$", provider):
+        return await update.message.reply_text("⚠️ Provider không hợp lệ.")
+    set_provider_freeze_state(provider, False, reason_code="manual_unfreeze", reason_message="manual unfreeze", updated_by=update.effective_user.id)
+    await update.message.reply_text(
+        "✅ Đã unfreeze provider.\n"
+        f"• Provider: <code>{html.escape(provider)}</code>\n\n"
+        "Public tool vẫn phụ thuộc ENV public ON/OFF, không tự mở image/video.",
+        parse_mode="HTML",
+    )
 
 async def cmd_shopaikey_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -31980,6 +32510,12 @@ async def cmd_shopaikey_usage(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Không hiển thị API key hoặc usage URL đầy đủ.",
             parse_mode="HTML",
         )
+    record_provider_error(
+        "shopaikey",
+        "usage",
+        classify_provider_error(result.get("http_status") or 0, result.get("error_class") or result.get("status") or "", result.get("detail") or detail),
+        result.get("detail") or detail,
+    )
     await update.message.reply_text(
         "📊 <b>ShopAIKey Usage</b>\n\n"
         f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
@@ -32032,9 +32568,17 @@ async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_
     save_tool_test_result("shopaikey_chat", result.get("status") or "FAIL", detail, uid)
     save_shopaikey_chat_snapshot(result, detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    if result.get("status") != "PASS":
+        record_provider_error(
+            "shopaikey",
+            "chat",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or result.get("status") or "", detail),
+            detail,
+        )
     await update_waiting_message(waiting_message, "✅ ShopAIKey text smoke test đã xử lý xong. Không trừ Xu.")
     await update.message.reply_text(
         "🧪 <b>ShopAIKey Smoke Test</b>\n\n"
+        f"• Provider freeze: <code>{html.escape(shopaikey_admin_freeze_warning_text())}</code>\n"
         f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
         f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
         f"• Model used: <code>{html.escape(str(result.get('model') or '-'))}</code>\n"
@@ -32095,9 +32639,17 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
     save_tool_test_result("shopaikey_tts", status, final_detail, uid)
     save_shopaikey_component_snapshot("tts", tts_snapshot, final_detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey_tts", status, int(http_status or 0), final_detail)
+    if status != "PASS":
+        record_provider_error(
+            "shopaikey",
+            "tts",
+            classify_provider_error(http_status or 0, status, final_detail),
+            final_detail,
+        )
     await update_waiting_message(waiting_message, "✅ ShopAIKey TTS smoke test đã xử lý xong. Không trừ Xu.")
     await update.message.reply_text(
         "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
+        f"• Provider freeze: <code>{html.escape(shopaikey_admin_freeze_warning_text())}</code>\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
         f"• HTTP: <code>{html.escape(str(http_status or 0))}</code>\n"
         f"• Model: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code>\n"
@@ -32189,6 +32741,13 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
     save_tool_test_result("shopaikey_image", status, detail, uid)
     save_shopaikey_component_snapshot("image", result, detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey_image", status, int(result.get("http_status") or 0), detail)
+    if status != "PASS":
+        record_provider_error(
+            "shopaikey",
+            "image",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("detail") or detail),
+            result.get("detail") or detail,
+        )
     update_shopaikey_job(
         job_id=job_id,
         status="SUCCESS" if status == "PASS" else "FAILED",
@@ -32204,6 +32763,7 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
     await update_waiting_message(waiting_message, "✅ ShopAIKey image smoke test đã xử lý xong. Không trừ Xu.")
     await update.message.reply_text(
         "🖼 <b>ShopAIKey Image Smoke Test</b>\n\n"
+        f"• Provider freeze: <code>{html.escape(shopaikey_admin_freeze_warning_text())}</code>\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
         f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
         f"• Model: <code>{html.escape(str(result.get('model') or SHOPAIKEY_IMAGE_MODEL or '-'))}</code>\n"
@@ -32280,6 +32840,13 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
     save_tool_test_result("shopaikey_video", status, detail, uid)
     save_shopaikey_component_snapshot("video", result, detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey_video", status, int(result.get("http_status") or 0), detail)
+    if status != "PASS_SUBMITTED":
+        record_provider_error(
+            "shopaikey",
+            "video",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("message") or result.get("detail") or detail),
+            result.get("message") or result.get("detail") or detail,
+        )
     task_id = str(result.get("task_id") or "")
     selected_model = str(result.get("selected_model") or "") if task_id else ""
     db_status = "IN_PROGRESS" if status == "PASS_SUBMITTED" and task_id else "FAILED"
@@ -32300,6 +32867,7 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
         asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, update.effective_chat.id, uid, task_id))
     await update.message.reply_text(
         "🎞 <b>ShopAIKey Video Smoke Test</b>\n\n"
+        f"• Provider freeze: <code>{html.escape(shopaikey_admin_freeze_warning_text())}</code>\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
         f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
         f"• Selected model: <code>{html.escape(selected_model or '-')}</code>\n"
@@ -32375,6 +32943,13 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
     save_tool_test_result("shopaikey_video", status, detail, uid)
     save_shopaikey_component_snapshot("video", snapshot_payload, detail, uid)
     record_api_debug("shopaikey", "shopaikey_video_job", status, int(result.get("http_status") or 0), detail)
+    if shopaikey_db_video_status(status) in {"FAILED", "TIMEOUT"}:
+        record_provider_error(
+            "shopaikey",
+            "video",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("fail_reason") or result.get("detail") or detail),
+            result.get("fail_reason") or result.get("detail") or detail,
+        )
     update_shopaikey_job(
         job_id=job_id,
         task_id=task_id,
@@ -32574,6 +33149,12 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 )
                 output_sent = True
         if status != "PASS":
+            record_provider_error(
+                "shopaikey",
+                "image",
+                classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("detail") or status),
+                result.get("detail") or status,
+            )
             refunded = refund_shopaikey_job_if_needed(uid, job_id, "", result.get("detail") or status)
             update_shopaikey_job(job_id=job_id, status="FAILED", error_class=result.get("error_class") or status, provider_error_code=result.get("provider_error_code") or "", provider_message=result.get("detail") or "", attempts=1, finished_at=now_text())
             return await context.bot.send_message(
@@ -32604,6 +33185,12 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
                 asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, query.message.chat_id, uid, task_id))
             return
+        record_provider_error(
+            "shopaikey",
+            "video",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("message") or result.get("detail") or status),
+            result.get("message") or result.get("detail") or status,
+        )
         refunded = refund_shopaikey_job_if_needed(uid, job_id, "", result.get("message") or result.get("detail") or status)
         update_shopaikey_job(job_id=job_id, status="FAILED", error_class=result.get("error_class") or status, provider_error_code=result.get("provider_error_code") or "", provider_message=result.get("message") or result.get("detail") or "", attempts=len(attempts), finished_at=now_text())
         return await context.bot.send_message(
@@ -57858,6 +58445,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("provider_matrix", cmd_provider_matrix))
     tg_app.add_handler(CommandHandler("shopaikey_status", cmd_shopaikey_status))
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
+    tg_app.add_handler(CommandHandler("maintenance_status", cmd_maintenance_status))
+    tg_app.add_handler(CommandHandler("provider_freeze", cmd_provider_freeze))
+    tg_app.add_handler(CommandHandler("provider_unfreeze", cmd_provider_unfreeze))
     tg_app.add_handler(CommandHandler("tool_catalog", cmd_tool_catalog))
     tg_app.add_handler(CommandHandler("admin_api_roadmap", cmd_admin_api_roadmap))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))
