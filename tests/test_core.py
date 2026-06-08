@@ -50,6 +50,79 @@ def test_health_status_and_runtime_endpoints(monkeypatch):
     assert runtime.json()["service"].startswith("TOAN AAS")
 
 
+def test_data_persistence_guard_backup_and_status(monkeypatch, tmp_path):
+    source = bot_source_text()
+    init_source = source_between(source, "def init_db():", "def now_text():")
+    assert "DROP TABLE" not in init_source.upper()
+    assert "DELETE FROM USERS" not in init_source.upper()
+    assert "UPDATE USERS SET CREDITS=0" not in init_source.upper()
+    assert "ensure_startup_sqlite_backup_once()" in init_source
+    assert 'CommandHandler("data_status", cmd_data_status)' in source
+    data_status_source = source_between(source, "async def cmd_data_status", "async def cmd_legal_export")
+    assert "is_admin_user" in data_status_source
+    assert "DATABASE_URL" in data_status_source
+
+    db_path = tmp_path / "existing.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """CREATE TABLE users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT,
+                credits INTEGER DEFAULT 0,
+                is_vip INTEGER DEFAULT 0,
+                join_date TEXT,
+                total_spent INTEGER DEFAULT 0
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
+            ("existing-user", "Existing", 100, 0, "2026-01-01 00:00:00", 0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    backup_dir = tmp_path / "backups"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(bot, "DATA_PERSISTENCE_MODE", "sqlite")
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_ENABLED", True)
+    monkeypatch.setattr(bot, "DB_MIGRATION_DRY_RUN", False)
+    monkeypatch.setattr(bot, "DB_ALLOW_DESTRUCTIVE_MIGRATION", False)
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+    backups = list(backup_dir.glob("toandaas_system_*_before_migration.db"))
+    assert backups
+    payload = bot.data_persistence_status_payload(include_counts=True)
+    assert payload["db_exists"] is True
+    assert payload["users_count"] >= 1
+    assert payload["backup_enabled"] is True
+    assert payload["destructive_migration_allowed"] is False
+
+    blocked = False
+    try:
+        bot.assert_safe_migration_sql("DROP TABLE users")
+    except RuntimeError:
+        blocked = True
+    assert blocked is True
+
+    assert "secret" not in bot.masked_database_url("postgresql://user:secret@db.example.com/toanaas")
+
+
+def test_data_persistence_warns_missing_railway_db(monkeypatch, tmp_path):
+    missing_db = tmp_path / "missing.db"
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.setattr(bot, "DB_FILE", str(missing_db))
+    monkeypatch.setattr(bot, "DATA_PERSISTENCE_MODE", "sqlite")
+    monkeypatch.setattr(bot, "DATABASE_URL", "")
+    monkeypatch.setattr(bot, "DATA_PERSISTENCE_WARNINGS", [])
+    payload = bot.data_persistence_status_payload(include_counts=False)
+    assert payload["db_exists"] is False
+    assert payload["data_loss_risk"] is True
+    assert any(item["code"] == "DATA_LOSS_RISK_DETECTED" for item in payload["warnings"])
+
+
 def test_customer_guide_download_routes_are_word_only():
     client = TestClient(bot.fastapi_app)
     docx = client.get("/download/huong-dan-toan-aas.docx")
@@ -1008,6 +1081,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "pending": "cmd_pending",
         "sales_ready": "cmd_sales_ready",
         "backup_db": "cmd_backup_db",
+        "data_status": "cmd_data_status",
         "providers": "cmd_providers",
         "film": "cmd_film",
         "growth_ai": "cmd_growth_ai",

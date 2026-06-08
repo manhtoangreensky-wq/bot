@@ -706,8 +706,20 @@ MANUAL_BANK_ACCOUNT   = _env("MANUAL_BANK_ACCOUNT", "8899397968")
 MANUAL_BANK_OWNER     = _env("MANUAL_BANK_OWNER", "NGUYEN MANH TOAN")
 
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
-DB_FILE           = _env("DB_FILE", "toandaas_system.db")
+DATA_PERSISTENCE_MODE = (_env("DATA_PERSISTENCE_MODE", "sqlite") or "sqlite").strip().lower()
+DATABASE_URL      = _env("DATABASE_URL", "")
+DB_PATH           = _env("DB_PATH", _env("DB_FILE", "toandaas_system.db"))
+DB_FILE           = _env("DB_FILE", DB_PATH or "toandaas_system.db")
+REQUIRE_PERSISTENT_DB = env_flag("REQUIRE_PERSISTENT_DB", "false")
+DB_STARTUP_BACKUP_ENABLED = env_flag("DB_STARTUP_BACKUP_ENABLED", "true")
+DB_MIGRATION_DRY_RUN = env_flag("DB_MIGRATION_DRY_RUN", "false")
+DB_ALLOW_DESTRUCTIVE_MIGRATION = env_flag("DB_ALLOW_DESTRUCTIVE_MIGRATION", "false")
+DB_BACKUP_DIR = _env("DB_BACKUP_DIR", "backups")
+DB_STARTUP_BACKUP_RETENTION = max(1, env_int("DB_STARTUP_BACKUP_RETENTION", 20))
 BACKUP_MAX_BYTES  = 45 * 1024 * 1024
+DATA_PERSISTENCE_WARNINGS: list[dict] = []
+DB_STARTUP_BACKUP_RESULT: dict = {"status": "not_run", "path": "", "created_at": "", "reason": ""}
+DB_STARTUP_BACKUP_PATHS: set[str] = set()
 TRIAL_CREDITS     = 200
 TRIAL_BONUS_ENABLED = env_flag("TRIAL_BONUS_ENABLED", "true")
 TRIAL_BONUS_AMOUNT = env_int("TRIAL_BONUS_AMOUNT", TRIAL_CREDITS)
@@ -956,6 +968,235 @@ CHAT_NORMAL_DAILY_LIMIT = FREE_CHAT_DAILY
 # GROQ_KEY        = _env("GROQ_KEY")         # Groq Llama-3 — siêu nhanh, có free tier
 # COHERE_KEY      = _env("COHERE_KEY")       # Cohere Command R+
 
+DESTRUCTIVE_SQL_MARKERS = (
+    "DROP TABLE",
+    "DROP DATABASE",
+    "TRUNCATE",
+    "DELETE FROM USERS",
+    "DELETE FROM PAYOS_ORDERS",
+    "DELETE FROM CREDIT_EVENTS",
+    "DELETE FROM TRIAL_GRANTS",
+    "DELETE FROM TRIAL_BONUS_CLAIMS",
+    "DELETE FROM SHOPAIKEY_JOBS",
+    "UPDATE USERS SET CREDITS=0",
+    "UPDATE USERS SET CREDITS = 0",
+)
+
+def add_data_persistence_warning(code: str, message: str):
+    code_clean = str(code or "DATA_PERSISTENCE_WARNING").strip()[:80]
+    message_clean = str(message or "").strip()[:500]
+    if not code_clean:
+        code_clean = "DATA_PERSISTENCE_WARNING"
+    if any(item.get("code") == code_clean for item in DATA_PERSISTENCE_WARNINGS):
+        return
+    DATA_PERSISTENCE_WARNINGS.append({
+        "code": code_clean,
+        "message": message_clean,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+def masked_db_path(path: str = "") -> str:
+    value = str(path or DB_FILE or "").strip()
+    if not value:
+        return "missing"
+    base = os.path.basename(value) or value
+    if value == base:
+        return base
+    drive, _tail = os.path.splitdrive(value)
+    prefix = drive or ("/" if value.startswith("/") else "")
+    return f"{prefix}...{os.sep}{base}" if prefix else f"...{os.sep}{base}"
+
+def masked_database_url(url: str = "") -> str:
+    value = str(url or DATABASE_URL or "").strip()
+    if not value:
+        return "missing"
+    try:
+        parsed = urlparse(value)
+        if not parsed.scheme:
+            return "configured"
+        host = parsed.hostname or "host"
+        port = f":{parsed.port}" if parsed.port else ""
+        return f"{parsed.scheme}://***@{host}{port}{parsed.path or ''}"
+    except Exception:
+        return "configured"
+
+def sqlite_db_abs_path() -> str:
+    db_path = str(DB_FILE or "").strip()
+    return os.path.abspath(db_path) if db_path else ""
+
+def sqlite_db_exists() -> bool:
+    db_path = str(DB_FILE or "").strip()
+    return bool(db_path and os.path.exists(db_path))
+
+def sqlite_db_size_bytes() -> int:
+    try:
+        return os.path.getsize(str(DB_FILE)) if sqlite_db_exists() else 0
+    except Exception:
+        return 0
+
+def sqlite_volume_status() -> dict:
+    db_path = sqlite_db_abs_path()
+    volume_mount = _env("RAILWAY_VOLUME_MOUNT_PATH", "")
+    candidates = [volume_mount, "/data", "/mnt/data", "/app/data"]
+    normalized_db = db_path.replace("\\", "/")
+    detected = False
+    matched = ""
+    for candidate in candidates:
+        candidate_clean = str(candidate or "").strip()
+        if not candidate_clean:
+            continue
+        normalized_candidate = os.path.abspath(candidate_clean).replace("\\", "/")
+        if normalized_db.startswith(normalized_candidate.rstrip("/") + "/") or normalized_db == normalized_candidate:
+            detected = True
+            matched = candidate_clean
+            break
+    return {
+        "detected": detected,
+        "mount": masked_db_path(matched) if matched else "unknown",
+        "db_under_volume": detected,
+    }
+
+def data_persistence_runtime_is_risky() -> bool:
+    if DATA_PERSISTENCE_MODE != "sqlite":
+        return not bool(DATABASE_URL)
+    if is_railway_runtime() and not sqlite_volume_status().get("detected"):
+        return True
+    if is_railway_runtime() and (not sqlite_db_exists() or sqlite_db_size_bytes() <= 0):
+        return True
+    return any(item.get("code") == "DATA_LOSS_RISK_DETECTED" for item in DATA_PERSISTENCE_WARNINGS)
+
+def assert_safe_migration_sql(sql: str):
+    sql_upper = re.sub(r"\s+", " ", str(sql or "")).upper().strip()
+    if DB_ALLOW_DESTRUCTIVE_MIGRATION:
+        return True
+    for marker in DESTRUCTIVE_SQL_MARKERS:
+        if marker in sql_upper:
+            raise RuntimeError(f"Blocked destructive migration while DB_ALLOW_DESTRUCTIVE_MIGRATION=false: {marker}")
+    return True
+
+def evaluate_data_persistence_startup_state():
+    db_exists = sqlite_db_exists()
+    db_size = sqlite_db_size_bytes()
+    volume = sqlite_volume_status()
+    if DATA_PERSISTENCE_MODE != "sqlite" and not DATABASE_URL:
+        add_data_persistence_warning(
+            "DATA_LOSS_RISK_DETECTED",
+            "DATA_PERSISTENCE_MODE is not sqlite but DATABASE_URL is missing.",
+        )
+    if is_railway_runtime() and DATA_PERSISTENCE_MODE == "sqlite":
+        if not volume.get("detected"):
+            add_data_persistence_warning(
+                "DATA_LOSS_RISK_DETECTED",
+                "Railway runtime is using SQLite without a detected persistent volume path.",
+            )
+        if not db_exists or db_size <= 0:
+            add_data_persistence_warning(
+                "DATA_LOSS_RISK_DETECTED",
+                "Railway SQLite DB is missing or empty before init_db; old data may have disappeared.",
+            )
+    if REQUIRE_PERSISTENT_DB:
+        if DATA_PERSISTENCE_MODE == "sqlite" and not volume.get("detected"):
+            add_data_persistence_warning(
+                "PERSISTENT_DB_REQUIRED",
+                "REQUIRE_PERSISTENT_DB=true but DB_FILE is not under a detected persistent volume.",
+            )
+            raise RuntimeError("Persistent DB required but SQLite DB path is not under a detected persistent volume.")
+        if DATA_PERSISTENCE_MODE != "sqlite" and not DATABASE_URL:
+            add_data_persistence_warning(
+                "PERSISTENT_DB_REQUIRED",
+                "REQUIRE_PERSISTENT_DB=true but DATABASE_URL is missing.",
+            )
+            raise RuntimeError("Persistent DB required but DATABASE_URL is missing.")
+
+def latest_startup_backup_info() -> dict:
+    result = dict(DB_STARTUP_BACKUP_RESULT or {})
+    if result.get("path"):
+        return result
+    backup_dir = str(DB_BACKUP_DIR or "backups")
+    try:
+        if not os.path.isdir(backup_dir):
+            return {"status": result.get("status") or "not_found", "path": "", "created_at": "", "reason": result.get("reason") or ""}
+        files = []
+        for name in os.listdir(backup_dir):
+            if name.startswith("toandaas_system_") and name.endswith("_before_migration.db"):
+                path = os.path.join(backup_dir, name)
+                files.append((os.path.getmtime(path), path))
+        if not files:
+            return {"status": result.get("status") or "not_found", "path": "", "created_at": "", "reason": result.get("reason") or ""}
+        _mtime, path = sorted(files, reverse=True)[0]
+        return {
+            "status": "found",
+            "path": path,
+            "created_at": datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S"),
+            "reason": "latest_file",
+        }
+    except Exception as e:
+        return {"status": "error", "path": "", "created_at": "", "reason": str(e)[:160]}
+
+def cleanup_old_startup_backups():
+    backup_dir = str(DB_BACKUP_DIR or "backups")
+    try:
+        if not os.path.isdir(backup_dir):
+            return
+        files = []
+        for name in os.listdir(backup_dir):
+            if name.startswith("toandaas_system_") and name.endswith("_before_migration.db"):
+                path = os.path.join(backup_dir, name)
+                files.append((os.path.getmtime(path), path))
+        files = sorted(files, reverse=True)
+        for _mtime, path in files[DB_STARTUP_BACKUP_RETENTION:]:
+            try:
+                os.remove(path)
+            except Exception as e:
+                logger.warning(f"Startup DB backup cleanup skipped {masked_db_path(path)}: {type(e).__name__}")
+    except Exception as e:
+        logger.warning(f"Startup DB backup cleanup failed: {type(e).__name__}")
+
+def backup_sqlite_before_migration(reason: str = "before_migration") -> dict:
+    global DB_STARTUP_BACKUP_RESULT
+    if DATA_PERSISTENCE_MODE != "sqlite":
+        DB_STARTUP_BACKUP_RESULT = {"status": "skipped", "path": "", "created_at": "", "reason": "non_sqlite_mode"}
+        return DB_STARTUP_BACKUP_RESULT
+    if not DB_STARTUP_BACKUP_ENABLED:
+        DB_STARTUP_BACKUP_RESULT = {"status": "skipped", "path": "", "created_at": "", "reason": "disabled"}
+        return DB_STARTUP_BACKUP_RESULT
+    db_path = str(DB_FILE or "").strip()
+    if not db_path or not os.path.exists(db_path):
+        DB_STARTUP_BACKUP_RESULT = {"status": "skipped", "path": "", "created_at": "", "reason": "db_missing"}
+        return DB_STARTUP_BACKUP_RESULT
+    if os.path.getsize(db_path) <= 0:
+        DB_STARTUP_BACKUP_RESULT = {"status": "skipped", "path": "", "created_at": "", "reason": "db_empty"}
+        return DB_STARTUP_BACKUP_RESULT
+    try:
+        backup_dir = str(DB_BACKUP_DIR or "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = os.path.join(backup_dir, f"toandaas_system_{timestamp}_{reason}.db")
+        shutil.copy2(db_path, backup_path)
+        DB_STARTUP_BACKUP_RESULT = {
+            "status": "created",
+            "path": backup_path,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "reason": reason,
+            "size_bytes": os.path.getsize(backup_path),
+        }
+        cleanup_old_startup_backups()
+        return DB_STARTUP_BACKUP_RESULT
+    except Exception as e:
+        add_data_persistence_warning(
+            "STARTUP_BACKUP_FAILED",
+            f"Could not create SQLite backup before migration: {type(e).__name__}",
+        )
+        DB_STARTUP_BACKUP_RESULT = {"status": "failed", "path": "", "created_at": "", "reason": str(e)[:160]}
+        return DB_STARTUP_BACKUP_RESULT
+
+def ensure_startup_sqlite_backup_once():
+    db_abs = sqlite_db_abs_path()
+    if not db_abs or db_abs in DB_STARTUP_BACKUP_PATHS:
+        return DB_STARTUP_BACKUP_RESULT
+    DB_STARTUP_BACKUP_PATHS.add(db_abs)
+    return backup_sqlite_before_migration("before_migration")
+
 def db_connect():
     conn = sqlite3.connect(DB_FILE, timeout=30)
     conn.execute("PRAGMA busy_timeout=30000")
@@ -982,6 +1223,106 @@ def runtime_db_status() -> dict:
     except Exception as e:
         return {"ok": False, "status": "FAIL", "file": db_label, "error": str(e)[:300]}
 
+def sqlite_table_exists(conn, table: str) -> bool:
+    try:
+        row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (str(table),)).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+def sqlite_count_table(conn, table: str) -> int:
+    try:
+        if not sqlite_table_exists(conn, table):
+            return 0
+        row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+        return int(row[0] or 0) if row else 0
+    except Exception:
+        return 0
+
+def data_persistence_status_payload(include_counts: bool = True) -> dict:
+    evaluate_safe = False
+    try:
+        evaluate_data_persistence_startup_state()
+        evaluate_safe = True
+    except RuntimeError:
+        raise
+    except Exception as e:
+        add_data_persistence_warning("DATA_PERSISTENCE_CHECK_FAILED", f"Startup persistence check failed: {type(e).__name__}")
+    exists = sqlite_db_exists()
+    size_bytes = sqlite_db_size_bytes()
+    volume = sqlite_volume_status()
+    backup = latest_startup_backup_info()
+    payload = {
+        "mode": DATA_PERSISTENCE_MODE,
+        "database_url": masked_database_url(DATABASE_URL),
+        "db_path": masked_db_path(DB_FILE),
+        "db_exists": exists,
+        "db_size_bytes": size_bytes,
+        "railway_runtime": is_railway_runtime(),
+        "volume_detected": bool(volume.get("detected")),
+        "volume_mount": volume.get("mount") or "unknown",
+        "backup_enabled": bool(DB_STARTUP_BACKUP_ENABLED),
+        "backup_last_status": backup.get("status") or "not_run",
+        "backup_last_path": masked_db_path(backup.get("path") or ""),
+        "backup_last_at": backup.get("created_at") or "",
+        "backup_dir": masked_db_path(DB_BACKUP_DIR),
+        "migration_dry_run": bool(DB_MIGRATION_DRY_RUN),
+        "destructive_migration_allowed": bool(DB_ALLOW_DESTRUCTIVE_MIGRATION),
+        "require_persistent_db": bool(REQUIRE_PERSISTENT_DB),
+        "warnings": list(DATA_PERSISTENCE_WARNINGS),
+        "data_loss_risk": data_persistence_runtime_is_risky(),
+        "startup_check_ok": evaluate_safe,
+    }
+    if include_counts and exists and size_bytes > 0:
+        try:
+            conn = db_connect()
+            try:
+                payload["table_count"] = sqlite_count_table(conn, "sqlite_master")
+                row = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()
+                payload["main_table_count"] = int(row[0] or 0) if row else 0
+                payload["users_count"] = sqlite_count_table(conn, "users")
+                payload["payment_topup_count"] = (
+                    sqlite_count_table(conn, "payos_orders")
+                    + sqlite_count_table(conn, "pending_deposits")
+                    + sqlite_count_table(conn, "transactions")
+                )
+                payload["credit_events_count"] = sqlite_count_table(conn, "credit_events")
+                payload["trial_claims_count"] = (
+                    sqlite_count_table(conn, "trial_grants")
+                    + sqlite_count_table(conn, "trial_bonus_claims")
+                )
+                payload["shopaikey_jobs_count"] = sqlite_count_table(conn, "shopaikey_jobs")
+                payload["shopaikey_billing_events_count"] = sqlite_count_table(conn, "shopaikey_billing_events")
+                payload["provider_status_count"] = (
+                    sqlite_count_table(conn, "api_debug_events")
+                    + sqlite_count_table(conn, "tool_events")
+                    + sqlite_count_table(conn, "provider_freeze_state")
+                )
+                payload["settings_count"] = (
+                    sqlite_count_table(conn, "system_settings")
+                    + sqlite_count_table(conn, "system_flags")
+                    + sqlite_count_table(conn, "feature_flags")
+                )
+                payload["backup_records_count"] = sqlite_count_table(conn, "audit_logs")
+            finally:
+                conn.close()
+        except Exception as e:
+            payload["count_error"] = str(e)[:160]
+    else:
+        payload.update({
+            "main_table_count": 0,
+            "users_count": 0,
+            "payment_topup_count": 0,
+            "credit_events_count": 0,
+            "trial_claims_count": 0,
+            "shopaikey_jobs_count": 0,
+            "shopaikey_billing_events_count": 0,
+            "provider_status_count": 0,
+            "settings_count": 0,
+            "backup_records_count": 0,
+        })
+    return payload
+
 def telegram_handler_count(application) -> int:
     try:
         return sum(len(handlers) for handlers in getattr(application, "handlers", {}).values())
@@ -989,6 +1330,11 @@ def telegram_handler_count(application) -> int:
         return 0
 
 def init_db():
+    evaluate_data_persistence_startup_state()
+    ensure_startup_sqlite_backup_once()
+    if DB_MIGRATION_DRY_RUN:
+        logger.warning("DB_MIGRATION_DRY_RUN=true; init_db schema changes skipped.")
+        return
     conn = db_connect()
     conn.execute("PRAGMA journal_mode=WAL")
     c = conn.cursor()
@@ -29325,7 +29671,7 @@ EMERGENCY_ALLOWED_PUBLIC_COMMANDS = {
 EMERGENCY_ALLOWED_ADMIN_COMMANDS = {
     "backup_db", "emergency_status", "emergency_unlock", "ops_plan",
     "admin_whoami", "providers", "tool_status", "tool_audit", "tool_catalog",
-    "admin_api_roadmap", "api_recommend", "sales_ready",
+    "admin_api_roadmap", "api_recommend", "sales_ready", "data_status",
     "admin_docs", "security_status", "security_checklist", "risk_checklist",
     "ip_notice", "legal_export", "admin_report_month", "admin_report_year",
     "export_accounting_month", "export_accounting_year", "billing_report", "xu_ledger_export",
@@ -31577,6 +31923,53 @@ async def cmd_security_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_data_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    payload = data_persistence_status_payload(include_counts=True)
+    warnings = payload.get("warnings") or []
+    warning_text = " | ".join(str(item.get("code") or "") for item in warnings if item.get("code")) or "-"
+    lines = [
+        "🗄️ <b>DATA PERSISTENCE STATUS — TOAN AAS</b>",
+        "",
+        f"• DB mode: <code>{html.escape(str(payload.get('mode') or '-'))}</code>",
+        f"• DB path: <code>{html.escape(str(payload.get('db_path') or '-'))}</code>",
+        f"• DATABASE_URL: <code>{html.escape(str(payload.get('database_url') or '-'))}</code>",
+        f"• DB exists: <code>{'yes' if payload.get('db_exists') else 'no'}</code>",
+        f"• DB size: <code>{int(payload.get('db_size_bytes') or 0):,} bytes</code>",
+        f"• Railway runtime: <code>{'yes' if payload.get('railway_runtime') else 'no'}</code>",
+        f"• Railway volume detected: <code>{'yes' if payload.get('volume_detected') else 'no/unknown'}</code>",
+        f"• Volume mount: <code>{html.escape(str(payload.get('volume_mount') or '-'))}</code>",
+        "",
+        "<b>Counts</b>",
+        f"• Main tables: <code>{int(payload.get('main_table_count') or 0)}</code>",
+        f"• Users: <code>{int(payload.get('users_count') or 0)}</code>",
+        f"• Payment/top-up rows: <code>{int(payload.get('payment_topup_count') or 0)}</code>",
+        f"• Credit events: <code>{int(payload.get('credit_events_count') or 0)}</code>",
+        f"• Trial records: <code>{int(payload.get('trial_claims_count') or 0)}</code>",
+        f"• ShopAIKey jobs: <code>{int(payload.get('shopaikey_jobs_count') or 0)}</code>",
+        f"• ShopAIKey billing events: <code>{int(payload.get('shopaikey_billing_events_count') or 0)}</code>",
+        f"• Provider status/events: <code>{int(payload.get('provider_status_count') or 0)}</code>",
+        f"• Settings/flags: <code>{int(payload.get('settings_count') or 0)}</code>",
+        f"• Backup/audit records: <code>{int(payload.get('backup_records_count') or 0)}</code>",
+        "",
+        "<b>Backup / Migration Guard</b>",
+        f"• Startup backup enabled: <code>{'yes' if payload.get('backup_enabled') else 'no'}</code>",
+        f"• Last startup backup: <code>{html.escape(str(payload.get('backup_last_status') or '-'))}</code>",
+        f"• Last backup at: <code>{html.escape(str(payload.get('backup_last_at') or '-'))}</code>",
+        f"• Last backup path: <code>{html.escape(str(payload.get('backup_last_path') or '-'))}</code>",
+        f"• Backup dir: <code>{html.escape(str(payload.get('backup_dir') or '-'))}</code>",
+        f"• Dry run: <code>{'yes' if payload.get('migration_dry_run') else 'no'}</code>",
+        f"• Destructive migration allowed: <code>{'yes' if payload.get('destructive_migration_allowed') else 'no'}</code>",
+        f"• Require persistent DB: <code>{'yes' if payload.get('require_persistent_db') else 'no'}</code>",
+        "",
+        f"• Data loss risk detected: <code>{'YES' if payload.get('data_loss_risk') else 'no'}</code>",
+        f"• Warnings: <code>{html.escape(warning_text)}</code>",
+        "",
+        "Rule: không DROP TABLE, không reset Xu, không xóa lịch sử nạp/trial/job. Nếu Railway chưa có Volume, nên cấu hình Volume hoặc chuyển Postgres trước khi scale.",
+    ]
+    await reply_html_lines(update, lines)
+
 async def cmd_legal_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin/internal.")
@@ -31905,6 +32298,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     providers = provider_status_payload()
     db_status = db_status_payload()
+    data_persistence = data_persistence_status_payload(include_counts=False)
     state = current_system_mode()
     payos_debug_status = (get_system_setting("payos_debug_create_status", "NOT_TESTED") or "NOT_TESTED").upper()
     payos_checkout_url = get_system_setting("payos_debug_create_checkout_url", "")
@@ -31934,6 +32328,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
         f"• Public URL: <code>{provider_status_text(providers['core']['public_base_url'])}</code>",
         f"• DB: <code>{'OK' if db_status['ok'] else 'FAIL'}</code>",
+        f"• Data persistence: mode <code>{html.escape(str(data_persistence.get('mode') or '-'))}</code> | risk <code>{'YES' if data_persistence.get('data_loss_risk') else 'no'}</code> | backup <code>{'ON' if data_persistence.get('backup_enabled') else 'OFF'}</code> | <code>/data_status</code>",
         f"• PayOS Client ID: <code>{provider_status_text(providers['payos']['client_id'])}</code>",
         f"• PayOS API Key: <code>{provider_status_text(providers['payos']['api_key'])}</code>",
         f"• PayOS Checksum: <code>{provider_status_text(providers['payos']['checksum_key'])}</code>",
@@ -59752,8 +60147,9 @@ async def lifespan(app: FastAPI):
     init_db()
     token_summary = telegram_token_runtime_summary()
     db_summary = runtime_db_status()
+    data_summary = data_persistence_status_payload(include_counts=False)
     logger.info(
-        "TOAN AAS STARTUP | build=%s | deploy=%s | public_base_url=%s | public_base_url_source=%s | telegram_update_mode=%s | force_polling=%s | token=%s len=%s masked=%s | db=%s",
+        "TOAN AAS STARTUP | build=%s | deploy=%s | public_base_url=%s | public_base_url_source=%s | telegram_update_mode=%s | force_polling=%s | token=%s len=%s masked=%s | db=%s | data_mode=%s | data_path=%s | data_exists=%s | data_loss_risk=%s | startup_backup=%s",
         APP_BUILD,
         APP_DEPLOY_ID or "-",
         PUBLIC_BASE_URL or "missing",
@@ -59764,6 +60160,11 @@ async def lifespan(app: FastAPI):
         token_summary["len"],
         token_summary["masked"] or "-",
         db_summary.get("status") or "FAIL",
+        data_summary.get("mode") or "-",
+        data_summary.get("db_path") or "-",
+        "yes" if data_summary.get("db_exists") else "no",
+        "yes" if data_summary.get("data_loss_risk") else "no",
+        data_summary.get("backup_last_status") or "-",
     )
     if not TELEGRAM_TOKEN:
         TELEGRAM_STARTUP_ERROR = "TELEGRAM_TOKEN chưa được set"
@@ -59829,6 +60230,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("admin_doc_converter", cmd_admin_doc_converter))
     tg_app.add_handler(CommandHandler("admin_doc_sources", cmd_admin_doc_sources))
     tg_app.add_handler(CommandHandler("security_status", cmd_security_status))
+    tg_app.add_handler(CommandHandler("data_status", cmd_data_status))
     tg_app.add_handler(CommandHandler("security_checklist", cmd_security_checklist))
     tg_app.add_handler(CommandHandler("risk_checklist", cmd_risk_checklist))
     tg_app.add_handler(CommandHandler("ip_notice", cmd_ip_notice))
@@ -60751,6 +61153,7 @@ async def asset_check():
 @fastapi_app.get("/health")
 async def health_check():
     db_status = db_status_payload()
+    data_persistence = data_persistence_status_payload(include_counts=False)
     providers = provider_status_payload()
     mode = current_system_mode()
     db_ok = db_status["ok"]
@@ -60765,6 +61168,9 @@ async def health_check():
         "db_ok": db_ok,
         "db_file": db_file_health_label(),
         "db_error": db_error,
+        "data_persistence_mode": data_persistence.get("mode") or "sqlite",
+        "data_loss_risk": bool(data_persistence.get("data_loss_risk")),
+        "db_startup_backup_enabled": bool(data_persistence.get("backup_enabled")),
         "payos_configured": providers["payos"]["ready"],
         "gemini_configured": providers["ai"]["gemini"],
         "openai_configured": providers["ai"]["openai"],
@@ -60790,6 +61196,7 @@ async def runtime_health(request: Request):
     expected_webhook = expected_telegram_webhook_url()
     token_summary = telegram_token_runtime_summary()
     db_summary = runtime_db_status()
+    data_persistence = data_persistence_status_payload(include_counts=True)
     webhook_info = {"ok": False, "reason": "telegram_app_not_ready", "expected_url": expected_webhook}
     if tg_app:
         try:
@@ -60806,6 +61213,7 @@ async def runtime_health(request: Request):
         "deploy_id": APP_DEPLOY_ID or "",
         "time": now_text(),
         "db": db_summary,
+        "data_persistence": data_persistence,
         "bot_username_env": BOT_USERNAME,
         "public_base_url": PUBLIC_BASE_URL or "",
         "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
