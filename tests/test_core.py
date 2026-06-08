@@ -56,11 +56,13 @@ def test_data_persistence_guard_backup_and_status(monkeypatch, tmp_path):
     assert "DROP TABLE" not in init_source.upper()
     assert "DELETE FROM USERS" not in init_source.upper()
     assert "UPDATE USERS SET CREDITS=0" not in init_source.upper()
+    assert "prepare_sqlite_persistent_path_once" in source
     assert "ensure_startup_sqlite_backup_once()" in init_source
     assert 'CommandHandler("data_status", cmd_data_status)' in source
     data_status_source = source_between(source, "async def cmd_data_status", "async def cmd_legal_export")
     assert "is_admin_user" in data_status_source
     assert "DATABASE_URL" in data_status_source
+    assert "Persistent path candidate" in data_status_source
 
     db_path = tmp_path / "existing.db"
     conn = sqlite3.connect(db_path)
@@ -91,11 +93,13 @@ def test_data_persistence_guard_backup_and_status(monkeypatch, tmp_path):
     monkeypatch.setattr(bot, "DB_MIGRATION_DRY_RUN", False)
     monkeypatch.setattr(bot, "DB_ALLOW_DESTRUCTIVE_MIGRATION", False)
     monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    monkeypatch.setattr(bot, "DB_STARTUP_PREP_RESULT", {"status": "not_run", "path": "", "created_at": "", "reason": ""})
     bot.init_db()
-    backups = list(backup_dir.glob("toandaas_system_*_before_migration.db"))
+    backups = list(backup_dir.glob("toandaas_system_*_startup.db"))
     assert backups
     payload = bot.data_persistence_status_payload(include_counts=True)
     assert payload["db_exists"] is True
+    assert payload["db_writable"] is True
     assert payload["users_count"] >= 1
     assert payload["backup_enabled"] is True
     assert payload["destructive_migration_allowed"] is False
@@ -110,6 +114,91 @@ def test_data_persistence_guard_backup_and_status(monkeypatch, tmp_path):
     assert "secret" not in bot.masked_database_url("postgresql://user:secret@db.example.com/toanaas")
 
 
+def test_persistent_sqlite_volume_copy_backup_and_no_overwrite(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    volume_dir = tmp_path / "data"
+    target_db = volume_dir / "toandaas_system.db"
+    backup_dir = volume_dir / "backups"
+    local_db = tmp_path / "toandaas_system.db"
+    conn = sqlite3.connect(local_db)
+    try:
+        conn.execute(
+            """CREATE TABLE users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT,
+                credits INTEGER DEFAULT 0,
+                is_vip INTEGER DEFAULT 0,
+                join_date TEXT,
+                total_spent INTEGER DEFAULT 0
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent) VALUES (?,?,?,?,?,?)",
+            ("persistent-user", "Persistent", 777, 0, "2026-01-01 00:00:00", 0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setenv("RAILWAY_VOLUME_MOUNT_PATH", str(volume_dir))
+    monkeypatch.setattr(bot, "DB_FILE", str(target_db))
+    monkeypatch.setattr(bot, "DB_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(bot, "DATA_PERSISTENCE_MODE", "sqlite")
+    monkeypatch.setattr(bot, "REQUIRE_PERSISTENT_DB", True)
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_ENABLED", True)
+    monkeypatch.setattr(bot, "DB_ALLOW_DESTRUCTIVE_MIGRATION", False)
+    monkeypatch.setattr(bot, "DATA_PERSISTENCE_WARNINGS", [])
+    monkeypatch.setattr(bot, "DB_STARTUP_PREP_RESULT", {"status": "not_run", "path": "", "created_at": "", "reason": ""})
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_RESULT", {"status": "not_run", "path": "", "created_at": "", "reason": ""})
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+
+    bot.init_db()
+    assert target_db.exists()
+    assert bot.DB_STARTUP_PREP_RESULT["status"] == "copied_local_to_persistent"
+    assert list(backup_dir.glob("toandaas_system_*_startup.db"))
+    payload = bot.data_persistence_status_payload(include_counts=True)
+    assert payload["persistent_path_candidate"] is True
+    assert payload["db_writable"] is True
+    assert payload["backup_dir_writable"] is True
+    assert payload["data_loss_risk_level"] in {"NO", "LOW"}
+    assert payload["users_count"] >= 1
+
+    conn = sqlite3.connect(local_db)
+    try:
+        conn.execute("UPDATE users SET credits=1 WHERE user_id='persistent-user'")
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setattr(bot, "DB_STARTUP_PREP_RESULT", {"status": "not_run", "path": "", "created_at": "", "reason": ""})
+    result = bot.prepare_sqlite_persistent_path_once()
+    assert result["status"] == "persistent_db_exists"
+    conn = sqlite3.connect(target_db)
+    try:
+        row = conn.execute("SELECT credits FROM users WHERE user_id='persistent-user'").fetchone()
+        assert row[0] == 777
+    finally:
+        conn.close()
+
+
+def test_persistent_sqlite_path_and_relative_risk(monkeypatch, tmp_path):
+    assert bot.is_persistent_sqlite_path("/data/toandaas_system.db") is True
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("RAILWAY_VOLUME_MOUNT_PATH", raising=False)
+    monkeypatch.setattr(bot, "DB_FILE", "toandaas_system.db")
+    monkeypatch.setattr(bot, "DB_BACKUP_DIR", "backups")
+    monkeypatch.setattr(bot, "DATA_PERSISTENCE_MODE", "sqlite")
+    monkeypatch.setattr(bot, "DATABASE_URL", "")
+    monkeypatch.setattr(bot, "REQUIRE_PERSISTENT_DB", False)
+    monkeypatch.setattr(bot, "DATA_PERSISTENCE_WARNINGS", [])
+    monkeypatch.setattr(bot, "DB_STARTUP_PREP_RESULT", {"status": "not_run", "path": "", "created_at": "", "reason": ""})
+
+    payload = bot.data_persistence_status_payload(include_counts=False)
+    assert payload["persistent_path_candidate"] is False
+    assert payload["data_loss_risk"] is True
+    assert payload["data_loss_risk_level"] == "YES"
+
+
 def test_data_persistence_warns_missing_railway_db(monkeypatch, tmp_path):
     missing_db = tmp_path / "missing.db"
     monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
@@ -117,6 +206,7 @@ def test_data_persistence_warns_missing_railway_db(monkeypatch, tmp_path):
     monkeypatch.setattr(bot, "DATA_PERSISTENCE_MODE", "sqlite")
     monkeypatch.setattr(bot, "DATABASE_URL", "")
     monkeypatch.setattr(bot, "DATA_PERSISTENCE_WARNINGS", [])
+    monkeypatch.setattr(bot, "DB_STARTUP_PREP_RESULT", {"status": "not_run", "path": "", "created_at": "", "reason": ""})
     payload = bot.data_persistence_status_payload(include_counts=False)
     assert payload["db_exists"] is False
     assert payload["data_loss_risk"] is True

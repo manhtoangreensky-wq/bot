@@ -708,18 +708,21 @@ MANUAL_BANK_OWNER     = _env("MANUAL_BANK_OWNER", "NGUYEN MANH TOAN")
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
 DATA_PERSISTENCE_MODE = (_env("DATA_PERSISTENCE_MODE", "sqlite") or "sqlite").strip().lower()
 DATABASE_URL      = _env("DATABASE_URL", "")
+DB_PATH_ENV_CONFIGURED = bool(_env("DB_PATH"))
+DB_FILE_ENV_CONFIGURED = bool(_env("DB_FILE"))
 DB_PATH           = _env("DB_PATH", _env("DB_FILE", "toandaas_system.db"))
-DB_FILE           = _env("DB_FILE", DB_PATH or "toandaas_system.db")
+DB_FILE           = DB_PATH or "toandaas_system.db"
 REQUIRE_PERSISTENT_DB = env_flag("REQUIRE_PERSISTENT_DB", "false")
 DB_STARTUP_BACKUP_ENABLED = env_flag("DB_STARTUP_BACKUP_ENABLED", "true")
 DB_MIGRATION_DRY_RUN = env_flag("DB_MIGRATION_DRY_RUN", "false")
 DB_ALLOW_DESTRUCTIVE_MIGRATION = env_flag("DB_ALLOW_DESTRUCTIVE_MIGRATION", "false")
-DB_BACKUP_DIR = _env("DB_BACKUP_DIR", "backups")
+DB_BACKUP_DIR = _env("DB_BACKUP_DIR", "/data/backups" if str(DB_FILE).replace("\\", "/").startswith("/data/") else "backups")
 DB_STARTUP_BACKUP_RETENTION = max(1, env_int("DB_STARTUP_BACKUP_RETENTION", 20))
 BACKUP_MAX_BYTES  = 45 * 1024 * 1024
 DATA_PERSISTENCE_WARNINGS: list[dict] = []
 DB_STARTUP_BACKUP_RESULT: dict = {"status": "not_run", "path": "", "created_at": "", "reason": ""}
 DB_STARTUP_BACKUP_PATHS: set[str] = set()
+DB_STARTUP_PREP_RESULT: dict = {"status": "not_run", "path": "", "created_at": "", "reason": ""}
 TRIAL_CREDITS     = 200
 TRIAL_BONUS_ENABLED = env_flag("TRIAL_BONUS_ENABLED", "true")
 TRIAL_BONUS_AMOUNT = env_int("TRIAL_BONUS_AMOUNT", TRIAL_CREDITS)
@@ -995,6 +998,9 @@ def add_data_persistence_warning(code: str, message: str):
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
+def now_text_safe() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 def masked_db_path(path: str = "") -> str:
     value = str(path or DB_FILE or "").strip()
     if not value:
@@ -1005,6 +1011,10 @@ def masked_db_path(path: str = "") -> str:
     drive, _tail = os.path.splitdrive(value)
     prefix = drive or ("/" if value.startswith("/") else "")
     return f"{prefix}...{os.sep}{base}" if prefix else f"...{os.sep}{base}"
+
+def display_db_path(path: str = "") -> str:
+    value = str(path or DB_FILE or "").strip()
+    return value or "missing"
 
 def masked_database_url(url: str = "") -> str:
     value = str(url or DATABASE_URL or "").strip()
@@ -1024,6 +1034,73 @@ def sqlite_db_abs_path() -> str:
     db_path = str(DB_FILE or "").strip()
     return os.path.abspath(db_path) if db_path else ""
 
+def sqlite_local_fallback_path() -> str:
+    return os.path.abspath("toandaas_system.db")
+
+def sqlite_candidate_mounts() -> list[str]:
+    mounts: list[str] = []
+    for candidate in (_env("RAILWAY_VOLUME_MOUNT_PATH", ""), "/data", "/mnt/data", "/app/data"):
+        candidate_clean = str(candidate or "").strip()
+        if candidate_clean and candidate_clean not in mounts:
+            mounts.append(candidate_clean)
+    return mounts
+
+def path_under_dir(path: str, directory: str) -> bool:
+    path_clean = str(path or "").strip()
+    dir_clean = str(directory or "").strip()
+    if not path_clean or not dir_clean:
+        return False
+    normalized_path = os.path.abspath(path_clean).replace("\\", "/").rstrip("/")
+    normalized_dir = os.path.abspath(dir_clean).replace("\\", "/").rstrip("/")
+    return normalized_path == normalized_dir or normalized_path.startswith(normalized_dir + "/")
+
+def is_persistent_sqlite_path(path: str = "") -> bool:
+    db_path = str(path or DB_FILE or "").strip()
+    if not db_path:
+        return False
+    return any(path_under_dir(db_path, mount) for mount in sqlite_candidate_mounts())
+
+def is_relative_sqlite_path(path: str = "") -> bool:
+    db_path = str(path or DB_FILE or "").strip()
+    return bool(db_path and not os.path.isabs(db_path))
+
+def sqlite_parent_dir(path: str = "") -> str:
+    db_path = str(path or DB_FILE or "").strip()
+    if not db_path:
+        return ""
+    parent = os.path.dirname(os.path.abspath(db_path))
+    return parent or os.getcwd()
+
+def directory_writable(path: str) -> bool:
+    directory = str(path or "").strip()
+    if not directory:
+        return False
+    try:
+        os.makedirs(directory, exist_ok=True)
+        probe = os.path.join(directory, f".toanaas_write_test_{os.getpid()}_{int(time.time() * 1000)}")
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+        return True
+    except Exception:
+        try:
+            if "probe" in locals() and os.path.exists(probe):
+                os.remove(probe)
+        except Exception:
+            pass
+        return False
+
+def sqlite_db_writable() -> bool:
+    db_path = str(DB_FILE or "").strip()
+    if not db_path:
+        return False
+    if os.path.exists(db_path):
+        return os.access(db_path, os.W_OK)
+    return directory_writable(sqlite_parent_dir(db_path))
+
+def sqlite_backup_dir_writable() -> bool:
+    return directory_writable(str(DB_BACKUP_DIR or "backups"))
+
 def sqlite_db_exists() -> bool:
     db_path = str(DB_FILE or "").strip()
     return bool(db_path and os.path.exists(db_path))
@@ -1034,36 +1111,96 @@ def sqlite_db_size_bytes() -> int:
     except Exception:
         return 0
 
+def prepare_sqlite_persistent_path_once() -> dict:
+    global DB_STARTUP_PREP_RESULT
+    if DATA_PERSISTENCE_MODE != "sqlite":
+        DB_STARTUP_PREP_RESULT = {"status": "skipped", "path": "", "created_at": "", "reason": "non_sqlite_mode"}
+        return DB_STARTUP_PREP_RESULT
+    current_abs = sqlite_db_abs_path()
+    previous_abs = os.path.abspath(str(DB_STARTUP_PREP_RESULT.get("path") or "")) if DB_STARTUP_PREP_RESULT.get("path") else ""
+    if DB_STARTUP_PREP_RESULT.get("status") not in {"not_run", ""} and previous_abs == current_abs:
+        return DB_STARTUP_PREP_RESULT
+    db_path = str(DB_FILE or "").strip()
+    if not db_path:
+        DB_STARTUP_PREP_RESULT = {"status": "error", "path": "", "created_at": now_text_safe(), "reason": "db_path_missing"}
+        add_data_persistence_warning("DB_PATH_MISSING", "SQLite DB path is missing.")
+        return DB_STARTUP_PREP_RESULT
+    persistent_candidate = is_persistent_sqlite_path(db_path)
+    if not persistent_candidate:
+        if is_relative_sqlite_path(db_path):
+            add_data_persistence_warning("DATA_LOSS_RISK_DETECTED", "SQLite DB path is relative/local; configure DB_PATH=/data/toandaas_system.db for Railway production.")
+        DB_STARTUP_PREP_RESULT = {"status": "local_dev_path", "path": db_path, "created_at": now_text_safe(), "reason": "not_persistent_candidate"}
+        return DB_STARTUP_PREP_RESULT
+
+    target_abs = os.path.abspath(db_path)
+    parent = os.path.dirname(target_abs) or os.getcwd()
+    if os.path.exists(target_abs):
+        DB_STARTUP_PREP_RESULT = {"status": "persistent_db_exists", "path": target_abs, "created_at": now_text_safe(), "reason": "use_existing_persistent_db"}
+        return DB_STARTUP_PREP_RESULT
+
+    if not directory_writable(parent):
+        add_data_persistence_warning("PERSISTENT_DB_NOT_WRITABLE", f"Persistent SQLite directory is not writable: {display_db_path(parent)}")
+        DB_STARTUP_PREP_RESULT = {"status": "error", "path": target_abs, "created_at": now_text_safe(), "reason": "persistent_dir_not_writable"}
+        return DB_STARTUP_PREP_RESULT
+
+    legacy_abs = sqlite_local_fallback_path()
+    if os.path.exists(legacy_abs) and os.path.getsize(legacy_abs) > 0 and os.path.abspath(legacy_abs) != target_abs:
+        try:
+            shutil.copy2(legacy_abs, target_abs)
+            logger.info("migrated local sqlite db to persistent path")
+            DB_STARTUP_PREP_RESULT = {"status": "copied_local_to_persistent", "path": target_abs, "created_at": now_text_safe(), "reason": "migrated local sqlite db to persistent path"}
+            return DB_STARTUP_PREP_RESULT
+        except Exception as e:
+            add_data_persistence_warning("PERSISTENT_DB_COPY_FAILED", f"Could not copy local SQLite DB to persistent path: {type(e).__name__}")
+            DB_STARTUP_PREP_RESULT = {"status": "error", "path": target_abs, "created_at": now_text_safe(), "reason": str(e)[:160]}
+            return DB_STARTUP_PREP_RESULT
+
+    add_data_persistence_warning("SQLITE_NEW_EMPTY_DB_PENDING", "Persistent SQLite DB does not exist and no local fallback DB was found; a new empty DB will be created.")
+    DB_STARTUP_PREP_RESULT = {"status": "new_empty_db_pending", "path": target_abs, "created_at": now_text_safe(), "reason": "no_existing_db_found"}
+    return DB_STARTUP_PREP_RESULT
+
 def sqlite_volume_status() -> dict:
     db_path = sqlite_db_abs_path()
-    volume_mount = _env("RAILWAY_VOLUME_MOUNT_PATH", "")
-    candidates = [volume_mount, "/data", "/mnt/data", "/app/data"]
-    normalized_db = db_path.replace("\\", "/")
     detected = False
     matched = ""
-    for candidate in candidates:
-        candidate_clean = str(candidate or "").strip()
-        if not candidate_clean:
-            continue
-        normalized_candidate = os.path.abspath(candidate_clean).replace("\\", "/")
-        if normalized_db.startswith(normalized_candidate.rstrip("/") + "/") or normalized_db == normalized_candidate:
+    for candidate_clean in sqlite_candidate_mounts():
+        if path_under_dir(db_path, candidate_clean):
             detected = True
             matched = candidate_clean
             break
+    parent = sqlite_parent_dir(db_path)
+    parent_writable = directory_writable(parent) if detected else False
     return {
         "detected": detected,
-        "mount": masked_db_path(matched) if matched else "unknown",
+        "mount": display_db_path(matched) if matched else "unknown",
         "db_under_volume": detected,
+        "persistent_path_candidate": detected,
+        "parent_dir": display_db_path(parent),
+        "parent_writable": parent_writable,
     }
 
-def data_persistence_runtime_is_risky() -> bool:
+def data_persistence_risk_level() -> str:
     if DATA_PERSISTENCE_MODE != "sqlite":
-        return not bool(DATABASE_URL)
-    if is_railway_runtime() and not sqlite_volume_status().get("detected"):
-        return True
+        return "YES" if not bool(DATABASE_URL) else "NO"
+    volume = sqlite_volume_status()
+    persistent_candidate = bool(volume.get("persistent_path_candidate"))
+    db_writable = sqlite_db_writable()
+    if REQUIRE_PERSISTENT_DB and (not persistent_candidate or not db_writable):
+        return "ERROR"
+    if is_relative_sqlite_path():
+        return "YES"
+    if is_railway_runtime() and not persistent_candidate:
+        return "YES"
     if is_railway_runtime() and (not sqlite_db_exists() or sqlite_db_size_bytes() <= 0):
-        return True
-    return any(item.get("code") == "DATA_LOSS_RISK_DETECTED" for item in DATA_PERSISTENCE_WARNINGS)
+        return "YES"
+    if persistent_candidate and db_writable:
+        return "NO"
+    if persistent_candidate:
+        return "LOW"
+    return "YES" if any(item.get("code") == "DATA_LOSS_RISK_DETECTED" for item in DATA_PERSISTENCE_WARNINGS) else "NO"
+
+def data_persistence_runtime_is_risky() -> bool:
+    return data_persistence_risk_level() in {"YES", "ERROR"}
 
 def assert_safe_migration_sql(sql: str):
     sql_upper = re.sub(r"\s+", " ", str(sql or "")).upper().strip()
@@ -1075,13 +1212,21 @@ def assert_safe_migration_sql(sql: str):
     return True
 
 def evaluate_data_persistence_startup_state():
+    prepare_sqlite_persistent_path_once()
     db_exists = sqlite_db_exists()
     db_size = sqlite_db_size_bytes()
     volume = sqlite_volume_status()
+    db_writable = sqlite_db_writable()
+    backup_writable = sqlite_backup_dir_writable()
     if DATA_PERSISTENCE_MODE != "sqlite" and not DATABASE_URL:
         add_data_persistence_warning(
             "DATA_LOSS_RISK_DETECTED",
             "DATA_PERSISTENCE_MODE is not sqlite but DATABASE_URL is missing.",
+        )
+    if DATA_PERSISTENCE_MODE == "sqlite" and is_relative_sqlite_path():
+        add_data_persistence_warning(
+            "DATA_LOSS_RISK_DETECTED",
+            "SQLite DB path is relative/local. Use DB_PATH=/data/toandaas_system.db with a Railway Volume for production.",
         )
     if is_railway_runtime() and DATA_PERSISTENCE_MODE == "sqlite":
         if not volume.get("detected"):
@@ -1098,9 +1243,20 @@ def evaluate_data_persistence_startup_state():
         if DATA_PERSISTENCE_MODE == "sqlite" and not volume.get("detected"):
             add_data_persistence_warning(
                 "PERSISTENT_DB_REQUIRED",
-                "REQUIRE_PERSISTENT_DB=true but DB_FILE is not under a detected persistent volume.",
+                "REQUIRE_PERSISTENT_DB=true but DB_PATH is not under a detected persistent volume.",
             )
             raise RuntimeError("Persistent DB required but SQLite DB path is not under a detected persistent volume.")
+        if DATA_PERSISTENCE_MODE == "sqlite" and not db_writable:
+            add_data_persistence_warning(
+                "PERSISTENT_DB_NOT_WRITABLE",
+                "REQUIRE_PERSISTENT_DB=true but SQLite DB path or parent directory is not writable.",
+            )
+            raise RuntimeError("Persistent DB required but SQLite DB path is not writable.")
+        if DATA_PERSISTENCE_MODE == "sqlite" and DB_STARTUP_BACKUP_ENABLED and not backup_writable:
+            add_data_persistence_warning(
+                "DB_BACKUP_DIR_NOT_WRITABLE",
+                "DB_STARTUP_BACKUP_ENABLED=true but DB_BACKUP_DIR is not writable.",
+            )
         if DATA_PERSISTENCE_MODE != "sqlite" and not DATABASE_URL:
             add_data_persistence_warning(
                 "PERSISTENT_DB_REQUIRED",
@@ -1118,7 +1274,7 @@ def latest_startup_backup_info() -> dict:
             return {"status": result.get("status") or "not_found", "path": "", "created_at": "", "reason": result.get("reason") or ""}
         files = []
         for name in os.listdir(backup_dir):
-            if name.startswith("toandaas_system_") and name.endswith("_before_migration.db"):
+            if name.startswith("toandaas_system_") and name.endswith("_startup.db"):
                 path = os.path.join(backup_dir, name)
                 files.append((os.path.getmtime(path), path))
         if not files:
@@ -1140,7 +1296,7 @@ def cleanup_old_startup_backups():
             return
         files = []
         for name in os.listdir(backup_dir):
-            if name.startswith("toandaas_system_") and name.endswith("_before_migration.db"):
+            if name.startswith("toandaas_system_") and name.endswith("_startup.db"):
                 path = os.path.join(backup_dir, name)
                 files.append((os.path.getmtime(path), path))
         files = sorted(files, reverse=True)
@@ -1152,7 +1308,7 @@ def cleanup_old_startup_backups():
     except Exception as e:
         logger.warning(f"Startup DB backup cleanup failed: {type(e).__name__}")
 
-def backup_sqlite_before_migration(reason: str = "before_migration") -> dict:
+def backup_sqlite_before_migration(reason: str = "startup") -> dict:
     global DB_STARTUP_BACKUP_RESULT
     if DATA_PERSISTENCE_MODE != "sqlite":
         DB_STARTUP_BACKUP_RESULT = {"status": "skipped", "path": "", "created_at": "", "reason": "non_sqlite_mode"}
@@ -1195,10 +1351,21 @@ def ensure_startup_sqlite_backup_once():
     if not db_abs or db_abs in DB_STARTUP_BACKUP_PATHS:
         return DB_STARTUP_BACKUP_RESULT
     DB_STARTUP_BACKUP_PATHS.add(db_abs)
-    return backup_sqlite_before_migration("before_migration")
+    return backup_sqlite_before_migration("startup")
 
 def db_connect():
+    global DB_STARTUP_PREP_RESULT
+    db_path = str(DB_FILE or "").strip()
+    if db_path and os.path.dirname(os.path.abspath(db_path)):
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    existed_before = bool(db_path and os.path.exists(db_path))
     conn = sqlite3.connect(DB_FILE, timeout=30)
+    if not existed_before and DB_STARTUP_PREP_RESULT.get("status") == "new_empty_db_pending":
+        DB_STARTUP_PREP_RESULT = {
+            **DB_STARTUP_PREP_RESULT,
+            "status": "new_empty_db_created",
+            "created_at": now_text_safe(),
+        }
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
@@ -1252,25 +1419,38 @@ def data_persistence_status_payload(include_counts: bool = True) -> dict:
     size_bytes = sqlite_db_size_bytes()
     volume = sqlite_volume_status()
     backup = latest_startup_backup_info()
+    prep = dict(DB_STARTUP_PREP_RESULT or {})
+    risk_level = data_persistence_risk_level()
     payload = {
         "mode": DATA_PERSISTENCE_MODE,
         "database_url": masked_database_url(DATABASE_URL),
-        "db_path": masked_db_path(DB_FILE),
+        "db_path": display_db_path(DB_FILE),
+        "db_path_env_configured": bool(DB_PATH_ENV_CONFIGURED),
+        "db_file_env_configured": bool(DB_FILE_ENV_CONFIGURED),
         "db_exists": exists,
         "db_size_bytes": size_bytes,
+        "db_writable": sqlite_db_writable(),
         "railway_runtime": is_railway_runtime(),
         "volume_detected": bool(volume.get("detected")),
+        "persistent_path_candidate": bool(volume.get("persistent_path_candidate")),
         "volume_mount": volume.get("mount") or "unknown",
+        "volume_parent_dir": volume.get("parent_dir") or "",
+        "volume_parent_writable": bool(volume.get("parent_writable")),
         "backup_enabled": bool(DB_STARTUP_BACKUP_ENABLED),
         "backup_last_status": backup.get("status") or "not_run",
-        "backup_last_path": masked_db_path(backup.get("path") or ""),
+        "backup_last_path": display_db_path(backup.get("path") or ""),
         "backup_last_at": backup.get("created_at") or "",
-        "backup_dir": masked_db_path(DB_BACKUP_DIR),
+        "backup_dir": display_db_path(DB_BACKUP_DIR),
+        "backup_dir_writable": sqlite_backup_dir_writable(),
         "migration_dry_run": bool(DB_MIGRATION_DRY_RUN),
         "destructive_migration_allowed": bool(DB_ALLOW_DESTRUCTIVE_MIGRATION),
         "require_persistent_db": bool(REQUIRE_PERSISTENT_DB),
+        "startup_prep_status": prep.get("status") or "not_run",
+        "startup_prep_reason": prep.get("reason") or "",
+        "startup_prep_path": display_db_path(prep.get("path") or ""),
         "warnings": list(DATA_PERSISTENCE_WARNINGS),
-        "data_loss_risk": data_persistence_runtime_is_risky(),
+        "data_loss_risk": risk_level in {"YES", "ERROR"},
+        "data_loss_risk_level": risk_level,
         "startup_check_ok": evaluate_safe,
     }
     if include_counts and exists and size_bytes > 0:
@@ -31995,10 +32175,13 @@ async def cmd_data_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• DB path: <code>{html.escape(str(payload.get('db_path') or '-'))}</code>",
         f"• DATABASE_URL: <code>{html.escape(str(payload.get('database_url') or '-'))}</code>",
         f"• DB exists: <code>{'yes' if payload.get('db_exists') else 'no'}</code>",
+        f"• DB writable: <code>{'yes' if payload.get('db_writable') else 'no'}</code>",
         f"• DB size: <code>{int(payload.get('db_size_bytes') or 0):,} bytes</code>",
         f"• Railway runtime: <code>{'yes' if payload.get('railway_runtime') else 'no'}</code>",
         f"• Railway volume detected: <code>{'yes' if payload.get('volume_detected') else 'no/unknown'}</code>",
+        f"• Persistent path candidate: <code>{'yes' if payload.get('persistent_path_candidate') else 'no'}</code>",
         f"• Volume mount: <code>{html.escape(str(payload.get('volume_mount') or '-'))}</code>",
+        f"• Volume parent writable: <code>{'yes' if payload.get('volume_parent_writable') else 'no'}</code>",
         "",
         "<b>Counts</b>",
         f"• Main tables: <code>{int(payload.get('main_table_count') or 0)}</code>",
@@ -32018,11 +32201,14 @@ async def cmd_data_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Last backup at: <code>{html.escape(str(payload.get('backup_last_at') or '-'))}</code>",
         f"• Last backup path: <code>{html.escape(str(payload.get('backup_last_path') or '-'))}</code>",
         f"• Backup dir: <code>{html.escape(str(payload.get('backup_dir') or '-'))}</code>",
+        f"• Backup dir writable: <code>{'yes' if payload.get('backup_dir_writable') else 'no'}</code>",
         f"• Dry run: <code>{'yes' if payload.get('migration_dry_run') else 'no'}</code>",
         f"• Destructive migration allowed: <code>{'yes' if payload.get('destructive_migration_allowed') else 'no'}</code>",
         f"• Require persistent DB: <code>{'yes' if payload.get('require_persistent_db') else 'no'}</code>",
+        f"• Startup DB prep: <code>{html.escape(str(payload.get('startup_prep_status') or '-'))}</code>",
+        f"• Startup prep reason: <code>{html.escape(str(payload.get('startup_prep_reason') or '-'))}</code>",
         "",
-        f"• Data loss risk detected: <code>{'YES' if payload.get('data_loss_risk') else 'no'}</code>",
+        f"• Data loss risk: <code>{html.escape(str(payload.get('data_loss_risk_level') or ('YES' if payload.get('data_loss_risk') else 'NO')))}</code>",
         f"• Warnings: <code>{html.escape(warning_text)}</code>",
         "",
         "Rule: không DROP TABLE, không reset Xu, không xóa lịch sử nạp/trial/job. Nếu Railway chưa có Volume, nên cấu hình Volume hoặc chuyển Postgres trước khi scale.",

@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 toandaas_system.db
 operator_uploads/
+pytest_tmp/
 backups/
 *.sqlite
 *.sqlite3
