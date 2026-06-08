@@ -329,6 +329,14 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED=false" in env_example
     assert "IMAGE_BASE_COST_XU=50" in env_example
     assert "VIDEO_BASE_COST_XU=300" in env_example
+    assert "MEDIA_PRICE_MULTIPLIER=2" in env_example
+    assert "IMAGE_LOW_COST_XU=50" in env_example
+    assert "IMAGE_STANDARD_COST_XU=300" in env_example
+    assert "IMAGE_HIGH_COST_XU=500" in env_example
+    assert "VIDEO_LOW_COST_XU=300" in env_example
+    assert "VIDEO_STANDARD_COST_XU=600" in env_example
+    assert "VIDEO_HIGH_COST_XU=1200" in env_example
+    assert "VIDEO_PREMIUM_COST_XU=2000" in env_example
     assert "WORKFLOW_TREND_ANALYSIS_COST_XU=20" in env_example
     assert "WORKFLOW_SCRIPT_STORYBOARD_COST_XU=30" in env_example
     assert "WORKFLOW_PROMPT_PACK_COST_XU=20" in env_example
@@ -510,12 +518,10 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert "record_shopaikey_billing_event" in callback_source
     assert "SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT" in source
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL" in source
-    assert "Billing mode:" in source and "centralized_pricing" in source
-    assert "Workflow trend analysis cost" in source
-    assert "Workflow script/storyboard cost" in source
-    assert "Workflow prompt pack cost" in source
-    assert "quick image cost" in source
-    assert "quick video cost" in source
+    assert "Pricing mode:" in source and "tiered_media_pricing" in source
+    assert "Image tiers:" in source
+    assert "Video tiers:" in source
+    assert "Price table source:" in source
     assert "deduct_dynamic_credit(" not in callback_source
     assert "add_credit(" not in callback_source
 
@@ -531,8 +537,11 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
 
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_COST_XU", 200)
     monkeypatch.setattr(bot, "SHOPAIKEY_IMAGE_COST_XU", 50)
-    monkeypatch.setattr(bot, "IMAGE_BASE_COST_XU", 320)
-    monkeypatch.setattr(bot, "VIDEO_BASE_COST_XU", 640)
+    monkeypatch.setattr(bot, "MEDIA_PRICE_MULTIPLIER", 2)
+    monkeypatch.setattr(bot, "IMAGE_LOW_PROVIDER_COST_XU", 160)
+    monkeypatch.setattr(bot, "VIDEO_LOW_PROVIDER_COST_XU", 320)
+    monkeypatch.setattr(bot, "IMAGE_LOW_COST_XU", 320)
+    monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 640)
     monkeypatch.setattr(bot, "WORKFLOW_TREND_ANALYSIS_COST_XU", 11)
     monkeypatch.setattr(bot, "WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 22)
     monkeypatch.setattr(bot, "WORKFLOW_PROMPT_PACK_COST_XU", 33)
@@ -540,10 +549,17 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL", True)
     assert bot.image_base_cost_xu() == 320
     assert bot.video_base_cost_xu() == 640
+    monkeypatch.setattr(bot, "IMAGE_LOW_COST_XU", 0)
+    assert bot.image_base_cost_xu() == 320
+    monkeypatch.setattr(bot, "IMAGE_LOW_COST_XU", 320)
     assert bot.shopaikey_video_cost_for_flow(False) == 640
     assert bot.shopaikey_video_cost_for_flow(True) == 640
     pricing = bot.media_workflow_pricing_payload()
-    assert pricing["billing_mode"] == "centralized_pricing"
+    assert pricing["billing_mode"] == "tiered_media_pricing"
+    assert pricing["price_table_source"] == "centralized_price_menu"
+    assert pricing["media_price_multiplier"] == 2
+    assert pricing["image_tiers"]["low"]["cost"] == 320
+    assert pricing["video_tiers"]["low"]["cost"] == 640
     assert pricing["quick_image_cost"] == 320
     assert pricing["workflow_image_cost"] == 320
     assert pricing["quick_video_cost"] == 640
@@ -998,12 +1014,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Mở menu chính bên dưới" in helper_source
     assert 'IMAGE_BASE_COST_XU = env_int("IMAGE_BASE_COST_XU", 50)' in source
     assert 'VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", 300)' in source
+    assert 'MEDIA_PRICE_MULTIPLIER = env_int("MEDIA_PRICE_MULTIPLIER", 2)' in source
+    assert 'IMAGE_LOW_COST_XU = env_int("IMAGE_LOW_COST_XU"' in source
+    assert 'VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU"' in source
     assert 'WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)' in source
     assert 'WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)' in source
     assert 'WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", 20)' in source
     assert "Tính năng này đang thử nghiệm nội bộ, chưa mở công khai" in helper_source
-    assert "media_workflow_pricing_payload()" in helper_source
-    assert "Legacy ShopAIKey 50/200 chỉ là fallback ENV cũ" in helper_source
+    assert "Giá chính thức được gom về một nơi duy nhất" in helper_source
     assert "set_quick_media_pending(uid, action)" in source
     assert 'set_quick_media_pending(uid, "quick_image_prompt")' not in source  # action is centralized through start/callback helpers.
     assert "quick_image_prompt" in source and "quick_video_prompt" in source
@@ -1023,23 +1041,46 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "/quick_image_test" in quick_source and "/quick_video_test" in quick_source
     assert "No Xu deducted" in quick_source or "Không trừ Xu" in quick_source
     assert "Quick media menu: <code>enabled/admin-only</code>" in source
-    assert "Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>" in source
+    assert "Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>" in source
+    assert "Price table source: <code>{html.escape(pricing['price_table_source'])}</code>" in source
 
-    monkeypatch.setattr(bot, "IMAGE_BASE_COST_XU", 321)
-    monkeypatch.setattr(bot, "VIDEO_BASE_COST_XU", 654)
+    monkeypatch.setattr(bot, "MEDIA_PRICE_MULTIPLIER", 2)
+    monkeypatch.setattr(bot, "IMAGE_LOW_PROVIDER_COST_XU", 161)
+    monkeypatch.setattr(bot, "VIDEO_LOW_PROVIDER_COST_XU", 327)
+    monkeypatch.setattr(bot, "IMAGE_LOW_COST_XU", 321)
+    monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 654)
+    monkeypatch.setattr(bot, "IMAGE_STANDARD_COST_XU", 777)
+    monkeypatch.setattr(bot, "IMAGE_HIGH_COST_XU", 888)
+    monkeypatch.setattr(bot, "VIDEO_STANDARD_COST_XU", 999)
+    monkeypatch.setattr(bot, "VIDEO_HIGH_COST_XU", 1111)
+    monkeypatch.setattr(bot, "VIDEO_PREMIUM_COST_XU", 2222)
     monkeypatch.setattr(bot, "WORKFLOW_TREND_ANALYSIS_COST_XU", 7)
     monkeypatch.setattr(bot, "WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 8)
     monkeypatch.setattr(bot, "WORKFLOW_PROMPT_PACK_COST_XU", 9)
     pricing = bot.media_workflow_pricing_payload()
+    assert pricing["billing_mode"] == "tiered_media_pricing"
+    assert pricing["image_tiers"]["low"]["cost"] == 321
+    assert pricing["image_tiers"]["standard"]["cost"] == 777
+    assert pricing["image_tiers"]["high"]["cost"] == 888
+    assert pricing["video_tiers"]["low"]["cost"] == 654
+    assert pricing["video_tiers"]["standard"]["cost"] == 999
+    assert pricing["video_tiers"]["high"]["cost"] == 1111
+    assert pricing["video_tiers"]["premium"]["cost"] == 2222
     assert pricing["quick_image_cost"] == 321
     assert pricing["quick_video_cost"] == 654
-    assert "321 Xu" in bot.create_media_pricing_text()
-    assert "654 Xu" in bot.create_media_pricing_text()
+    assert "321 Xu" not in bot.create_media_pricing_text()
+    assert "654 Xu" not in bot.create_media_pricing_text()
     pricing_text = "\n".join(bot.pricing_main_lines())
-    assert "AI Media" in pricing_text
-    assert "Tạo ảnh nhanh: <b>321 Xu</b>" in pricing_text
-    assert "Tạo video nhanh: <b>654 Xu</b>" in pricing_text
-    assert "centralized_pricing" in pricing_text
+    assert "C. Hình ảnh AI" in pricing_text
+    assert "D. Video AI" in pricing_text
+    assert "E. Workflow nội dung theo trend" in pricing_text
+    assert "Ảnh tiết kiệm: <b>321 Xu</b>" in pricing_text
+    assert "Ảnh tiêu chuẩn: <b>777 Xu</b>" in pricing_text
+    assert "Video tiết kiệm: <b>654 Xu</b>" in pricing_text
+    assert "Video premium/admin-only: <b>2222 Xu</b>" in pricing_text
+    assert "Tổng gói content-only: <b>24 Xu</b>" in pricing_text
+    assert "provider cost" not in pricing_text.lower()
+    assert "tiered_media_pricing" in pricing_text
     start_labels = [button.text for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard for button in row]
     assert "🎨 Media Creator" not in start_labels
     assert "🎬 Tạo nội dung / Video" in start_labels
@@ -1058,6 +1099,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     image_labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
     assert "🖼 Tạo ảnh AI nhanh" in image_labels
     assert "💳 Xem bảng giá" not in image_labels
+    assert "💰 Xem giá" not in image_labels
     assert "📞 Liên hệ admin" not in image_labels
     video_buttons = [button for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     assert any(button.text == "🎞 Tạo video nhanh" and button.callback_data == "create_media|quick_video" for button in video_buttons)
@@ -1067,7 +1109,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "✍️ Tạo prompt video" in video_labels
     assert "📝 Viết hook/script/caption" in video_labels
     assert "💳 Xem bảng giá" not in video_labels
+    assert "💰 Xem giá" not in video_labels
     assert "📞 Liên hệ admin" not in video_labels
+    docs_labels = [button.text for row in bot.main_docs_keyboard("vi").inline_keyboard for button in row]
+    assert "💰 Xem giá" not in docs_labels
+    topup_labels = [button.text for row in bot.main_topup_keyboard("vi").inline_keyboard for button in row]
+    assert "💰 Xem giá" not in topup_labels
+    guide_labels = [button.text for row in bot.main_guide_keyboard("vi").inline_keyboard for button in row]
+    assert "💰 Bảng giá" not in guide_labels
     create_media_labels = [button.text for row in bot.create_media_menu_keyboard().inline_keyboard for button in row]
     assert "🖼 Tạo ảnh nhanh" in create_media_labels
     assert "🎞 Tạo video nhanh" in create_media_labels

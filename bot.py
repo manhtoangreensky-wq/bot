@@ -845,6 +845,21 @@ VIDEO_FROM_IMAGE_BASIC_COST = 300
 VIDEO_FROM_IMAGE_PRO_COST = 600
 IMAGE_BASE_COST_XU = env_int("IMAGE_BASE_COST_XU", 50)
 VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", 300)
+MEDIA_PRICE_MULTIPLIER = env_int("MEDIA_PRICE_MULTIPLIER", 2)
+IMAGE_LOW_PROVIDER_COST_XU = env_int("IMAGE_LOW_PROVIDER_COST_XU", 25)
+IMAGE_STANDARD_PROVIDER_COST_XU = env_int("IMAGE_STANDARD_PROVIDER_COST_XU", 150)
+IMAGE_HIGH_PROVIDER_COST_XU = env_int("IMAGE_HIGH_PROVIDER_COST_XU", 250)
+VIDEO_LOW_PROVIDER_COST_XU = env_int("VIDEO_LOW_PROVIDER_COST_XU", 150)
+VIDEO_STANDARD_PROVIDER_COST_XU = env_int("VIDEO_STANDARD_PROVIDER_COST_XU", 300)
+VIDEO_HIGH_PROVIDER_COST_XU = env_int("VIDEO_HIGH_PROVIDER_COST_XU", 600)
+VIDEO_PREMIUM_PROVIDER_COST_XU = env_int("VIDEO_PREMIUM_PROVIDER_COST_XU", 1000)
+IMAGE_LOW_COST_XU = env_int("IMAGE_LOW_COST_XU", IMAGE_LOW_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
+IMAGE_STANDARD_COST_XU = env_int("IMAGE_STANDARD_COST_XU", IMAGE_STANDARD_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
+IMAGE_HIGH_COST_XU = env_int("IMAGE_HIGH_COST_XU", IMAGE_HIGH_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
+VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", VIDEO_LOW_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
+VIDEO_STANDARD_COST_XU = env_int("VIDEO_STANDARD_COST_XU", VIDEO_STANDARD_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
+VIDEO_HIGH_COST_XU = env_int("VIDEO_HIGH_COST_XU", VIDEO_HIGH_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
+VIDEO_PREMIUM_COST_XU = env_int("VIDEO_PREMIUM_COST_XU", VIDEO_PREMIUM_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)
 WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)
 WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", 20)
@@ -27470,11 +27485,80 @@ def shopaikey_paid_image_source_available(user_id, source_job_id: str) -> bool:
     finally:
         conn.close()
 
+def media_price_multiplier() -> int:
+    return max(1, int(MEDIA_PRICE_MULTIPLIER or 2))
+
+def media_tier_price(cost_xu: int, provider_cost_xu: int, fallback_xu: int = 0) -> int:
+    explicit = int(cost_xu or 0)
+    if explicit > 0:
+        return explicit
+    provider_cost = int(provider_cost_xu or 0)
+    if provider_cost > 0:
+        return max(0, provider_cost * media_price_multiplier())
+    return max(0, int(fallback_xu or 0))
+
+def image_tier_pricing_payload() -> dict:
+    return {
+        "low": {
+            "label": "Ảnh tiết kiệm",
+            "cost": media_tier_price(IMAGE_LOW_COST_XU, IMAGE_LOW_PROVIDER_COST_XU, IMAGE_BASE_COST_XU),
+            "provider_cost": int(IMAGE_LOW_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            "note": "Ảnh nhanh, phù hợp nháp/prompt test.",
+        },
+        "standard": {
+            "label": "Ảnh tiêu chuẩn",
+            "cost": media_tier_price(IMAGE_STANDARD_COST_XU, IMAGE_STANDARD_PROVIDER_COST_XU, AI_IMAGE_COST),
+            "provider_cost": int(IMAGE_STANDARD_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            "note": "Chất lượng ổn cho nội dung hằng ngày.",
+        },
+        "high": {
+            "label": "Ảnh chất lượng cao",
+            "cost": media_tier_price(IMAGE_HIGH_COST_XU, IMAGE_HIGH_PROVIDER_COST_XU, AI_IMAGE_EDIT_COST),
+            "provider_cost": int(IMAGE_HIGH_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            "note": "Ưu tiên prompt kỹ hơn, dùng cho sản phẩm/quảng cáo.",
+        },
+    }
+
+def video_tier_pricing_payload() -> dict:
+    return {
+        "low": {
+            "label": "Video tiết kiệm",
+            "cost": media_tier_price(VIDEO_LOW_COST_XU, VIDEO_LOW_PROVIDER_COST_XU, VIDEO_BASE_COST_XU),
+            "provider_cost": int(VIDEO_LOW_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+            "note": "Video ngắn/nháp, public vẫn phụ thuộc ENV.",
+        },
+        "standard": {
+            "label": "Video tiêu chuẩn",
+            "cost": media_tier_price(VIDEO_STANDARD_COST_XU, VIDEO_STANDARD_PROVIDER_COST_XU, VIDEO_FROM_IMAGE_PRO_COST),
+            "provider_cost": int(VIDEO_STANDARD_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+            "note": "Dùng cho video ngắn ổn định hơn.",
+        },
+        "high": {
+            "label": "Video chất lượng cao",
+            "cost": media_tier_price(VIDEO_HIGH_COST_XU, VIDEO_HIGH_PROVIDER_COST_XU, VIDEO_SERIES_COST),
+            "provider_cost": int(VIDEO_HIGH_PROVIDER_COST_XU or 0),
+            "model": "veo/grok fallback",
+            "note": "Tác vụ nặng, cần provider ổn định.",
+        },
+        "premium": {
+            "label": "Video premium/admin-only",
+            "cost": media_tier_price(VIDEO_PREMIUM_COST_XU, VIDEO_PREMIUM_PROVIDER_COST_XU, max(VIDEO_SERIES_COST, 2000)),
+            "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
+            "model": "premium/admin-only",
+            "note": "Chỉ mở khi admin xác nhận provider và chi phí.",
+        },
+    }
+
 def image_base_cost_xu() -> int:
-    return max(0, int(IMAGE_BASE_COST_XU or SHOPAIKEY_IMAGE_COST_XU or AI_IMAGE_COST or 0))
+    return int(image_tier_pricing_payload()["low"]["cost"])
 
 def video_base_cost_xu() -> int:
-    return max(0, int(VIDEO_BASE_COST_XU or SHOPAIKEY_VIDEO_COST_XU or VIDEO_FROM_IMAGE_BASIC_COST or 0))
+    return int(video_tier_pricing_payload()["low"]["cost"])
 
 def workflow_trend_analysis_cost_xu() -> int:
     return max(0, int(WORKFLOW_TREND_ANALYSIS_COST_XU or 0))
@@ -27512,12 +27596,18 @@ def trend_workflow_billing_status_text() -> str:
 
 def media_workflow_pricing_payload() -> dict:
     trend_breakdown = trend_workflow_content_cost_breakdown()
+    image_tiers = image_tier_pricing_payload()
+    video_tiers = video_tier_pricing_payload()
     return {
-        "billing_mode": "centralized_pricing",
-        "quick_image_cost": image_base_cost_xu(),
-        "quick_video_cost": video_base_cost_xu(),
-        "workflow_image_cost": image_base_cost_xu(),
-        "workflow_video_cost": video_base_cost_xu(),
+        "billing_mode": "tiered_media_pricing",
+        "price_table_source": "centralized_price_menu",
+        "media_price_multiplier": media_price_multiplier(),
+        "image_tiers": image_tiers,
+        "video_tiers": video_tiers,
+        "quick_image_cost": int(image_tiers["low"]["cost"]),
+        "quick_video_cost": int(video_tiers["low"]["cost"]),
+        "workflow_image_cost": int(image_tiers["low"]["cost"]),
+        "workflow_video_cost": int(video_tiers["low"]["cost"]),
         "workflow_trend_analysis_cost": trend_breakdown["trend_analysis"],
         "workflow_script_storyboard_cost": trend_breakdown["script_storyboard"],
         "workflow_prompt_pack_cost": trend_breakdown["prompt_pack"],
@@ -27593,22 +27683,11 @@ def create_media_menu_keyboard() -> InlineKeyboardMarkup:
     ])
 
 def create_media_pricing_text() -> str:
-    pricing = media_workflow_pricing_payload()
     return (
         "📌 <b>Giá Media Creator TOAN AAS</b>\n\n"
-        f"• Quick image cost: <code>{pricing['quick_image_cost']} Xu</code>\n"
-        f"• Quick video cost: <code>{pricing['quick_video_cost']} Xu</code>\n"
-        f"• Workflow trend analysis cost: <code>{pricing['workflow_trend_analysis_cost']} Xu</code>\n"
-        f"• Workflow script/storyboard cost: <code>{pricing['workflow_script_storyboard_cost']} Xu</code>\n"
-        f"• Workflow prompt pack cost: <code>{pricing['workflow_prompt_pack_cost']} Xu</code>\n"
-        f"• Workflow content total: <code>{pricing['workflow_content_total_cost']} Xu</code>\n"
-        f"• Trend workflow public: <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code>\n"
-        f"• Trend workflow billing: <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code>\n"
-        f"• Trend workflow confirm: <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>\n"
-        f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>\n"
-        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>\n"
-        f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>\n\n"
-        "Legacy ShopAIKey 50/200 chỉ là fallback ENV cũ nếu chưa có giá tập trung, không phải giá chính thức."
+        "Giá chính thức được gom về một nơi duy nhất: <b>💳 Bảng giá</b>.\n"
+        "Vui lòng mở <code>/pricing</code> hoặc <code>/banggia</code> để xem đầy đủ các nhóm Hình ảnh AI, Video AI và Workflow nội dung theo trend.\n\n"
+        "Menu Media Creator chỉ dùng để bắt đầu thao tác, không lặp bảng giá để tránh rối mắt."
     )
 
 def shopaikey_preview_final_cost(user_id, base_cost: int, event_type: str) -> int:
@@ -30386,12 +30465,10 @@ def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📄 Document tools", callback_data="menu|hint_doc_tools")],
-            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📄 Mở công cụ tài liệu", callback_data="menu|hint_doc_tools")],
-        [InlineKeyboardButton("💰 Xem giá", callback_data="pricing|main")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -30474,12 +30551,10 @@ def main_topup_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Use /naptien", callback_data="menu|hint_naptien")],
-            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien")],
-        [InlineKeyboardButton("💰 Xem giá", callback_data="pricing|main")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -30489,14 +30564,12 @@ def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("📘 Full guide", callback_data="menu|guide")],
             [InlineKeyboardButton("📜 Terms", callback_data="menu|legal")],
             [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📘 Hướng dẫn đầy đủ", callback_data="menu|guide")],
         [InlineKeyboardButton("📜 Điều khoản", callback_data="menu|legal")],
         [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton("💰 Bảng giá", callback_data="pricing|main")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -32634,17 +32707,12 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Enabled: <code>{'true' if SHOPAIKEY_ENABLED else 'false'}</code>",
         f"• Admin-only: <code>{'true' if SHOPAIKEY_ADMIN_ONLY else 'false'}</code>",
         "• Public: <code>OFF</code>",
-        f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
-        "• Pricing source: <code>configurable ENV</code>",
+        f"• Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
+        f"• Price table source: <code>{html.escape(pricing['price_table_source'])}</code>",
+        f"• Media markup multiplier: <code>{pricing['media_price_multiplier']}x</code>",
         "• Quick media menu: <code>enabled/admin-only</code>",
-        f"• Quick image: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_image_cost']} Xu</code>",
-        f"• Quick video: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_video_cost']} Xu</code>",
-        f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | quick image cost <code>{pricing['quick_image_cost']} Xu</code>",
-        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | quick video cost <code>{pricing['quick_video_cost']} Xu</code>",
-        f"• Workflow trend analysis cost: <code>{pricing['workflow_trend_analysis_cost']} Xu</code>",
-        f"• Workflow script/storyboard cost: <code>{pricing['workflow_script_storyboard_cost']} Xu</code>",
-        f"• Workflow prompt pack cost: <code>{pricing['workflow_prompt_pack_cost']} Xu</code>",
-        f"• Legacy ShopAIKey fallback cost: image <code>{pricing['legacy_shopaikey_image_fallback']} Xu</code> / video <code>{pricing['legacy_shopaikey_video_fallback']} Xu</code>",
+        f"• Image tiers: <code>{'/'.join(pricing['image_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
+        f"• Video tiers: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
@@ -32668,10 +32736,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Video reason: <code>{html.escape(shopaikey_video_reason or '-')}</code>",
         "• Video: <code>custom video endpoint; customer public controlled by ENV</code>",
         f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
-        f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | trend <code>{pricing['workflow_trend_analysis_cost']} Xu</code> | script/storyboard <code>{pricing['workflow_script_storyboard_cost']} Xu</code> | prompt pack <code>{pricing['workflow_prompt_pack_cost']} Xu</code>",
-        f"• Trend workflow separate generation: image <code>{pricing['workflow_image_cost']} Xu</code> | video <code>{pricing['workflow_video_cost']} Xu</code>",
-        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | image cost <code>{pricing['workflow_image_cost']} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
-        f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code> | workflow video cost <code>{pricing['workflow_video_cost']} Xu</code> | standalone video cost <code>{pricing['quick_video_cost']} Xu</code>",
+        f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | image/video separate in <code>/pricing</code>",
+        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
+        f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
         "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
         "",
@@ -33348,27 +33415,26 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Chat model: <code>{html.escape(SHOPAIKEY_CHAT_MODEL or '-')}</code>",
         f"• Chat fallbacks: <code>{html.escape(', '.join(shopaikey_chat_fallback_models()) or '-')}</code>",
         f"• TTS: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code> / <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>",
-        f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
-        "• Pricing source: <code>configurable ENV</code>",
+        f"• Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
+        f"• Price table source: <code>{html.escape(pricing['price_table_source'])}</code>",
+        f"• Media markup multiplier: <code>{pricing['media_price_multiplier']}x</code>",
         "• Quick media menu: <code>enabled/admin-only</code>",
-        f"• Quick image: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_image_cost']} Xu</code>",
-        f"• Quick video: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_video_cost']} Xu</code>",
-        f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | quick image cost <code>{pricing['quick_image_cost']} Xu</code>",
-        f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | quick video cost <code>{pricing['quick_video_cost']} Xu</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
-        f"• Workflow trend analysis cost: <code>{pricing['workflow_trend_analysis_cost']} Xu</code>",
-        f"• Workflow script/storyboard cost: <code>{pricing['workflow_script_storyboard_cost']} Xu</code>",
-        f"• Workflow prompt pack cost: <code>{pricing['workflow_prompt_pack_cost']} Xu</code>",
-        f"• Legacy ShopAIKey fallback cost: image <code>{pricing['legacy_shopaikey_image_fallback']} Xu</code> / video <code>{pricing['legacy_shopaikey_video_fallback']} Xu</code>",
+        f"• Image tiers: <code>{'/'.join(pricing['image_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
+        f"• Image provider cost: low <code>{pricing['image_tiers']['low']['provider_cost']} Xu</code> / standard <code>{pricing['image_tiers']['standard']['provider_cost']} Xu</code> / high <code>{pricing['image_tiers']['high']['provider_cost']} Xu</code>",
+        f"• Image model mapping: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
+        f"• Video tiers: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
+        f"• Video provider cost: low <code>{pricing['video_tiers']['low']['provider_cost']} Xu</code> / standard <code>{pricing['video_tiers']['standard']['provider_cost']} Xu</code> / high <code>{pricing['video_tiers']['high']['provider_cost']} Xu</code> / premium <code>{pricing['video_tiers']['premium']['provider_cost']} Xu</code>",
+        f"• Video model mapping: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
         f"• Job lock: <code>{'ON' if SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED else 'OFF'}</code>",
         f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
         f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | trend <code>{pricing['workflow_trend_analysis_cost']} Xu</code> | script/storyboard <code>{pricing['workflow_script_storyboard_cost']} Xu</code> | prompt pack <code>{pricing['workflow_prompt_pack_cost']} Xu</code>",
-        f"• Trend workflow separate generation: image <code>{pricing['workflow_image_cost']} Xu</code> | video <code>{pricing['workflow_video_cost']} Xu</code>",
-        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | cost <code>{pricing['workflow_image_cost']} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
+        f"• Trend workflow separate generation: image/video priced by tiers in <code>/pricing</code>",
+        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
-        f"• Image-to-video cost later: <code>{pricing['workflow_video_cost']} Xu workflow video step / {pricing['quick_video_cost']} Xu standalone</code>",
+        "• Image-to-video cost later: <code>uses Video AI tier pricing when public is enabled</code>",
         f"• Maintenance mode: <code>{'ON' if maintenance_on else 'OFF'}</code>",
         f"• Provider freeze: <code>{'ON' if provider_freeze.get('frozen') else 'OFF'}</code>",
         f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason') or '-'))}</code>",
@@ -44959,33 +45025,64 @@ async def send_pricing_lines(message, lines: list[str], reply_markup: InlineKeyb
 
 def pricing_main_lines() -> list[str]:
     pricing = media_workflow_pricing_payload()
+    image_tiers = pricing["image_tiers"]
+    video_tiers = pricing["video_tiers"]
+    doc_items = [
+        f"• Ảnh sang PDF: <b>{DOC_COSTS.get('image_to_pdf', 0)} Xu</b>",
+        f"• PDF sang ảnh: <b>{DOC_COSTS.get('pdf_to_images', 0)} Xu</b>",
+        f"• PDF sang Word text: <b>{DOC_COSTS.get('pdf_to_word_text', 0)} Xu</b>",
+        f"• Nén PDF: <b>{DOC_COSTS.get('compress_pdf', 0)} Xu</b>",
+        f"• Tách/gộp PDF: <b>{DOC_COSTS.get('split_pdf', 0)} / {DOC_COSTS.get('merge_pdf', 0)} Xu</b>",
+        f"• OCR ảnh/PDF: <b>{DOC_COSTS.get('ocr_image', 0)} Xu</b> / <b>{DOC_COSTS.get('ocr_pdf_per_page', 0)} Xu/trang</b>",
+    ]
     return [
-        "💎 <b>BẢNG GIÁ TOAN AAS</b>",
+        "💳 <b>BẢNG GIÁ TOAN AAS</b>",
         "",
-        "TOAN AAS dùng 2 cách thanh toán:",
+        "<b>A. Gói Xu / Nạp Xu</b>",
+        f"• Trial trải nghiệm: <b>{TRIAL_BONUS_AMOUNT if TRIAL_BONUS_ENABLED else 0} Xu</b> / tài khoản hợp lệ, nhận 1 lần.",
+        "• 50.000đ → <b>500 Xu</b>",
+        "• 100.000đ → <b>1.000 Xu</b>",
+        "• 200.000đ → <b>2.000 Xu</b>",
+        "• 500.000đ → <b>5.000 Xu</b>",
+        "• Bonus nạp/launch/rank-up nếu đang có sẽ hiển thị theo chính sách hiện hành, không cộng thêm theo hạng thành viên trên mọi lần nạp.",
         "",
-        "1. 💰 <b>Nạp Xu thủ công</b>",
-        "Dùng linh hoạt cho từng tác vụ AI, file, audio, video, nhạc, dịch thuật.",
+        "<b>B. AI Chat / Hỏi AI</b>",
+        f"• Gói thường: <b>{CHAT_COST_NORMAL} Xu</b> / lượt trả lời thành công.",
+        f"• Gói Pro: <b>{CHAT_COST_PRO} Xu</b> / lượt trả lời thành công.",
+        f"• Gói Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>, tùy độ dài/tác vụ.",
+        "• Nếu provider lỗi/quota, bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
         "",
-        "2. 📦 <b>Gói tháng</b>",
-        "Dành cho thành viên đủ điều kiện, gồm quyền dùng công cụ + hạn mức xử lý + lượt dịch vụ VIP.",
+        "<b>C. Hình ảnh AI</b>",
+        f"• {image_tiers['low']['label']}: <b>{image_tiers['low']['cost']} Xu</b> — {html.escape(image_tiers['low']['note'])}",
+        f"• {image_tiers['standard']['label']}: <b>{image_tiers['standard']['cost']} Xu</b> — {html.escape(image_tiers['standard']['note'])}",
+        f"• {image_tiers['high']['label']}: <b>{image_tiers['high']['cost']} Xu</b> — {html.escape(image_tiers['high']['note'])}",
+        f"• Trạng thái public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         "",
-        "3. ⭐ <b>Dịch vụ VIP</b>",
-        "Các tác vụ tốn AI/API/server như tạo ảnh AI, tạo nhạc AI, dịch file, ghép nhạc/video, làm rõ audio/video.",
+        "<b>D. Video AI</b>",
+        f"• {video_tiers['low']['label']}: <b>{video_tiers['low']['cost']} Xu</b> — {html.escape(video_tiers['low']['note'])}",
+        f"• {video_tiers['standard']['label']}: <b>{video_tiers['standard']['cost']} Xu</b> — {html.escape(video_tiers['standard']['note'])}",
+        f"• {video_tiers['high']['label']}: <b>{video_tiers['high']['cost']} Xu</b> — {html.escape(video_tiers['high']['note'])}",
+        f"• {video_tiers['premium']['label']}: <b>{video_tiers['premium']['cost']} Xu</b> — {html.escape(video_tiers['premium']['note'])}",
+        f"• Trạng thái public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
-        "4. 🪪 <b>Thành viên</b>",
-        "Hạng thành viên dùng để nhận giảm Xu khi dùng dịch vụ và mở điều kiện mua gói tháng.",
-        "",
-        "<b>AI Media</b>",
-        f"• Tạo ảnh nhanh: <b>{pricing['quick_image_cost']} Xu</b>",
-        f"• Tạo video nhanh: <b>{pricing['quick_video_cost']} Xu</b>",
+        "<b>E. Workflow nội dung theo trend</b>",
         f"• Phân tích trend: <b>{pricing['workflow_trend_analysis_cost']} Xu</b>",
         f"• Hook/script/storyboard: <b>{pricing['workflow_script_storyboard_cost']} Xu</b>",
         f"• Prompt pack: <b>{pricing['workflow_prompt_pack_cost']} Xu</b>",
-        f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
-        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
-        f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
-        "• Giá media lấy từ centralized pricing và có thể chỉnh bằng ENV.",
+        f"• Tổng gói content-only: <b>{pricing['workflow_content_total_cost']} Xu</b>",
+        "• Gói này chưa bao gồm tạo ảnh/video thật. Ảnh/video tính riêng theo bảng giá Hình ảnh AI / Video AI.",
+        "",
+        "<b>F. Voice / TTS / Nhạc / SFX</b>",
+        f"• TTS/voice tiết kiệm: từ <b>{VOICE_BASE_COST} Xu</b> + <b>{VOICE_COST_PER_BLOCK} Xu</b> theo độ dài.",
+        f"• Audio xử lý cơ bản: từ <b>{AUDIO_MIN_COST} Xu</b>, tùy dung lượng.",
+        "• Nhạc/SFX library: tìm kiếm/nghe thử không trừ Xu; tạo nhạc AI thật chỉ mở khi provider và giá đã được xác nhận.",
+        "",
+        "<b>G. Tài liệu / PDF</b>",
+        *doc_items,
+        "",
+        "<b>Pricing mode</b>",
+        f"• <code>{html.escape(pricing['billing_mode'])}</code>",
+        "• Giá media lấy từ bảng giá tập trung và có biên dự phòng provider/refund.",
         "",
         "<b>Lưu ý:</b>",
         "• Xu là đơn vị nội bộ trong TOAN AAS, không phải tiền/tiền điện tử, không rút tiền, không chuyển nhượng.",
