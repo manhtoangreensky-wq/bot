@@ -24048,9 +24048,136 @@ class AgentDownloader:
 # ─── STATE ───────────────────────────────────────────────────────────────────
 USER_BILL_STATE: dict = {}
 USER_PENDING: dict = {}
+GENERATION_PENDING_JOBS: dict[tuple, dict] = {}
 MANUAL_BILL_STATE_TTL_SECONDS = 10 * 60
 LAST_USER_FILE_TTL_SECONDS = 10 * 60
+GENERATION_PENDING_TTL_SECONDS = 10 * 60
 LAST_USER_FILE: dict = {}
+
+def normalize_generation_prompt(value: str) -> str:
+    clean = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    return clean[:240]
+
+def generation_pending_key(user_id, tool_type="", normalized_prompt=""):
+    return (str(user_id or ""), str(tool_type or ""), str(normalized_prompt or ""))
+
+def get_generation_wait_text(tool_type: str) -> str:
+    tool = str(tool_type or "").lower()
+    if "image" in tool:
+        return "🖼 Đang tạo ảnh cho bạn... vui lòng chờ một chút. Không cần gửi lại lệnh, bot sẽ trả kết quả khi xong."
+    if "video" in tool:
+        return "🎬 Đang tạo video cho bạn... video có thể mất 1–5 phút. Không cần gửi lại lệnh, bot sẽ cập nhật khi có kết quả."
+    if "tts" in tool or "audio" in tool or "voice" in tool:
+        return "🔊 Đang tạo giọng nói... vui lòng chờ một chút."
+    if "trend" in tool:
+        return "🔎 Đang tìm trend và phân tích ý tưởng... vui lòng chờ."
+    return "⏳ Bot đang xử lý yêu cầu... vui lòng chờ, không cần gửi lại lệnh."
+
+def is_duplicate_pending_job(user_id, tool_type="", normalized_prompt="") -> dict | None:
+    key = generation_pending_key(user_id, tool_type, normalized_prompt)
+    job = GENERATION_PENDING_JOBS.get(key)
+    if not job:
+        return None
+    if time.time() - float(job.get("created_at_ts") or 0) > GENERATION_PENDING_TTL_SECONDS:
+        GENERATION_PENDING_JOBS.pop(key, None)
+        return None
+    if str(job.get("status") or "").lower() in {"pending", "running"}:
+        return job
+    return None
+
+def start_generation_pending_job(user_id, tool_type="", normalized_prompt="", provider="", xu_cost=0, command="") -> dict:
+    key = generation_pending_key(user_id, tool_type, normalized_prompt)
+    job = {
+        "user_id": str(user_id or ""),
+        "command": str(command or ""),
+        "tool_type": str(tool_type or ""),
+        "status": "running",
+        "created_at": now_text(),
+        "created_at_ts": time.time(),
+        "provider": str(provider or ""),
+        "task_id": "",
+        "output": "",
+        "xu_cost": int(xu_cost or 0),
+    }
+    GENERATION_PENDING_JOBS[key] = job
+    return job
+
+def update_generation_pending_job(user_id, tool_type="", normalized_prompt="", **fields):
+    key = generation_pending_key(user_id, tool_type, normalized_prompt)
+    job = GENERATION_PENDING_JOBS.get(key)
+    if not job:
+        return
+    for field, value in fields.items():
+        if field in {"task_id", "output", "status", "provider"}:
+            job[field] = str(value or "")
+
+def finish_generation_pending_job(user_id, tool_type="", normalized_prompt="", status="done"):
+    key = generation_pending_key(user_id, tool_type, normalized_prompt)
+    job = GENERATION_PENDING_JOBS.get(key)
+    if job:
+        job["status"] = str(status or "done")
+    GENERATION_PENDING_JOBS.pop(key, None)
+
+async def send_waiting_message(update: Update, context: ContextTypes.DEFAULT_TYPE, tool_type: str):
+    return await update.message.reply_text(get_generation_wait_text(tool_type))
+
+async def update_waiting_message(message, text: str):
+    if not message:
+        return False
+    try:
+        await message.edit_text(str(text or ""))
+        return True
+    except Exception:
+        return False
+
+def build_image_pose_suggestions(topic: str) -> str:
+    topic = str(topic or "sản phẩm").strip()[:160]
+    return (
+        "Pose: front-facing hero pose; side angle product showcase; over-the-shoulder POV; "
+        "close-up detail shot; wide scene with environment. "
+        "Camera: eye-level; low angle; top-down; cinematic close-up; wide establishing shot. "
+        "Style: realistic product ad; clean minimal tech; cinematic neon; UGC social media; premium brand commercial. "
+        f"Subject: {topic}."
+    )
+
+def build_video_flow_suggestions(topic: str, image_context: str = "") -> str:
+    topic = str(topic or "sản phẩm").strip()[:160]
+    context = f" Dựa trên ảnh: {str(image_context).strip()[:120]}." if image_context else ""
+    return (
+        f"Product reveal: Scene 1 hook, Scene 2 problem, Scene 3 {topic} as solution, Scene 4 benefit, Scene 5 CTA.{context}\n"
+        f"Viral short 9:16: 0-2s shocking hook, 2-5s visual transformation, 5-8s proof/result, 8-12s CTA for {topic}.\n"
+        f"Brand cinematic 16:9: logo intro, hero shot, motion details, final slogan and CTA for {topic}."
+    )
+
+def build_trend_prompt_suggestions(trend: dict) -> list[str]:
+    title = str(trend.get("title") or trend.get("trend_title") or trend.get("topic") or "trend").strip()[:180]
+    summary = str(trend.get("summary") or trend.get("trend_summary") or "").strip()[:260]
+    platform = str(trend.get("platform") or "tiktok").strip()[:40]
+    niche = str(trend.get("niche") or "AI/product").strip()[:80]
+    simple_image = f"Create a clean realistic image about {title}, target audience {niche}, clear subject, no watermark, high quality, aspect ratio 9:16."
+    product_image = f"Product/affiliate ad image for {title}, show problem-solution visually, clean commercial lighting, CTA space, no fake claims, 4:5."
+    viral_image = f"Viral social image for {platform}: bold visual hook about {title}, UGC style, emotional contrast, readable composition, no extra text."
+    thumbnail = f"Cinematic thumbnail for {title}, premium tech lighting, strong focal point, high contrast, professional brand style, 16:9."
+    short_video = f"Short video prompt: {build_video_flow_suggestions(title)}"
+    return [
+        "",
+        f"<b>Trend guide:</b> {html.escape(title)}",
+        f"• Vì sao đáng chú ý: {html.escape(summary or 'Có tín hiệu mới/đang được quan tâm trong nguồn trend.')}",
+        f"• Audience: <code>{html.escape(niche)}</code> | Platform: <code>{html.escape(platform)}</code>",
+        "• Risk/copyright: kiểm tra nguồn, tránh dùng logo/nhân vật/thương hiệu nếu chưa có quyền; không cam kết kết quả quá mức.",
+        "• Hook/caption gợi ý: <code>Đừng mua/làm điều này trước khi xem 3 điểm sau...</code> | <code>Đây là cách biến vấn đề này thành lợi thế.</code>",
+        "• CTA gợi ý: <code>Lưu lại để thử sau</code> | <code>Nhắn TOAN AAS để tạo pack nội dung tương tự</code>",
+        "Bạn có thể copy 1 trong các prompt này để tạo ảnh:",
+        f"<pre>{html.escape(simple_image)}</pre>",
+        f"<pre>{html.escape(product_image)}</pre>",
+        f"<pre>{html.escape(viral_image)}</pre>",
+        f"<pre>{html.escape(thumbnail)}</pre>",
+        "Gợi ý pose/góc máy/style:",
+        f"<pre>{html.escape(build_image_pose_suggestions(title))}</pre>",
+        "Gợi ý video tiếp theo:",
+        f"<pre>{html.escape(short_video)}</pre>",
+        "Nếu ảnh này ổn, bạn có thể dùng nó để tạo video. Gợi ý: copy prompt video ở trên.",
+    ]
 
 def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key=""):
     USER_BILL_STATE[uid] = {
@@ -31306,6 +31433,12 @@ async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_
     if not SHOPAIKEY_API_KEY:
         save_tool_test_result("shopaikey", "MISSING", "SHOPAIKEY_API_KEY missing", uid)
         return await update.message.reply_text("🧪 <b>ShopAIKey Smoke Test</b>\n\n• Status: <code>MISSING</code>", parse_mode="HTML")
+    tool_type = "shopaikey_chat"
+    normalized_prompt = normalize_generation_prompt("shopaikey chat smoke test")
+    if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
+        return await update.message.reply_text("⏳ Yêu cầu trước của bạn vẫn đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_shopaikey")
+    waiting_message = await send_waiting_message(update, context, "ai")
     result = await shopaikey_chat_smoke_test()
     attempts = result.get("attempts") or []
     attempt_text = ", ".join(f"{item.get('model')}={item.get('status')}" for item in attempts) or "-"
@@ -31317,6 +31450,7 @@ async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_
     save_tool_test_result("shopaikey_chat", result.get("status") or "FAIL", detail, uid)
     save_shopaikey_chat_snapshot(result, detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    await update_waiting_message(waiting_message, "✅ ShopAIKey text smoke test đã xử lý xong. Không trừ Xu.")
     await update.message.reply_text(
         "🧪 <b>ShopAIKey Smoke Test</b>\n\n"
         f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
@@ -31328,6 +31462,7 @@ async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_
         "Tiny prompt only. Không log prompt/response/key. Không trừ Xu. Không ảnh hưởng provider khác.",
         parse_mode="HTML",
     )
+    finish_generation_pending_job(uid, tool_type, normalized_prompt, result.get("status") or "done")
 
 async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -31351,6 +31486,12 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
             "Không gọi API và không trừ Xu.",
             parse_mode="HTML",
         )
+    tool_type = "shopaikey_tts"
+    normalized_prompt = normalize_generation_prompt("shopaikey tts smoke test")
+    if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
+        return await update.message.reply_text("⏳ Yêu cầu trước của bạn vẫn đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_shopaikey_tts")
+    waiting_message = await send_waiting_message(update, context, "tts")
     status, audio_bytes, detail, http_status = await shopaikey_tts_smoke_test()
     output_sent = False
     if status == "PASS" and audio_bytes:
@@ -31372,6 +31513,7 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
     save_tool_test_result("shopaikey_tts", status, final_detail, uid)
     save_shopaikey_component_snapshot("tts", tts_snapshot, final_detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey_tts", status, int(http_status or 0), final_detail)
+    await update_waiting_message(waiting_message, "✅ ShopAIKey TTS smoke test đã xử lý xong. Không trừ Xu.")
     await update.message.reply_text(
         "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
@@ -31383,6 +31525,7 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
         "Không log prompt/response/key. Không trừ Xu.",
         parse_mode="HTML",
     )
+    finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
 
 async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -31406,6 +31549,12 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
             "Không gọi API và không trừ Xu.",
             parse_mode="HTML",
         )
+    tool_type = "shopaikey_image"
+    normalized_prompt = normalize_generation_prompt("shopaikey image smoke test nano-banana")
+    if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
+        return await update.message.reply_text("⏳ Yêu cầu trước của bạn vẫn đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_shopaikey_image")
+    waiting_message = await send_waiting_message(update, context, "image")
     result = await shopaikey_image_smoke_test()
     status = str(result.get("status") or "FAIL")
     image_url = str(result.get("image_url") or "")
@@ -31442,6 +31591,7 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
     save_tool_test_result("shopaikey_image", status, detail, uid)
     save_shopaikey_component_snapshot("image", result, detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey_image", status, int(result.get("http_status") or 0), detail)
+    await update_waiting_message(waiting_message, "✅ ShopAIKey image smoke test đã xử lý xong. Không trừ Xu.")
     await update.message.reply_text(
         "🖼 <b>ShopAIKey Image Smoke Test</b>\n\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
@@ -31455,6 +31605,7 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         "Endpoint admin-only. Không log prompt/response/key. Không trừ Xu. Public image/video vẫn OFF.",
         parse_mode="HTML",
     )
+    finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
 
 async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -31478,6 +31629,12 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
             "Không gọi API và không trừ Xu.",
             parse_mode="HTML",
         )
+    tool_type = "shopaikey_video"
+    normalized_prompt = normalize_generation_prompt("shopaikey video smoke test veo3.1-fast")
+    if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
+        return await update.message.reply_text("⏳ Yêu cầu trước của bạn vẫn đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_shopaikey_video")
+    waiting_message = await send_waiting_message(update, context, "video")
     result = await shopaikey_video_create_smoke_test()
     status = str(result.get("status") or "FAIL")
     detail = (
@@ -31490,6 +31647,8 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
     save_shopaikey_component_snapshot("video", result, detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey_video", status, int(result.get("http_status") or 0), detail)
     task_id = str(result.get("task_id") or "")
+    update_generation_pending_job(uid, tool_type, normalized_prompt, task_id=task_id, status=status)
+    await update_waiting_message(waiting_message, "✅ ShopAIKey video submit đã xử lý xong. Không trừ Xu.")
     await update.message.reply_text(
         "🎞 <b>ShopAIKey Video Smoke Test</b>\n\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
@@ -31503,6 +31662,7 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
         + "Endpoint admin-only. Không log prompt/response/key. Public video vẫn OFF.",
         parse_mode="HTML",
     )
+    finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
 
 async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -31513,6 +31673,13 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
     if not context.args:
         return await update.message.reply_text("Cú pháp: /shopaikey_video_job <task_id>")
     task_id = str(context.args[0] or "").strip()
+    tool_type = "shopaikey_video_job"
+    normalized_prompt = normalize_generation_prompt(task_id)
+    if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
+        return await update.message.reply_text("⏳ Yêu cầu trước của bạn vẫn đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/shopaikey_video_job")
+    update_generation_pending_job(uid, tool_type, normalized_prompt, task_id=task_id)
+    waiting_message = await send_waiting_message(update, context, "video")
     result = await shopaikey_video_job_status(task_id)
     status = str(result.get("status") or "FAIL")
     result_url = str(result.get("result_url") or "")
@@ -31551,6 +31718,8 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
     save_tool_test_result("shopaikey_video", status, detail, uid)
     save_shopaikey_component_snapshot("video", snapshot_payload, detail, uid)
     record_api_debug("shopaikey", "shopaikey_video_job", status, int(result.get("http_status") or 0), detail)
+    update_generation_pending_job(uid, tool_type, normalized_prompt, task_id=task_id, status=status)
+    await update_waiting_message(waiting_message, "✅ ShopAIKey video job đã cập nhật xong. Không trừ Xu.")
     completed = bool(result_url)
     result_line = f"• Result URL: <a href=\"{html.escape(result_url, quote=True)}\">open</a>\n" if completed else ""
     await update.message.reply_text(
@@ -31568,6 +31737,7 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
         parse_mode="HTML",
         disable_web_page_preview=False,
     )
+    finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
 
 class TranslationProviderError(RuntimeError):
     def __init__(self, statuses: dict, errors: dict):
@@ -54186,7 +54356,7 @@ async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if campaign_id and not get_campaign(campaign_id, update.effective_user.id):
         return await update.message.reply_text("❌ Không tìm thấy campaign.")
 
-    msg = await update.message.reply_text("🔎 Đang tìm trend mới nhất...")
+    msg = await update.message.reply_text("🔎 Đang tìm trend và phân tích ý tưởng... vui lòng chờ.")
     try:
         items = await fetch_google_news_trends(niche, platform, limit=5)
     except Exception as e:
@@ -54209,8 +54379,9 @@ async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Nền tảng mục tiêu: <code>{html.escape(platform)}</code>",
         "",
     ]
+    suggestion_lines = []
     buttons = []
-    for _, item, scores in scored_items:
+    for idx, (_, item, scores) in enumerate(scored_items):
         trend_id = save_trend_candidate(
             update.effective_user.id,
             niche,
@@ -54233,9 +54404,18 @@ async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  <b>{html.escape(item['title'])}</b>\n"
             f"  Nguồn: {html.escape(item.get('source') or '-')} | Lý do: {html.escape(scores['score_reason'])}"
         )
+        if idx < 2:
+            suggestion_lines.extend(build_trend_prompt_suggestions({
+                "title": item.get("title") or "",
+                "summary": item.get("summary") or "",
+                "platform": platform,
+                "niche": niche,
+            }))
         buttons.append([InlineKeyboardButton(f"🎬 Tạo video trend #{trend_id} ({scores['trend_score']})", callback_data=f"trend|video|{trend_id}")])
     lines.append("\nChọn nút bên dưới để đưa trend vào pipeline affiliate.")
     await msg.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+    if suggestion_lines:
+        await reply_html_lines(update, ["🧭 <b>GỢI Ý TREND → IMAGE → VIDEO</b>", *suggestion_lines], limit=3600)
 
 async def cmd_trend_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:

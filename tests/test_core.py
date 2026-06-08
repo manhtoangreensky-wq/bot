@@ -315,6 +315,36 @@ def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
             os.unlink(db_path)
 
 
+def test_generation_waiting_duplicate_and_guidance_helpers():
+    bot.GENERATION_PENDING_JOBS.clear()
+    try:
+        assert "Đang tạo ảnh" in bot.get_generation_wait_text("image")
+        assert "Đang tạo video" in bot.get_generation_wait_text("video")
+        assert "Đang tạo giọng nói" in bot.get_generation_wait_text("tts")
+        assert "Đang tìm trend" in bot.get_generation_wait_text("trend")
+
+        prompt_key = bot.normalize_generation_prompt("ShopAIKey image smoke test")
+        assert bot.is_duplicate_pending_job("u1", "shopaikey_image", prompt_key) is None
+        bot.start_generation_pending_job("u1", "shopaikey_image", prompt_key, provider="shopaikey", xu_cost=0, command="/tool_test_shopaikey_image")
+        duplicate = bot.is_duplicate_pending_job("u1", "shopaikey_image", prompt_key)
+        assert duplicate
+        assert duplicate["xu_cost"] == 0
+        bot.finish_generation_pending_job("u1", "shopaikey_image", prompt_key, "PASS")
+        assert bot.is_duplicate_pending_job("u1", "shopaikey_image", prompt_key) is None
+
+        trend_lines = "\n".join(bot.build_trend_prompt_suggestions({
+            "title": "AI automation for small shops",
+            "summary": "SMB owners are testing AI workflows.",
+            "platform": "tiktok",
+            "niche": "AI tools",
+        }))
+        assert "Bạn có thể copy" in trend_lines
+        assert "Gợi ý video tiếp theo" in trend_lines
+        assert "Risk/copyright" in trend_lines
+    finally:
+        bot.GENERATION_PENDING_JOBS.clear()
+
+
 def test_critical_sales_ready_commands_remain_registered():
     source = bot_source_text()
     handler_lines = [line.strip() for line in source.splitlines() if "CommandHandler(" in line]
