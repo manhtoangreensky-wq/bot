@@ -826,6 +826,11 @@ AI_IMAGE_COST = 300
 AI_IMAGE_EDIT_COST = 350
 VIDEO_FROM_IMAGE_BASIC_COST = 300
 VIDEO_FROM_IMAGE_PRO_COST = 600
+IMAGE_BASE_COST_XU = env_int("IMAGE_BASE_COST_XU", AI_IMAGE_COST)
+VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", VIDEO_FROM_IMAGE_BASIC_COST)
+WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", TREND_ANALYSIS_COST_XU)
+WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", TREND_PROMPT_COST_XU)
+WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", TREND_PROMPT_COST_XU)
 MEDIA_FACTORY_PACK_COST = 500
 AUDIO_BASE_COST    = 30
 AUDIO_COST_PER_MB  = 20
@@ -26937,13 +26942,41 @@ def shopaikey_paid_image_source_available(user_id, source_job_id: str) -> bool:
     finally:
         conn.close()
 
+def image_base_cost_xu() -> int:
+    return max(0, int(IMAGE_BASE_COST_XU or SHOPAIKEY_IMAGE_COST_XU or AI_IMAGE_COST or 0))
+
+def video_base_cost_xu() -> int:
+    return max(0, int(VIDEO_BASE_COST_XU or SHOPAIKEY_VIDEO_COST_XU or VIDEO_FROM_IMAGE_BASIC_COST or 0))
+
+def workflow_trend_analysis_cost_xu() -> int:
+    return max(0, int(WORKFLOW_TREND_ANALYSIS_COST_XU or 0))
+
+def workflow_script_storyboard_cost_xu() -> int:
+    return max(0, int(WORKFLOW_SCRIPT_STORYBOARD_COST_XU or 0))
+
+def workflow_prompt_pack_cost_xu() -> int:
+    return max(0, int(WORKFLOW_PROMPT_PACK_COST_XU or 0))
+
+def workflow_content_cost_xu() -> int:
+    return workflow_trend_analysis_cost_xu() + workflow_script_storyboard_cost_xu() + workflow_prompt_pack_cost_xu()
+
+def media_workflow_pricing_payload() -> dict:
+    return {
+        "billing_mode": "centralized_pricing",
+        "quick_image_cost": image_base_cost_xu(),
+        "quick_video_cost": video_base_cost_xu(),
+        "workflow_image_cost": image_base_cost_xu(),
+        "workflow_video_cost": video_base_cost_xu(),
+        "workflow_trend_analysis_cost": workflow_trend_analysis_cost_xu(),
+        "workflow_script_storyboard_cost": workflow_script_storyboard_cost_xu(),
+        "workflow_prompt_pack_cost": workflow_prompt_pack_cost_xu(),
+        "workflow_content_total_cost": workflow_content_cost_xu(),
+        "legacy_shopaikey_image_fallback": max(0, int(SHOPAIKEY_IMAGE_COST_XU or 0)),
+        "legacy_shopaikey_video_fallback": max(0, int(SHOPAIKEY_VIDEO_COST_XU or 0)),
+    }
+
 def shopaikey_video_cost_for_flow(from_image: bool = False, user_id=None) -> int:
-    base_video = max(0, int(SHOPAIKEY_VIDEO_COST_XU or 200))
-    if from_image:
-        if user_id is not None and not shopaikey_paid_image_source_job(user_id):
-            return base_video
-        return max(0, base_video - max(0, int(SHOPAIKEY_IMAGE_COST_XU or 50)))
-    return base_video
+    return video_base_cost_xu()
 
 def shopaikey_preview_final_cost(user_id, base_cost: int, event_type: str) -> int:
     if is_admin_user(user_id):
@@ -27926,7 +27959,7 @@ def shopaikey_billing_flow_status_text() -> str:
         return "not_ready_confirm_disabled"
     if not SHOPAIKEY_REFUND_ON_PROVIDER_FAIL:
         return "not_ready_refund_disabled"
-    if int(SHOPAIKEY_IMAGE_COST_XU or 0) <= 0 or int(SHOPAIKEY_VIDEO_COST_XU or 0) <= 0:
+    if image_base_cost_xu() <= 0 or video_base_cost_xu() <= 0:
         return "not_ready_cost_missing"
     return "ready_guarded_public_off" if not (SHOPAIKEY_PUBLIC_IMAGE_ENABLED or SHOPAIKEY_PUBLIC_VIDEO_ENABLED) else "ready_public_env_on"
 
@@ -31826,7 +31859,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     shopaikey_usage = shopaikey_last_usage_snapshot()
     shopaikey_video_reason = shopaikey_video_reason_text()
     shopaikey_freeze = provider_freeze_display("shopaikey")
-    workflow_video_from_image_cost = max(0, int(SHOPAIKEY_VIDEO_COST_XU or 0) - int(SHOPAIKEY_IMAGE_COST_XU or 0))
+    pricing = media_workflow_pricing_payload()
     maintenance_on, _maintenance_message = is_system_maintenance()
     provider_freeze_on = provider_freeze_runtime_on("shopaikey")
     if providers["downloader"].get("cobalt_self_host"):
@@ -31868,8 +31901,13 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Enabled: <code>{'true' if SHOPAIKEY_ENABLED else 'false'}</code>",
         f"• Admin-only: <code>{'true' if SHOPAIKEY_ADMIN_ONLY else 'false'}</code>",
         "• Public: <code>OFF</code>",
-        f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code>",
-        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu</code>",
+        f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
+        f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | quick image cost <code>{pricing['quick_image_cost']} Xu</code>",
+        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | quick video cost <code>{pricing['quick_video_cost']} Xu</code>",
+        f"• Workflow trend analysis cost: <code>{pricing['workflow_trend_analysis_cost']} Xu</code>",
+        f"• Workflow script/storyboard cost: <code>{pricing['workflow_script_storyboard_cost']} Xu</code>",
+        f"• Workflow prompt pack cost: <code>{pricing['workflow_prompt_pack_cost']} Xu</code>",
+        f"• Legacy ShopAIKey fallback cost: image <code>{pricing['legacy_shopaikey_image_fallback']} Xu</code> / video <code>{pricing['legacy_shopaikey_video_fallback']} Xu</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
@@ -31892,9 +31930,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Video tested: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Video reason: <code>{html.escape(shopaikey_video_reason or '-')}</code>",
         "• Video: <code>custom video endpoint; customer public controlled by ENV</code>",
-        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | prompt cost <code>{int(TREND_PROMPT_COST_XU or 0)} Xu</code>",
-        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | image cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
-        f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code> | later cost <code>{workflow_video_from_image_cost} Xu from workflow image / {int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu standalone</code>",
+        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | content workflow total <code>{pricing['workflow_content_total_cost']} Xu</code>",
+        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | image cost <code>{pricing['workflow_image_cost']} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
+        f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code> | workflow video cost <code>{pricing['workflow_video_cost']} Xu</code> | standalone video cost <code>{pricing['quick_video_cost']} Xu</code>",
         "• Stage: <code>experimental/admin-only</code>",
         "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_workflow_image_to_video</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
         "",
@@ -32559,7 +32597,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     usage = shopaikey_last_usage_snapshot()
     provider_freeze = provider_freeze_display("shopaikey")
     maintenance_on, _maintenance_message = is_system_maintenance()
-    workflow_video_from_image_cost = max(0, int(SHOPAIKEY_VIDEO_COST_XU or 0) - int(SHOPAIKEY_IMAGE_COST_XU or 0))
+    pricing = media_workflow_pricing_payload()
     lines = [
         "🧪 <b>ShopAIKey Experimental Provider</b>",
         "",
@@ -32571,16 +32609,21 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Chat model: <code>{html.escape(SHOPAIKEY_CHAT_MODEL or '-')}</code>",
         f"• Chat fallbacks: <code>{html.escape(', '.join(shopaikey_chat_fallback_models()) or '-')}</code>",
         f"• TTS: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code> / <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>",
-        f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code>",
-        f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
+        f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
+        f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | quick image cost <code>{pricing['quick_image_cost']} Xu</code>",
+        f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | quick video cost <code>{pricing['quick_video_cost']} Xu</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
+        f"• Workflow trend analysis cost: <code>{pricing['workflow_trend_analysis_cost']} Xu</code>",
+        f"• Workflow script/storyboard cost: <code>{pricing['workflow_script_storyboard_cost']} Xu</code>",
+        f"• Workflow prompt pack cost: <code>{pricing['workflow_prompt_pack_cost']} Xu</code>",
+        f"• Legacy ShopAIKey fallback cost: image <code>{pricing['legacy_shopaikey_image_fallback']} Xu</code> / video <code>{pricing['legacy_shopaikey_video_fallback']} Xu</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
         f"• Job lock: <code>{'ON' if SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED else 'OFF'}</code>",
         f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code>",
-        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
+        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | cost <code>{pricing['workflow_image_cost']} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
-        f"• Image-to-video cost later: <code>{workflow_video_from_image_cost} Xu if workflow image already charged / {int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu standalone</code>",
+        f"• Image-to-video cost later: <code>{pricing['workflow_video_cost']} Xu workflow video step / {pricing['quick_video_cost']} Xu standalone</code>",
         f"• Maintenance mode: <code>{'ON' if maintenance_on else 'OFF'}</code>",
         f"• Provider freeze: <code>{'ON' if provider_freeze.get('frozen') else 'OFF'}</code>",
         f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason') or '-'))}</code>",
@@ -33238,7 +33281,7 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
     if shopaikey_active_job_for_user(uid, "image"):
         return await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
-    base_cost = max(0, int(SHOPAIKEY_IMAGE_COST_XU or 50))
+    base_cost = image_base_cost_xu()
     final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
     if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
         return await reply_insufficient_credits(update, int(credits or 0), final_preview_cost)
@@ -42299,7 +42342,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
         prompt = str(output.get("image_prompt") or "").strip()
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend workflow user")
-        base_cost = max(0, int(SHOPAIKEY_IMAGE_COST_XU or 50))
+        base_cost = image_base_cost_xu()
         final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
         if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
             return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)

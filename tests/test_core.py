@@ -163,6 +163,11 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
     assert "SHOPAIKEY_PUBLIC_IMAGE_ENABLED=false" in env_example
     assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED=false" in env_example
+    assert "IMAGE_BASE_COST_XU=300" in env_example
+    assert "VIDEO_BASE_COST_XU=300" in env_example
+    assert "WORKFLOW_TREND_ANALYSIS_COST_XU=0" in env_example
+    assert "WORKFLOW_SCRIPT_STORYBOARD_COST_XU=0" in env_example
+    assert "WORKFLOW_PROMPT_PACK_COST_XU=0" in env_example
     assert "SHOPAIKEY_IMAGE_COST_XU=50" in env_example
     assert "SHOPAIKEY_VIDEO_COST_XU=200" in env_example
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=true" in env_example
@@ -339,6 +344,12 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert "record_shopaikey_billing_event" in callback_source
     assert "SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT" in source
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL" in source
+    assert "Billing mode:" in source and "centralized_pricing" in source
+    assert "Workflow trend analysis cost" in source
+    assert "Workflow script/storyboard cost" in source
+    assert "Workflow prompt pack cost" in source
+    assert "quick image cost" in source
+    assert "quick video cost" in source
     assert "deduct_dynamic_credit(" not in callback_source
     assert "add_credit(" not in callback_source
 
@@ -354,10 +365,26 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
 
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_COST_XU", 200)
     monkeypatch.setattr(bot, "SHOPAIKEY_IMAGE_COST_XU", 50)
+    monkeypatch.setattr(bot, "IMAGE_BASE_COST_XU", 320)
+    monkeypatch.setattr(bot, "VIDEO_BASE_COST_XU", 640)
+    monkeypatch.setattr(bot, "WORKFLOW_TREND_ANALYSIS_COST_XU", 11)
+    monkeypatch.setattr(bot, "WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 22)
+    monkeypatch.setattr(bot, "WORKFLOW_PROMPT_PACK_COST_XU", 33)
     monkeypatch.setattr(bot, "SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL", True)
-    assert bot.shopaikey_video_cost_for_flow(False) == 200
-    assert bot.shopaikey_video_cost_for_flow(True) == 150
+    assert bot.image_base_cost_xu() == 320
+    assert bot.video_base_cost_xu() == 640
+    assert bot.shopaikey_video_cost_for_flow(False) == 640
+    assert bot.shopaikey_video_cost_for_flow(True) == 640
+    pricing = bot.media_workflow_pricing_payload()
+    assert pricing["billing_mode"] == "centralized_pricing"
+    assert pricing["quick_image_cost"] == 320
+    assert pricing["workflow_image_cost"] == 320
+    assert pricing["quick_video_cost"] == 640
+    assert pricing["workflow_video_cost"] == 640
+    assert pricing["workflow_content_total_cost"] == 66
+    assert pricing["legacy_shopaikey_image_fallback"] == 50
+    assert pricing["legacy_shopaikey_video_fallback"] == 200
     assert bot.shopaikey_billing_flow_status_text().startswith("ready")
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
@@ -383,31 +410,31 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
             "source_job_id",
         }.issubset(cols)
         assert {"user_id", "job_id", "event_type", "amount_xu", "balance_before", "balance_after", "reason", "created_at"}.issubset(billing_cols)
-        job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="IN_PROGRESS", admin_only=False, xu_cost_planned=50)
-        bot.update_shopaikey_job(job_id=job_id, xu_deducted=50, refund_status="pending", refund_reason="provider_fail")
+        job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="IN_PROGRESS", admin_only=False, xu_cost_planned=320)
+        bot.update_shopaikey_job(job_id=job_id, xu_deducted=320, refund_status="pending", refund_reason="provider_fail")
         active = bot.shopaikey_active_job_for_user("u2", "image")
-        assert active["xu_cost_planned"] == 50
-        assert active["xu_deducted"] == 50
+        assert active["xu_cost_planned"] == 320
+        assert active["xu_deducted"] == 320
         assert active["refund_status"] == "pending"
         assert active["confirm_required"] == 1
         assert active["billing_status"] == "pending_confirm"
         bot.record_shopaikey_billing_event("u2", job_id, "confirm", 0, 100, 100, "test confirm")
-        bot.record_shopaikey_billing_event("u2", job_id, "deduct", 50, 100, 50, "test deduct")
+        bot.record_shopaikey_billing_event("u2", job_id, "deduct", 320, 1000, 680, "test deduct")
         conn = bot.db_connect()
         try:
             billing_events = conn.execute("SELECT event_type, amount_xu FROM shopaikey_billing_events WHERE job_id=? ORDER BY id", (job_id,)).fetchall()
-            assert [(row[0], row[1]) for row in billing_events] == [("confirm", 0), ("deduct", 50)]
+            assert [(row[0], row[1]) for row in billing_events] == [("confirm", 0), ("deduct", 320)]
         finally:
             conn.close()
-        assert bot.shopaikey_video_cost_for_flow(True, "u2") == 200
-        image_job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="SUCCESS", admin_only=False, xu_cost_planned=50)
-        bot.update_shopaikey_job(job_id=image_job_id, xu_deducted=50)
+        assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
+        image_job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="SUCCESS", admin_only=False, xu_cost_planned=320)
+        bot.update_shopaikey_job(job_id=image_job_id, xu_deducted=320)
         assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is True
-        assert bot.shopaikey_video_cost_for_flow(True, "u2") == 150
-        video_job_id = bot.create_shopaikey_job("u2", "c2", "video", model="veo3.1-fast", prompt="video", status="QUEUED", admin_only=False, xu_cost_planned=150, source_job_id=str(image_job_id))
+        assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
+        video_job_id = bot.create_shopaikey_job("u2", "c2", "video", model="veo3.1-fast", prompt="video", status="QUEUED", admin_only=False, xu_cost_planned=640, source_job_id=str(image_job_id))
         assert video_job_id > 0
         assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is False
-        assert bot.shopaikey_video_cost_for_flow(True, "u2") == 200
+        assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
