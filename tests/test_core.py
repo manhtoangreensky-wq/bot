@@ -342,6 +342,8 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "TREND_PROMPT_COST_XU=0" in env_example
     assert "TREND_ANALYSIS_COST_XU=0" in env_example
     assert "TREND_WORKFLOW_PUBLIC_ENABLED=false" in env_example
+    assert "TREND_WORKFLOW_BILLING_ENABLED=true" in env_example
+    assert "TREND_WORKFLOW_REQUIRE_CONFIRM=true" in env_example
     assert "SYSTEM_MAINTENANCE_MODE=false" in env_example
     assert "PROVIDER_FREEZE_ENABLED=false" in env_example
     assert "TOOL_FREEZE_IMAGE=false" in env_example
@@ -780,6 +782,9 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert 'CommandHandler("tool_test_workflow_image", cmd_tool_test_workflow_image)' in source
     assert "trend_video_workflow_status_text()" in source
     assert "trend_workflow_image_generation_status_text()" in source
+    assert "trend_workflow_content_confirm_text" in source
+    assert "TREND_WORKFLOW_BILLING_ENABLED" in source
+    assert "TREND_WORKFLOW_REQUIRE_CONFIRM" in source
     assert "Trend video workflow:" in source
     assert "Workflow image generation:" in source
     assert "Bạn muốn tạo ảnh từ prompt nào" in source
@@ -792,11 +797,14 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "TREND_VIDEO_PENDING_TTL_SECONDS" in source
     assert "handle_trend_video_flow_pending_text(update, context)" in message_source
     assert message_source.index("handle_trend_video_flow_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
-    assert "send_trend_video_flow_for_topic(update, topic)" in pending_source
+    assert "send_or_confirm_trend_video_flow(update, context, topic)" in pending_source
     assert "clear_trend_video_flow_pending(uid)" in pending_source
     assert "shopaikey_image_generate" not in combined_source
     assert "shopaikey_video_create" not in combined_source
-    assert "spend_fixed_credit_info" not in combined_source
+    assert "spend_fixed_credit_info" in combined_source
+    assert "trend_workflow_content" in combined_source
+    assert "apply_member_discount_flag=False" in combined_source
+    assert "record_trend_workflow_billing_event" in combined_source
     assert "deduct_dynamic_credit" not in combined_source
     assert "add_credit(" not in combined_source
     assert "shopaikey_public_generation_guard(\"image\")" in callback_source
@@ -815,10 +823,16 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ENABLED", True)
     monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ADMIN_ONLY", True)
     monkeypatch.setattr(bot, "TREND_WORKFLOW_PUBLIC_ENABLED", False)
+    monkeypatch.setattr(bot, "TREND_WORKFLOW_BILLING_ENABLED", True)
+    monkeypatch.setattr(bot, "TREND_WORKFLOW_REQUIRE_CONFIRM", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", False)
     assert bot.trend_video_workflow_status_text() == "enabled/admin-only"
     assert bot.trend_workflow_image_generation_status_text() == "guarded/public OFF"
     assert bot.trend_video_workflow_can_access(0) is False
+    monkeypatch.setattr(bot, "TREND_WORKFLOW_PUBLIC_ENABLED", True)
+    assert bot.trend_video_workflow_status_text() == "enabled/public_content_billing_guarded"
+    assert bot.trend_video_workflow_can_access(0) is True
+    monkeypatch.setattr(bot, "TREND_WORKFLOW_PUBLIC_ENABLED", False)
     key = bot.trend_video_pending_key("u4")
     bot.USER_PENDING.pop(key, None)
     bot.set_trend_video_flow_pending("u4")
@@ -829,6 +843,16 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     bot.USER_PENDING[key]["created_at_ts"] = 0
     assert bot.get_trend_video_flow_pending("u4") is None
     assert key not in bot.USER_PENDING
+    confirm_key = bot.trend_workflow_confirm_pending_key("u4")
+    bot.USER_PENDING.pop(confirm_key, None)
+    bot.set_trend_workflow_confirm_pending("u4", "affiliate AI tool cho người mới", "wf_1")
+    confirm_pending = bot.get_trend_workflow_confirm_pending("u4")
+    assert confirm_pending and confirm_pending["pending_action"] == "trend_workflow_confirm"
+    assert int(confirm_pending["cost_total"]) == 70
+    assert bot.clear_trend_workflow_confirm_pending("u4") is True
+    bot.set_trend_workflow_confirm_pending("u4", "affiliate AI tool cho người mới", "wf_2")
+    bot.USER_PENDING[confirm_key]["created_at_ts"] = 0
+    assert bot.get_trend_workflow_confirm_pending("u4") is None
 
     sections = bot.trend_video_flow_sections("affiliate AI tool cho người mới")
     assert len(sections) >= 6
@@ -850,7 +874,24 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
         "không tạo ảnh-video thật",
     ]:
         assert marker in joined
+    assert "admin preview / content-only / no xu deducted" in joined
+    billed_sections = bot.trend_video_flow_sections("affiliate AI tool cho người mới", billing_note=bot.trend_workflow_billed_note(70))
+    billed_joined = "\n".join(billed_sections).lower()
+    assert "70 xu" in billed_joined
+    assert "tạo ảnh 50 xu" in billed_joined
+    assert "tạo video 300 xu" in billed_joined
     assert "Bot chưa trừ Xu" in bot.TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE or "thử nghiệm nội bộ" in bot.TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE
+    assert bot.TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE == "🧪 Tính năng tạo video theo trend đang thử nghiệm nội bộ, chưa mở công khai."
+    breakdown = bot.trend_workflow_content_cost_breakdown()
+    assert breakdown["trend_analysis"] == 20
+    assert breakdown["script_storyboard"] == 30
+    assert breakdown["prompt_pack"] == 20
+    assert breakdown["total"] == 70
+    assert breakdown["image_separate"] == 50
+    assert breakdown["video_separate"] == 300
+    assert "70 Xu" in bot.trend_workflow_content_confirm_text("affiliate AI", 200)
+    assert "tvflow|confirm_content" in source
+    assert "tvflow|cancel_content" in source
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -890,6 +931,31 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
         output = bot.trend_workflow_output_for_user("u3", 1)
         assert output["generated_image_url"] == "https://example.com/image.png"
         assert int(output["shopaikey_job_id"]) == 123
+        credits_before, _, _ = bot.get_user("u_billing", "Billing Test")
+        charge = bot.spend_fixed_credit_info(
+            "u_billing",
+            breakdown["total"],
+            "trend_workflow_content",
+            "unit test",
+            apply_member_discount_flag=False,
+        )
+        assert charge["ok"] is True
+        assert int(charge["final_cost"]) == 70
+        credits_after, _, _ = bot.get_user("u_billing")
+        assert int(credits_before) - int(credits_after) == 70
+        bot.record_trend_workflow_billing_event("u_billing", workflow_id, "deduct", 70, int(credits_before), int(credits_after), "unit")
+        refunded = bot.refund_charged_credit("u_billing", 70, "trend_workflow_refund", workflow_id, "unit refund", True)
+        assert refunded is True
+        credits_refunded, _, _ = bot.get_user("u_billing")
+        assert int(credits_refunded) == int(credits_before)
+        bot.record_trend_workflow_billing_event("u_billing", workflow_id, "refund", 70, int(credits_after), int(credits_refunded), "unit")
+        conn = bot.db_connect()
+        try:
+            events = conn.execute("SELECT event_type, amount_xu FROM shopaikey_billing_events WHERE user_id=? ORDER BY id", ("u_billing",)).fetchall()
+        finally:
+            conn.close()
+        assert ("deduct", 70) in [(row[0], int(row[1])) for row in events]
+        assert ("refund", 70) in [(row[0], int(row[1])) for row in events]
     finally:
         bot.LAST_TREND_VIDEO_WORKFLOWS.pop("u3", None)
         if os.path.exists(db_path):

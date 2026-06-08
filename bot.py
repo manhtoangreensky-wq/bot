@@ -381,6 +381,8 @@ TREND_VIDEO_WORKFLOW_ADMIN_ONLY = env_flag("TREND_VIDEO_WORKFLOW_ADMIN_ONLY", "t
 TREND_PROMPT_COST_XU = env_int("TREND_PROMPT_COST_XU", 0)
 TREND_ANALYSIS_COST_XU = env_int("TREND_ANALYSIS_COST_XU", 0)
 TREND_WORKFLOW_PUBLIC_ENABLED = env_flag("TREND_WORKFLOW_PUBLIC_ENABLED", "false")
+TREND_WORKFLOW_BILLING_ENABLED = env_flag("TREND_WORKFLOW_BILLING_ENABLED", "true")
+TREND_WORKFLOW_REQUIRE_CONFIRM = env_flag("TREND_WORKFLOW_REQUIRE_CONFIRM", "true")
 ENABLE_OPENAI_IMAGE = env_flag("ENABLE_OPENAI_IMAGE", "0")
 ENABLE_OPENAI_IMAGE_EDIT = env_flag("ENABLE_OPENAI_IMAGE_EDIT", "0")
 ENABLE_REAL_VIDEO = env_flag("ENABLE_REAL_VIDEO", "0")
@@ -27486,17 +27488,43 @@ def workflow_prompt_pack_cost_xu() -> int:
 def workflow_content_cost_xu() -> int:
     return workflow_trend_analysis_cost_xu() + workflow_script_storyboard_cost_xu() + workflow_prompt_pack_cost_xu()
 
+def trend_workflow_content_cost_breakdown() -> dict:
+    trend_cost = workflow_trend_analysis_cost_xu()
+    script_cost = workflow_script_storyboard_cost_xu()
+    prompt_pack_cost = workflow_prompt_pack_cost_xu()
+    return {
+        "trend_analysis": trend_cost,
+        "script_storyboard": script_cost,
+        "prompt_pack": prompt_pack_cost,
+        "total": trend_cost + script_cost + prompt_pack_cost,
+        "image_separate": image_base_cost_xu(),
+        "video_separate": video_base_cost_xu(),
+    }
+
+def trend_workflow_billing_status_text() -> str:
+    if not TREND_WORKFLOW_PUBLIC_ENABLED:
+        return "public_off/admin_preview_no_xu"
+    if not TREND_WORKFLOW_BILLING_ENABLED:
+        return "public_on/billing_off"
+    if TREND_WORKFLOW_REQUIRE_CONFIRM:
+        return "public_on/confirm_before_deduct"
+    return "public_on/billing_on_no_confirm"
+
 def media_workflow_pricing_payload() -> dict:
+    trend_breakdown = trend_workflow_content_cost_breakdown()
     return {
         "billing_mode": "centralized_pricing",
         "quick_image_cost": image_base_cost_xu(),
         "quick_video_cost": video_base_cost_xu(),
         "workflow_image_cost": image_base_cost_xu(),
         "workflow_video_cost": video_base_cost_xu(),
-        "workflow_trend_analysis_cost": workflow_trend_analysis_cost_xu(),
-        "workflow_script_storyboard_cost": workflow_script_storyboard_cost_xu(),
-        "workflow_prompt_pack_cost": workflow_prompt_pack_cost_xu(),
-        "workflow_content_total_cost": workflow_content_cost_xu(),
+        "workflow_trend_analysis_cost": trend_breakdown["trend_analysis"],
+        "workflow_script_storyboard_cost": trend_breakdown["script_storyboard"],
+        "workflow_prompt_pack_cost": trend_breakdown["prompt_pack"],
+        "workflow_content_total_cost": trend_breakdown["total"],
+        "trend_workflow_billing_enabled": bool(TREND_WORKFLOW_BILLING_ENABLED),
+        "trend_workflow_require_confirm": bool(TREND_WORKFLOW_REQUIRE_CONFIRM),
+        "trend_workflow_billing_status": trend_workflow_billing_status_text(),
         "legacy_shopaikey_image_fallback": max(0, int(SHOPAIKEY_IMAGE_COST_XU or 0)),
         "legacy_shopaikey_video_fallback": max(0, int(SHOPAIKEY_VIDEO_COST_XU or 0)),
     }
@@ -27540,7 +27568,8 @@ def support_contact_keyboard(back_to_media: bool = False) -> InlineKeyboardMarku
 def clear_media_creator_pending_states(user_id) -> bool:
     quick_cleared = clear_quick_media_pending(user_id)
     trend_cleared = clear_trend_video_flow_pending(user_id)
-    return bool(quick_cleared or trend_cleared)
+    trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
+    return bool(quick_cleared or trend_cleared or trend_confirm_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -27573,6 +27602,9 @@ def create_media_pricing_text() -> str:
         f"• Workflow script/storyboard cost: <code>{pricing['workflow_script_storyboard_cost']} Xu</code>\n"
         f"• Workflow prompt pack cost: <code>{pricing['workflow_prompt_pack_cost']} Xu</code>\n"
         f"• Workflow content total: <code>{pricing['workflow_content_total_cost']} Xu</code>\n"
+        f"• Trend workflow public: <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code>\n"
+        f"• Trend workflow billing: <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code>\n"
+        f"• Trend workflow confirm: <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>\n"
         f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>\n"
         f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>\n"
         f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>\n\n"
@@ -32635,7 +32667,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Video tested: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Video reason: <code>{html.escape(shopaikey_video_reason or '-')}</code>",
         "• Video: <code>custom video endpoint; customer public controlled by ENV</code>",
-        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | content workflow total <code>{pricing['workflow_content_total_cost']} Xu</code>",
+        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
+        f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | trend <code>{pricing['workflow_trend_analysis_cost']} Xu</code> | script/storyboard <code>{pricing['workflow_script_storyboard_cost']} Xu</code> | prompt pack <code>{pricing['workflow_prompt_pack_cost']} Xu</code>",
+        f"• Trend workflow separate generation: image <code>{pricing['workflow_image_cost']} Xu</code> | video <code>{pricing['workflow_video_cost']} Xu</code>",
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | image cost <code>{pricing['workflow_image_cost']} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code> | workflow video cost <code>{pricing['workflow_video_cost']} Xu</code> | standalone video cost <code>{pricing['quick_video_cost']} Xu</code>",
         "• Stage: <code>experimental/admin-only</code>",
@@ -33329,7 +33363,9 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
         f"• Job lock: <code>{'ON' if SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED else 'OFF'}</code>",
-        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code>",
+        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
+        f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | trend <code>{pricing['workflow_trend_analysis_cost']} Xu</code> | script/storyboard <code>{pricing['workflow_script_storyboard_cost']} Xu</code> | prompt pack <code>{pricing['workflow_prompt_pack_cost']} Xu</code>",
+        f"• Trend workflow separate generation: image <code>{pricing['workflow_image_cost']} Xu</code> | video <code>{pricing['workflow_video_cost']} Xu</code>",
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | cost <code>{pricing['workflow_image_cost']} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         f"• Image-to-video cost later: <code>{pricing['workflow_video_cost']} Xu workflow video step / {pricing['quick_video_cost']} Xu standalone</code>",
@@ -42543,21 +42579,21 @@ async def cmd_creative_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await reply_html_lines(update, creative_flow_text(idea).splitlines())
 
-TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE = "🧪 Tính năng tạo video theo trend đang thử nghiệm nội bộ. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
+TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE = "🧪 Tính năng tạo video theo trend đang thử nghiệm nội bộ, chưa mở công khai."
 
 def trend_video_workflow_status_text() -> str:
     if not TREND_VIDEO_WORKFLOW_ENABLED:
         return "disabled"
+    if TREND_WORKFLOW_PUBLIC_ENABLED:
+        return "enabled/public_content_billing_guarded"
     if TREND_VIDEO_WORKFLOW_ADMIN_ONLY:
         return "enabled/admin-only"
-    if TREND_WORKFLOW_PUBLIC_ENABLED:
-        return "enabled/public_prompt_only"
     return "enabled/internal"
 
 def trend_video_workflow_can_access(user_id) -> bool:
     if is_admin_user(user_id):
         return True
-    return bool(TREND_VIDEO_WORKFLOW_ENABLED and TREND_WORKFLOW_PUBLIC_ENABLED and not TREND_VIDEO_WORKFLOW_ADMIN_ONLY)
+    return bool(TREND_VIDEO_WORKFLOW_ENABLED and TREND_WORKFLOW_PUBLIC_ENABLED)
 
 def trend_workflow_image_generation_status_text() -> str:
     if not TREND_VIDEO_WORKFLOW_ENABLED:
@@ -42633,6 +42669,68 @@ def get_trend_video_flow_pending(user_id) -> dict | None:
 
 def clear_trend_video_flow_pending(user_id) -> bool:
     return USER_PENDING.pop(trend_video_pending_key(user_id), None) is not None
+
+def trend_workflow_confirm_pending_key(user_id) -> str:
+    return f"trend_workflow_confirm:{user_id}"
+
+def set_trend_workflow_confirm_pending(user_id, topic: str, workflow_id: str = "") -> None:
+    breakdown = trend_workflow_content_cost_breakdown()
+    USER_PENDING[trend_workflow_confirm_pending_key(user_id)] = {
+        "pending_action": "trend_workflow_confirm",
+        "topic": re.sub(r"\s+", " ", str(topic or "").strip())[:220],
+        "workflow_id": str(workflow_id or "")[:80] or trend_workflow_id(user_id),
+        "cost_total": int(breakdown.get("total") or 0),
+        "trend_cost": int(breakdown.get("trend_analysis") or 0),
+        "script_cost": int(breakdown.get("script_storyboard") or 0),
+        "prompt_pack_cost": int(breakdown.get("prompt_pack") or 0),
+        "image_cost": int(breakdown.get("image_separate") or 0),
+        "video_cost": int(breakdown.get("video_separate") or 0),
+        "created_at_ts": time.time(),
+    }
+
+def get_trend_workflow_confirm_pending(user_id) -> dict | None:
+    key = trend_workflow_confirm_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "trend_workflow_confirm":
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > TREND_VIDEO_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_trend_workflow_confirm_pending(user_id) -> bool:
+    return USER_PENDING.pop(trend_workflow_confirm_pending_key(user_id), None) is not None
+
+def trend_workflow_content_confirm_text(topic: str, current_credits: int = 0) -> str:
+    breakdown = trend_workflow_content_cost_breakdown()
+    total = int(breakdown.get("total") or 0)
+    return (
+        "🎬 <b>Xác nhận gói tạo nội dung theo trend</b>\n\n"
+        f"Chủ đề: <code>{html.escape(str(topic or '')[:180])}</code>\n\n"
+        f"Gói tạo nội dung theo trend sẽ tốn <b>{total} Xu</b>, gồm:\n"
+        f"• Phân tích trend: <b>{int(breakdown.get('trend_analysis') or 0)} Xu</b>\n"
+        f"• Hook/script/storyboard: <b>{int(breakdown.get('script_storyboard') or 0)} Xu</b>\n"
+        f"• Prompt pack: <b>{int(breakdown.get('prompt_pack') or 0)} Xu</b>\n\n"
+        f"• Số dư hiện tại: <b>{int(current_credits or 0)} Xu</b>\n\n"
+        "Gói này chỉ gồm phần nội dung workflow. Tạo ảnh và tạo video thật tính riêng:\n"
+        f"• Tạo ảnh: <b>{int(breakdown.get('image_separate') or 0)} Xu</b>\n"
+        f"• Tạo video: <b>{int(breakdown.get('video_separate') or 0)} Xu</b>\n\n"
+        "Bạn có muốn tiếp tục không?\n"
+        "Bot chỉ trừ Xu sau khi bạn bấm xác nhận."
+    )
+
+def trend_workflow_content_confirm_keyboard() -> InlineKeyboardMarkup:
+    total = int(trend_workflow_content_cost_breakdown().get("total") or 0)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"✅ Tiếp tục -{total} Xu", callback_data="tvflow|confirm_content")],
+        [InlineKeyboardButton("❌ Huỷ", callback_data="tvflow|cancel_content")],
+    ])
+
+def record_trend_workflow_billing_event(user_id, workflow_id: str, event_type: str, amount_xu: int = 0, balance_before: int = 0, balance_after: int = 0, reason: str = "") -> None:
+    safe_workflow = str(workflow_id or "")[:80]
+    safe_reason = f"trend_workflow_content; workflow_id={safe_workflow}; {reason or ''}"
+    record_shopaikey_billing_event(user_id, 0, event_type, amount_xu, balance_before, balance_after, safe_reason)
 
 def trend_video_pending_prompt_text() -> str:
     return (
@@ -42888,10 +42986,12 @@ def trend_video_flow_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🖼 Tạo ảnh từ Scene 1", callback_data="tvflow|image_scene_1")],
         [InlineKeyboardButton("🖼 Tạo ảnh từ Scene 2", callback_data="tvflow|image_scene_2")],
         [InlineKeyboardButton("🖼 Tạo ảnh từ Scene 3", callback_data="tvflow|image_scene_3")],
+        [InlineKeyboardButton("🎞 Tạo video — tính riêng", callback_data="tvflow|video_prompt")],
         [
-            InlineKeyboardButton("✍️ Sửa prompt ảnh", callback_data="tvflow|edit_prompt"),
-            InlineKeyboardButton("❌ Hủy", callback_data="tvflow|cancel"),
+            InlineKeyboardButton("✍️ Sửa script/prompt", callback_data="tvflow|rewrite"),
+            InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main"),
         ],
+        [InlineKeyboardButton("❌ Hủy", callback_data="tvflow|cancel")],
     ])
 
 def trend_workflow_image_success_keyboard(job_id: int, scene_index: int) -> InlineKeyboardMarkup:
@@ -42914,11 +43014,12 @@ def trend_video_flow_help_text() -> str:
         "/trend_video_flow mỹ phẩm dưỡng da cho nữ văn phòng\n"
         "/trend_video_flow quán ăn gia đình trên TikTok\n\n"
         "Bot sẽ tạo gói: hooks, script 15s/30s/60s, storyboard, prompt ảnh, prompt video, TTS, nhạc, caption, hashtag và CTA.\n\n"
-        "V1 chỉ tạo plan/prompt/script. Không gọi tạo ảnh/video thật. Không trừ Xu."
+        "V1 chỉ tạo plan/prompt/script. Không gọi tạo ảnh/video thật. Nếu public workflow được bật, bot sẽ hỏi xác nhận trước khi trừ Xu phần nội dung."
     )
 
-def trend_video_flow_sections(topic: str) -> list[str]:
+def trend_video_flow_sections(topic: str, billing_note: str = "") -> list[str]:
     safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:220] or "affiliate AI tool cho người mới"
+    safe_billing_note = str(billing_note or "").strip() or "Xu: 0 Xu — Admin preview / content-only / no Xu deducted."
     hooks = [
         f"Bạn đang bỏ lỡ cách dùng {safe_topic} nhanh nhất.",
         f"Đừng làm {safe_topic} theo cách cũ nếu bạn muốn tiết kiệm thời gian.",
@@ -42939,7 +43040,7 @@ def trend_video_flow_sections(topic: str) -> list[str]:
             f"Chủ đề: {safe_topic}\n"
             "Trạng thái: content-only / prompt-only / không tạo ảnh-video thật.\n"
             "Public image/video: OFF mặc định.\n"
-            "Xu: 0 Xu trong V1 này nếu chỉ tạo plan/prompt/script.\n\n"
+            f"{safe_billing_note}\n\n"
             "Mục tiêu gợi ý:\n"
             "• Bán hàng hoặc affiliate nhưng không cam kết doanh thu.\n"
             "• Kéo traffic bằng hook rõ, demo cụ thể, CTA nhẹ.\n"
@@ -43031,24 +43132,153 @@ def trend_video_flow_sections(topic: str) -> list[str]:
             "CTA comment/inbox: Comment 'flow' để nhận checklist.\n"
             "CTA TOAN AAS: Dùng TOAN AAS để tạo script, prompt, caption và voice nhanh hơn.\n\n"
             "Bạn muốn tạo ảnh từ prompt nào?\n"
+            f"• Tạo ảnh từ prompt này — sẽ tính {image_base_cost_xu()} Xu riêng nếu public image được bật.\n"
+            f"• Tạo video — sẽ tính {video_base_cost_xu()} Xu riêng nếu public video được bật.\n"
+            "• Bạn cũng có thể sửa script/prompt hoặc quay lại menu chính.\n\n"
             "Chọn Scene 1/2/3 ở nút bên dưới để đi qua guard tạo ảnh ShopAIKey."
         ),
     ]
     return sections
 
-async def send_trend_video_flow_sections(update: Update, sections: list[str]):
+async def send_trend_video_flow_sections_to_message(message, sections: list[str]):
     for idx, section in enumerate(sections):
         reply_markup = trend_video_flow_keyboard() if idx == len(sections) - 1 else None
-        await update.message.reply_text(section[:3900], reply_markup=reply_markup)
+        await message.reply_text(section[:3900], reply_markup=reply_markup)
 
-async def send_trend_video_flow_for_topic(update: Update, topic: str) -> None:
-    uid = update.effective_user.id if update.effective_user else 0
+async def send_trend_video_flow_sections(update: Update, sections: list[str]):
+    await send_trend_video_flow_sections_to_message(update.message, sections)
+
+async def send_trend_video_flow_for_topic_message(message, user_id, topic: str, billing_note: str = "") -> None:
+    uid = user_id or 0
     workflow_id = trend_workflow_id(uid)
     scene_outputs = trend_video_scene_outputs(topic)
     save_trend_workflow_outputs(uid, workflow_id, scene_outputs)
     cache_trend_workflow(uid, workflow_id, scene_outputs)
-    sections = trend_video_flow_sections(topic)
-    await send_trend_video_flow_sections(update, sections)
+    sections = trend_video_flow_sections(topic, billing_note=billing_note)
+    await send_trend_video_flow_sections_to_message(message, sections)
+
+async def send_trend_video_flow_for_topic(update: Update, topic: str, billing_note: str = "") -> None:
+    uid = update.effective_user.id if update.effective_user else 0
+    await send_trend_video_flow_for_topic_message(update.message, uid, topic, billing_note=billing_note)
+
+def trend_workflow_admin_preview_note() -> str:
+    return "Xu: 0 Xu — Admin preview / content-only / no Xu deducted."
+
+def trend_workflow_billed_note(deducted_xu: int = 0) -> str:
+    breakdown = trend_workflow_content_cost_breakdown()
+    return (
+        f"Xu: {int(deducted_xu or 0)} Xu — đã trừ cho content workflow. "
+        f"Tạo ảnh {int(breakdown.get('image_separate') or 0)} Xu và tạo video {int(breakdown.get('video_separate') or 0)} Xu tính riêng."
+    )
+
+def trend_workflow_billing_off_note() -> str:
+    return "Xu: 0 Xu — public workflow billing OFF. Image/video vẫn tính riêng nếu bật public."
+
+async def execute_confirmed_trend_workflow_content(message, user_id, topic: str, workflow_id: str = "") -> None:
+    uid = user_id or 0
+    workflow = str(workflow_id or "")[:80] or trend_workflow_id(uid)
+    total_cost = int(trend_workflow_content_cost_breakdown().get("total") or 0)
+    balance_before, _, _ = get_user(uid)
+    charge = spend_fixed_credit_info(
+        uid,
+        total_cost,
+        "trend_workflow_content",
+        f"Trend workflow content: {str(topic or '')[:120]}",
+        apply_member_discount_flag=False,
+    )
+    if not charge.get("ok"):
+        credits_now, _, _ = get_user(uid)
+        return await message.reply_text(
+            insufficient_credits_text(int(credits_now or 0), total_cost),
+            parse_mode="HTML",
+            reply_markup=build_topup_keyboard(uid),
+        )
+    deducted = int(charge.get("final_cost") or 0)
+    balance_after, _, _ = get_user(uid)
+    record_trend_workflow_billing_event(
+        uid,
+        workflow,
+        "deduct",
+        deducted,
+        int(balance_before or 0),
+        int(balance_after or 0),
+        "confirmed_content_pack",
+    )
+    try:
+        await send_trend_video_flow_for_topic_message(
+            message,
+            uid,
+            topic,
+            billing_note=trend_workflow_billed_note(deducted),
+        )
+        record_trend_workflow_billing_event(
+            uid,
+            workflow,
+            "success",
+            0,
+            int(balance_after or 0),
+            int(balance_after or 0),
+            "content_pack_sent",
+        )
+    except Exception as exc:
+        refunded = refund_charged_credit(
+            uid,
+            deducted,
+            "trend_workflow_refund",
+            workflow,
+            f"Hoàn Xu Trend Workflow do lỗi gửi pack: {sanitize_provider_error(str(exc))[:120]}",
+            deducted > 0,
+        )
+        credits_after_refund, _, _ = get_user(uid)
+        if refunded:
+            record_trend_workflow_billing_event(
+                uid,
+                workflow,
+                "refund",
+                deducted,
+                int(balance_after or 0),
+                int(credits_after_refund or 0),
+                "content_pack_send_failed",
+            )
+        record_trend_workflow_billing_event(
+            uid,
+            workflow,
+            "fail",
+            0,
+            int(balance_after or 0),
+            int(credits_after_refund or 0),
+            "content_pack_send_failed",
+        )
+        await message.reply_text(
+            "⚙️ Workflow xử lý chưa ổn định. TOAN AAS đã hoàn Xu nếu có trừ. Vui lòng thử lại sau."
+        )
+
+async def send_or_confirm_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str) -> None:
+    uid = update.effective_user.id if update.effective_user else 0
+    if not TREND_VIDEO_WORKFLOW_ENABLED:
+        return await update.message.reply_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
+    if not trend_video_workflow_can_access(uid):
+        return await update.message.reply_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+    if is_admin_user(uid):
+        return await send_trend_video_flow_for_topic(update, topic, billing_note=trend_workflow_admin_preview_note())
+    breakdown = trend_workflow_content_cost_breakdown()
+    total_cost = int(breakdown.get("total") or 0)
+    if not TREND_WORKFLOW_PUBLIC_ENABLED:
+        return await update.message.reply_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+    if not TREND_WORKFLOW_BILLING_ENABLED or total_cost <= 0:
+        return await send_trend_video_flow_for_topic(update, topic, billing_note=trend_workflow_billing_off_note())
+    credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Trend workflow user")
+    if int(credits or 0) < total_cost:
+        return await reply_insufficient_credits(update, int(credits or 0), total_cost)
+    workflow = trend_workflow_id(uid)
+    if TREND_WORKFLOW_REQUIRE_CONFIRM:
+        set_trend_workflow_confirm_pending(uid, topic, workflow)
+        return await update.message.reply_text(
+            trend_workflow_content_confirm_text(topic, int(credits or 0)),
+            parse_mode="HTML",
+            reply_markup=trend_workflow_content_confirm_keyboard(),
+        )
+    await execute_confirmed_trend_workflow_content(update.message, uid, topic, workflow)
 
 async def cmd_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -43060,15 +43290,49 @@ async def cmd_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYP
     if not topic:
         set_trend_video_flow_pending(uid)
         return await update.message.reply_text(trend_video_pending_prompt_text(), reply_markup=trend_video_pending_keyboard())
-    await send_trend_video_flow_for_topic(update, topic)
+    await send_or_confirm_trend_video_flow(update, context, topic)
 
 async def handle_trend_video_flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
     uid = query.from_user.id if query.from_user else 0
+    if action == "cancel_content":
+        pending = get_trend_workflow_confirm_pending(uid)
+        workflow = str((pending or {}).get("workflow_id") or "")
+        clear_trend_workflow_confirm_pending(uid)
+        record_trend_workflow_billing_event(uid, workflow, "cancel", 0, 0, 0, "user_cancelled_content_confirmation")
+        return await query.edit_message_text("❌ Đã hủy gói nội dung theo trend. Bot chưa gọi provider và chưa trừ Xu.")
+    if action == "confirm_content":
+        pending = get_trend_workflow_confirm_pending(uid)
+        if not pending:
+            return await query.edit_message_text("⏰ Yêu cầu đã hết hạn hoặc đã xử lý. Bot chưa trừ Xu.")
+        clear_trend_workflow_confirm_pending(uid)
+        topic = str(pending.get("topic") or "").strip()
+        workflow = str(pending.get("workflow_id") or "")[:80]
+        if not TREND_VIDEO_WORKFLOW_ENABLED:
+            return await query.edit_message_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
+        if not TREND_WORKFLOW_PUBLIC_ENABLED and not is_admin_user(uid):
+            return await query.edit_message_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+        if is_admin_user(uid):
+            await query.edit_message_text("🧪 Admin preview / content-only / no Xu deducted.")
+            return await send_trend_video_flow_for_topic_message(query.message, uid, topic, billing_note=trend_workflow_admin_preview_note())
+        if not TREND_WORKFLOW_BILLING_ENABLED:
+            await query.edit_message_text("ℹ️ Billing workflow đang OFF. Bot chưa trừ Xu.")
+            return await send_trend_video_flow_for_topic_message(query.message, uid, topic, billing_note=trend_workflow_billing_off_note())
+        total_cost = int(trend_workflow_content_cost_breakdown().get("total") or 0)
+        credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend workflow user")
+        if int(credits or 0) < total_cost:
+            return await edit_insufficient_credits(query, int(credits or 0), total_cost, uid)
+        record_trend_workflow_billing_event(uid, workflow, "confirm", 0, int(credits or 0), int(credits or 0), "user_confirmed_content_pack")
+        await query.edit_message_text(
+            "🎬 Đã xác nhận. Đang tạo gói nội dung theo trend...\n"
+            "Bot không gọi image/video API trong bước này."
+        )
+        return await execute_confirmed_trend_workflow_content(query.message, uid, topic, workflow)
     if action in {"cancel_pending", "cancel"}:
         clear_trend_video_flow_pending(uid)
+        clear_trend_workflow_confirm_pending(uid)
         return await query.edit_message_text("❌ Đã hủy Trend → Video Workflow. Bot chưa gọi API và chưa trừ Xu.")
     if not trend_video_workflow_can_access(uid):
         return await query.edit_message_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
@@ -43163,10 +43427,7 @@ async def handle_trend_video_flow_pending_text(update: Update, context: ContextT
     if not TREND_VIDEO_WORKFLOW_ENABLED:
         await update.message.reply_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
         return True
-    if not trend_video_workflow_can_access(uid):
-        await update.message.reply_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
-        return True
-    await send_trend_video_flow_for_topic(update, topic)
+    await send_or_confirm_trend_video_flow(update, context, topic)
     return True
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
