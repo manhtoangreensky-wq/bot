@@ -168,6 +168,11 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=true" in env_example
     assert "SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT=true" in env_example
     assert "SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED=true" in env_example
+    assert "TREND_VIDEO_WORKFLOW_ENABLED=true" in env_example
+    assert "TREND_VIDEO_WORKFLOW_ADMIN_ONLY=true" in env_example
+    assert "TREND_PROMPT_COST_XU=0" in env_example
+    assert "TREND_ANALYSIS_COST_XU=0" in env_example
+    assert "TREND_WORKFLOW_PUBLIC_ENABLED=false" in env_example
     assert "SYSTEM_MAINTENANCE_MODE=false" in env_example
     assert "PROVIDER_FREEZE_ENABLED=false" in env_example
     assert "TOOL_FREEZE_IMAGE=false" in env_example
@@ -567,6 +572,51 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
             os.unlink(db_path)
 
 
+def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
+    source = bot_source_text()
+    command_source = source_between(source, "async def cmd_trend_video_flow", "async def handle_trend_video_flow_callback")
+    callback_source = source_between(source, "async def handle_trend_video_flow_callback", "async def cmd_image_tools")
+    combined_source = command_source + callback_source
+
+    assert 'CommandHandler("trend_video_flow", cmd_trend_video_flow)' in source
+    assert 'CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\\|")' in source
+    assert "trend_video_workflow_status_text()" in source
+    assert "Trend video workflow:" in source
+    assert "shopaikey_image_generate" not in combined_source
+    assert "shopaikey_video_create" not in combined_source
+    assert "spend_fixed_credit_info" not in combined_source
+    assert "deduct_dynamic_credit" not in combined_source
+    assert "add_credit(" not in combined_source
+
+    monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ENABLED", True)
+    monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ADMIN_ONLY", True)
+    monkeypatch.setattr(bot, "TREND_WORKFLOW_PUBLIC_ENABLED", False)
+    assert bot.trend_video_workflow_status_text() == "enabled/admin-only"
+    assert bot.trend_video_workflow_can_access(0) is False
+
+    sections = bot.trend_video_flow_sections("affiliate AI tool cho người mới")
+    assert len(sections) >= 6
+    assert all(len(section) <= 3900 for section in sections)
+    joined = "\n".join(sections).lower()
+    for marker in [
+        "10 hook",
+        "script 15",
+        "script 30",
+        "script 60",
+        "storyboard",
+        "prompt tạo ảnh",
+        "prompt tạo video",
+        "tts",
+        "nhạc",
+        "caption",
+        "cta",
+        "public image/video: off",
+        "không tạo ảnh-video thật",
+    ]:
+        assert marker in joined
+    assert "Bot chưa trừ Xu" in bot.TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE or "thử nghiệm nội bộ" in bot.TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE
+
+
 def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -695,6 +745,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "shopaikey_image": "cmd_shopaikey_image_public",
         "shopaikey_video": "cmd_shopaikey_video_public",
         "shopaikey_video_from_image": "cmd_shopaikey_video_from_image_public",
+        "trend_video_flow": "cmd_trend_video_flow",
         "shopaikey_status": "cmd_shopaikey_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
         "trial_bonus_status": "cmd_trial_bonus_status",

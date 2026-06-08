@@ -35,6 +35,36 @@ Một workflow video đầy đủ cần tạo:
 - Caption/subtitle.
 - CTA/affiliate/ad copy.
 
+## Trend to Video Creative Workflow V1
+
+Command admin-first: `/trend_video_flow <chủ đề>`.
+
+Mục tiêu V1:
+
+- Tạo plan/prompt/script để khách hoặc admin copy nhanh.
+- Chưa gọi ShopAIKey image/video public nếu public image/video đang OFF.
+- Không trừ Xu khi chỉ tạo hooks/script/storyboard/prompt.
+- Không publish, không broadcast, không tự chạy ads.
+
+Output nên chia thành các block ngắn:
+
+1. 10 hook mở đầu.
+2. Script 15s, 30s, 60s.
+3. Storyboard theo scene.
+4. Prompt tạo ảnh 9:16.
+5. Prompt tạo video hoặc image-to-video.
+6. Gợi ý TTS, nhạc/Suno, caption, hashtag, CTA.
+
+Nút điều hướng chỉ gợi ý bước tiếp theo:
+
+- Tạo prompt ảnh đẹp hơn.
+- Tạo prompt video từ ảnh.
+- Tạo voice/TTS.
+- Tạo nhạc nền.
+- Viết lại script.
+- Tạo phiên bản ads để admin review.
+- Lưu kế hoạch thủ công.
+
 ## Admin-First Safety
 
 - Publish/video automation là admin-first.
@@ -43,6 +73,8 @@ Một workflow video đầy đủ cần tạo:
 - Không chạy ads hộ khách.
 - Không cam kết viral/doanh thu.
 - Mọi output có yếu tố affiliate/ad cần disclosure và risk check.
+- Public image/video generation vẫn OFF cho tới khi admin bật ENV, có billing, refund, queue và job lock.
+- Prompt workflow không được gọi provider tạo ảnh/video thật nếu public OFF.
 
 ## Lưu ý dữ liệu
 

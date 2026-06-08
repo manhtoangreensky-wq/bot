@@ -376,6 +376,11 @@ SHOPAIKEY_VIDEO_WAITING_MESSAGE_ENABLED = env_flag("SHOPAIKEY_VIDEO_WAITING_MESS
 SHOPAIKEY_VIDEO_PROVIDER_MODE = _env("SHOPAIKEY_VIDEO_PROVIDER_MODE", "admin_only")
 SHOPAIKEY_IMAGE_PROVIDER_MODE = _env("SHOPAIKEY_IMAGE_PROVIDER_MODE", "admin_only")
 SHOPAIKEY_MAINTENANCE_ON_PROVIDER_ERROR = env_flag("SHOPAIKEY_MAINTENANCE_ON_PROVIDER_ERROR", "true")
+TREND_VIDEO_WORKFLOW_ENABLED = env_flag("TREND_VIDEO_WORKFLOW_ENABLED", "true")
+TREND_VIDEO_WORKFLOW_ADMIN_ONLY = env_flag("TREND_VIDEO_WORKFLOW_ADMIN_ONLY", "true")
+TREND_PROMPT_COST_XU = env_int("TREND_PROMPT_COST_XU", 0)
+TREND_ANALYSIS_COST_XU = env_int("TREND_ANALYSIS_COST_XU", 0)
+TREND_WORKFLOW_PUBLIC_ENABLED = env_flag("TREND_WORKFLOW_PUBLIC_ENABLED", "false")
 ENABLE_OPENAI_IMAGE = env_flag("ENABLE_OPENAI_IMAGE", "0")
 ENABLE_OPENAI_IMAGE_EDIT = env_flag("ENABLE_OPENAI_IMAGE_EDIT", "0")
 ENABLE_REAL_VIDEO = env_flag("ENABLE_REAL_VIDEO", "0")
@@ -31778,6 +31783,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Video tested: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Video reason: <code>{html.escape(shopaikey_video_reason or '-')}</code>",
         "• Video: <code>custom video endpoint; customer public controlled by ENV</code>",
+        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | prompt cost <code>{int(TREND_PROMPT_COST_XU or 0)} Xu</code>",
         "• Stage: <code>experimental/admin-only</code>",
         "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
         "",
@@ -32459,6 +32465,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
         f"• Job lock: <code>{'ON' if SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED else 'OFF'}</code>",
+        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code>",
         f"• Maintenance mode: <code>{'ON' if maintenance_on else 'OFF'}</code>",
         f"• Provider freeze: <code>{'ON' if provider_freeze.get('frozen') else 'OFF'}</code>",
         f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason') or '-'))}</code>",
@@ -41641,6 +41648,202 @@ async def cmd_creative_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Ví dụ: /creative_flow video quảng cáo máy xay sinh tố mini TikTok 15 giây vui tươi"
         )
     await reply_html_lines(update, creative_flow_text(idea).splitlines())
+
+TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE = "🧪 Tính năng tạo video theo trend đang thử nghiệm nội bộ. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
+
+def trend_video_workflow_status_text() -> str:
+    if not TREND_VIDEO_WORKFLOW_ENABLED:
+        return "disabled"
+    if TREND_VIDEO_WORKFLOW_ADMIN_ONLY:
+        return "enabled/admin-only"
+    if TREND_WORKFLOW_PUBLIC_ENABLED:
+        return "enabled/public_prompt_only"
+    return "enabled/internal"
+
+def trend_video_workflow_can_access(user_id) -> bool:
+    if is_admin_user(user_id):
+        return True
+    return bool(TREND_VIDEO_WORKFLOW_ENABLED and TREND_WORKFLOW_PUBLIC_ENABLED and not TREND_VIDEO_WORKFLOW_ADMIN_ONLY)
+
+def trend_video_flow_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🖼 Prompt ảnh đẹp hơn", callback_data="tvflow|image_prompt"),
+            InlineKeyboardButton("🎞 Prompt video từ ảnh", callback_data="tvflow|video_prompt"),
+        ],
+        [
+            InlineKeyboardButton("🔊 Voice/TTS", callback_data="tvflow|tts"),
+            InlineKeyboardButton("🎵 Nhạc nền", callback_data="tvflow|music"),
+        ],
+        [
+            InlineKeyboardButton("✍️ Viết lại script", callback_data="tvflow|rewrite"),
+            InlineKeyboardButton("🧪 Phiên bản ads", callback_data="tvflow|ads"),
+        ],
+        [InlineKeyboardButton("📌 Lưu kế hoạch này", callback_data="tvflow|save")],
+    ])
+
+def trend_video_flow_help_text() -> str:
+    return (
+        "🎬 Trend → Video Workflow TOAN AAS\n\n"
+        "Cú pháp:\n"
+        "/trend_video_flow <chủ đề / sản phẩm / ngành>\n\n"
+        "Ví dụ:\n"
+        "/trend_video_flow affiliate AI tool cho người mới\n"
+        "/trend_video_flow mỹ phẩm dưỡng da cho nữ văn phòng\n"
+        "/trend_video_flow quán ăn gia đình trên TikTok\n\n"
+        "Bot sẽ tạo gói: hooks, script 15s/30s/60s, storyboard, prompt ảnh, prompt video, TTS, nhạc, caption, hashtag và CTA.\n\n"
+        "V1 chỉ tạo plan/prompt/script. Không gọi tạo ảnh/video thật. Không trừ Xu."
+    )
+
+def trend_video_flow_sections(topic: str) -> list[str]:
+    safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:220] or "affiliate AI tool cho người mới"
+    hooks = [
+        f"Bạn đang bỏ lỡ cách dùng {safe_topic} nhanh nhất.",
+        f"Đừng làm {safe_topic} theo cách cũ nếu bạn muốn tiết kiệm thời gian.",
+        f"3 lỗi khiến nội dung về {safe_topic} không ai xem đến cuối.",
+        f"Tôi vừa phát hiện một cách biến {safe_topic} thành video ngắn dễ hiểu.",
+        f"Trước khi chạy ads cho {safe_topic}, hãy kiểm tra 5 giây đầu này.",
+        f"Nếu bạn mới bắt đầu với {safe_topic}, hãy xem điều này trước.",
+        f"Cách dùng AI để biến {safe_topic} thành nội dung bán hàng.",
+        f"Trước/sau khi có workflow cho {safe_topic}: khác nhau ở điểm này.",
+        f"Không cần quay phức tạp, {safe_topic} vẫn có thể thành video 15 giây.",
+        f"Affiliate/bán hàng với {safe_topic}: đừng hứa quá mức, hãy chứng minh bằng demo.",
+    ]
+    hook_lines = "\n".join(f"{i}. {hook}" for i, hook in enumerate(hooks, 1))
+
+    sections = [
+        (
+            "🎬 TREND → VIDEO CREATIVE WORKFLOW V1\n\n"
+            f"Chủ đề: {safe_topic}\n"
+            "Trạng thái: content-only / prompt-only / không tạo ảnh-video thật.\n"
+            "Public image/video: OFF mặc định.\n"
+            "Xu: 0 Xu trong V1 này nếu chỉ tạo plan/prompt/script.\n\n"
+            "Mục tiêu gợi ý:\n"
+            "• Bán hàng hoặc affiliate nhưng không cam kết doanh thu.\n"
+            "• Kéo traffic bằng hook rõ, demo cụ thể, CTA nhẹ.\n"
+            "• Tái dùng cho TikTok, Facebook Reels, YouTube Shorts, Instagram Reels.\n\n"
+            "A. 10 HOOK MỞ ĐẦU\n"
+            f"{hook_lines}"
+        ),
+        (
+            "B. 3 KỊCH BẢN VIDEO\n\n"
+            "Script 15 giây\n"
+            f"Hook: {hooks[1]}\n"
+            f"Nội dung chính: Nêu vấn đề phổ biến của người mới khi tiếp cận {safe_topic}. Cho thấy một bước đơn giản để bắt đầu.\n"
+            "Điểm nhấn: một kết quả nhỏ, kiểm chứng được, không phóng đại.\n"
+            "CTA: Lưu lại nếu bạn muốn làm video theo workflow này.\n\n"
+            "Script 30 giây\n"
+            f"Hook: {hooks[2]}\n"
+            "Nội dung chính: Lỗi 1 là mở đầu quá chung. Lỗi 2 là nói lợi ích không có demo. Lỗi 3 là CTA quá bán hàng.\n"
+            f"Điểm nhấn: dùng {safe_topic} như ví dụ để chuyển từ vấn đề → demo → lời mời hành động.\n"
+            "CTA: Comment 'flow' hoặc inbox để nhận bản checklist.\n\n"
+            "Script 60 giây\n"
+            f"Hook: {hooks[6]}\n"
+            f"Nội dung chính: Bắt đầu bằng insight người xem, tạo storyboard 5 cảnh, viết voice-over ngắn, chọn nhạc phù hợp, rồi tự đăng lên kênh của bạn.\n"
+            "Điểm nhấn: quy trình rõ ràng giúp giảm thời gian chuẩn bị nội dung.\n"
+            "CTA: Dùng TOAN AAS để tạo hook, script, caption và prompt nhanh hơn."
+        ),
+        (
+            "C. STORYBOARD TỪNG CẢNH\n\n"
+            "Scene 1 — 0-3s\n"
+            f"Visual: cận cảnh vấn đề hoặc màn hình trước khi dùng {safe_topic}.\n"
+            "Text overlay: Đừng bắt đầu bằng cách này.\n"
+            "Voiceover: Nếu bạn mới làm nội dung, 3 giây đầu quyết định rất nhiều.\n"
+            "Camera: close-up, slow push-in. Transition: quick cut.\n"
+            f"Prompt ảnh: realistic vertical 9:16 shot about {safe_topic}, clean lighting, clear focal subject, no watermark.\n"
+            f"Prompt video: Use this with selected image, slow push-in, subtle motion, clean transition, 3s, vertical 9:16.\n\n"
+            "Scene 2 — 3-8s\n"
+            "Visual: chỉ ra lỗi/điểm đau bằng checklist đơn giản.\n"
+            "Text overlay: Lỗi 1: nói quá chung.\n"
+            "Voiceover: Người xem cần thấy ngay bạn giải quyết vấn đề gì.\n"
+            "Camera: screen-record or top-down desk shot. Transition: swipe.\n\n"
+            "Scene 3 — 8-15s\n"
+            "Visual: demo quy trình 3 bước.\n"
+            "Text overlay: Hook → Demo → CTA.\n"
+            "Voiceover: Dùng cấu trúc này để biến ý tưởng thành video ngắn.\n"
+            "Camera: clean screen walkthrough. Transition: soft zoom.\n\n"
+            "Scene 4 — 15-24s\n"
+            "Visual: before/after kế hoạch nội dung.\n"
+            "Text overlay: Trước: rối. Sau: có flow.\n"
+            "Voiceover: Khi có storyboard, bạn biết cần ảnh, voice, caption và CTA nào.\n"
+            "Camera: split-screen before/after. Transition: match cut.\n\n"
+            "Scene 5 — 24-30s\n"
+            "Visual: end frame rõ CTA.\n"
+            "Text overlay: Muốn bản flow? Comment hoặc dùng TOAN AAS.\n"
+            "Voiceover: Lưu lại để tự tạo video cho sản phẩm của bạn.\n"
+            "Camera: static clean frame. Transition: fade out."
+        ),
+        (
+            "D. PROMPT TẠO ẢNH\n\n"
+            f"1. Subject: creator planning {safe_topic}; background: clean desk with laptop; lighting: soft daylight; camera: 45-degree angle; mood: focused; style: realistic commercial; aspect ratio 9:16; negative prompt: blurry, watermark, extra text.\n"
+            f"2. Subject: product/tool demo for {safe_topic}; background: minimal studio; lighting: bright softbox; camera: close-up; mood: professional; style: high-detail ad photo; aspect ratio 9:16; negative prompt: distorted hands, logo misuse.\n"
+            f"3. Subject: before/after content workflow board for {safe_topic}; background: simple whiteboard; lighting: clean; camera: front view; mood: educational; style: modern tutorial; aspect ratio 9:16; negative prompt: unreadable text, clutter.\n"
+            f"4. Subject: faceless narration setup for {safe_topic}; background: phone filming vertical video; lighting: natural; camera: over-the-shoulder; mood: practical; style: UGC realistic; aspect ratio 9:16; negative prompt: fake UI, watermark.\n"
+            f"5. Subject: cinematic AI result inspired by {safe_topic}; background: futuristic turquoise gradient-free clean studio; lighting: rim light; camera: low angle; mood: premium; style: cinematic product demo; aspect ratio 9:16; negative prompt: extra text, messy composition."
+        ),
+        (
+            "E. PROMPT TẠO VIDEO\n\n"
+            f"1. Use this with selected image. Motion: slow push-in on the main subject about {safe_topic}. Camera movement: smooth 3-second zoom. Lighting: clean commercial. Style: realistic vertical short. Duration: 3s. Negative prompt: jitter, blur, watermark, extra text.\n"
+            f"2. Motion: checklist items appear one by one for {safe_topic}. Camera movement: subtle handheld screen-record feel. Transition: quick swipe. Duration: 5s. Aspect ratio: 9:16. Style: AI tutorial reel.\n"
+            f"3. Motion: before/after board transforms from messy notes to clean workflow. Camera movement: side dolly. Duration: 5s. Style: educational product demo. Negative prompt: unreadable letters, distorted interface.\n"
+            f"4. Motion: product/tool interface scrolls smoothly, cursor highlights one action. Camera movement: screen-record walkthrough. Duration: 6s. Style: clean SaaS tutorial. Negative prompt: fake claims, aggressive flashing.\n"
+            f"5. Motion: end frame settles with soft fade and clear CTA area. Camera movement: static clean frame. Duration: 3s. Style: minimal brand video. Negative prompt: too much text, watermark, overexposure."
+        ),
+        (
+            "F. TTS / NHẠC / CAPTION / CTA\n\n"
+            "Gợi ý TTS:\n"
+            "• Giọng nữ hoặc nam trẻ, rõ chữ, tốc độ hơi nhanh cho TikTok/Reels.\n"
+            "• Nếu hướng chuyên gia: giọng trầm ấm, tốc độ vừa, ít cảm thán.\n"
+            "• Ngôn ngữ: dùng tiếng Việt trước, có thể chuyển English nếu nhắm thị trường quốc tế.\n\n"
+            "Gợi ý nhạc/Suno:\n"
+            f"• Prompt Suno: upbeat clean tech commercial background for a short video about {safe_topic}, modern, positive, no vocal.\n"
+            "• Mood: upbeat, tech, clean, viral short, không lấn voice-over.\n\n"
+            "Caption ngắn:\n"
+            f"Muốn biến {safe_topic} thành video ngắn dễ hiểu? Bắt đầu từ hook, storyboard và CTA rõ.\n\n"
+            "Caption dài:\n"
+            f"Đừng bắt đầu video về {safe_topic} bằng một đoạn giới thiệu dài. Hãy dùng flow: hook 3 giây → demo ngắn → lợi ích kiểm chứng được → CTA nhẹ. Lưu lại nếu bạn muốn tự làm lại cho sản phẩm của mình.\n\n"
+            "Hashtag: #toanaas #aicontent #shortvideo #contentworkflow #affiliate #tiktokshop\n"
+            "Text overlay chính: Hook → Demo → CTA\n\n"
+            "CTA bán hàng: Nhắn tin để nhận tư vấn phù hợp.\n"
+            "CTA affiliate: Xem link chi tiết trước khi quyết định, kiểm tra điều kiện và nguồn chính thức.\n"
+            "CTA comment/inbox: Comment 'flow' để nhận checklist.\n"
+            "CTA TOAN AAS: Dùng TOAN AAS để tạo script, prompt, caption và voice nhanh hơn.\n\n"
+            "Bạn muốn làm gì tiếp?"
+        ),
+    ]
+    return sections
+
+async def send_trend_video_flow_sections(update: Update, sections: list[str]):
+    for idx, section in enumerate(sections):
+        reply_markup = trend_video_flow_keyboard() if idx == len(sections) - 1 else None
+        await update.message.reply_text(section[:3900], reply_markup=reply_markup)
+
+async def cmd_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not TREND_VIDEO_WORKFLOW_ENABLED:
+        return await update.message.reply_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
+    if not trend_video_workflow_can_access(uid):
+        return await update.message.reply_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text(trend_video_flow_help_text())
+    sections = trend_video_flow_sections(topic)
+    await send_trend_video_flow_sections(update, sections)
+
+async def handle_trend_video_flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
+    guidance = {
+        "image_prompt": "🖼 Copy prompt ảnh trong gói này, hoặc dùng /image_prompt <chủ đề> để viết lại prompt ảnh đẹp hơn. V1 chưa gọi tạo ảnh thật.",
+        "video_prompt": "🎞 Copy prompt video trong gói này, hoặc reply ảnh rồi dùng /image_to_video_pack <mô tả chuyển động>. V1 chưa gọi tạo video thật.",
+        "tts": "🔊 Dùng /tool_test_shopaikey_tts nếu admin muốn smoke test TTS, hoặc dùng /translate_voice /transcribe cho audio. Workflow này chưa trừ Xu.",
+        "music": "🎵 Dùng /music_library <mood> hoặc /sfx_library <từ khóa> để tìm nhạc/SFX nghe thử. Kiểm tra license trước khi dùng thương mại.",
+        "rewrite": "✍️ Gửi lại /trend_video_flow <chủ đề + phong cách mới> để bot tạo lại pack theo hướng khác.",
+        "ads": "🧪 Phiên bản ads vẫn cần admin review/risk check. Không tự chạy ads, không cam kết doanh thu.",
+        "save": "📌 Hiện V1 chưa lưu project tự động. Hãy copy pack này vào note/project của bạn. Không có Xu nào bị trừ.",
+    }.get(action, "ℹ️ Workflow V1 chỉ tạo plan/prompt/script. Không gọi image/video thật.")
+    await query.edit_message_text(guidance)
 
 async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -58901,6 +59104,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("trend_live", cmd_trend_live))
     tg_app.add_handler(CommandHandler("trend_research", cmd_trend_research))
     tg_app.add_handler(CommandHandler("trend_status", cmd_trend_status))
+    tg_app.add_handler(CommandHandler("trend_video_flow", cmd_trend_video_flow))
     tg_app.add_handler(CommandHandler("image_tools", cmd_image_tools))
     tg_app.add_handler(CommandHandler("image_studio", cmd_image_studio))
     tg_app.add_handler(CommandHandler("image_prompt", cmd_image_prompt))
@@ -59051,6 +59255,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
