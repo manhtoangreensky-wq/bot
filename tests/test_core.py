@@ -160,10 +160,14 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_IMAGE_MODEL=nano-banana" in env_example
     assert "SHOPAIKEY_VIDEO_URL=https://api.shopaikey.com/v1/video/generations" in env_example
     assert "SHOPAIKEY_VIDEO_MODEL=veo3.1-fast" in env_example
+    assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
     assert "if not is_admin_user(update.effective_user.id)" in command_source
     assert "Trả lời đúng một câu tiếng Việt có chữ TEST_OK." in source
     assert "TOAN AAS image smoke test: simple turquoise AI automation logo" in source
-    assert "A 3-second clean futuristic turquoise AI automation logo animation" in source
+    assert "A short clean futuristic turquoise AI automation logo animation" in source
+    assert "shopaikey_video_model_sequence" in source
+    assert "FAIL_NO_AVAILABLE_CHANNEL" in source
+    assert "provider/group has no available channel for selected model" in source
     assert "cmd_tool_test_shopaikey_image" in source
     assert "cmd_tool_test_shopaikey_video" in source
     assert "cmd_shopaikey_video_job" in source
@@ -253,6 +257,29 @@ def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
+
+
+def test_shopaikey_video_model_fallback_payload_and_reason(monkeypatch):
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_FALLBACK_MODELS", "veo3.1,veo3.1-fast,grok-video-3,grok-video-3-10s")
+    assert bot.shopaikey_video_model_sequence() == ["veo3.1-fast", "veo3.1", "grok-video-3", "grok-video-3-10s"]
+    assert bot.shopaikey_video_model_sequence("grok-video-3") == ["grok-video-3"]
+
+    veo_payload = bot.shopaikey_video_request_payload("veo3.1")
+    assert veo_payload["model"] == "veo3.1"
+    assert veo_payload["metadata"]["aspect_ratio"] == "16:9"
+
+    grok_payload = bot.shopaikey_video_request_payload("grok-video-3")
+    assert grok_payload["model"] == "grok-video-3"
+    assert "metadata" not in grok_payload
+
+    grok_10s_payload = bot.shopaikey_video_request_payload("grok-video-3-10s")
+    assert grok_10s_payload["metadata"]["quality"] == "720p"
+
+    assert bot.shopaikey_classify_video_error(503, "No available channel for model veo3.1-fast") == "FAIL_NO_AVAILABLE_CHANNEL"
+    assert bot.shopaikey_classify_video_error(401, "unauthorized") == "FAIL_AUTH"
+    assert bot.shopaikey_classify_video_error(400, "bad request") == "FAIL_BAD_REQUEST"
+    assert bot.shopaikey_video_reason_text({"status": "FAIL_NO_AVAILABLE_CHANNEL", "detail": ""}) == "provider/group has no available channel for selected model."
 
 
 def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
