@@ -349,9 +349,10 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "TREND_VIDEO_WORKFLOW_ADMIN_ONLY=true" in env_example
     assert "TREND_PROMPT_COST_XU=0" in env_example
     assert "TREND_ANALYSIS_COST_XU=0" in env_example
-    assert "TREND_WORKFLOW_PUBLIC_ENABLED=false" in env_example
+    assert "TREND_WORKFLOW_PUBLIC_ENABLED=true" in env_example
     assert "TREND_WORKFLOW_BILLING_ENABLED=true" in env_example
     assert "TREND_WORKFLOW_REQUIRE_CONFIRM=true" in env_example
+    assert "TREND_WORKFLOW_CONTENT_ONLY=true" in env_example
     assert "SYSTEM_MAINTENANCE_MODE=false" in env_example
     assert "PROVIDER_FREEZE_ENABLED=false" in env_example
     assert "TOOL_FREEZE_IMAGE=false" in env_example
@@ -558,6 +559,7 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert pricing["billing_mode"] == "tiered_media_pricing"
     assert pricing["price_table_source"] == "centralized_price_menu"
     assert pricing["media_price_multiplier"] == 2
+    assert pricing["trend_workflow_content_only"] is True
     assert pricing["image_tiers"]["low"]["cost"] == 320
     assert pricing["video_tiers"]["low"]["cost"] == 640
     assert pricing["quick_image_cost"] == 320
@@ -801,9 +803,10 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "trend_workflow_content_confirm_text" in source
     assert "TREND_WORKFLOW_BILLING_ENABLED" in source
     assert "TREND_WORKFLOW_REQUIRE_CONFIRM" in source
+    assert "TREND_WORKFLOW_CONTENT_ONLY" in source
     assert "Trend video workflow:" in source
     assert "Workflow image generation:" in source
-    assert "Bạn muốn tạo ảnh từ prompt nào" in source
+    assert "Bạn muốn làm gì tiếp" in source
     assert "tvflow|image_scene_1" in source
     assert "tvflow|image_scene_2" in source
     assert "tvflow|image_scene_3" in source
@@ -821,6 +824,8 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "trend_workflow_content" in combined_source
     assert "apply_member_discount_flag=False" in combined_source
     assert "record_trend_workflow_billing_event" in combined_source
+    assert "trend_workflow_insufficient_credits_text" in combined_source
+    assert "insufficient_balance" in combined_source
     assert "deduct_dynamic_credit" not in combined_source
     assert "add_credit(" not in combined_source
     assert "shopaikey_public_generation_guard(\"image\")" in callback_source
@@ -908,6 +913,8 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "70 Xu" in bot.trend_workflow_content_confirm_text("affiliate AI", 200)
     assert "tvflow|confirm_content" in source
     assert "tvflow|cancel_content" in source
+    assert "Đã hủy gói nội dung theo trend" in callback_source
+    assert "Tính năng tạo ảnh/video thật đang thử nghiệm nội bộ" in callback_source
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -1074,13 +1081,35 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "C. Hình ảnh AI" in pricing_text
     assert "D. Video AI" in pricing_text
     assert "E. Workflow nội dung theo trend" in pricing_text
+    assert "F. Dịch thuật" in pricing_text
+    assert "G. Voice / TTS / STT" in pricing_text
+    assert "H. Nhạc / SFX / Audio" in pricing_text
+    assert "I. Tài liệu / PDF" in pricing_text
+    assert "J. Gói tháng" in pricing_text
+    assert "K. Thành viên" in pricing_text
+    assert "L. Điều khoản Xu" in pricing_text
     assert "Ảnh tiết kiệm: <b>321 Xu</b>" in pricing_text
     assert "Ảnh tiêu chuẩn: <b>777 Xu</b>" in pricing_text
     assert "Video tiết kiệm: <b>654 Xu</b>" in pricing_text
     assert "Video premium/admin-only: <b>2222 Xu</b>" in pricing_text
+    assert "Gói nội dung theo trend: <b>24 Xu</b>" in pricing_text
     assert "Tổng gói content-only: <b>24 Xu</b>" in pricing_text
+    assert "Dịch văn bản ngắn: từ <b>5 Xu</b>" in pricing_text
+    assert "Dịch/lồng tiếng video: từ <b>800 Xu</b>" in pricing_text
+    assert "TTS/voice ngắn" in pricing_text
+    assert "Tìm nhạc/SFX library" in pricing_text
     assert "provider cost" not in pricing_text.lower()
     assert "tiered_media_pricing" in pricing_text
+    xu_text = "\n".join(bot.pricing_xu_lines())
+    assert xu_text.count("💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>") == 1
+    plan_text = "\n".join(bot.pricing_plans_lines())
+    assert "Tác vụ phát sinh xem tại <b>💳 Bảng giá tổng</b>" in plan_text
+    assert "Giá tác vụ dịch tham khảo" not in plan_text
+    assert "<code>/translate_voice</code>: từ 30–80 Xu/audio ngắn" not in plan_text
+    assert "Music / Audio Factory" not in plan_text
+    pricing_callback_source = source_between(source, "async def handle_pricing_callback", "def parse_chat_pro_args")
+    assert "edit_or_send_pricing_lines(query, pricing_xu_lines(), pricing_xu_keyboard())" in pricing_callback_source
+    assert "send_pricing_lines(query.message, pricing_xu_lines()" not in pricing_callback_source
     start_labels = [button.text for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard for button in row]
     assert "🎨 Media Creator" not in start_labels
     assert "🎬 Tạo nội dung / Video" in start_labels

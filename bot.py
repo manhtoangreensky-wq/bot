@@ -380,9 +380,10 @@ TREND_VIDEO_WORKFLOW_ENABLED = env_flag("TREND_VIDEO_WORKFLOW_ENABLED", "true")
 TREND_VIDEO_WORKFLOW_ADMIN_ONLY = env_flag("TREND_VIDEO_WORKFLOW_ADMIN_ONLY", "true")
 TREND_PROMPT_COST_XU = env_int("TREND_PROMPT_COST_XU", 0)
 TREND_ANALYSIS_COST_XU = env_int("TREND_ANALYSIS_COST_XU", 0)
-TREND_WORKFLOW_PUBLIC_ENABLED = env_flag("TREND_WORKFLOW_PUBLIC_ENABLED", "false")
+TREND_WORKFLOW_PUBLIC_ENABLED = env_flag("TREND_WORKFLOW_PUBLIC_ENABLED", "true")
 TREND_WORKFLOW_BILLING_ENABLED = env_flag("TREND_WORKFLOW_BILLING_ENABLED", "true")
 TREND_WORKFLOW_REQUIRE_CONFIRM = env_flag("TREND_WORKFLOW_REQUIRE_CONFIRM", "true")
+TREND_WORKFLOW_CONTENT_ONLY = env_flag("TREND_WORKFLOW_CONTENT_ONLY", "true")
 ENABLE_OPENAI_IMAGE = env_flag("ENABLE_OPENAI_IMAGE", "0")
 ENABLE_OPENAI_IMAGE_EDIT = env_flag("ENABLE_OPENAI_IMAGE_EDIT", "0")
 ENABLE_REAL_VIDEO = env_flag("ENABLE_REAL_VIDEO", "0")
@@ -27614,6 +27615,7 @@ def media_workflow_pricing_payload() -> dict:
         "workflow_content_total_cost": trend_breakdown["total"],
         "trend_workflow_billing_enabled": bool(TREND_WORKFLOW_BILLING_ENABLED),
         "trend_workflow_require_confirm": bool(TREND_WORKFLOW_REQUIRE_CONFIRM),
+        "trend_workflow_content_only": bool(TREND_WORKFLOW_CONTENT_ONLY),
         "trend_workflow_billing_status": trend_workflow_billing_status_text(),
         "legacy_shopaikey_image_fallback": max(0, int(SHOPAIKEY_IMAGE_COST_XU or 0)),
         "legacy_shopaikey_video_fallback": max(0, int(SHOPAIKEY_VIDEO_COST_XU or 0)),
@@ -32735,8 +32737,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Video tested: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Video reason: <code>{html.escape(shopaikey_video_reason or '-')}</code>",
         "• Video: <code>custom video endpoint; customer public controlled by ENV</code>",
-        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
-        f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | image/video separate in <code>/pricing</code>",
+        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | content-only <code>{'ON' if pricing['trend_workflow_content_only'] else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
+        f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | image/video generation priced by tier, separate from content workflow",
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
@@ -33429,7 +33431,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
         f"• Job lock: <code>{'ON' if SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED else 'OFF'}</code>",
-        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
+        f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | content-only <code>{'ON' if pricing['trend_workflow_content_only'] else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
         f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | trend <code>{pricing['workflow_trend_analysis_cost']} Xu</code> | script/storyboard <code>{pricing['workflow_script_storyboard_cost']} Xu</code> | prompt pack <code>{pricing['workflow_prompt_pack_cost']} Xu</code>",
         f"• Trend workflow separate generation: image/video priced by tiers in <code>/pricing</code>",
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
@@ -42798,6 +42800,49 @@ def record_trend_workflow_billing_event(user_id, workflow_id: str, event_type: s
     safe_reason = f"trend_workflow_content; workflow_id={safe_workflow}; {reason or ''}"
     record_shopaikey_billing_event(user_id, 0, event_type, amount_xu, balance_before, balance_after, safe_reason)
 
+def trend_workflow_insufficient_credits_text(current_credits: int, required_credits: int) -> str:
+    need_more = max(0, int(required_credits or 0) - int(current_credits or 0))
+    return (
+        f"⚠️ <b>Bạn chưa đủ Xu để tạo gói nội dung theo trend.</b>\n\n"
+        f"Gói này cần <b>{int(required_credits or 0)} Xu</b>.\n"
+        f"• Số dư hiện tại: <b>{int(current_credits or 0)} Xu</b>\n"
+        f"• Còn thiếu: <b>{need_more} Xu</b>\n\n"
+        "Bạn có thể dùng <code>/naptien</code> hoặc mở <b>💳 Bảng giá</b> để xem gói Xu phù hợp."
+    )
+
+async def reply_trend_workflow_insufficient_credits(update: Update, current_credits: int, required_credits: int, workflow_id: str = ""):
+    uid = update.effective_user.id if update.effective_user else 0
+    record_trend_workflow_billing_event(
+        uid,
+        workflow_id,
+        "insufficient_balance",
+        0,
+        int(current_credits or 0),
+        int(current_credits or 0),
+        f"required={int(required_credits or 0)}",
+    )
+    await update.message.reply_text(
+        trend_workflow_insufficient_credits_text(current_credits, required_credits),
+        parse_mode="HTML",
+        reply_markup=build_topup_keyboard(uid),
+    )
+
+async def edit_trend_workflow_insufficient_credits(query, current_credits: int, required_credits: int, uid: int, workflow_id: str = ""):
+    record_trend_workflow_billing_event(
+        uid,
+        workflow_id,
+        "insufficient_balance",
+        0,
+        int(current_credits or 0),
+        int(current_credits or 0),
+        f"required={int(required_credits or 0)}",
+    )
+    await query.edit_message_text(
+        trend_workflow_insufficient_credits_text(current_credits, required_credits),
+        parse_mode="HTML",
+        reply_markup=build_topup_keyboard(uid),
+    )
+
 def trend_video_pending_prompt_text() -> str:
     return (
         "🎬 Trend → Video Workflow TOAN AAS\n\n"
@@ -43054,10 +43099,13 @@ def trend_video_flow_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🖼 Tạo ảnh từ Scene 3", callback_data="tvflow|image_scene_3")],
         [InlineKeyboardButton("🎞 Tạo video — tính riêng", callback_data="tvflow|video_prompt")],
         [
-            InlineKeyboardButton("✍️ Sửa script/prompt", callback_data="tvflow|rewrite"),
-            InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main"),
+            InlineKeyboardButton("✍️ Sửa script", callback_data="tvflow|rewrite"),
+            InlineKeyboardButton("🔁 Tạo phiên bản khác", callback_data="tvflow|rewrite"),
         ],
-        [InlineKeyboardButton("❌ Hủy", callback_data="tvflow|cancel")],
+        [
+            InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main"),
+            InlineKeyboardButton("❌ Hủy", callback_data="tvflow|cancel"),
+        ],
     ])
 
 def trend_workflow_image_success_keyboard(job_id: int, scene_index: int) -> InlineKeyboardMarkup:
@@ -43086,6 +43134,7 @@ def trend_video_flow_help_text() -> str:
 def trend_video_flow_sections(topic: str, billing_note: str = "") -> list[str]:
     safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:220] or "affiliate AI tool cho người mới"
     safe_billing_note = str(billing_note or "").strip() or "Xu: 0 Xu — Admin preview / content-only / no Xu deducted."
+    content_only_status = "ON" if TREND_WORKFLOW_CONTENT_ONLY else "OFF"
     hooks = [
         f"Bạn đang bỏ lỡ cách dùng {safe_topic} nhanh nhất.",
         f"Đừng làm {safe_topic} theo cách cũ nếu bạn muốn tiết kiệm thời gian.",
@@ -43105,6 +43154,7 @@ def trend_video_flow_sections(topic: str, billing_note: str = "") -> list[str]:
             "🎬 TREND → VIDEO CREATIVE WORKFLOW V1\n\n"
             f"Chủ đề: {safe_topic}\n"
             "Trạng thái: content-only / prompt-only / không tạo ảnh-video thật.\n"
+            f"Trend workflow content-only: {content_only_status}.\n"
             "Public image/video: OFF mặc định.\n"
             f"{safe_billing_note}\n\n"
             "Mục tiêu gợi ý:\n"
@@ -43197,7 +43247,7 @@ def trend_video_flow_sections(topic: str, billing_note: str = "") -> list[str]:
             "CTA affiliate: Xem link chi tiết trước khi quyết định, kiểm tra điều kiện và nguồn chính thức.\n"
             "CTA comment/inbox: Comment 'flow' để nhận checklist.\n"
             "CTA TOAN AAS: Dùng TOAN AAS để tạo script, prompt, caption và voice nhanh hơn.\n\n"
-            "Bạn muốn tạo ảnh từ prompt nào?\n"
+            "Bạn muốn làm gì tiếp?\n"
             f"• Tạo ảnh từ prompt này — sẽ tính {image_base_cost_xu()} Xu riêng nếu public image được bật.\n"
             f"• Tạo video — sẽ tính {video_base_cost_xu()} Xu riêng nếu public video được bật.\n"
             "• Bạn cũng có thể sửa script/prompt hoặc quay lại menu chính.\n\n"
@@ -43254,8 +43304,17 @@ async def execute_confirmed_trend_workflow_content(message, user_id, topic: str,
     )
     if not charge.get("ok"):
         credits_now, _, _ = get_user(uid)
+        record_trend_workflow_billing_event(
+            uid,
+            workflow,
+            "insufficient_balance",
+            0,
+            int(credits_now or 0),
+            int(credits_now or 0),
+            f"required={total_cost}; after_confirm_charge_failed",
+        )
         return await message.reply_text(
-            insufficient_credits_text(int(credits_now or 0), total_cost),
+            trend_workflow_insufficient_credits_text(int(credits_now or 0), total_cost),
             parse_mode="HTML",
             reply_markup=build_topup_keyboard(uid),
         )
@@ -43316,7 +43375,7 @@ async def execute_confirmed_trend_workflow_content(message, user_id, topic: str,
             "content_pack_send_failed",
         )
         await message.reply_text(
-            "⚙️ Workflow xử lý chưa ổn định. TOAN AAS đã hoàn Xu nếu có trừ. Vui lòng thử lại sau."
+            "⚙️ Có lỗi khi tạo nội dung. TOAN AAS đã hoàn Xu cho bạn, vui lòng thử lại sau."
         )
 
 async def send_or_confirm_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, topic: str) -> None:
@@ -43333,10 +43392,10 @@ async def send_or_confirm_trend_video_flow(update: Update, context: ContextTypes
         return await update.message.reply_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
     if not TREND_WORKFLOW_BILLING_ENABLED or total_cost <= 0:
         return await send_trend_video_flow_for_topic(update, topic, billing_note=trend_workflow_billing_off_note())
+    workflow = trend_workflow_id(uid)
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Trend workflow user")
     if int(credits or 0) < total_cost:
-        return await reply_insufficient_credits(update, int(credits or 0), total_cost)
-    workflow = trend_workflow_id(uid)
+        return await reply_trend_workflow_insufficient_credits(update, int(credits or 0), total_cost, workflow)
     if TREND_WORKFLOW_REQUIRE_CONFIRM:
         set_trend_workflow_confirm_pending(uid, topic, workflow)
         return await update.message.reply_text(
@@ -43389,7 +43448,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         total_cost = int(trend_workflow_content_cost_breakdown().get("total") or 0)
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend workflow user")
         if int(credits or 0) < total_cost:
-            return await edit_insufficient_credits(query, int(credits or 0), total_cost, uid)
+            return await edit_trend_workflow_insufficient_credits(query, int(credits or 0), total_cost, uid, workflow)
         record_trend_workflow_billing_event(uid, workflow, "confirm", 0, int(credits or 0), int(credits or 0), "user_confirmed_content_pack")
         await query.edit_message_text(
             "🎬 Đã xác nhận. Đang tạo gói nội dung theo trend...\n"
@@ -43421,7 +43480,10 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
                     "🧪 Public image đang OFF. Admin có thể test riêng bằng /tool_test_workflow_image.\n"
                     "Bot chưa gọi API public và chưa trừ Xu."
                 )
-            return await query.edit_message_text(f"{message}\nBot chưa trừ Xu.")
+            return await query.edit_message_text(
+                "🧪 Tính năng tạo ảnh/video thật đang thử nghiệm nội bộ, chưa mở công khai.\n"
+                "Bot chưa gọi API và chưa trừ Xu."
+            )
         if shopaikey_active_job_for_user(uid, "image"):
             return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
         prompt = str(output.get("image_prompt") or "").strip()
@@ -43498,6 +43560,17 @@ async def handle_trend_video_flow_pending_text(update: Update, context: ContextT
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
+    trend_confirm_pending = get_trend_workflow_confirm_pending(uid)
+    if trend_confirm_pending:
+        record_trend_workflow_billing_event(
+            uid,
+            str(trend_confirm_pending.get("workflow_id") or ""),
+            "cancel",
+            0,
+            0,
+            0,
+            "user_cancelled_by_command",
+        )
     if clear_media_creator_pending_states(uid):
         return await update.message.reply_text(
             "❌ Đã hủy Media Creator. Bot chưa gọi API và chưa trừ Xu.\n\n"
@@ -45023,6 +45096,37 @@ async def send_pricing_lines(message, lines: list[str], reply_markup: InlineKeyb
     if chunk:
         await message.reply_text("\n".join(chunk), parse_mode="HTML", reply_markup=reply_markup)
 
+def chunk_pricing_lines(lines: list[str], limit: int = 3600) -> list[str]:
+    chunks: list[str] = []
+    chunk: list[str] = []
+    current_len = 0
+    for line in lines:
+        line = str(line)
+        add_len = len(line) + 1
+        if chunk and current_len + add_len > limit:
+            chunks.append("\n".join(chunk))
+            chunk = []
+            current_len = 0
+        chunk.append(line)
+        current_len += add_len
+    if chunk:
+        chunks.append("\n".join(chunk))
+    return chunks
+
+async def edit_or_send_pricing_lines(query, lines: list[str], reply_markup: InlineKeyboardMarkup | None = None, limit: int = 3600):
+    chunks = chunk_pricing_lines(lines, limit=limit)
+    if not chunks:
+        return
+    if len(chunks) == 1:
+        return await query.edit_message_text(chunks[0], parse_mode="HTML", reply_markup=reply_markup)
+    await query.edit_message_text(chunks[0], parse_mode="HTML")
+    for idx, chunk in enumerate(chunks[1:], 1):
+        await query.message.reply_text(
+            chunk,
+            parse_mode="HTML",
+            reply_markup=reply_markup if idx == len(chunks) - 1 else None,
+        )
+
 def pricing_main_lines() -> list[str]:
     pricing = media_workflow_pricing_payload()
     image_tiers = pricing["image_tiers"]
@@ -45039,17 +45143,19 @@ def pricing_main_lines() -> list[str]:
         "💳 <b>BẢNG GIÁ TOAN AAS</b>",
         "",
         "<b>A. Gói Xu / Nạp Xu</b>",
-        f"• Trial trải nghiệm: <b>{TRIAL_BONUS_AMOUNT if TRIAL_BONUS_ENABLED else 0} Xu</b> / tài khoản hợp lệ, nhận 1 lần.",
+        "• 10.000đ → <b>100 Xu</b>",
         "• 50.000đ → <b>500 Xu</b>",
         "• 100.000đ → <b>1.000 Xu</b>",
         "• 200.000đ → <b>2.000 Xu</b>",
         "• 500.000đ → <b>5.000 Xu</b>",
-        "• Bonus nạp/launch/rank-up nếu đang có sẽ hiển thị theo chính sách hiện hành, không cộng thêm theo hạng thành viên trên mọi lần nạp.",
+        "• 1.000.000đ → <b>10.000 Xu</b> nếu có mở",
+        f"• Trial trải nghiệm: <b>{TRIAL_BONUS_AMOUNT if TRIAL_BONUS_ENABLED else 0} Xu</b> / tài khoản hợp lệ, nhận 1 lần.",
+        "• Launch bonus / ưu đãi nạp nếu đang bật sẽ áp dụng theo chính sách hiện hành.",
         "",
         "<b>B. AI Chat / Hỏi AI</b>",
-        f"• Gói thường: <b>{CHAT_COST_NORMAL} Xu</b> / lượt trả lời thành công.",
-        f"• Gói Pro: <b>{CHAT_COST_PRO} Xu</b> / lượt trả lời thành công.",
-        f"• Gói Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>, tùy độ dài/tác vụ.",
+        f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b> / lượt thành công.",
+        f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b> / lượt thành công.",
+        f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>, tùy độ dài/tác vụ.",
         "• Nếu provider lỗi/quota, bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
         "",
         "<b>C. Hình ảnh AI</b>",
@@ -45066,19 +45172,60 @@ def pricing_main_lines() -> list[str]:
         f"• Trạng thái public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
         "<b>E. Workflow nội dung theo trend</b>",
+        f"• Gói nội dung theo trend: <b>{pricing['workflow_content_total_cost']} Xu</b>",
         f"• Phân tích trend: <b>{pricing['workflow_trend_analysis_cost']} Xu</b>",
         f"• Hook/script/storyboard: <b>{pricing['workflow_script_storyboard_cost']} Xu</b>",
         f"• Prompt pack: <b>{pricing['workflow_prompt_pack_cost']} Xu</b>",
         f"• Tổng gói content-only: <b>{pricing['workflow_content_total_cost']} Xu</b>",
         "• Gói này chưa bao gồm tạo ảnh/video thật. Ảnh/video tính riêng theo bảng giá Hình ảnh AI / Video AI.",
         "",
-        "<b>F. Voice / TTS / Nhạc / SFX</b>",
-        f"• TTS/voice tiết kiệm: từ <b>{VOICE_BASE_COST} Xu</b> + <b>{VOICE_COST_PER_BLOCK} Xu</b> theo độ dài.",
-        f"• Audio xử lý cơ bản: từ <b>{AUDIO_MIN_COST} Xu</b>, tùy dung lượng.",
-        "• Nhạc/SFX library: tìm kiếm/nghe thử không trừ Xu; tạo nhạc AI thật chỉ mở khi provider và giá đã được xác nhận.",
+        "<b>F. Dịch thuật</b>",
+        "• Dịch văn bản ngắn: từ <b>5 Xu</b> / lượt thành công.",
+        "• Dịch văn bản dài: từ <b>20 Xu</b>, tùy độ dài.",
+        "• Dịch file: từ <b>100 Xu</b> / file.",
+        "• Dịch phụ đề: từ <b>150 Xu</b> / file.",
+        "• Dịch voice/audio ngắn: từ <b>30–80 Xu</b>.",
+        f"• Transcribe audio: từ <b>{AUDIO_MIN_COST} Xu</b>, tùy MB/thời lượng.",
+        "• Dịch/lồng tiếng video: từ <b>800 Xu</b> / video, admin test trước.",
+        "• Giá có thể thay đổi theo độ dài, dung lượng và provider.",
         "",
-        "<b>G. Tài liệu / PDF</b>",
+        "<b>G. Voice / TTS / STT</b>",
+        f"• TTS/voice ngắn: từ <b>{VOICE_BASE_COST} Xu</b>.",
+        "• TTS/voice dài: từ <b>80–150 Xu</b>, tùy số ký tự/thời lượng.",
+        f"• STT/bóc băng audio ngắn: từ <b>{AUDIO_MIN_COST} Xu</b>.",
+        "• STT/audio dài: tính theo MB/thời lượng.",
+        "• Thêm voice vào video: từ <b>150 Xu</b>.",
+        "• Dịch voice/audio: xem nhóm Dịch thuật.",
+        "",
+        "<b>H. Nhạc / SFX / Audio</b>",
+        "• Tìm nhạc/SFX library: miễn phí hoặc không trừ Xu khi chỉ tìm/nghe thử.",
+        "• Tạo prompt nhạc: miễn phí hoặc <b>5 Xu</b> nếu sau này bật tính phí.",
+        "• Thêm nhạc nền vào video: từ <b>120 Xu</b>.",
+        "• Tạo video nhạc từ ảnh: từ <b>150 Xu</b>.",
+        "• Thêm voice vào video: từ <b>150 Xu</b>.",
+        "• Video music / ghép nhạc video: từ <b>200 Xu</b>.",
+        "• Audio enhance: từ <b>80 Xu</b>.",
+        "• Tạo nhạc AI thật: từ <b>300–1.000 Xu</b>, chỉ mở khi provider/giá đã xác nhận.",
+        "• Suno/Musicful/MiniMax music: admin-only/planned nếu chưa public.",
+        "",
+        "<b>I. Tài liệu / PDF</b>",
         *doc_items,
+        "",
+        "<b>J. Gói tháng</b>",
+        "• Free / Starter / Creator / Pro / Business.",
+        "• Gói tháng gồm hạn mức/quyền lợi + Xu xử lý/tháng.",
+        "• Không phải unlimited tác vụ nặng.",
+        "• Tác vụ phát sinh hoặc vượt hạn mức xem tại Bảng giá tổng này.",
+        "",
+        "<b>K. Thành viên</b>",
+        "• Hạng thành viên không làm tăng Xu gói nạp.",
+        "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ đủ điều kiện.",
+        "• Rank-up/top-up bonus nếu có thì chỉ theo chính sách hiện hành.",
+        "",
+        "<b>L. Điều khoản Xu</b>",
+        "• Xu là đơn vị nội bộ trong TOAN AAS.",
+        "• Không rút tiền, không chuyển nhượng.",
+        "• Provider lỗi/quota/timeout thì không trừ Xu hoặc hoàn Xu nếu đã trừ.",
         "",
         "<b>Pricing mode</b>",
         f"• <code>{html.escape(pricing['billing_mode'])}</code>",
@@ -45126,6 +45273,7 @@ def pricing_plans_lines() -> list[str]:
         "",
         "Gói tháng = quyền dùng công cụ + hạn mức xử lý + lượt dịch vụ VIP.",
         "Gói tháng không phải nạp Xu thô và không phải unlimited mọi tác vụ nặng.",
+        "Tác vụ phát sinh xem tại <b>💳 Bảng giá tổng</b>.",
         "",
         "<b>ĐIỀU KIỆN MUA GÓI:</b>",
         "• Chỉ thành viên từ 🥈 Silver / Bạc trở lên mới được mua gói tháng.",
@@ -45134,80 +45282,40 @@ def pricing_plans_lines() -> list[str]:
         "• Vượt hạn mức gói có thể nạp thêm Xu để dùng tiếp.",
         "• Admin có thể cấp gói thủ công khi thanh toán lỗi, tặng quà hoặc khuyến mãi.",
         "",
-        "<b>Gói Free — 0đ/tháng</b>",
-        "• Tặng 200 Xu trải nghiệm một lần",
-        "• Dùng kho nhạc/SFX/media miễn phí",
-        "• Tạo prompt nhạc, prompt ảnh, xem hướng dẫn",
-        "• Dịch văn bản ngắn dùng thử giới hạn",
-        "• Tác vụ VIP/file/audio/video dài cần Xu xử lý",
+        "<b>Free — 0đ/tháng</b>",
+        "• Trial 200 Xu một lần nếu tài khoản hợp lệ.",
+        "• Dùng công cụ public cơ bản theo hạn mức chống spam.",
+        "• Tác vụ nặng dùng Xu theo Bảng giá tổng.",
         "",
-        "<b>Gói Starter — 49.000đ/tháng</b>",
+        "<b>Starter — 49.000đ/tháng</b>",
         "Điều kiện: từ 🥈 Silver trở lên",
-        "Dành cho người mới làm content.",
-        "• Dùng công cụ cơ bản",
-        "• Kho nhạc/SFX/media miễn phí",
-        "• Tạo prompt nhạc, prompt ảnh, caption, hashtag",
-        "• Dịch văn bản ngắn dùng thử trong giới hạn",
-        "• Có 600 Xu xử lý/tháng",
-        "• Có hạn mức nhỏ cho tác vụ thường",
-        "• Tác vụ VIP dùng Xu xử lý hoặc mua thêm",
-        "• Phù hợp người mới làm TikTok, Reels, Shorts, bán hàng cá nhân",
+        "• Dành cho người mới làm content.",
+        "• Có 600 Xu xử lý/tháng.",
+        "• Hạn mức nhỏ cho tác vụ thường; tác vụ nặng dùng Xu.",
         "",
-        "<b>Gói Creator — 99.000đ/tháng</b>",
+        "<b>Creator — 99.000đ/tháng</b>",
         "Điều kiện: từ 🥈 Silver trở lên",
-        "Dành cho người làm nội dung đều đặn.",
-        "• Bao gồm quyền Starter",
-        "• Dịch văn bản ngắn miễn phí trong giới hạn chống spam",
-        "• Chat AI thường miễn phí trong giới hạn chống spam",
-        "• Có 1.300 Xu xử lý/tháng",
-        "• Có khoảng 5–8 tác vụ VIP nhỏ/tháng hoặc nhiều tác vụ thường",
-        "• Phù hợp affiliate, TikTok Shop, creator cá nhân, shop nhỏ",
+        "• Dành cho người làm nội dung đều đặn.",
+        "• Có 1.300 Xu xử lý/tháng.",
+        "• Hạn mức cao hơn Starter cho chat/dịch/tác vụ thường.",
         "",
-        "<b>Gói Pro — 199.000đ/tháng</b>",
+        "<b>Pro — 199.000đ/tháng</b>",
         "Điều kiện khuyến nghị: từ 🥇 Gold trở lên",
-        "Dành cho người dùng thường xuyên.",
-        "• Bao gồm quyền Creator",
-        "• Dịch văn bản ngắn/dài trong giới hạn gói",
-        "• Chat AI thường và một phần chat nâng cao trong giới hạn",
-        "• Có 3.000 Xu xử lý/tháng",
-        "• Có khoảng 10–20 tác vụ VIP nhỏ/tháng hoặc nhiều tác vụ thường",
-        "• Ưu tiên xử lý file/audio/video khi công cụ được mở",
-        "• Phù hợp shop, affiliate team nhỏ, người làm content mỗi ngày",
+        "• Dành cho người dùng thường xuyên.",
+        "• Có 3.000 Xu xử lý/tháng.",
+        "• Ưu tiên tác vụ thường/file/audio khi công cụ được mở.",
         "",
-        "<b>Gói Business — 499.000đ/tháng</b>",
+        "<b>Business — 499.000đ/tháng</b>",
         "Điều kiện khuyến nghị: từ 🥇 Gold trở lên hoặc admin duyệt",
-        "Dành cho đội nhóm nhỏ.",
-        "• Bao gồm quyền Pro",
-        "• Hạn mức cao hơn cho chat/dịch/tác vụ thường",
-        "• Có 8.000 Xu xử lý/tháng",
-        "• Có nhiều lượt dịch vụ VIP hơn Pro",
-        "• Phù hợp chiến dịch nội dung, shop, team affiliate, agency nhỏ",
-        "• Ưu tiên xử lý nhiều nội dung hơn theo chính sách đang bật",
-        "",
-        "<b>Chat AI &amp; Dịch thuật theo gói:</b>",
-        "• Free: dịch văn bản ngắn dùng thử giới hạn; chat thường trừ Xu nếu vượt thử nghiệm.",
-        "• Starter: dịch ngắn dùng thử trong giới hạn; dịch dài/file/audio/video tính Xu.",
-        "• Creator: dịch ngắn/chat thường miễn phí trong giới hạn chống spam; voice/audio/file/video là VIP.",
-        "• Pro/Business: hạn mức cao hơn cho chat/dịch/tác vụ thường; tác vụ voice/audio/file/video dùng hạn mức VIP hoặc trừ Xu nếu vượt.",
-        "",
-        "<b>Giá tác vụ dịch tham khảo:</b>",
-        "• Dịch văn bản ngắn: miễn phí trong giới hạn gói hoặc từ 5 Xu/lượt thành công",
-        "• Dịch văn bản dài: từ 20 Xu/lượt tùy độ dài",
-        "• <code>/translate_voice</code>: từ 30–80 Xu/audio ngắn",
-        "• <code>/transcribe</code>: từ 80 Xu/audio, tính theo MB/thời lượng",
-        "• <code>/translate_file</code>: từ 100 Xu/file",
-        "• <code>/translate_subtitle</code>: từ 150 Xu/file",
-        "• Dịch/lồng tiếng video: từ 800 Xu/video, admin test trước",
+        "• Dành cho đội nhóm nhỏ.",
+        "• Có 8.000 Xu xử lý/tháng.",
+        "• Hạn mức cao hơn cho chiến dịch nội dung/shop/team nhỏ.",
         "",
         "<b>Lệnh mua gói:</b>",
         "• <code>/buy_plan starter</code>",
         "• <code>/buy_plan creator</code>",
         "• <code>/buy_plan pro</code>",
         "• <code>/buy_plan business</code>",
-        "",
-        "<b>Music / Audio Factory:</b>",
-        "• Miễn phí: <code>/music</code>, <code>/music_prompt</code>, <code>/music_library</code>, <code>/sfx_library</code>, <code>/media_library</code>, <code>/play_music</code>, <code>/play_sfx</code>, <code>/select_music</code>, <code>/select_sfx</code>, <code>/music_policy</code>",
-        "• Trừ Xu/VIP khi xử lý thật: <code>/music_bg</code> từ 300 Xu, <code>/music_song</code> từ 500–1.000 Xu, <code>/audio_enhance</code> từ 80 Xu, <code>/add_music</code> từ 120 Xu, <code>/add_voice_to_video</code> từ 150 Xu, <code>/image_to_music_video</code> từ 150 Xu, <code>/video_music</code> từ 200 Xu.",
         "",
         "<b>Thanh toán gói tháng:</b>",
         "• Dùng <code>/buy_plan &lt;plan&gt;</code> hoặc bấm nút mua gói để tạo checkout PayOS.",
@@ -45218,7 +45326,7 @@ def pricing_plans_lines() -> list[str]:
         "",
         "<b>Ghi chú:</b>",
         "• Số lượt VIP chỉ là ước tính vì mỗi công cụ có mức tốn API/server khác nhau.",
-        "• Tác vụ nặng như tạo video AI thật, làm rõ video dài, dịch video dài, tạo nhạc AI/vocal có thể tính Xu riêng cao hơn.",
+        "• Tác vụ phát sinh xem tại Bảng giá tổng, không nhồi lại trong menu gói tháng.",
         "• Gói tháng không tự nâng hạng thành viên và không cộng vào tổng nạp thành viên.",
     ]
 
@@ -45568,20 +45676,16 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if query.from_user:
         clear_media_creator_pending_states(query.from_user.id)
     if action == "xu":
-        return await send_pricing_lines(query.message, pricing_xu_lines(), pricing_xu_keyboard())
+        return await edit_or_send_pricing_lines(query, pricing_xu_lines(), pricing_xu_keyboard())
     if action == "plans":
-        return await send_pricing_lines(query.message, pricing_plans_lines(), pricing_plans_keyboard())
+        return await edit_or_send_pricing_lines(query, pricing_plans_lines(), pricing_plans_keyboard())
     if action == "vip":
-        return await send_pricing_lines(query.message, vip_services_lines(), vip_services_keyboard())
+        return await edit_or_send_pricing_lines(query, vip_services_lines(), vip_services_keyboard())
     if action == "member":
-        return await send_pricing_lines(query.message, member_policy_lines(), member_policy_keyboard())
+        return await edit_or_send_pricing_lines(query, member_policy_lines(), member_policy_keyboard())
     if action == "terms":
-        return await send_pricing_lines(query.message, pricing_terms_lines(), pricing_terms_keyboard())
-    return await query.message.reply_text(
-        "\n".join(pricing_main_lines()),
-        parse_mode="HTML",
-        reply_markup=pricing_main_keyboard(),
-    )
+        return await edit_or_send_pricing_lines(query, pricing_terms_lines(), pricing_terms_keyboard())
+    return await edit_or_send_pricing_lines(query, pricing_main_lines(), pricing_main_keyboard())
 
 def parse_chat_pro_args(raw: str) -> dict:
     kv, remainder = parse_loose_kv_args(raw)
