@@ -26984,6 +26984,14 @@ def create_media_public_off_message() -> str:
 def create_media_menu_text() -> str:
     return "🎨 TOAN AAS Media Creator\n\nBạn muốn làm gì?"
 
+def create_media_open_text(user_id) -> str:
+    quick_cleared = clear_quick_media_pending(user_id)
+    trend_cleared = clear_trend_video_flow_pending(user_id)
+    cleared = quick_cleared or trend_cleared
+    if cleared:
+        return "ℹ️ Đã hủy thao tác cũ và mở Media Creator.\n\n" + create_media_menu_text()
+    return create_media_menu_text()
+
 def create_media_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")],
@@ -29493,8 +29501,9 @@ def admin_internal_command(handler):
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-        [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
-        [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
+        [InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
+        [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
+        [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
         [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
         [InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|main_guide")],
@@ -29542,8 +29551,9 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     if lang == "zh":
         rows = [
             [InlineKeyboardButton("🎬 内容创作", callback_data="menu|main_video"), InlineKeyboardButton("🤖 AI 助手", callback_data="menu|main_ai")],
-            [InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image")],
-            [InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 语音工具", callback_data="menu|main_audio")],
+            [InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media"), InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image")],
+            [InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs"), InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music")],
+            [InlineKeyboardButton("🎙 语音工具", callback_data="menu|main_audio")],
             [InlineKeyboardButton("🌐 翻译", callback_data="menu|translate"), InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory")],
             [InlineKeyboardButton("💳 价格", callback_data="pricing|main"), InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("👤 账户", callback_data="menu|main_profile"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
@@ -29557,8 +29567,9 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     if lang == "vi":
         rows = [
             [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
-            [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
+            [InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
+            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
+            [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
             [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
             [InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
@@ -29571,8 +29582,9 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         return InlineKeyboardMarkup(rows)
     rows = [
         [InlineKeyboardButton("🎬 Content", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Ask AI", callback_data="menu|main_ai")],
-        [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
-        [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
+        [InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
+        [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music")],
+        [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
         [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate"), InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory")],
         [InlineKeyboardButton("💳 Pricing", callback_data="pricing|main"), InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("👤 Account", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
@@ -29728,11 +29740,13 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🎬 Create content", callback_data="menu|hint_film")],
+            [InlineKeyboardButton("🎬 Trend video workflow", callback_data="create_media|trend")],
             [InlineKeyboardButton("⚡ Quick access", callback_data="menu|main_quick")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎬 Tạo video ngay", callback_data="menu|hint_film")],
+        [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
         [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
@@ -29779,11 +29793,13 @@ def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎨 AI image/video", callback_data="menu|create_media")],
             [InlineKeyboardButton("🖼 Image tools", callback_data="menu|hint_image_tools")],
             [InlineKeyboardButton("🎬 Image-to-video prompt", callback_data="menu|hint_image_to_video_pack")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎨 Tạo ảnh/video AI", callback_data="menu|create_media")],
         [InlineKeyboardButton("🖼 Mở công cụ ảnh", callback_data="menu|hint_image_tools")],
         [InlineKeyboardButton("🎬 Ảnh sang video prompt", callback_data="menu|hint_image_to_video_pack")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
@@ -31735,6 +31751,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             query,
             help_text_for_user_i18n(query.from_user.id),
             reply_markup=localized_main_menu_keyboard(user_is_admin, lang),
+        )
+    if action == "create_media":
+        return await safe_edit_query_message(
+            query,
+            create_media_open_text(query.from_user.id),
+            reply_markup=create_media_menu_keyboard(),
         )
     if action.startswith("translate_set_"):
         target = normalize_translate_target(action.replace("translate_set_", "", 1))
@@ -42507,7 +42529,8 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("ℹ️ Không có tác vụ Trend → Video Workflow nào đang chờ. Bot chưa trừ Xu.")
 
 async def cmd_create_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(create_media_menu_text(), reply_markup=create_media_menu_keyboard())
+    uid = update.effective_user.id if update.effective_user else 0
+    await update.message.reply_text(create_media_open_text(uid), reply_markup=create_media_menu_keyboard())
 
 async def start_quick_media_prompt(update: Update, action: str):
     uid = update.effective_user.id if update.effective_user else 0

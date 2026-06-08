@@ -744,6 +744,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'CommandHandler("quick_video_test", cmd_quick_video_test)' in source
     assert 'CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\\|")' in source
     assert "🎨 TOAN AAS Media Creator" in helper_source
+    assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' in source
+    assert 'InlineKeyboardButton("🎨 Tạo ảnh/video AI", callback_data="menu|create_media")' in source
+    assert 'InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")' in source
+    assert "create_media_open_text(query.from_user.id)" in source
+    assert "create_media_open_text(uid)" in quick_source
     for callback_data in [
         "create_media|quick_image",
         "create_media|quick_video",
@@ -786,6 +791,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert pricing["quick_video_cost"] == 654
     assert "321 Xu" in bot.create_media_pricing_text()
     assert "654 Xu" in bot.create_media_pricing_text()
+    start_labels = [button.text for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard for button in row]
+    assert "🎨 Media Creator" in start_labels
+    image_labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
+    assert "🎨 Tạo ảnh/video AI" in image_labels
+    video_buttons = [button for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
+    assert any(button.text == "🎬 Tạo video theo trend" and button.callback_data == "create_media|trend" for button in video_buttons)
 
     key = bot.quick_media_pending_key("u6")
     bot.USER_PENDING.pop(key, None)
@@ -797,6 +808,17 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     bot.USER_PENDING[key]["created_at_ts"] = 0
     assert bot.get_quick_media_pending("u6") is None
     assert key not in bot.USER_PENDING
+    bot.set_quick_media_pending("u7", "quick_image_prompt")
+    assert bot.create_media_open_text("u7").startswith("ℹ️ Đã hủy thao tác cũ")
+    assert bot.get_quick_media_pending("u7") is None
+    bot.set_trend_video_flow_pending("u7")
+    assert bot.create_media_open_text("u7").startswith("ℹ️ Đã hủy thao tác cũ")
+    assert bot.get_trend_video_flow_pending("u7") is None
+    bot.set_quick_media_pending("u8", "quick_video_prompt")
+    bot.set_trend_video_flow_pending("u8")
+    assert bot.create_media_open_text("u8").startswith("ℹ️ Đã hủy thao tác cũ")
+    assert bot.get_quick_media_pending("u8") is None
+    assert bot.get_trend_video_flow_pending("u8") is None
 
 
 def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
