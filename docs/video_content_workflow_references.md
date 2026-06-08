@@ -65,6 +65,27 @@ Nút điều hướng chỉ gợi ý bước tiếp theo:
 - Tạo phiên bản ads để admin review.
 - Lưu kế hoạch thủ công.
 
+## Image Generation From Trend Workflow V1
+
+Mục tiêu: nối prompt ảnh trong `/trend_video_flow` sang luồng tạo ảnh ShopAIKey có guard.
+
+Nguyên tắc:
+
+- Public image vẫn OFF mặc định qua `SHOPAIKEY_PUBLIC_IMAGE_ENABLED=false`.
+- Public video không mở trong bước này.
+- Khi workflow tạo xong, bot hỏi "Bạn muốn tạo ảnh từ prompt nào?".
+- Scene 1/2/3 chỉ đi tiếp nếu public image ON hoặc admin dùng smoke command riêng.
+- Public image ON thì vẫn phải đủ Xu, có job lock, hỏi xác nhận, rồi mới trừ Xu.
+- Provider fail/no channel/timeout thì hoàn Xu theo `SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=true`.
+- Admin smoke command `/tool_test_workflow_image` không trừ Xu và không mở public.
+
+DB tối giản:
+
+- `trend_workflow_outputs` lưu `workflow_id`, scene, image prompt, video prompt, generated image URL nếu có.
+- Không lưu API key.
+- Không lưu raw provider response.
+- Không lưu prompt quá dài.
+
 ## Admin-First Safety
 
 - Publish/video automation là admin-first.

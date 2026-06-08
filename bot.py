@@ -1137,6 +1137,17 @@ def init_db():
         reason TEXT,
         created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS trend_workflow_outputs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        workflow_id TEXT,
+        selected_scene INTEGER DEFAULT 0,
+        image_prompt TEXT,
+        video_prompt TEXT,
+        generated_image_url TEXT,
+        shopaikey_job_id INTEGER DEFAULT 0,
+        created_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS launch_bonus_redemptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -1834,6 +1845,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_trial_bonus_claims_created ON trial_bonus_claims(created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_media_factory_jobs_user ON media_factory_jobs(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_media_factory_jobs_status ON media_factory_jobs(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_trend_workflow_outputs_user ON trend_workflow_outputs(user_id, created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_trend_workflow_outputs_workflow_scene ON trend_workflow_outputs(workflow_id, selected_scene)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_launch_bonus_user ON launch_bonus_redemptions(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_launch_bonus_order ON launch_bonus_redemptions(order_code)")
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_launch_bonus_user_package ON launch_bonus_redemptions(user_id, package_amount_vnd)")
@@ -24178,10 +24191,12 @@ USER_BILL_STATE: dict = {}
 USER_PENDING: dict = {}
 GENERATION_PENDING_JOBS: dict[tuple, dict] = {}
 SHOPAIKEY_PENDING_CONFIRMATIONS: dict[str, dict] = {}
+LAST_TREND_VIDEO_WORKFLOWS: dict[str, dict] = {}
 MANUAL_BILL_STATE_TTL_SECONDS = 10 * 60
 LAST_USER_FILE_TTL_SECONDS = 10 * 60
 GENERATION_PENDING_TTL_SECONDS = 10 * 60
 SHOPAIKEY_CONFIRMATION_TTL_SECONDS = 10 * 60
+TREND_WORKFLOW_TTL_SECONDS = 30 * 60
 LAST_USER_FILE: dict = {}
 
 def normalize_generation_prompt(value: str) -> str:
@@ -31784,8 +31799,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Video reason: <code>{html.escape(shopaikey_video_reason or '-')}</code>",
         "• Video: <code>custom video endpoint; customer public controlled by ENV</code>",
         f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | prompt cost <code>{int(TREND_PROMPT_COST_XU or 0)} Xu</code>",
+        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | image cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
+        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -32466,6 +32482,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
         f"• Job lock: <code>{'ON' if SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED else 'OFF'}</code>",
         f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code>",
+        f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Maintenance mode: <code>{'ON' if maintenance_on else 'OFF'}</code>",
         f"• Provider freeze: <code>{'ON' if provider_freeze.get('frozen') else 'OFF'}</code>",
         f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason') or '-'))}</code>",
@@ -33214,6 +33231,9 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     prompt = str(pending.get("prompt") or "").strip()
     base_cost = int(pending.get("base_cost") or 0)
     source_job_id = str(pending.get("source_job_id") or "").strip()
+    workflow_id = str(pending.get("workflow_id") or "").strip()
+    trend_output_id = int(pending.get("trend_output_id") or 0)
+    scene_index = int(pending.get("scene_index") or 0)
     enabled, message = shopaikey_public_generation_guard(job_type)
     if not enabled:
         return await query.edit_message_text(f"{message}\nBot chưa trừ Xu.")
@@ -33266,11 +33286,26 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         image_url = str(result.get("image_url") or "")
         output_sent = False
         if status == "PASS" and image_url:
+            if workflow_id or trend_output_id:
+                update_trend_workflow_generated_image(
+                    output_id=trend_output_id,
+                    workflow_id=workflow_id,
+                    scene_index=scene_index,
+                    user_id=uid,
+                    image_url=image_url,
+                    job_id=job_id,
+                )
+            success_markup = trend_workflow_image_success_keyboard(job_id, scene_index) if (workflow_id or trend_output_id) else None
+            success_caption = (
+                f"✅ Ảnh ShopAIKey đã tạo xong.\nJob #{job_id}\nĐã trừ: {deducted} Xu."
+                + ("\n\nBạn hài lòng với ảnh này chưa?" if success_markup else "")
+            )
             try:
                 await context.bot.send_photo(
                     chat_id=query.message.chat_id,
                     photo=image_url,
-                    caption=f"✅ Ảnh ShopAIKey đã tạo xong.\nJob #{job_id}\nĐã trừ: {deducted} Xu.",
+                    caption=success_caption,
+                    reply_markup=success_markup,
                 )
                 output_sent = True
             except Exception:
@@ -41665,21 +41700,182 @@ def trend_video_workflow_can_access(user_id) -> bool:
         return True
     return bool(TREND_VIDEO_WORKFLOW_ENABLED and TREND_WORKFLOW_PUBLIC_ENABLED and not TREND_VIDEO_WORKFLOW_ADMIN_ONLY)
 
+def trend_workflow_image_generation_status_text() -> str:
+    if not TREND_VIDEO_WORKFLOW_ENABLED:
+        return "disabled"
+    if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
+        return "guarded/public OFF"
+    return "guarded/public ON"
+
+def trend_workflow_id(user_id) -> str:
+    raw = f"{user_id}:{time.time()}:{random.random()}"
+    return "twf_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:14]
+
+def trend_video_scene_outputs(topic: str) -> dict[int, dict]:
+    safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:220] or "affiliate AI tool cho người mới"
+    return {
+        1: {
+            "image_prompt": (
+                f"Realistic vertical 9:16 image about {safe_topic}: creator facing the main problem, clean desk or phone screen, "
+                "soft daylight, close-up composition, clear focal subject, modern Vietnamese creator style, no watermark, no extra text."
+            ),
+            "video_prompt": (
+                "Use this with selected image. Slow push-in on the main subject, subtle micro movement, clean commercial lighting, "
+                "3 seconds, vertical 9:16, no jitter, no blur, no watermark."
+            ),
+        },
+        2: {
+            "image_prompt": (
+                f"Vertical 9:16 tutorial keyframe for {safe_topic}: simple checklist board showing Hook, Demo, CTA, "
+                "minimal workspace background, front camera angle, bright softbox lighting, educational mood, no unreadable text."
+            ),
+            "video_prompt": (
+                "Checklist items appear one by one, smooth swipe transition, screen-record walkthrough feeling, 5 seconds, "
+                "vertical 9:16, clean SaaS/tutorial style, avoid flashing and fake UI."
+            ),
+        },
+        3: {
+            "image_prompt": (
+                f"Before and after content workflow visual for {safe_topic}: left side messy notes, right side clean storyboard, "
+                "modern whiteboard, high-detail commercial look, 9:16, focused composition, no brand misuse, no watermark."
+            ),
+            "video_prompt": (
+                "Before/after board transforms from messy notes to clean workflow, side dolly camera movement, soft match cut, "
+                "5 seconds, vertical 9:16, educational product demo style, negative prompt: distorted interface, unreadable letters."
+            ),
+        },
+    }
+
+def ensure_trend_workflow_outputs_table(conn=None):
+    own_conn = conn is None
+    conn = conn or db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS trend_workflow_outputs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            workflow_id TEXT,
+            selected_scene INTEGER DEFAULT 0,
+            image_prompt TEXT,
+            video_prompt TEXT,
+            generated_image_url TEXT,
+            shopaikey_job_id INTEGER DEFAULT 0,
+            created_at TEXT
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_trend_workflow_outputs_user ON trend_workflow_outputs(user_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_trend_workflow_outputs_workflow_scene ON trend_workflow_outputs(workflow_id, selected_scene)")
+        if own_conn:
+            conn.commit()
+    finally:
+        if own_conn:
+            conn.close()
+
+def save_trend_workflow_outputs(user_id, workflow_id: str, scene_outputs: dict[int, dict]) -> None:
+    uid = str(user_id or "")
+    workflow = str(workflow_id or "")[:80]
+    if not uid or not workflow:
+        return
+    conn = db_connect()
+    try:
+        ensure_trend_workflow_outputs_table(conn)
+        conn.execute("DELETE FROM trend_workflow_outputs WHERE user_id=? AND workflow_id=?", (uid, workflow))
+        for scene_index, payload in sorted((scene_outputs or {}).items()):
+            conn.execute(
+                """INSERT INTO trend_workflow_outputs
+                (user_id, workflow_id, selected_scene, image_prompt, video_prompt, generated_image_url, shopaikey_job_id, created_at)
+                VALUES (?,?,?,?,?,?,0,?)""",
+                (
+                    uid,
+                    workflow,
+                    int(scene_index),
+                    str(payload.get("image_prompt") or "")[:1200],
+                    str(payload.get("video_prompt") or "")[:1200],
+                    "",
+                    now_text(),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+def cache_trend_workflow(user_id, workflow_id: str, scene_outputs: dict[int, dict]) -> None:
+    LAST_TREND_VIDEO_WORKFLOWS[str(user_id or "")] = {
+        "workflow_id": str(workflow_id or ""),
+        "created_at_ts": time.time(),
+        "scenes": scene_outputs or {},
+    }
+
+def trend_workflow_output_for_user(user_id, scene_index: int) -> dict | None:
+    uid = str(user_id or "")
+    try:
+        scene = int(scene_index)
+    except Exception:
+        return None
+    cached = LAST_TREND_VIDEO_WORKFLOWS.get(uid) or {}
+    if cached and time.time() - float(cached.get("created_at_ts") or 0) <= TREND_WORKFLOW_TTL_SECONDS:
+        payload = (cached.get("scenes") or {}).get(scene) or {}
+        if payload:
+            return {
+                "id": 0,
+                "user_id": uid,
+                "workflow_id": cached.get("workflow_id") or "",
+                "selected_scene": scene,
+                "image_prompt": payload.get("image_prompt") or "",
+                "video_prompt": payload.get("video_prompt") or "",
+                "generated_image_url": "",
+            }
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        ensure_trend_workflow_outputs_table(conn)
+        row = conn.execute(
+            """SELECT * FROM trend_workflow_outputs
+            WHERE user_id=? AND selected_scene=?
+            ORDER BY id DESC LIMIT 1""",
+            (uid, scene),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def update_trend_workflow_generated_image(output_id: int = 0, workflow_id: str = "", scene_index: int = 0, user_id="", image_url: str = "", job_id: int = 0) -> None:
+    conn = db_connect()
+    try:
+        ensure_trend_workflow_outputs_table(conn)
+        if output_id:
+            conn.execute(
+                "UPDATE trend_workflow_outputs SET generated_image_url=?, shopaikey_job_id=? WHERE id=?",
+                (str(image_url or "")[:1000], int(job_id or 0), int(output_id)),
+            )
+        else:
+            conn.execute(
+                """UPDATE trend_workflow_outputs
+                SET generated_image_url=?, shopaikey_job_id=?
+                WHERE user_id=? AND workflow_id=? AND selected_scene=?""",
+                (str(image_url or "")[:1000], int(job_id or 0), str(user_id or ""), str(workflow_id or ""), int(scene_index or 0)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
 def trend_video_flow_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Tạo ảnh từ Scene 1", callback_data="tvflow|image_scene_1")],
+        [InlineKeyboardButton("🖼 Tạo ảnh từ Scene 2", callback_data="tvflow|image_scene_2")],
+        [InlineKeyboardButton("🖼 Tạo ảnh từ Scene 3", callback_data="tvflow|image_scene_3")],
         [
-            InlineKeyboardButton("🖼 Prompt ảnh đẹp hơn", callback_data="tvflow|image_prompt"),
-            InlineKeyboardButton("🎞 Prompt video từ ảnh", callback_data="tvflow|video_prompt"),
+            InlineKeyboardButton("✍️ Sửa prompt ảnh", callback_data="tvflow|edit_prompt"),
+            InlineKeyboardButton("❌ Hủy", callback_data="tvflow|cancel"),
         ],
+    ])
+
+def trend_workflow_image_success_keyboard(job_id: int, scene_index: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎞 Tạo video từ ảnh này", callback_data=f"tvflow|video_from_image_{int(job_id or 0)}")],
         [
-            InlineKeyboardButton("🔊 Voice/TTS", callback_data="tvflow|tts"),
-            InlineKeyboardButton("🎵 Nhạc nền", callback_data="tvflow|music"),
+            InlineKeyboardButton("🔁 Tạo lại ảnh", callback_data=f"tvflow|regen_scene_{int(scene_index or 1)}"),
+            InlineKeyboardButton("✍️ Sửa prompt", callback_data="tvflow|edit_prompt"),
         ],
-        [
-            InlineKeyboardButton("✍️ Viết lại script", callback_data="tvflow|rewrite"),
-            InlineKeyboardButton("🧪 Phiên bản ads", callback_data="tvflow|ads"),
-        ],
-        [InlineKeyboardButton("📌 Lưu kế hoạch này", callback_data="tvflow|save")],
+        [InlineKeyboardButton("💾 Lưu ảnh", callback_data="tvflow|save_image")],
     ])
 
 def trend_video_flow_help_text() -> str:
@@ -41808,7 +42004,8 @@ def trend_video_flow_sections(topic: str) -> list[str]:
             "CTA affiliate: Xem link chi tiết trước khi quyết định, kiểm tra điều kiện và nguồn chính thức.\n"
             "CTA comment/inbox: Comment 'flow' để nhận checklist.\n"
             "CTA TOAN AAS: Dùng TOAN AAS để tạo script, prompt, caption và voice nhanh hơn.\n\n"
-            "Bạn muốn làm gì tiếp?"
+            "Bạn muốn tạo ảnh từ prompt nào?\n"
+            "Chọn Scene 1/2/3 ở nút bên dưới để đi qua guard tạo ảnh ShopAIKey."
         ),
     ]
     return sections
@@ -41827,6 +42024,10 @@ async def cmd_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYP
     topic = media_factory_topic_from_args(context)
     if not topic:
         return await update.message.reply_text(trend_video_flow_help_text())
+    workflow_id = trend_workflow_id(uid)
+    scene_outputs = trend_video_scene_outputs(topic)
+    save_trend_workflow_outputs(uid, workflow_id, scene_outputs)
+    cache_trend_workflow(uid, workflow_id, scene_outputs)
     sections = trend_video_flow_sections(topic)
     await send_trend_video_flow_sections(update, sections)
 
@@ -41834,9 +42035,73 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
     query = update.callback_query
     await query.answer()
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
+    uid = query.from_user.id if query.from_user else 0
+    if not trend_video_workflow_can_access(uid):
+        return await query.edit_message_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+    if action.startswith("regen_scene_"):
+        action = "image_scene_" + action.rsplit("_", 1)[-1]
+    if action.startswith("image_scene_"):
+        try:
+            scene_index = int(action.rsplit("_", 1)[-1])
+        except Exception:
+            scene_index = 0
+        output = trend_workflow_output_for_user(uid, scene_index)
+        if not output:
+            return await query.edit_message_text(
+                "⚠️ Chưa tìm thấy prompt ảnh của workflow gần nhất. Vui lòng chạy lại /trend_video_flow <chủ đề>.\nBot chưa trừ Xu."
+            )
+        enabled, message = shopaikey_public_generation_guard("image")
+        if not enabled:
+            if is_admin_user(uid) and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
+                return await query.edit_message_text(
+                    "🧪 Public image đang OFF. Admin có thể test riêng bằng /tool_test_workflow_image.\n"
+                    "Bot chưa gọi API public và chưa trừ Xu."
+                )
+            return await query.edit_message_text(f"{message}\nBot chưa trừ Xu.")
+        if shopaikey_active_job_for_user(uid, "image"):
+            return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
+        prompt = str(output.get("image_prompt") or "").strip()
+        credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend workflow user")
+        base_cost = max(0, int(SHOPAIKEY_IMAGE_COST_XU or 50))
+        final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
+        if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+            return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
+        token = set_shopaikey_pending_confirmation(uid, {
+            "job_type": "image",
+            "prompt": prompt,
+            "base_cost": base_cost,
+            "from_image": False,
+            "workflow_id": str(output.get("workflow_id") or ""),
+            "scene_index": int(scene_index),
+            "trend_output_id": int(output.get("id") or 0),
+            "source_prompt_type": "image_prompt",
+        })
+        return await query.edit_message_text(
+            "🖼 <b>Xác nhận tạo ảnh từ Trend Workflow</b>\n\n"
+            f"• Scene: <b>{scene_index}</b>\n"
+            f"• Chi phí dự kiến: <b>{base_cost} Xu</b>\n"
+            f"• Số Xu sẽ trừ: <b>{final_preview_cost} Xu</b>\n"
+            f"• Số dư hiện tại: <b>{int(credits or 0)} Xu</b>\n"
+            f"• Prompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\n"
+            "Bot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn Xu theo chính sách.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"✅ Tạo ảnh này -{final_preview_cost} Xu", callback_data=f"shopai|confirm|{token}")],
+                [InlineKeyboardButton("❌ Huỷ", callback_data=f"shopai|cancel|{token}")],
+            ]),
+        )
+    if action.startswith("video_from_image_"):
+        return await query.edit_message_text(
+            "🎞 Public video vẫn đang OFF trong task này.\n"
+            "Bạn có thể dùng ảnh đã tạo với prompt video trong workflow, hoặc chờ admin mở video public sau khi đủ guard.\n"
+            "Bot chưa trừ Xu."
+        )
     guidance = {
-        "image_prompt": "🖼 Copy prompt ảnh trong gói này, hoặc dùng /image_prompt <chủ đề> để viết lại prompt ảnh đẹp hơn. V1 chưa gọi tạo ảnh thật.",
-        "video_prompt": "🎞 Copy prompt video trong gói này, hoặc reply ảnh rồi dùng /image_to_video_pack <mô tả chuyển động>. V1 chưa gọi tạo video thật.",
+        "edit_prompt": "✍️ Copy prompt ảnh trong workflow rồi chỉnh lại mô tả. Sau đó dùng /shopaikey_image <prompt đã sửa> khi public image được bật, hoặc admin dùng /tool_test_workflow_image để smoke test.",
+        "cancel": "❌ Đã hủy chọn ảnh. Bot chưa gọi API và chưa trừ Xu.",
+        "save_image": "💾 Telegram đã lưu ảnh trong chat. Nếu cần lưu project tự động, đây là backlog sau. Bot chưa trừ thêm Xu.",
+        "image_prompt": "🖼 Copy prompt ảnh trong gói này, hoặc dùng /image_prompt <chủ đề> để viết lại prompt ảnh đẹp hơn.",
+        "video_prompt": "🎞 Copy prompt video trong gói này, hoặc reply ảnh rồi dùng /image_to_video_pack <mô tả chuyển động>. Public video vẫn OFF.",
         "tts": "🔊 Dùng /tool_test_shopaikey_tts nếu admin muốn smoke test TTS, hoặc dùng /translate_voice /transcribe cho audio. Workflow này chưa trừ Xu.",
         "music": "🎵 Dùng /music_library <mood> hoặc /sfx_library <từ khóa> để tìm nhạc/SFX nghe thử. Kiểm tra license trước khi dùng thương mại.",
         "rewrite": "✍️ Gửi lại /trend_video_flow <chủ đề + phong cách mới> để bot tạo lại pack theo hướng khác.",
@@ -41844,6 +42109,58 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         "save": "📌 Hiện V1 chưa lưu project tự động. Hãy copy pack này vào note/project của bạn. Không có Xu nào bị trừ.",
     }.get(action, "ℹ️ Workflow V1 chỉ tạo plan/prompt/script. Không gọi image/video thật.")
     await query.edit_message_text(guidance)
+
+async def cmd_tool_test_workflow_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    prompt = (trend_video_scene_outputs("TOAN AAS workflow image smoke test").get(1) or {}).get("image_prompt") or ""
+    if not SHOPAIKEY_API_KEY:
+        save_tool_test_result("workflow_image", "MISSING", "SHOPAIKEY_API_KEY missing; no image call", uid)
+        return await update.message.reply_text(
+            "🖼 <b>Workflow Image Smoke Test</b>\n\n"
+            "• Status: <code>MISSING</code>\n"
+            "• Env: <code>SHOPAIKEY_API_KEY</code>\n"
+            "• No Xu deducted: <code>yes</code>",
+            parse_mode="HTML",
+        )
+    waiting = await update.message.reply_text("🖼 Đang test tạo ảnh từ workflow mẫu... Không trừ Xu.")
+    result = await shopaikey_image_generate(prompt)
+    status = str(result.get("status") or "FAIL")
+    detail = (
+        f"model={result.get('model') or SHOPAIKEY_IMAGE_MODEL}; http={result.get('http_status') or 0}; "
+        f"size={result.get('size') or '-'}; error_class={result.get('error_class') or '-'}; workflow_prompt=yes"
+    )
+    save_tool_test_result("workflow_image", status, detail, uid)
+    image_url = str(result.get("image_url") or "")
+    output_sent = False
+    if status == "PASS" and image_url:
+        try:
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=image_url,
+                caption=(
+                    "✅ Workflow image smoke PASS\n"
+                    f"Model: {result.get('model') or SHOPAIKEY_IMAGE_MODEL}\n"
+                    f"Size: {result.get('size') or '-'}\n"
+                    "No Xu deducted: yes\n"
+                    "Public image remains controlled by ENV."
+                ),
+            )
+            output_sent = True
+        except Exception:
+            output_sent = False
+    await waiting.edit_text(
+        "🖼 <b>Workflow Image Smoke Test</b>\n\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Model: <code>{html.escape(str(result.get('model') or SHOPAIKEY_IMAGE_MODEL))}</code>\n"
+        f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n"
+        "• No Xu deducted: <code>yes</code>\n"
+        "• Public image: <code>controlled by ENV</code>\n\n"
+        "Không log API key/prompt/raw response.",
+        parse_mode="HTML",
+    )
 
 async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
@@ -58790,6 +59107,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_shopaikey", cmd_tool_test_shopaikey))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_tts", cmd_tool_test_shopaikey_tts))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_image", cmd_tool_test_shopaikey_image))
+    tg_app.add_handler(CommandHandler("tool_test_workflow_image", cmd_tool_test_workflow_image))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_video", cmd_tool_test_shopaikey_video))
     tg_app.add_handler(CommandHandler("shopaikey_video_job", cmd_shopaikey_video_job))
     tg_app.add_handler(CommandHandler("shopaikey_image", cmd_shopaikey_image_public))
