@@ -282,6 +282,59 @@ def test_shopaikey_video_model_fallback_payload_and_reason(monkeypatch):
     assert bot.shopaikey_video_reason_text({"status": "FAIL_NO_AVAILABLE_CHANNEL", "detail": ""}) == "provider/group has no available channel for selected model."
 
 
+def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch):
+    assert bot.normalize_shopaikey_video_status("queued") == "QUEUED"
+    assert bot.normalize_shopaikey_video_status("processing") == "IN_PROGRESS"
+    assert bot.normalize_shopaikey_video_status("IN_PROGRESS") == "IN_PROGRESS"
+    assert bot.normalize_shopaikey_video_status("SUCCESS") == "SUCCESS"
+    assert bot.normalize_shopaikey_video_status("succeeded") == "SUCCESS"
+    assert bot.normalize_shopaikey_video_status("completed") == "SUCCESS"
+    assert bot.normalize_shopaikey_video_status("FAILURE") == "FAILED"
+    assert bot.normalize_shopaikey_video_status("failed") == "FAILED"
+    assert bot.shopaikey_db_video_status("FAIL_NO_AVAILABLE_CHANNEL") == "FAILED"
+
+    assert bot.shopaikey_extract_task_id({"task_id": "task_direct"}) == "task_direct"
+    assert bot.shopaikey_extract_task_id({"data": {"task_id": "task_nested"}}) == "task_nested"
+    assert bot.shopaikey_video_result_url({"data": {"result_url": "https://example.com/a.mp4"}}) == "https://example.com/a.mp4"
+    nested_result = {
+        "data": {
+            "data": {
+                "success": True,
+                "data": [{"video_url": "https://example.com/nested.mp4", "state": "succeeded"}],
+            }
+        }
+    }
+    assert bot.shopaikey_video_result_url(nested_result) == "https://example.com/nested.mp4"
+    assert "secret" not in bot.shopaikey_sanitize_error("https://x.test/usage?apiKey=secret")
+    assert len(bot.shopaikey_sanitize_error("x" * 1000)) <= 500
+
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", False)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
+    assert bot.shopaikey_public_generation_guard("image")[0] is False
+    assert bot.shopaikey_public_generation_guard("video")[0] is False
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
+    assert bot.shopaikey_public_generation_guard("image")[0] is True
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        job_id = bot.create_shopaikey_job("u1", "c1", "video", model="veo3.1-fast", prompt="full prompt with sensitive details", status="IN_PROGRESS")
+        active = bot.shopaikey_active_job_for_user("u1", "video")
+        assert active
+        assert active["id"] == job_id
+        assert len(active["prompt_preview"]) <= 120
+        bot.update_shopaikey_job(job_id=job_id, task_id="task_abc", status="SUCCESS", result_url="https://example.com/video.mp4", result_sent=1, finished_at=bot.now_text())
+        assert bot.shopaikey_active_job_for_user("u1", "video") is None
+        saved = bot.shopaikey_job_by_task_id("task_abc")
+        assert saved["status"] == "SUCCESS"
+        assert saved["result_sent"] == 1
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
