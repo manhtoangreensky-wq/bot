@@ -344,6 +344,7 @@ SHOPAIKEY_IMAGE_COST_XU = env_int("SHOPAIKEY_IMAGE_COST_XU", 50)
 SHOPAIKEY_VIDEO_COST_XU = env_int("SHOPAIKEY_VIDEO_COST_XU", 200)
 SHOPAIKEY_TREND_COST_XU = env_int("SHOPAIKEY_TREND_COST_XU", 10)
 SHOPAIKEY_REFUND_ON_PROVIDER_FAIL = env_flag("SHOPAIKEY_REFUND_ON_PROVIDER_FAIL", "true")
+SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT = env_flag("SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT", "true")
 SYSTEM_MAINTENANCE_MODE = env_flag("SYSTEM_MAINTENANCE_MODE", "false")
 SYSTEM_MAINTENANCE_MESSAGE = _env("SYSTEM_MAINTENANCE_MESSAGE", "⚙️ TOAN AAS đang bảo trì ngắn để nâng cấp hệ thống. Vui lòng quay lại sau ít phút.")
 PROVIDER_FREEZE_ENABLED = env_flag("PROVIDER_FREEZE_ENABLED", "false")
@@ -1097,7 +1098,11 @@ def init_db():
         xu_cost_planned INTEGER DEFAULT 0,
         xu_deducted INTEGER DEFAULT 0,
         refund_status TEXT DEFAULT '',
+        refund_amount INTEGER DEFAULT 0,
         refund_reason TEXT DEFAULT '',
+        billing_status TEXT DEFAULT '',
+        confirm_required INTEGER DEFAULT 1,
+        confirmed_at TEXT DEFAULT '',
         source_job_id TEXT DEFAULT '',
         admin_only INTEGER DEFAULT 1,
         error_class TEXT,
@@ -1112,6 +1117,17 @@ def init_db():
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_shopaikey_jobs_user_status ON shopaikey_jobs(user_id, status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_shopaikey_jobs_task_id ON shopaikey_jobs(task_id)")
+    c.execute("""CREATE TABLE IF NOT EXISTS shopaikey_billing_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        job_id INTEGER DEFAULT 0,
+        event_type TEXT,
+        amount_xu INTEGER DEFAULT 0,
+        balance_before INTEGER DEFAULT 0,
+        balance_after INTEGER DEFAULT 0,
+        reason TEXT,
+        created_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS launch_bonus_redemptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -1829,7 +1845,11 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_created ON local_worker_jobs(created_at)")
     for col, col_type in [
         ("refund_status", "TEXT DEFAULT ''"),
+        ("refund_amount", "INTEGER DEFAULT 0"),
         ("refund_reason", "TEXT DEFAULT ''"),
+        ("billing_status", "TEXT DEFAULT ''"),
+        ("confirm_required", "INTEGER DEFAULT 1"),
+        ("confirmed_at", "TEXT DEFAULT ''"),
         ("source_job_id", "TEXT DEFAULT ''"),
     ]:
         try:
@@ -27840,6 +27860,15 @@ def shopaikey_admin_freeze_warning_text() -> str:
     reason = row.get("reason_code") or "provider_freeze"
     return f"ON ({reason}) — admin smoke test only, không mở public."
 
+def shopaikey_billing_flow_status_text() -> str:
+    if not SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT:
+        return "not_ready_confirm_disabled"
+    if not SHOPAIKEY_REFUND_ON_PROVIDER_FAIL:
+        return "not_ready_refund_disabled"
+    if int(SHOPAIKEY_IMAGE_COST_XU or 0) <= 0 or int(SHOPAIKEY_VIDEO_COST_XU or 0) <= 0:
+        return "not_ready_cost_missing"
+    return "ready_guarded_public_off" if not (SHOPAIKEY_PUBLIC_IMAGE_ENABLED or SHOPAIKEY_PUBLIC_VIDEO_ENABLED) else "ready_public_env_on"
+
 def shopaikey_generation_unavailable_message(status: str = "", detail: str = "") -> str:
     error_class = classify_provider_error(0, status, detail)
     return user_friendly_error(error_class, "shopaikey")
@@ -27882,6 +27911,39 @@ def shopaikey_active_job_for_user(user_id, job_type: str = "") -> dict | None:
     finally:
         conn.close()
 
+def record_shopaikey_billing_event(user_id, job_id: int, event_type: str, amount_xu: int = 0, balance_before: int = 0, balance_after: int = 0, reason: str = ""):
+    conn = db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS shopaikey_billing_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            job_id INTEGER DEFAULT 0,
+            event_type TEXT,
+            amount_xu INTEGER DEFAULT 0,
+            balance_before INTEGER DEFAULT 0,
+            balance_after INTEGER DEFAULT 0,
+            reason TEXT,
+            created_at TEXT
+        )""")
+        conn.execute(
+            """INSERT INTO shopaikey_billing_events
+            (user_id, job_id, event_type, amount_xu, balance_before, balance_after, reason, created_at)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id or ""),
+                int(job_id or 0),
+                str(event_type or "")[:40],
+                int(amount_xu or 0),
+                int(balance_before or 0),
+                int(balance_after or 0),
+                sanitize_provider_error(reason)[:220],
+                now_text(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
 def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", prompt: str = "", status: str = "QUEUED", admin_only: bool = True, xu_cost_planned: int = 0, source_job_id: str = "") -> int:
     now = now_text()
     conn = db_connect()
@@ -27890,8 +27952,9 @@ def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", promp
             """
             INSERT INTO shopaikey_jobs
             (user_id, chat_id, job_type, provider, model, status, prompt_hash, prompt_preview,
-             xu_cost_planned, xu_deducted, source_job_id, admin_only, attempts, poll_count, created_at, updated_at)
-            VALUES (?, ?, ?, 'shopaikey', ?, ?, ?, ?, ?, 0, ?, ?, 0, 0, ?, ?)
+             xu_cost_planned, xu_deducted, refund_amount, billing_status, confirm_required, confirmed_at,
+             source_job_id, admin_only, attempts, poll_count, created_at, updated_at)
+            VALUES (?, ?, ?, 'shopaikey', ?, ?, ?, ?, ?, 0, 0, ?, ?, '', ?, ?, 0, 0, ?, ?)
             """,
             (
                 str(user_id or ""),
@@ -27902,6 +27965,8 @@ def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", promp
                 shopaikey_prompt_hash(prompt),
                 shopaikey_safe_prompt_preview(prompt),
                 int(xu_cost_planned or 0),
+                "confirmed" if admin_only else "pending_confirm",
+                1 if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 0,
                 str(source_job_id or "")[:80],
                 1 if admin_only else 0,
                 now,
@@ -27917,8 +27982,8 @@ def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
     allowed = {
         "model", "task_id", "status", "result_url", "result_sent", "output_file_id",
         "error_class", "provider_error_code", "provider_message", "fail_reason",
-        "attempts", "poll_count", "finished_at", "xu_deducted", "refund_status", "refund_reason",
-        "source_job_id",
+        "attempts", "poll_count", "finished_at", "xu_deducted", "refund_status", "refund_amount", "refund_reason",
+        "billing_status", "confirm_required", "confirmed_at", "source_job_id",
     }
     updates = {}
     if job_id and str(task_id or "").strip():
@@ -27932,10 +27997,12 @@ def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
             updates[key] = shopaikey_sanitize_error(str(value or ""))[:260]
         elif key == "result_url":
             updates[key] = str(value or "").strip()[:1000]
-        elif key in {"result_sent", "attempts", "poll_count", "xu_deducted"}:
+        elif key in {"result_sent", "attempts", "poll_count", "xu_deducted", "refund_amount", "confirm_required"}:
             updates[key] = int(value or 0)
-        elif key in {"refund_status", "refund_reason"}:
+        elif key in {"refund_status", "refund_reason", "billing_status"}:
             updates[key] = shopaikey_sanitize_error(str(value or ""))[:160]
+        elif key == "confirmed_at":
+            updates[key] = str(value or "")[:40]
         elif key == "source_job_id":
             updates[key] = str(value or "")[:80]
         elif key == "status":
@@ -27988,6 +28055,7 @@ def refund_shopaikey_job_if_needed(user_id, job_id: int = 0, task_id: str = "", 
     amount = int(job.get("xu_deducted") or 0)
     if amount <= 0:
         return False
+    balance_before, _, _ = get_user(user_id)
     refunded = refund_charged_credit(
         user_id,
         amount,
@@ -27997,11 +28065,23 @@ def refund_shopaikey_job_if_needed(user_id, job_id: int = 0, task_id: str = "", 
         True,
     )
     if refunded:
+        balance_after, _, _ = get_user(user_id)
         update_shopaikey_job(
             job_id=int(job.get("id") or job_id or 0),
             task_id=str(job.get("task_id") or task_id or ""),
             refund_status="refunded",
+            refund_amount=amount,
             refund_reason=reason,
+            billing_status="refunded",
+        )
+        record_shopaikey_billing_event(
+            user_id,
+            int(job.get("id") or job_id or 0),
+            "refund",
+            amount,
+            int(balance_before or 0),
+            int(balance_after or 0),
+            reason,
         )
     return refunded
 
@@ -31647,6 +31727,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code>",
         f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
+        f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
+        f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
         f"• Freeze: <code>{'ON' if shopaikey_frozen else 'OFF'}</code>",
         f"• Freeze reason: <code>{html.escape(str(shopaikey_freeze.get('reason_code') or '-'))}</code>",
         f"• Unfreeze after: <code>{html.escape(str(shopaikey_freeze.get('unfreeze_after') or '-'))}</code>",
@@ -32342,6 +32424,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_IMAGE_COST_XU or 0)} Xu</code>",
         f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{int(SHOPAIKEY_VIDEO_COST_XU or 0)} Xu</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
+        f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
+        f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
         f"• Maintenance mode: <code>{'ON' if maintenance_on else 'OFF'}</code>",
         f"• Provider freeze: <code>{'ON' if provider_frozen else 'OFF'}</code>",
         f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason_code') or '-'))}</code>",
@@ -33081,6 +33165,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     uid = query.from_user.id
     if action == "cancel":
         pop_shopaikey_pending_confirmation(token, uid)
+        record_shopaikey_billing_event(uid, 0, "cancel", 0, 0, 0, "user_cancelled_confirmation")
         return await query.edit_message_text("❌ Đã huỷ. Bot chưa trừ Xu.")
     pending = pop_shopaikey_pending_confirmation(token, uid)
     if not pending:
@@ -33099,6 +33184,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             "⚠️ Ảnh nguồn đã được dùng hoặc không còn hợp lệ để giảm phần video. Bot chưa trừ Xu.\n"
             "Vui lòng gửi lại lệnh tạo video để hệ thống tính chi phí hiện tại."
         )
+    balance_before, _, _ = get_user(uid)
     charge = spend_fixed_credit_info(
         uid,
         base_cost,
@@ -33110,6 +33196,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         credits_now, _, _ = get_user(uid)
         return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or base_cost), uid)
     deducted = int(charge.get("final_cost") or 0)
+    balance_after, _, _ = get_user(uid)
     model = SHOPAIKEY_IMAGE_MODEL if job_type == "image" else (SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")
     job_id = create_shopaikey_job(
         uid,
@@ -33122,7 +33209,16 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         xu_cost_planned=base_cost,
         source_job_id=source_job_id,
     )
-    update_shopaikey_job(job_id=job_id, xu_deducted=deducted)
+    confirmed_at = now_text()
+    update_shopaikey_job(
+        job_id=job_id,
+        xu_deducted=deducted,
+        billing_status="deducted" if deducted > 0 else "admin_free",
+        confirm_required=1 if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 0,
+        confirmed_at=confirmed_at,
+    )
+    record_shopaikey_billing_event(uid, job_id, "confirm", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}")
+    record_shopaikey_billing_event(uid, job_id, "deduct", deducted, int(balance_before or 0), int(balance_after or 0), f"shopaikey_{job_type}")
     if job_type == "image":
         await query.edit_message_text("🖼 Đang tạo ảnh cho bạn, vui lòng chờ một chút. Không cần gửi lại lệnh, bot sẽ tự báo khi xong.")
         result = await shopaikey_image_generate(prompt)

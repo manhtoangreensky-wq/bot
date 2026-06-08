@@ -166,6 +166,7 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_IMAGE_COST_XU=50" in env_example
     assert "SHOPAIKEY_VIDEO_COST_XU=200" in env_example
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=true" in env_example
+    assert "SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT=true" in env_example
     assert "SYSTEM_MAINTENANCE_MODE=false" in env_example
     assert "PROVIDER_FREEZE_ENABLED=false" in env_example
     assert "TOOL_FREEZE_IMAGE=false" in env_example
@@ -291,6 +292,8 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert "spend_fixed_credit_info" not in image_source
     assert "spend_fixed_credit_info" in callback_source
     assert "refund_shopaikey_job_if_needed" in callback_source
+    assert "record_shopaikey_billing_event" in callback_source
+    assert "SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT" in source
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL" in source
     assert "deduct_dynamic_credit(" not in callback_source
     assert "add_credit(" not in callback_source
@@ -306,8 +309,11 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
 
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_COST_XU", 200)
     monkeypatch.setattr(bot, "SHOPAIKEY_IMAGE_COST_XU", 50)
+    monkeypatch.setattr(bot, "SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL", True)
     assert bot.shopaikey_video_cost_for_flow(False) == 200
     assert bot.shopaikey_video_cost_for_flow(True) == 150
+    assert bot.shopaikey_billing_flow_status_text().startswith("ready")
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -317,15 +323,37 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
         conn = bot.db_connect()
         try:
             cols = {row[1] for row in conn.execute("PRAGMA table_info(shopaikey_jobs)").fetchall()}
+            billing_cols = {row[1] for row in conn.execute("PRAGMA table_info(shopaikey_billing_events)").fetchall()}
         finally:
             conn.close()
-        assert {"xu_cost_planned", "xu_deducted", "refund_status", "refund_reason", "source_job_id"}.issubset(cols)
+        assert {
+            "xu_cost_planned",
+            "xu_deducted",
+            "refund_status",
+            "refund_amount",
+            "refund_reason",
+            "billing_status",
+            "confirm_required",
+            "confirmed_at",
+            "source_job_id",
+        }.issubset(cols)
+        assert {"user_id", "job_id", "event_type", "amount_xu", "balance_before", "balance_after", "reason", "created_at"}.issubset(billing_cols)
         job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="IN_PROGRESS", admin_only=False, xu_cost_planned=50)
         bot.update_shopaikey_job(job_id=job_id, xu_deducted=50, refund_status="pending", refund_reason="provider_fail")
         active = bot.shopaikey_active_job_for_user("u2", "image")
         assert active["xu_cost_planned"] == 50
         assert active["xu_deducted"] == 50
         assert active["refund_status"] == "pending"
+        assert active["confirm_required"] == 1
+        assert active["billing_status"] == "pending_confirm"
+        bot.record_shopaikey_billing_event("u2", job_id, "confirm", 0, 100, 100, "test confirm")
+        bot.record_shopaikey_billing_event("u2", job_id, "deduct", 50, 100, 50, "test deduct")
+        conn = bot.db_connect()
+        try:
+            billing_events = conn.execute("SELECT event_type, amount_xu FROM shopaikey_billing_events WHERE job_id=? ORDER BY id", (job_id,)).fetchall()
+            assert [(row[0], row[1]) for row in billing_events] == [("confirm", 0), ("deduct", 50)]
+        finally:
+            conn.close()
         assert bot.shopaikey_video_cost_for_flow(True, "u2") == 200
         image_job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="SUCCESS", admin_only=False, xu_cost_planned=50)
         bot.update_shopaikey_job(job_id=image_job_id, xu_deducted=50)
