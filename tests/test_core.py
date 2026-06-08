@@ -819,17 +819,17 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🎨 TOAN AAS Media Creator" in helper_source
     assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
     assert 'InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")' in source
+    assert 'InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video")' in source
     assert 'InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image")' in source
-    assert 'InlineKeyboardButton("🎞 Video", callback_data="menu|main_video")' in source
     assert 'InlineKeyboardButton("🖼 Tạo ảnh AI nhanh", callback_data="create_media|quick_image")' in source
     assert 'InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")' in source
     assert 'InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
+    assert 'InlineKeyboardButton("📝 Viết hook/script/caption", callback_data="menu|hint_film")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
     for callback_data in [
         "create_media|quick_image",
         "create_media|quick_video",
-        "create_media|support",
         "create_media|main",
         "create_media|cancel",
     ]:
@@ -886,9 +886,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "centralized_pricing" in pricing_text
     start_labels = [button.text for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard for button in row]
     assert "🎨 Media Creator" not in start_labels
+    assert "🎬 Tạo nội dung / Video" in start_labels
     assert "🖼 Hình ảnh" in start_labels
-    assert "🎞 Video" in start_labels
+    assert "🎞 Video" not in start_labels
     assert "📞 Liên hệ admin" in start_labels
+    assert "💳 Bảng giá" in start_labels
     for keyboard in [
         bot.main_menu_keyboard(False),
         bot.localized_main_menu_keyboard(False, "vi"),
@@ -899,16 +901,22 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         assert voice_rows and len(voice_rows[0]) == 2
     image_labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
     assert "🖼 Tạo ảnh AI nhanh" in image_labels
-    assert "💳 Xem bảng giá" in image_labels
-    assert "📞 Liên hệ admin" in image_labels
+    assert "💳 Xem bảng giá" not in image_labels
+    assert "📞 Liên hệ admin" not in image_labels
     video_buttons = [button for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     assert any(button.text == "🎞 Tạo video nhanh" and button.callback_data == "create_media|quick_video" for button in video_buttons)
     assert any(button.text == "🎬 Tạo video theo trend" and button.callback_data == "create_media|trend" for button in video_buttons)
+    video_labels = [button.text for button in video_buttons]
+    assert "🖼➡️🎞 Tạo video từ ảnh" in video_labels
+    assert "✍️ Tạo prompt video" in video_labels
+    assert "📝 Viết hook/script/caption" in video_labels
+    assert "💳 Xem bảng giá" not in video_labels
+    assert "📞 Liên hệ admin" not in video_labels
     create_media_labels = [button.text for row in bot.create_media_menu_keyboard().inline_keyboard for button in row]
     assert "🖼 Tạo ảnh nhanh" in create_media_labels
     assert "🎞 Tạo video nhanh" in create_media_labels
-    assert "📞 Liên hệ admin" in create_media_labels
     assert "🔙 Quay lại menu chính" in create_media_labels
+    assert "📞 Liên hệ admin" not in create_media_labels
     assert "📌 Xem giá" not in create_media_labels
     assert "🎬 Tạo video theo trend" not in create_media_labels
     monkeypatch.setattr(bot, "SUPPORT_TELEGRAM_URL", "")

@@ -27379,7 +27379,6 @@ def create_media_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")],
         [InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")],
-        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="create_media|support")],
         [InlineKeyboardButton("🔙 Quay lại menu chính", callback_data="create_media|main")],
         [InlineKeyboardButton("❌ Hủy", callback_data="create_media|cancel")],
     ])
@@ -29883,20 +29882,21 @@ def admin_internal_command(handler):
 
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-        [InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎞 Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
-        [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
-        [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
-        [InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
-        [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|main_guide")],
-        [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
+        [InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
+        [InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
+        [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs")],
+        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
+        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support"), InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main")],
+        [InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
+        [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
     ]
     if is_admin:
         rows.extend([
-            [InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system")],
-            [InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
+            [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang"), InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin")],
+            [InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
         ])
+    else:
+        rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
     return InlineKeyboardMarkup(rows)
 
 def language_choice_text() -> str:
@@ -29933,50 +29933,56 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         rows = [
-            [InlineKeyboardButton("🎬 内容创作", callback_data="menu|main_video"), InlineKeyboardButton("🤖 AI 助手", callback_data="menu|main_ai")],
-            [InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image"), InlineKeyboardButton("🎞 视频", callback_data="menu|main_video")],
-            [InlineKeyboardButton("🎙 语音工具", callback_data="menu|main_audio"), InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music")],
-            [InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs"), InlineKeyboardButton("🌐 翻译", callback_data="menu|translate")],
-            [InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory"), InlineKeyboardButton("📞 支持", callback_data="menu|support")],
-            [InlineKeyboardButton("💳 价格", callback_data="pricing|main"), InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup")],
-            [InlineKeyboardButton("👤 账户", callback_data="menu|main_profile"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
-            [InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")],
+            [InlineKeyboardButton("🎬 内容 / 视频", callback_data="menu|main_video"), InlineKeyboardButton("🤖 AI 助手", callback_data="menu|main_ai")],
+            [InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image"), InlineKeyboardButton("🎙 语音工具", callback_data="menu|main_audio")],
+            [InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music"), InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs")],
+            [InlineKeyboardButton("🌐 翻译", callback_data="menu|translate"), InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory")],
+            [InlineKeyboardButton("📞 支持", callback_data="menu|support"), InlineKeyboardButton("💳 价格", callback_data="pricing|main")],
+            [InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 账户", callback_data="menu|main_profile")],
+            [InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
         ]
         if is_admin:
             rows.extend([
-                [InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("⚙️ 系统", callback_data="menu|system")],
+                [InlineKeyboardButton("🌍 切换语言", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")],
+                [InlineKeyboardButton("⚙️ 系统", callback_data="menu|system")],
             ])
+        else:
+            rows.append([InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")])
         return InlineKeyboardMarkup(rows)
     if lang == "vi":
         rows = [
-            [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-            [InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎞 Video", callback_data="menu|main_video")],
-            [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
-            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
-            [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
-            [InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
-            [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
-            [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
+            [InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
+            [InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
+            [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs")],
+            [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
+            [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support"), InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main")],
+            [InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
+            [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
         ]
         if is_admin:
             rows.extend([
-                [InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system")],
+                [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")],
+                [InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system")],
             ])
+        else:
+            rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
         return InlineKeyboardMarkup(rows)
     rows = [
-        [InlineKeyboardButton("🎬 Content", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Ask AI", callback_data="menu|main_ai")],
-        [InlineKeyboardButton("🖼 Images", callback_data="menu|main_image"), InlineKeyboardButton("🎞 Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music")],
-        [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("🌐 Translate", callback_data="menu|translate")],
-        [InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory"), InlineKeyboardButton("📞 Support", callback_data="menu|support")],
-        [InlineKeyboardButton("💳 Pricing", callback_data="pricing|main"), InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
-        [InlineKeyboardButton("👤 Account", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
-        [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
+        [InlineKeyboardButton("🎬 Content / Video", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Ask AI", callback_data="menu|main_ai")],
+        [InlineKeyboardButton("🖼 Images", callback_data="menu|main_image"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
+        [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music"), InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs")],
+        [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate"), InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory")],
+        [InlineKeyboardButton("📞 Support", callback_data="menu|support"), InlineKeyboardButton("💳 Pricing", callback_data="pricing|main")],
+        [InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Account", callback_data="menu|main_profile")],
+        [InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
     ]
     if is_admin:
         rows.extend([
-            [InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("⚙️ System", callback_data="menu|system")],
+            [InlineKeyboardButton("🌍 Change language", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")],
+            [InlineKeyboardButton("⚙️ System", callback_data="menu|system")],
         ])
+    else:
+        rows.append([InlineKeyboardButton("🌍 Change language", callback_data="back_lang")])
     return InlineKeyboardMarkup(rows)
 
 def localized_start_menu_text(user_id, lang: str) -> str:
@@ -30126,8 +30132,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🎬 Trend video workflow", callback_data="create_media|trend")],
             [InlineKeyboardButton("🖼➡️🎞 Image to video", callback_data="menu|hint_image_to_video_pack")],
             [InlineKeyboardButton("✍️ Video prompt", callback_data="menu|hint_film")],
-            [InlineKeyboardButton("💳 Pricing", callback_data="pricing|main")],
-            [InlineKeyboardButton("📞 Support", callback_data="menu|support")],
+            [InlineKeyboardButton("📝 Hook/script/caption", callback_data="menu|hint_film")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
@@ -30135,8 +30140,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
         [InlineKeyboardButton("🖼➡️🎞 Tạo video từ ảnh", callback_data="menu|hint_image_to_video_pack")],
         [InlineKeyboardButton("✍️ Tạo prompt video", callback_data="menu|hint_film")],
-        [InlineKeyboardButton("💳 Xem bảng giá", callback_data="pricing|main")],
-        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
+        [InlineKeyboardButton("📝 Viết hook/script/caption", callback_data="menu|hint_film")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -30186,8 +30190,6 @@ def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("✍️ Image prompt", callback_data="menu|hint_image_tools")],
             [InlineKeyboardButton("🧩 Edit image", callback_data="menu|hint_image_tools")],
             [InlineKeyboardButton("📐 Upscale / resize", callback_data="menu|hint_image_tools")],
-            [InlineKeyboardButton("💳 Pricing", callback_data="pricing|main")],
-            [InlineKeyboardButton("📞 Support", callback_data="menu|support")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
@@ -30195,8 +30197,6 @@ def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✍️ Tạo prompt ảnh", callback_data="menu|hint_image_tools")],
         [InlineKeyboardButton("🧩 Sửa ảnh / edit ảnh", callback_data="menu|hint_image_tools")],
         [InlineKeyboardButton("📐 Nâng cấp / đổi kích thước ảnh", callback_data="menu|hint_image_tools")],
-        [InlineKeyboardButton("💳 Xem bảng giá", callback_data="pricing|main")],
-        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -30635,10 +30635,11 @@ def menu_text_support() -> str:
 
 def menu_text_main_video() -> str:
     return (
-        "🎞 <b>Video TOAN AAS</b>\n\n"
+        "🎬 <b>Tạo nội dung / Video TOAN AAS</b>\n\n"
         "Bạn muốn làm gì?\n\n"
         "• Tạo video nhanh bằng provider AI nếu admin đã mở.\n"
         "• Tạo video theo trend: hook, script, storyboard, prompt ảnh/video, caption và CTA.\n"
+        "• Viết hook, script, caption hoặc prompt video để tự dùng.\n"
         "• Tạo prompt video hoặc prompt ảnh sang video để tự dùng.\n\n"
         "Public video hiện vẫn được kiểm soát bằng cấu hình an toàn. Nếu chưa mở, bot không gọi API và không trừ Xu.\n\n"
         "<b>Lệnh nhanh:</b>\n"
