@@ -345,6 +345,7 @@ SHOPAIKEY_VIDEO_COST_XU = env_int("SHOPAIKEY_VIDEO_COST_XU", 200)
 SHOPAIKEY_TREND_COST_XU = env_int("SHOPAIKEY_TREND_COST_XU", 10)
 SHOPAIKEY_REFUND_ON_PROVIDER_FAIL = env_flag("SHOPAIKEY_REFUND_ON_PROVIDER_FAIL", "true")
 SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT = env_flag("SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT", "true")
+SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED = env_flag("SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED", "true")
 SYSTEM_MAINTENANCE_MODE = env_flag("SYSTEM_MAINTENANCE_MODE", "false")
 SYSTEM_MAINTENANCE_MESSAGE = _env("SYSTEM_MAINTENANCE_MESSAGE", "⚙️ TOAN AAS đang bảo trì ngắn để nâng cấp hệ thống. Vui lòng quay lại sau ít phút.")
 PROVIDER_FREEZE_ENABLED = env_flag("PROVIDER_FREEZE_ENABLED", "false")
@@ -363,6 +364,9 @@ SHOPAIKEY_FREEZE_COOLDOWN_MINUTES = env_int("SHOPAIKEY_FREEZE_COOLDOWN_MINUTES",
 USER_BUSY_MESSAGE = _env("USER_BUSY_MESSAGE", "⏳ Tác vụ của bạn đang được xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 USER_PROVIDER_BUSY_MESSAGE = _env("USER_PROVIDER_BUSY_MESSAGE", "⚙️ Hệ thống AI đang bận. TOAN AAS đã ghi nhận, vui lòng thử lại sau ít phút.")
 USER_PROVIDER_MAINTENANCE_MESSAGE = _env("USER_PROVIDER_MAINTENANCE_MESSAGE", "🛠 Tính năng này đang được bảo trì ngắn để đảm bảo chất lượng. Vui lòng quay lại sau.")
+USER_WAIT_IMAGE_MESSAGE = _env("USER_WAIT_IMAGE_MESSAGE", "🖼 Đang tạo ảnh cho bạn, vui lòng chờ một chút. Không cần gửi lại lệnh.")
+USER_WAIT_VIDEO_MESSAGE = _env("USER_WAIT_VIDEO_MESSAGE", "🎞 Đang tạo video cho bạn. Quá trình này có thể mất 1–5 phút. Bot sẽ tự gửi kết quả khi hoàn tất.")
+USER_JOB_LOCK_MESSAGE = _env("USER_JOB_LOCK_MESSAGE", "⏳ Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED = env_flag("SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED", "true")
 SHOPAIKEY_VIDEO_POLL_INTERVAL_SECONDS = env_int("SHOPAIKEY_VIDEO_POLL_INTERVAL_SECONDS", 25)
 SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS = env_int("SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS", 24)
@@ -27869,6 +27873,31 @@ def shopaikey_billing_flow_status_text() -> str:
         return "not_ready_cost_missing"
     return "ready_guarded_public_off" if not (SHOPAIKEY_PUBLIC_IMAGE_ENABLED or SHOPAIKEY_PUBLIC_VIDEO_ENABLED) else "ready_public_env_on"
 
+def provider_freeze_display(provider: str = "shopaikey") -> dict:
+    frozen, row, _message = is_provider_frozen(provider)
+    if not frozen:
+        return {
+            "frozen": False,
+            "reason": "-",
+            "message": "-",
+            "unfreeze_after": "-",
+            "error_count": int(row.get("error_count") or 0) if row else 0,
+            "last_error_at": str(row.get("last_error_at") or "-") if row else "-",
+        }
+    return {
+        "frozen": True,
+        "reason": str(row.get("reason_code") or "-"),
+        "message": str(row.get("reason_message") or "-"),
+        "unfreeze_after": str(row.get("unfreeze_after") or "-"),
+        "error_count": int(row.get("error_count") or 0),
+        "last_error_at": str(row.get("last_error_at") or "-"),
+    }
+
+def provider_freeze_runtime_on(provider: str = "shopaikey") -> bool:
+    state = current_system_mode()
+    display = provider_freeze_display(provider)
+    return bool(state.get("provider_freeze") or PROVIDER_FREEZE_ENABLED or display.get("frozen"))
+
 def shopaikey_generation_unavailable_message(status: str = "", detail: str = "") -> str:
     error_class = classify_provider_error(0, status, detail)
     return user_friendly_error(error_class, "shopaikey")
@@ -27879,15 +27908,15 @@ def shopaikey_public_generation_guard(job_type: str) -> tuple[bool, str]:
     if freeze.get("frozen"):
         return False, freeze.get("message") or USER_PROVIDER_BUSY_MESSAGE
     if job == "image" and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
-        return False, "Chức năng đang thử nghiệm nội bộ, chưa mở công khai."
+        return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
     if job == "video" and not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
-        return False, "Chức năng đang thử nghiệm nội bộ, chưa mở công khai."
+        return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
     if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
         return False, "Hệ thống tạo ảnh/video đang bảo trì ngắn hoặc chưa sẵn sàng."
     return True, ""
 
 def shopaikey_active_job_for_user(user_id, job_type: str = "") -> dict | None:
-    if not SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED:
+    if not (SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED and SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED):
         return None
     uid = str(user_id or "")
     kind = str(job_type or "").lower()
@@ -31683,8 +31712,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deepgram_status = "configured — ready_for_smoke_test" if providers["audio"]["deepgram"] else "missing"
     shopaikey_usage = shopaikey_last_usage_snapshot()
     shopaikey_video_reason = shopaikey_video_reason_text()
-    shopaikey_frozen, shopaikey_freeze, _freeze_message = is_provider_frozen("shopaikey")
+    shopaikey_freeze = provider_freeze_display("shopaikey")
     maintenance_on, _maintenance_message = is_system_maintenance()
+    provider_freeze_on = provider_freeze_runtime_on("shopaikey")
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
         cobalt_note = "OK to smoke test"
@@ -31697,7 +31727,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         "🔐 <b>TOAN AAS Provider Status</b>",
         "configured = có ENV/key. tested = đã smoke test bằng /tool_test_*; configured không đồng nghĩa provider hoạt động.",
-        f"System mode: <code>{'MAINTENANCE' if maintenance_on else html.escape(state.get('label') or 'NORMAL')}</code> | payment_freeze=<code>{'on' if state.get('payment_freeze') else 'off'}</code> | tool_freeze=<code>{'on' if state.get('tool_freeze') else 'off'}</code> | provider_freeze=<code>{'on' if state.get('provider_freeze') or PROVIDER_FREEZE_ENABLED else 'off'}</code>",
+        f"System mode: <code>{'MAINTENANCE' if maintenance_on else html.escape(state.get('label') or 'NORMAL')}</code> | payment_freeze=<code>{'on' if state.get('payment_freeze') else 'off'}</code> | tool_freeze=<code>{'on' if state.get('tool_freeze') else 'off'}</code> | provider_freeze=<code>{'on' if provider_freeze_on else 'off'}</code>",
         "",
         "<b>Core</b>",
         f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
@@ -31729,8 +31759,10 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
-        f"• Freeze: <code>{'ON' if shopaikey_frozen else 'OFF'}</code>",
-        f"• Freeze reason: <code>{html.escape(str(shopaikey_freeze.get('reason_code') or '-'))}</code>",
+        f"• Job lock: <code>{'ON' if SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED else 'OFF'}</code>",
+        f"• Freeze: <code>{'ON' if shopaikey_freeze.get('frozen') else 'OFF'}</code>",
+        f"• Freeze reason: <code>{html.escape(str(shopaikey_freeze.get('reason') or '-'))}</code>",
+        f"• Freeze message: <code>{html.escape(str(shopaikey_freeze.get('message') or '-'))}</code>",
         f"• Unfreeze after: <code>{html.escape(str(shopaikey_freeze.get('unfreeze_after') or '-'))}</code>",
         f"• Auto freeze: <code>{'enabled' if SHOPAIKEY_AUTO_FREEZE_ENABLED else 'disabled'}</code>",
         f"• Low credit threshold: <code>warn {int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / freeze {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
@@ -32408,7 +32440,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     video_result = shopaikey_video_status_snapshot()
     video_reason = shopaikey_video_reason_text(video_result)
     usage = shopaikey_last_usage_snapshot()
-    provider_frozen, provider_freeze, _freeze_message = is_provider_frozen("shopaikey")
+    provider_freeze = provider_freeze_display("shopaikey")
     maintenance_on, _maintenance_message = is_system_maintenance()
     lines = [
         "🧪 <b>ShopAIKey Experimental Provider</b>",
@@ -32426,10 +32458,11 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
+        f"• Job lock: <code>{'ON' if SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED else 'OFF'}</code>",
         f"• Maintenance mode: <code>{'ON' if maintenance_on else 'OFF'}</code>",
-        f"• Provider freeze: <code>{'ON' if provider_frozen else 'OFF'}</code>",
-        f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason_code') or '-'))}</code>",
-        f"• Freeze message: <code>{html.escape(str(provider_freeze.get('reason_message') or '-'))}</code>",
+        f"• Provider freeze: <code>{'ON' if provider_freeze.get('frozen') else 'OFF'}</code>",
+        f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason') or '-'))}</code>",
+        f"• Freeze message: <code>{html.escape(str(provider_freeze.get('message') or '-'))}</code>",
         f"• Unfreeze after: <code>{html.escape(str(provider_freeze.get('unfreeze_after') or '-'))}</code>",
         f"• Recent provider errors: <code>{int(provider_freeze.get('error_count') or 0)}</code>",
         f"• Low credit warn/freeze: <code>{int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
@@ -33079,9 +33112,9 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
         return await update.message.reply_text("⚠️ Cú pháp: /shopaikey_image <mô tả ảnh>")
     enabled, message = shopaikey_public_generation_guard("image")
     if not enabled:
-        return await update.message.reply_text(f"🖼 {message}\nBot chưa trừ Xu.")
+        return await update.message.reply_text(f"{message}\nBot chưa trừ Xu.")
     if shopaikey_active_job_for_user(uid, "image"):
-        return await update.message.reply_text("⏳ Bạn đang có một tác vụ đang chạy. Vui lòng chờ kết quả hoặc kiểm tra trạng thái.")
+        return await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
     base_cost = max(0, int(SHOPAIKEY_IMAGE_COST_XU or 50))
     final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
@@ -33115,9 +33148,9 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
         return await update.message.reply_text(f"⚠️ Cú pháp: {command} <mô tả video>")
     enabled, message = shopaikey_public_generation_guard("video")
     if not enabled:
-        return await update.message.reply_text(f"🎞 {message}\nBot chưa trừ Xu.")
+        return await update.message.reply_text(f"{message}\nBot chưa trừ Xu.")
     if shopaikey_active_job_for_user(uid, "video"):
-        return await update.message.reply_text("⏳ Bạn đang có một tác vụ đang chạy. Vui lòng chờ kết quả hoặc kiểm tra trạng thái.")
+        return await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
     source_job = shopaikey_paid_image_source_job(uid) if from_image else None
     base_cost = shopaikey_video_cost_for_flow(from_image, uid)
@@ -33178,7 +33211,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     if not enabled:
         return await query.edit_message_text(f"{message}\nBot chưa trừ Xu.")
     if shopaikey_active_job_for_user(uid, job_type):
-        return await query.edit_message_text("⏳ Bạn đang có một tác vụ đang chạy. Vui lòng chờ kết quả hoặc kiểm tra trạng thái.")
+        return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
     if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
         return await query.edit_message_text(
             "⚠️ Ảnh nguồn đã được dùng hoặc không còn hợp lệ để giảm phần video. Bot chưa trừ Xu.\n"
@@ -33220,7 +33253,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     record_shopaikey_billing_event(uid, job_id, "confirm", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}")
     record_shopaikey_billing_event(uid, job_id, "deduct", deducted, int(balance_before or 0), int(balance_after or 0), f"shopaikey_{job_type}")
     if job_type == "image":
-        await query.edit_message_text("🖼 Đang tạo ảnh cho bạn, vui lòng chờ một chút. Không cần gửi lại lệnh, bot sẽ tự báo khi xong.")
+        await query.edit_message_text(USER_WAIT_IMAGE_MESSAGE)
         result = await shopaikey_image_generate(prompt)
         status = str(result.get("status") or "FAIL")
         image_url = str(result.get("image_url") or "")
@@ -33261,7 +33294,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         credits_after, _, _ = get_user(uid)
         return await context.bot.send_message(chat_id=query.message.chat_id, text=f"💼 Số dư còn lại: {credits_after} Xu")
     if job_type == "video":
-        await query.edit_message_text("🎞 Đang tạo video, quá trình này có thể mất 1–5 phút. Không cần gửi lại lệnh, bot sẽ tự gửi kết quả khi hoàn tất.")
+        await query.edit_message_text(USER_WAIT_VIDEO_MESSAGE)
         result = await shopaikey_video_create_smoke_test("", prompt)
         status = str(result.get("status") or "FAIL")
         task_id = str(result.get("task_id") or "")

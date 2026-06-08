@@ -167,12 +167,16 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_VIDEO_COST_XU=200" in env_example
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=true" in env_example
     assert "SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT=true" in env_example
+    assert "SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED=true" in env_example
     assert "SYSTEM_MAINTENANCE_MODE=false" in env_example
     assert "PROVIDER_FREEZE_ENABLED=false" in env_example
     assert "TOOL_FREEZE_IMAGE=false" in env_example
     assert "SHOPAIKEY_AUTO_FREEZE_ENABLED=true" in env_example
     assert "SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT=5" in env_example
     assert "SHOPAIKEY_ERROR_FREEZE_THRESHOLD=5" in env_example
+    assert "USER_WAIT_IMAGE_MESSAGE=" in env_example
+    assert "USER_WAIT_VIDEO_MESSAGE=" in env_example
+    assert "USER_JOB_LOCK_MESSAGE=" in env_example
     assert "if not is_admin_user(update.effective_user.id)" in command_source
     assert "Trả lời đúng một câu tiếng Việt có chữ TEST_OK." in source
     assert "TOAN AAS image smoke test: simple turquoise AI automation logo" in source
@@ -246,6 +250,8 @@ def test_provider_auto_freeze_and_status_commands(monkeypatch):
     assert "async def cmd_maintenance_status" in source
     assert "async def cmd_provider_freeze" in source
     assert "async def cmd_provider_unfreeze" in source
+    assert 'provider_freeze_display("shopaikey")' in source
+    assert 'provider_freeze_runtime_on("shopaikey")' in source
     assert 'CommandHandler("maintenance_status", cmd_maintenance_status)' in source
     assert 'CommandHandler("provider_freeze", cmd_provider_freeze)' in source
     assert 'CommandHandler("provider_unfreeze", cmd_provider_unfreeze)' in source
@@ -283,6 +289,39 @@ def test_provider_auto_freeze_and_status_commands(monkeypatch):
             os.unlink(db_path)
 
 
+def test_provider_freeze_display_cleanup_after_unfreeze(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "PROVIDER_FREEZE_ENABLED", False)
+    try:
+        bot.init_db()
+        assert bot.provider_freeze_runtime_on("shopaikey") is False
+        display = bot.provider_freeze_display("shopaikey")
+        assert display["frozen"] is False
+        assert display["reason"] == "-"
+        assert display["message"] == "-"
+        assert display["unfreeze_after"] == "-"
+
+        bot.set_provider_freeze_state("shopaikey", True, "test", "test freeze", "test")
+        assert bot.provider_freeze_runtime_on("shopaikey") is True
+        display = bot.provider_freeze_display("shopaikey")
+        assert display["frozen"] is True
+        assert display["reason"] == "test"
+        assert display["message"] == "test freeze"
+
+        bot.set_provider_freeze_state("shopaikey", False, "manual_unfreeze", "manual unfreeze", "test")
+        assert bot.provider_freeze_runtime_on("shopaikey") is False
+        display = bot.provider_freeze_display("shopaikey")
+        assert display["frozen"] is False
+        assert display["reason"] == "-"
+        assert display["message"] == "-"
+        assert display["unfreeze_after"] == "-"
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     source = bot_source_text()
     image_source = source_between(source, "async def cmd_shopaikey_image_public", "async def cmd_shopaikey_video_public")
@@ -300,8 +339,9 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
 
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", False)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
-    assert bot.shopaikey_public_generation_guard("image") == (False, "Chức năng đang thử nghiệm nội bộ, chưa mở công khai.")
-    assert bot.shopaikey_public_generation_guard("video") == (False, "Chức năng đang thử nghiệm nội bộ, chưa mở công khai.")
+    public_off_message = "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
+    assert bot.shopaikey_public_generation_guard("image") == (False, public_off_message)
+    assert bot.shopaikey_public_generation_guard("video") == (False, public_off_message)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
@@ -509,10 +549,14 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
     try:
         bot.init_db()
         job_id = bot.create_shopaikey_job("u1", "c1", "video", model="veo3.1-fast", prompt="full prompt with sensitive details", status="IN_PROGRESS")
+        monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED", True)
         active = bot.shopaikey_active_job_for_user("u1", "video")
         assert active
         assert active["id"] == job_id
         assert len(active["prompt_preview"]) <= 120
+        monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED", False)
+        assert bot.shopaikey_active_job_for_user("u1", "video") is None
+        monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED", True)
         bot.update_shopaikey_job(job_id=job_id, task_id="task_abc", status="SUCCESS", result_url="https://example.com/video.mp4", result_sent=1, finished_at=bot.now_text())
         assert bot.shopaikey_active_job_for_user("u1", "video") is None
         saved = bot.shopaikey_job_by_task_id("task_abc")
