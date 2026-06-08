@@ -26978,6 +26978,37 @@ def media_workflow_pricing_payload() -> dict:
 def shopaikey_video_cost_for_flow(from_image: bool = False, user_id=None) -> int:
     return video_base_cost_xu()
 
+def create_media_public_off_message() -> str:
+    return "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
+
+def create_media_menu_text() -> str:
+    return "🎨 TOAN AAS Media Creator\n\nBạn muốn làm gì?"
+
+def create_media_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")],
+        [InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")],
+        [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
+        [InlineKeyboardButton("📌 Xem giá", callback_data="create_media|pricing")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="create_media|cancel")],
+    ])
+
+def create_media_pricing_text() -> str:
+    pricing = media_workflow_pricing_payload()
+    return (
+        "📌 <b>Giá Media Creator TOAN AAS</b>\n\n"
+        f"• Quick image cost: <code>{pricing['quick_image_cost']} Xu</code>\n"
+        f"• Quick video cost: <code>{pricing['quick_video_cost']} Xu</code>\n"
+        f"• Workflow trend analysis cost: <code>{pricing['workflow_trend_analysis_cost']} Xu</code>\n"
+        f"• Workflow script/storyboard cost: <code>{pricing['workflow_script_storyboard_cost']} Xu</code>\n"
+        f"• Workflow prompt pack cost: <code>{pricing['workflow_prompt_pack_cost']} Xu</code>\n"
+        f"• Workflow content total: <code>{pricing['workflow_content_total_cost']} Xu</code>\n"
+        f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>\n"
+        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>\n"
+        f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>\n\n"
+        "Legacy ShopAIKey 50/200 chỉ là fallback ENV cũ nếu chưa có giá tập trung, không phải giá chính thức."
+    )
+
 def shopaikey_preview_final_cost(user_id, base_cost: int, event_type: str) -> int:
     if is_admin_user(user_id):
         return 0
@@ -29302,6 +29333,7 @@ TOOL_FREEZE_COMMANDS = {
     "image_tools", "image_prompt", "image_pack", "image_studio", "image_story", "image_story_prompt",
     "story_video", "shot_variations", "image_to_story_pack", "image_variations", "creative_flow",
     "video_from_image", "image_to_video_pack", "ai_image", "ai_image_edit",
+    "create_media", "quick_image_test", "quick_video_test",
     "music", "music_tools", "music_prompt", "music_library", "sfx_library", "media_library",
     "play_music", "play_sfx", "play_media", "select_music", "select_sfx", "select_media",
     "music_policy", "music_bg", "music_song", "add_music", "add_voice_to_video",
@@ -31902,6 +31934,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Admin-only: <code>{'true' if SHOPAIKEY_ADMIN_ONLY else 'false'}</code>",
         "• Public: <code>OFF</code>",
         f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
+        "• Quick media menu: <code>enabled/admin-only</code>",
+        f"• Quick image: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_image_cost']} Xu</code>",
+        f"• Quick video: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_video_cost']} Xu</code>",
         f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | quick image cost <code>{pricing['quick_image_cost']} Xu</code>",
         f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | quick video cost <code>{pricing['quick_video_cost']} Xu</code>",
         f"• Workflow trend analysis cost: <code>{pricing['workflow_trend_analysis_cost']} Xu</code>",
@@ -31934,7 +31969,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | image cost <code>{pricing['workflow_image_cost']} Xu</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code> | workflow video cost <code>{pricing['workflow_video_cost']} Xu</code> | standalone video cost <code>{pricing['quick_video_cost']} Xu</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
+        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -32610,6 +32645,9 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Chat fallbacks: <code>{html.escape(', '.join(shopaikey_chat_fallback_models()) or '-')}</code>",
         f"• TTS: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code> / <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>",
         f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
+        "• Quick media menu: <code>enabled/admin-only</code>",
+        f"• Quick image: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_image_cost']} Xu</code>",
+        f"• Quick video: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_video_cost']} Xu</code>",
         f"• Image: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | quick image cost <code>{pricing['quick_image_cost']} Xu</code>",
         f"• Video: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | quick video cost <code>{pricing['quick_video_cost']} Xu</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
         f"• Workflow trend analysis cost: <code>{pricing['workflow_trend_analysis_cost']} Xu</code>",
@@ -41857,6 +41895,51 @@ def trend_workflow_image_generation_status_text() -> str:
         return "guarded/public OFF"
     return "guarded/public ON"
 
+QUICK_MEDIA_PENDING_TTL_SECONDS = 10 * 60
+
+def quick_media_pending_key(user_id) -> str:
+    return f"quick_media:{user_id}"
+
+def set_quick_media_pending(user_id, action: str) -> None:
+    action = str(action or "").strip()
+    if action not in {"quick_image_prompt", "quick_video_prompt"}:
+        return
+    USER_PENDING[quick_media_pending_key(user_id)] = {
+        "pending_action": action,
+        "created_at_ts": time.time(),
+    }
+
+def get_quick_media_pending(user_id) -> dict | None:
+    key = quick_media_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") not in {"quick_image_prompt", "quick_video_prompt"}:
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_quick_media_pending(user_id) -> bool:
+    return USER_PENDING.pop(quick_media_pending_key(user_id), None) is not None
+
+def quick_media_prompt_text(action: str) -> str:
+    if action == "quick_video_prompt":
+        return (
+            "🎞 <b>Quick Video Admin Smoke Test</b>\n\n"
+            "Gửi prompt video ngắn để admin test ShopAIKey video.\n"
+            "Bot không trừ Xu, không mở public video và không log prompt/raw response.\n\n"
+            "Ví dụ: logo TOAN AAS chuyển động 3 giây, nền trắng sạch, màu xanh ngọc.\n\n"
+            "Timeout: 10 phút. Gõ /cancel để hủy."
+        )
+    return (
+        "🖼 <b>Quick Image Admin Smoke Test</b>\n\n"
+        "Gửi prompt ảnh ngắn để admin test ShopAIKey image.\n"
+        "Bot không trừ Xu, không mở public image và không log prompt/raw response.\n\n"
+        "Ví dụ: logo TOAN AAS, AI Automation System, xanh ngọc, nền trắng sạch.\n\n"
+        "Timeout: 10 phút. Gõ /cancel để hủy."
+    )
+
 def trend_video_pending_key(user_id) -> str:
     return f"trend_video_flow:{user_id}"
 
@@ -42417,9 +42500,235 @@ async def handle_trend_video_flow_pending_text(update: Update, context: ContextT
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
+    if clear_quick_media_pending(uid):
+        return await update.message.reply_text("❌ Đã hủy Quick Media Creator. Bot chưa gọi API và chưa trừ Xu.")
     if clear_trend_video_flow_pending(uid):
         return await update.message.reply_text("❌ Đã hủy Trend → Video Workflow. Bot chưa gọi API và chưa trừ Xu.")
     await update.message.reply_text("ℹ️ Không có tác vụ Trend → Video Workflow nào đang chờ. Bot chưa trừ Xu.")
+
+async def cmd_create_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(create_media_menu_text(), reply_markup=create_media_menu_keyboard())
+
+async def start_quick_media_prompt(update: Update, action: str):
+    uid = update.effective_user.id if update.effective_user else 0
+    if action not in {"quick_image_prompt", "quick_video_prompt"}:
+        return await update.message.reply_text("⚠️ Tác vụ media không hợp lệ. Bot chưa trừ Xu.")
+    if not is_admin_user(uid):
+        return await update.message.reply_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
+    job_type = "video" if action == "quick_video_prompt" else "image"
+    if shopaikey_active_job_for_user(uid, job_type):
+        return await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
+    set_quick_media_pending(uid, action)
+    await update.message.reply_text(quick_media_prompt_text(action), parse_mode="HTML")
+
+async def cmd_quick_image_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await start_quick_media_prompt(update, "quick_image_prompt")
+
+async def cmd_quick_video_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await start_quick_media_prompt(update, "quick_video_prompt")
+
+async def run_quick_image_admin_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str) -> None:
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        await update.message.reply_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
+        return
+    if not SHOPAIKEY_ENABLED or not SHOPAIKEY_ADMIN_ONLY or not SHOPAIKEY_API_KEY:
+        save_tool_test_result("quick_image", "DISABLED", "ShopAIKey admin image smoke not configured; no call", uid)
+        await update.message.reply_text("🧪 Quick image đang thiếu cấu hình admin smoke. Bot chưa gọi API và chưa trừ Xu.")
+        return
+    if shopaikey_active_job_for_user(uid, "image"):
+        await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
+        return
+    tool_type = "quick_image"
+    normalized_prompt = normalize_generation_prompt(prompt)
+    if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
+        await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
+        return
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/quick_image_test")
+    job_id = create_shopaikey_job(
+        uid,
+        update.effective_chat.id,
+        "image",
+        model=SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+        prompt="admin quick image smoke prompt",
+        status="IN_PROGRESS",
+        admin_only=True,
+        xu_cost_planned=0,
+    )
+    waiting = await update.message.reply_text("🖼 Đang tạo ảnh, vui lòng chờ một chút. Không cần gửi lại lệnh.")
+    result = await shopaikey_image_generate(prompt)
+    status = str(result.get("status") or "FAIL")
+    image_url = str(result.get("image_url") or "")
+    output_sent = False
+    if status == "PASS" and image_url:
+        try:
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=image_url,
+                caption=(
+                    "✅ Quick image smoke PASS\n"
+                    f"Model: {result.get('model') or SHOPAIKEY_IMAGE_MODEL}\n"
+                    f"Size: {result.get('size') or '-'}\n"
+                    "No Xu deducted: yes\n"
+                    "Public image: OFF"
+                ),
+            )
+            output_sent = True
+        except Exception:
+            try:
+                await update.message.reply_text(
+                    "✅ Quick image smoke PASS nhưng Telegram không gửi trực tiếp được ảnh từ URL.\n"
+                    "Admin kiểm tra lại trong provider dashboard. Bot chưa trừ Xu."
+                )
+            except Exception:
+                pass
+    detail = (
+        f"model={result.get('model') or SHOPAIKEY_IMAGE_MODEL}; http={result.get('http_status') or 0}; "
+        f"latency_ms={result.get('latency_ms') or 0}; size={result.get('size') or '-'}; "
+        f"output_sent={'yes' if output_sent else 'no'}; error_class={result.get('error_class') or '-'}"
+    )
+    save_tool_test_result("quick_image", status, detail, uid)
+    record_api_debug("shopaikey", "quick_image_test", status, int(result.get("http_status") or 0), detail)
+    update_shopaikey_job(
+        job_id=job_id,
+        status="SUCCESS" if status == "PASS" else "FAILED",
+        result_url=image_url if status == "PASS" else "",
+        result_sent=1 if output_sent else 0,
+        model=result.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+        error_class=result.get("error_class") or "",
+        provider_error_code=result.get("provider_error_code") or "",
+        provider_message=result.get("detail") or "",
+        attempts=1,
+        finished_at=now_text(),
+    )
+    await update_waiting_message(waiting, "✅ Quick image smoke đã xử lý xong. Không trừ Xu.")
+    if status != "PASS":
+        record_provider_error(
+            "shopaikey",
+            "image",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("detail") or status),
+            result.get("detail") or status,
+        )
+        await update.message.reply_text(f"{shopaikey_generation_unavailable_message(status, result.get('detail') or '')}\nBot chưa trừ Xu.")
+    finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
+
+async def run_quick_video_admin_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str) -> None:
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        await update.message.reply_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
+        return
+    if not SHOPAIKEY_ENABLED or not SHOPAIKEY_ADMIN_ONLY or not SHOPAIKEY_VIDEO_ADMIN_ONLY or not SHOPAIKEY_API_KEY:
+        save_tool_test_result("quick_video", "DISABLED", "ShopAIKey admin video smoke not configured; no call", uid)
+        await update.message.reply_text("🧪 Quick video đang thiếu cấu hình admin smoke. Bot chưa gọi API và chưa trừ Xu.")
+        return
+    if shopaikey_active_job_for_user(uid, "video"):
+        await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
+        return
+    tool_type = "quick_video"
+    normalized_prompt = normalize_generation_prompt(prompt)
+    if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
+        await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
+        return
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/quick_video_test")
+    model = SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast"
+    job_id = create_shopaikey_job(
+        uid,
+        update.effective_chat.id,
+        "video",
+        model=model,
+        prompt="admin quick video smoke prompt",
+        status="QUEUED",
+        admin_only=True,
+        xu_cost_planned=0,
+    )
+    waiting = await update.message.reply_text("🎞 Đang tạo video. Quá trình này có thể mất 1–5 phút. Bot sẽ tự gửi kết quả khi hoàn tất.")
+    result = await shopaikey_video_create_smoke_test(model, prompt)
+    status = str(result.get("status") or "FAIL")
+    task_id = str(result.get("task_id") or "")
+    attempts = result.get("attempts") or []
+    attempt_text = shopaikey_video_attempts_summary(attempts)
+    detail = (
+        f"model={result.get('model') or model}; http={result.get('http_status') or 0}; "
+        f"latency_ms={result.get('latency_ms') or 0}; task_id={task_id or '-'}; "
+        f"provider_status={result.get('provider_status') or '-'}; error_class={result.get('error_class') or '-'}; attempts={attempt_text}"
+    )
+    save_tool_test_result("quick_video", status, detail, uid)
+    record_api_debug("shopaikey", "quick_video_test", status, int(result.get("http_status") or 0), detail)
+    update_shopaikey_job(
+        job_id=job_id,
+        task_id=task_id,
+        status="IN_PROGRESS" if status == "PASS_SUBMITTED" and task_id else "FAILED",
+        model=result.get("selected_model") or result.get("model") or model,
+        error_class=result.get("error_class") or "",
+        provider_error_code=result.get("provider_error_code") or "",
+        provider_message=result.get("message") or result.get("detail") or "",
+        attempts=len(attempts),
+        finished_at="" if status == "PASS_SUBMITTED" and task_id else now_text(),
+    )
+    await update_waiting_message(waiting, "✅ Quick video submit đã xử lý xong. Không trừ Xu.")
+    if task_id and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
+        asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, update.effective_chat.id, uid, task_id))
+    if status == "PASS_SUBMITTED" and task_id:
+        await update.message.reply_text(
+            "🎞 Quick video smoke đã gửi vào queue.\n"
+            f"Task: {task_id}\n"
+            f"Auto poll: {'ON' if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED else 'OFF'}\n"
+            "No Xu deducted: yes\nPublic video: OFF"
+        )
+    else:
+        record_provider_error(
+            "shopaikey",
+            "video",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("message") or result.get("detail") or status),
+            result.get("message") or result.get("detail") or status,
+        )
+        await update.message.reply_text(f"{shopaikey_generation_unavailable_message(status, result.get('message') or result.get('detail') or '')}\nBot chưa trừ Xu.")
+    finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
+
+async def handle_quick_media_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_quick_media_pending(uid)
+    if not pending:
+        return False
+    prompt = re.sub(r"\s+", " ", update.message.text.strip())
+    if not prompt:
+        return False
+    clear_quick_media_pending(uid)
+    if pending.get("pending_action") == "quick_video_prompt":
+        await run_quick_video_admin_smoke(update, context, prompt)
+        return True
+    await run_quick_image_admin_smoke(update, context, prompt)
+    return True
+
+async def handle_create_media_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
+    uid = query.from_user.id if query.from_user else 0
+    if action == "cancel":
+        clear_quick_media_pending(uid)
+        return await query.edit_message_text("❌ Đã hủy Media Creator. Bot chưa gọi API và chưa trừ Xu.")
+    if action == "pricing":
+        return await query.edit_message_text(create_media_pricing_text(), parse_mode="HTML", reply_markup=create_media_menu_keyboard())
+    if action == "trend":
+        if not TREND_VIDEO_WORKFLOW_ENABLED:
+            return await query.edit_message_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
+        if not trend_video_workflow_can_access(uid):
+            return await query.edit_message_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+        set_trend_video_flow_pending(uid)
+        return await query.edit_message_text(trend_video_pending_prompt_text(), reply_markup=trend_video_pending_keyboard())
+    if action in {"quick_image", "quick_video"}:
+        if not is_admin_user(uid):
+            return await query.edit_message_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
+        pending_action = "quick_video_prompt" if action == "quick_video" else "quick_image_prompt"
+        job_type = "video" if action == "quick_video" else "image"
+        if shopaikey_active_job_for_user(uid, job_type):
+            return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
+        set_quick_media_pending(uid, pending_action)
+        return await query.edit_message_text(quick_media_prompt_text(pending_action), parse_mode="HTML")
+    await query.edit_message_text(create_media_menu_text(), reply_markup=create_media_menu_keyboard())
 
 async def cmd_tool_test_workflow_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -59185,6 +59494,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_trend_video_flow_pending_text(update, context):
         return
 
+    if await handle_quick_media_pending_text(update, context):
+        return
+
     normalized_music_command = normalize_music_inline_command_text(text)
     if normalized_music_command:
         handled = await dispatch_music_inline_command(update, context, normalized_music_command)
@@ -59855,6 +60167,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("trend_status", cmd_trend_status))
     tg_app.add_handler(CommandHandler("trend_video_flow", cmd_trend_video_flow))
     tg_app.add_handler(CommandHandler("cancel", cmd_cancel))
+    tg_app.add_handler(CommandHandler("create_media", cmd_create_media))
+    tg_app.add_handler(CommandHandler("quick_image_test", cmd_quick_image_test))
+    tg_app.add_handler(CommandHandler("quick_video_test", cmd_quick_video_test))
     tg_app.add_handler(CommandHandler("image_tools", cmd_image_tools))
     tg_app.add_handler(CommandHandler("image_studio", cmd_image_studio))
     tg_app.add_handler(CommandHandler("image_prompt", cmd_image_prompt))
@@ -60006,6 +60321,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))

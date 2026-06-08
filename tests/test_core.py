@@ -604,7 +604,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     source = bot_source_text()
     shared_source = source_between(source, "async def send_trend_video_flow_for_topic", "async def cmd_trend_video_flow")
     command_source = source_between(source, "async def cmd_trend_video_flow", "async def handle_trend_video_flow_callback")
-    callback_source = source_between(source, "async def handle_trend_video_flow_callback", "async def cmd_tool_test_workflow_image")
+    callback_source = source_between(source, "async def handle_trend_video_flow_callback", "async def cmd_create_media")
     pending_source = source_between(source, "async def handle_trend_video_flow_pending_text", "async def cmd_cancel")
     message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
     admin_smoke_source = source_between(source, "async def cmd_tool_test_workflow_image", "async def cmd_image_tools")
@@ -731,6 +731,72 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
         bot.LAST_TREND_VIDEO_WORKFLOWS.pop("u3", None)
         if os.path.exists(db_path):
             os.unlink(db_path)
+
+
+def test_create_media_menu_and_quick_pending_guards(monkeypatch):
+    source = bot_source_text()
+    helper_source = source_between(source, "def create_media_public_off_message", "def shopaikey_preview_final_cost")
+    quick_source = source_between(source, "async def cmd_create_media", "async def cmd_tool_test_workflow_image")
+    message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
+
+    assert 'CommandHandler("create_media", cmd_create_media)' in source
+    assert 'CommandHandler("quick_image_test", cmd_quick_image_test)' in source
+    assert 'CommandHandler("quick_video_test", cmd_quick_video_test)' in source
+    assert 'CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\\|")' in source
+    assert "🎨 TOAN AAS Media Creator" in helper_source
+    for callback_data in [
+        "create_media|quick_image",
+        "create_media|quick_video",
+        "create_media|trend",
+        "create_media|pricing",
+        "create_media|cancel",
+    ]:
+        assert callback_data in helper_source
+    assert "Tính năng này đang thử nghiệm nội bộ, chưa mở công khai" in helper_source
+    assert "media_workflow_pricing_payload()" in helper_source
+    assert "Legacy ShopAIKey 50/200 chỉ là fallback ENV cũ" in helper_source
+    assert "set_quick_media_pending(uid, action)" in source
+    assert 'set_quick_media_pending(uid, "quick_image_prompt")' not in source  # action is centralized through start/callback helpers.
+    assert "quick_image_prompt" in source and "quick_video_prompt" in source
+    assert "handle_quick_media_pending_text(update, context)" in message_source
+    assert message_source.index("handle_quick_media_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
+    assert "clear_quick_media_pending(uid)" in quick_source
+    assert "clear_quick_media_pending(uid)" in source_between(source, "async def cmd_cancel", "async def cmd_create_media")
+    assert "run_quick_image_admin_smoke" in quick_source
+    assert "run_quick_video_admin_smoke" in quick_source
+    assert "shopaikey_image_generate(prompt)" in quick_source
+    assert "shopaikey_video_create_smoke_test(model, prompt)" in quick_source
+    assert "spend_fixed_credit_info" not in quick_source
+    assert "deduct_dynamic_credit" not in quick_source
+    assert "add_credit(" not in quick_source
+    assert "PAYOS" not in quick_source.upper()
+    assert "USER_JOB_LOCK_MESSAGE" in quick_source
+    assert "/quick_image_test" in quick_source and "/quick_video_test" in quick_source
+    assert "No Xu deducted" in quick_source or "Không trừ Xu" in quick_source
+    assert "Quick media menu: <code>enabled/admin-only</code>" in source
+    assert "Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>" in source
+
+    monkeypatch.setattr(bot, "IMAGE_BASE_COST_XU", 321)
+    monkeypatch.setattr(bot, "VIDEO_BASE_COST_XU", 654)
+    monkeypatch.setattr(bot, "WORKFLOW_TREND_ANALYSIS_COST_XU", 7)
+    monkeypatch.setattr(bot, "WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 8)
+    monkeypatch.setattr(bot, "WORKFLOW_PROMPT_PACK_COST_XU", 9)
+    pricing = bot.media_workflow_pricing_payload()
+    assert pricing["quick_image_cost"] == 321
+    assert pricing["quick_video_cost"] == 654
+    assert "321 Xu" in bot.create_media_pricing_text()
+    assert "654 Xu" in bot.create_media_pricing_text()
+
+    key = bot.quick_media_pending_key("u6")
+    bot.USER_PENDING.pop(key, None)
+    bot.set_quick_media_pending("u6", "quick_image_prompt")
+    pending = bot.get_quick_media_pending("u6")
+    assert pending and pending["pending_action"] == "quick_image_prompt"
+    assert bot.clear_quick_media_pending("u6") is True
+    bot.set_quick_media_pending("u6", "quick_video_prompt")
+    bot.USER_PENDING[key]["created_at_ts"] = 0
+    assert bot.get_quick_media_pending("u6") is None
+    assert key not in bot.USER_PENDING
 
 
 def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
@@ -948,6 +1014,9 @@ def test_critical_sales_ready_commands_remain_registered():
         "shopaikey_video": "cmd_shopaikey_video_public",
         "shopaikey_video_from_image": "cmd_shopaikey_video_from_image_public",
         "trend_video_flow": "cmd_trend_video_flow",
+        "create_media": "cmd_create_media",
+        "quick_image_test": "cmd_quick_image_test",
+        "quick_video_test": "cmd_quick_video_test",
         "shopaikey_status": "cmd_shopaikey_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
         "trial_bonus_status": "cmd_trial_bonus_status",
