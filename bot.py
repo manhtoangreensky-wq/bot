@@ -838,11 +838,11 @@ AI_IMAGE_COST = 300
 AI_IMAGE_EDIT_COST = 350
 VIDEO_FROM_IMAGE_BASIC_COST = 300
 VIDEO_FROM_IMAGE_PRO_COST = 600
-IMAGE_BASE_COST_XU = env_int("IMAGE_BASE_COST_XU", AI_IMAGE_COST)
-VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", VIDEO_FROM_IMAGE_BASIC_COST)
-WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", TREND_ANALYSIS_COST_XU)
-WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", TREND_PROMPT_COST_XU)
-WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", TREND_PROMPT_COST_XU)
+IMAGE_BASE_COST_XU = env_int("IMAGE_BASE_COST_XU", 50)
+VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", 300)
+WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)
+WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)
+WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", 20)
 MEDIA_FACTORY_PACK_COST = 500
 AUDIO_BASE_COST    = 30
 AUDIO_COST_PER_MB  = 20
@@ -27327,14 +27327,51 @@ def shopaikey_video_cost_for_flow(from_image: bool = False, user_id=None) -> int
 def create_media_public_off_message() -> str:
     return "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
 
+def support_contact_text() -> str:
+    support_url = str(SUPPORT_TELEGRAM_URL or "").strip()
+    website_url = effective_public_site_url() or "https://www.toanaas.vn"
+    lines = [
+        "📞 <b>Hỗ trợ TOAN AAS</b>",
+        "",
+        "Bạn có thể liên hệ admin tại:",
+    ]
+    if support_url:
+        safe_support = html.escape(support_url)
+        lines.append(f"• Telegram: <a href=\"{safe_support}\">{safe_support}</a>")
+    else:
+        lines.append("• Admin chưa cấu hình link hỗ trợ. Vui lòng quay lại sau hoặc nhắn trực tiếp trong bot.")
+    if website_url:
+        safe_website = html.escape(website_url)
+        lines.append(f"• Website: <a href=\"{safe_website}\">{safe_website}</a>")
+    lines.extend([
+        "• Hoặc gửi tin nhắn tại đây, TOAN AAS sẽ hỗ trợ sớm nhất.",
+        "",
+        "Tính năng AI CSKH tự động sẽ được phát triển sau.",
+    ])
+    return "\n".join(lines)
+
+def support_contact_keyboard(back_to_media: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if back_to_media:
+        rows.append([InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")])
+    rows.append([InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def clear_media_creator_pending_states(user_id) -> bool:
+    quick_cleared = clear_quick_media_pending(user_id)
+    trend_cleared = clear_trend_video_flow_pending(user_id)
+    return bool(quick_cleared or trend_cleared)
+
+def clear_pending_start_notice(user_id) -> str:
+    if clear_media_creator_pending_states(user_id):
+        return "❌ Đã hủy thao tác đang chờ. Mở menu chính bên dưới.\n\n"
+    return ""
+
 def create_media_menu_text() -> str:
     return "🎨 TOAN AAS Media Creator\n\nBạn muốn làm gì?"
 
 def create_media_open_text(user_id) -> str:
-    quick_cleared = clear_quick_media_pending(user_id)
-    trend_cleared = clear_trend_video_flow_pending(user_id)
-    cleared = quick_cleared or trend_cleared
-    if cleared:
+    if clear_media_creator_pending_states(user_id):
         return "ℹ️ Đã hủy thao tác cũ và mở Media Creator.\n\n" + create_media_menu_text()
     return create_media_menu_text()
 
@@ -27342,8 +27379,8 @@ def create_media_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")],
         [InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")],
-        [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
-        [InlineKeyboardButton("📌 Xem giá", callback_data="create_media|pricing")],
+        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="create_media|support")],
+        [InlineKeyboardButton("🔙 Quay lại menu chính", callback_data="create_media|main")],
         [InlineKeyboardButton("❌ Hủy", callback_data="create_media|cancel")],
     ])
 
@@ -29847,10 +29884,10 @@ def admin_internal_command(handler):
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-        [InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
-        [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
-        [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
-        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
+        [InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎞 Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
+        [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
+        [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
         [InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|main_guide")],
         [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
@@ -29897,10 +29934,10 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     if lang == "zh":
         rows = [
             [InlineKeyboardButton("🎬 内容创作", callback_data="menu|main_video"), InlineKeyboardButton("🤖 AI 助手", callback_data="menu|main_ai")],
-            [InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media"), InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image")],
-            [InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs"), InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music")],
-            [InlineKeyboardButton("🎙 语音工具", callback_data="menu|main_audio")],
-            [InlineKeyboardButton("🌐 翻译", callback_data="menu|translate"), InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory")],
+            [InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image"), InlineKeyboardButton("🎞 视频", callback_data="menu|main_video")],
+            [InlineKeyboardButton("🎙 语音工具", callback_data="menu|main_audio"), InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music")],
+            [InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs"), InlineKeyboardButton("🌐 翻译", callback_data="menu|translate")],
+            [InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory"), InlineKeyboardButton("📞 支持", callback_data="menu|support")],
             [InlineKeyboardButton("💳 价格", callback_data="pricing|main"), InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("👤 账户", callback_data="menu|main_profile"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
             [InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")],
@@ -29913,10 +29950,10 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     if lang == "vi":
         rows = [
             [InlineKeyboardButton("🎬 Tạo nội dung", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-            [InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media"), InlineKeyboardButton("📸 Hình ảnh", callback_data="menu|main_image")],
-            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
-            [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
-            [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
+            [InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎞 Video", callback_data="menu|main_video")],
+            [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music")],
+            [InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
+            [InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory"), InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
             [InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
             [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
@@ -29928,10 +29965,10 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         return InlineKeyboardMarkup(rows)
     rows = [
         [InlineKeyboardButton("🎬 Content", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Ask AI", callback_data="menu|main_ai")],
-        [InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media"), InlineKeyboardButton("🖼 Images", callback_data="menu|main_image")],
-        [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music")],
-        [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
-        [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate"), InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory")],
+        [InlineKeyboardButton("🖼 Images", callback_data="menu|main_image"), InlineKeyboardButton("🎞 Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio"), InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music")],
+        [InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs"), InlineKeyboardButton("🌐 Translate", callback_data="menu|translate")],
+        [InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory"), InlineKeyboardButton("📞 Support", callback_data="menu|support")],
         [InlineKeyboardButton("💳 Pricing", callback_data="pricing|main"), InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
         [InlineKeyboardButton("👤 Account", callback_data="menu|main_profile"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
         [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
@@ -30085,15 +30122,21 @@ def menu_parent_action(section: str = "main") -> str:
 def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎬 Create content", callback_data="menu|hint_film")],
+            [InlineKeyboardButton("🎞 Quick video", callback_data="create_media|quick_video")],
             [InlineKeyboardButton("🎬 Trend video workflow", callback_data="create_media|trend")],
-            [InlineKeyboardButton("⚡ Quick access", callback_data="menu|main_quick")],
+            [InlineKeyboardButton("🖼➡️🎞 Image to video", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("✍️ Video prompt", callback_data="menu|hint_film")],
+            [InlineKeyboardButton("💳 Pricing", callback_data="pricing|main")],
+            [InlineKeyboardButton("📞 Support", callback_data="menu|support")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 Tạo video ngay", callback_data="menu|hint_film")],
+        [InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")],
         [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
-        [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick")],
+        [InlineKeyboardButton("🖼➡️🎞 Tạo video từ ảnh", callback_data="menu|hint_image_to_video_pack")],
+        [InlineKeyboardButton("✍️ Tạo prompt video", callback_data="menu|hint_film")],
+        [InlineKeyboardButton("💳 Xem bảng giá", callback_data="pricing|main")],
+        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -30139,15 +30182,21 @@ def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎨 AI image/video", callback_data="menu|create_media")],
-            [InlineKeyboardButton("🖼 Image tools", callback_data="menu|hint_image_tools")],
-            [InlineKeyboardButton("🎬 Image-to-video prompt", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("🖼 Quick AI image", callback_data="create_media|quick_image")],
+            [InlineKeyboardButton("✍️ Image prompt", callback_data="menu|hint_image_tools")],
+            [InlineKeyboardButton("🧩 Edit image", callback_data="menu|hint_image_tools")],
+            [InlineKeyboardButton("📐 Upscale / resize", callback_data="menu|hint_image_tools")],
+            [InlineKeyboardButton("💳 Pricing", callback_data="pricing|main")],
+            [InlineKeyboardButton("📞 Support", callback_data="menu|support")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎨 Tạo ảnh/video AI", callback_data="menu|create_media")],
-        [InlineKeyboardButton("🖼 Mở công cụ ảnh", callback_data="menu|hint_image_tools")],
-        [InlineKeyboardButton("🎬 Ảnh sang video prompt", callback_data="menu|hint_image_to_video_pack")],
+        [InlineKeyboardButton("🖼 Tạo ảnh AI nhanh", callback_data="create_media|quick_image")],
+        [InlineKeyboardButton("✍️ Tạo prompt ảnh", callback_data="menu|hint_image_tools")],
+        [InlineKeyboardButton("🧩 Sửa ảnh / edit ảnh", callback_data="menu|hint_image_tools")],
+        [InlineKeyboardButton("📐 Nâng cấp / đổi kích thước ảnh", callback_data="menu|hint_image_tools")],
+        [InlineKeyboardButton("💳 Xem bảng giá", callback_data="pricing|main")],
+        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -30586,12 +30635,15 @@ def menu_text_support() -> str:
 
 def menu_text_main_video() -> str:
     return (
-        "🎬 <b>VIDEO / CONTENT PACK</b>\n\n"
-        "Dùng để tạo kịch bản video, chia cảnh, caption, hashtag và CTA.\n"
-        "Phù hợp khi bạn muốn làm nội dung cho Facebook, TikTok, YouTube.\n\n"
-        "Bạn tự đăng nội dung đã tạo lên kênh của mình.\n\n"
+        "🎞 <b>Video TOAN AAS</b>\n\n"
+        "Bạn muốn làm gì?\n\n"
+        "• Tạo video nhanh bằng provider AI nếu admin đã mở.\n"
+        "• Tạo video theo trend: hook, script, storyboard, prompt ảnh/video, caption và CTA.\n"
+        "• Tạo prompt video hoặc prompt ảnh sang video để tự dùng.\n\n"
+        "Public video hiện vẫn được kiểm soát bằng cấu hình an toàn. Nếu chưa mở, bot không gọi API và không trừ Xu.\n\n"
         "<b>Lệnh nhanh:</b>\n"
         "• <code>/film &lt;chủ đề&gt;</code> — tạo kịch bản video cơ bản\n"
+        "• <code>/trend_video_flow</code> — tạo workflow video theo trend\n"
         "• <code>/video_factory_flow</code> — xem quy trình tạo nội dung video\n"
         "• <code>/media_factory</code> — mở trung tâm Video &amp; Media"
     )
@@ -30661,9 +30713,12 @@ def menu_text_main_docs() -> str:
 
 def menu_text_main_image() -> str:
     return (
-        "🖼 <b>CÔNG CỤ ẢNH</b>\n\n"
-        "Dùng để tạo prompt ảnh, tách nền, xử lý ảnh và chuẩn bị ảnh cho video.\n"
-        "Phù hợp làm hình sản phẩm, thumbnail, ảnh minh họa hoặc ảnh đăng bài.\n\n"
+        "🖼 <b>Hình ảnh TOAN AAS</b>\n\n"
+        "Bạn muốn làm gì?\n\n"
+        "• Tạo ảnh AI nhanh nếu admin đã mở public hoặc chạy smoke test nội bộ.\n"
+        "• Tạo prompt ảnh, sửa ảnh, tách nền, nâng cấp/đổi kích thước ảnh nếu công cụ đã bật.\n"
+        "• Chuẩn bị ảnh cho video hoặc nội dung đăng bài.\n\n"
+        "Public image hiện vẫn được kiểm soát bằng cấu hình an toàn. Nếu chưa mở, bot không gọi API và không trừ Xu.\n\n"
         "<b>Lệnh nhanh:</b>\n"
         "• <code>/image_tools</code> — mở công cụ ảnh\n"
         "• <code>/image_prompt</code> — tạo prompt ảnh\n"
@@ -31201,8 +31256,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         elif ref_result.get("reason") == "self_ref":
             await update.message.reply_text("⚠️ Bạn không thể tự giới thiệu chính mình.")
+    pending_notice = clear_pending_start_notice(uid)
     user_is_admin = is_admin_user(uid)
     if not has_user_language(uid):
+        if pending_notice:
+            await update.message.reply_text(pending_notice.strip())
         await update.message.reply_text(
             language_choice_text(),
             parse_mode="HTML",
@@ -31211,7 +31269,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     lang = get_user_language(uid) or "vi"
     await update.message.reply_text(
-        localized_start_menu_text(uid, lang) + mode_start_notice(uid),
+        pending_notice + localized_start_menu_text(uid, lang) + mode_start_notice(uid),
         parse_mode="HTML",
         reply_markup=localized_main_menu_keyboard(user_is_admin, lang),
     )
@@ -32127,6 +32185,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     user_is_admin = is_admin_user(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
+    clear_media_creator_pending_states(query.from_user.id)
     admin_only = {"affiliate", "operator", "admin", "system"}
     public_hints = {
         "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
@@ -32150,6 +32209,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             query,
             create_media_open_text(query.from_user.id),
             reply_markup=create_media_menu_keyboard(),
+        )
+    if action == "support":
+        return await safe_edit_query_message(
+            query,
+            support_contact_text(),
+            reply_markup=support_contact_keyboard(),
         )
     if action.startswith("translate_set_"):
         target = normalize_translate_target(action.replace("translate_set_", "", 1))
@@ -32351,6 +32416,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Admin-only: <code>{'true' if SHOPAIKEY_ADMIN_ONLY else 'false'}</code>",
         "• Public: <code>OFF</code>",
         f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
+        "• Pricing source: <code>configurable ENV</code>",
         "• Quick media menu: <code>enabled/admin-only</code>",
         f"• Quick image: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_image_cost']} Xu</code>",
         f"• Quick video: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_video_cost']} Xu</code>",
@@ -33062,6 +33128,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Chat fallbacks: <code>{html.escape(', '.join(shopaikey_chat_fallback_models()) or '-')}</code>",
         f"• TTS: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code> / <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>",
         f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
+        "• Pricing source: <code>configurable ENV</code>",
         "• Quick media menu: <code>enabled/admin-only</code>",
         f"• Quick image: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_image_cost']} Xu</code>",
         f"• Quick video: <code>guarded/public {'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | cost <code>{pricing['quick_video_cost']} Xu</code>",
@@ -42917,10 +42984,12 @@ async def handle_trend_video_flow_pending_text(update: Update, context: ContextT
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
-    if clear_quick_media_pending(uid):
-        return await update.message.reply_text("❌ Đã hủy Quick Media Creator. Bot chưa gọi API và chưa trừ Xu.")
-    if clear_trend_video_flow_pending(uid):
-        return await update.message.reply_text("❌ Đã hủy Trend → Video Workflow. Bot chưa gọi API và chưa trừ Xu.")
+    if clear_media_creator_pending_states(uid):
+        return await update.message.reply_text(
+            "❌ Đã hủy Media Creator. Bot chưa gọi API và chưa trừ Xu.\n\n"
+            "Bấm /start để mở menu chính.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")]]),
+        )
     await update.message.reply_text("ℹ️ Không có tác vụ Trend → Video Workflow nào đang chờ. Bot chưa trừ Xu.")
 
 async def cmd_create_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -43126,11 +43195,37 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
     uid = query.from_user.id if query.from_user else 0
     if action == "cancel":
-        clear_quick_media_pending(uid)
-        return await query.edit_message_text("❌ Đã hủy Media Creator. Bot chưa gọi API và chưa trừ Xu.")
+        clear_media_creator_pending_states(uid)
+        return await query.edit_message_text(
+            "❌ Đã hủy Media Creator. Bot chưa gọi API và chưa trừ Xu.\n\n"
+            "Bấm /start để mở menu chính.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")]]),
+        )
+    if action == "main":
+        notice = clear_pending_start_notice(uid)
+        lang = get_user_language(uid) or "vi"
+        text = (notice or "🔙 Mở menu chính bên dưới.\n\n") + localized_start_menu_text(uid, lang)
+        return await query.edit_message_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang),
+        )
+    if action == "support":
+        clear_media_creator_pending_states(uid)
+        return await query.edit_message_text(
+            support_contact_text(),
+            parse_mode="HTML",
+            reply_markup=support_contact_keyboard(back_to_media=True),
+        )
     if action == "pricing":
-        return await query.edit_message_text(create_media_pricing_text(), parse_mode="HTML", reply_markup=create_media_menu_keyboard())
+        clear_media_creator_pending_states(uid)
+        return await query.edit_message_text(
+            "\n".join(pricing_main_lines()),
+            parse_mode="HTML",
+            reply_markup=pricing_main_keyboard(),
+        )
     if action == "trend":
+        clear_quick_media_pending(uid)
         if not TREND_VIDEO_WORKFLOW_ENABLED:
             return await query.edit_message_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
         if not trend_video_workflow_can_access(uid):
@@ -43138,6 +43233,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         set_trend_video_flow_pending(uid)
         return await query.edit_message_text(trend_video_pending_prompt_text(), reply_markup=trend_video_pending_keyboard())
     if action in {"quick_image", "quick_video"}:
+        clear_trend_video_flow_pending(uid)
         if not is_admin_user(uid):
             return await query.edit_message_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
         pending_action = "quick_video_prompt" if action == "quick_video" else "quick_image_prompt"
@@ -44414,6 +44510,7 @@ async def send_pricing_lines(message, lines: list[str], reply_markup: InlineKeyb
         await message.reply_text("\n".join(chunk), parse_mode="HTML", reply_markup=reply_markup)
 
 def pricing_main_lines() -> list[str]:
+    pricing = media_workflow_pricing_payload()
     return [
         "💎 <b>BẢNG GIÁ TOAN AAS</b>",
         "",
@@ -44430,6 +44527,17 @@ def pricing_main_lines() -> list[str]:
         "",
         "4. 🪪 <b>Thành viên</b>",
         "Hạng thành viên dùng để nhận giảm Xu khi dùng dịch vụ và mở điều kiện mua gói tháng.",
+        "",
+        "<b>AI Media</b>",
+        f"• Tạo ảnh nhanh: <b>{pricing['quick_image_cost']} Xu</b>",
+        f"• Tạo video nhanh: <b>{pricing['quick_video_cost']} Xu</b>",
+        f"• Phân tích trend: <b>{pricing['workflow_trend_analysis_cost']} Xu</b>",
+        f"• Hook/script/storyboard: <b>{pricing['workflow_script_storyboard_cost']} Xu</b>",
+        f"• Prompt pack: <b>{pricing['workflow_prompt_pack_cost']} Xu</b>",
+        f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
+        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
+        f"• Billing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
+        "• Giá media lấy từ centralized pricing và có thể chỉnh bằng ENV.",
         "",
         "<b>Lưu ý:</b>",
         "• Xu là đơn vị nội bộ trong TOAN AAS, không phải tiền/tiền điện tử, không rút tiền, không chuyển nhượng.",
@@ -44912,6 +45020,8 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
         return
     await query.answer()
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
+    if query.from_user:
+        clear_media_creator_pending_states(query.from_user.id)
     if action == "xu":
         return await send_pricing_lines(query.message, pricing_xu_lines(), pricing_xu_keyboard())
     if action == "plans":

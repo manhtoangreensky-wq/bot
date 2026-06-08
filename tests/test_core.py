@@ -237,11 +237,11 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
     assert "SHOPAIKEY_PUBLIC_IMAGE_ENABLED=false" in env_example
     assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED=false" in env_example
-    assert "IMAGE_BASE_COST_XU=300" in env_example
+    assert "IMAGE_BASE_COST_XU=50" in env_example
     assert "VIDEO_BASE_COST_XU=300" in env_example
-    assert "WORKFLOW_TREND_ANALYSIS_COST_XU=0" in env_example
-    assert "WORKFLOW_SCRIPT_STORYBOARD_COST_XU=0" in env_example
-    assert "WORKFLOW_PROMPT_PACK_COST_XU=0" in env_example
+    assert "WORKFLOW_TREND_ANALYSIS_COST_XU=20" in env_example
+    assert "WORKFLOW_SCRIPT_STORYBOARD_COST_XU=30" in env_example
+    assert "WORKFLOW_PROMPT_PACK_COST_XU=20" in env_example
     assert "SHOPAIKEY_IMAGE_COST_XU=50" in env_example
     assert "SHOPAIKEY_VIDEO_COST_XU=200" in env_example
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=true" in env_example
@@ -817,19 +817,34 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'CommandHandler("quick_video_test", cmd_quick_video_test)' in source
     assert 'CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\\|")' in source
     assert "🎨 TOAN AAS Media Creator" in helper_source
-    assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' in source
-    assert 'InlineKeyboardButton("🎨 Tạo ảnh/video AI", callback_data="menu|create_media")' in source
-    assert 'InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")' in source
+    assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
+    assert 'InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")' in source
+    assert 'InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image")' in source
+    assert 'InlineKeyboardButton("🎞 Video", callback_data="menu|main_video")' in source
+    assert 'InlineKeyboardButton("🖼 Tạo ảnh AI nhanh", callback_data="create_media|quick_image")' in source
+    assert 'InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")' in source
+    assert 'InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
     for callback_data in [
         "create_media|quick_image",
         "create_media|quick_video",
-        "create_media|trend",
-        "create_media|pricing",
+        "create_media|support",
+        "create_media|main",
         "create_media|cancel",
     ]:
         assert callback_data in helper_source
+    create_media_keyboard_source = source_between(source, "def create_media_menu_keyboard", "def create_media_pricing_text")
+    assert "create_media|trend" not in create_media_keyboard_source
+    assert "create_media|pricing" not in create_media_keyboard_source
+    assert "support_contact_text()" in source
+    assert "clear_pending_start_notice(uid)" in source_between(source, "async def cmd_start", "async def cmd_menu")
+    assert "Mở menu chính bên dưới" in helper_source
+    assert 'IMAGE_BASE_COST_XU = env_int("IMAGE_BASE_COST_XU", 50)' in source
+    assert 'VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", 300)' in source
+    assert 'WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)' in source
+    assert 'WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)' in source
+    assert 'WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", 20)' in source
     assert "Tính năng này đang thử nghiệm nội bộ, chưa mở công khai" in helper_source
     assert "media_workflow_pricing_payload()" in helper_source
     assert "Legacy ShopAIKey 50/200 chỉ là fallback ENV cũ" in helper_source
@@ -839,7 +854,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "handle_quick_media_pending_text(update, context)" in message_source
     assert message_source.index("handle_quick_media_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
     assert "clear_quick_media_pending(uid)" in quick_source
-    assert "clear_quick_media_pending(uid)" in source_between(source, "async def cmd_cancel", "async def cmd_create_media")
+    assert "clear_media_creator_pending_states(uid)" in source_between(source, "async def cmd_cancel", "async def cmd_create_media")
     assert "run_quick_image_admin_smoke" in quick_source
     assert "run_quick_video_admin_smoke" in quick_source
     assert "shopaikey_image_generate(prompt)" in quick_source
@@ -864,12 +879,40 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert pricing["quick_video_cost"] == 654
     assert "321 Xu" in bot.create_media_pricing_text()
     assert "654 Xu" in bot.create_media_pricing_text()
+    pricing_text = "\n".join(bot.pricing_main_lines())
+    assert "AI Media" in pricing_text
+    assert "Tạo ảnh nhanh: <b>321 Xu</b>" in pricing_text
+    assert "Tạo video nhanh: <b>654 Xu</b>" in pricing_text
+    assert "centralized_pricing" in pricing_text
     start_labels = [button.text for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard for button in row]
-    assert "🎨 Media Creator" in start_labels
+    assert "🎨 Media Creator" not in start_labels
+    assert "🖼 Hình ảnh" in start_labels
+    assert "🎞 Video" in start_labels
+    assert "📞 Liên hệ admin" in start_labels
+    for keyboard in [
+        bot.main_menu_keyboard(False),
+        bot.localized_main_menu_keyboard(False, "vi"),
+        bot.localized_main_menu_keyboard(False, "en"),
+        bot.localized_main_menu_keyboard(False, "zh"),
+    ]:
+        voice_rows = [row for row in keyboard.inline_keyboard if any(button.callback_data == "menu|main_audio" for button in row)]
+        assert voice_rows and len(voice_rows[0]) == 2
     image_labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
-    assert "🎨 Tạo ảnh/video AI" in image_labels
+    assert "🖼 Tạo ảnh AI nhanh" in image_labels
+    assert "💳 Xem bảng giá" in image_labels
+    assert "📞 Liên hệ admin" in image_labels
     video_buttons = [button for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
+    assert any(button.text == "🎞 Tạo video nhanh" and button.callback_data == "create_media|quick_video" for button in video_buttons)
     assert any(button.text == "🎬 Tạo video theo trend" and button.callback_data == "create_media|trend" for button in video_buttons)
+    create_media_labels = [button.text for row in bot.create_media_menu_keyboard().inline_keyboard for button in row]
+    assert "🖼 Tạo ảnh nhanh" in create_media_labels
+    assert "🎞 Tạo video nhanh" in create_media_labels
+    assert "📞 Liên hệ admin" in create_media_labels
+    assert "🔙 Quay lại menu chính" in create_media_labels
+    assert "📌 Xem giá" not in create_media_labels
+    assert "🎬 Tạo video theo trend" not in create_media_labels
+    monkeypatch.setattr(bot, "SUPPORT_TELEGRAM_URL", "")
+    assert "Admin chưa cấu hình link hỗ trợ" in bot.support_contact_text()
 
     key = bot.quick_media_pending_key("u6")
     bot.USER_PENDING.pop(key, None)
@@ -892,6 +935,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.create_media_open_text("u8").startswith("ℹ️ Đã hủy thao tác cũ")
     assert bot.get_quick_media_pending("u8") is None
     assert bot.get_trend_video_flow_pending("u8") is None
+    bot.set_quick_media_pending("u9", "quick_image_prompt")
+    bot.set_trend_video_flow_pending("u9")
+    assert bot.clear_pending_start_notice("u9").startswith("❌ Đã hủy thao tác đang chờ")
+    assert bot.get_quick_media_pending("u9") is None
+    assert bot.get_trend_video_flow_pending("u9") is None
 
 
 def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
