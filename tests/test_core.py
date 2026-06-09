@@ -274,6 +274,13 @@ def test_admin_menu_contains_grouped_operator_and_system():
         "/shopaikey_usage",
         "/shopaikey_video_job",
         "/maintenance_status",
+        "/freeze_status",
+        "/freeze_video",
+        "/unfreeze_video",
+        "/queue_status",
+        "/job_status",
+        "/refund_job",
+        "/clear_job_lock",
         "/provider_freeze",
         "/provider_unfreeze",
     ]:
@@ -283,6 +290,13 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "| `/shopaikey_status` |" in registry
     assert "| `/shopaikey_usage` |" in registry
     assert "| `/shopaikey_video_job` |" in registry
+    assert "| `/freeze_status` |" in registry
+    assert "| `/freeze_video` |" in registry
+    assert "| `/unfreeze_video` |" in registry
+    assert "| `/queue_status` |" in registry
+    assert "| `/job_status` |" in registry
+    assert "| `/refund_job` |" in registry
+    assert "| `/clear_job_lock` |" in registry
 
 
 def test_provider_orchestrator_registry_is_admin_first(monkeypatch):
@@ -396,6 +410,9 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_AUTO_FREEZE_ENABLED=true" in env_example
     assert "SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT=5" in env_example
     assert "SHOPAIKEY_ERROR_FREEZE_THRESHOLD=5" in env_example
+    assert "SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_SHORT=5" in env_example
+    assert "SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_LONG=10" in env_example
+    assert "SHOPAIKEY_VIDEO_STALE_TIMEOUT_LOW_MINUTES=15" in env_example
     assert "USER_WAIT_IMAGE_MESSAGE=" in env_example
     assert "USER_WAIT_VIDEO_MESSAGE=" in env_example
     assert "USER_JOB_LOCK_MESSAGE=" in env_example
@@ -475,11 +492,25 @@ def test_provider_auto_freeze_and_status_commands(monkeypatch):
     assert "async def cmd_maintenance_status" in source
     assert "async def cmd_provider_freeze" in source
     assert "async def cmd_provider_unfreeze" in source
+    assert "async def cmd_freeze_status" in source
+    assert "async def cmd_freeze_video" in source
+    assert "async def cmd_unfreeze_video" in source
+    assert "async def cmd_queue_status" in source
+    assert "async def cmd_job_status" in source
+    assert "async def cmd_refund_job" in source
+    assert "async def cmd_clear_job_lock" in source
     assert 'provider_freeze_display("shopaikey")' in source
     assert 'provider_freeze_runtime_on("shopaikey")' in source
     assert 'CommandHandler("maintenance_status", cmd_maintenance_status)' in source
     assert 'CommandHandler("provider_freeze", cmd_provider_freeze)' in source
     assert 'CommandHandler("provider_unfreeze", cmd_provider_unfreeze)' in source
+    assert 'CommandHandler("freeze_status", cmd_freeze_status)' in source
+    assert 'CommandHandler("freeze_video", cmd_freeze_video)' in source
+    assert 'CommandHandler("unfreeze_video", cmd_unfreeze_video)' in source
+    assert 'CommandHandler("queue_status", cmd_queue_status)' in source
+    assert 'CommandHandler("job_status", cmd_job_status)' in source
+    assert 'CommandHandler("refund_job", cmd_refund_job)' in source
+    assert 'CommandHandler("clear_job_lock", cmd_clear_job_lock)' in source
     assert "No Xu deducted" in source or "Không trừ Xu" in source
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
@@ -537,6 +568,109 @@ def test_video_provider_freeze_does_not_block_public_image(monkeypatch):
         assert int(bot.provider_freeze_row("shopaikey").get("is_frozen") or 0) == 0
         assert bot.shopaikey_public_generation_guard("video")[0] is False
         assert bot.shopaikey_public_generation_guard("image")[0] is True
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_video_maintenance_guard_low_credit_lock_refund_and_stale(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "SHOPAIKEY_AUTO_FREEZE_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT", 5)
+    monkeypatch.setattr(bot, "SHOPAIKEY_LOW_CREDIT_WARN_PERCENT", 10)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
+    monkeypatch.setattr(bot, "SYSTEM_MAINTENANCE_MODE", False)
+    monkeypatch.setattr(bot, "PROVIDER_FREEZE_ENABLED", False)
+    monkeypatch.setattr(bot, "TOOL_FREEZE_IMAGE", False)
+    monkeypatch.setattr(bot, "TOOL_FREEZE_VIDEO", False)
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_STALE_TIMEOUT_LOW_MINUTES", 1)
+    monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 200)
+    try:
+        bot.init_db()
+        bot.save_shopaikey_usage_snapshot(
+            {
+                "total": 100,
+                "used": 96,
+                "balance": 4,
+                "remaining": 4,
+                "remaining_percent": 4,
+                "group_name": "cheap",
+                "token_name": "masked",
+            },
+            "test",
+        )
+        assert int(bot.provider_freeze_row("shopaikey_video").get("is_frozen") or 0) == 1
+        assert int(bot.provider_freeze_row("shopaikey").get("is_frozen") or 0) == 0
+        ok_video, video_message = bot.shopaikey_public_generation_guard("video")
+        assert ok_video is False
+        assert "sắp hết credit" in video_message
+        assert bot.shopaikey_public_generation_guard("image")[0] is True
+
+        bot.set_provider_freeze_state("shopaikey_video", False, "manual_unfreeze", "ok", "test")
+        bot.record_provider_error("shopaikey", "video", "NO_CHANNEL", "no available channel")
+        assert int(bot.provider_freeze_row("shopaikey_video").get("is_frozen") or 0) == 1
+        assert "/queue_status" in bot.menu_text_admin()
+        assert "/refund_job" in bot.menu_text_admin()
+        bot.set_provider_freeze_state("shopaikey_video", False, "manual_unfreeze", "ok", "test")
+
+        bot.get_user("lock_user", "Lock user")
+        lock_job_id = bot.create_shopaikey_job("lock_user", "chat", "video", model="veo3.1-fast", prompt="video", status="PROCESSING", admin_only=False, xu_cost_planned=200)
+        bot.update_shopaikey_job(job_id=lock_job_id, task_id="task_lock")
+        active = bot.shopaikey_active_job_for_user("lock_user", "video")
+        assert active and int(active["id"]) == lock_job_id
+        assert "Video sẽ được gửi tự động" in bot.public_video_active_job_text("vi")
+        lock_buttons = [button.text for row in bot.public_video_active_job_keyboard(active, "vi").inline_keyboard for button in row]
+        assert "🔄 Kiểm tra trạng thái video" in lock_buttons
+        assert "🏠 Menu chính" in lock_buttons
+
+        bot.get_user("refund_video", "Refund video")
+        conn = bot.db_connect()
+        try:
+            conn.execute("UPDATE users SET credits=500, total_spent=0 WHERE user_id=?", ("refund_video",))
+            conn.commit()
+        finally:
+            conn.close()
+        charge = bot.spend_fixed_credit_info("refund_video", 200, "shopaikey_video", "unit video refund", True)
+        assert charge["ok"] is True
+        refund_job_id = bot.create_shopaikey_job("refund_video", "chat", "video", model="veo3.1-fast", prompt="video", status="FAILED", admin_only=False, xu_cost_planned=200)
+        bot.update_shopaikey_job(job_id=refund_job_id, xu_deducted=200, refund_status="pending", refund_reason="provider_fail")
+        assert bot.refund_shopaikey_job_if_needed("refund_video", refund_job_id, "", "provider fail") is True
+        credits_after_refund, _, _ = bot.get_user("refund_video")
+        assert int(credits_after_refund) == 500
+        assert bot.refund_shopaikey_job_if_needed("refund_video", refund_job_id, "", "provider fail") is False
+        credits_after_second_refund, _, _ = bot.get_user("refund_video")
+        assert int(credits_after_second_refund) == 500
+
+        bot.get_user("stale_video", "Stale video")
+        conn = bot.db_connect()
+        try:
+            conn.execute("UPDATE users SET credits=500, total_spent=0 WHERE user_id=?", ("stale_video",))
+            conn.commit()
+        finally:
+            conn.close()
+        assert bot.spend_fixed_credit_info("stale_video", 200, "shopaikey_video", "unit stale video", True)["ok"] is True
+        stale_job_id = bot.create_shopaikey_job("stale_video", "chat", "video", model="veo3.1-fast", prompt="video", status="QUEUED", admin_only=False, xu_cost_planned=200)
+        bot.update_shopaikey_job(job_id=stale_job_id, task_id="task_stale", xu_deducted=200, refund_status="pending")
+        old_at = "2000-01-01 00:00:00"
+        conn = bot.db_connect()
+        try:
+            conn.execute("UPDATE shopaikey_jobs SET created_at=?, updated_at=? WHERE id=?", (old_at, old_at, stale_job_id))
+            conn.commit()
+        finally:
+            conn.close()
+        stale = bot.mark_stale_public_video_jobs("stale_video")
+        assert stale and int(stale[0]["id"]) == stale_job_id
+        fresh = bot.shopaikey_job_by_id(stale_job_id)
+        assert fresh["status"] == "FAILED_TIMEOUT"
+        assert fresh["refund_status"] == "refunded"
+        credits_after_stale, _, _ = bot.get_user("stale_video")
+        assert int(credits_after_stale) == 500
+        assert bot.shopaikey_active_job_for_user("stale_video", "video") is None
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
@@ -2347,6 +2481,13 @@ def test_critical_sales_ready_commands_remain_registered():
         "quick_video_test": "cmd_quick_video_test",
         "shopaikey_status": "cmd_shopaikey_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
+        "freeze_status": "cmd_freeze_status",
+        "freeze_video": "cmd_freeze_video",
+        "unfreeze_video": "cmd_unfreeze_video",
+        "queue_status": "cmd_queue_status",
+        "job_status": "cmd_job_status",
+        "refund_job": "cmd_refund_job",
+        "clear_job_lock": "cmd_clear_job_lock",
         "trial_bonus_status": "cmd_trial_bonus_status",
     }
     for command, handler in expected_handlers.items():

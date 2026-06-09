@@ -376,6 +376,12 @@ SHOPAIKEY_LOW_CREDIT_WARN_PERCENT = env_int("SHOPAIKEY_LOW_CREDIT_WARN_PERCENT",
 SHOPAIKEY_ERROR_FREEZE_THRESHOLD = env_int("SHOPAIKEY_ERROR_FREEZE_THRESHOLD", 5)
 SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES = env_int("SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES", 15)
 SHOPAIKEY_FREEZE_COOLDOWN_MINUTES = env_int("SHOPAIKEY_FREEZE_COOLDOWN_MINUTES", 30)
+SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_SHORT = env_int("SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_SHORT", SHOPAIKEY_ERROR_FREEZE_THRESHOLD)
+SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_SHORT_MINUTES = env_int("SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_SHORT_MINUTES", SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES)
+SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_LONG = env_int("SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_LONG", 10)
+SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_LONG_MINUTES = env_int("SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_LONG_MINUTES", 30)
+SHOPAIKEY_VIDEO_FREEZE_COOLDOWN_SHORT_MINUTES = env_int("SHOPAIKEY_VIDEO_FREEZE_COOLDOWN_SHORT_MINUTES", SHOPAIKEY_FREEZE_COOLDOWN_MINUTES)
+SHOPAIKEY_VIDEO_FREEZE_COOLDOWN_LONG_MINUTES = env_int("SHOPAIKEY_VIDEO_FREEZE_COOLDOWN_LONG_MINUTES", 60)
 USER_BUSY_MESSAGE = _env("USER_BUSY_MESSAGE", "⏳ Tác vụ của bạn đang được xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 USER_PROVIDER_BUSY_MESSAGE = _env("USER_PROVIDER_BUSY_MESSAGE", "⚙️ Hệ thống AI đang bận. TOAN AAS đã ghi nhận, vui lòng thử lại sau ít phút.")
 USER_PROVIDER_MAINTENANCE_MESSAGE = _env("USER_PROVIDER_MAINTENANCE_MESSAGE", "🛠 Tính năng này đang được bảo trì ngắn để đảm bảo chất lượng. Vui lòng quay lại sau.")
@@ -389,6 +395,8 @@ SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED = env_flag("SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED", 
 SHOPAIKEY_IMAGE_WAITING_MESSAGE_ENABLED = env_flag("SHOPAIKEY_IMAGE_WAITING_MESSAGE_ENABLED", "true")
 SHOPAIKEY_VIDEO_WAITING_MESSAGE_ENABLED = env_flag("SHOPAIKEY_VIDEO_WAITING_MESSAGE_ENABLED", "true")
 SHOPAIKEY_VIDEO_STATUS_STALE_SECONDS = env_int("SHOPAIKEY_VIDEO_STATUS_STALE_SECONDS", 30 * 60)
+SHOPAIKEY_VIDEO_STALE_TIMEOUT_LOW_MINUTES = env_int("SHOPAIKEY_VIDEO_STALE_TIMEOUT_LOW_MINUTES", 15)
+SHOPAIKEY_VIDEO_STALE_TIMEOUT_DEFAULT_MINUTES = env_int("SHOPAIKEY_VIDEO_STALE_TIMEOUT_DEFAULT_MINUTES", 30)
 SHOPAIKEY_VIDEO_PROVIDER_MODE = _env("SHOPAIKEY_VIDEO_PROVIDER_MODE", "admin_only")
 SHOPAIKEY_IMAGE_PROVIDER_MODE = _env("SHOPAIKEY_IMAGE_PROVIDER_MODE", "admin_only")
 SHOPAIKEY_MAINTENANCE_ON_PROVIDER_ERROR = env_flag("SHOPAIKEY_MAINTENANCE_ON_PROVIDER_ERROR", "true")
@@ -29110,12 +29118,16 @@ async def maybe_alert_shopaikey_low_quota(bot_client, usage: dict, updated_by="m
     remaining_percent = float(usage.get("remaining_percent") or 0)
     if not shopaikey_low_quota_alert_due(remaining_percent):
         return False
+    freeze_note = ""
+    if remaining_percent <= float(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 5):
+        freeze_note = "\n⚠️ ShopAIKey video credit thấp. Public video đã tạm khóa để bảo vệ chi phí.\n"
     text = (
         "⚠️ SHOPAIKEY QUOTA LOW\n\n"
         f"Remaining: {format_quota_number(usage.get('remaining'))} / total {format_quota_number(usage.get('total'))} ({remaining_percent:.2f}%)\n"
         f"Used: {format_quota_number(usage.get('used'))}\n"
         f"Balance: {format_quota_number(usage.get('balance'))}\n"
-        f"Group: {usage.get('group_name') or '-'}\n\n"
+        f"Group: {usage.get('group_name') or '-'}\n"
+        f"{freeze_note}\n"
         "Action: nạp thêm credit hoặc dùng fallback provider. Không có key/URL secret trong cảnh báo."
     )
     await bot_client.send_message(chat_id=ADMIN_ID, text=text)
@@ -29684,6 +29696,25 @@ def maybe_auto_unfreeze_provider(provider: str) -> bool:
         return True
     return False
 
+SHOPAIKEY_VIDEO_IMMEDIATE_FREEZE_ERRORS = {
+    "CREDIT_LOW_OR_EMPTY",
+    "NO_CHANNEL",
+    "RATE_LIMITED",
+    "PROVIDER_UNAVAILABLE",
+}
+
+SHOPAIKEY_ACTIVE_JOB_STATUSES = {
+    "QUEUED",
+    "PENDING",
+    "SUBMITTED",
+    "IN_PROGRESS",
+    "PROCESSING",
+    "RUNNING",
+    "POLLING",
+    "STARTED",
+    "GENERATING",
+}
+
 def record_provider_error(provider: str, tool: str, error_class: str, message: str = "") -> dict:
     provider = str(provider or "unknown").strip().lower()
     tool = str(tool or "").strip().lower()
@@ -29691,7 +29722,12 @@ def record_provider_error(provider: str, tool: str, error_class: str, message: s
     safe_message = sanitize_provider_error(message or error_class)
     record_system_event("provider_error", provider=provider, tool=tool, severity="warning", code=error_class, message=safe_message)
     freeze_provider = "shopaikey_video" if provider == "shopaikey" and tool == "video" else provider
-    count = provider_error_count(provider, SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES if provider == "shopaikey" else 15, tool if freeze_provider == "shopaikey_video" else "")
+    if freeze_provider == "shopaikey_video":
+        count_short = provider_error_count(provider, SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_SHORT_MINUTES, "video")
+        count_long = provider_error_count(provider, SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_LONG_MINUTES, "video")
+        count = max(count_short, count_long)
+    else:
+        count = provider_error_count(provider, SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES if provider == "shopaikey" else 15, "")
     row = provider_freeze_row(freeze_provider)
     conn = db_connect()
     try:
@@ -29719,7 +29755,28 @@ def record_provider_error(provider: str, tool: str, error_class: str, message: s
     finally:
         conn.close()
     if provider == "shopaikey" and SHOPAIKEY_AUTO_FREEZE_ENABLED:
-        if error_class == "CREDIT_LOW_OR_EMPTY" or count >= max(1, int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 5)):
+        if tool == "video":
+            reason_code = error_class
+            cooldown = 0
+            if error_class in SHOPAIKEY_VIDEO_IMMEDIATE_FREEZE_ERRORS:
+                cooldown = max(1, int(SHOPAIKEY_VIDEO_FREEZE_COOLDOWN_SHORT_MINUTES or SHOPAIKEY_FREEZE_COOLDOWN_MINUTES or 30))
+            elif count_long >= max(1, int(SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_LONG or 10)):
+                reason_code = "VIDEO_ERROR_THRESHOLD_LONG"
+                cooldown = max(1, int(SHOPAIKEY_VIDEO_FREEZE_COOLDOWN_LONG_MINUTES or 60))
+            elif count_short >= max(1, int(SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_SHORT or SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 5)):
+                reason_code = "VIDEO_ERROR_THRESHOLD_SHORT"
+                cooldown = max(1, int(SHOPAIKEY_VIDEO_FREEZE_COOLDOWN_SHORT_MINUTES or SHOPAIKEY_FREEZE_COOLDOWN_MINUTES or 30))
+            if cooldown:
+                set_provider_freeze_state(
+                    "shopaikey_video",
+                    True,
+                    reason_code,
+                    safe_message,
+                    "auto_video_provider_error",
+                    cooldown_minutes=cooldown,
+                    error_count=count,
+                )
+        elif error_class == "CREDIT_LOW_OR_EMPTY" or count >= max(1, int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 5)):
             set_provider_freeze_state(
                 freeze_provider,
                 True,
@@ -29734,22 +29791,34 @@ def record_provider_error(provider: str, tool: str, error_class: str, message: s
 def evaluate_shopaikey_usage_freeze(usage: dict, updated_by="") -> str:
     try:
         remaining_percent = float(usage.get("remaining_percent") or 0)
+        total_value = float(usage.get("total") or 0)
+        remaining_value = float(usage.get("remaining") or usage.get("balance") or 0)
     except Exception:
         return ""
-    if remaining_percent <= float(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 5) and SHOPAIKEY_AUTO_FREEZE_ENABLED:
+    balance_very_low = total_value > 0 and remaining_value <= 1
+    if (remaining_percent <= float(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 5) or balance_very_low) and SHOPAIKEY_AUTO_FREEZE_ENABLED:
         set_provider_freeze_state(
-            "shopaikey",
+            "shopaikey_video",
             True,
             "CREDIT_LOW_OR_EMPTY",
-            f"remaining_percent={remaining_percent:.2f}",
+            f"remaining_percent={remaining_percent:.2f}; remaining={remaining_value:.2f}; public video frozen",
             updated_by or "usage_check",
             cooldown_minutes=max(1, int(SHOPAIKEY_FREEZE_COOLDOWN_MINUTES or 30)),
         )
-        return "freeze"
+        record_system_event(
+            "provider_low_credit_freeze",
+            provider="shopaikey_video",
+            tool="video",
+            severity="critical",
+            code="CREDIT_LOW_OR_EMPTY",
+            message=f"remaining_percent={remaining_percent:.2f}; remaining={remaining_value:.2f}; public video frozen",
+        )
+        return "freeze_video"
     if remaining_percent <= float(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 10):
         record_system_event(
             "provider_low_credit_warning",
-            provider="shopaikey",
+            provider="shopaikey_video",
+            tool="video",
             severity="warning",
             code="LOW_CREDIT_WARN",
             message=f"remaining_percent={remaining_percent:.2f}",
@@ -29869,6 +29938,11 @@ def shopaikey_public_generation_guard(job_type: str) -> tuple[bool, str]:
     job = str(job_type or "").lower()
     freeze = is_tool_frozen(job, "shopaikey")
     if freeze.get("frozen"):
+        if job == "video":
+            reason = str(freeze.get("reason") or "").upper()
+            if reason == "CREDIT_LOW_OR_EMPTY":
+                return False, "🎬 Tạo video đang tạm bảo trì do nhà cung cấp sắp hết credit. Vui lòng thử lại sau."
+            return False, "🎬 Tạo video đang tạm bảo trì do nhà cung cấp bận. Vui lòng thử lại sau."
         return False, freeze.get("message") or USER_PROVIDER_BUSY_MESSAGE
     if job == "image" and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
         return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
@@ -29885,19 +29959,26 @@ def shopaikey_active_job_for_user(user_id, job_type: str = "") -> dict | None:
     kind = str(job_type or "").lower()
     if not uid:
         return None
+    if kind == "video":
+        try:
+            mark_stale_public_video_jobs(uid)
+        except Exception:
+            pass
+    statuses = tuple(sorted(SHOPAIKEY_ACTIVE_JOB_STATUSES))
+    placeholders = ",".join("?" for _ in statuses)
     conn = db_connect()
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT * FROM shopaikey_jobs
             WHERE user_id=?
               AND (?='' OR job_type=?)
-              AND UPPER(status) IN ('QUEUED','IN_PROGRESS')
+              AND UPPER(status) IN ({placeholders})
             ORDER BY id DESC
             LIMIT 1
             """,
-            (uid, kind, kind),
+            (uid, kind, kind, *statuses),
         ).fetchall()
         return dict(rows[0]) if rows else None
     finally:
@@ -30091,6 +30172,144 @@ def refund_shopaikey_job_if_needed(user_id, job_id: int = 0, task_id: str = "", 
             reason,
         )
     return refunded
+
+def shopaikey_video_job_timeout_minutes(job: dict) -> int:
+    if int((job or {}).get("admin_only") or 0):
+        return max(60, int(SHOPAIKEY_VIDEO_STALE_TIMEOUT_DEFAULT_MINUTES or 30))
+    planned = int((job or {}).get("xu_cost_planned") or 0)
+    try:
+        low_cost = int((video_tier_payload("low") or {}).get("cost") or VIDEO_LOW_COST_XU or 0)
+    except Exception:
+        low_cost = int(VIDEO_LOW_COST_XU or 0)
+    if planned and low_cost and planned <= low_cost:
+        return max(5, int(SHOPAIKEY_VIDEO_STALE_TIMEOUT_LOW_MINUTES or 15))
+    return max(10, int(SHOPAIKEY_VIDEO_STALE_TIMEOUT_DEFAULT_MINUTES or 30))
+
+def mark_stale_public_video_jobs(user_id: str = "", limit: int = 50) -> list[dict]:
+    statuses = tuple(sorted(SHOPAIKEY_ACTIVE_JOB_STATUSES))
+    placeholders = ",".join("?" for _ in statuses)
+    uid = str(user_id or "").strip()
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT * FROM shopaikey_jobs
+            WHERE job_type='video'
+              AND admin_only=0
+              AND (?='' OR user_id=?)
+              AND UPPER(status) IN ({placeholders})
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (uid, uid, *statuses, max(1, min(200, int(limit or 50)))),
+        ).fetchall()
+    finally:
+        conn.close()
+    stale_jobs: list[dict] = []
+    now_dt = datetime.now()
+    for row in rows:
+        job = dict(row)
+        created_dt = parse_now_text(job.get("created_at") or job.get("updated_at") or "")
+        if not created_dt:
+            continue
+        timeout_minutes = shopaikey_video_job_timeout_minutes(job)
+        if now_dt - created_dt < timedelta(minutes=timeout_minutes):
+            continue
+        job_id = int(job.get("id") or 0)
+        deducted_amount = int(job.get("xu_deducted") or 0)
+        balance_before, _, _ = get_user(job.get("user_id") or "")
+        record_shopaikey_billing_event(
+            job.get("user_id") or "",
+            job_id,
+            "video_stale_timeout",
+            0,
+            int(balance_before or 0),
+            int(balance_before or 0),
+            f"timeout_minutes={timeout_minutes}",
+        )
+        refunded = refund_shopaikey_job_if_needed(job.get("user_id") or "", job_id, job.get("task_id") or "", "stale_video_timeout") if deducted_amount > 0 else False
+        balance_after, _, _ = get_user(job.get("user_id") or "")
+        if deducted_amount > 0 and refunded:
+            record_shopaikey_billing_event(
+                job.get("user_id") or "",
+                job_id,
+                "video_refunded",
+                deducted_amount,
+                int(balance_before or 0),
+                int(balance_after or 0),
+                "stale_video_timeout",
+            )
+        elif deducted_amount > 0:
+            record_shopaikey_billing_event(
+                job.get("user_id") or "",
+                job_id,
+                "video_refund_failed",
+                deducted_amount,
+                int(balance_before or 0),
+                int(balance_after or 0),
+                "stale_video_timeout; refund_error=auto_refund_failed",
+            )
+        update_shopaikey_job(
+            job_id=job_id,
+            status="FAILED_TIMEOUT",
+            error_class="STALE_TIMEOUT",
+            fail_reason="stale_video_timeout",
+            refund_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged"),
+            refund_amount=deducted_amount if refunded else 0,
+            refund_reason="stale_video_timeout",
+            billing_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "timeout_not_charged"),
+            finished_at=now_text(),
+        )
+        record_system_event(
+            "shopaikey_video_stale_timeout",
+            provider="shopaikey_video",
+            tool="video",
+            severity="warning",
+            code="STALE_TIMEOUT",
+            message=f"job_id={job_id}; user_id={job.get('user_id') or ''}; timeout_minutes={timeout_minutes}",
+        )
+        stale_jobs.append({**job, "refunded": refunded, "timeout_minutes": timeout_minutes})
+    return stale_jobs
+
+def shopaikey_video_queue_counts() -> dict:
+    mark_stale_public_video_jobs()
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT UPPER(COALESCE(status, 'UNKNOWN')), COUNT(*)
+            FROM shopaikey_jobs
+            WHERE job_type='video'
+            GROUP BY UPPER(COALESCE(status, 'UNKNOWN'))"""
+        ).fetchall()
+        counts = {str(status or "UNKNOWN"): int(count or 0) for status, count in rows}
+    except Exception:
+        counts = {}
+    finally:
+        conn.close()
+    active = sum(counts.get(status, 0) for status in SHOPAIKEY_ACTIVE_JOB_STATUSES)
+    return {
+        "queued": counts.get("QUEUED", 0),
+        "running": active,
+        "success": counts.get("SUCCESS", 0),
+        "failed": counts.get("FAILED", 0) + counts.get("FAILED_TIMEOUT", 0) + counts.get("TIMEOUT", 0),
+        "total": sum(counts.values()),
+        "raw": counts,
+    }
+
+def public_video_active_job_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return "⏳ 你已有一个视频正在处理中。完成后会自动发送视频。请不要重复创建新任务。"
+    if normalize_user_language(lang) != "vi":
+        return "⏳ You already have a video being processed. The video will be sent automatically when it is ready. Please do not create another job."
+    return "⏳ Bạn đang có video đang xử lý. Video sẽ được gửi tự động khi hoàn tất. Vui lòng không tạo thêm job mới."
+
+def public_video_active_job_keyboard(active_job: dict | None, lang: str = "vi") -> InlineKeyboardMarkup:
+    task_id = str((active_job or {}).get("task_id") or "").strip()
+    keyboard = shopaikey_video_job_check_keyboard(task_id, lang, public_user=True) if task_id else None
+    if keyboard:
+        return keyboard
+    return InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]])
 
 async def shopaikey_video_create_for_model(model: str, prompt: str = "") -> dict:
     if not SHOPAIKEY_API_KEY:
@@ -32157,8 +32376,10 @@ def menu_text_admin() -> str:
         "• <code>/tool_test_shopaikey_video</code>\n• <code>/tool_test_shopaikey_tts</code>\n\n"
         "<b>E. Giá / Sẵn sàng bán</b>\n"
         "• <code>/banggia</code>\n• <code>/costs</code>\n• <code>/sales_ready</code>\n• <code>/providers</code>\n\n"
-        "<b>F. Maintenance / Freeze</b>\n"
-        "• <code>/maintenance_status</code>\n• <code>/maintenance_on</code>\n• <code>/maintenance_off</code>\n"
+        "<b>F. Maintenance / Freeze / Refund / Queue</b>\n"
+        "• <code>/freeze_status</code>\n• <code>/maintenance_status</code>\n• <code>/maintenance_on</code>\n• <code>/maintenance_off</code>\n"
+        "• <code>/freeze_video</code>\n• <code>/unfreeze_video</code>\n"
+        "• <code>/queue_status</code>\n• <code>/job_status</code>\n• <code>/refund_job</code>\n• <code>/clear_job_lock</code>\n"
         "• <code>/freeze_tools</code>\n• <code>/unfreeze_tools</code>\n"
         "• <code>/provider_freeze</code>\n• <code>/provider_unfreeze</code>\n\n"
         "<b>G. Góp ý / Admin notes</b>\n• <code>/admin_gopy</code>"
@@ -34231,6 +34452,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Freeze message: <code>{html.escape(str(shopaikey_freeze.get('message') or '-'))}</code>",
         f"• Unfreeze after: <code>{html.escape(str(shopaikey_freeze.get('unfreeze_after') or '-'))}</code>",
         f"• Video freeze: <code>{'ON' if shopaikey_video_freeze.get('frozen') else 'OFF'}</code> | reason <code>{html.escape(str(shopaikey_video_freeze.get('reason') or '-'))}</code> | unfreeze <code>{html.escape(str(shopaikey_video_freeze.get('unfreeze_after') or '-'))}</code>",
+        f"• Video error windows: <code>{html.escape(shopaikey_video_error_window_text())}</code>",
         f"• Auto freeze: <code>{'enabled' if SHOPAIKEY_AUTO_FREEZE_ENABLED else 'disabled'}</code>",
         f"• Low credit threshold: <code>warn {int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / freeze {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
         f"• Error threshold: <code>{int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)} errors / {int(SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES or 0)} min</code>",
@@ -34253,7 +34475,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code>",
+        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -34962,7 +35184,9 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Freeze message: <code>{html.escape(str(provider_freeze.get('message') or '-'))}</code>",
         f"• Unfreeze after: <code>{html.escape(str(provider_freeze.get('unfreeze_after') or '-'))}</code>",
         f"• Video freeze: <code>{'ON' if video_freeze.get('frozen') else 'OFF'}</code> | reason <code>{html.escape(str(video_freeze.get('reason') or '-'))}</code> | unfreeze <code>{html.escape(str(video_freeze.get('unfreeze_after') or '-'))}</code>",
+        f"• Video freeze message: <code>{html.escape(str(video_freeze.get('message') or '-'))}</code>",
         f"• Recent provider errors: <code>{int(provider_freeze.get('error_count') or 0)}</code>",
+        f"• Video error windows: <code>{html.escape(shopaikey_video_error_window_text())}</code>",
         f"• Low credit warn/freeze: <code>{int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
         f"• Error threshold: <code>{int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)} / {int(SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES or 0)} min</code>",
         f"• Chat test: <code>{html.escape(shopaikey_chat_status_text())}</code>",
@@ -34997,8 +35221,10 @@ async def cmd_maintenance_status(update: Update, context: ContextTypes.DEFAULT_T
     state = current_system_mode()
     maintenance_on, _maintenance_message = is_system_maintenance()
     shopaikey_frozen, shopaikey_freeze, _freeze_message = is_provider_frozen("shopaikey")
+    shopaikey_video_freeze = provider_freeze_display("shopaikey_video")
     usage = shopaikey_last_usage_snapshot()
     events = recent_system_events(5)
+    queue = shopaikey_video_queue_counts()
     lines = [
         "🛠 <b>TOAN AAS Maintenance / Provider Freeze</b>",
         "",
@@ -35027,6 +35253,13 @@ async def cmd_maintenance_status(update: Update, context: ContextTypes.DEFAULT_T
         f"• Thresholds: <code>warn {int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / freeze {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}% / errors {int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)}</code>",
         f"• Usage last known: <code>{html.escape(shopaikey_usage_summary_text(usage))}</code>",
         "",
+        "<b>ShopAIKey Video Guard</b>",
+        f"• Video freeze: <code>{'ON' if shopaikey_video_freeze.get('frozen') else 'OFF'}</code>",
+        f"• Video reason: <code>{html.escape(str(shopaikey_video_freeze.get('reason') or '-'))}</code>",
+        f"• Video unfreeze after: <code>{html.escape(str(shopaikey_video_freeze.get('unfreeze_after') or '-'))}</code>",
+        f"• Video error windows: <code>{html.escape(shopaikey_video_error_window_text())}</code>",
+        f"• Queue active: <code>{int(queue.get('running') or 0)}</code> | queued <code>{int(queue.get('queued') or 0)}</code> | failed <code>{int(queue.get('failed') or 0)}</code>",
+        "",
         "<b>Recent events</b>",
     ]
     if not events:
@@ -35044,7 +35277,7 @@ async def cmd_maintenance_status(update: Update, context: ContextTypes.DEFAULT_T
             )
     lines.extend([
         "",
-        "Commands: <code>/provider_freeze shopaikey &lt;reason&gt;</code> | <code>/provider_unfreeze shopaikey</code>",
+        "Commands: <code>/freeze_status</code> | <code>/freeze_video &lt;reason&gt;</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status &lt;job_id&gt;</code> | <code>/refund_job &lt;job_id&gt;</code> | <code>/clear_job_lock &lt;user_id&gt;</code>",
         "Không hiển thị API key/token/raw response.",
     ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -35087,6 +35320,212 @@ async def cmd_provider_unfreeze(update: Update, context: ContextTypes.DEFAULT_TY
         "✅ Đã unfreeze provider.\n"
         f"• Provider: <code>{html.escape(provider)}</code>\n\n"
         "Public tool vẫn phụ thuộc ENV public ON/OFF, không tự mở image/video.",
+        parse_mode="HTML",
+    )
+
+def shopaikey_video_error_window_text() -> str:
+    short_count = provider_error_count("shopaikey", SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_SHORT_MINUTES, "video")
+    long_count = provider_error_count("shopaikey", SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_LONG_MINUTES, "video")
+    return (
+        f"{short_count}/{int(SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_SHORT or 5)} in "
+        f"{int(SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_SHORT_MINUTES or 15)}m; "
+        f"{long_count}/{int(SHOPAIKEY_VIDEO_ERROR_FREEZE_THRESHOLD_LONG or 10)} in "
+        f"{int(SHOPAIKEY_VIDEO_ERROR_FREEZE_WINDOW_LONG_MINUTES or 30)}m"
+    )
+
+async def cmd_freeze_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    mark_stale_public_video_jobs()
+    shopaikey = provider_freeze_display("shopaikey")
+    video = provider_freeze_display("shopaikey_video")
+    usage = shopaikey_last_usage_snapshot()
+    queue = shopaikey_video_queue_counts()
+    lines = [
+        "🧊 <b>TOAN AAS Freeze / Queue Status</b>",
+        "",
+        "<b>ShopAIKey public video</b>",
+        f"• Freeze: <code>{'ON' if video.get('frozen') else 'OFF'}</code>",
+        f"• Reason: <code>{html.escape(str(video.get('reason') or '-'))}</code>",
+        f"• Message: <code>{html.escape(str(video.get('message') or '-'))}</code>",
+        f"• Unfreeze after: <code>{html.escape(str(video.get('unfreeze_after') or '-'))}</code>",
+        f"• Error windows: <code>{html.escape(shopaikey_video_error_window_text())}</code>",
+        "",
+        "<b>ShopAIKey general</b>",
+        f"• Freeze: <code>{'ON' if shopaikey.get('frozen') else 'OFF'}</code>",
+        f"• Reason: <code>{html.escape(str(shopaikey.get('reason') or '-'))}</code>",
+        f"• Usage: <code>{html.escape(shopaikey_usage_summary_text(usage))}</code>",
+        "",
+        "<b>Video queue</b>",
+        f"• Queued: <code>{int(queue.get('queued') or 0)}</code>",
+        f"• Running/active: <code>{int(queue.get('running') or 0)}</code>",
+        f"• Success: <code>{int(queue.get('success') or 0)}</code>",
+        f"• Failed/timeout: <code>{int(queue.get('failed') or 0)}</code>",
+        f"• Total: <code>{int(queue.get('total') or 0)}</code>",
+        "",
+        "Commands: <code>/freeze_video &lt;reason&gt;</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status &lt;job_id&gt;</code> | <code>/refund_job &lt;job_id&gt;</code> | <code>/clear_job_lock &lt;user_id&gt;</code>",
+        "Không hiển thị API key/token/raw provider response.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_freeze_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    reason = " ".join(context.args or []).strip() or "manual_video_freeze"
+    set_provider_freeze_state(
+        "shopaikey_video",
+        True,
+        reason_code=reason[:120],
+        reason_message=reason,
+        updated_by=update.effective_user.id,
+        cooldown_minutes=0,
+    )
+    await update.message.reply_text(
+        "✅ Đã khóa public video.\n"
+        f"• Provider: <code>shopaikey_video</code>\n"
+        f"• Reason: <code>{html.escape(sanitize_provider_error(reason))}</code>\n\n"
+        "Chỉ khóa tạo video public. Public image không bị khóa. Không gọi API và không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_unfreeze_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    set_provider_freeze_state("shopaikey_video", False, reason_code="manual_unfreeze", reason_message="manual video unfreeze", updated_by=update.effective_user.id)
+    await update.message.reply_text(
+        "✅ Đã mở khóa public video guard.\n\n"
+        "Lưu ý: video public vẫn phụ thuộc ENV public ON/OFF, job lock, đủ Xu và xác nhận trước khi trừ Xu.",
+    )
+
+async def cmd_queue_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    stale = mark_stale_public_video_jobs()
+    queue = shopaikey_video_queue_counts()
+    raw = queue.get("raw") or {}
+    raw_text = ", ".join(f"{key}={value}" for key, value in sorted(raw.items())) or "-"
+    await update.message.reply_text(
+        "🎞 <b>ShopAIKey Video Queue</b>\n\n"
+        f"• Queued: <code>{int(queue.get('queued') or 0)}</code>\n"
+        f"• Running/active: <code>{int(queue.get('running') or 0)}</code>\n"
+        f"• Success: <code>{int(queue.get('success') or 0)}</code>\n"
+        f"• Failed/timeout: <code>{int(queue.get('failed') or 0)}</code>\n"
+        f"• Total: <code>{int(queue.get('total') or 0)}</code>\n"
+        f"• Stale fixed now: <code>{len(stale)}</code>\n"
+        f"• Raw statuses: <code>{html.escape(raw_text)}</code>\n\n"
+        "Không gọi provider. Không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+def shopaikey_job_status_text(job: dict) -> str:
+    if not job:
+        return "⚠️ Không tìm thấy job."
+    return (
+        "🧾 <b>ShopAIKey Job Status</b>\n\n"
+        f"• Job ID: <code>{int(job.get('id') or 0)}</code>\n"
+        f"• User ID: <code>{html.escape(str(job.get('user_id') or '-'))}</code>\n"
+        f"• Type: <code>{html.escape(str(job.get('job_type') or '-'))}</code>\n"
+        f"• Status: <code>{html.escape(str(job.get('status') or '-'))}</code>\n"
+        f"• Task ID: <code>{html.escape(str(job.get('task_id') or '-'))}</code>\n"
+        f"• Model: <code>{html.escape(str(job.get('model') or '-'))}</code>\n"
+        f"• Admin only: <code>{'yes' if int(job.get('admin_only') or 0) else 'no'}</code>\n"
+        f"• Planned Xu: <code>{int(job.get('xu_cost_planned') or 0)}</code>\n"
+        f"• Deducted Xu: <code>{int(job.get('xu_deducted') or 0)}</code>\n"
+        f"• Refund: <code>{html.escape(str(job.get('refund_status') or '-'))}</code> / <code>{int(job.get('refund_amount') or 0)} Xu</code>\n"
+        f"• Billing: <code>{html.escape(str(job.get('billing_status') or '-'))}</code>\n"
+        f"• Result URL: <code>{'yes' if job.get('result_url') else 'no'}</code>\n"
+        f"• Error: <code>{html.escape(str(job.get('error_class') or job.get('provider_error_code') or '-'))}</code>\n"
+        f"• Message: <code>{html.escape(sanitize_provider_error(job.get('provider_message') or job.get('fail_reason') or '-')[:220])}</code>\n"
+        f"• Created: <code>{html.escape(str(job.get('created_at') or '-'))}</code>\n"
+        f"• Updated: <code>{html.escape(str(job.get('updated_at') or '-'))}</code>\n"
+        f"• Finished: <code>{html.escape(str(job.get('finished_at') or '-'))}</code>"
+    )
+
+async def cmd_job_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args or not str(context.args[0]).isdigit():
+        return await update.message.reply_text("Cú pháp: /job_status <job_id>")
+    job = shopaikey_job_by_id(int(context.args[0]))
+    await update.message.reply_text(shopaikey_job_status_text(job or {}), parse_mode="HTML")
+
+async def cmd_refund_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args or not str(context.args[0]).isdigit():
+        return await update.message.reply_text("Cú pháp: /refund_job <job_id>")
+    job_id = int(context.args[0])
+    job = shopaikey_job_by_id(job_id)
+    if not job:
+        return await update.message.reply_text("⚠️ Không tìm thấy job.")
+    if str(job.get("refund_status") or "").lower() == "refunded":
+        return await update.message.reply_text("ℹ️ Job này đã được hoàn Xu trước đó. Không hoàn trùng.")
+    deducted = int(job.get("xu_deducted") or 0)
+    if deducted <= 0:
+        update_shopaikey_job(job_id=job_id, refund_status="not_charged", refund_reason="manual_refund_no_deduction", billing_status=job.get("billing_status") or "not_charged")
+        return await update.message.reply_text("ℹ️ Job này chưa trừ Xu nên không cần hoàn.")
+    refunded = refund_shopaikey_job_if_needed(job.get("user_id") or "", job_id, job.get("task_id") or "", "manual_admin_refund")
+    fresh = shopaikey_job_by_id(job_id) or job
+    response_text = (
+        ("✅ Đã hoàn Xu cho job.\n" if refunded else "⚠️ Chưa hoàn được hoặc đã được xử lý trước đó.\n")
+        + f"• Job ID: <code>{job_id}</code>\n"
+        + f"• User ID: <code>{html.escape(str(job.get('user_id') or '-'))}</code>\n"
+        + f"• Deducted: <code>{deducted} Xu</code>\n"
+        + f"• Refund status: <code>{html.escape(str(fresh.get('refund_status') or '-'))}</code>\n\n"
+        + "Không đụng PayOS/top-up/payment history."
+    )
+    await update.message.reply_text(
+        response_text,
+        parse_mode="HTML",
+    )
+
+async def cmd_clear_job_lock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /clear_job_lock <user_id>")
+    uid = str(context.args[0] or "").strip()
+    if not re.match(r"^[0-9A-Za-z_:-]{2,80}$", uid):
+        return await update.message.reply_text("⚠️ User ID không hợp lệ.")
+    statuses = tuple(sorted(SHOPAIKEY_ACTIVE_JOB_STATUSES))
+    placeholders = ",".join("?" for _ in statuses)
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            f"""SELECT * FROM shopaikey_jobs
+            WHERE user_id=? AND job_type='video' AND UPPER(status) IN ({placeholders})
+            ORDER BY id DESC LIMIT 20""",
+            (uid, *statuses),
+        ).fetchall()
+    finally:
+        conn.close()
+    cleared = 0
+    refunded = 0
+    for row in rows:
+        job = dict(row)
+        job_id = int(job.get("id") or 0)
+        amount = int(job.get("xu_deducted") or 0)
+        did_refund = refund_shopaikey_job_if_needed(uid, job_id, job.get("task_id") or "", "manual_clear_job_lock") if amount > 0 else False
+        if did_refund:
+            refunded += amount
+        update_shopaikey_job(
+            job_id=job_id,
+            status="FAILED_MANUAL_CLEAR",
+            error_class="MANUAL_CLEAR",
+            fail_reason="admin_clear_job_lock",
+            refund_status="refunded" if did_refund else ("not_charged" if amount <= 0 else str(job.get("refund_status") or "")),
+            refund_reason="manual_clear_job_lock",
+            billing_status="refunded" if did_refund else ("manual_clear_no_charge" if amount <= 0 else str(job.get("billing_status") or "")),
+            finished_at=now_text(),
+        )
+        cleared += 1
+    await update.message.reply_text(
+        "🧹 <b>Clear Video Job Lock</b>\n\n"
+        f"• User ID: <code>{html.escape(uid)}</code>\n"
+        f"• Jobs cleared: <code>{cleared}</code>\n"
+        f"• Xu refunded: <code>{refunded}</code>\n\n"
+        "Chỉ clear active ShopAIKey video jobs. Không đụng PayOS/top-up.",
         parse_mode="HTML",
     )
 
@@ -35916,8 +36355,12 @@ async def handle_public_video_prompt_pending_text(update: Update, context: Conte
     if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
         await update.message.reply_text(ui_text(lang, "media.public_off"))
         return True
-    if shopaikey_active_job_for_user(uid, "video"):
-        await update.message.reply_text(ui_text(lang, "video.active_job"))
+    active_video_job = shopaikey_active_job_for_user(uid, "video")
+    if active_video_job:
+        await update.message.reply_text(
+            public_video_active_job_text(lang),
+            reply_markup=public_video_active_job_keyboard(active_video_job, lang),
+        )
         return True
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Video user")
     base_cost = int(payload.get("cost") or 0)
@@ -35952,8 +36395,12 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
     enabled, message = shopaikey_public_generation_guard("video")
     if not enabled:
         return await update.message.reply_text(f"{message}\nBot chưa trừ Xu.")
-    if shopaikey_active_job_for_user(uid, "video"):
-        return await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
+    active_video_job = shopaikey_active_job_for_user(uid, "video")
+    if active_video_job:
+        return await update.message.reply_text(
+            public_video_active_job_text(lang),
+            reply_markup=public_video_active_job_keyboard(active_video_job, lang),
+        )
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
     source_job = shopaikey_paid_image_source_job(uid) if from_image else None
     tier = normalize_video_tier(SHOPAIKEY_VIDEO_DEFAULT_TIER)
@@ -36038,9 +36485,14 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     enabled, message = shopaikey_public_generation_guard(job_type)
     if not enabled:
         return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
-    if shopaikey_active_job_for_user(uid, job_type):
+    active_public_job = shopaikey_active_job_for_user(uid, job_type)
+    if active_public_job:
         if job_type == "video":
-            return await safe_edit_or_send(query, ui_text(lang, "video.active_job"))
+            return await safe_edit_or_send(
+                query,
+                public_video_active_job_text(lang),
+                reply_markup=public_video_active_job_keyboard(active_public_job, lang),
+            )
         return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
     if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
         return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
@@ -50253,8 +50705,13 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_public_image_prompt_pending(uid)
         clear_public_video_prompt_pending(uid)
         clear_public_video_package_context(uid)
-        if shopaikey_active_job_for_user(uid, "video"):
-            return await safe_edit_or_send(query, ui_text(lang, "video.active_job"))
+        active_video_job = shopaikey_active_job_for_user(uid, "video")
+        if active_video_job:
+            return await safe_edit_or_send(
+                query,
+                public_video_active_job_text(lang),
+                reply_markup=public_video_active_job_keyboard(active_video_job, lang),
+            )
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
             if is_admin_user(uid):
                 set_quick_media_pending(uid, "quick_video_prompt")
@@ -50282,8 +50739,13 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_or_send(query, ui_text(lang, "video.tier_disabled_message"))
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
             return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
-        if shopaikey_active_job_for_user(uid, "video"):
-            return await safe_edit_or_send(query, ui_text(lang, "video.active_job"))
+        active_video_job = shopaikey_active_job_for_user(uid, "video")
+        if active_video_job:
+            return await safe_edit_or_send(
+                query,
+                public_video_active_job_text(lang),
+                reply_markup=public_video_active_job_keyboard(active_video_job, lang),
+            )
         package = get_public_video_package_context(uid)
         if package:
             raw_prompt = video_package_prompt(package)
@@ -67725,6 +68187,13 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("maintenance_status", cmd_maintenance_status))
     tg_app.add_handler(CommandHandler("provider_freeze", cmd_provider_freeze))
     tg_app.add_handler(CommandHandler("provider_unfreeze", cmd_provider_unfreeze))
+    tg_app.add_handler(CommandHandler("freeze_status", cmd_freeze_status))
+    tg_app.add_handler(CommandHandler("freeze_video", cmd_freeze_video))
+    tg_app.add_handler(CommandHandler("unfreeze_video", cmd_unfreeze_video))
+    tg_app.add_handler(CommandHandler("queue_status", cmd_queue_status))
+    tg_app.add_handler(CommandHandler("job_status", cmd_job_status))
+    tg_app.add_handler(CommandHandler("refund_job", cmd_refund_job))
+    tg_app.add_handler(CommandHandler("clear_job_lock", cmd_clear_job_lock))
     tg_app.add_handler(CommandHandler("tool_catalog", cmd_tool_catalog))
     tg_app.add_handler(CommandHandler("admin_api_roadmap", cmd_admin_api_roadmap))
     tg_app.add_handler(CommandHandler("tool_audit",  cmd_tool_audit))

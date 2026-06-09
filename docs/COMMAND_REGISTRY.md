@@ -126,6 +126,13 @@ These handlers remain in code for admin/internal testing but are blocked for nor
 | `/unfreeze_tools` | `cmd_unfreeze_tools` | YES | YES | Unfreeze tool usage. |
 | `/provider_freeze` | `cmd_provider_freeze` | YES | YES | Freeze a provider by name/reason. |
 | `/provider_unfreeze` | `cmd_provider_unfreeze` | YES | YES | Unfreeze a provider by name. |
+| `/freeze_status` | `cmd_freeze_status` | YES | YES | ShopAIKey video freeze, credit, error-window and queue overview. |
+| `/freeze_video` | `cmd_freeze_video` | YES | YES | Manually freeze public ShopAIKey video only; does not touch image. |
+| `/unfreeze_video` | `cmd_unfreeze_video` | YES | YES | Manually unfreeze public ShopAIKey video guard; public flags still apply. |
+| `/queue_status` | `cmd_queue_status` | YES | YES | ShopAIKey video queue counts and stale cleanup status. |
+| `/job_status` | `cmd_job_status` | YES | YES | Sanitized ShopAIKey job status by internal job id. |
+| `/refund_job` | `cmd_refund_job` | YES | YES | Idempotent manual refund for a ShopAIKey job if Xu was deducted. |
+| `/clear_job_lock` | `cmd_clear_job_lock` | YES | YES | Clear stuck public video active jobs for a user, refunding deducted Xu when possible. |
 | `/checkpayos` | `cmd_checkpayos` | YES | System menu | PayOS order check. |
 | `/telegram_status` | `cmd_telegram_status` | YES | System menu | Telegram update mode. |
 | `/telegram_takeover` | `cmd_telegram_takeover` | YES | System menu | Reclaim Telegram webhook/polling. |
