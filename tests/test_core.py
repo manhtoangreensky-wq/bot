@@ -1826,9 +1826,17 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "2️⃣ Chọn gợi ý 2" in music_choice_buttons
     assert "3️⃣ Chọn gợi ý 3" in music_choice_buttons
     music_selected_buttons = [button.text for row in bot.cinematic_ad_music_selected_keyboard().inline_keyboard for button in row]
-    assert "✅ Lưu gợi ý nhạc" in music_selected_buttons
-    assert "🚫 Không cần nhạc" in music_selected_buttons
-    assert "🎞 Sang bước prompt video" in music_selected_buttons
+    assert "✅ Chốt nhạc này" in music_selected_buttons
+    assert "🎬 Tạo video / chốt video với nhạc này" in music_selected_buttons
+    assert "🚫 Bỏ nhạc và tạo video không nhạc" in music_selected_buttons
+    assert "🎞 Quay lại prompt video" in music_selected_buttons
+    assert "🎵 Chọn nhạc khác" in music_selected_buttons
+    no_music_buttons = [button.text for row in bot.cinematic_ad_no_music_keyboard().inline_keyboard for button in row]
+    assert "🎬 Chốt video không nhạc" in no_music_buttons
+    assert "🎵 Chọn nhạc lại" in no_music_buttons
+    package_pending_buttons = [button.text for row in bot.cinematic_ad_video_package_pending_keyboard().inline_keyboard for button in row]
+    assert "✅ Lưu bản chốt video" in package_pending_buttons
+    assert "🎵 Đổi nhạc" in package_pending_buttons
     assert "🎵 Tìm nhạc trong kho" not in music_selected_buttons
     assert "🤖 Prompt tạo nhạc AI" not in music_selected_buttons
     assert "💡 Gợi ý thể loại nhạc" in [button.text for row in bot.cinematic_ad_music_menu_keyboard().inline_keyboard for button in row]
@@ -1909,6 +1917,13 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "3. nhạc tiktok/reels" in music_suggestions
     assert "đã chọn hướng nhạc 1" in bot.cinematic_ad_music_choice_text(concept, 1).lower()
     assert "tạo nhạc ai/ghép nhạc sẽ mở sau" in bot.ui_text("vi", "concept.music_saved_next").lower()
+    no_music_text = bot.cinematic_ad_no_music_selected_text(concept).lower()
+    assert "đã chọn không thêm nhạc" in no_music_text
+    package = bot.save_latest_video_package("u_ad", bot.build_cinematic_ad_video_package("u_ad", concept, no_music=True))
+    assert package["source"] == "cinematic_ad"
+    assert package["no_music"] is True
+    assert "video thật chưa mở công khai" in bot.cinematic_ad_video_public_off_package_text(package).lower()
+    assert "đã chốt bản video" in bot.cinematic_ad_video_package_saved_text(package).lower()
     video_from_concept = bot.cinematic_ad_video_from_concept_text(concept).lower()
     assert "tạo video thật chưa mở công khai" in video_from_concept
     assert "prompt video đã lưu" in video_from_concept

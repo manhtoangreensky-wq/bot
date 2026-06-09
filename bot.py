@@ -38057,6 +38057,68 @@ LAST_AUDIO_LINK: dict[int, dict] = {}
 SELECTED_MUSIC: dict[int, dict] = {}
 SELECTED_SFX: dict[int, dict] = {}
 SELECTED_MEDIA: dict[int, dict] = {}
+LAST_VIDEO_MUSIC_CONTEXT: dict[int, dict] = {}
+LAST_VIDEO_PACKAGES: dict[int, dict] = {}
+VIDEO_MUSIC_CONTEXT_TTL_SECONDS = 600
+VIDEO_PACKAGE_TTL_SECONDS = 3600
+
+def media_runtime_user_key(user_id):
+    try:
+        return int(user_id)
+    except Exception:
+        return str(user_id)
+
+def set_video_music_context(user_id, source: str):
+    if not user_id:
+        return
+    LAST_VIDEO_MUSIC_CONTEXT[media_runtime_user_key(user_id)] = {
+        "source": str(source or "")[:40],
+        "created_at": time.time(),
+    }
+
+def get_video_music_context(user_id) -> dict:
+    if not user_id:
+        return {}
+    key = media_runtime_user_key(user_id)
+    item = LAST_VIDEO_MUSIC_CONTEXT.get(key) or {}
+    if not item:
+        return {}
+    if time.time() - float(item.get("created_at") or 0) > VIDEO_MUSIC_CONTEXT_TTL_SECONDS:
+        LAST_VIDEO_MUSIC_CONTEXT.pop(key, None)
+        return {}
+    return item
+
+def clear_video_music_context(user_id):
+    if user_id:
+        LAST_VIDEO_MUSIC_CONTEXT.pop(media_runtime_user_key(user_id), None)
+
+def save_latest_video_package(user_id, package: dict) -> dict:
+    if not user_id:
+        return {}
+    now_value = time.time()
+    clean = dict(package or {})
+    clean["user_id"] = str(user_id)
+    clean["created_at"] = clean.get("created_at") or now_text()
+    clean["created_ts"] = now_value
+    clean["public_video_enabled"] = bool(SHOPAIKEY_PUBLIC_VIDEO_ENABLED)
+    clean["package_id"] = clean.get("package_id") or f"vpack_{int(now_value)}_{str(user_id)[-6:]}"
+    for key in ("concept_text", "image_prompt", "video_prompt"):
+        if key in clean:
+            clean[key] = str(clean.get(key) or "")[:2200]
+    LAST_VIDEO_PACKAGES[media_runtime_user_key(user_id)] = clean
+    return clean
+
+def get_latest_video_package(user_id) -> dict:
+    if not user_id:
+        return {}
+    key = media_runtime_user_key(user_id)
+    item = LAST_VIDEO_PACKAGES.get(key) or {}
+    if not item:
+        return {}
+    if time.time() - float(item.get("created_ts") or 0) > VIDEO_PACKAGE_TTL_SECONDS:
+        LAST_VIDEO_PACKAGES.pop(key, None)
+        return {}
+    return item
 
 def jamendo_preview_item(item: dict) -> dict:
     return {
@@ -38378,6 +38440,86 @@ def selected_media_license_warning(item: dict, lang: str = "vi") -> str:
         return "📜 Public music/media has source-specific licenses. Check commercial rights, attribution and platform rules before ads or monetized content."
     return "📜 Nhạc/kho public có license riêng. Hãy kiểm tra quyền sử dụng thương mại, attribution và điều khoản nền tảng trước khi đăng quảng cáo/kiếm tiền."
 
+def selected_music_video_followup_text(item: dict, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    title = str(item.get("title") or "Untitled")[:120]
+    license_text = str(item.get("license") or "-")[:240]
+    warning = selected_media_license_warning(item, lang)
+    if lang == "zh":
+        return (
+            f"✅ <b>已选择音乐:</b> {html.escape(title)}\n\n"
+            f"<b>License:</b> {html.escape(license_text)}\n"
+            f"{html.escape(warning)}\n\n"
+            "Bot 还没有合成音乐，也没有扣除 Xu。\n"
+            "你想下一步做什么？"
+        )
+    if lang == "en":
+        return (
+            f"✅ <b>Selected music:</b> {html.escape(title)}\n\n"
+            f"<b>License:</b> {html.escape(license_text)}\n"
+            f"{html.escape(warning)}\n\n"
+            "The bot has not mixed the music and has not charged Xu.\n"
+            "What would you like to do next?"
+        )
+    return (
+        f"✅ <b>Đã chọn nhạc:</b> {html.escape(title)}\n\n"
+        f"<b>Lưu ý license:</b> {html.escape(license_text)}\n"
+        f"{html.escape(warning)}\n\n"
+        "Bot chưa ghép nhạc và chưa trừ Xu.\n"
+        "Bạn muốn làm gì tiếp?"
+    )
+
+def selected_music_video_followup_keyboard(source: str = "cinematic_ad", index_text: str = "1", lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = music_ui_lang(lang=lang)
+    source = str(source or "cinematic_ad")
+    index_text = str(index_text or "1").strip() or "1"
+    if source == "trend_guided":
+        prefix = "trendg"
+        save_cb = f"{prefix}|music_save"
+        create_cb = f"{prefix}|video_real"
+        no_music_cb = f"{prefix}|music_none"
+        choose_cb = f"{prefix}|music_library"
+        main_cb = f"{prefix}|main"
+    else:
+        prefix = "adconcept"
+        save_cb = f"{prefix}|music_save"
+        create_cb = f"{prefix}|finalize_video_music"
+        no_music_cb = f"{prefix}|finalize_video_no_music"
+        choose_cb = f"{prefix}|music_library"
+        main_cb = f"{prefix}|main"
+    if lang == "zh":
+        labels = {
+            "save": "✅ 确认这首音乐",
+            "create": "🎬 用这首音乐确认视频",
+            "none": "🚫 不加音乐确认视频",
+            "choose": "🎵 选择其他音乐",
+            "license": "📜 查看 license",
+        }
+    elif lang == "en":
+        labels = {
+            "save": "✅ Lock this music",
+            "create": "🎬 Finalize video with this music",
+            "none": "🚫 Finalize video without music",
+            "choose": "🎵 Choose another track",
+            "license": "📜 View license",
+        }
+    else:
+        labels = {
+            "save": "✅ Chốt nhạc này",
+            "create": "🎬 Tạo video / chốt video với nhạc này",
+            "none": "🚫 Bỏ nhạc và tạo video không nhạc",
+            "choose": "🎵 Chọn bài khác",
+            "license": "📜 Xem license",
+        }
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels["save"], callback_data=save_cb)],
+        [InlineKeyboardButton(labels["create"], callback_data=create_cb)],
+        [InlineKeyboardButton(labels["none"], callback_data=no_music_cb)],
+        [InlineKeyboardButton(labels["choose"], callback_data=choose_cb)],
+        [InlineKeyboardButton(labels["license"], callback_data=f"license_music|{index_text}")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data=main_cb)],
+    ])
+
 async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
     user_id = update.effective_user.id if update.effective_user else 0
     lang = music_ui_lang(user_id)
@@ -38401,6 +38543,32 @@ async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYP
         SELECTED_MUSIC[int(user_id)] = selected
         noun = "music" if lang == "en" else ("音乐" if lang == "zh" else "nhạc")
         cmd_label = "/select_music"
+        flow_context = get_video_music_context(user_id)
+        if flow_context:
+            selected_for_video = {
+                "provider": selected.get("provider") or "",
+                "title": selected.get("title") or "",
+                "author": selected.get("author") or "",
+                "duration": selected.get("duration") or "",
+                "license": selected.get("license") or "",
+                "source_url": selected.get("source_url") or "",
+                "created_at": selected.get("created_at") or time.time(),
+            }
+            if str(flow_context.get("source") or "") == "trend_guided":
+                set_trend_video_flow_pending(user_id, "music_selected", music_choice="library", music_selected_item=selected_for_video)
+            else:
+                concept = get_latest_cinematic_ad_concept(user_id)
+                if concept:
+                    concept["music_choice"] = "library"
+                    concept["music_selected_item"] = selected_for_video
+                    LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(user_id)] = concept
+            return await context.bot.send_message(
+                chat_id=chat_id,
+                text=selected_music_video_followup_text(selected, lang),
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                reply_markup=selected_music_video_followup_keyboard(flow_context.get("source") or "cinematic_ad", index_text, lang),
+            )
     if lang == "zh":
         text = (
             f"✅ 已选择{noun}: {selected.get('title') or 'Untitled'}\n\n"
@@ -44939,6 +45107,7 @@ def cinematic_ad_motion_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(ui_text(lang, "concept.save_motion"), callback_data="adconcept|save_motion_current")],
         [InlineKeyboardButton(ui_text(lang, "concept.video_prompt"), callback_data="adconcept|video_prompt_from_motion")],
+        [InlineKeyboardButton("🎬 Chốt video từ hướng này" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video from this motion" if normalize_user_language(lang) != "zh" else "🎬 从此动效确认视频"), callback_data="adconcept|finalize_video_music")],
         [InlineKeyboardButton(ui_text(lang, "concept.image_view_prompt"), callback_data="adconcept|image_prompt_from_motion")],
         [InlineKeyboardButton(ui_text(lang, "concept.music_from_current"), callback_data="adconcept|music_menu")],
         [InlineKeyboardButton(ui_text(lang, "motion.create_another"), callback_data="adconcept|motion_current")],
@@ -44988,6 +45157,7 @@ def cinematic_ad_image_prompt_selected_keyboard(prompt_index: int = 1, lang: str
     rows.extend([
         [InlineKeyboardButton(ui_text(lang, "concept.edit_image_prompt"), callback_data="adconcept|edit_current")],
         [InlineKeyboardButton(ui_text(lang, "concept.next_video_prompt"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton("🎬 Tạo video từ ảnh/prompt này" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video from this image prompt" if normalize_user_language(lang) != "zh" else "🎬 从此图片 prompt 确认视频"), callback_data="adconcept|finalize_video_music")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
     ])
     return InlineKeyboardMarkup(rows)
@@ -45008,6 +45178,7 @@ def cinematic_ad_video_prompt_choices_keyboard(lang: str = "vi") -> InlineKeyboa
         [InlineKeyboardButton(ui_text(lang, "concept.choose_1"), callback_data="adconcept|video_prompt_choice|1")],
         [InlineKeyboardButton(ui_text(lang, "concept.choose_2"), callback_data="adconcept|video_prompt_choice|2")],
         [InlineKeyboardButton(ui_text(lang, "concept.choose_3"), callback_data="adconcept|video_prompt_choice|3")],
+        [InlineKeyboardButton("🎬 Tạo video / chốt video" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video" if normalize_user_language(lang) != "zh" else "🎬 确认视频"), callback_data="adconcept|finalize_video_music")],
         [InlineKeyboardButton(ui_text(lang, "concept.regenerate_3"), callback_data="adconcept|video_prompt_current")],
         [InlineKeyboardButton(ui_text(lang, "concept.edit_video_prompt"), callback_data="adconcept|edit_current")],
         [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
@@ -45072,9 +45243,29 @@ def cinematic_ad_music_suggestion_keyboard(lang: str = "vi") -> InlineKeyboardMa
 
 def cinematic_ad_music_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "concept.save_music"), callback_data="adconcept|music_save")],
-        [InlineKeyboardButton(ui_text(lang, "concept.music_none"), callback_data="adconcept|music_none")],
-        [InlineKeyboardButton(ui_text(lang, "concept.next_video_prompt"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton("✅ Chốt nhạc này" if normalize_user_language(lang) == "vi" else ("✅ Lock this music" if normalize_user_language(lang) != "zh" else "✅ 确认这段音乐"), callback_data="adconcept|music_save")],
+        [InlineKeyboardButton("🎬 Tạo video / chốt video với nhạc này" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video with this music" if normalize_user_language(lang) != "zh" else "🎬 用此音乐确认视频"), callback_data="adconcept|finalize_video_music")],
+        [InlineKeyboardButton("🚫 Bỏ nhạc và tạo video không nhạc" if normalize_user_language(lang) == "vi" else ("🚫 Finalize video without music" if normalize_user_language(lang) != "zh" else "🚫 不加音乐确认视频"), callback_data="adconcept|finalize_video_no_music")],
+        [InlineKeyboardButton("🎞 Quay lại prompt video" if normalize_user_language(lang) == "vi" else ("🎞 Back to video prompt" if normalize_user_language(lang) != "zh" else "🎞 返回视频 prompt"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton("🎵 Chọn nhạc khác" if normalize_user_language(lang) == "vi" else ("🎵 Choose another music" if normalize_user_language(lang) != "zh" else "🎵 选择其他音乐"), callback_data="adconcept|music_menu")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
+    ])
+
+def cinematic_ad_music_ai_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Lưu prompt nhạc" if normalize_user_language(lang) == "vi" else ("✅ Save music prompt" if normalize_user_language(lang) != "zh" else "✅ 保存音乐 prompt"), callback_data="adconcept|music_ai_save")],
+        [InlineKeyboardButton("🎬 Tạo video / chốt video với prompt nhạc này" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video with this music prompt" if normalize_user_language(lang) != "zh" else "🎬 用此音乐 prompt 确认视频"), callback_data="adconcept|finalize_video_music")],
+        [InlineKeyboardButton("🚫 Bỏ nhạc và tạo video không nhạc" if normalize_user_language(lang) == "vi" else ("🚫 Finalize video without music" if normalize_user_language(lang) != "zh" else "🚫 不加音乐确认视频"), callback_data="adconcept|finalize_video_no_music")],
+        [InlineKeyboardButton("🎞 Quay lại prompt video" if normalize_user_language(lang) == "vi" else ("🎞 Back to video prompt" if normalize_user_language(lang) != "zh" else "🎞 返回视频 prompt"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
+    ])
+
+def cinematic_ad_no_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 Chốt video không nhạc" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video without music" if normalize_user_language(lang) != "zh" else "🎬 确认无音乐视频"), callback_data="adconcept|finalize_video_no_music")],
+        [InlineKeyboardButton(ui_text(lang, "concept.save_video_prompt"), callback_data="adconcept|save_video_prompt_current")],
+        [InlineKeyboardButton("🎵 Chọn nhạc lại" if normalize_user_language(lang) == "vi" else ("🎵 Choose music again" if normalize_user_language(lang) != "zh" else "🎵 重新选择音乐"), callback_data="adconcept|music_menu")],
+        [InlineKeyboardButton("🎞 Xem prompt video" if normalize_user_language(lang) == "vi" else ("🎞 View video prompt" if normalize_user_language(lang) != "zh" else "🎞 查看视频 prompt"), callback_data="adconcept|video_prompt_current")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
     ])
 
@@ -45110,6 +45301,28 @@ def cinematic_ad_video_saved_keyboard(lang: str = "vi", is_admin: bool = False) 
         [InlineKeyboardButton(ui_text(lang, "concept.music_from_current"), callback_data="adconcept|music_menu")],
         [InlineKeyboardButton(ui_text(lang, "concept.edit_video_prompt"), callback_data="adconcept|edit_current")],
         [InlineKeyboardButton(ui_text(lang, "concept.finish"), callback_data="adconcept|finalize")],
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton(ui_text(lang, "concept.admin_video_smoke"), callback_data="adconcept|admin_video_smoke")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")])
+    return InlineKeyboardMarkup(rows)
+
+def cinematic_ad_video_package_pending_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("✅ Lưu bản chốt video" if normalize_user_language(lang) == "vi" else ("✅ Save finalized video package" if normalize_user_language(lang) != "zh" else "✅ 保存视频定稿"), callback_data="adconcept|save_video_package")],
+        [InlineKeyboardButton("🎞 Xem prompt video" if normalize_user_language(lang) == "vi" else ("🎞 View video prompt" if normalize_user_language(lang) != "zh" else "🎞 查看视频 prompt"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton("🎵 Đổi nhạc" if normalize_user_language(lang) == "vi" else ("🎵 Change music" if normalize_user_language(lang) != "zh" else "🎵 更换音乐"), callback_data="adconcept|music_menu")],
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton(ui_text(lang, "concept.admin_video_smoke"), callback_data="adconcept|admin_video_smoke")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")])
+    return InlineKeyboardMarkup(rows)
+
+def cinematic_ad_video_package_saved_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("🎞 Xem prompt video" if normalize_user_language(lang) == "vi" else ("🎞 View video prompt" if normalize_user_language(lang) != "zh" else "🎞 查看视频 prompt"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton("🎵 Đổi nhạc" if normalize_user_language(lang) == "vi" else ("🎵 Change music" if normalize_user_language(lang) != "zh" else "🎵 更换音乐"), callback_data="adconcept|music_menu")],
+        [InlineKeyboardButton("🖼 Tạo/chọn ảnh khung chính" if normalize_user_language(lang) == "vi" else ("🖼 Create/select keyframe image" if normalize_user_language(lang) != "zh" else "🖼 创建/选择关键帧图片"), callback_data="adconcept|image_prompt_current")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton(ui_text(lang, "concept.admin_video_smoke"), callback_data="adconcept|admin_video_smoke")])
@@ -45789,6 +46002,141 @@ def cinematic_ad_music_ai_text(concept: dict, lang: str = "vi") -> str:
         note = "Bot chỉ chuẩn bị prompt, chưa gọi API tạo nhạc và chưa trừ Xu."
     return f"{title}\n\n<code>{html.escape(prompt)}</code>\n\n{note}"
 
+def cinematic_ad_music_summary(concept: dict, lang: str = "vi") -> dict:
+    choice = concept.get("music_choice")
+    if choice == "none":
+        return {"type": "none", "label": "no_music"}
+    item = concept.get("music_selected_item") or {}
+    if isinstance(item, dict) and item.get("title"):
+        return {
+            "type": "library",
+            "label": str(item.get("title") or "selected_music")[:160],
+            "license": str(item.get("license") or "-")[:240],
+            "provider": str(item.get("provider") or "-")[:80],
+            "source_url": str(item.get("source_url") or "")[:240],
+        }
+    if choice == "ai_prompt":
+        return {
+            "type": "ai_prompt",
+            "label": "AI music prompt",
+            "prompt": cinematic_ad_music_ai_prompt_for_package(concept, lang),
+        }
+    try:
+        idx = max(1, min(3, int(choice or 0)))
+    except Exception:
+        idx = 0
+    if idx:
+        labels = {
+            1: "emotional cinematic music",
+            2: "modern technology music",
+            3: "upbeat TikTok/Reels music",
+        }
+        return {"type": "suggestion", "index": idx, "label": labels[idx]}
+    return {"type": "not_selected", "label": "music_not_selected"}
+
+def cinematic_ad_music_ai_prompt_for_package(concept: dict, lang: str = "vi") -> str:
+    product, message, style, _topic = cinematic_ad_concept_input(concept, lang)
+    return f"Short advertising background music for {product}, message {message}, style {style}, no vocal, clean commercial mood, 15 seconds."[:600]
+
+def build_cinematic_ad_video_package(user_id, concept: dict, lang: str = "vi", no_music: bool = False, source: str = "cinematic_ad") -> dict:
+    idx = max(1, min(3, safe_int((concept or {}).get("video_prompt_choice") or 1, 1)))
+    image_idx = max(1, min(3, safe_int((concept or {}).get("image_prompt_choice") or 1, 1)))
+    _product, _message, _style, topic = cinematic_ad_concept_input(concept, lang)
+    music_choice = {"type": "none", "label": "no_music"} if no_music else cinematic_ad_music_summary(concept, lang)
+    return {
+        "source": source,
+        "concept_text": topic,
+        "trend_choice": concept.get("idea_choice") or "",
+        "motion_choice": concept.get("motion_choice") or "",
+        "image_prompt": cinematic_ad_image_prompt_for_index(concept, image_idx, lang),
+        "generated_image_id": concept.get("generated_image_id") or "",
+        "generated_image_url": concept.get("generated_image_url") or "",
+        "video_prompt": cinematic_ad_video_prompt_for_index(concept, idx, lang),
+        "video_prompt_choice": idx,
+        "music_choice": music_choice,
+        "no_music": bool(no_music or music_choice.get("type") == "none"),
+    }
+
+def cinematic_ad_video_public_off_package_text(package: dict, lang: str = "vi") -> str:
+    music_choice = package.get("music_choice") or {}
+    if package.get("no_music") or music_choice.get("type") == "none":
+        music_line_vi = "Không thêm nhạc"
+        music_line_en = "No music"
+        music_line_zh = "不添加音乐"
+    else:
+        label = str(music_choice.get("label") or "music suggestion")[:160]
+        music_line_vi = f"Nhạc/gợi ý nhạc: {label}"
+        music_line_en = f"Music/music prompt: {label}"
+        music_line_zh = f"音乐/音乐提示: {label}"
+    if normalize_user_language(lang) == "zh":
+        return (
+            "🎬 <b>真实视频尚未公开</b>\n\n"
+            "TOAN AAS 已保存 concept、视频 prompt 和音乐选择。公开视频开启后，此步骤会进入视频档位选择和价格确认。\n\n"
+            f"• {html.escape(music_line_zh)}\n"
+            f"• Package: <code>{html.escape(str(package.get('package_id') or '-'))}</code>\n\n"
+            "Bot 未调用视频 API，也未扣除 Xu。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎬 <b>Real video generation is not public yet</b>\n\n"
+            "TOAN AAS saved the concept, video prompt and music choice. When public video opens, this step will move to video tier selection and price confirmation.\n\n"
+            f"• {html.escape(music_line_en)}\n"
+            f"• Package: <code>{html.escape(str(package.get('package_id') or '-'))}</code>\n\n"
+            "The bot has not called the video API and has not charged Xu."
+        )
+    return (
+        "🎬 <b>Video thật chưa mở công khai.</b>\n\n"
+        "TOAN AAS đã lưu concept, prompt video và gợi ý nhạc này. Khi public video mở, bước này sẽ chuyển sang chọn tier video và xác nhận giá.\n\n"
+        f"• {html.escape(music_line_vi)}\n"
+        f"• Package: <code>{html.escape(str(package.get('package_id') or '-'))}</code>\n\n"
+        "Bot chưa gọi API video và chưa trừ Xu."
+    )
+
+def cinematic_ad_video_package_saved_text(package: dict, lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return (
+            "✅ <b>视频定稿已保存</b>\n\n"
+            "Bot 已保存足够数据，等公开视频功能开启后即可继续创建视频。\n\n"
+            f"Package: <code>{html.escape(str(package.get('package_id') or '-'))}</code>\n"
+            "Bot 未调用视频 API，也未扣除 Xu。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✅ <b>Video package finalized.</b>\n\n"
+            "The bot saved enough data to create the video when public video generation opens.\n\n"
+            f"Package: <code>{html.escape(str(package.get('package_id') or '-'))}</code>\n"
+            "The bot has not called the video API and has not charged Xu."
+        )
+    return (
+        "✅ <b>Đã chốt bản video.</b>\n\n"
+        "Bot đã lưu đủ dữ liệu để tạo video khi tính năng public video mở.\n\n"
+        f"Package: <code>{html.escape(str(package.get('package_id') or '-'))}</code>\n"
+        "Bot chưa gọi API video và chưa trừ Xu."
+    )
+
+def cinematic_ad_no_music_selected_text(concept: dict, lang: str = "vi") -> str:
+    _product, _message, _style, topic = cinematic_ad_concept_input(concept, lang)
+    if normalize_user_language(lang) == "zh":
+        return (
+            "✅ <b>已选择不添加音乐。</b>\n\n"
+            f"Concept: <b>{html.escape(topic)}</b>\n"
+            "你可以创建无音乐视频，或保存 prompt 以后使用。\n"
+            "Bot 未调用音乐/视频 API，也未扣除 Xu。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✅ <b>No music selected.</b>\n\n"
+            f"Concept: <b>{html.escape(topic)}</b>\n"
+            "You can finalize a no-music video or save the prompt for later.\n"
+            "The bot has not called music/video APIs and has not charged Xu."
+        )
+    return (
+        "✅ <b>Đã chọn không thêm nhạc.</b>\n\n"
+        f"Concept: <b>{html.escape(topic)}</b>\n"
+        "Bạn có thể tạo video không nhạc hoặc lưu prompt để dùng sau.\n"
+        "Bot chưa gọi API nhạc/video và chưa trừ Xu."
+    )
+
 def cinematic_ad_product_text(lang: str = "vi") -> str:
     return ui_text(lang, "concept_ad.ask_product")
 
@@ -46214,7 +46562,8 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
         "image_prompt_current", "image_prompt_from_motion", "image_prompt_choice", "video_prompt_current", "video_prompt_from_motion", "video_prompt_choice",
         "save_image_prompt_current", "save_video_prompt_current",
         "create_image_current", "create_video_current", "video_current", "trend_current", "workflow_current",
-        "music_current", "music_suggest", "music_library", "music_genre", "music_choice", "music_ai", "music_none", "music_save", "finalize",
+        "music_current", "music_suggest", "music_library", "music_genre", "music_choice", "music_ai", "music_ai_save", "music_none", "music_save",
+        "finalize_video_music", "finalize_video_no_music", "save_video_package", "finalize",
         "admin_video_smoke", "edit_current", "image_ai", "image_ai_tier",
     }:
         concept = get_latest_cinematic_ad_concept(uid)
@@ -46335,6 +46684,14 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
             idx = max(1, min(3, safe_int(value or concept.get("video_prompt_choice") or 1, 1)))
             concept["video_prompt_choice"] = idx
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
+            if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+                package = save_latest_video_package(uid, build_cinematic_ad_video_package(uid, concept, lang, source="cinematic_ad_prompt"))
+                return await safe_edit_query_message(
+                    query,
+                    cinematic_ad_video_public_off_package_text(package, lang),
+                    parse_mode="HTML",
+                    reply_markup=cinematic_ad_video_package_pending_keyboard(lang, is_admin_user(uid)),
+                )
             return await safe_edit_query_message(
                 query,
                 cinematic_ad_video_from_concept_text(concept, lang),
@@ -46346,6 +46703,7 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_query_message(query, cinematic_ad_music_library_text(concept, lang), reply_markup=cinematic_ad_music_library_keyboard(lang))
         if action == "music_genre":
             search_query = cinematic_ad_music_genre_query(value, concept, lang)
+            set_video_music_context(uid, "cinematic_ad")
             await safe_edit_query_message(query, ui_text(lang, "concept.music_searching"))
             return await send_music_library_results(query.message, uid, search_query)
         if action == "music_choice":
@@ -46354,15 +46712,51 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
             return await safe_edit_query_message(query, cinematic_ad_music_choice_text(concept, idx, lang), reply_markup=cinematic_ad_music_selected_keyboard(lang))
         if action == "music_ai":
-            return await safe_edit_query_message(query, cinematic_ad_music_ai_text(concept, lang), reply_markup=cinematic_ad_music_suggestion_keyboard(lang))
+            concept["music_choice"] = "ai_prompt"
+            LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
+            return await safe_edit_query_message(query, cinematic_ad_music_ai_text(concept, lang), reply_markup=cinematic_ad_music_ai_selected_keyboard(lang))
+        if action == "music_ai_save":
+            concept["music_choice"] = "ai_prompt"
+            concept["music_saved"] = True
+            LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
+            return await safe_edit_query_message(query, cinematic_ad_music_ai_text(concept, lang) + "\n\n" + ("Bot đã lưu prompt nhạc AI. Tạo nhạc AI thật sẽ mở sau." if normalize_user_language(lang) == "vi" else "The bot saved this AI music prompt. Real AI music generation will open later."), reply_markup=cinematic_ad_music_ai_selected_keyboard(lang))
         if action == "music_none":
             concept["music_choice"] = "none"
+            concept["no_music"] = True
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
-            return await safe_edit_query_message(query, ui_text(lang, "concept.music_none_saved"), reply_markup=cinematic_ad_music_selected_keyboard(lang))
+            return await safe_edit_query_message(query, cinematic_ad_no_music_selected_text(concept, lang), parse_mode="HTML", reply_markup=cinematic_ad_no_music_keyboard(lang))
         if action == "music_save":
             concept["music_saved"] = True
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
             return await safe_edit_query_message(query, ui_text(lang, "concept.music_saved_next"), reply_markup=cinematic_ad_music_selected_keyboard(lang))
+        if action in {"finalize_video_music", "finalize_video_no_music"}:
+            no_music = action == "finalize_video_no_music"
+            if no_music:
+                concept["music_choice"] = "none"
+                concept["no_music"] = True
+            else:
+                concept.setdefault("music_choice", concept.get("music_choice") or "not_selected")
+            concept["video_prompt_choice"] = safe_int(value or concept.get("video_prompt_choice") or 1, 1)
+            LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
+            if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+                package = save_latest_video_package(uid, build_cinematic_ad_video_package(uid, concept, lang, no_music=no_music, source="cinematic_ad_music"))
+                return await safe_edit_query_message(
+                    query,
+                    cinematic_ad_video_public_off_package_text(package, lang),
+                    parse_mode="HTML",
+                    reply_markup=cinematic_ad_video_package_pending_keyboard(lang, is_admin_user(uid)),
+                )
+            return await safe_edit_query_message(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
+        if action == "save_video_package":
+            package = get_latest_video_package(uid)
+            if not package:
+                package = save_latest_video_package(uid, build_cinematic_ad_video_package(uid, concept, lang, source="cinematic_ad_saved"))
+            return await safe_edit_query_message(
+                query,
+                cinematic_ad_video_package_saved_text(package, lang),
+                parse_mode="HTML",
+                reply_markup=cinematic_ad_video_package_saved_keyboard(lang, is_admin_user(uid)),
+            )
         if action == "finalize":
             concept["finalized"] = True
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
@@ -47763,17 +48157,27 @@ def trend_guided_music_choice_text(state: dict, index: int = 1, lang: str = "vi"
 
 def trend_guided_music_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Lưu gợi ý nhạc" if normalize_user_language(lang) == "vi" else "✅ Save music suggestion", callback_data="trendg|music_save")],
-        [InlineKeyboardButton("🎵 Tìm nhạc trong kho theo gợi ý" if normalize_user_language(lang) == "vi" else "🎵 Search library by suggestion", callback_data="trendg|music_library")],
-        [InlineKeyboardButton("🤖 Tạo prompt nhạc AI từ gợi ý" if normalize_user_language(lang) == "vi" else "🤖 Create AI music prompt", callback_data="trendg|music_ai")],
-        [InlineKeyboardButton("✅ Hoàn tất flow" if normalize_user_language(lang) == "vi" else "✅ Finish flow", callback_data="trendg|finalize")],
+        [InlineKeyboardButton("✅ Chốt nhạc này" if normalize_user_language(lang) == "vi" else "✅ Lock this music", callback_data="trendg|music_save")],
+        [InlineKeyboardButton("🎬 Tạo video / chốt video với nhạc này" if normalize_user_language(lang) == "vi" else "🎬 Finalize video with this music", callback_data="trendg|video_real")],
+        [InlineKeyboardButton("🚫 Bỏ nhạc và tạo video không nhạc" if normalize_user_language(lang) == "vi" else "🚫 Finalize video without music", callback_data="trendg|music_none")],
+        [InlineKeyboardButton("🎞 Quay lại prompt video" if normalize_user_language(lang) == "vi" else "🎞 Back to video prompt", callback_data="trendg|video_review")],
+        [InlineKeyboardButton("🎵 Chọn nhạc khác" if normalize_user_language(lang) == "vi" else "🎵 Choose another music", callback_data="trendg|music_step")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
     ])
 
 def trend_guided_no_music_text(state: dict, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return "✅ <b>No music selected.</b>\n\nThe flow is completed at the no-music step. The bot has not called music/video APIs and has not charged Xu."
-    return "✅ <b>Đã chọn không thêm nhạc.</b>\n\nFlow đã hoàn tất ở bước không nhạc. Bot chưa gọi API nhạc/video và chưa trừ Xu."
+        return "✅ <b>No music selected.</b>\n\nYou can finalize a no-music video or save the prompt for later. The bot has not called music/video APIs and has not charged Xu."
+    return "✅ <b>Đã chọn không thêm nhạc.</b>\n\nBạn có thể tạo video không nhạc hoặc lưu prompt để dùng sau. Bot chưa gọi API nhạc/video và chưa trừ Xu."
+
+def trend_guided_no_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 Chốt video không nhạc" if normalize_user_language(lang) == "vi" else "🎬 Finalize video without music", callback_data="trendg|video_real")],
+        [InlineKeyboardButton("✅ Lưu prompt video" if normalize_user_language(lang) == "vi" else "✅ Save video prompt", callback_data="trendg|video_prompt_save")],
+        [InlineKeyboardButton("🎵 Chọn nhạc lại" if normalize_user_language(lang) == "vi" else "🎵 Choose music again", callback_data="trendg|music_step")],
+        [InlineKeyboardButton("🎞 Xem prompt video" if normalize_user_language(lang) == "vi" else "🎞 View video prompt", callback_data="trendg|video_review")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
+    ])
 
 def trend_guided_finalize_text(state: dict, lang: str = "vi") -> str:
     topic = trend_guided_topic(state)
@@ -47831,6 +48235,60 @@ def trend_guided_music_ai_text(state: dict, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return f"🤖 <b>AI music prompt</b>\n\n<code>{html.escape(prompt)}</code>\n\nThe bot only prepares the prompt. It has not called any music API and has not charged Xu."
     return f"🤖 <b>Prompt tạo nhạc AI</b>\n\n<code>{html.escape(prompt)}</code>\n\nBot chỉ chuẩn bị prompt, chưa gọi API tạo nhạc và chưa trừ Xu."
+
+def trend_guided_music_ai_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Lưu prompt nhạc" if normalize_user_language(lang) == "vi" else "✅ Save music prompt", callback_data="trendg|music_save")],
+        [InlineKeyboardButton("🎬 Tạo video / chốt video với prompt nhạc này" if normalize_user_language(lang) == "vi" else "🎬 Finalize video with this music prompt", callback_data="trendg|video_real")],
+        [InlineKeyboardButton("🚫 Bỏ nhạc và tạo video không nhạc" if normalize_user_language(lang) == "vi" else "🚫 Finalize video without music", callback_data="trendg|music_none")],
+        [InlineKeyboardButton("🎞 Quay lại prompt video" if normalize_user_language(lang) == "vi" else "🎞 Back to video prompt", callback_data="trendg|video_review")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
+    ])
+
+def build_trend_guided_video_package(user_id, state: dict, lang: str = "vi") -> dict:
+    idx = int((state or {}).get("video_prompt_choice") or 1)
+    image_idx = int((state or {}).get("image_prompt_choice") or 1)
+    music_item = (state or {}).get("music_selected_item") or {}
+    if (state or {}).get("no_music") or str((state or {}).get("music_choice") or "") == "none":
+        music_choice = {"type": "none", "label": "no_music"}
+    elif isinstance(music_item, dict) and music_item.get("title"):
+        music_choice = {
+            "type": "library",
+            "label": str(music_item.get("title") or "")[:160],
+            "license": str(music_item.get("license") or "-")[:240],
+            "provider": str(music_item.get("provider") or "-")[:80],
+            "source_url": str(music_item.get("source_url") or "")[:240],
+        }
+    elif str((state or {}).get("music_choice") or "") == "ai_prompt":
+        music_choice = {"type": "ai_prompt", "label": "AI music prompt", "prompt": trend_guided_music_ai_text(state, lang)[:600]}
+    else:
+        music_choice = {"type": "suggestion", "label": f"music_direction_{state.get('music_choice') or 1}"}
+    return {
+        "source": "trend_guided",
+        "concept_text": trend_guided_topic(state),
+        "trend_choice": state.get("trend_choice") or "",
+        "motion_choice": state.get("motion_choice") or "",
+        "image_prompt": trend_guided_image_prompt_for_index(state, image_idx, lang),
+        "generated_image_id": state.get("generated_image_id") or "",
+        "generated_image_url": state.get("generated_image_url") or "",
+        "video_prompt": trend_guided_video_prompt_for_index(state, idx, lang),
+        "video_prompt_choice": idx,
+        "music_choice": music_choice,
+        "no_music": bool(music_choice.get("type") == "none"),
+    }
+
+def trend_guided_video_package_saved_text(package: dict, lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✅ <b>Video package finalized.</b>\n\n"
+            "The bot saved the trend direction, video prompt and music choice. Public video is still OFF, so no video API was called and no Xu was charged.\n\n"
+            f"Package: <code>{html.escape(str(package.get('package_id') or '-'))}</code>"
+        )
+    return (
+        "✅ <b>Đã chốt bản video.</b>\n\n"
+        "Bot đã lưu hướng trend, prompt video và lựa chọn nhạc. Public video vẫn OFF nên bot chưa gọi API video và chưa trừ Xu.\n\n"
+        f"Package: <code>{html.escape(str(package.get('package_id') or '-'))}</code>"
+    )
 
 def trend_workflow_id(user_id) -> str:
     raw = f"{user_id}:{time.time()}:{random.random()}"
@@ -48754,7 +49212,13 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, prefix + trend_guided_selected_video_prompt_text(state, idx, lang), parse_mode="HTML", reply_markup=trend_guided_selected_video_prompt_keyboard(lang, is_admin_user(uid)))
     if action == "video_real":
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
-            return await safe_edit_or_send(query, trend_guided_video_public_off_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_video_public_off_keyboard(lang, is_admin_user(uid)))
+            package = save_latest_video_package(uid, build_trend_guided_video_package(uid, state, lang))
+            return await safe_edit_or_send(
+                query,
+                trend_guided_video_package_saved_text(package, lang),
+                parse_mode="HTML",
+                reply_markup=trend_guided_video_public_off_keyboard(lang, is_admin_user(uid)),
+            )
         return await safe_edit_or_send(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
     if action == "admin_video_smoke":
         if not is_admin_user(uid):
@@ -48778,7 +49242,7 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
     if action == "music_none":
         set_trend_video_flow_pending(uid, "music_done", no_music=True, music_choice="none")
         state = get_trend_video_flow_pending(uid) or state
-        return await safe_edit_or_send(query, trend_guided_no_music_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_review_keyboard(lang))
+        return await safe_edit_or_send(query, trend_guided_no_music_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_no_music_keyboard(lang))
     if action == "music_save":
         set_trend_video_flow_pending(uid, "music_selected", music_saved=True)
         state = get_trend_video_flow_pending(uid) or state
@@ -48787,10 +49251,14 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, trend_guided_music_library_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_music_library_keyboard(lang))
     if action == "music_genre":
         search_query = trend_guided_music_genre_query(value, state, lang)
+        set_video_music_context(uid, "trend_guided")
         await safe_edit_or_send(query, "🎵 Searching music library..." if normalize_user_language(lang) != "vi" else "🎵 Đang tìm nhạc trong kho...")
         return await send_music_library_results(query.message, uid, search_query)
     if action == "music_ai":
-        return await safe_edit_or_send(query, trend_guided_music_ai_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_music_menu_keyboard(lang))
+        set_trend_video_flow_pending(uid, "music_selected", music_choice="ai_prompt")
+        state = get_trend_video_flow_pending(uid) or state
+        suffix = "\n\nBot đã lưu prompt nhạc AI. Tạo nhạc AI thật sẽ mở sau." if normalize_user_language(lang) == "vi" else "\n\nThe bot saved this AI music prompt. Real AI music generation will open later."
+        return await safe_edit_or_send(query, trend_guided_music_ai_text(state, lang) + suffix, parse_mode="HTML", reply_markup=trend_guided_music_ai_selected_keyboard(lang))
     if action == "finalize":
         set_trend_video_flow_pending(uid, "finalized", finalized=True)
         state = get_trend_video_flow_pending(uid) or state
