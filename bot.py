@@ -343,7 +343,7 @@ SHOPAIKEY_VIDEO_ADMIN_ONLY = env_flag("SHOPAIKEY_VIDEO_ADMIN_ONLY", "true")
 SHOPAIKEY_VIDEO_MODEL = _env("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
 SHOPAIKEY_VIDEO_FALLBACK_MODELS = _env("SHOPAIKEY_VIDEO_FALLBACK_MODELS", "veo3.1,veo3.1-fast,veo3.1-pro,veo3.1-4k,veo3.1-fast-components,grok-video-3,grok-video-3-10s")
 SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "true")
-SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "false")
+SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", _env("PUBLIC_VIDEO_GENERATION_ENABLED", "true"))
 IMAGE_TIER_LOW_ENABLED = env_flag("IMAGE_TIER_LOW_ENABLED", "true")
 IMAGE_TIER_STANDARD_ENABLED = env_flag("IMAGE_TIER_STANDARD_ENABLED", "true")
 IMAGE_TIER_HIGH_ENABLED = env_flag("IMAGE_TIER_HIGH_ENABLED", "true")
@@ -27228,7 +27228,7 @@ def admin_center_text(section: str = "main") -> str:
             "• <code>/settier &lt;ID&gt; &lt;newbie|silver|gold|platinum|diamond|vip&gt;</code> — đặt hạng thành viên theo chính sách mới\n"
             "• <code>/set_member_tier &lt;ID&gt; &lt;tier&gt;</code> — alias của /settier\n"
             "• <code>/set_vip &lt;ID&gt; &lt;tier&gt;</code> — alias cũ cho override hạng\n"
-            "• <code>/setvip &lt;ID&gt; &lt;1|0&gt;</code> — legacy bật/tắt VIP nội bộ, không khuyến nghị dùng cho hạng mới\n"
+            "• <code>/setvip &lt;ID&gt; &lt;silver|gold|platinum|diamond|vip&gt;</code> — đặt nhanh 5 hạng đã chốt; <code>1</code> map tạm sang <code>vip</code>, <code>0</code> không còn hỗ trợ\n"
             "• <code>/member_user &lt;ID&gt;</code> — xem hạng/quyền lợi user\n"
             "• <code>/grant_tier_promo &lt;ID&gt; &lt;tier&gt;</code> — tạo mã ưu đãi lên hạng thủ công\n\n"
             "Nguyên tắc: hạng thành viên chỉ giảm Xu khi tiêu dịch vụ và có ưu đãi lên hạng một lần. Không cộng thêm Xu định kỳ theo hạng khi nạp."
@@ -27271,7 +27271,7 @@ def admin_center_text(section: str = "main") -> str:
         "<b>B. Thành viên</b>\n"
         "• <code>/settier &lt;ID&gt; &lt;newbie|silver|gold|platinum|diamond|vip&gt;</code> — đặt hạng thành viên\n"
         "• <code>/set_member_tier &lt;ID&gt; &lt;tier&gt;</code> — alias của /settier\n"
-        "• <code>/setvip &lt;ID&gt; &lt;1|0&gt;</code> — legacy: bật/tắt VIP nội bộ, không khuyến nghị dùng cho hạng mới\n"
+        "• <code>/setvip &lt;ID&gt; &lt;silver|gold|platinum|diamond|vip&gt;</code> — đặt nhanh 5 hạng đã chốt; không hỗ trợ standard/basic/0\n"
         "• <code>/member_user &lt;ID&gt;</code> — xem hạng/quyền lợi user\n\n"
         "<b>C. Bill thủ công</b>\n"
         "• <code>/pending</code> — xem bill đang chờ\n"
@@ -28604,11 +28604,18 @@ def video_tier_public_status_text() -> str:
 def video_tier_prompt_for_generation(prompt: str, tier: str = "") -> str:
     prompt = re.sub(r"\s+", " ", str(prompt or "").strip())[:1200]
     tier_norm = normalize_video_tier(tier)
+    safety = (
+        "Use realistic motion, stable subject, physically correct perspective, no morphing, "
+        "no distorted hands or faces, no fake UI. Negative prompt: no text, no caption, no watermark, "
+        "no fake logo, no readable subtitles, no broken letters. Do not render readable text, captions, subtitles, "
+        "watermarks, fake logos or broken letters. If a phone/laptop/screen appears, keep the screen "
+        "clean or slightly blurred with no readable UI text."
+    )
     if tier_norm == "standard":
-        return f"{prompt}. Short clean video, stable motion, professional lighting, 16:9, no watermark, no extra text."
+        return f"{prompt}. Short clean video, stable motion, professional lighting, 16:9. {safety}"
     if tier_norm == "high":
-        return f"{prompt}. High-quality short commercial video, polished camera movement, stable subject, professional lighting, 16:9, no watermark, no extra text."
-    return f"{prompt}. Short simple video, clean motion, clear subject, 16:9, no watermark, no extra text."
+        return f"{prompt}. High-quality short commercial video, polished camera movement, stable subject, professional lighting, 16:9. {safety}"
+    return f"{prompt}. Short simple video, clean motion, clear subject, 16:9. {safety}"
 
 def image_base_cost_xu() -> int:
     return int(image_tier_pricing_payload()["low"]["cost"])
@@ -28716,11 +28723,12 @@ def clear_media_creator_pending_states(user_id) -> bool:
     quick_cleared = clear_quick_media_pending(user_id)
     public_image_cleared = clear_public_image_prompt_pending(user_id)
     public_video_cleared = clear_public_video_prompt_pending(user_id)
+    public_video_context_cleared = clear_public_video_package_context(user_id)
     creative_motion_cleared = clear_creative_motion_pending(user_id)
     cinematic_ad_cleared = clear_cinematic_ad_pending(user_id)
     trend_cleared = clear_trend_video_flow_pending(user_id)
     trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
-    return bool(quick_cleared or public_image_cleared or public_video_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared)
+    return bool(quick_cleared or public_image_cleared or public_video_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -29652,16 +29660,24 @@ def set_provider_freeze_state(provider: str, is_frozen: bool, reason_code: str =
         count=count_value,
     )
 
-def provider_error_count(provider: str, window_minutes: int) -> int:
+def provider_error_count(provider: str, window_minutes: int, tool: str = "") -> int:
     provider = str(provider or "").strip().lower()
+    tool = str(tool or "").strip().lower()
     cutoff = datetime_text(datetime.now() - timedelta(minutes=max(1, int(window_minutes or 15))))
     conn = db_connect()
     try:
-        row = conn.execute(
-            """SELECT COUNT(*) FROM system_events
-            WHERE event_type='provider_error' AND provider=? AND created_at>=?""",
-            (provider, cutoff),
-        ).fetchone()
+        if tool:
+            row = conn.execute(
+                """SELECT COUNT(*) FROM system_events
+                WHERE event_type='provider_error' AND provider=? AND tool=? AND created_at>=?""",
+                (provider, tool, cutoff),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """SELECT COUNT(*) FROM system_events
+                WHERE event_type='provider_error' AND provider=? AND created_at>=?""",
+                (provider, cutoff),
+            ).fetchone()
         return int(row[0] or 0) if row else 0
     except Exception:
         return 0
@@ -29685,8 +29701,9 @@ def record_provider_error(provider: str, tool: str, error_class: str, message: s
     error_class = str(error_class or "UNKNOWN_PROVIDER_ERROR").upper()
     safe_message = sanitize_provider_error(message or error_class)
     record_system_event("provider_error", provider=provider, tool=tool, severity="warning", code=error_class, message=safe_message)
-    count = provider_error_count(provider, SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES if provider == "shopaikey" else 15)
-    row = provider_freeze_row(provider)
+    freeze_provider = "shopaikey_video" if provider == "shopaikey" and tool == "video" else provider
+    count = provider_error_count(provider, SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES if provider == "shopaikey" else 15, tool if freeze_provider == "shopaikey_video" else "")
+    row = provider_freeze_row(freeze_provider)
     conn = db_connect()
     try:
         conn.execute(
@@ -29698,7 +29715,7 @@ def record_provider_error(provider: str, tool: str, error_class: str, message: s
                 last_error_at=excluded.last_error_at,
                 updated_at=excluded.updated_at""",
             (
-                provider,
+                freeze_provider,
                 int(row.get("is_frozen") or 0),
                 row.get("reason_code") or "",
                 row.get("reason_message") or "",
@@ -29715,7 +29732,7 @@ def record_provider_error(provider: str, tool: str, error_class: str, message: s
     if provider == "shopaikey" and SHOPAIKEY_AUTO_FREEZE_ENABLED:
         if error_class == "CREDIT_LOW_OR_EMPTY" or count >= max(1, int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 5)):
             set_provider_freeze_state(
-                provider,
+                freeze_provider,
                 True,
                 error_class,
                 safe_message,
@@ -29723,7 +29740,7 @@ def record_provider_error(provider: str, tool: str, error_class: str, message: s
                 cooldown_minutes=max(1, int(SHOPAIKEY_FREEZE_COOLDOWN_MINUTES or 30)),
                 error_count=count,
             )
-    return provider_freeze_row(provider)
+    return provider_freeze_row(freeze_provider)
 
 def evaluate_shopaikey_usage_freeze(usage: dict, updated_by="") -> str:
     try:
@@ -29788,6 +29805,10 @@ def is_tool_frozen(tool: str, provider: str = "shopaikey") -> dict:
     state = current_system_mode()
     if state.get("tool_freeze") or state.get("provider_freeze"):
         return {"frozen": True, "reason": "SYSTEM_FLAG_FREEZE", "message": USER_PROVIDER_MAINTENANCE_MESSAGE, "provider_state": {}}
+    if provider == "shopaikey" and tool == "video":
+        frozen, row, message = is_provider_frozen("shopaikey_video")
+        if frozen:
+            return {"frozen": True, "reason": row.get("reason_code") or "VIDEO_PROVIDER_FREEZE", "message": message or USER_PROVIDER_BUSY_MESSAGE, "provider_state": row}
     frozen, row, message = is_provider_frozen(provider)
     if frozen:
         return {"frozen": True, "reason": row.get("reason_code") or "PROVIDER_FREEZE", "message": message or USER_PROVIDER_BUSY_MESSAGE, "provider_state": row}
@@ -34140,6 +34161,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     shopaikey_usage = shopaikey_last_usage_snapshot()
     shopaikey_video_reason = shopaikey_video_reason_text()
     shopaikey_freeze = provider_freeze_display("shopaikey")
+    shopaikey_video_freeze = provider_freeze_display("shopaikey_video")
     pricing = media_workflow_pricing_payload()
     maintenance_on, _maintenance_message = is_system_maintenance()
     provider_freeze_on = provider_freeze_runtime_on("shopaikey")
@@ -34204,6 +34226,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Freeze reason: <code>{html.escape(str(shopaikey_freeze.get('reason') or '-'))}</code>",
         f"• Freeze message: <code>{html.escape(str(shopaikey_freeze.get('message') or '-'))}</code>",
         f"• Unfreeze after: <code>{html.escape(str(shopaikey_freeze.get('unfreeze_after') or '-'))}</code>",
+        f"• Video freeze: <code>{'ON' if shopaikey_video_freeze.get('frozen') else 'OFF'}</code> | reason <code>{html.escape(str(shopaikey_video_freeze.get('reason') or '-'))}</code> | unfreeze <code>{html.escape(str(shopaikey_video_freeze.get('unfreeze_after') or '-'))}</code>",
         f"• Auto freeze: <code>{'enabled' if SHOPAIKEY_AUTO_FREEZE_ENABLED else 'disabled'}</code>",
         f"• Low credit threshold: <code>warn {int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / freeze {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
         f"• Error threshold: <code>{int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)} errors / {int(SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES or 0)} min</code>",
@@ -34888,6 +34911,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     video_reason = shopaikey_video_reason_text(video_result)
     usage = shopaikey_last_usage_snapshot()
     provider_freeze = provider_freeze_display("shopaikey")
+    video_freeze = provider_freeze_display("shopaikey_video")
     maintenance_on, _maintenance_message = is_system_maintenance()
     pricing = media_workflow_pricing_payload()
     lines = [
@@ -34933,6 +34957,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Freeze reason: <code>{html.escape(str(provider_freeze.get('reason') or '-'))}</code>",
         f"• Freeze message: <code>{html.escape(str(provider_freeze.get('message') or '-'))}</code>",
         f"• Unfreeze after: <code>{html.escape(str(provider_freeze.get('unfreeze_after') or '-'))}</code>",
+        f"• Video freeze: <code>{'ON' if video_freeze.get('frozen') else 'OFF'}</code> | reason <code>{html.escape(str(video_freeze.get('reason') or '-'))}</code> | unfreeze <code>{html.escape(str(video_freeze.get('unfreeze_after') or '-'))}</code>",
         f"• Recent provider errors: <code>{int(provider_freeze.get('error_count') or 0)}</code>",
         f"• Low credit warn/freeze: <code>{int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
         f"• Error threshold: <code>{int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)} / {int(SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES or 0)} min</code>",
@@ -38119,6 +38144,60 @@ def get_latest_video_package(user_id) -> dict:
         LAST_VIDEO_PACKAGES.pop(key, None)
         return {}
     return item
+
+def public_video_context_key(user_id) -> str:
+    return f"public_video_context:{user_id}"
+
+def set_public_video_package_context(user_id, package: dict) -> dict:
+    clean = save_latest_video_package(user_id, package or {})
+    if not clean:
+        return {}
+    USER_PENDING[public_video_context_key(user_id)] = {
+        "pending_action": "public_video_context",
+        "package": clean,
+        "created_at_ts": time.time(),
+    }
+    return clean
+
+def get_public_video_package_context(user_id) -> dict:
+    key = public_video_context_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "public_video_context":
+        return {}
+    if time.time() - float(pending.get("created_at_ts") or 0) > VIDEO_PACKAGE_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return {}
+    return dict(pending.get("package") or {})
+
+def clear_public_video_package_context(user_id) -> bool:
+    return USER_PENDING.pop(public_video_context_key(user_id), None) is not None
+
+def video_package_prompt(package: dict) -> str:
+    for key in ("video_prompt", "prompt", "motion_prompt", "concept_text"):
+        value = re.sub(r"\s+", " ", str((package or {}).get(key) or "").strip())
+        if value:
+            return value[:1200]
+    return ""
+
+def video_package_music_label(package: dict, lang: str = "vi") -> str:
+    music = (package or {}).get("music_choice") or {}
+    if (package or {}).get("no_music") or str(music.get("type") or "").lower() == "none":
+        return "không" if normalize_user_language(lang) == "vi" else ("no" if normalize_user_language(lang) != "zh" else "无")
+    label = str(music.get("label") or music.get("title") or music.get("provider") or "").strip()
+    return label[:160] if label else ("có" if normalize_user_language(lang) == "vi" else ("yes" if normalize_user_language(lang) != "zh" else "有"))
+
+def build_image_to_video_public_package(user_id, job_id: int = 0, index: int = 1, lang: str = "vi") -> dict:
+    prompt = image_to_video_prompt_from_image(job_id, user_id, index, lang)
+    return {
+        "source": "image_to_video",
+        "concept_text": image_to_video_subject_for_job(job_id, user_id, lang),
+        "generated_image_id": str(int(job_id or 0)),
+        "source_job_id": str(int(job_id or 0)) if int(job_id or 0) else "",
+        "video_prompt": prompt,
+        "video_prompt_choice": max(1, min(3, int(index or 1))),
+        "music_choice": {"type": "not_selected", "label": "music_not_selected"},
+        "no_music": False,
+    }
 
 def jamendo_preview_item(item: dict) -> dict:
     return {
@@ -46692,11 +46771,8 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
                     parse_mode="HTML",
                     reply_markup=cinematic_ad_video_package_pending_keyboard(lang, is_admin_user(uid)),
                 )
-            return await safe_edit_query_message(
-                query,
-                cinematic_ad_video_from_concept_text(concept, lang),
-                reply_markup=cinematic_ad_video_off_keyboard(lang, is_admin_user(uid)),
-            )
+            set_public_video_package_context(uid, build_cinematic_ad_video_package(uid, concept, lang, source="cinematic_ad_prompt"))
+            return await safe_edit_query_message(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
         if action in {"music_current", "music_suggest"}:
             return await safe_edit_query_message(query, cinematic_ad_music_from_concept_text(concept, lang), reply_markup=cinematic_ad_music_suggestion_keyboard(lang))
         if action == "music_library":
@@ -46746,6 +46822,7 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
                     parse_mode="HTML",
                     reply_markup=cinematic_ad_video_package_pending_keyboard(lang, is_admin_user(uid)),
                 )
+            set_public_video_package_context(uid, build_cinematic_ad_video_package(uid, concept, lang, no_music=no_music, source="cinematic_ad_music"))
             return await safe_edit_query_message(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
         if action == "save_video_package":
             package = get_latest_video_package(uid)
@@ -47423,10 +47500,10 @@ def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def public_video_prompt_request_text(tier: str, lang: str = "vi") -> str:
     return ui_text(lang, "video.prompt.ask", label=html.escape(localized_video_tier_label(tier, lang)))
 
-def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi") -> str:
+def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi", music_label: str = "") -> str:
     payload = video_tier_payload(tier)
     cost = int(payload.get("cost") or 0)
-    return ui_text(
+    text = ui_text(
         lang,
         "video.confirm.cost",
         label=html.escape(localized_video_tier_label(tier, lang)),
@@ -47434,6 +47511,40 @@ def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         credits=int(current_credits or 0),
         prompt=html.escape(shopaikey_safe_prompt_preview(prompt)),
     )
+    music = str(music_label or "").strip()
+    if music:
+        if normalize_user_language(lang) == "zh":
+            extra = f"\n• 音乐: <code>{html.escape(music)}</code>\n• Public video: <code>ON</code>"
+        elif normalize_user_language(lang) != "vi":
+            extra = f"\n• Music: <code>{html.escape(music)}</code>\n• Public video: <code>ON</code>"
+        else:
+            extra = f"\n• Nhạc: <code>{html.escape(music)}</code>\n• Public video: <code>ON</code>"
+        marker = "\n\nVideo AI" if "Video AI" in text else ("\n\nAI video" if "AI video" in text else "")
+        text = text.replace(marker, extra + marker, 1) if marker else text + extra
+    return text
+
+def public_video_pending_payload_from_package(tier: str, package: dict) -> dict:
+    tier_norm = normalize_video_tier(tier)
+    payload = video_tier_payload(tier_norm)
+    raw_prompt = video_package_prompt(package)
+    music_label = video_package_music_label(package)
+    generation_prompt = raw_prompt
+    if music_label and music_label not in {"không", "no", "无"}:
+        generation_prompt = f"{raw_prompt}. Visual pacing should fit this music/mood: {music_label}. Do not generate audio; soundtrack/captions are handled separately."
+    return {
+        "job_type": "video",
+        "prompt": video_tier_prompt_for_generation(generation_prompt, tier_norm),
+        "original_prompt": raw_prompt,
+        "base_cost": int(payload.get("cost") or 0),
+        "from_image": str((package or {}).get("source") or "") == "image_to_video",
+        "source_job_id": str((package or {}).get("source_job_id") or "")[:80],
+        "video_tier": tier_norm,
+        "tier_label": payload.get("label") or tier_norm,
+        "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+        "package_id": str((package or {}).get("package_id") or "")[:80],
+        "source": str((package or {}).get("source") or "")[:80],
+        "music_label": music_label,
+    }
 
 def public_video_provider_fail_message(amount_xu: int = 0, refund_done: bool = False, lang: str = "vi") -> str:
     amount = int(amount_xu or 0)
@@ -49025,6 +49136,7 @@ async def trend_guided_start_from_query(query, uid: int, lang: str = "vi"):
     clear_quick_media_pending(uid)
     clear_public_image_prompt_pending(uid)
     clear_public_video_prompt_pending(uid)
+    clear_public_video_package_context(uid)
     clear_trend_video_flow_pending(uid)
     if not TREND_VIDEO_WORKFLOW_ENABLED:
         return await safe_edit_or_send(query, "🛠 Trend video workflow is temporarily under maintenance. The bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🛠 Video theo trend đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
@@ -49219,6 +49331,7 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
                 parse_mode="HTML",
                 reply_markup=trend_guided_video_public_off_keyboard(lang, is_admin_user(uid)),
             )
+        set_public_video_package_context(uid, build_trend_guided_video_package(uid, state, lang))
         return await safe_edit_or_send(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
     if action == "admin_video_smoke":
         if not is_admin_user(uid):
@@ -49458,9 +49571,8 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
                 parse_mode="HTML",
                 reply_markup=image_to_video_public_off_keyboard(job_id, idx, lang, is_admin_user(uid)),
             )
-        if normalize_user_language(lang) == "zh":
-            return await safe_edit_or_send(query, "🎞 Public video 需要通过单独的 billing/confirmation guard。\n本次未扣除 Xu。")
-        return await safe_edit_or_send(query, "🎞 Public video must go through its own billing/confirmation guard.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🎞 Public video cần đi qua billing/confirmation guard riêng.\nBot chưa trừ Xu.")
+        set_public_video_package_context(uid, build_image_to_video_public_package(uid, job_id, idx, lang))
+        return await safe_edit_or_send(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
     if action.startswith("admin_video_image_"):
         match = re.match(r"^admin_video_image_(\d+)_(\d+)$", action)
         job_id = safe_int(match.group(1), 0) if match else 0
@@ -49878,6 +49990,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
         clear_public_video_prompt_pending(uid)
+        clear_public_video_package_context(uid)
         if shopaikey_active_job_for_user(uid, "image"):
             return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         enabled, message = shopaikey_public_generation_guard("image")
@@ -49893,6 +50006,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
         clear_public_video_prompt_pending(uid)
+        clear_public_video_package_context(uid)
         tier = normalize_image_tier(action.replace("image_tier_", "", 1))
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
@@ -49909,6 +50023,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
         clear_public_video_prompt_pending(uid)
+        clear_public_video_package_context(uid)
         if shopaikey_active_job_for_user(uid, "video"):
             return await safe_edit_or_send(query, ui_text(lang, "video.active_job"))
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
@@ -49940,6 +50055,40 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
         if shopaikey_active_job_for_user(uid, "video"):
             return await safe_edit_or_send(query, ui_text(lang, "video.active_job"))
+        package = get_public_video_package_context(uid)
+        if package:
+            raw_prompt = video_package_prompt(package)
+            if not raw_prompt:
+                clear_public_video_package_context(uid)
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Chưa có prompt video trong gói này. Vui lòng chọn/tạo prompt video trước. Bot chưa gọi API và chưa trừ Xu."
+                    if normalize_user_language(lang) == "vi" else
+                    "⚠️ This package does not have a video prompt yet. Please choose or create a video prompt first. The bot has not called any API and has not charged Xu.",
+                )
+            source_job_id = str(package.get("source_job_id") or "").strip()
+            if source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
+                clear_public_video_package_context(uid)
+                return await safe_edit_or_send(query, ui_text(lang, "video.source_invalid"))
+            credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Video user")
+            pending_payload = public_video_pending_payload_from_package(tier, package)
+            base_cost = int(pending_payload.get("base_cost") or 0)
+            final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video")
+            if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+                return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
+            token = set_shopaikey_pending_confirmation(uid, pending_payload)
+            clear_public_video_package_context(uid)
+            record_shopaikey_billing_event(uid, 0, "video_package_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; source={pending_payload.get('source') or '-'}; package={pending_payload.get('package_id') or '-'}")
+            return await safe_edit_or_send(
+                query,
+                public_video_confirm_text(tier, raw_prompt, int(credits or 0), lang, pending_payload.get("music_label") or ""),
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=f"shopai|confirm|{token}")],
+                    [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=f"shopai|cancel|{token}")],
+                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                ]),
+            )
         set_public_video_prompt_pending(uid, tier)
         return await safe_edit_or_send(query, public_video_prompt_request_text(tier, lang), parse_mode="HTML")
     await safe_edit_or_send(query, create_media_menu_text(lang), reply_markup=create_media_menu_keyboard(lang))
@@ -66671,37 +66820,70 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_setvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return
+    valid_tiers = {"silver", "gold", "platinum", "diamond", "vip"}
+    invalid_message = "⚠️ Hạng không hợp lệ. Chỉ hỗ trợ: silver, gold, platinum, diamond, vip."
+    syntax = (
+        "⚠️ Cú pháp: /setvip <ID> <silver|gold|platinum|diamond|vip>\n"
+        "Ví dụ: /setvip 7817576663 gold"
+    )
+    if len(context.args or []) < 2:
+        return await update.message.reply_text(syntax)
+    target_id = str(context.args[0]).strip()
+    raw_tier = " ".join(context.args[1:]).strip().lower()
+    if raw_tier == "1":
+        tier = "vip"
+    elif raw_tier == "0":
+        return await update.message.reply_text(invalid_message)
+    else:
+        tier = normalize_member_tier(raw_tier)
+    if tier not in valid_tiers:
+        return await update.message.reply_text(invalid_message)
+    if not user_exists(target_id):
+        return await update.message.reply_text(f"⚠️ Không tìm thấy user <code>{html.escape(str(target_id))}</code>. User cần bấm /start trước.", parse_mode="HTML")
+    conn = db_connect()
     try:
-        target_id = context.args[0]
-        flag = int(context.args[1])
-        conn = db_connect()
-        c = conn.cursor()
-        c.execute("SELECT is_vip FROM users WHERE user_id=?", (str(target_id),))
-        before_row = c.fetchone()
-        before_vip = before_row[0] if before_row else None
-        c.execute("UPDATE users SET is_vip=? WHERE user_id=?", (flag, str(target_id)))
+        before = get_member_profile(target_id, conn=conn)
+        conn.execute(
+            """INSERT OR REPLACE INTO member_tier_overrides (user_id, tier, reason, updated_at)
+            VALUES (?,?,?,?)""",
+            (str(target_id), tier, f"Admin /setvip override by {update.effective_user.id}", now_text()),
+        )
+        conn.execute("UPDATE users SET vip_tier_override=?, is_vip=? WHERE user_id=?", (tier, 1 if tier == "vip" else 0, str(target_id)))
         record_audit(
             conn,
-            ADMIN_ID,
+            update.effective_user.id,
             "admin",
-            "user.vip_updated",
+            "member.tier_override_set",
             "user",
             str(target_id),
-            before={"is_vip": before_vip},
-            after={"is_vip": flag},
-            note="Admin updated VIP flag",
+            before={"tier": before.get("tier")},
+            after={"tier": tier},
+            note="Admin updated member tier via /setvip",
         )
         conn.commit()
+    finally:
         conn.close()
-        label = "VIP ✅" if flag == 1 else "Tiêu Chuẩn"
-        await update.message.reply_text(f"✅ ID {target_id} → Hạng: {label}")
+    label = member_tier_label(tier)
+    notify_warning = ""
+    try:
         await context.bot.send_message(
             chat_id=target_id,
-            text=f"🎖️ Tài khoản của bạn đã được nâng lên hạng <b>{'VIP 💎' if flag else 'Tiêu Chuẩn'}</b>.",
-            parse_mode="HTML"
+            text=f"✅ Đã cập nhật hạng thành viên: <b>{html.escape(label)}</b>.",
+            parse_mode="HTML",
         )
-    except Exception:
-        await update.message.reply_text("⚠️ Cú pháp: /setvip <ID> <1|0>")
+    except Exception as e:
+        notify_warning = (
+            "\n⚠️ Đã cập nhật hạng nhưng chưa gửi được thông báo cho user."
+            f"\n• Error: <code>{html.escape(provider_error_summary(e))}</code>"
+        )
+        logger.warning("Setvip target notify failed | %s", sanitize_log_text(str(e))[:240])
+    await update.message.reply_text(
+        f"✅ Đã cập nhật hạng thành viên: <b>{html.escape(label)}</b>.\n"
+        f"• User: <code>{html.escape(str(target_id))}</code>\n"
+        f"• Admin: <code>{html.escape(str(update.effective_user.id))}</code>"
+        f"{notify_warning}",
+        parse_mode="HTML",
+    )
 
 async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):

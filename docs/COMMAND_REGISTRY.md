@@ -86,7 +86,7 @@ These handlers remain in code for admin/internal testing but are blocked for nor
 | `/duyet` | `cmd_duyet` | YES | YES | Approve manual bill. |
 | `/tuchoi` | `cmd_tuchoi` | YES | YES | Reject manual bill. |
 | `/add` | `cmd_admin_add` | YES | YES | Add credit. |
-| `/setvip` | `cmd_setvip` | YES | YES | VIP flag. |
+| `/setvip` | `cmd_setvip` | YES | YES | Set member tier: silver/gold/platinum/diamond/vip only. |
 | `/admin_gopy` | `cmd_admin_gopy` | YES | YES | View feedback. |
 | `/backup_db` | `cmd_backup_db` | YES | YES | Sends DB file to admin if available. |
 | `/providers` | `cmd_providers` | YES | YES | Provider key status, configured/missing only. |

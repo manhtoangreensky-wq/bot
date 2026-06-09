@@ -326,7 +326,8 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_VIDEO_MODEL=veo3.1-fast" in env_example
     assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
     assert "SHOPAIKEY_PUBLIC_IMAGE_ENABLED=true" in env_example
-    assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED=false" in env_example
+    assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED=true" in env_example
+    assert "PUBLIC_VIDEO_GENERATION_ENABLED=true" in env_example
     assert "IMAGE_TIER_LOW_ENABLED=true" in env_example
     assert "IMAGE_TIER_STANDARD_ENABLED=true" in env_example
     assert "IMAGE_TIER_HIGH_ENABLED=true" in env_example
@@ -485,6 +486,34 @@ def test_provider_auto_freeze_and_status_commands(monkeypatch):
         assert int(bot.provider_freeze_row("shopaikey").get("is_frozen") or 0) == 0
         events = bot.recent_system_events(5)
         assert any(event.get("event_type") == "provider_auto_unfreeze" for event in events)
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_video_provider_freeze_does_not_block_public_image(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "SHOPAIKEY_AUTO_FREEZE_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ERROR_FREEZE_THRESHOLD", 2)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES", 15)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
+    monkeypatch.setattr(bot, "SYSTEM_MAINTENANCE_MODE", False)
+    monkeypatch.setattr(bot, "PROVIDER_FREEZE_ENABLED", False)
+    monkeypatch.setattr(bot, "TOOL_FREEZE_IMAGE", False)
+    monkeypatch.setattr(bot, "TOOL_FREEZE_VIDEO", False)
+    try:
+        bot.init_db()
+        bot.record_provider_error("shopaikey", "video", "NO_CHANNEL", "video no channel one")
+        bot.record_provider_error("shopaikey", "video", "NO_CHANNEL", "video no channel two")
+        assert int(bot.provider_freeze_row("shopaikey_video").get("is_frozen") or 0) == 1
+        assert int(bot.provider_freeze_row("shopaikey").get("is_frozen") or 0) == 0
+        assert bot.shopaikey_public_generation_guard("video")[0] is False
+        assert bot.shopaikey_public_generation_guard("image")[0] is True
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
@@ -999,7 +1028,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
         "nhạc",
         "caption",
         "cta",
-            "public image: off; public video: off",
+            "public image: off; public video: on",
             "gợi ý chuyển động/cảnh quay",
             "motion đơn giản/dễ tạo",
             "motion cinematic",
@@ -1331,6 +1360,24 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any("Video premium" in button.text and "liên hệ admin" in button.text for button in video_tier_buttons)
     assert "Gửi mô tả video bạn muốn tạo" in bot.public_video_prompt_request_text("standard")
     assert "999 Xu" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500)
+    assert "Public video" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500, music_label="piano cinematic")
+    guarded_prompt = bot.video_tier_prompt_for_generation("phone screen product demo", "low")
+    assert "no text" in guarded_prompt.lower()
+    assert "no caption" in guarded_prompt.lower()
+    assert "no watermark" in guarded_prompt.lower()
+    assert "screen clean or slightly blurred" in guarded_prompt.lower()
+    package = bot.set_public_video_package_context("u_video", {
+        "source": "cinematic_ad",
+        "video_prompt": "cinematic product demo",
+        "music_choice": {"type": "library", "label": "piano cinematic"},
+    })
+    assert bot.get_public_video_package_context("u_video")["video_prompt"] == "cinematic product demo"
+    pending_payload = bot.public_video_pending_payload_from_package("low", package)
+    assert pending_payload["job_type"] == "video"
+    assert pending_payload["video_tier"] == "low"
+    assert pending_payload["base_cost"] == bot.video_tier_cost_xu("low")
+    assert "piano cinematic" in pending_payload["prompt"]
+    assert bot.clear_public_video_package_context("u_video") is True
     assert "321 Xu" not in bot.create_media_pricing_text()
     assert "654 Xu" not in bot.create_media_pricing_text()
     pricing_text = "\n".join(bot.pricing_main_lines())
@@ -1624,7 +1671,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     source = bot_source_text()
     motion_source = source_between(source, "def creative_motion_pending_key", "TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE")
     ad_source = source_between(source, "def cinematic_ad_pending_key", "TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE")
-    assert 'SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "false")' in source
+    assert 'SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", _env("PUBLIC_VIDEO_GENERATION_ENABLED", "true"))' in source
     assert 'CREATIVE_MOTION_GUIDE_COST_XU = env_int("CREATIVE_MOTION_GUIDE_COST_XU", 0)' in source
     assert 'CallbackQueryHandler(handle_creative_motion_callback, pattern=r"^motion\\|")' in source
     assert 'CallbackQueryHandler(handle_cinematic_ad_callback, pattern=r"^adconcept\\|")' in source
@@ -1906,7 +1953,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "đã chọn prompt ảnh 1" in bot.cinematic_ad_selected_image_prompt_text(concept, 1).lower()
     video_prompts = bot.cinematic_ad_video_prompt_from_concept_text(concept).lower()
     assert "gợi ý video 5 giây" in video_prompts
-    assert "tạo video thật đang thử nghiệm nội bộ" in video_prompts
+    assert "dùng prompt này để tạo video thật" in video_prompts
     assert "điều cần tránh" in video_prompts
     assert "không tạo chữ/text/logo giả" in video_prompts
     assert "đã chọn prompt video 1" in bot.cinematic_ad_selected_video_prompt_text(concept, 1).lower()
@@ -1982,6 +2029,23 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
+
+
+def test_setvip_is_limited_to_five_member_tiers():
+    source = bot_source_text()
+    setvip_source = source_between(source, "async def cmd_setvip", "async def cmd_backup_db")
+    assert 'valid_tiers = {"silver", "gold", "platinum", "diamond", "vip"}' in setvip_source
+    assert "Chỉ hỗ trợ: silver, gold, platinum, diamond, vip" in setvip_source
+    assert 'raw_tier == "1"' in setvip_source
+    assert 'raw_tier == "0"' in setvip_source
+    assert "member_tier_overrides" in setvip_source
+    assert "vip_tier_override" in setvip_source
+    assert "Tiêu Chuẩn" not in setvip_source
+    assert "<1|0>" not in setvip_source
+    admin_help = bot.admin_center_text("member")
+    assert "/setvip" in admin_help
+    assert "silver|gold|platinum|diamond|vip" in admin_help
+    assert "<1|0>" not in admin_help
 
 
 def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
