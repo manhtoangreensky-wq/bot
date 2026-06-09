@@ -869,7 +869,7 @@ VIDEO_PREMIUM_PROVIDER_COST_XU = env_int("VIDEO_PREMIUM_PROVIDER_COST_XU", 1000)
 IMAGE_LOW_COST_XU = env_int("IMAGE_LOW_COST_XU", IMAGE_LOW_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 IMAGE_STANDARD_COST_XU = env_int("IMAGE_STANDARD_COST_XU", IMAGE_STANDARD_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 IMAGE_HIGH_COST_XU = env_int("IMAGE_HIGH_COST_XU", IMAGE_HIGH_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
-VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", VIDEO_LOW_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
+VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", 200)
 VIDEO_STANDARD_COST_XU = env_int("VIDEO_STANDARD_COST_XU", VIDEO_STANDARD_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 VIDEO_HIGH_COST_XU = env_int("VIDEO_HIGH_COST_XU", VIDEO_HIGH_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 VIDEO_PREMIUM_COST_XU = env_int("VIDEO_PREMIUM_COST_XU", VIDEO_PREMIUM_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
@@ -31471,14 +31471,12 @@ def menu_text_main_profile(user_id) -> str:
         return "👤 <b>TÀI KHOẢN</b>\n\nGõ <code>/profile</code> để xem số dư Xu, hạng thành viên và thông tin tài khoản."
     credits, total_spent, is_vip = get_user(user_id)
     balance = "Vô hạn" if is_admin_user(user_id) else f"{int(credits)} Xu"
-    ref_link = referral_link_for_user(user_id, BOT_USERNAME)
     return (
         "👤 <b>TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{html.escape(str(user_id))}</code>\n"
         f"• 🪪 Hạng: <b>{html.escape(get_role_badge(user_id))}</b>\n"
         f"• Số dư: <b>{html.escape(balance)}</b>\n\n"
-        "🎁 <b>Link giới thiệu của bạn</b>\n"
-        f"<code>{html.escape(ref_link)}</code>\n\n"
+        "Bấm nút bên dưới để xem link giới thiệu, quyền lợi và lịch sử.\n"
         "Gõ <code>/profile</code> để xem chi tiết referral, birthday gift và quyền lợi thành viên."
     )
 
@@ -31761,14 +31759,12 @@ def menu_text_main_profile_i18n(user_id, lang: str) -> str:
         return "👤 <b>ACCOUNT</b>\n\nUse <code>/profile</code> to view balance, tier and account information."
     credits, _total_spent, _is_vip = get_user(user_id)
     balance = "Unlimited" if is_admin_user(user_id) else f"{int(credits)} Xu"
-    ref_link = referral_link_for_user(user_id, BOT_USERNAME)
     return (
         "👤 <b>ACCOUNT</b>\n\n"
         f"• ID: <code>{html.escape(str(user_id))}</code>\n"
         f"• Tier: <b>{html.escape(get_role_badge(user_id))}</b>\n"
         f"• Balance: <b>{html.escape(balance)}</b>\n\n"
-        "🎁 <b>Your referral link</b>\n"
-        f"<code>{html.escape(ref_link)}</code>\n\n"
+        "Use the buttons below to view your referral link, benefits and history.\n"
         "Use <code>/profile</code> for referral, birthday and member details."
     )
 
@@ -43503,6 +43499,7 @@ async def handle_creative_motion_pending_text(update: Update, context: ContextTy
     return True
 
 CREATIVE_CINEMATIC_AD_PENDING_TTL_SECONDS = 10 * 60
+LAST_CINEMATIC_AD_CONCEPTS: dict[str, dict] = {}
 
 def cinematic_ad_pending_key(user_id) -> str:
     return f"cinematic_ad_concept:{user_id}"
@@ -43529,6 +43526,84 @@ def get_cinematic_ad_pending(user_id) -> dict | None:
 
 def clear_cinematic_ad_pending(user_id) -> bool:
     return USER_PENDING.pop(cinematic_ad_pending_key(user_id), None) is not None
+
+def cinematic_ad_latest_key(user_id) -> str:
+    return str(user_id)
+
+def cinematic_ad_concept_topic(product: str, message: str, style: str = "cinematic") -> str:
+    safe_product = re.sub(r"\s+", " ", str(product or "").strip())[:300] or "sản phẩm/dịch vụ"
+    safe_message = re.sub(r"\s+", " ", str(message or "").strip())[:300] or "thông điệp thương hiệu"
+    style_label = cinematic_ad_style_label(style)
+    return f"concept quảng cáo {style_label} cho {safe_product}, thông điệp {safe_message}"
+
+def save_cinematic_ad_concept(user_id, product: str, message: str, style: str = "cinematic") -> dict:
+    concept = {
+        "product": str(product or "")[:500],
+        "message": str(message or "")[:500],
+        "style": str(style or "cinematic")[:80],
+        "topic": cinematic_ad_concept_topic(product, message, style),
+        "created_at_ts": time.time(),
+    }
+    LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(user_id)] = concept
+    return concept
+
+def get_latest_cinematic_ad_concept(user_id) -> dict | None:
+    concept = LAST_CINEMATIC_AD_CONCEPTS.get(cinematic_ad_latest_key(user_id)) or {}
+    if not concept:
+        return None
+    age = time.time() - float(concept.get("created_at_ts") or 0)
+    if age > CREATIVE_CINEMATIC_AD_PENDING_TTL_SECONDS:
+        LAST_CINEMATIC_AD_CONCEPTS.pop(cinematic_ad_latest_key(user_id), None)
+        return None
+    return concept
+
+def cinematic_ad_missing_latest_text() -> str:
+    return (
+        "⚠️ Chưa tìm thấy concept quảng cáo gần nhất hoặc concept đã hết hạn.\n\n"
+        "Vui lòng bấm 🎬 Concept quảng cáo cinematic để tạo lại concept.\n"
+        "Bot chưa gọi API và chưa trừ Xu."
+    )
+
+def cinematic_ad_continuation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Chốt concept / Tạo tiếp từ concept này", callback_data="adconcept|continue")],
+        [InlineKeyboardButton("🎥 Gợi ý chuyển động từ concept này", callback_data="adconcept|motion_current")],
+        [InlineKeyboardButton("🎬 Tạo video theo trend từ concept này", callback_data="adconcept|trend_current")],
+        [InlineKeyboardButton("🖼➡️🎞 Tạo video từ concept này", callback_data="adconcept|video_current")],
+        [InlineKeyboardButton("🔁 Tạo concept khác", callback_data="adconcept|start")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="adconcept|cancel"), InlineKeyboardButton("🏠 Menu chính", callback_data="adconcept|main")],
+    ])
+
+def cinematic_ad_continue_text(concept: dict) -> str:
+    product = concept.get("product") or "sản phẩm/dịch vụ"
+    message = concept.get("message") or "thông điệp thương hiệu"
+    style_label = cinematic_ad_style_label(concept.get("style") or "cinematic")
+    return (
+        "✅ <b>Đã chốt concept quảng cáo cinematic</b>\n\n"
+        f"• Sản phẩm/dịch vụ: <b>{html.escape(product)}</b>\n"
+        f"• Thông điệp: <b>{html.escape(message)}</b>\n"
+        f"• Phong cách: <b>{html.escape(style_label)}</b>\n\n"
+        "Bạn muốn đi tiếp từ concept này theo hướng nào?\n"
+        "Bot sẽ dùng lại dữ liệu concept hiện tại, không bắt bạn nhập lại từ đầu."
+    )
+
+def cinematic_ad_video_from_concept_text(concept: dict) -> str:
+    product = concept.get("product") or "sản phẩm/dịch vụ"
+    message = concept.get("message") or "thông điệp thương hiệu"
+    style_label = cinematic_ad_style_label(concept.get("style") or "cinematic")
+    topic = concept.get("topic") or cinematic_ad_concept_topic(product, message, style_label)
+    return (
+        "🖼➡️🎞 <b>Tạo video từ concept này</b>\n\n"
+        f"• Concept: <b>{html.escape(topic)}</b>\n"
+        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>\n\n"
+        "Public video vẫn đang OFF trong task này, nên bot chưa gọi API video và chưa trừ Xu.\n\n"
+        "<b>Prompt ảnh gợi ý</b>\n"
+        f"<code>Commercial cinematic keyframe for {html.escape(product)}, message: {html.escape(message)}, style: {html.escape(style_label)}, clean composition, brand ad look, no watermark, no extra text.</code>\n\n"
+        "<b>Prompt video motion gợi ý</b>\n"
+        f"<code>Animate this concept into a short {html.escape(style_label)} ad for {html.escape(product)}. "
+        "Use smooth cinematic camera motion, emotional reveal, clean product focus, stable subject, CTA frame, no watermark, no extra text.</code>\n\n"
+        "Khi public video được mở sau này, flow tạo video thật sẽ đi qua kiểm tra Xu, xác nhận và refund guard."
+    )
 
 def cinematic_ad_product_text() -> str:
     return (
@@ -43700,6 +43775,42 @@ def cinematic_ad_concept_text(product: str, message: str, style: str = "cinemati
         "CTA bán hàng mềm: “Nhắn TOAN AAS để dựng concept/ảnh/video phù hợp sản phẩm của bạn.”"
     )
 
+async def send_or_confirm_trend_video_flow_from_callback(query, uid: int, topic: str) -> None:
+    if not TREND_VIDEO_WORKFLOW_ENABLED:
+        await query.edit_message_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
+        return
+    if not trend_video_workflow_can_access(uid):
+        await query.edit_message_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+        return
+    topic = re.sub(r"\s+", " ", str(topic or "").strip())[:800]
+    if not topic:
+        await query.edit_message_text(cinematic_ad_missing_latest_text())
+        return
+    if is_admin_user(uid):
+        await query.edit_message_text("🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...\nAdmin preview / no Xu deducted.")
+        await send_trend_video_flow_for_topic_message(query.message, uid, topic, billing_note=trend_workflow_admin_preview_note())
+        return
+    if not TREND_WORKFLOW_BILLING_ENABLED:
+        await query.edit_message_text("🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...\nBilling workflow OFF, bot chưa trừ Xu.")
+        await send_trend_video_flow_for_topic_message(query.message, uid, topic, billing_note=trend_workflow_billing_off_note())
+        return
+    total_cost = int(trend_workflow_content_cost_breakdown().get("total") or 0)
+    workflow = trend_workflow_id(uid)
+    credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend workflow user")
+    if int(credits or 0) < total_cost:
+        await edit_trend_workflow_insufficient_credits(query, int(credits or 0), total_cost, uid, workflow)
+        return
+    if TREND_WORKFLOW_REQUIRE_CONFIRM:
+        set_trend_workflow_confirm_pending(uid, topic, workflow)
+        await query.edit_message_text(
+            trend_workflow_content_confirm_text(topic, int(credits or 0)),
+            parse_mode="HTML",
+            reply_markup=trend_workflow_content_confirm_keyboard(),
+        )
+        return
+    await query.edit_message_text("🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...")
+    await execute_confirmed_trend_workflow_content(query.message, uid, topic, workflow)
+
 async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
@@ -43730,6 +43841,35 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
         clear_media_creator_pending_states(uid)
         set_cinematic_ad_pending(uid, "product")
         return await safe_edit_query_message(query, cinematic_ad_product_text(), reply_markup=cinematic_ad_product_keyboard())
+    if action in {"continue", "motion_current", "trend_current", "video_current"}:
+        concept = get_latest_cinematic_ad_concept(uid)
+        if not concept:
+            return await safe_edit_query_message(
+                query,
+                cinematic_ad_missing_latest_text(),
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎬 Tạo concept mới", callback_data="adconcept|start")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="adconcept|main")],
+                ]),
+            )
+        if action == "continue":
+            return await safe_edit_query_message(query, cinematic_ad_continue_text(concept), reply_markup=cinematic_ad_continuation_keyboard())
+        if action == "motion_current":
+            topic = concept.get("topic") or cinematic_ad_concept_topic(concept.get("product"), concept.get("message"), concept.get("style"))
+            return await safe_edit_query_message(
+                query,
+                creative_motion_guide_text(topic, concept.get("style") or "cinematic"),
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Chốt concept / Tạo tiếp", callback_data="adconcept|continue")],
+                    [InlineKeyboardButton("🎬 Trend workflow từ concept", callback_data="adconcept|trend_current")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="adconcept|main")],
+                ]),
+            )
+        if action == "trend_current":
+            topic = concept.get("topic") or cinematic_ad_concept_topic(concept.get("product"), concept.get("message"), concept.get("style"))
+            return await send_or_confirm_trend_video_flow_from_callback(query, uid, topic)
+        if action == "video_current":
+            return await safe_edit_query_message(query, cinematic_ad_video_from_concept_text(concept), reply_markup=cinematic_ad_continuation_keyboard())
     if action == "back":
         pending = get_cinematic_ad_pending(uid) or {}
         if value == "product":
@@ -43758,16 +43898,12 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
         pending = get_cinematic_ad_pending(uid) or {}
         product = pending.get("product") or "sản phẩm/dịch vụ của bạn"
         message = pending.get("message") or "thông điệp thương hiệu"
+        save_cinematic_ad_concept(uid, product, message, value)
         clear_cinematic_ad_pending(uid)
         return await safe_edit_query_message(
             query,
             cinematic_ad_concept_text(product, message, value),
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Tạo concept khác", callback_data="adconcept|start")],
-                [InlineKeyboardButton("🎥 Gợi ý chuyển động video", callback_data="motion|start")],
-                [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
-                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-            ]),
+            reply_markup=cinematic_ad_continuation_keyboard(),
         )
     return await safe_edit_query_message(query, cinematic_ad_product_text(), reply_markup=cinematic_ad_product_keyboard())
 
@@ -43793,16 +43929,12 @@ async def handle_cinematic_ad_pending_text(update: Update, context: ContextTypes
         return True
     product = pending.get("product") or "sản phẩm/dịch vụ của bạn"
     message = pending.get("message") or "thông điệp thương hiệu"
+    save_cinematic_ad_concept(uid, product, message, text)
     clear_cinematic_ad_pending(uid)
     await update.message.reply_text(
         cinematic_ad_concept_text(product, message, text),
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔁 Tạo concept khác", callback_data="adconcept|start")],
-            [InlineKeyboardButton("🎥 Gợi ý chuyển động video", callback_data="motion|start")],
-            [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
-            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-        ]),
+        reply_markup=cinematic_ad_continuation_keyboard(),
     )
     return True
 

@@ -344,7 +344,7 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "IMAGE_LOW_COST_XU=50" in env_example
     assert "IMAGE_STANDARD_COST_XU=300" in env_example
     assert "IMAGE_HIGH_COST_XU=500" in env_example
-    assert "VIDEO_LOW_COST_XU=300" in env_example
+    assert "VIDEO_LOW_COST_XU=200" in env_example
     assert "VIDEO_STANDARD_COST_XU=600" in env_example
     assert "VIDEO_HIGH_COST_XU=1200" in env_example
     assert "VIDEO_PREMIUM_COST_XU=2000" in env_example
@@ -980,7 +980,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     billed_joined = "\n".join(billed_sections).lower()
     assert "70 xu" in billed_joined
     assert "tạo ảnh 50 xu" in billed_joined
-    assert "tạo video 300 xu" in billed_joined
+    assert "tạo video 200 xu" in billed_joined
     assert "Bot chưa trừ Xu" in bot.TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE or "thử nghiệm nội bộ" in bot.TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE
     assert bot.TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE == "🧪 Tính năng tạo video theo trend đang thử nghiệm nội bộ, chưa mở công khai."
     breakdown = bot.trend_workflow_content_cost_breakdown()
@@ -989,7 +989,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert breakdown["prompt_pack"] == 20
     assert breakdown["total"] == 70
     assert breakdown["image_separate"] == 50
-    assert breakdown["video_separate"] == 300
+    assert breakdown["video_separate"] == 200
     assert "70 Xu" in bot.trend_workflow_content_confirm_text("affiliate AI", 200)
     assert "tvflow|confirm_content" in source
     assert "tvflow|cancel_content" in source
@@ -1115,7 +1115,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", 300)' in source
     assert 'MEDIA_PRICE_MULTIPLIER = env_int("MEDIA_PRICE_MULTIPLIER", 2)' in source
     assert 'IMAGE_LOW_COST_XU = env_int("IMAGE_LOW_COST_XU"' in source
-    assert 'VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU"' in source
+    assert 'VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", 200)' in source
     assert 'WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)' in source
     assert 'WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)' in source
     assert 'WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", 20)' in source
@@ -1396,14 +1396,17 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "deduct_dynamic_credit" not in ad_source
 
     assert bot.referral_link_for_user("123456", "toanaasbot") == "https://t.me/toanaasbot?start=ref_123456"
-    profile_source = source_between(source, "def menu_text_main_profile", "def menu_text_main_guide")
-    assert "🎁 <b>Link giới thiệu của bạn</b>" in profile_source
-    assert "referral_link_for_user(user_id" in profile_source
+    profile_text_source = source_between(source, "def menu_text_main_profile", "def main_profile_keyboard")
+    assert "🎁 <b>Link giới thiệu của bạn</b>" not in profile_text_source
+    assert "referral_link_for_user(user_id" not in profile_text_source
+    assert "Bấm nút bên dưới để xem link giới thiệu" in profile_text_source
+    assert "https://t.me/" not in profile_text_source
     profile_buttons = [button.text for row in bot.main_profile_keyboard("vi").inline_keyboard for button in row]
     assert "🎁 Link giới thiệu của tôi" in profile_buttons
     assert "📋 Cách nhận thưởng giới thiệu" in profile_buttons
     assert "👥 Người đã giới thiệu" in profile_buttons
     assert "Ghi nhận giới thiệu trước" in bot.referral_account_link_text("123456", "toanaasbot")
+    assert "https://t.me/toanaasbot?start=ref_123456" in bot.referral_account_link_text("123456", "toanaasbot")
 
     plan_text = "\n".join(bot.pricing_plans_lines())
     assert "Gói tháng = quyền dùng công cụ + Xu xử lý/tháng + hạn mức ưu tiên" in plan_text
@@ -1457,6 +1460,15 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "🎬 Cinematic cảm xúc" in style_buttons
     assert "🖤 Đen trắng luxury" in style_buttons
     assert "🧊 3D/product reveal" in style_buttons
+    continuation_buttons = [button.text for row in bot.cinematic_ad_continuation_keyboard().inline_keyboard for button in row]
+    assert "✅ Chốt concept / Tạo tiếp từ concept này" in continuation_buttons
+    assert "🎥 Gợi ý chuyển động từ concept này" in continuation_buttons
+    assert "🎬 Tạo video theo trend từ concept này" in continuation_buttons
+    assert "🖼➡️🎞 Tạo video từ concept này" in continuation_buttons
+    assert "adconcept|motion_current" in ad_source
+    assert "adconcept|trend_current" in ad_source
+    assert "adconcept|video_current" in ad_source
+    assert "send_or_confirm_trend_video_flow_from_callback" in ad_source
     ad_concept = bot.cinematic_ad_concept_text("máy xay sinh tố mini", "tiết kiệm thời gian", "cinematic").lower()
     assert "big idea" in ad_concept
     assert "brand story" in ad_concept
@@ -1480,6 +1492,15 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     pending = bot.get_cinematic_ad_pending("u_ad")
     assert pending and pending["message"] == "tiết kiệm thời gian"
     assert bot.clear_cinematic_ad_pending("u_ad") is True
+    concept = bot.save_cinematic_ad_concept("u_ad", "máy xay sinh tố mini", "tiết kiệm thời gian", "cinematic")
+    latest = bot.get_latest_cinematic_ad_concept("u_ad")
+    assert latest and latest["product"] == "máy xay sinh tố mini"
+    assert "concept quảng cáo" in latest["topic"]
+    assert "dùng lại dữ liệu concept hiện tại" in bot.cinematic_ad_continue_text(concept).lower()
+    video_from_concept = bot.cinematic_ad_video_from_concept_text(concept).lower()
+    assert "public video" in video_from_concept
+    assert "off" in video_from_concept
+    assert "bot chưa gọi api video và chưa trừ xu" in video_from_concept
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
