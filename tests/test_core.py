@@ -342,8 +342,10 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "VIDEO_BASE_COST_XU=300" in env_example
     assert "MEDIA_PRICE_MULTIPLIER=2" in env_example
     assert "IMAGE_LOW_COST_XU=50" in env_example
-    assert "IMAGE_STANDARD_COST_XU=300" in env_example
-    assert "IMAGE_HIGH_COST_XU=500" in env_example
+    assert "IMAGE_STANDARD_COST_XU=200" in env_example
+    assert "IMAGE_STANDARD_WARRANTY_COST_XU=250" in env_example
+    assert "IMAGE_HIGH_COST_XU=400" in env_example
+    assert "IMAGE_HIGH_WARRANTY_COST_XU=500" in env_example
     assert "VIDEO_LOW_COST_XU=200" in env_example
     assert "VIDEO_STANDARD_COST_XU=600" in env_example
     assert "VIDEO_HIGH_COST_XU=1200" in env_example
@@ -916,7 +918,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "update_trend_workflow_generated_image" in shopai_callback_source
     assert "trend_workflow_image_success_keyboard" in shopai_callback_source
     assert "image.success" in shopai_callback_source
-    assert "🎞 Tạo video từ ảnh này" in source
+    assert "🎞 Tạo 3 prompt video từ ảnh này" in source
 
     monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ENABLED", True)
     monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ADMIN_ONLY", True)
@@ -995,7 +997,8 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "tvflow|confirm_content" in source
     assert "tvflow|cancel_content" in source
     assert "Đã hủy gói nội dung theo trend" in callback_source
-    assert "image_to_video_public_off_prompt" in callback_source
+    assert "image_to_video_prompt_choices_text" in callback_source
+    assert "image_to_video_public_off_from_prompt_text" in callback_source
     assert "safe_edit_or_send" in callback_source
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
@@ -1093,7 +1096,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.is_soft_telegram_edit_error(Exception("BadRequest: There is no text in the message to edit")) is True
     assert bot.is_soft_telegram_edit_error(Exception("RateLimitError")) is False
     safe_edit_source = source_between(source, "async def safe_edit_or_send", "async def handle_menu_callback")
-    assert "Có lỗi nhỏ khi cập nhật màn hình" in safe_edit_source
+    assert "Có lỗi nhỏ khi cập nhật màn hình" not in safe_edit_source
     assert "message.reply_text" in safe_edit_source
     assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
     assert 'InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")' in source
@@ -1117,7 +1120,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "create_media|cancel",
     ]:
         assert callback_data in source
-    assert 'callback_data=f"create_media|image_tier_{tier}"' in source
+        assert 'image_tier_choice_rows(lambda tier: f"create_media|image_tier_{tier}", lang)' in source
     assert 'callback_data=f"create_media|video_tier_{tier}"' in source
     create_media_keyboard_source = source_between(source, "def create_media_menu_keyboard", "def create_media_pricing_text")
     assert "create_media|trend" not in create_media_keyboard_source
@@ -1187,7 +1190,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     monkeypatch.setattr(bot, "IMAGE_LOW_COST_XU", 321)
     monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 654)
     monkeypatch.setattr(bot, "IMAGE_STANDARD_COST_XU", 777)
+    monkeypatch.setattr(bot, "IMAGE_STANDARD_WARRANTY_COST_XU", 799)
     monkeypatch.setattr(bot, "IMAGE_HIGH_COST_XU", 888)
+    monkeypatch.setattr(bot, "IMAGE_HIGH_WARRANTY_COST_XU", 999)
     monkeypatch.setattr(bot, "IMAGE_TIER_LOW_ENABLED", True)
     monkeypatch.setattr(bot, "IMAGE_TIER_STANDARD_ENABLED", True)
     monkeypatch.setattr(bot, "IMAGE_TIER_HIGH_ENABLED", True)
@@ -1210,7 +1215,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert pricing["billing_mode"] == "tiered_media_pricing"
     assert pricing["image_tiers"]["low"]["cost"] == 321
     assert pricing["image_tiers"]["standard"]["cost"] == 777
+    assert pricing["image_tiers"]["standard_warranty"]["cost"] == 799
+    assert pricing["image_tiers"]["standard_warranty"]["retry_warranty_count"] == 1
     assert pricing["image_tiers"]["high"]["cost"] == 888
+    assert pricing["image_tiers"]["high_warranty"]["cost"] == 999
+    assert pricing["image_tiers"]["high_warranty"]["retry_warranty_count"] == 1
     assert pricing["video_tiers"]["low"]["cost"] == 654
     assert pricing["video_tiers"]["standard"]["cost"] == 999
     assert pricing["video_tiers"]["high"]["cost"] == 1111
@@ -1219,9 +1228,13 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert pricing["quick_video_cost"] == 654
     assert bot.image_tier_cost_xu("low") == 321
     assert bot.image_tier_cost_xu("standard") == 777
+    assert bot.image_tier_cost_xu("standard_warranty") == 799
     assert bot.image_tier_cost_xu("high") == 888
+    assert bot.image_tier_cost_xu("high_warranty") == 999
+    assert bot.image_tier_retry_warranty_count("standard_warranty") == 1
+    assert bot.image_tier_retry_warranty_count("high") == 0
     assert bot.image_tier_payload("pro")["tier"] == "high"
-    assert bot.image_tier_public_status_text() == "low:ON / standard:ON / high:ON"
+    assert bot.image_tier_public_status_text() == "low:ON / standard:ON / standard_warranty:ON / high:ON / high_warranty:ON"
     assert bot.video_tier_cost_xu("low") == 654
     assert bot.video_tier_cost_xu("standard") == 999
     assert bot.video_tier_cost_xu("high") == 1111
@@ -1234,12 +1247,17 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     tier_buttons = [button for row in bot.public_image_tier_keyboard().inline_keyboard for button in row]
     assert any(button.callback_data == "create_media|image_tier_low" for button in tier_buttons)
     assert any(button.callback_data == "create_media|image_tier_standard" for button in tier_buttons)
+    assert any(button.callback_data == "create_media|image_tier_standard_warranty" for button in tier_buttons)
     assert any(button.callback_data == "create_media|image_tier_high" for button in tier_buttons)
+    assert any(button.callback_data == "create_media|image_tier_high_warranty" for button in tier_buttons)
     assert any("Ảnh tiết kiệm" in button.text and "321 Xu" in button.text for button in tier_buttons)
+    assert any("Ảnh tiêu chuẩn + bảo hành" in button.text and "799 Xu" in button.text for button in tier_buttons)
     assert "Gửi mô tả ảnh bạn muốn tạo" in bot.public_image_prompt_request_text("standard")
     assert "777 Xu" in bot.public_image_confirm_text("standard", "ảnh sản phẩm", 1000)
+    assert "Gói này không kèm tạo lại miễn phí" in bot.public_image_confirm_text("standard", "ảnh sản phẩm", 1000)
+    assert "Gói này kèm 1 lần tạo lại trong cùng yêu cầu" in bot.public_image_confirm_text("standard_warranty", "ảnh sản phẩm", 1000)
     success_buttons = [button for row in bot.public_image_success_keyboard(123, "low").inline_keyboard for button in row]
-    assert any(button.callback_data == "tvflow|video_from_image_123" for button in success_buttons)
+    assert any(button.callback_data == "tvflow|image_video_prompts_123" for button in success_buttons)
     assert any(button.callback_data == "create_media|image_tier_low" for button in success_buttons)
     video_tier_text = bot.public_video_tier_selection_text()
     assert "Bạn muốn tạo video chất lượng nào" in video_tier_text
@@ -1696,7 +1714,9 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "3️⃣ Chọn gợi ý 3" in image_choice_buttons
     selected_image_buttons = [button.text for row in bot.cinematic_ad_image_prompt_selected_keyboard(1).inline_keyboard for button in row]
     assert "✅ Lưu prompt ảnh" in selected_image_buttons
-    assert any("Tạo ảnh tiết kiệm" in label for label in selected_image_buttons)
+    assert any("Ảnh tiết kiệm" in label for label in selected_image_buttons)
+    assert any("Ảnh tiêu chuẩn + bảo hành" in label and "250 Xu" in label for label in selected_image_buttons)
+    assert any("Ảnh chất lượng cao + bảo hành" in label and "500 Xu" in label for label in selected_image_buttons)
     video_choice_buttons = [button.text for row in bot.cinematic_ad_video_prompt_choices_keyboard().inline_keyboard for button in row]
     assert "1️⃣ Chọn gợi ý 1" in video_choice_buttons
     assert "2️⃣ Chọn gợi ý 2" in video_choice_buttons
@@ -1718,7 +1738,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "adconcept|video_prompt_current" in ad_source
     assert "adconcept|video_prompt_choice|1" in ad_source
     assert "adconcept|music_choice|1" in ad_source
-    assert "adconcept|image_ai_tier|1|low" in ad_source
+    assert 'image_tier_choice_rows(lambda tier: f"adconcept|image_ai_tier|1|{tier}", lang)' in ad_source
     assert "adconcept|create_video_current" in ad_source
     assert "adconcept|edit_current" in ad_source
     assert "send_or_confirm_trend_video_flow_from_callback" in ad_source
@@ -1856,7 +1876,7 @@ def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
     assert "auto_poll_shopaikey_video_job" in command_source
     assert "No Xu deducted" in command_source
     assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED" in callback_source
-    assert "image_to_video_public_off_prompt" in callback_source
+    assert "image_to_video_public_off_from_prompt_text" in callback_source
     assert "safe_edit_or_send" in callback_source
     assert "spend_fixed_credit_info" not in command_source
     assert "deduct_dynamic_credit" not in command_source

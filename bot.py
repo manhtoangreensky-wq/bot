@@ -871,8 +871,10 @@ VIDEO_STANDARD_PROVIDER_COST_XU = env_int("VIDEO_STANDARD_PROVIDER_COST_XU", 300
 VIDEO_HIGH_PROVIDER_COST_XU = env_int("VIDEO_HIGH_PROVIDER_COST_XU", 600)
 VIDEO_PREMIUM_PROVIDER_COST_XU = env_int("VIDEO_PREMIUM_PROVIDER_COST_XU", 1000)
 IMAGE_LOW_COST_XU = env_int("IMAGE_LOW_COST_XU", IMAGE_LOW_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
-IMAGE_STANDARD_COST_XU = env_int("IMAGE_STANDARD_COST_XU", IMAGE_STANDARD_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
-IMAGE_HIGH_COST_XU = env_int("IMAGE_HIGH_COST_XU", IMAGE_HIGH_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
+IMAGE_STANDARD_COST_XU = env_int("IMAGE_STANDARD_COST_XU", 200)
+IMAGE_STANDARD_WARRANTY_COST_XU = env_int("IMAGE_STANDARD_WARRANTY_COST_XU", 250)
+IMAGE_HIGH_COST_XU = env_int("IMAGE_HIGH_COST_XU", 400)
+IMAGE_HIGH_WARRANTY_COST_XU = env_int("IMAGE_HIGH_WARRANTY_COST_XU", 500)
 VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", 200)
 VIDEO_STANDARD_COST_XU = env_int("VIDEO_STANDARD_COST_XU", VIDEO_STANDARD_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 VIDEO_HIGH_COST_XU = env_int("VIDEO_HIGH_COST_XU", VIDEO_HIGH_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
@@ -1691,6 +1693,9 @@ def init_db():
         confirm_required INTEGER DEFAULT 1,
         confirmed_at TEXT DEFAULT '',
         source_job_id TEXT DEFAULT '',
+        retry_warranty_count INTEGER DEFAULT 0,
+        retry_warranty_used INTEGER DEFAULT 0,
+        retry_warranty_parent_job_id INTEGER DEFAULT 0,
         admin_only INTEGER DEFAULT 1,
         error_class TEXT,
         provider_error_code TEXT,
@@ -2465,6 +2470,9 @@ def init_db():
         ("confirm_required", "INTEGER DEFAULT 1"),
         ("confirmed_at", "TEXT DEFAULT ''"),
         ("source_job_id", "TEXT DEFAULT ''"),
+        ("retry_warranty_count", "INTEGER DEFAULT 0"),
+        ("retry_warranty_used", "INTEGER DEFAULT 0"),
+        ("retry_warranty_parent_job_id", "INTEGER DEFAULT 0"),
     ]:
         try:
             c.execute(f"ALTER TABLE shopaikey_jobs ADD COLUMN {col} {col_type}")
@@ -3266,23 +3274,29 @@ UI_TEXT = {
         "image.tier_disabled": " — tạm tắt",
         "image.tier.low": "Ảnh tiết kiệm",
         "image.tier.standard": "Ảnh tiêu chuẩn",
+        "image.tier.standard_warranty": "Ảnh tiêu chuẩn + bảo hành",
         "image.tier.high": "Ảnh chất lượng cao",
+        "image.tier.high_warranty": "Ảnh chất lượng cao + bảo hành",
         "image.quick_button": "🖼 Tạo ảnh AI nhanh",
         "image.prompt_button": "✍️ Tạo prompt ảnh",
         "image.edit_button": "🧩 Sửa ảnh / edit ảnh",
         "image.upscale_button": "📐 Nâng cấp / đổi kích thước ảnh",
         "image.waiting": "🖼 Đang tạo ảnh cho bạn, vui lòng chờ một chút. Không cần gửi lại lệnh.",
         "image.tier_disabled_message": "🧪 Tier ảnh này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.",
-        "image.success": "✅ Ảnh {label} đã tạo xong.\nJob #{job_id}\nĐã trừ: {deducted} Xu.\n\nBạn muốn làm gì tiếp?",
+        "image.success": "✅ Ảnh {label} đã tạo xong.\nJob #{job_id}\n{billing_note}\n\nBạn muốn làm gì tiếp?\n\n• Chốt ảnh này nếu đã hài lòng\n• Tạo prompt video từ ảnh\n• Sửa prompt hoặc tạo lại ảnh",
         "image.success_link": "✅ Ảnh ShopAIKey đã tạo xong nhưng Telegram không gửi trực tiếp được.\n<a href=\"{url}\">Mở ảnh</a>",
         "image.fail.not_charged": "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau.",
         "image.fail.refunded": "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau.",
         "image.fail.refund_failed": "⚠️ Tác vụ tạo ảnh lỗi sau khi đã trừ Xu. Bot chưa hoàn tự động được. Admin đã được ghi nhận để kiểm tra và hoàn Xu thủ công nếu hợp lệ.",
         "image.prompt.ask": "🖼 <b>{label}</b>\n\nGửi mô tả ảnh bạn muốn tạo.\n\nVí dụ: logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản.\n\nTimeout: 10 phút. Gõ /cancel để hủy.\nBot chưa gọi API và chưa trừ Xu.",
-        "image.confirm.cost": "🖼 <b>Tạo ảnh {label} sẽ tốn {cost} Xu.</b>\n\n• Số dư hiện tại: <b>{credits} Xu</b>\n• Prompt: <code>{prompt}</code>\n\nBạn có muốn tiếp tục không?\nBot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn Xu theo chính sách.",
-        "image.to_video": "🎞 Tạo video từ ảnh này",
+        "image.confirm.cost": "🖼 <b>Tạo ảnh {label} sẽ tốn {cost} Xu.</b>\n\n• Số dư hiện tại: <b>{credits} Xu</b>\n• Bảo hành: {warranty_note}\n• Prompt: <code>{prompt}</code>\n\nBạn có muốn tiếp tục không?\nBot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn Xu theo chính sách.",
+        "image.lock": "✅ Chốt ảnh này",
+        "image.to_video": "🎞 Tạo 3 prompt video từ ảnh này",
         "image.regenerate": "🔁 Tạo lại ảnh",
-        "image.edit_prompt": "✍️ Sửa prompt",
+        "image.regenerate_paid": "🔁 Tạo lại ảnh theo bảng giá",
+        "image.warranty_retry": "🔁 Tạo lại ảnh bảo hành 1 lần",
+        "image.edit_prompt": "✍️ Sửa prompt ảnh",
+        "image.music_hint": "🎵 Gợi ý nhạc",
         "video.choose_tier.title": "🎞 <b>Bạn muốn tạo video chất lượng nào?</b>\n\nChọn tier video bên dưới. Giá lấy từ <b>💳 Bảng giá</b>.",
         "video.quick": "🎞 Tạo video nhanh",
         "video.trend": "🎬 Tạo video theo trend",
@@ -3509,23 +3523,29 @@ UI_TEXT = {
         "image.tier_disabled": " — disabled",
         "image.tier.low": "Budget image",
         "image.tier.standard": "Standard image",
+        "image.tier.standard_warranty": "Standard image + warranty",
         "image.tier.high": "High-quality image",
+        "image.tier.high_warranty": "High-quality image + warranty",
         "image.quick_button": "🖼 Quick AI image",
         "image.prompt_button": "✍️ Image prompt",
         "image.edit_button": "🧩 Edit image",
         "image.upscale_button": "📐 Upscale / resize image",
         "image.waiting": "🖼 Creating your image. Please wait a moment and do not resend the command.",
         "image.tier_disabled_message": "🧪 This image tier is currently disabled. The bot has not called any API and has not charged Xu.",
-        "image.success": "✅ {label} is ready.\nJob #{job_id}\nCharged: {deducted} Xu.\n\nWhat would you like to do next?",
+        "image.success": "✅ {label} image is ready.\nJob #{job_id}\n{billing_note}\n\nWhat would you like to do next?\n\n• Lock this image if you are happy with it\n• Create video prompts from this image\n• Edit the prompt or regenerate the image",
         "image.success_link": "✅ The ShopAIKey image is ready, but Telegram could not send it directly.\n<a href=\"{url}\">Open image</a>",
         "image.fail.not_charged": "⚙️ The image model is busy or temporarily unavailable. The bot has not charged Xu. Please try again later.",
         "image.fail.refunded": "⚙️ The image model is busy or temporarily unavailable. TOAN AAS has refunded {amount} Xu. Please try again later.",
         "image.fail.refund_failed": "⚠️ The image task failed after Xu was charged. The bot could not refund automatically. Admin has been notified to review and refund manually if valid.",
         "image.prompt.ask": "🖼 <b>{label}</b>\n\nSend the image description you want to generate.\n\nExample: TOAN AAS turquoise logo, clean white background, minimalist tech style.\n\nTimeout: 10 minutes. Use /cancel to cancel.\nThe bot has not called any API and has not charged Xu.",
-        "image.confirm.cost": "🖼 <b>Creating {label} costs {cost} Xu.</b>\n\n• Current balance: <b>{credits} Xu</b>\n• Prompt: <code>{prompt}</code>\n\nDo you want to continue?\nThe bot charges Xu only after you confirm. If the provider fails, the bot refunds Xu according to policy.",
-        "image.to_video": "🎞 Create video from this image",
+        "image.confirm.cost": "🖼 <b>Creating {label} costs {cost} Xu.</b>\n\n• Current balance: <b>{credits} Xu</b>\n• Retry warranty: {warranty_note}\n• Prompt: <code>{prompt}</code>\n\nDo you want to continue?\nThe bot charges Xu only after you confirm. If the provider fails, the bot refunds Xu according to policy.",
+        "image.lock": "✅ Lock this image",
+        "image.to_video": "🎞 Create 3 video prompts from this image",
         "image.regenerate": "🔁 Regenerate image",
+        "image.regenerate_paid": "🔁 Regenerate by pricing table",
+        "image.warranty_retry": "🔁 Use 1 warranty retry",
         "image.edit_prompt": "✍️ Edit prompt",
+        "image.music_hint": "🎵 Music suggestion",
         "video.choose_tier.title": "🎞 <b>Choose video quality</b>\n\nSelect a video tier below. Pricing comes from <b>💳 Pricing</b>.",
         "video.quick": "🎞 Quick video",
         "video.trend": "🎬 Trend video workflow",
@@ -3752,23 +3772,29 @@ UI_TEXT = {
         "image.tier_disabled": " — 已关闭",
         "image.tier.low": "经济图片",
         "image.tier.standard": "标准图片",
+        "image.tier.standard_warranty": "标准图片 + 保障重试",
         "image.tier.high": "高质量图片",
+        "image.tier.high_warranty": "高质量图片 + 保障重试",
         "image.quick_button": "🖼 快速生成 AI 图片",
         "image.prompt_button": "✍️ 图片 prompt",
         "image.edit_button": "🧩 编辑图片",
         "image.upscale_button": "📐 放大 / 调整图片尺寸",
         "image.waiting": "🖼 正在为你生成图片，请稍候，不需要重复发送命令。",
         "image.tier_disabled_message": "🧪 此图片档位当前已关闭。Bot 未调用 API，也未扣除 Xu。",
-        "image.success": "✅ {label} 已生成完成。\nJob #{job_id}\n已扣除：{deducted} Xu。\n\n你想下一步做什么？",
+        "image.success": "✅ {label} 已生成完成。\nJob #{job_id}\n{billing_note}\n\n你想下一步做什么？\n\n• 如果满意，请锁定此图片\n• 基于此图片生成 3 个视频 prompt\n• 修改 prompt 或重新生成图片",
         "image.success_link": "✅ ShopAIKey 图片已生成，但 Telegram 无法直接发送。\n<a href=\"{url}\">打开图片</a>",
         "image.fail.not_charged": "⚙️ 图片模型正忙或暂时不可用。本次未扣除 Xu。请稍后再试。",
         "image.fail.refunded": "⚙️ 图片模型正忙或暂时不可用。TOAN AAS 已退回 {amount} Xu。请稍后再试。",
         "image.fail.refund_failed": "⚠️ 图片任务在扣除 Xu 后失败。Bot 暂时无法自动退款，Admin 已收到记录，会在符合条件时人工处理退款。",
         "image.prompt.ask": "🖼 <b>{label}</b>\n\n请发送你想生成的图片描述。\n\n示例：TOAN AAS 青绿色 logo，白色干净背景，极简科技风。\n\n超时：10 分钟。使用 /cancel 取消。\nBot 未调用 API，也未扣除 Xu。",
-        "image.confirm.cost": "🖼 <b>生成 {label} 需要 {cost} Xu。</b>\n\n• 当前余额：<b>{credits} Xu</b>\n• Prompt：<code>{prompt}</code>\n\n是否继续？\n只有确认后 Bot 才会扣除 Xu。如果 provider 失败，Bot 会按政策退款。",
-        "image.to_video": "🎞 用这张图生成视频",
+        "image.confirm.cost": "🖼 <b>生成 {label} 需要 {cost} Xu。</b>\n\n• 当前余额：<b>{credits} Xu</b>\n• 重试保障：{warranty_note}\n• Prompt：<code>{prompt}</code>\n\n是否继续？\n只有确认后 Bot 才会扣除 Xu。如果 provider 失败，Bot 会按政策退款。",
+        "image.lock": "✅ 锁定这张图片",
+        "image.to_video": "🎞 基于此图片生成 3 个视频 prompt",
         "image.regenerate": "🔁 重新生成图片",
+        "image.regenerate_paid": "🔁 按价格表重新生成",
+        "image.warranty_retry": "🔁 使用 1 次保障重试",
         "image.edit_prompt": "✍️ 修改 prompt",
+        "image.music_hint": "🎵 音乐建议",
         "video.choose_tier.title": "🎞 <b>选择视频质量</b>\n\n请选择视频档位。价格以 <b>💳 价格</b> 为准。",
         "video.quick": "🎞 快速生成视频",
         "video.trend": "🎬 Trend 视频 workflow",
@@ -28358,6 +28384,15 @@ def media_tier_price(cost_xu: int, provider_cost_xu: int, fallback_xu: int = 0) 
         return max(0, provider_cost * media_price_multiplier())
     return max(0, int(fallback_xu or 0))
 
+IMAGE_TIER_ORDER = ("low", "standard", "standard_warranty", "high", "high_warranty")
+IMAGE_TIER_ICONS = {
+    "low": "🟢",
+    "standard": "🔵",
+    "standard_warranty": "🛡",
+    "high": "🟣",
+    "high_warranty": "🛡",
+}
+
 def image_tier_pricing_payload() -> dict:
     return {
         "low": {
@@ -28365,21 +28400,40 @@ def image_tier_pricing_payload() -> dict:
             "cost": media_tier_price(IMAGE_LOW_COST_XU, IMAGE_LOW_PROVIDER_COST_XU, IMAGE_BASE_COST_XU),
             "provider_cost": int(IMAGE_LOW_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
-            "note": "Ảnh nhanh, phù hợp nháp/prompt test.",
+            "note": "Không kèm tạo lại miễn phí. Dùng làm sản phẩm mồi/test nhanh.",
+            "retry_warranty_count": 0,
         },
         "standard": {
             "label": "Ảnh tiêu chuẩn",
-            "cost": media_tier_price(IMAGE_STANDARD_COST_XU, IMAGE_STANDARD_PROVIDER_COST_XU, AI_IMAGE_COST),
+            "cost": media_tier_price(IMAGE_STANDARD_COST_XU, IMAGE_STANDARD_PROVIDER_COST_XU, 200),
             "provider_cost": int(IMAGE_STANDARD_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
-            "note": "Chất lượng ổn cho nội dung hằng ngày.",
+            "note": "Gói này không kèm tạo lại miễn phí.",
+            "retry_warranty_count": 0,
+        },
+        "standard_warranty": {
+            "label": "Ảnh tiêu chuẩn + bảo hành",
+            "cost": max(0, int(IMAGE_STANDARD_WARRANTY_COST_XU or 250)),
+            "provider_cost": int(IMAGE_STANDARD_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            "note": "Gói này kèm 1 lần tạo lại trong cùng yêu cầu.",
+            "retry_warranty_count": 1,
         },
         "high": {
             "label": "Ảnh chất lượng cao",
-            "cost": media_tier_price(IMAGE_HIGH_COST_XU, IMAGE_HIGH_PROVIDER_COST_XU, AI_IMAGE_EDIT_COST),
+            "cost": media_tier_price(IMAGE_HIGH_COST_XU, IMAGE_HIGH_PROVIDER_COST_XU, 400),
             "provider_cost": int(IMAGE_HIGH_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
-            "note": "Ưu tiên prompt kỹ hơn, dùng cho sản phẩm/quảng cáo.",
+            "note": "Gói này không kèm tạo lại miễn phí.",
+            "retry_warranty_count": 0,
+        },
+        "high_warranty": {
+            "label": "Ảnh chất lượng cao + bảo hành",
+            "cost": max(0, int(IMAGE_HIGH_WARRANTY_COST_XU or 500)),
+            "provider_cost": int(IMAGE_HIGH_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            "note": "Gói này kèm 1 lần tạo lại trong cùng yêu cầu.",
+            "retry_warranty_count": 1,
         },
     }
 
@@ -28387,11 +28441,18 @@ def image_tier_enabled_map() -> dict:
     return {
         "low": bool(IMAGE_TIER_LOW_ENABLED),
         "standard": bool(IMAGE_TIER_STANDARD_ENABLED),
+        "standard_warranty": bool(IMAGE_TIER_STANDARD_ENABLED),
         "high": bool(IMAGE_TIER_HIGH_ENABLED),
+        "high_warranty": bool(IMAGE_TIER_HIGH_ENABLED),
     }
 
 def normalize_image_tier(value: str = "") -> str:
     tier = str(value or "").strip().lower()
+    tier = tier.replace("-", "_").replace(" ", "_")
+    if tier in {"standard_warranty", "standard_plus", "standard_retry", "std_warranty", "normal_warranty", "medium_warranty"}:
+        return "standard_warranty"
+    if tier in {"high_warranty", "high_plus", "high_retry", "pro_warranty", "premium_warranty"}:
+        return "high_warranty"
     if tier in {"standard", "std", "normal", "medium"}:
         return "standard"
     if tier in {"high", "pro", "premium"}:
@@ -28399,7 +28460,8 @@ def normalize_image_tier(value: str = "") -> str:
     if tier in {"low", "basic", "cheap", "eco", "economy"}:
         return "low"
     fallback = str(SHOPAIKEY_IMAGE_DEFAULT_TIER or "low").strip().lower()
-    return fallback if fallback in {"low", "standard", "high"} else "low"
+    fallback = fallback.replace("-", "_").replace(" ", "_")
+    return fallback if fallback in set(IMAGE_TIER_ORDER) else "low"
 
 def image_tier_payload(tier: str = "") -> dict:
     tier_norm = normalize_image_tier(tier)
@@ -28416,18 +28478,41 @@ def localized_image_tier_label(tier: str = "", lang: str = "vi") -> str:
 def image_tier_cost_xu(tier: str = "") -> int:
     return int(image_tier_payload(tier).get("cost") or 0)
 
+def image_tier_retry_warranty_count(tier: str = "") -> int:
+    return max(0, int(image_tier_payload(tier).get("retry_warranty_count") or 0))
+
+def image_tier_warranty_note(tier: str = "", lang: str = "vi") -> str:
+    has_warranty = image_tier_retry_warranty_count(tier) > 0
+    if normalize_user_language(lang) == "zh":
+        return "本套餐包含同一需求内 1 次重新生成。" if has_warranty else "本套餐不包含免费重新生成。"
+    if normalize_user_language(lang) != "vi":
+        return "This package includes 1 retry in the same request." if has_warranty else "This package does not include a free retry."
+    return "Gói này kèm 1 lần tạo lại trong cùng yêu cầu." if has_warranty else "Gói này không kèm tạo lại miễn phí."
+
 def image_tier_public_status_text() -> str:
     enabled_map = image_tier_enabled_map()
-    return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in ["low", "standard", "high"])
+    return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in IMAGE_TIER_ORDER)
 
 def image_tier_prompt_for_generation(prompt: str, tier: str = "") -> str:
     prompt = re.sub(r"\s+", " ", str(prompt or "").strip())[:1200]
     tier_norm = normalize_image_tier(tier)
-    if tier_norm == "standard":
+    if tier_norm in {"standard", "standard_warranty"}:
         return f"{prompt}. High quality, clean composition, professional lighting, detailed but natural, no watermark, no extra text."
-    if tier_norm == "high":
+    if tier_norm in {"high", "high_warranty"}:
         return f"{prompt}. Premium commercial quality, refined composition, sharp details, professional studio lighting, polished brand-safe look, no watermark, no extra text."
     return f"{prompt}. Clean simple composition, fast draft quality, clear subject, no watermark, no extra text."
+
+def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool = True) -> str:
+    tier_norm = normalize_image_tier(tier)
+    payload = image_tier_payload(tier_norm)
+    state = ui_text(lang, "image.tier_disabled") if include_state and not payload.get("enabled") else ""
+    return f"{IMAGE_TIER_ICONS.get(tier_norm, '🖼')} {localized_image_tier_label(tier_norm, lang)} — {int(payload.get('cost') or 0)} Xu{state}"
+
+def image_tier_choice_rows(callback_builder, lang: str = "vi") -> list[list[InlineKeyboardButton]]:
+    return [
+        [InlineKeyboardButton(image_tier_button_text(tier, lang), callback_data=callback_builder(tier))]
+        for tier in IMAGE_TIER_ORDER
+    ]
 
 def video_tier_pricing_payload() -> dict:
     return {
@@ -29827,7 +29912,7 @@ def record_shopaikey_billing_event(user_id, job_id: int, event_type: str, amount
     finally:
         conn.close()
 
-def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", prompt: str = "", status: str = "QUEUED", admin_only: bool = True, xu_cost_planned: int = 0, source_job_id: str = "") -> int:
+def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", prompt: str = "", status: str = "QUEUED", admin_only: bool = True, xu_cost_planned: int = 0, source_job_id: str = "", retry_warranty_count: int = 0, retry_warranty_parent_job_id: int = 0) -> int:
     now = now_text()
     conn = db_connect()
     try:
@@ -29836,8 +29921,9 @@ def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", promp
             INSERT INTO shopaikey_jobs
             (user_id, chat_id, job_type, provider, model, status, prompt_hash, prompt_preview,
              xu_cost_planned, xu_deducted, refund_amount, billing_status, confirm_required, confirmed_at,
-             source_job_id, admin_only, attempts, poll_count, created_at, updated_at)
-            VALUES (?, ?, ?, 'shopaikey', ?, ?, ?, ?, ?, 0, 0, ?, ?, '', ?, ?, 0, 0, ?, ?)
+             source_job_id, retry_warranty_count, retry_warranty_used, retry_warranty_parent_job_id,
+             admin_only, attempts, poll_count, created_at, updated_at)
+            VALUES (?, ?, ?, 'shopaikey', ?, ?, ?, ?, ?, 0, 0, ?, ?, '', ?, ?, 0, ?, ?, 0, 0, ?, ?)
             """,
             (
                 str(user_id or ""),
@@ -29851,6 +29937,8 @@ def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", promp
                 "confirmed" if admin_only else "pending_confirm",
                 1 if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 0,
                 str(source_job_id or "")[:80],
+                max(0, int(retry_warranty_count or 0)),
+                max(0, int(retry_warranty_parent_job_id or 0)),
                 1 if admin_only else 0,
                 now,
                 now,
@@ -29867,6 +29955,7 @@ def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
         "error_class", "provider_error_code", "provider_message", "fail_reason",
         "attempts", "poll_count", "finished_at", "xu_deducted", "refund_status", "refund_amount", "refund_reason",
         "billing_status", "confirm_required", "confirmed_at", "source_job_id",
+        "retry_warranty_count", "retry_warranty_used", "retry_warranty_parent_job_id",
     }
     updates = {}
     if job_id and str(task_id or "").strip():
@@ -29880,7 +29969,7 @@ def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
             updates[key] = shopaikey_sanitize_error(str(value or ""))[:260]
         elif key == "result_url":
             updates[key] = str(value or "").strip()[:1000]
-        elif key in {"result_sent", "attempts", "poll_count", "xu_deducted", "refund_amount", "confirm_required"}:
+        elif key in {"result_sent", "attempts", "poll_count", "xu_deducted", "refund_amount", "confirm_required", "retry_warranty_count", "retry_warranty_used", "retry_warranty_parent_job_id"}:
             updates[key] = int(value or 0)
         elif key in {"refund_status", "refund_reason", "billing_status"}:
             updates[key] = shopaikey_sanitize_error(str(value or ""))[:160]
@@ -33720,7 +33809,6 @@ async def safe_edit_query_message(query, text: str, reply_markup=None, parse_mod
             message = getattr(query, "message", None)
             if message:
                 try:
-                    await message.reply_text("Có lỗi nhỏ khi cập nhật màn hình. Bot đã gửi lại bước tiếp theo bên dưới.")
                     return await message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
                 except Exception as send_error:
                     logger.warning("safe_edit_query_message fallback failed | %s", sanitize_log_text(str(send_error))[:240])
@@ -33753,11 +33841,6 @@ async def safe_edit_or_send(query, text: str, reply_markup=None, parse_mode: str
         logger.warning("safe_edit_or_send fallback | %s", sanitize_log_text(str(e))[:240])
         try:
             if message:
-                await message.reply_text(
-                    "Có lỗi nhỏ khi cập nhật màn hình. Bot đã gửi lại bước tiếp theo bên dưới."
-                    if parse_mode == "HTML" else
-                    "Có lỗi nhỏ khi cập nhật màn hình. Bot đã gửi lại bước tiếp theo bên dưới."
-                )
                 return await message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
         except Exception as send_error:
             logger.warning("safe_edit_or_send reply fallback failed | %s", sanitize_log_text(str(send_error))[:240])
@@ -35513,6 +35596,7 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
         "image_tier": tier,
         "tier_label": tier_payload.get("label") or "Ảnh tiết kiệm",
         "model": tier_payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+        "retry_warranty_count": int(tier_payload.get("retry_warranty_count") or 0),
     })
     await update.message.reply_text(
         "🖼 <b>Xác nhận tạo ảnh ShopAIKey</b>\n\n"
@@ -35576,6 +35660,7 @@ async def handle_public_image_prompt_pending_text(update: Update, context: Conte
         "image_tier": tier,
         "tier_label": payload.get("label") or tier,
         "model": payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+        "retry_warranty_count": int(payload.get("retry_warranty_count") or 0),
     })
     await update.message.reply_text(
         public_image_confirm_text(tier, prompt, int(credits or 0), lang),
@@ -35584,6 +35669,96 @@ async def handle_public_image_prompt_pending_text(update: Update, context: Conte
             [InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=f"shopai|confirm|{token}")],
             [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=f"shopai|cancel|{token}")],
         ]),
+    )
+    return True
+
+async def handle_image_warranty_retry_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_image_warranty_retry_pending(uid)
+    if not pending:
+        return False
+    lang = user_ui_lang(uid)
+    edit_note = re.sub(r"\s+", " ", update.message.text.strip())[:500]
+    if not edit_note:
+        return False
+    clear_image_warranty_retry_pending(uid)
+    parent_job_id = int(pending.get("job_id") or 0)
+    parent = shopaikey_image_job_for_user(parent_job_id, uid)
+    if not parent or image_job_retry_warranty_remaining(parent_job_id) <= 0:
+        await update.message.reply_text(ui_text(lang, "common.expired_not_charged"))
+        return True
+    if shopaikey_active_job_for_user(uid, "image"):
+        await update.message.reply_text(ui_text(lang, "media.job_lock"))
+        return True
+    if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED and not is_admin_user(uid):
+        await update.message.reply_text(ui_text(lang, "media.public_off"))
+        return True
+    original = str(parent.get("prompt_preview") or "").strip()
+    retry_prompt = (
+        f"{original}\n\nWarranty retry adjustment: {edit_note}\n"
+        "Keep the same product/topic and make only a small revision. No watermark, no extra text."
+    )[:1400]
+    await update.message.reply_text(
+        "🔁 Đang tạo lại ảnh bảo hành. Bot không trừ thêm Xu.\nProvider có thể vẫn tốn credit thật." if normalize_user_language(lang) == "vi" else
+        "🔁 Creating the warranty retry image. The bot will not charge extra Xu.\nThe provider may still consume real credit."
+    )
+    model = str(parent.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana")
+    job_id = create_shopaikey_job(
+        uid,
+        update.message.chat_id,
+        "image",
+        model=model,
+        prompt=retry_prompt,
+        status="IN_PROGRESS",
+        admin_only=False,
+        xu_cost_planned=0,
+        source_job_id=str(parent_job_id),
+        retry_warranty_count=0,
+        retry_warranty_parent_job_id=parent_job_id,
+    )
+    update_shopaikey_job(job_id=job_id, billing_status="warranty_retry", confirm_required=0, confirmed_at=now_text())
+    result = await shopaikey_image_generate(retry_prompt, model)
+    status = str(result.get("status") or "FAIL")
+    image_url = str(result.get("image_url") or "")
+    if status == "PASS" and image_url:
+        parent_used = max(0, int(parent.get("retry_warranty_used") or 0)) + 1
+        update_shopaikey_job(job_id=parent_job_id, retry_warranty_used=parent_used)
+        update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, result_sent=1, model=result.get("model") or model, attempts=1, finished_at=now_text())
+        caption = ui_text(
+            lang,
+            "image.success",
+            label=html.escape(localized_image_tier_label("standard_warranty", lang)),
+            job_id=int(job_id or 0),
+            billing_note=html.escape("Đã dùng 1 lần tạo lại bảo hành. Bot không trừ thêm Xu." if normalize_user_language(lang) == "vi" else "Used 1 warranty retry. The bot did not charge extra Xu."),
+        )
+        try:
+            await context.bot.send_photo(
+                chat_id=update.message.chat_id,
+                photo=image_url,
+                caption=caption,
+                reply_markup=public_image_success_keyboard(job_id, "standard", lang),
+            )
+        except Exception:
+            await update.message.reply_text(ui_text(lang, "image.success_link", url=html.escape(image_url, quote=True)), parse_mode="HTML")
+        return True
+    provider_error_text = result.get("detail") or result.get("provider_error_code") or result.get("error_class") or status
+    update_shopaikey_job(
+        job_id=job_id,
+        status="FAILED",
+        error_class=result.get("error_class") or status,
+        provider_error_code=result.get("provider_error_code") or "",
+        provider_message=provider_error_text,
+        attempts=1,
+        finished_at=now_text(),
+        refund_status="not_charged",
+        refund_reason="warranty_retry_provider_fail",
+    )
+    await update.message.reply_text(
+        "⚙️ Tạo lại ảnh bảo hành bị lỗi provider. Bot chưa trừ thêm Xu và chưa tính là đã dùng lượt bảo hành. Vui lòng thử lại sau."
+        if normalize_user_language(lang) == "vi" else
+        "⚙️ The warranty retry failed due to provider error. The bot did not charge extra Xu and did not consume the warranty retry. Please try again later."
     )
     return True
 
@@ -35728,6 +35903,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     workflow_id = str(pending.get("workflow_id") or "").strip()
     trend_output_id = int(pending.get("trend_output_id") or 0)
     scene_index = int(pending.get("scene_index") or 0)
+    retry_warranty_count = max(0, int(pending.get("retry_warranty_count") or 0)) if job_type == "image" else 0
     enabled, message = shopaikey_public_generation_guard(job_type)
     if not enabled:
         return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
@@ -35765,6 +35941,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         admin_only=False,
         xu_cost_planned=base_cost,
         source_job_id=source_job_id,
+        retry_warranty_count=retry_warranty_count,
     )
     confirmed_at = now_text()
     update_shopaikey_job(
@@ -35773,6 +35950,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         billing_status="deducted" if deducted > 0 else "admin_free",
         confirm_required=1 if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 0,
         confirmed_at=confirmed_at,
+        retry_warranty_count=retry_warranty_count,
     )
     tier_reason = f"; tier={image_tier}; label={tier_label}" if job_type == "image" else f"; tier={video_tier}; label={tier_label}"
     record_shopaikey_billing_event(uid, job_id, "confirm" if job_type == "image" else "video_confirmed", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}{tier_reason}")
@@ -35803,7 +35981,13 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                     job_id=job_id,
                 )
             success_markup = trend_workflow_image_success_keyboard(job_id, scene_index, lang) if (workflow_id or trend_output_id) else public_image_success_keyboard(job_id, image_tier, lang)
-            success_caption = ui_text(lang, "image.success", label=html.escape(tier_label), job_id=int(job_id or 0), deducted=int(deducted or 0))
+            success_caption = ui_text(
+                lang,
+                "image.success",
+                label=html.escape(tier_label),
+                job_id=int(job_id or 0),
+                billing_note=html.escape(public_image_success_billing_note(deducted, lang, is_admin_user(uid) and int(deducted or 0) <= 0)),
+            )
             try:
                 await context.bot.send_photo(
                     chat_id=query.message.chat_id,
@@ -44623,6 +44807,7 @@ def cinematic_ad_concept_topic(product: str, message: str, style: str = "cinemat
     return f"concept quảng cáo {style_label} cho {safe_product}, thông điệp {safe_message}"
 
 def save_cinematic_ad_concept(user_id, product: str, message: str, style: str = "cinematic", lang: str = "vi") -> dict:
+    style = normalize_cinematic_ad_style_code(style)
     concept = {
         "product": str(product or "")[:500],
         "message": str(message or "")[:500],
@@ -44657,12 +44842,25 @@ def lock_latest_cinematic_ad_concept(user_id) -> dict | None:
 def cinematic_ad_concept_input(concept: dict, lang: str = "vi") -> tuple[str, str, str, str]:
     product = str(concept.get("product") or "").strip() or ("产品/服务" if normalize_user_language(lang) == "zh" else ("product/service" if normalize_user_language(lang) != "vi" else "sản phẩm/dịch vụ"))
     message = str(concept.get("message") or "").strip() or ("品牌信息" if normalize_user_language(lang) == "zh" else ("brand message" if normalize_user_language(lang) != "vi" else "thông điệp thương hiệu"))
-    style = str(concept.get("style") or "cinematic").strip() or "cinematic"
+    style = normalize_cinematic_ad_style_code(concept.get("style") or "cinematic")
     topic = str(concept.get("topic") or "").strip() or cinematic_ad_concept_topic(product, message, style, lang)
     return product, message, style, topic
 
 def cinematic_ad_missing_latest_text(lang: str = "vi") -> str:
     return ui_text(lang, "concept_ad.missing_latest")
+
+def cinematic_ad_expired_session_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return "⚠️ Concept 会话已过期。请重新创建 concept，或返回主菜单。\nBot 未调用 API，也未扣除 Xu。"
+    if normalize_user_language(lang) != "vi":
+        return "⚠️ This concept session has expired. Please create a new concept or return to the main menu.\nThe bot has not called any API and has not charged Xu."
+    return "⚠️ Phiên concept đã hết hạn. Vui lòng tạo concept mới hoặc quay lại menu chính.\nBot chưa gọi API và chưa trừ Xu."
+
+def cinematic_ad_expired_session_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "concept_ad.new"), callback_data="adconcept|start")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
+    ])
 
 def cinematic_ad_continuation_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -44717,15 +44915,16 @@ def cinematic_ad_motion_choices_keyboard(lang: str = "vi") -> InlineKeyboardMark
     ])
 
 def cinematic_ad_image_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    rows = [
         [InlineKeyboardButton(ui_text(lang, "concept.save_image_prompt"), callback_data="adconcept|save_image_prompt_current")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_low", cost=int(image_tier_payload("low").get("cost") or 0)), callback_data="adconcept|image_ai_tier|1|low")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_standard", cost=int(image_tier_payload("standard").get("cost") or 0)), callback_data="adconcept|image_ai_tier|1|standard")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_high", cost=int(image_tier_payload("high").get("cost") or 0)), callback_data="adconcept|image_ai_tier|1|high")],
+    ]
+    rows.extend(image_tier_choice_rows(lambda tier: f"adconcept|image_ai_tier|1|{tier}", lang))
+    rows.extend([
         [InlineKeyboardButton(ui_text(lang, "concept.edit_image_prompt"), callback_data="adconcept|edit_current")],
         [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
     ])
+    return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_image_prompt_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -44740,15 +44939,16 @@ def cinematic_ad_image_prompt_choices_keyboard(lang: str = "vi") -> InlineKeyboa
 
 def cinematic_ad_image_prompt_selected_keyboard(prompt_index: int = 1, lang: str = "vi") -> InlineKeyboardMarkup:
     idx = max(1, min(3, int(prompt_index or 1)))
-    return InlineKeyboardMarkup([
+    rows = [
         [InlineKeyboardButton(ui_text(lang, "concept.save_image_prompt"), callback_data=f"adconcept|save_image_prompt_current|{idx}")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_low", cost=int(image_tier_payload("low").get("cost") or 0)), callback_data=f"adconcept|image_ai_tier|{idx}|low")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_standard", cost=int(image_tier_payload("standard").get("cost") or 0)), callback_data=f"adconcept|image_ai_tier|{idx}|standard")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_high", cost=int(image_tier_payload("high").get("cost") or 0)), callback_data=f"adconcept|image_ai_tier|{idx}|high")],
+    ]
+    rows.extend(image_tier_choice_rows(lambda tier: f"adconcept|image_ai_tier|{idx}|{tier}", lang))
+    rows.extend([
         [InlineKeyboardButton(ui_text(lang, "concept.edit_image_prompt"), callback_data="adconcept|edit_current")],
         [InlineKeyboardButton(ui_text(lang, "concept.next_video_prompt"), callback_data="adconcept|video_prompt_current")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
     ])
+    return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_video_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -44787,15 +44987,16 @@ def cinematic_ad_video_prompt_selected_keyboard(prompt_index: int = 1, lang: str
     return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_image_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    rows = [
         [InlineKeyboardButton(ui_text(lang, "concept.image_view_prompt"), callback_data="adconcept|image_prompt_current")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_low", cost=int(image_tier_payload("low").get("cost") or 0)), callback_data="adconcept|image_ai_tier|1|low")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_standard", cost=int(image_tier_payload("standard").get("cost") or 0)), callback_data="adconcept|image_ai_tier|1|standard")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_high", cost=int(image_tier_payload("high").get("cost") or 0)), callback_data="adconcept|image_ai_tier|1|high")],
+    ]
+    rows.extend(image_tier_choice_rows(lambda tier: f"adconcept|image_ai_tier|1|{tier}", lang))
+    rows.extend([
         [InlineKeyboardButton(ui_text(lang, "concept.edit_image_prompt"), callback_data="adconcept|edit_current")],
         [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
     ])
+    return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_video_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -45618,7 +45819,7 @@ def cinematic_ad_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(ui_text(lang, "concept_ad.style.cinematic"), callback_data="adconcept|concept_style_cinematic"),
-            InlineKeyboardButton(ui_text(lang, "concept_ad.style.bw_luxury"), callback_data="adconcept|concept_style_bw_luxury"),
+            InlineKeyboardButton(ui_text(lang, "concept_ad.style.bw_luxury"), callback_data="adconcept|concept_style_luxury_bw"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "concept_ad.style.viral"), callback_data="adconcept|concept_style_viral"),
@@ -45633,7 +45834,34 @@ def cinematic_ad_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel")],
     ])
 
+def normalize_cinematic_ad_style_code(style: str = "") -> str:
+    value = re.sub(r"[^a-z0-9_]+", "_", str(style or "").strip().lower()).strip("_")
+    aliases = {
+        "cinematic": "cinematic",
+        "emotional_cinematic": "cinematic",
+        "bw_luxury": "bw_luxury",
+        "luxury_bw": "bw_luxury",
+        "black_white_luxury": "bw_luxury",
+        "den_trang_cao_cap": "bw_luxury",
+        "viral": "viral",
+        "tiktok": "viral",
+        "viral_tiktok_reels": "viral",
+        "direct_sales": "direct_sales",
+        "sales": "direct_sales",
+        "ban_hang_truc_tiep": "direct_sales",
+        "ugc": "ugc",
+        "everyday_ugc": "ugc",
+        "fpv": "fpv",
+        "drone": "fpv",
+        "goc_bay": "fpv",
+        "product_reveal": "product_reveal",
+        "3d_product_reveal": "product_reveal",
+        "product_3d": "product_reveal",
+    }
+    return aliases.get(value, "cinematic")
+
 def cinematic_ad_style_label(style: str, lang: str = "vi") -> str:
+    style = normalize_cinematic_ad_style_code(style)
     if normalize_user_language(lang) == "zh":
         labels = {
             "cinematic": "情感电影感",
@@ -45887,8 +46115,10 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
     extra = parts[3] if len(parts) >= 4 else ""
     lang = user_ui_lang(uid)
     if action.startswith("concept_style_"):
-        value = action.replace("concept_style_", "", 1)
+        value = normalize_cinematic_ad_style_code(action.replace("concept_style_", "", 1))
         action = "style"
+    elif action == "style":
+        value = normalize_cinematic_ad_style_code(value)
 
     if action == "cancel":
         clear_cinematic_ad_pending(uid)
@@ -46126,6 +46356,7 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
                 "image_tier": tier,
                 "tier_label": payload.get("label") or tier,
                 "model": payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+                "retry_warranty_count": int(payload.get("retry_warranty_count") or 0),
                 "source": "cinematic_ad_concept",
             })
             return await safe_edit_query_message(
@@ -46167,11 +46398,8 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
         if not pending or str(pending.get("step") or "") not in {"style", "edit"} or not (pending.get("product") and pending.get("message")):
             return await safe_edit_query_message(
                 query,
-                "⚠️ This concept session has expired. Please start again from the menu." if normalize_user_language(lang) != "vi" else "⚠️ Phiên làm việc đã hết hạn. Vui lòng bắt đầu lại từ menu.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(ui_text(lang, "concept_ad.new"), callback_data="adconcept|start")],
-                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
-                ]),
+                cinematic_ad_expired_session_text(lang),
+                reply_markup=cinematic_ad_expired_session_keyboard(lang),
             )
         product = pending.get("product")
         message = pending.get("message")
@@ -46282,25 +46510,42 @@ def get_public_image_prompt_pending(user_id) -> dict | None:
 def clear_public_image_prompt_pending(user_id) -> bool:
     return USER_PENDING.pop(public_image_pending_key(user_id), None) is not None
 
+def image_warranty_retry_pending_key(user_id) -> str:
+    return f"image_warranty_retry:{user_id}"
+
+def set_image_warranty_retry_pending(user_id, job_id: int) -> None:
+    USER_PENDING[image_warranty_retry_pending_key(user_id)] = {
+        "pending_action": "image_warranty_retry",
+        "job_id": int(job_id or 0),
+        "created_at_ts": time.time(),
+    }
+
+def get_image_warranty_retry_pending(user_id) -> dict | None:
+    key = image_warranty_retry_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "image_warranty_retry":
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_image_warranty_retry_pending(user_id) -> bool:
+    return USER_PENDING.pop(image_warranty_retry_pending_key(user_id), None) is not None
+
+def image_warranty_retry_request_text(job_id: int = 0, lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return f"🔁 <b>图片保障重试</b>\n\n请发送你想轻微修改的内容。\nJob #{int(job_id or 0)} 只能在同一需求/主题内使用 1 次保障重试。\n\n如果是完全新的需求，请创建新图片任务。\nBot 尚未调用 API，也未扣除 Xu。"
+    if normalize_user_language(lang) != "vi":
+        return f"🔁 <b>Image warranty retry</b>\n\nSend the small adjustment you want.\nJob #{int(job_id or 0)} can use the warranty retry once, only for the same request/topic.\n\nIf this is a completely new request, please create a new image job.\nThe bot has not called the API and has not charged Xu."
+    return f"🔁 <b>Tạo lại ảnh bảo hành</b>\n\nHãy gửi chỉnh sửa nhẹ bạn muốn.\nJob #{int(job_id or 0)} chỉ được dùng bảo hành 1 lần trong cùng yêu cầu/chủ đề.\n\nNếu bạn đổi hoàn toàn yêu cầu, hãy tạo job ảnh mới theo bảng giá.\nBot chưa gọi API và chưa trừ Xu."
+
 def public_image_tier_selection_text(lang: str = "vi") -> str:
     return ui_text(lang, "image.choose_tier.title")
 
 def public_image_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    pricing = image_tier_pricing_payload()
-    enabled_map = image_tier_enabled_map()
-    rows = []
-    tier_meta = [
-        ("low", "🟢"),
-        ("standard", "🔵"),
-        ("high", "🟣"),
-    ]
-    for tier, icon in tier_meta:
-        payload = pricing[tier]
-        state = "" if enabled_map.get(tier) else ui_text(lang, "image.tier_disabled")
-        rows.append([InlineKeyboardButton(
-            f"{icon} {localized_image_tier_label(tier, lang)} — {int(payload['cost'])} Xu{state}",
-            callback_data=f"create_media|image_tier_{tier}",
-        )])
+    rows = image_tier_choice_rows(lambda tier: f"create_media|image_tier_{tier}", lang)
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_image")])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="create_media|cancel")])
     return InlineKeyboardMarkup(rows)
@@ -46317,19 +46562,222 @@ def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         label=html.escape(localized_image_tier_label(tier, lang)),
         cost=cost,
         credits=int(current_credits or 0),
+        warranty_note=html.escape(image_tier_warranty_note(tier, lang)),
         prompt=html.escape(shopaikey_safe_prompt_preview(prompt)),
     )
 
+def public_image_success_billing_note(deducted: int = 0, lang: str = "vi", admin_internal_free: bool = False) -> str:
+    amount = int(deducted or 0)
+    if admin_internal_free and amount <= 0:
+        if normalize_user_language(lang) == "zh":
+            return "已扣除：0 Xu（admin 内部测试）。Provider 仍可能消耗真实 credit。"
+        if normalize_user_language(lang) != "vi":
+            return "Charged: 0 Xu internally because this is an admin account. The provider may still consume real credit."
+        return "Đã trừ: 0 Xu nội bộ do tài khoản admin. Provider có thể vẫn tốn credit thật."
+    if normalize_user_language(lang) == "zh":
+        return f"已扣除：{amount} Xu。"
+    if normalize_user_language(lang) != "vi":
+        return f"Charged: {amount} Xu."
+    return f"Đã trừ: {amount} Xu."
+
+def shopaikey_image_job_for_user(job_id: int = 0, user_id=0) -> dict | None:
+    jid = int(job_id or 0)
+    if jid <= 0:
+        return None
+    job = shopaikey_job_by_id(jid) or {}
+    if not job or str(job.get("job_type") or "").lower() != "image":
+        return None
+    owner = str(job.get("user_id") or "")
+    if owner and owner == str(user_id or ""):
+        return job
+    if is_admin_user(user_id):
+        return job
+    return None
+
+def image_to_video_subject_for_job(job_id: int = 0, user_id=0, lang: str = "vi") -> str:
+    job = shopaikey_image_job_for_user(job_id, user_id) or {}
+    prompt_preview = str(job.get("prompt_preview") or "").strip()
+    if not prompt_preview:
+        recent = get_recent_media_state(LAST_USER_IMAGE, safe_int(user_id, 0))
+        prompt_preview = str((recent or {}).get("caption") or (recent or {}).get("file_name") or "").strip()
+    if prompt_preview:
+        return prompt_preview[:500]
+    if normalize_user_language(lang) == "zh":
+        return "已选择的图片 / 产品场景"
+    if normalize_user_language(lang) != "vi":
+        return "selected image / product scene"
+    return "ảnh/sản phẩm đã chọn"
+
+def image_to_video_prompt_from_image(job_id: int = 0, user_id=0, index: int = 1, lang: str = "vi") -> str:
+    idx = max(1, min(3, int(index or 1)))
+    subject = image_to_video_subject_for_job(job_id, user_id, lang)
+    if normalize_user_language(lang) == "zh":
+        if idx == 1:
+            return f"基于已选择图片制作 5 秒短视频。主体: {subject}. Camera slow push-in, subtle parallax, stable subject, clean light, keep product sharp, no watermark, no extra text."
+        if idx == 2:
+            return f"基于已选择图片制作 10 秒短广告。主体: {subject}. Start with a clear hook, reveal the product/service, show one benefit, end with a clean CTA frame, smooth camera motion, no distortion."
+        return f"基于已选择图片制作 15 秒 cinematic/lifestyle 视频。主体: {subject}. Add context, smooth cinematic camera movement, emotional reveal, final hero frame for message/CTA, no watermark, no broken text."
+    if normalize_user_language(lang) != "vi":
+        if idx == 1:
+            return f"Create a 5-second video from the selected image. Subject/context: {subject}. Camera slowly pushes in, subtle parallax, stable subject, clean lighting, keep the product sharp, no watermark, no extra text."
+        if idx == 2:
+            return f"Create a 10-second short ad from the selected image. Subject/context: {subject}. Start with a clear hook, reveal the product/service, show one benefit, end with a clean CTA frame, smooth camera motion, no distortion."
+        return f"Create a 15-second cinematic/lifestyle video from the selected image. Subject/context: {subject}. Add context, smooth cinematic camera movement, emotional reveal, final hero frame for message/CTA, no watermark, no broken text."
+    if idx == 1:
+        return f"Tạo video 5 giây từ ảnh đã chọn. Chủ thể/bối cảnh: {subject}. Camera tiến nhẹ vào sản phẩm, parallax rất nhẹ, giữ sản phẩm rõ nét, ánh sáng sạch, phù hợp test nhanh/chi phí thấp, không watermark, không chữ thừa."
+    if idx == 2:
+        return f"Tạo video quảng cáo ngắn 10 giây từ ảnh đã chọn. Chủ thể/bối cảnh: {subject}. Mở đầu bằng hook rõ, reveal sản phẩm/dịch vụ, nêu một lợi ích chính, kết thúc bằng khung CTA sạch, chuyển động camera mượt, không méo hình."
+    return f"Tạo video cinematic/lifestyle 15 giây từ ảnh đã chọn. Chủ thể/bối cảnh: {subject}. Có bối cảnh sử dụng, chuyển động camera mượt, reveal cảm xúc, cảnh cuối là hero frame để chốt thông điệp/CTA, không watermark, không chữ lỗi."
+
+def image_to_video_prompt_choices_text(job_id: int = 0, user_id=0, lang: str = "vi") -> str:
+    prompts = [image_to_video_prompt_from_image(job_id, user_id, idx, lang) for idx in range(1, 4)]
+    if normalize_user_language(lang) == "zh":
+        return (
+            "🎞 <b>请选择 1 个图片生成视频方向</b>\n\n"
+            "<b>1. 5 秒视频 — 简单运动</b>\n• Camera 轻微推进\n• 保持产品清晰\n• 适合快速测试\n"
+            f"<code>{html.escape(prompts[0])}</code>\n\n"
+            "<b>2. 10 秒视频 — 短广告</b>\n• Hook 开场\n• Reveal 产品\n• CTA 结尾\n"
+            f"<code>{html.escape(prompts[1])}</code>\n\n"
+            "<b>3. 15 秒视频 — Cinematic/lifestyle</b>\n• 有场景\n• Camera 运动更顺\n• 最后一帧收束信息\n"
+            f"<code>{html.escape(prompts[2])}</code>\n\nBot 未调用视频 API，也未扣除 Xu。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎞 <b>Choose 1 video direction from this image</b>\n\n"
+            "<b>1. 5-second video — simple motion</b>\n• Gentle camera push-in\n• Keep the product clear\n• Good for quick tests\n"
+            f"<code>{html.escape(prompts[0])}</code>\n\n"
+            "<b>2. 10-second video — short ad</b>\n• Hook opening\n• Product reveal\n• CTA ending\n"
+            f"<code>{html.escape(prompts[1])}</code>\n\n"
+            "<b>3. 15-second video — cinematic/lifestyle</b>\n• More context\n• Smooth camera movement\n• Final frame for the message\n"
+            f"<code>{html.escape(prompts[2])}</code>\n\nThe bot has not called the video API and has not charged Xu."
+        )
+    return (
+        "🎞 <b>Chọn 1 hướng video từ ảnh</b>\n\n"
+        "<b>1️⃣ Video 5 giây — chuyển động đơn giản</b>\n• Camera tiến nhẹ vào sản phẩm\n• Giữ sản phẩm rõ nét\n• Phù hợp test nhanh/chi phí thấp\n"
+        f"<code>{html.escape(prompts[0])}</code>\n\n"
+        "<b>2️⃣ Video 10 giây — quảng cáo ngắn</b>\n• Mở đầu bằng hook\n• Reveal sản phẩm\n• Kết thúc bằng lời kêu gọi hành động\n"
+        f"<code>{html.escape(prompts[1])}</code>\n\n"
+        "<b>3️⃣ Video 15 giây — cinematic/lifestyle</b>\n• Có bối cảnh\n• Có chuyển động camera mượt\n• Có cảnh cuối để chốt thông điệp\n"
+        f"<code>{html.escape(prompts[2])}</code>\n\nBot chưa gọi API video và chưa trừ Xu."
+    )
+
+def image_to_video_prompt_choices_keyboard(job_id: int = 0, lang: str = "vi") -> InlineKeyboardMarkup:
+    jid = int(job_id or 0)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1️⃣ Chọn prompt video 1" if normalize_user_language(lang) == "vi" else "1️⃣ Choose video prompt 1", callback_data=f"tvflow|image_video_prompt_select_{jid}_1")],
+        [InlineKeyboardButton("2️⃣ Chọn prompt video 2" if normalize_user_language(lang) == "vi" else "2️⃣ Choose video prompt 2", callback_data=f"tvflow|image_video_prompt_select_{jid}_2")],
+        [InlineKeyboardButton("3️⃣ Chọn prompt video 3" if normalize_user_language(lang) == "vi" else "3️⃣ Choose video prompt 3", callback_data=f"tvflow|image_video_prompt_select_{jid}_3")],
+        [InlineKeyboardButton("🔁 Tạo lại 3 prompt video" if normalize_user_language(lang) == "vi" else "🔁 Regenerate 3 video prompts", callback_data=f"tvflow|image_video_prompts_{jid}")],
+        [InlineKeyboardButton("🖼 Quay lại ảnh" if normalize_user_language(lang) == "vi" else "🖼 Back to image", callback_data=f"tvflow|image_back_{jid}")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def image_to_video_selected_prompt_text(job_id: int = 0, user_id=0, index: int = 1, lang: str = "vi") -> str:
+    prompt = image_to_video_prompt_from_image(job_id, user_id, index, lang)
+    if normalize_user_language(lang) == "zh":
+        return f"✅ <b>已选择图片生成视频 prompt。</b>\n\n<code>{html.escape(prompt)}</code>\n\nBot 未调用视频 API，也未扣除 Xu。"
+    if normalize_user_language(lang) != "vi":
+        return f"✅ <b>Video prompt from image selected.</b>\n\n<code>{html.escape(prompt)}</code>\n\nThe bot has not called the video API and has not charged Xu."
+    return f"✅ <b>Đã chọn prompt video từ ảnh.</b>\n\n<code>{html.escape(prompt)}</code>\n\nBot chưa gọi API video và chưa trừ Xu."
+
+def image_to_video_selected_prompt_keyboard(job_id: int = 0, index: int = 1, lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
+    jid = int(job_id or 0)
+    idx = max(1, min(3, int(index or 1)))
+    rows = [
+        [InlineKeyboardButton("✅ Lưu prompt video" if normalize_user_language(lang) == "vi" else "✅ Save video prompt", callback_data=f"tvflow|image_video_prompt_save_{jid}_{idx}")],
+        [InlineKeyboardButton("🎬 Tạo video thật từ prompt này" if normalize_user_language(lang) == "vi" else "🎬 Create real video from this prompt", callback_data=f"tvflow|image_video_real_{jid}_{idx}")],
+        [InlineKeyboardButton("🎵 Gợi ý nhạc phù hợp" if normalize_user_language(lang) == "vi" else "🎵 Music suggestion", callback_data=f"tvflow|music_image_{jid}")],
+        [InlineKeyboardButton("✍️ Sửa prompt video" if normalize_user_language(lang) == "vi" else "✍️ Edit video prompt", callback_data=f"tvflow|image_video_prompt_edit_{jid}_{idx}")],
+        [InlineKeyboardButton("🖼 Quay lại ảnh" if normalize_user_language(lang) == "vi" else "🖼 Back to image", callback_data=f"tvflow|image_back_{jid}")],
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton("🔐 Admin smoke test video từ prompt này" if normalize_user_language(lang) == "vi" else "🔐 Admin smoke test video from this prompt", callback_data=f"tvflow|admin_video_image_{jid}_{idx}")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def image_to_video_public_off_from_prompt_text(job_id: int = 0, user_id=0, index: int = 1, lang: str = "vi") -> str:
+    prompt = image_to_video_prompt_from_image(job_id, user_id, index, lang)
+    if normalize_user_language(lang) == "zh":
+        return (
+            "🎬 <b>真实视频暂未公开开放。</b>\n\n"
+            "TOAN AAS 已保存此 image-to-video prompt。\n"
+            "Public video 开启后，此按钮会进入视频质量选择和价格确认步骤。\n\n"
+            f"<code>{html.escape(prompt)}</code>\n\nBot 未调用视频 API，也未扣除 Xu。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎬 <b>Real video generation is not public yet.</b>\n\n"
+            "TOAN AAS saved this image-to-video prompt.\n"
+            "When public video is enabled, this button will move to video quality selection and price confirmation.\n\n"
+            f"<code>{html.escape(prompt)}</code>\n\nThe bot has not called the video API and has not charged Xu."
+        )
+    return (
+        "🎬 <b>Video thật chưa mở công khai.</b>\n\n"
+        "TOAN AAS đã lưu prompt image-to-video này.\n"
+        "Khi public video bật, nút này sẽ chuyển sang bước chọn chất lượng video và xác nhận giá.\n\n"
+        f"<code>{html.escape(prompt)}</code>\n\nBot chưa gọi API video và chưa trừ Xu."
+    )
+
+def image_to_video_public_off_keyboard(job_id: int = 0, index: int = 1, lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
+    jid = int(job_id or 0)
+    idx = max(1, min(3, int(index or 1)))
+    rows = [
+        [InlineKeyboardButton("✅ Lưu prompt video" if normalize_user_language(lang) == "vi" else "✅ Save video prompt", callback_data=f"tvflow|image_video_prompt_save_{jid}_{idx}")],
+        [InlineKeyboardButton("🎵 Gợi ý nhạc phù hợp" if normalize_user_language(lang) == "vi" else "🎵 Music suggestion", callback_data=f"tvflow|music_image_{jid}")],
+        [InlineKeyboardButton("🖼 Quay lại ảnh" if normalize_user_language(lang) == "vi" else "🖼 Back to image", callback_data=f"tvflow|image_back_{jid}")],
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton("🔐 Admin smoke test video từ prompt này" if normalize_user_language(lang) == "vi" else "🔐 Admin smoke test video from this prompt", callback_data=f"tvflow|admin_video_image_{jid}_{idx}")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def image_to_video_music_suggestions_text(job_id: int = 0, user_id=0, lang: str = "vi") -> str:
+    subject = image_to_video_subject_for_job(job_id, user_id, lang)
+    if normalize_user_language(lang) == "zh":
+        return f"🎵 <b>音乐建议</b>\n\n图片主题: <b>{html.escape(subject)}</b>\n\n1. cinematic piano / emotional strings\n2. modern technology ambient\n3. upbeat TikTok/Reels product review\n\nBot 仅给建议，未调用音乐/视频 API，也未扣除 Xu。"
+    if normalize_user_language(lang) != "vi":
+        return f"🎵 <b>Music suggestions</b>\n\nImage context: <b>{html.escape(subject)}</b>\n\n1. Cinematic piano / emotional strings\n2. Modern technology ambient\n3. Upbeat TikTok/Reels product review\n\nThe bot only suggests music. It has not called music/video APIs and has not charged Xu."
+    return f"🎵 <b>Gợi ý nhạc phù hợp</b>\n\nBối cảnh ảnh: <b>{html.escape(subject)}</b>\n\n1. Piano cinematic / dây đàn cảm xúc\n2. Ambient công nghệ / hiện đại\n3. Nhạc TikTok/Reels vui tươi cho review sản phẩm\n\nBot chỉ gợi ý nhạc, chưa gọi API nhạc/video và chưa trừ Xu."
+
+def image_to_video_image_options_text(job_id: int = 0, user_id=0, lang: str = "vi") -> str:
+    subject = image_to_video_subject_for_job(job_id, user_id, lang)
+    if normalize_user_language(lang) == "zh":
+        return f"🖼 <b>已选择图片</b>\n\nContext: <code>{html.escape(subject)}</code>\n\n请选择下一步。Bot 未调用视频 API，也未扣除 Xu。"
+    if normalize_user_language(lang) != "vi":
+        return f"🖼 <b>Selected image</b>\n\nContext: <code>{html.escape(subject)}</code>\n\nChoose the next step. The bot has not called the video API and has not charged Xu."
+    return f"🖼 <b>Ảnh đã chọn</b>\n\nBối cảnh: <code>{html.escape(subject)}</code>\n\nBạn muốn làm gì tiếp? Bot chưa gọi API video và chưa trừ Xu."
+
+def image_job_retry_warranty_remaining(job_id: int = 0) -> int:
+    try:
+        job = shopaikey_job_by_id(int(job_id or 0)) if int(job_id or 0) else None
+    except Exception:
+        return 0
+    if not job:
+        return 0
+    total = max(0, int((job or {}).get("retry_warranty_count") or 0))
+    used = max(0, int((job or {}).get("retry_warranty_used") or 0))
+    if str((job or {}).get("job_type") or "").lower() != "image":
+        return 0
+    if str((job or {}).get("status") or "").upper() != "SUCCESS":
+        return 0
+    return max(0, total - used)
+
 def public_image_success_keyboard(job_id: int, tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     tier_norm = normalize_image_tier(tier)
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "image.to_video"), callback_data=f"tvflow|video_from_image_{int(job_id or 0)}")],
-        [
-            InlineKeyboardButton(ui_text(lang, "image.regenerate"), callback_data=f"create_media|image_tier_{tier_norm}"),
-            InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data=f"create_media|image_tier_{tier_norm}"),
-        ],
+    rows = [
+        [InlineKeyboardButton(ui_text(lang, "image.lock"), callback_data="tvflow|save_image")],
+        [InlineKeyboardButton(ui_text(lang, "image.to_video"), callback_data=f"tvflow|image_video_prompts_{int(job_id or 0)}")],
+    ]
+    if image_job_retry_warranty_remaining(job_id) > 0:
+        rows.append([InlineKeyboardButton(ui_text(lang, "image.warranty_retry"), callback_data=f"tvflow|image_warranty_retry_{int(job_id or 0)}")])
+    else:
+        rows.append([InlineKeyboardButton(ui_text(lang, "image.regenerate_paid"), callback_data=f"create_media|image_tier_{tier_norm}")])
+    rows.extend([
+        [InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data=f"create_media|image_tier_{tier_norm}")],
+        [InlineKeyboardButton(ui_text(lang, "image.music_hint"), callback_data=f"tvflow|music_image_{int(job_id or 0)}")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
+    return InlineKeyboardMarkup(rows)
 
 def public_video_pending_key(user_id) -> str:
     return f"public_video_prompt:{user_id}"
@@ -46956,15 +47404,16 @@ def trend_guided_selected_image_prompt_text(state: dict, index: int = 1, lang: s
     return f"🖼 <b>{html.escape(title)}</b>\n\n<code>{html.escape(prompt)}</code>\n\n{html.escape(question)}\n\nBot chưa gọi API ảnh/video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else f"🖼 <b>{html.escape(title)}</b>\n\n<code>{html.escape(prompt)}</code>\n\n{html.escape(question)}\n\nThe bot has not called image/video APIs and has not charged Xu."
 
 def trend_guided_selected_image_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    rows = [
         [InlineKeyboardButton("✅ Lưu prompt ảnh" if normalize_user_language(lang) == "vi" else "✅ Save image prompt", callback_data="trendg|image_prompt_save")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_low", cost=int(image_tier_payload("low").get("cost") or 0)), callback_data="trendg|image_ai_tier|low")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_standard", cost=int(image_tier_payload("standard").get("cost") or 0)), callback_data="trendg|image_ai_tier|standard")],
-        [InlineKeyboardButton(ui_text(lang, "concept.create_image_high", cost=int(image_tier_payload("high").get("cost") or 0)), callback_data="trendg|image_ai_tier|high")],
+    ]
+    rows.extend(image_tier_choice_rows(lambda tier: f"trendg|image_ai_tier|{tier}", lang))
+    rows.extend([
         [InlineKeyboardButton("✍️ Sửa prompt ảnh" if normalize_user_language(lang) == "vi" else "✍️ Edit image prompt", callback_data="trendg|image_prompt_custom")],
         [InlineKeyboardButton("➡️ Sang bước prompt video" if normalize_user_language(lang) == "vi" else "➡️ Next: video prompt", callback_data="trendg|video_prompt_step")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
     ])
+    return InlineKeyboardMarkup(rows)
 
 def trend_guided_video_prompt_for_index(state: dict, index: int = 1, lang: str = "vi") -> str:
     custom = str((state or {}).get("custom_video_prompt") or "").strip()
@@ -47459,14 +47908,20 @@ def trend_video_flow_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def trend_workflow_image_success_keyboard(job_id: int, scene_index: int, lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "image.to_video"), callback_data=f"tvflow|video_from_image_{int(job_id or 0)}")],
-        [
-            InlineKeyboardButton(ui_text(lang, "image.regenerate"), callback_data=f"tvflow|regen_scene_{int(scene_index or 1)}"),
-            InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data="tvflow|edit_prompt"),
-        ],
+    rows = [
+        [InlineKeyboardButton(ui_text(lang, "image.lock"), callback_data="tvflow|save_image")],
+        [InlineKeyboardButton(ui_text(lang, "image.to_video"), callback_data=f"tvflow|image_video_prompts_{int(job_id or 0)}")],
+    ]
+    if image_job_retry_warranty_remaining(job_id) > 0:
+        rows.append([InlineKeyboardButton(ui_text(lang, "image.warranty_retry"), callback_data=f"tvflow|image_warranty_retry_{int(job_id or 0)}")])
+    else:
+        rows.append([InlineKeyboardButton(ui_text(lang, "image.regenerate_paid"), callback_data=f"tvflow|regen_scene_{int(scene_index or 1)}")])
+    rows.extend([
+        [InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data="tvflow|edit_prompt")],
+        [InlineKeyboardButton(ui_text(lang, "image.music_hint"), callback_data=f"tvflow|music_image_{int(job_id or 0)}")],
         [InlineKeyboardButton(ui_text(lang, "workflow.save_image"), callback_data="tvflow|save_image")],
     ])
+    return InlineKeyboardMarkup(rows)
 
 def trend_video_flow_help_text() -> str:
     return (
@@ -48221,6 +48676,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
     if action in {"cancel_pending", "cancel"}:
         clear_trend_video_flow_pending(uid)
         clear_trend_workflow_confirm_pending(uid)
+        clear_image_warranty_retry_pending(uid)
         if normalize_user_language(lang) == "zh":
             return await safe_edit_or_send(query, "❌ 已取消 Trend → Video Workflow。Bot 未调用 API，也未扣除 Xu。")
         return await safe_edit_or_send(query, "❌ Trend → Video Workflow cancelled. The bot has not called any API and has not charged Xu." if normalize_user_language(lang) != "vi" else "❌ Đã hủy Trend → Video Workflow. Bot chưa gọi API và chưa trừ Xu.")
@@ -48264,6 +48720,8 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             "scene_index": int(scene_index),
             "trend_output_id": int(output.get("id") or 0),
             "source_prompt_type": "image_prompt",
+            "image_tier": "low",
+            "retry_warranty_count": int(image_tier_payload("low").get("retry_warranty_count") or 0),
         })
         return await safe_edit_or_send(
             query,
@@ -48300,15 +48758,109 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         )
     if action.startswith("video_from_image_"):
         job_id = safe_int(action.rsplit("_", 1)[-1], 0)
+        action = f"image_video_prompts_{job_id}"
+    if action.startswith("image_video_prompts_"):
+        job_id = safe_int(action.rsplit("_", 1)[-1], 0)
+        return await safe_edit_or_send(
+            query,
+            image_to_video_prompt_choices_text(job_id, uid, lang),
+            parse_mode="HTML",
+            reply_markup=image_to_video_prompt_choices_keyboard(job_id, lang),
+        )
+    if action.startswith("image_video_prompt_select_"):
+        match = re.match(r"^image_video_prompt_select_(\d+)_(\d+)$", action)
+        job_id = safe_int(match.group(1), 0) if match else 0
+        idx = max(1, min(3, safe_int(match.group(2), 1) if match else 1))
+        return await safe_edit_or_send(
+            query,
+            image_to_video_selected_prompt_text(job_id, uid, idx, lang),
+            parse_mode="HTML",
+            reply_markup=image_to_video_selected_prompt_keyboard(job_id, idx, lang, is_admin_user(uid)),
+        )
+    if action.startswith("image_video_prompt_save_"):
+        match = re.match(r"^image_video_prompt_save_(\d+)_(\d+)$", action)
+        job_id = safe_int(match.group(1), 0) if match else 0
+        idx = max(1, min(3, safe_int(match.group(2), 1) if match else 1))
+        if normalize_user_language(lang) == "zh":
+            text = "✅ 已保存此 video prompt。Bot 未调用视频 API，也未扣除 Xu。"
+        elif normalize_user_language(lang) != "vi":
+            text = "✅ Video prompt saved. The bot has not called the video API and has not charged Xu."
+        else:
+            text = "✅ Đã lưu prompt video. Bot chưa gọi API video và chưa trừ Xu."
+        return await safe_edit_or_send(
+            query,
+            text + "\n\n" + image_to_video_selected_prompt_text(job_id, uid, idx, lang),
+            parse_mode="HTML",
+            reply_markup=image_to_video_selected_prompt_keyboard(job_id, idx, lang, is_admin_user(uid)),
+        )
+    if action.startswith("image_video_prompt_edit_"):
+        match = re.match(r"^image_video_prompt_edit_(\d+)_(\d+)$", action)
+        job_id = safe_int(match.group(1), 0) if match else 0
+        idx = max(1, min(3, safe_int(match.group(2), 1) if match else 1))
+        prompt = image_to_video_prompt_from_image(job_id, uid, idx, lang)
+        if normalize_user_language(lang) == "zh":
+            text = f"✍️ 请复制并修改下面的 prompt。Bot 未调用视频 API，也未扣除 Xu。\n\n<code>{html.escape(prompt)}</code>"
+        elif normalize_user_language(lang) != "vi":
+            text = f"✍️ Copy and edit this prompt. The bot has not called the video API and has not charged Xu.\n\n<code>{html.escape(prompt)}</code>"
+        else:
+            text = f"✍️ Bạn có thể copy và chỉnh prompt dưới đây. Bot chưa gọi API video và chưa trừ Xu.\n\n<code>{html.escape(prompt)}</code>"
+        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=image_to_video_selected_prompt_keyboard(job_id, idx, lang, is_admin_user(uid)))
+    if action.startswith("image_video_real_"):
+        match = re.match(r"^image_video_real_(\d+)_(\d+)$", action)
+        job_id = safe_int(match.group(1), 0) if match else 0
+        idx = max(1, min(3, safe_int(match.group(2), 1) if match else 1))
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
             return await safe_edit_or_send(
                 query,
-                image_to_video_public_off_prompt(job_id, uid, lang),
+                image_to_video_public_off_from_prompt_text(job_id, uid, idx, lang),
                 parse_mode="HTML",
+                reply_markup=image_to_video_public_off_keyboard(job_id, idx, lang, is_admin_user(uid)),
             )
         if normalize_user_language(lang) == "zh":
-            return await safe_edit_or_send(query, "🎞 Public video 需要通过单独的 billing/confirmation guard。\nAdmin 用 ENV 开启 public video 后，可使用 /shopaikey_video_from_image。\n本次未扣除 Xu。")
-        return await safe_edit_or_send(query, "🎞 Public video must go through its own billing/confirmation guard.\nUse /shopaikey_video_from_image after admin enables public video via ENV.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🎞 Public video cần đi qua billing/confirmation guard riêng.\nHiện hãy dùng /shopaikey_video_from_image khi admin đã bật public video bằng ENV.\nBot chưa trừ Xu.")
+            return await safe_edit_or_send(query, "🎞 Public video 需要通过单独的 billing/confirmation guard。\n本次未扣除 Xu。")
+        return await safe_edit_or_send(query, "🎞 Public video must go through its own billing/confirmation guard.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🎞 Public video cần đi qua billing/confirmation guard riêng.\nBot chưa trừ Xu.")
+    if action.startswith("admin_video_image_"):
+        match = re.match(r"^admin_video_image_(\d+)_(\d+)$", action)
+        job_id = safe_int(match.group(1), 0) if match else 0
+        idx = max(1, min(3, safe_int(match.group(2), 1) if match else 1))
+        if not is_admin_user(uid):
+            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
+        await safe_edit_or_send(query, ui_text(lang, "video.admin_smoke_warning"))
+        fake_update = SimpleNamespace(effective_user=query.from_user, effective_chat=SimpleNamespace(id=query.message.chat_id), message=query.message)
+        return await run_quick_video_admin_smoke(fake_update, context, image_to_video_prompt_from_image(job_id, uid, idx, lang))
+    if action.startswith("music_image_"):
+        job_id = safe_int(action.rsplit("_", 1)[-1], 0)
+        return await safe_edit_or_send(
+            query,
+            image_to_video_music_suggestions_text(job_id, uid, lang),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(ui_text(lang, "image.to_video"), callback_data=f"tvflow|image_video_prompts_{job_id}")],
+                [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            ]),
+        )
+    if action.startswith("image_back_"):
+        job_id = safe_int(action.rsplit("_", 1)[-1], 0)
+        return await safe_edit_or_send(
+            query,
+            image_to_video_image_options_text(job_id, uid, lang),
+            parse_mode="HTML",
+            reply_markup=public_image_success_keyboard(job_id, "low", lang),
+        )
+    if action.startswith("image_warranty_retry_"):
+        job_id = safe_int(action.rsplit("_", 1)[-1], 0)
+        if not shopaikey_image_job_for_user(job_id, uid) or image_job_retry_warranty_remaining(job_id) <= 0:
+            return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+        set_image_warranty_retry_pending(uid, job_id)
+        return await safe_edit_or_send(
+            query,
+            image_warranty_retry_request_text(job_id, lang),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="tvflow|cancel")],
+                [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            ]),
+        )
     guidance = {
         "edit_prompt": "✍️ Copy prompt ảnh trong workflow rồi chỉnh lại mô tả. Sau đó dùng /shopaikey_image <prompt đã sửa> khi public image được bật, hoặc admin dùng /tool_test_workflow_image để smoke test.",
         "cancel": "❌ Đã hủy chọn ảnh. Bot chưa gọi API và chưa trừ Xu.",
@@ -50049,6 +50601,10 @@ def pricing_main_lines() -> list[str]:
     pricing = media_workflow_pricing_payload()
     image_tiers = pricing["image_tiers"]
     video_tiers = pricing["video_tiers"]
+    image_items = [
+        f"• {payload['label']}: <b>{payload['cost']} Xu</b> — {html.escape(payload['note'])}"
+        for _tier, payload in image_tiers.items()
+    ]
     doc_items = [
         f"• Ảnh sang PDF: <b>{DOC_COSTS.get('image_to_pdf', 0)} Xu</b>",
         f"• PDF sang ảnh: <b>{DOC_COSTS.get('pdf_to_images', 0)} Xu</b>",
@@ -50077,9 +50633,7 @@ def pricing_main_lines() -> list[str]:
         "• Nếu provider lỗi/quota, bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
         "",
         "<b>C. Hình ảnh AI</b>",
-        f"• {image_tiers['low']['label']}: <b>{image_tiers['low']['cost']} Xu</b> — {html.escape(image_tiers['low']['note'])}",
-        f"• {image_tiers['standard']['label']}: <b>{image_tiers['standard']['cost']} Xu</b> — {html.escape(image_tiers['standard']['note'])}",
-        f"• {image_tiers['high']['label']}: <b>{image_tiers['high']['cost']} Xu</b> — {html.escape(image_tiers['high']['note'])}",
+        *image_items,
         f"• Trạng thái public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         "",
         "<b>D. Video AI</b>",
@@ -50350,6 +50904,10 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
     pricing = media_workflow_pricing_payload()
     image = pricing["image_tiers"]
     video = pricing["video_tiers"]
+    image_items = [
+        f"• {localized_image_tier_label(tier, lang)}: <b>{payload['cost']} Xu</b>"
+        for tier, payload in image.items()
+    ]
     if lang == "zh":
         return [
             "💳 <b>TOAN AAS 价格</b>",
@@ -50363,9 +50921,7 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
             "• Pro/Deep Chat：从 10–20 Xu 起，按任务复杂度计算。",
             "",
             "<b>C. AI 图片</b>",
-            f"• {image['low']['label']}: <b>{image['low']['cost']} Xu</b>",
-            f"• {image['standard']['label']}: <b>{image['standard']['cost']} Xu</b>",
-            f"• {image['high']['label']}: <b>{image['high']['cost']} Xu</b>",
+            *image_items,
             f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
             "",
             "<b>D. AI 视频</b>",
@@ -50395,9 +50951,7 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
         "• Pro/Deep chat: from 10–20 Xu depending on task complexity.",
         "",
         "<b>C. AI Images</b>",
-        f"• {image['low']['label']}: <b>{image['low']['cost']} Xu</b>",
-        f"• {image['standard']['label']}: <b>{image['standard']['cost']} Xu</b>",
-        f"• {image['high']['label']}: <b>{image['high']['cost']} Xu</b>",
+        *image_items,
         f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         "",
         "<b>D. AI Video</b>",
@@ -65750,6 +66304,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid  = update.effective_user.id
 
     if await handle_trend_video_flow_pending_text(update, context):
+        return
+
+    if await handle_image_warranty_retry_pending_text(update, context):
         return
 
     if await handle_public_image_prompt_pending_text(update, context):
