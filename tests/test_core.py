@@ -887,7 +887,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "tvflow|image_scene_2" in source
     assert "tvflow|image_scene_3" in source
     assert "set_trend_video_flow_pending(uid)" in command_source
-    assert "trend_video_pending_prompt_text()" in command_source
+    assert "trend_video_pending_prompt_text(lang)" in command_source
     assert "pending_action" in source and "trend_video_flow" in source
     assert "TREND_VIDEO_PENDING_TTL_SECONDS" in source
     assert "handle_trend_video_flow_pending_text(update, context)" in message_source
@@ -914,7 +914,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "add_credit(" not in admin_smoke_source
     assert "update_trend_workflow_generated_image" in shopai_callback_source
     assert "trend_workflow_image_success_keyboard" in shopai_callback_source
-    assert "Bạn muốn làm gì tiếp" in shopai_callback_source
+    assert "image.success" in shopai_callback_source
     assert "🎞 Tạo video từ ảnh này" in source
 
     monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ENABLED", True)
@@ -994,7 +994,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "tvflow|confirm_content" in source
     assert "tvflow|cancel_content" in source
     assert "Đã hủy gói nội dung theo trend" in callback_source
-    assert "Tính năng tạo ảnh/video thật đang thử nghiệm nội bộ" in callback_source
+    assert "media.public_off" in callback_source
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -1083,17 +1083,18 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "def public_video_tier_keyboard" in source
     assert "def public_video_success_keyboard" in source
     assert "async def handle_public_video_prompt_pending_text" in source
-    assert "🎨 TOAN AAS Media Creator" in helper_source
+    assert "media.creator_title" in helper_source
     assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
     assert 'InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")' in source
     assert 'InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video")' in source
     assert 'InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image")' in source
-    assert 'InlineKeyboardButton("🖼 Tạo ảnh AI nhanh", callback_data="create_media|quick_image")' in source
-    assert 'InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")' in source
-    assert 'InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
-    assert 'InlineKeyboardButton("🎥 Gợi ý chuyển động video", callback_data="motion|start")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
-    assert 'InlineKeyboardButton("🎬 Concept quảng cáo cinematic", callback_data="adconcept|start")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
-    assert 'InlineKeyboardButton("📝 Viết hook/script/caption", callback_data="menu|hint_film")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
+    video_keyboard_source = source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
+    assert 'ui_text(lang, "image.quick_button")' in source
+    assert 'ui_text(lang, "video.quick")' in video_keyboard_source
+    assert 'ui_text(lang, "video.trend")' in video_keyboard_source
+    assert 'ui_text(lang, "motion.menu")' in video_keyboard_source
+    assert 'ui_text(lang, "concept_ad.menu")' in video_keyboard_source
+    assert 'ui_text(lang, "video.hook_script")' in video_keyboard_source
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
     for callback_data in [
@@ -1110,7 +1111,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "create_media|pricing" not in create_media_keyboard_source
     assert "support_contact_text()" in source
     assert "clear_pending_start_notice(uid)" in source_between(source, "async def cmd_start", "async def cmd_menu")
-    assert "Mở menu chính bên dưới" in helper_source
+    assert "common.pending_cancelled_main" in source_between(source, "def clear_pending_start_notice", "def shopaikey_generation_unavailable_message")
     assert 'IMAGE_BASE_COST_XU = env_int("IMAGE_BASE_COST_XU", 50)' in source
     assert 'VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", 300)' in source
     assert 'MEDIA_PRICE_MULTIPLIER = env_int("MEDIA_PRICE_MULTIPLIER", 2)' in source
@@ -1119,7 +1120,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)' in source
     assert 'WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)' in source
     assert 'WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", 20)' in source
-    assert "Tính năng này đang thử nghiệm nội bộ, chưa mở công khai" in helper_source
+    assert "media.public_off" in helper_source
     assert "Giá chính thức được gom về một nơi duy nhất" in helper_source
     assert "set_quick_media_pending(uid, action)" in source
     assert 'set_quick_media_pending(uid, "quick_image_prompt")' not in source  # action is centralized through start/callback helpers.
@@ -1150,7 +1151,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "deduct_dynamic_credit" not in quick_source
     assert "add_credit(" not in quick_source
     assert "PAYOS" not in quick_source.upper()
-    assert "USER_JOB_LOCK_MESSAGE" in quick_source
+    assert 'ui_text(lang, "media.job_lock")' in quick_source
     assert "/quick_image_test" in quick_source and "/quick_video_test" in quick_source
     assert "No Xu deducted" in quick_source or "Không trừ Xu" in quick_source
     assert "Quick media menu: <code>enabled/guarded</code>" in source
@@ -1265,7 +1266,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "<code>/translate_voice</code>: từ 30–80 Xu/audio ngắn" not in plan_text
     assert "Music / Audio Factory" not in plan_text
     pricing_callback_source = source_between(source, "async def handle_pricing_callback", "def parse_chat_pro_args")
-    assert "edit_or_send_pricing_lines(query, pricing_xu_lines(), pricing_xu_keyboard())" in pricing_callback_source
+    assert "edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang), pricing_xu_keyboard(lang))" in pricing_callback_source
     assert "send_pricing_lines(query.message, pricing_xu_lines()" not in pricing_callback_source
     start_labels = [button.text for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard for button in row]
     assert "🎨 Media Creator" not in start_labels
@@ -1379,6 +1380,105 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.get_trend_video_flow_pending("u9") is None
 
 
+def test_public_flow_i18n_helpers_do_not_mix_vietnamese():
+    vietnamese_fragments = [
+        "Bạn", "Quay lại", "Hủy", "Menu chính", "Bảng giá", "Tài khoản", "Số dư",
+        "Đã trừ", "vui lòng", "chưa trừ", "Tạo ảnh", "Tạo video", "Gợi ý",
+        "Link giới thiệu", "Gói tháng", "không gọi", "trừ Xu", "Sản phẩm",
+        "Thông điệp", "Phong cách", "Đã hủy",
+    ]
+
+    def flatten_keyboard_text(keyboard):
+        return "\n".join(button.text for row in keyboard.inline_keyboard for button in row if getattr(button, "text", None))
+
+    def assert_no_vi(text):
+        leaked = [fragment for fragment in vietnamese_fragments if fragment in text]
+        assert not leaked, leaked
+
+    english_samples = [
+        flatten_keyboard_text(bot.localized_main_menu_keyboard(False, "en")),
+        flatten_keyboard_text(bot.main_video_keyboard("en")),
+        flatten_keyboard_text(bot.main_image_keyboard("en")),
+        flatten_keyboard_text(bot.main_profile_keyboard("en")),
+        flatten_keyboard_text(bot.pricing_main_keyboard("en")),
+        flatten_keyboard_text(bot.public_image_tier_keyboard("en")),
+        flatten_keyboard_text(bot.public_video_tier_keyboard("en")),
+        flatten_keyboard_text(bot.creative_motion_topic_keyboard("en")),
+        flatten_keyboard_text(bot.cinematic_ad_message_keyboard("en")),
+        flatten_keyboard_text(bot.cinematic_ad_style_keyboard("en")),
+        flatten_keyboard_text(bot.cinematic_ad_continuation_keyboard("en")),
+        flatten_keyboard_text(bot.trend_video_flow_keyboard("en")),
+        "\n".join(bot.pricing_main_lines_i18n("en")),
+        "\n".join(bot.pricing_xu_lines_i18n("en")),
+        "\n".join(bot.pricing_plans_lines_i18n("en")),
+        bot.public_image_tier_selection_text("en"),
+        bot.public_image_prompt_request_text("standard", "en"),
+        bot.public_image_confirm_text("standard", "turquoise product photo", 1000, "en"),
+        bot.public_video_tier_selection_text("en"),
+        bot.public_video_prompt_request_text("standard", "en"),
+        bot.public_video_confirm_text("standard", "short product video", 1000, "en"),
+        bot.public_image_provider_fail_message(50, True, "en"),
+        bot.public_video_provider_fail_message(200, False, "en"),
+        bot.creative_motion_topic_text("en"),
+        bot.creative_motion_style_text("mini blender ad", "en"),
+        bot.creative_motion_guide_text("mini blender product ad", "cinematic", "en"),
+        bot.cinematic_ad_product_text("en"),
+        bot.cinematic_ad_message_text("mini blender", "en"),
+        bot.cinematic_ad_style_text("mini blender", "save time", "en"),
+        bot.cinematic_ad_concept_text("mini blender", "save time", "cinematic", "en"),
+        bot.cinematic_ad_continue_text({"product": "mini blender", "message": "save time", "style": "cinematic"}, "en"),
+        bot.cinematic_ad_video_from_concept_text({"product": "mini blender", "message": "save time", "style": "cinematic"}, "en"),
+        "\n".join(bot.trend_video_flow_sections_i18n("mini blender product review", "Xu: 0 Xu — no charge.", "en")),
+        bot.trend_workflow_content_confirm_text("mini blender", 1000, "en"),
+        flatten_keyboard_text(bot.trend_workflow_content_confirm_keyboard("en")),
+        bot.trend_workflow_insufficient_credits_text(10, 70, "en"),
+        bot.trend_video_pending_prompt_text("en"),
+        flatten_keyboard_text(bot.trend_video_pending_keyboard("en")),
+    ]
+    for sample in english_samples:
+        assert_no_vi(str(sample))
+
+    chinese_samples = [
+        flatten_keyboard_text(bot.localized_main_menu_keyboard(False, "zh")),
+        flatten_keyboard_text(bot.main_video_keyboard("zh")),
+        flatten_keyboard_text(bot.main_image_keyboard("zh")),
+        flatten_keyboard_text(bot.main_profile_keyboard("zh")),
+        flatten_keyboard_text(bot.pricing_main_keyboard("zh")),
+        flatten_keyboard_text(bot.public_image_tier_keyboard("zh")),
+        flatten_keyboard_text(bot.public_video_tier_keyboard("zh")),
+        flatten_keyboard_text(bot.creative_motion_topic_keyboard("zh")),
+        flatten_keyboard_text(bot.cinematic_ad_message_keyboard("zh")),
+        flatten_keyboard_text(bot.cinematic_ad_style_keyboard("zh")),
+        flatten_keyboard_text(bot.cinematic_ad_continuation_keyboard("zh")),
+        flatten_keyboard_text(bot.trend_video_flow_keyboard("zh")),
+        "\n".join(bot.pricing_main_lines_i18n("zh")),
+        "\n".join(bot.pricing_xu_lines_i18n("zh")),
+        "\n".join(bot.pricing_plans_lines_i18n("zh")),
+        bot.public_image_prompt_request_text("standard", "zh"),
+        bot.public_video_prompt_request_text("standard", "zh"),
+        bot.public_image_provider_fail_message(50, True, "zh"),
+        bot.public_video_provider_fail_message(200, False, "zh"),
+        bot.creative_motion_topic_text("zh"),
+        bot.creative_motion_style_text("迷你搅拌机广告", "zh"),
+        bot.creative_motion_guide_text("迷你搅拌机广告", "cinematic", "zh"),
+        bot.cinematic_ad_product_text("zh"),
+        bot.cinematic_ad_message_text("迷你搅拌机", "zh"),
+        bot.cinematic_ad_style_text("迷你搅拌机", "节省时间", "zh"),
+        bot.cinematic_ad_concept_text("迷你搅拌机", "节省时间", "cinematic", "zh"),
+        "\n".join(bot.trend_video_flow_sections_i18n("迷你搅拌机产品广告", "Xu: 0 Xu — no charge.", "zh")),
+        bot.trend_workflow_content_confirm_text("迷你搅拌机", 1000, "zh"),
+        bot.trend_workflow_insufficient_credits_text(10, 70, "zh"),
+        bot.trend_video_pending_prompt_text("zh"),
+    ]
+    for sample in chinese_samples:
+        assert_no_vi(str(sample))
+
+    assert bot.ui_text("en", "missing.translation.key.for.test") == "missing.translation.key.for.test"
+    assert "Back" in bot.ui_text("en", "common.back")
+    assert "返回" in bot.ui_text("zh", "common.back")
+    assert "Quay lại" in bot.ui_text("vi", "common.back")
+
+
 def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     source = bot_source_text()
     motion_source = source_between(source, "def creative_motion_pending_key", "TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE")
@@ -1399,7 +1499,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     profile_text_source = source_between(source, "def menu_text_main_profile", "def main_profile_keyboard")
     assert "🎁 <b>Link giới thiệu của bạn</b>" not in profile_text_source
     assert "referral_link_for_user(user_id" not in profile_text_source
-    assert "Bấm nút bên dưới để xem link giới thiệu" in profile_text_source
+    assert "account.ref_hint" in profile_text_source
     assert "https://t.me/" not in profile_text_source
     profile_buttons = [button.text for row in bot.main_profile_keyboard("vi").inline_keyboard for button in row]
     assert "🎁 Link giới thiệu của tôi" in profile_buttons
@@ -1570,7 +1670,7 @@ def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
     assert "auto_poll_shopaikey_video_job" in command_source
     assert "No Xu deducted" in command_source
     assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED" in callback_source
-    assert "Tính năng tạo video từ ảnh đang thử nghiệm nội bộ" in callback_source
+    assert "media.public_off" in callback_source
     assert "spend_fixed_credit_info" not in command_source
     assert "deduct_dynamic_credit" not in command_source
     assert "add_credit(" not in command_source
