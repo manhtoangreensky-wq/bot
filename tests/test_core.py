@@ -1086,7 +1086,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "def public_video_success_keyboard" in source
     assert "async def handle_public_video_prompt_pending_text" in source
     assert "media.creator_title" in helper_source
-    assert "ADMIN_DEBUG" in source
+    assert "ADMIN_DEBUG_PUBLIC_ERRORS" in source
     assert "BOT COMMAND ERROR" not in source
     assert "BOT COMMAND DEBUG ERROR" in source
     assert "def safe_edit_or_send" in source
@@ -1101,10 +1101,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image")' in source
     video_keyboard_source = source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert 'ui_text(lang, "image.quick_button")' in source
-    assert 'ui_text(lang, "video.quick")' in video_keyboard_source
-    assert 'ui_text(lang, "video.trend")' in video_keyboard_source
-    assert 'ui_text(lang, "motion.menu")' in video_keyboard_source
-    assert 'ui_text(lang, "concept_ad.menu")' in video_keyboard_source
+    assert 'ui_text(lang, "video.guided_flow")' in video_keyboard_source
+    assert 'ui_text(lang, "video.quick_admin_public")' in video_keyboard_source
+    assert 'ui_text(lang, "video.trend_short")' in video_keyboard_source
+    assert 'ui_text(lang, "video.motion_short")' in video_keyboard_source
+    assert 'ui_text(lang, "video.concept_short")' in video_keyboard_source
     assert 'ui_text(lang, "video.hook_script")' in video_keyboard_source
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
@@ -1309,9 +1310,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "📞 Liên hệ admin" not in image_labels
     video_buttons = [button for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     assert any(button.text == "🎞 Tạo video nhanh" and button.callback_data == "create_media|quick_video" for button in video_buttons)
-    assert any(button.text == "🎬 Tạo video theo trend" and button.callback_data == "create_media|trend" for button in video_buttons)
+    assert any(button.text == "✨ Làm theo từng bước" and button.callback_data == "adconcept|guided_start" for button in video_buttons)
+    assert any(button.text == "🔥 Video theo trend" and button.callback_data == "create_media|trend" for button in video_buttons)
     video_labels = [button.text for button in video_buttons]
-    assert "🎥 Gợi ý chuyển động video" in video_labels
+    assert "🎥 Gợi ý chuyển động" in video_labels
     assert "🖼➡️🎞 Tạo video từ ảnh" in video_labels
     assert "✍️ Tạo prompt video" in video_labels
     assert "📝 Viết hook/script/caption" in video_labels
@@ -1613,25 +1615,27 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "🧊 3D/product reveal" in style_buttons
     continuation_buttons = [button.text for row in bot.cinematic_ad_continuation_keyboard().inline_keyboard for button in row]
     assert "✅ Hoàn tất / Chốt concept này" in continuation_buttons
-    assert "🎥 Tạo motion guide từ concept này" in continuation_buttons
-    assert "🖼 Tạo prompt ảnh từ concept này" in continuation_buttons
-    assert "🎞 Tạo prompt video từ concept này" in continuation_buttons
-    assert "🖼 Tạo ảnh từ concept này" in continuation_buttons
-    assert "🎬 Tạo video từ concept này" in continuation_buttons
-    assert "🎬 Tạo workflow đầy đủ từ concept này" in continuation_buttons
     assert "🔁 Tạo concept khác" in continuation_buttons
     assert "✍️ Sửa concept" in continuation_buttons
     locked_buttons = [button.text for row in bot.cinematic_ad_locked_keyboard().inline_keyboard for button in row]
-    assert "🎵 Gợi ý nhạc phù hợp" in locked_buttons
+    assert "🖼 Ảnh / Prompt ảnh" in locked_buttons
+    assert "🎬 Video / Chuyển động" in locked_buttons
+    assert "🎵 Nhạc / Âm thanh" in locked_buttons
     assert "🔙 Quay lại concept đã chốt" in [button.text for row in bot.cinematic_ad_motion_keyboard().inline_keyboard for button in row]
+    assert "✅ Lưu hướng chuyển động" in [button.text for row in bot.cinematic_ad_motion_keyboard().inline_keyboard for button in row]
+    assert "✅ Lưu prompt ảnh" in [button.text for row in bot.cinematic_ad_image_prompt_keyboard().inline_keyboard for button in row]
     assert "🖼 Tạo ảnh AI từ prompt 1" in [button.text for row in bot.cinematic_ad_image_prompt_keyboard().inline_keyboard for button in row]
-    assert "🎬 Tạo video từ prompt này" in [button.text for row in bot.cinematic_ad_video_prompt_keyboard().inline_keyboard for button in row]
+    assert "✅ Lưu prompt video" in [button.text for row in bot.cinematic_ad_video_prompt_keyboard().inline_keyboard for button in row]
+    assert "🎬 Tạo video thật từ prompt này" in [button.text for row in bot.cinematic_ad_video_prompt_keyboard().inline_keyboard for button in row]
+    assert "💡 Gợi ý thể loại nhạc" in [button.text for row in bot.cinematic_ad_music_menu_keyboard().inline_keyboard for button in row]
     assert "adconcept|motion_current" in ad_source
+    assert "adconcept|image_menu" in ad_source
+    assert "adconcept|video_menu" in ad_source
+    assert "adconcept|music_menu" in ad_source
     assert "adconcept|image_prompt_current" in ad_source
     assert "adconcept|video_prompt_current" in ad_source
     assert "adconcept|create_image_current" in ad_source
     assert "adconcept|create_video_current" in ad_source
-    assert "adconcept|workflow_current" in ad_source
     assert "adconcept|edit_current" in ad_source
     assert "send_or_confirm_trend_video_flow_from_callback" in ad_source
     ad_concept = bot.cinematic_ad_concept_text("máy xay sinh tố mini", "tiết kiệm thời gian", "cinematic").lower()
@@ -1668,25 +1672,27 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert locked and locked["locked"] is True
     assert "dùng lại dữ liệu concept hiện tại" in bot.cinematic_ad_continue_text(concept).lower()
     motion_from_concept = bot.cinematic_ad_motion_from_concept_text(concept).lower()
-    assert "motion guide" in motion_from_concept
-    assert "timeline" in motion_from_concept
-    assert "camera motion" in motion_from_concept
+    assert "hướng chuyển động" in motion_from_concept
+    assert "lộ trình từng giây" in motion_from_concept
+    assert "chuyển động camera" in motion_from_concept
     assert "không gọi api video thật" in motion_from_concept
     image_prompts = bot.cinematic_ad_image_prompts_from_concept_text(concept).lower()
-    assert "prompt ảnh từ concept này" in image_prompts
-    assert "1. vertical" in image_prompts
-    assert "2. product" in image_prompts
-    assert "negative prompt" in image_prompts
+    assert "prompt ảnh khung chính từ concept này" in image_prompts
+    assert "1. khung mở đầu" in image_prompts
+    assert "2. khung hero sản phẩm" in image_prompts
+    assert "điều cần tránh" in image_prompts
     video_prompts = bot.cinematic_ad_video_prompt_from_concept_text(concept).lower()
-    assert "prompt 5s" in video_prompts
+    assert "gợi ý video 5 giây" in video_prompts
     assert "tạo video thật đang thử nghiệm nội bộ" in video_prompts
+    assert "điều cần tránh" in video_prompts
     music_suggestions = bot.cinematic_ad_music_from_concept_text(concept).lower()
     assert "/music_library" in music_suggestions
     assert "/sfx_library" in music_suggestions
+    assert "prompt tạo nhạc" in music_suggestions
     video_from_concept = bot.cinematic_ad_video_from_concept_text(concept).lower()
-    assert "public video" in video_from_concept
+    assert "tạo video thật chưa mở công khai" in video_from_concept
     assert "off" in video_from_concept
-    assert "bot chưa gọi api video và chưa trừ xu" in video_from_concept
+    assert "không gọi api video và không trừ xu" in video_from_concept
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
