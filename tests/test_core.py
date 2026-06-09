@@ -887,14 +887,14 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "tvflow|image_scene_1" in source
     assert "tvflow|image_scene_2" in source
     assert "tvflow|image_scene_3" in source
-    assert "set_trend_video_flow_pending(uid)" in command_source
+    assert 'set_trend_video_flow_pending(uid, "topic")' in command_source
     assert "trend_video_pending_prompt_text(lang)" in command_source
     assert "pending_action" in source and "trend_video_flow" in source
     assert "TREND_VIDEO_PENDING_TTL_SECONDS" in source
     assert "handle_trend_video_flow_pending_text(update, context)" in message_source
     assert message_source.index("handle_trend_video_flow_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
-    assert "send_or_confirm_trend_video_flow(update, context, topic)" in pending_source
-    assert "clear_trend_video_flow_pending(uid)" in pending_source
+    assert "send_trend_guided_choices_message(update.message, uid, topic, lang)" in pending_source
+    assert "clear_trend_video_flow_pending(uid)" in source
     assert "shopaikey_image_generate" not in combined_source
     assert "shopaikey_video_create" not in combined_source
     assert "spend_fixed_credit_info" in combined_source
@@ -1101,9 +1101,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image")' in source
     video_keyboard_source = source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert 'ui_text(lang, "image.quick_button")' in source
-    assert 'ui_text(lang, "video.guided_flow")' in video_keyboard_source
+    assert 'ui_text(lang, "video.guided_flow")' not in video_keyboard_source
     assert 'ui_text(lang, "video.quick_admin_public")' in video_keyboard_source
     assert 'ui_text(lang, "video.trend_short")' in video_keyboard_source
+    assert 'callback_data="trendg|start"' in video_keyboard_source
     assert 'ui_text(lang, "video.motion_short")' in video_keyboard_source
     assert 'ui_text(lang, "video.concept_short")' in video_keyboard_source
     assert 'ui_text(lang, "video.hook_script")' in video_keyboard_source
@@ -1310,8 +1311,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "📞 Liên hệ admin" not in image_labels
     video_buttons = [button for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     assert any(button.text == "🎞 Tạo video nhanh" and button.callback_data == "create_media|quick_video" for button in video_buttons)
-    assert any(button.text == "✨ Làm theo từng bước" and button.callback_data == "adconcept|guided_start" for button in video_buttons)
-    assert any(button.text == "🔥 Video theo trend" and button.callback_data == "create_media|trend" for button in video_buttons)
+    assert not any(button.text == "✨ Làm theo từng bước" for button in video_buttons)
+    assert any(button.text == "🔥 Video theo trend" and button.callback_data == "trendg|start" for button in video_buttons)
     video_labels = [button.text for button in video_buttons]
     assert "🎥 Gợi ý chuyển động" in video_labels
     assert "🖼➡️🎞 Tạo video từ ảnh" in video_labels
@@ -1602,6 +1603,65 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert pending and pending["topic"] == "AI tool affiliate"
     assert bot.clear_creative_motion_pending("u_motion") is True
 
+    trend_prompt = bot.trend_video_pending_prompt_text()
+    assert "Bạn muốn làm video về sản phẩm/dịch vụ/chủ đề gì" in trend_prompt
+    assert "mục tiêu + phong cách + nền tảng" not in trend_prompt
+    bot.USER_PENDING.pop(bot.trend_video_pending_key("u_trend"), None)
+    bot.set_trend_video_flow_pending("u_trend", "trend_choices", topic="máy xay sinh tố mini")
+    pending = bot.get_trend_video_flow_pending("u_trend")
+    assert pending and pending["pending_action"] == "trend_video_flow"
+    assert pending["topic"] == "máy xay sinh tố mini"
+    trend_text = bot.trend_guided_trend_choices_text("máy xay sinh tố mini")
+    assert "Chọn 1 trong 3 hướng video" in trend_text
+    assert "Hướng cảm xúc / câu chuyện" in trend_text
+    assert "Hướng bán hàng trực tiếp" in trend_text
+    assert "Hướng viral TikTok/Reels" in trend_text
+    trend_callbacks = [button.callback_data for row in bot.trend_guided_trend_choices_keyboard().inline_keyboard for button in row]
+    assert "trendg|trend_select_1" in trend_callbacks
+    assert "trendg|trend_select_2" in trend_callbacks
+    assert "trendg|trend_select_3" in trend_callbacks
+    motion_callbacks = [button.callback_data for row in bot.trend_guided_motion_choices_keyboard().inline_keyboard for button in row]
+    assert "trendg|motion_select_1" in motion_callbacks
+    assert "trendg|motion_select_2" in motion_callbacks
+    assert "trendg|motion_select_3" in motion_callbacks
+    image_callbacks = [button.callback_data for row in bot.trend_guided_image_prompt_choices_keyboard().inline_keyboard for button in row]
+    assert "trendg|image_prompt_select_1" in image_callbacks
+    assert "trendg|image_prompt_select_2" in image_callbacks
+    assert "trendg|image_prompt_select_3" in image_callbacks
+    video_callbacks = [button.callback_data for row in bot.trend_guided_video_prompt_choices_keyboard().inline_keyboard for button in row]
+    assert "trendg|video_prompt_select_1" in video_callbacks
+    assert "trendg|video_prompt_select_2" in video_callbacks
+    assert "trendg|video_prompt_select_3" in video_callbacks
+    music_callbacks = [button.callback_data for row in bot.trend_guided_music_suggestions_keyboard().inline_keyboard for button in row]
+    assert "trendg|music_select_1" in music_callbacks
+    assert "trendg|music_select_2" in music_callbacks
+    assert "trendg|music_select_3" in music_callbacks
+    video_off_text = bot.trend_guided_video_public_off_text(bot.get_trend_video_flow_pending("u_trend") or {})
+    assert "Tạo video thật chưa mở công khai" in video_off_text
+    assert "chưa trừ Xu" in video_off_text
+    bot.USER_PENDING.pop(bot.trend_video_pending_key("u_trend_en"), None)
+    bot.set_trend_video_flow_pending(
+        "u_trend_en",
+        "video_prompt_selected",
+        topic="mini blender",
+        trend_choice=1,
+        motion_choice=1,
+        image_prompt_choice=1,
+        video_prompt_choice=1,
+    )
+    english_state = bot.get_trend_video_flow_pending("u_trend_en") or {}
+    english_image_prompt = bot.trend_guided_image_prompt_for_index(english_state, 1, "en")
+    english_video_prompt = bot.trend_guided_video_prompt_for_index(english_state, 1, "en")
+    english_video_off = bot.trend_guided_video_public_off_text(english_state, "en")
+    assert "Main product image" in english_image_prompt
+    assert "Video prompt 5 seconds" in english_video_prompt
+    assert "Real video generation is not public yet" in english_video_off
+    assert "Ảnh" not in english_image_prompt
+    assert "Gợi ý video" not in english_video_prompt
+    assert "Tạo video thật chưa mở công khai" not in english_video_off
+    assert "callback_data=\"trendg|start\"" in source
+    assert "CallbackQueryHandler(handle_trend_guided_callback, pattern=r\"^trendg\\|\")" in source
+
     product_text = bot.cinematic_ad_product_text()
     assert "Bạn muốn làm quảng cáo cho sản phẩm/dịch vụ gì" in product_text
     assert "không gọi API ảnh/video thật" in product_text
@@ -1610,9 +1670,9 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "Before / After" in ad_buttons
     assert "✍️ Nhập thông điệp khác" in ad_buttons
     style_buttons = [button.text for row in bot.cinematic_ad_style_keyboard().inline_keyboard for button in row]
-    assert "🎬 Cinematic cảm xúc" in style_buttons
-    assert "🖤 Đen trắng luxury" in style_buttons
-    assert "🧊 3D/product reveal" in style_buttons
+    assert "🎬 Điện ảnh cảm xúc" in style_buttons
+    assert "🖤 Đen trắng cao cấp" in style_buttons
+    assert "🧊 Hé lộ sản phẩm 3D" in style_buttons
     continuation_buttons = [button.text for row in bot.cinematic_ad_continuation_keyboard().inline_keyboard for button in row]
     assert "1️⃣ Chọn gợi ý 1" in continuation_buttons
     assert "2️⃣ Chọn gợi ý 2" in continuation_buttons
@@ -2069,14 +2129,14 @@ def test_customer_guide_is_public_and_policy_aligned():
     assert "/huongdan 1" in guide_index
     assert "Hướng dẫn tạo ảnh AI" in guide_index
     assert "Hướng dẫn tạo video AI" in guide_index
-    assert "Làm video theo từng bước" in guide_index
+    assert "Làm video theo trend từng bước" in guide_index
     assert "Hướng dẫn thêm nhạc" in guide_index
     assert "📘 Hướng Dẫn" in button_texts
     assert "50.000đ → 500 Xu + 30 Xu Launch Bonus" in guide_credit
     assert "100.000đ → 1.000 Xu + 50 Xu Launch Bonus" in guide_credit
     assert "chỉ sau khi bạn xác nhận" in guide_image.lower()
     assert "không gọi api video và không trừ xu" in guide_video.lower()
-    assert "3 gợi ý cụ thể ở mỗi bước" in guide_step.lower()
+    assert "3 gợi ý" in guide_step.lower()
     assert "nhạc là tùy chọn" in guide_music.lower()
     assert bot.package_launch_bonus_xu(50000) == 30
     assert bot.package_launch_bonus_xu(100000) == 50
