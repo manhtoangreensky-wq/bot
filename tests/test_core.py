@@ -2542,13 +2542,18 @@ def test_topup_keyboard_preserves_package_callbacks():
 
 def test_customer_guide_is_public_and_policy_aligned():
     guide_index = bot.guide_index_text()
+    guide_quick = bot.guide_section_text("quick_start")
     guide_credit = bot.guide_section_text("credits")
     guide_image = bot.guide_section_text("image_ai")
     guide_video = bot.guide_section_text("video_ai")
     guide_step = bot.guide_section_text("guided_video")
     guide_music = bot.guide_section_text("music_add")
+    guide_refund = bot.guide_section_text("refund")
+    guide_faq = bot.guide_section_text("faq")
     keyboard = bot.main_menu_keyboard(False)
     button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
+    guide_labels = [button.text for row in bot.main_guide_keyboard("vi").inline_keyboard for button in row]
+    guide_callbacks = [button.callback_data for row in bot.main_guide_keyboard("vi").inline_keyboard for button in row if button.callback_data]
 
     assert "/huongdan 1" in guide_index
     assert "Hướng dẫn tạo ảnh AI" in guide_index
@@ -2556,12 +2561,61 @@ def test_customer_guide_is_public_and_policy_aligned():
     assert "Làm video theo trend từng bước" in guide_index
     assert "Hướng dẫn thêm nhạc" in guide_index
     assert "📘 Hướng Dẫn" in button_texts
+    assert "🚀 Bắt đầu nhanh" in guide_labels
+    assert "🖼 Hướng dẫn tạo ảnh" in guide_labels
+    assert "🎬 Hướng dẫn tạo video" in guide_labels
+    assert "🔥 Hướng dẫn video theo trend" in guide_labels
+    assert "🎵 Hướng dẫn thêm nhạc / bỏ nhạc" in guide_labels
+    assert "💰 Hướng dẫn Xu & nạp tiền" in guide_labels
+    assert "🔁 Hoàn Xu khi lỗi" in guide_labels
+    assert "❓ Câu hỏi thường gặp" in guide_labels
+    assert "👨‍💼 Liên hệ admin" in guide_labels
+    assert "menu|guide_quick_start" in guide_callbacks
+    assert "menu|guide_refund" in guide_callbacks
+    assert "menu|guide_faq" in guide_callbacks
+    assert "Bắt đầu nhanh với TOAN AAS" in guide_quick
+    assert "Tạo ảnh AI" in guide_quick
+    assert "Tạo video AI" in guide_quick
+    assert "Video theo trend" in guide_quick
     assert "50.000đ → 500 Xu + 30 Xu Launch Bonus" in guide_credit
     assert "100.000đ → 1.000 Xu + 50 Xu Launch Bonus" in guide_credit
     assert "chỉ sau khi bạn xác nhận" in guide_image.lower()
+    assert "Ảnh tiêu chuẩn" in guide_image
+    assert "bảo hành" in guide_image.lower()
     assert "không gọi api video và không trừ xu" in guide_video.lower()
+    assert "Video tiết kiệm: 200 Xu" in guide_video
+    assert "Video tiêu chuẩn: 600 Xu" in guide_video
+    assert "Video chất lượng cao: 1200 Xu" in guide_video
     assert "3 gợi ý" in guide_step.lower()
+    assert "chọn cách lấy trend" in guide_step.lower()
     assert "nhạc là tùy chọn" in guide_music.lower()
+    assert "bỏ nhạc" in guide_music.lower()
+    assert "Hoàn Xu khi lỗi" in guide_refund
+    assert "provider hết quota" in guide_refund
+    assert guide_faq.count("<b>") >= 8
+    assert len(guide_faq) < 2600
+    image_buttons = [button.text for row in bot.guide_keyboard("image_ai", "vi").inline_keyboard for button in row]
+    video_buttons = [button.text for row in bot.guide_keyboard("video_ai", "vi").inline_keyboard for button in row]
+    trend_buttons = [button.text for row in bot.guide_keyboard("guided_video", "vi").inline_keyboard for button in row]
+    xu_buttons = [button.text for row in bot.guide_keyboard("credits", "vi").inline_keyboard for button in row]
+    quick_buttons = [button.text for row in bot.guide_keyboard("quick_start", "vi").inline_keyboard for button in row]
+    assert "🖼 Tạo ảnh ngay" in image_buttons
+    assert "🎬 Tạo video ngay" in video_buttons
+    assert "🔥 Tạo video theo trend" in trend_buttons
+    assert "💳 Nạp Xu" in xu_buttons
+    assert "🖼 Tạo ảnh AI" in quick_buttons
+    assert "🎬 Tạo video AI" in quick_buttons
+    assert "🔥 Video theo trend" in quick_buttons
+    en_text, en_keyboard = bot.localized_menu_content("guide_image_ai", False, "en", "u_en")
+    assert "AI Image Guide" in en_text
+    assert "Hướng dẫn" not in en_text
+    assert any(button.text == "🔙 Back to guide" for row in en_keyboard.inline_keyboard for button in row)
+    vi_guide_text, vi_guide_keyboard = bot.localized_menu_content("main_guide", False, "vi", "u_vi")
+    assert "HƯỚNG DẪN" in vi_guide_text
+    assert any(button.text == "🚀 Bắt đầu nhanh" for row in vi_guide_keyboard.inline_keyboard for button in row)
+    sales_payload = bot.sales_readiness_payload()
+    assert sales_payload["commands"]["guide_menu"] is True
+    assert "Guide menu: <code>{'ON' if commands.get('guide_menu') else 'OFF'}</code>" in bot_source_text()
     assert bot.package_launch_bonus_xu(50000) == 30
     assert bot.package_launch_bonus_xu(100000) == 50
 

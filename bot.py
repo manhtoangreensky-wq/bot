@@ -30943,6 +30943,7 @@ def sales_readiness_payload() -> dict:
         "promo_seed_beta": callable(globals().get("cmd_promo_seed_beta")),
         "emergency_status": callable(globals().get("cmd_emergency_status")),
         "ops_plan": callable(globals().get("cmd_ops_plan")),
+        "guide_menu": callable(globals().get("main_guide_keyboard")) and callable(globals().get("guide_section_text")),
     }
     blockers = []
     if not db_status["ok"]:
@@ -30989,6 +30990,19 @@ def sales_readiness_payload() -> dict:
         status = "BETA READY / NEED PAYOS DEBUG"
     else:
         status = "NOT READY"
+    try:
+        data_persistence = data_persistence_status_payload(include_counts=False)
+    except Exception as e:
+        data_persistence = {
+            "data_loss_risk": True,
+            "data_loss_risk_level": "ERROR",
+            "db_path": display_db_path(DB_FILE),
+            "startup_prep_reason": str(e)[:160],
+        }
+    try:
+        video_queue = shopaikey_video_queue_counts()
+    except Exception:
+        video_queue = {"queued": 0, "running": 0, "success": 0, "failed": 0, "total": 0}
     return {
         "status": status,
         "db_ok": db_status["ok"],
@@ -31001,6 +31015,14 @@ def sales_readiness_payload() -> dict:
         "payos_real_test": payos_test,
         "promo": promo_readiness_payload(),
         "ops": ops_mode,
+        "data_persistence": data_persistence,
+        "shopaikey_usage": shopaikey_last_usage_snapshot(),
+        "video_freeze": provider_freeze_display("shopaikey_video"),
+        "video_queue": video_queue,
+        "public_image_enabled": bool(SHOPAIKEY_PUBLIC_IMAGE_ENABLED),
+        "public_video_enabled": bool(SHOPAIKEY_PUBLIC_VIDEO_ENABLED),
+        "refund_guard": bool(SHOPAIKEY_REFUND_ON_PROVIDER_FAIL),
+        "job_lock": bool(SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED),
         "blockers": blockers,
         "note": "SALES READY chỉ bật khi /payos_debug_create PASS và admin đã mark PayOS real payment test PASS.",
     }
@@ -31190,14 +31212,20 @@ CUSTOMER_GUIDE_SECTIONS = [
         "Hướng dẫn tạo ảnh AI",
         (
             "🖼 <b>Hướng dẫn tạo ảnh AI</b>\n\n"
-            "1. Mở <b>Hình ảnh</b> hoặc đi từ <b>Concept quảng cáo</b>.\n"
-            "2. Chọn prompt ảnh hoặc gửi mô tả ảnh bạn muốn tạo.\n"
-            "3. Chọn chất lượng ảnh: tiết kiệm, tiêu chuẩn hoặc chất lượng cao.\n"
-            "4. Bot hiển thị giá Xu và hỏi xác nhận.\n"
+            "1. Mở <b>Hình ảnh</b> rồi chọn <b>Tạo ảnh AI nhanh</b>, hoặc đi từ Concept/Trend workflow.\n"
+            "2. Gửi mô tả ảnh càng rõ càng tốt: sản phẩm, nền, ánh sáng, phong cách, tỉ lệ, chữ cần tránh.\n"
+            "3. Chọn gói ảnh: tiết kiệm, tiêu chuẩn, tiêu chuẩn + bảo hành, chất lượng cao hoặc chất lượng cao + bảo hành.\n"
+            "4. Bot hiển thị giá Xu và hỏi xác nhận trước khi tạo.\n"
             "5. Chỉ sau khi bạn xác nhận, bot mới trừ Xu và gọi provider tạo ảnh.\n"
-            "6. Nếu provider lỗi theo chính sách hoàn Xu, bot sẽ hoàn Xu cho bước đó.\n\n"
+            "6. Nếu provider lỗi/quota/timeout theo chính sách hoàn Xu, bot sẽ hoàn Xu cho bước đó.\n\n"
+            "<b>Ví dụ mô tả tốt:</b>\n"
+            "<code>Máy xay sinh tố mini màu xanh ngọc trên bàn bếp sáng, ánh sáng tự nhiên, sạch, quảng cáo thương mại, không thêm chữ, không watermark.</code>\n\n"
+            "<b>Gói ảnh:</b>\n"
+            "• Ảnh tiết kiệm: test nhanh, không kèm tạo lại miễn phí.\n"
+            "• Ảnh tiêu chuẩn: cân bằng chất lượng/chi phí.\n"
+            "• Gói có bảo hành: kèm 1 lần tạo lại trong cùng yêu cầu nếu ảnh chưa đúng ý.\n\n"
             "<b>Sau khi có ảnh:</b>\n"
-            "Bạn có thể lưu ảnh, sửa prompt, tạo lại theo quy tắc chống spam, hoặc dùng ảnh để chuẩn bị prompt video.\n\n"
+            "Bạn có thể lưu ảnh, sửa prompt, tạo lại theo quy tắc gói đã chọn, hoặc dùng ảnh để chuẩn bị prompt video.\n\n"
             "Lưu ý: tạo ảnh thật đang đi qua billing guard; không có xác nhận thì không trừ Xu."
         ),
     ),
@@ -31206,14 +31234,19 @@ CUSTOMER_GUIDE_SECTIONS = [
         "Hướng dẫn tạo video AI",
         (
             "🎬 <b>Hướng dẫn tạo video AI</b>\n\n"
-            "1. Tạo ý tưởng/concept.\n"
-            "2. Chọn hướng chuyển động.\n"
-            "3. Tạo ảnh khung chính nếu cần.\n"
-            "4. Tạo prompt video.\n"
-            "5. Khi video public mở, chọn chất lượng video và xác nhận giá.\n"
-            "6. Chờ bot xử lý, không gửi lại nhiều lần.\n"
-            "7. Có thể thêm nhạc hoặc hoàn tất không nhạc.\n\n"
-            "Hiện video public có thể đang OFF. Khi OFF, bot chỉ tạo prompt/hướng dẫn, không gọi API video và không trừ Xu."
+            "1. Mở <b>Tạo nội dung / Video</b> hoặc chọn <b>Tạo video nhanh</b>.\n"
+            "2. Gửi mô tả video: sản phẩm, cảnh quay, chuyển động, tỉ lệ, thời lượng, phong cách.\n"
+            "3. Nếu cần, tạo ảnh khung chính trước rồi dùng ảnh đó để làm video.\n"
+            "4. Chọn chất lượng video và xác nhận giá.\n"
+            "5. Bot trừ Xu sau khi xác nhận, gửi job vào queue và tự gửi video khi hoàn tất.\n"
+            "6. Trong lúc chờ, không gửi lại nhiều lần để tránh job trùng.\n"
+            "7. Sau video, bạn có thể chọn thêm nhạc hoặc hoàn tất không nhạc.\n\n"
+            "<b>Gói video:</b>\n"
+            "• Video tiết kiệm: 200 Xu.\n"
+            "• Video tiêu chuẩn: 600 Xu.\n"
+            "• Video chất lượng cao: 1200 Xu.\n"
+            "• Video premium: admin-only / liên hệ admin.\n\n"
+            "Nếu Public video OFF, bot chỉ tạo prompt/hướng dẫn, không gọi API video và không trừ Xu."
         ),
     ),
     (
@@ -31223,27 +31256,34 @@ CUSTOMER_GUIDE_SECTIONS = [
             "🔥 <b>Hướng dẫn làm video theo trend từng bước</b>\n\n"
             "1. Mở <b>Tạo nội dung / Video</b> → <b>Video theo trend</b>.\n"
             "2. Gửi sản phẩm/dịch vụ/chủ đề bạn muốn làm video.\n"
-            "3. Bot đưa <b>3 hướng video</b>: cảm xúc/câu chuyện, bán hàng trực tiếp, viral TikTok/Reels.\n"
-            "4. Bạn chọn 1 hướng, chốt/lưu, rồi sang bước chuyển động.\n"
-            "5. Ở mỗi bước sau, bot cũng đưa <b>3 gợi ý</b>: chuyển động, prompt ảnh, prompt video và nhạc.\n\n"
+            "3. Chọn cách lấy trend: gợi ý 3 trend phổ biến, trend theo ngành, tự nhập trend hoặc bỏ qua trend.\n"
+            "4. Chọn/chốt trend rồi bot mới tạo hướng video phù hợp.\n"
+            "5. Đi tiếp từng bước: 3 hướng chuyển động, 3 prompt ảnh, prompt video, nhạc hoặc không nhạc.\n"
+            "6. Ở các bước sau, bot vẫn ưu tiên đưa <b>3 gợi ý</b> để bạn dễ chọn.\n"
+            "7. Bạn có thể dừng ở bước prompt hoặc xác nhận tạo ảnh/video thật nếu public đã mở.\n\n"
             "<b>Nguyên tắc dùng:</b>\n"
             "• Bạn có thể dừng ở bất kỳ bước nào để tiết kiệm chi phí.\n"
             "• Bot chỉ trừ Xu khi bạn xác nhận tạo ảnh/video/nhạc thật.\n"
+            "• Gợi ý trend public hiện là content-only nếu trend live chưa mở.\n"
             "• Nếu chỉ lưu prompt/kịch bản/gợi ý nhạc thì bot chưa gọi API tạo thật.\n"
-            "• Video thật hiện chưa mở công khai nếu Public video OFF."
+            "• Video thật chỉ gọi provider khi Public video ON và bạn đã xác nhận."
         ),
     ),
     (
         "music_add",
         "Hướng dẫn thêm nhạc",
         (
-            "🎵 <b>Hướng dẫn thêm nhạc</b>\n\n"
+            "🎵 <b>Hướng dẫn thêm nhạc / bỏ nhạc</b>\n\n"
             "Nhạc là tùy chọn, không bắt buộc.\n\n"
             "Bạn có thể:\n"
             "• Chọn không cần nhạc và hoàn tất.\n"
             "• Chọn một trong 3 gợi ý nhạc theo concept.\n"
             "• Tìm nhạc trong kho để nghe thử.\n"
             "• Tạo prompt nhạc AI để dùng sau.\n\n"
+            "<b>Khi nào nên bỏ nhạc?</b>\n"
+            "• Video cần giọng nói rõ.\n"
+            "• Bạn sẽ tự ghép nhạc bằng CapCut/TikTok sau.\n"
+            "• Bạn chưa chắc license nhạc có dùng thương mại được không.\n\n"
             "Tạo nhạc AI hoặc ghép nhạc nếu được mở sau này sẽ tính phí riêng và có xác nhận trước khi trừ Xu."
         ),
     ),
@@ -31306,9 +31346,170 @@ CUSTOMER_GUIDE_SECTIONS = [
     ),
 ]
 
+CUSTOMER_GUIDE_SECTIONS.extend([
+    (
+        "quick_start",
+        "Bắt đầu nhanh",
+        (
+            "🚀 <b>Bắt đầu nhanh với TOAN AAS</b>\n\n"
+            "Nếu bạn mới dùng bot, hãy chọn một trong 3 cách đơn giản:\n\n"
+            "<b>1. Tạo ảnh AI</b>\n"
+            "Phù hợp khi bạn cần ảnh sản phẩm, thumbnail, key visual hoặc ảnh khung chính cho video.\n"
+            "Mẹo: mô tả rõ sản phẩm, nền, ánh sáng, tỉ lệ và ghi <code>không thêm chữ, không watermark</code> nếu cần.\n\n"
+            "<b>2. Tạo video AI</b>\n"
+            "Phù hợp khi bạn đã có ý tưởng hoặc ảnh khung chính và muốn tạo video ngắn.\n"
+            "Mẹo: ghi rõ chuyển động camera, motion của sản phẩm, thời lượng và phong cách.\n\n"
+            "<b>3. Video theo trend</b>\n"
+            "Phù hợp khi bạn chưa có ý tưởng. Bot sẽ giúp chọn trend, hook, storyboard, prompt ảnh, prompt video và nhạc.\n\n"
+            "TOAN AAS luôn hỏi xác nhận trước khi trừ Xu ở các bước tạo thật. Nếu chỉ xem hướng dẫn/prompt, bot chưa gọi API tạo ảnh/video."
+        ),
+    ),
+    (
+        "refund",
+        "Hoàn Xu khi lỗi",
+        (
+            "🔁 <b>Hoàn Xu khi lỗi</b>\n\n"
+            "TOAN AAS có guard để tránh mất Xu sai khi provider lỗi.\n\n"
+            "<b>Bot chưa trừ Xu khi:</b>\n"
+            "• Bạn chỉ mở menu/hướng dẫn/bảng giá.\n"
+            "• Bạn chưa bấm xác nhận tạo ảnh/video.\n"
+            "• Tính năng public đang OFF.\n\n"
+            "<b>Bot hoàn Xu khi đã trừ nhưng bước tạo thất bại do:</b>\n"
+            "• provider hết quota/no channel/maintenance.\n"
+            "• Timeout hoặc lỗi xử lý được phân loại là provider fail.\n"
+            "• Job bị lỗi trước khi có kết quả hợp lệ.\n\n"
+            "<b>Bạn nên làm gì?</b>\n"
+            "• Không bấm tạo nhiều lần khi job đang chạy.\n"
+            "• Chờ bot tự gửi kết quả hoặc dùng nút kiểm tra trạng thái trong tin nhắn job.\n"
+            "• Nếu cần hỗ trợ, gửi admin ID Telegram + job/task gần nhất."
+        ),
+    ),
+    (
+        "faq",
+        "Câu hỏi thường gặp",
+        (
+            "❓ <b>Câu hỏi thường gặp</b>\n\n"
+            "<b>1. Vì sao video lâu?</b>\n"
+            "Tạo video cần queue/provider xử lý, thường lâu hơn tạo text/ảnh.\n\n"
+            "<b>2. Có nên bấm tạo nhiều lần?</b>\n"
+            "Không. Job lock sẽ chặn hoặc làm bạn rối trạng thái. Hãy chờ kết quả.\n\n"
+            "<b>3. Thiếu Xu thì sao?</b>\n"
+            "Bot sẽ báo thiếu Xu và không gọi API. Bạn có thể nạp Xu bằng <code>/naptien</code>.\n\n"
+            "<b>4. Video lỗi thì sao?</b>\n"
+            "Nếu lỗi thuộc provider/timeout theo chính sách, bot hoàn Xu phần đã trừ cho job đó.\n\n"
+            "<b>5. Có tạo video không nhạc được không?</b>\n"
+            "Có. Nhạc là tùy chọn; bạn có thể hoàn tất không nhạc hoặc tự ghép sau.\n\n"
+            "<b>6. Có thể tạo ảnh rồi làm video không?</b>\n"
+            "Có. Hãy tạo ảnh khung chính trước, sau đó dùng ảnh/prompt để tạo video.\n\n"
+            "<b>7. Vì sao text AI đôi khi chưa đúng?</b>\n"
+            "AI cần bạn kiểm tra lại thông tin thật: giá, ưu đãi, công dụng, cam kết và chính sách sản phẩm.\n\n"
+            "<b>8. Cần hỗ trợ thì làm gì?</b>\n"
+            "Bấm <b>Liên hệ admin</b> hoặc gửi ID/job/task để TOAN AAS kiểm tra."
+        ),
+    ),
+])
+
 CUSTOMER_GUIDE_LOOKUP = {key: (idx + 1, title, body) for idx, (key, title, body) in enumerate(CUSTOMER_GUIDE_SECTIONS)}
 
-def guide_keyboard() -> InlineKeyboardMarkup:
+GUIDE_SECTION_ALIASES = {
+    "quickstart": "quick_start",
+    "image": "image_ai",
+    "video": "video_ai",
+    "trend": "guided_video",
+    "music": "music_add",
+    "xu": "credits",
+    "topup": "credits",
+}
+
+def normalize_guide_section_key(section_key_or_number: str) -> str:
+    raw = (section_key_or_number or "").strip().lower()
+    return GUIDE_SECTION_ALIASES.get(raw, raw)
+
+def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    section_key = normalize_guide_section_key(section)
+    if lang == "vi":
+        action_rows = {
+            "quick_start": [
+                [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="create_media|quick_video")],
+                [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
+                [InlineKeyboardButton("📚 Xem hướng dẫn", callback_data="menu|main_guide")],
+            ],
+            "image_ai": [
+                [InlineKeyboardButton("🖼 Tạo ảnh ngay", callback_data="create_media|quick_image")],
+                [InlineKeyboardButton("💰 Xem bảng giá", callback_data="pricing|main")],
+            ],
+            "video_ai": [
+                [InlineKeyboardButton("🎬 Tạo video ngay", callback_data="create_media|quick_video")],
+                [InlineKeyboardButton("🖼 Tạo ảnh trước rồi làm video", callback_data="menu|main_image")],
+                [InlineKeyboardButton("💰 Xem bảng giá", callback_data="pricing|main")],
+            ],
+            "guided_video": [
+                [InlineKeyboardButton("🔥 Tạo video theo trend", callback_data="trendg|start")],
+                [InlineKeyboardButton("🎬 Tạo video thường", callback_data="create_media|quick_video")],
+            ],
+            "music_add": [
+                [InlineKeyboardButton("🎵 Xem gợi ý nhạc", callback_data="menu|main_music")],
+                [InlineKeyboardButton("🚫 Tạo video không nhạc", callback_data="create_media|quick_video")],
+            ],
+            "credits": [
+                [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
+                [InlineKeyboardButton("💰 Xem bảng giá", callback_data="pricing|main")],
+                [InlineKeyboardButton("📊 Xem số dư", callback_data="menu|main_profile")],
+            ],
+            "refund": [
+                [InlineKeyboardButton("🔄 Kiểm tra trạng thái video", callback_data="menu|hint_video_status")],
+                [InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
+            ],
+            "faq": [
+                [InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
+            ],
+        }
+        rows = action_rows.get(section_key, [])
+        if not section_key:
+            public_base = effective_public_base_url()
+            if public_base:
+                rows.append([InlineKeyboardButton("📄 Tải bản Word", url=f"{public_base}/download/huong-dan-toan-aas.docx")])
+        rows.append([InlineKeyboardButton("🔙 Quay lại Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+        return InlineKeyboardMarkup(rows)
+    rows = []
+    if not section_key:
+        public_base = effective_public_base_url()
+        if public_base:
+            rows.append([InlineKeyboardButton("📄 Download full guide", url=f"{public_base}/download/huong-dan-toan-aas.docx")])
+    if section_key == "quick_start":
+        rows.extend([
+            [InlineKeyboardButton("🖼 Create image", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Create video", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start"), InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
+        ])
+    elif section_key == "image_ai":
+        rows.extend([
+            [InlineKeyboardButton("🖼 Create image", callback_data="create_media|quick_image")],
+            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
+        ])
+    elif section_key == "video_ai":
+        rows.extend([
+            [InlineKeyboardButton("🎬 Create video", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🖼 Create image first", callback_data="menu|main_image")],
+            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
+        ])
+    elif section_key == "guided_video":
+        rows.extend([
+            [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start")],
+            [InlineKeyboardButton("🎬 Normal video", callback_data="create_media|quick_video")],
+        ])
+    elif section_key == "credits":
+        rows.extend([
+            [InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
+            [InlineKeyboardButton("📊 Balance", callback_data="menu|main_profile")],
+        ])
+    elif section_key in {"refund", "faq"}:
+        rows.append([InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")])
+    rows.append([InlineKeyboardButton("🔙 Back to guide", callback_data="menu|main_guide"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def legacy_guide_download_keyboard() -> InlineKeyboardMarkup:
     rows = []
     public_base = effective_public_base_url()
     if public_base:
@@ -31478,8 +31679,18 @@ def guide_index_text() -> str:
     ])
     return "\n".join(lines)
 
+def guide_index_text_i18n(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "vi":
+        return guide_index_text()
+    return (
+        "📘 <b>TOAN AAS GUIDE</b>\n\n"
+        "Choose a topic from the buttons below.\n\n"
+        "Available sections: quick start, image guide, video guide, trend video, music/no music, Xu/top-up, refund and FAQ.\n\n"
+        "Full Vietnamese guide: <code>/huongdan</code>. English/Chinese long-form guide translation is planned; this screen keeps the flow usable without mixing Vietnamese text into English/Chinese menus."
+    )
+
 def guide_section_text(section_key_or_number: str) -> str:
-    raw = (section_key_or_number or "").strip().lower()
+    raw = normalize_guide_section_key(section_key_or_number)
     selected = None
     if raw.isdigit():
         idx = int(raw)
@@ -31492,6 +31703,53 @@ def guide_section_text(section_key_or_number: str) -> str:
         return guide_index_text()
     idx, title, body = selected
     return f"📘 <b>Hướng dẫn {idx}: {html.escape(title)}</b>\n\n{body}\n\nMục lục: <code>/huongdan</code>"
+
+def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "vi":
+        return guide_section_text(section_key_or_number)
+    section_key = normalize_guide_section_key(section_key_or_number)
+    english_sections = {
+        "quick_start": (
+            "🚀 <b>Quick Start with TOAN AAS</b>\n\n"
+            "Pick one simple path:\n"
+            "1. Create an AI image for a product, thumbnail or key frame.\n"
+            "2. Create an AI video from a clear video description or key image.\n"
+            "3. Use Trend Video if you need hooks, storyboard, prompts and music ideas first.\n\n"
+            "The bot asks for confirmation before charging Xu for real generation."
+        ),
+        "image_ai": (
+            "🖼 <b>AI Image Guide</b>\n\n"
+            "Describe the product, background, lighting, style and aspect ratio. Choose an image tier, confirm the Xu cost, then the bot creates the image.\n\n"
+            "Provider errors are handled by the refund guard when applicable."
+        ),
+        "video_ai": (
+            "🎬 <b>AI Video Guide</b>\n\n"
+            "Describe the scene, camera motion, product movement, style and duration. Choose a video tier and confirm before the bot submits a queue job.\n\n"
+            "Public video OFF means prompt-only; no video API call and no Xu deduction."
+        ),
+        "guided_video": (
+            "🔥 <b>Trend Video Guide</b>\n\n"
+            "Enter your product/topic, choose how the bot suggests trends, pick a trend, then continue through motion, image prompts, video prompts and music/no-music."
+        ),
+        "music_add": (
+            "🎵 <b>Music / No Music Guide</b>\n\n"
+            "Music is optional. You can use suggested music, search the music/SFX library, create a music prompt, or finish the video without music."
+        ),
+        "credits": (
+            "💰 <b>Xu and Top-up Guide</b>\n\n"
+            "Use <code>/pricing</code> for the central price table, <code>/naptien</code> to top up Xu, and <code>/profile</code> to check your balance."
+        ),
+        "refund": (
+            "🔁 <b>Refund Guide</b>\n\n"
+            "If a provider fails after a confirmed paid step, TOAN AAS refunds the deducted Xu according to the refund guard. Do not create duplicate jobs while one is running."
+        ),
+        "faq": (
+            "❓ <b>FAQ</b>\n\n"
+            "Video can be slow because providers queue jobs. Do not press create many times. If you are short on Xu, top up first. If a provider fails, the refund guard applies. Music is optional. You can create image first, then video."
+        ),
+    }
+    return english_sections.get(section_key, guide_index_text_i18n(lang))
 
 async def reply_internal_customer_feature(update: Update):
     return await update.message.reply_text(INTERNAL_CUSTOMER_FEATURE_TEXT, parse_mode="HTML")
@@ -32052,16 +32310,24 @@ def main_topup_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📘 Full guide", callback_data="menu|guide")],
-            [InlineKeyboardButton("📜 Terms", callback_data="menu|legal")],
-            [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+            [InlineKeyboardButton("🚀 Quick start", callback_data="menu|guide_quick_start")],
+            [InlineKeyboardButton("🖼 Image guide", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Video guide", callback_data="menu|guide_video_ai")],
+            [InlineKeyboardButton("🔥 Trend video guide", callback_data="menu|guide_guided_video")],
+            [InlineKeyboardButton("🎵 Music / no music", callback_data="menu|guide_music_add")],
+            [InlineKeyboardButton("💰 Xu / top-up", callback_data="menu|guide_credits"), InlineKeyboardButton("🔁 Refunds", callback_data="menu|guide_refund")],
+            [InlineKeyboardButton("❓ FAQ", callback_data="menu|guide_faq"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
+            [InlineKeyboardButton("📜 Terms", callback_data="menu|legal"), InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📘 Hướng dẫn đầy đủ", callback_data="menu|guide")],
-        [InlineKeyboardButton("📜 Điều khoản", callback_data="menu|legal")],
-        [InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🚀 Bắt đầu nhanh", callback_data="menu|guide_quick_start")],
+        [InlineKeyboardButton("🖼 Hướng dẫn tạo ảnh", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Hướng dẫn tạo video", callback_data="menu|guide_video_ai")],
+        [InlineKeyboardButton("🔥 Hướng dẫn video theo trend", callback_data="menu|guide_guided_video")],
+        [InlineKeyboardButton("🎵 Hướng dẫn thêm nhạc / bỏ nhạc", callback_data="menu|guide_music_add")],
+        [InlineKeyboardButton("💰 Hướng dẫn Xu & nạp tiền", callback_data="menu|guide_credits"), InlineKeyboardButton("🔁 Hoàn Xu khi lỗi", callback_data="menu|guide_refund")],
+        [InlineKeyboardButton("❓ Câu hỏi thường gặp", callback_data="menu|guide_faq"), InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
+        [InlineKeyboardButton("📜 Điều khoản", callback_data="menu|legal"), InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKeyboardMarkup:
@@ -32721,14 +32987,9 @@ def referral_account_stats_text(user_id) -> str:
 def menu_text_main_guide() -> str:
     return (
         "📚 <b>HƯỚNG DẪN</b>\n\n"
-        "Bạn có thể xem:\n\n"
-        "• <code>/help</code> — hướng dẫn dùng bot\n"
-        "• <code>/pricing</code> — bảng giá Xu\n"
-        "• <code>/legal</code> — điều khoản và chính sách\n"
-        "• <code>/vip_policy</code> — quyền lợi thành viên\n"
-        "• <code>/referral</code> — giới thiệu bạn bè\n"
-        "• <code>/birthday</code> — thêm ngày sinh nhận quà bí mật\n\n"
-        "Gợi ý: bắt đầu dễ nhất là dùng <code>/film</code> để tạo một kịch bản video hoặc nhắn trực tiếp câu hỏi cho AI."
+        "Chọn một mục bên dưới để xem nhanh cách dùng TOAN AAS.\n\n"
+        "Nếu bạn là khách mới, nên bắt đầu bằng <b>🚀 Bắt đầu nhanh</b>.\n"
+        "Các bước tạo thật đều có xác nhận trước khi trừ Xu. Nếu chỉ mở hướng dẫn, bot không gọi API và không trừ Xu."
     )
 
 def menu_hint_text(action: str) -> tuple[str, str]:
@@ -32743,6 +33004,7 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_image_tools": ("main_image", "🖼 <b>Công cụ ảnh</b>\n\nCopy lệnh:\n<code>/image_tools</code>"),
         "hint_image_to_video_pack": ("main_image", "🎬 <b>Ảnh sang video prompt</b>\n\nCopy lệnh:\n<code>/image_to_video_pack chủ đề hoặc mô tả ảnh</code>"),
         "hint_media_factory": ("main_audio", "🎤 <b>Trung tâm Video & Media</b>\n\nCopy lệnh:\n<code>/media_factory</code>\n\nTạo voice, bóc băng và video/content pack tùy công cụ đã bật."),
+        "hint_video_status": ("main_guide", "🔄 <b>Kiểm tra trạng thái video</b>\n\nKhi video được gửi vào queue, bot sẽ gửi kèm nút <b>Kiểm tra trạng thái video</b> trong chính tin nhắn job.\n\nNếu bạn không còn tin nhắn đó, hãy gửi admin ID Telegram và job/task gần nhất để TOAN AAS kiểm tra. Không cần bấm tạo lại nhiều lần khi job đang xử lý."),
         "hint_film_blueprint": ("video_workflow", "🚀 <b>Film Blueprint</b>\n\nCopy lệnh:\n<code>/film_blueprint</code>"),
         "hint_scene_pack": ("video_workflow", "📦 <b>Scene Pack</b>\n\nCopy lệnh:\n<code>/scene_pack job=&lt;JOB_ID&gt; scene=1</code>"),
         "hint_growth_loop": ("video_workflow", "📈 <b>Growth Loop</b>\n\nCopy lệnh:\n<code>/growth_loop</code>"),
@@ -32768,6 +33030,7 @@ def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
         "hint_image_tools": ("main_image", "🖼 <b>Image tools</b>\n\nCopy:\n<code>/image_tools</code>"),
         "hint_image_to_video_pack": ("main_image", "🎬 <b>Image-to-video prompt pack</b>\n\nCopy:\n<code>/image_to_video_pack topic or image description</code>"),
         "hint_media_factory": ("main_audio", "🎤 <b>Media tools</b>\n\nCopy:\n<code>/media_factory</code>\n\nVoice, transcription and media/content packs depending on enabled tools."),
+        "hint_video_status": ("main_guide", "🔄 <b>Video status</b>\n\nWhen a video is queued, the bot adds a status button to that job message. If you no longer have it, contact support with your Telegram ID and latest job/task. Do not create duplicate jobs while one is processing."),
         "hint_naptien": ("billing", "💳 <b>Top up Xu</b>\n\nCopy:\n<code>/naptien</code>"),
         "hint_profile": ("billing", "👤 <b>Account</b>\n\nCopy:\n<code>/profile</code>"),
         "hint_terms": ("support", "📜 <b>Terms</b>\n\nCopy:\n<code>/terms</code>\n\nFull policy is currently available in Vietnamese."),
@@ -32973,13 +33236,9 @@ def menu_text_main_guide_i18n(lang: str) -> str:
         return menu_text_main_guide()
     return (
         "📚 <b>GUIDE</b>\n\n"
-        "Useful commands:\n\n"
-        "• <code>/help</code> — bot guide\n"
-        "• <code>/pricing</code> — pricing\n"
-        "• <code>/legal</code> — terms and policies\n"
-        "• <code>/vip_policy</code> — member benefits\n"
-        "• <code>/hub</code> — TOAN AAS Hub\n\n"
-        "Full legal policies are currently available in Vietnamese."
+        "Choose a topic below. New customers should start with <b>🚀 Quick start</b>.\n\n"
+        "Real image/video generation asks for confirmation before charging Xu. Opening guide screens does not call providers and does not charge Xu.\n\n"
+        "Long-form policy text is currently available in Vietnamese; product guide translation is being prepared."
     )
 
 def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None) -> tuple[str, InlineKeyboardMarkup]:
@@ -33018,6 +33277,11 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return referral_account_stats_text(user_id or "__customer__"), main_profile_keyboard(lang)
     if action == "main_guide":
         return menu_text_main_guide_i18n(lang), main_guide_keyboard(lang)
+    if action == "guide":
+        return guide_index_text_i18n(lang), guide_keyboard("", lang)
+    if action.startswith("guide_"):
+        section = action.replace("guide_", "", 1)
+        return guide_section_text_i18n(section, lang), guide_keyboard(section, lang)
     if action.startswith("hint_"):
         section, hint = menu_hint_text_i18n(action, lang)
         return hint, menu_nav_keyboard_i18n(section, is_admin, lang)
@@ -33081,7 +33345,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
     if action == "guide":
         return guide_index_text(), guide_keyboard()
     if action.startswith("guide_"):
-        return guide_section_text(action.replace("guide_", "", 1)), guide_keyboard()
+        section = action.replace("guide_", "", 1)
+        return guide_section_text(section), guide_keyboard(section)
     if action.startswith("hint_"):
         section, hint = menu_hint_text(action)
         return hint, menu_nav_keyboard(section, is_admin)
@@ -33305,11 +33570,13 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_huongdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
     section = context.args[0] if context.args else ""
     await update.message.reply_text(
-        guide_section_text(section),
+        guide_section_text_i18n(section, lang),
         parse_mode="HTML",
-        reply_markup=guide_keyboard(),
+        reply_markup=guide_keyboard(section, lang),
     )
     if section or PUBLIC_BASE_URL:
         return
@@ -34204,7 +34471,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     public_hints = {
         "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
         "hint_note", "hint_search_note", "hint_remind", "hint_doc_tools", "hint_pricing",
-        "hint_image_tools", "hint_image_to_video_pack", "hint_media_factory",
+        "hint_image_tools", "hint_image_to_video_pack", "hint_media_factory", "hint_video_status",
     }
     if action in admin_only and not user_is_admin:
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
@@ -34215,8 +34482,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "main_guide":
         return await safe_edit_query_message(
             query,
-            help_text_for_user_i18n(query.from_user.id),
-            reply_markup=localized_main_menu_keyboard(user_is_admin, lang),
+            menu_text_main_guide_i18n(lang),
+            reply_markup=main_guide_keyboard(lang),
         )
     if action == "create_media":
         return await safe_edit_query_message(
@@ -41648,6 +41915,10 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payos_debug = data.get("payos_debug_create") or {}
     promo = data.get("promo") or {}
     ops = data.get("ops") or current_system_mode()
+    data_persistence = data.get("data_persistence") or {}
+    shopaikey_usage = data.get("shopaikey_usage") or {}
+    video_freeze = data.get("video_freeze") or {}
+    video_queue = data.get("video_queue") or {}
     blockers = data["blockers"] or []
     lines = [
         "🚀 <b>TOAN AAS Sales Readiness</b>",
@@ -41667,6 +41938,12 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Maintenance mode: <code>{'ON' if ops.get('maintenance_mode') else 'available/off'}</code>",
         f"• Payment freeze: <code>{'ON' if ops.get('payment_freeze') else 'available/off'}</code>",
         f"• Tool freeze: <code>{'ON' if ops.get('tool_freeze') else 'available/off'}</code>",
+        f"• Video provider freeze: <code>{'ON' if video_freeze.get('is_frozen') else 'OFF'}</code> | reason <code>{html.escape(str(video_freeze.get('reason_code') or '-'))}</code>",
+        f"• Data loss risk: <code>{html.escape(str(data_persistence.get('data_loss_risk_level') or ('YES' if data_persistence.get('data_loss_risk') else 'NO')))}</code> | DB <code>{html.escape(str(data_persistence.get('db_path') or '-'))}</code>",
+        f"• Video queue active: <code>{int(video_queue.get('running') or 0)}</code> | queued <code>{int(video_queue.get('queued') or 0)}</code>",
+        f"• Refund guard: <code>{'ON' if data.get('refund_guard') else 'OFF'}</code>",
+        f"• Job lock: <code>{'ON' if data.get('job_lock') else 'OFF'}</code>",
+        f"• Guide menu: <code>{'ON' if commands.get('guide_menu') else 'OFF'}</code>",
         f"• Backup command: <code>{'available' if commands.get('backup_db') else 'missing'}</code>",
         f"• Ops plan: <code>{'available' if commands.get('ops_plan') else 'missing'}</code> — <code>/ops_plan</code>",
         "",
@@ -41678,8 +41955,11 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• STT: <code>{'READY' if providers['audio']['deepgram'] else 'MISSING'}</code>",
         f"• TTS: <code>{'READY' if providers['audio']['elevenlabs'] or providers['audio']['fish_audio'] or providers['audio']['edge_tts'] else 'MISSING'}</code> — ElevenLabs/Fish/Edge",
         f"• Image: <code>{'READY' if providers['image']['ready'] else 'MISSING'}</code>",
+        f"• ShopAIKey credit: <code>{html.escape(shopaikey_usage_summary_text(shopaikey_usage))}</code>",
         "",
         "<b>Creative Tools</b>",
+        f"• Public image generation: <code>{'ON' if data.get('public_image_enabled') else 'OFF'}</code>",
+        f"• Public video generation: <code>{'ON' if data.get('public_video_enabled') else 'OFF'}</code>",
         "• Trend AI: <code>READY/content-only</code>",
         f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code> | SerpAPI <code>{provider_status_text(providers['search']['serpapi'])}</code>",
         "• Image Prompt: <code>READY/prompt-only</code>",
