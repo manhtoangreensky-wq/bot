@@ -27852,9 +27852,10 @@ def clear_media_creator_pending_states(user_id) -> bool:
     public_image_cleared = clear_public_image_prompt_pending(user_id)
     public_video_cleared = clear_public_video_prompt_pending(user_id)
     creative_motion_cleared = clear_creative_motion_pending(user_id)
+    cinematic_ad_cleared = clear_cinematic_ad_pending(user_id)
     trend_cleared = clear_trend_video_flow_pending(user_id)
     trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
-    return bool(quick_cleared or public_image_cleared or public_video_cleared or creative_motion_cleared or trend_cleared or trend_confirm_cleared)
+    return bool(quick_cleared or public_image_cleared or public_video_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -30736,6 +30737,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🎞 Quick video", callback_data="create_media|quick_video")],
             [InlineKeyboardButton("🎬 Trend video workflow", callback_data="create_media|trend")],
             [InlineKeyboardButton("🎥 Video motion guide", callback_data="motion|start")],
+            [InlineKeyboardButton("🎬 Cinematic ad concept", callback_data="adconcept|start")],
             [InlineKeyboardButton("🖼➡️🎞 Image to video", callback_data="menu|hint_image_to_video_pack")],
             [InlineKeyboardButton("✍️ Video prompt", callback_data="menu|hint_film")],
             [InlineKeyboardButton("📝 Hook/script/caption", callback_data="menu|hint_film")],
@@ -30745,6 +30747,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")],
         [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
         [InlineKeyboardButton("🎥 Gợi ý chuyển động video", callback_data="motion|start")],
+        [InlineKeyboardButton("🎬 Concept quảng cáo cinematic", callback_data="adconcept|start")],
         [InlineKeyboardButton("🖼➡️🎞 Tạo video từ ảnh", callback_data="menu|hint_image_to_video_pack")],
         [InlineKeyboardButton("✍️ Tạo prompt video", callback_data="menu|hint_film")],
         [InlineKeyboardButton("📝 Viết hook/script/caption", callback_data="menu|hint_film")],
@@ -43495,6 +43498,310 @@ async def handle_creative_motion_pending_text(update: Update, context: ContextTy
             [InlineKeyboardButton("🔁 Gợi ý chủ đề khác", callback_data="motion|start")],
             [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
             [InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")],
+        ]),
+    )
+    return True
+
+CREATIVE_CINEMATIC_AD_PENDING_TTL_SECONDS = 10 * 60
+
+def cinematic_ad_pending_key(user_id) -> str:
+    return f"cinematic_ad_concept:{user_id}"
+
+def set_cinematic_ad_pending(user_id, step: str = "product", product: str = "", message: str = "") -> None:
+    USER_PENDING[cinematic_ad_pending_key(user_id)] = {
+        "pending_action": "cinematic_ad_concept",
+        "step": str(step or "product"),
+        "product": str(product or "")[:500],
+        "message": str(message or "")[:500],
+        "created_at_ts": time.time(),
+    }
+
+def get_cinematic_ad_pending(user_id) -> dict | None:
+    key = cinematic_ad_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "cinematic_ad_concept":
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > CREATIVE_CINEMATIC_AD_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_cinematic_ad_pending(user_id) -> bool:
+    return USER_PENDING.pop(cinematic_ad_pending_key(user_id), None) is not None
+
+def cinematic_ad_product_text() -> str:
+    return (
+        "🎬 <b>Concept quảng cáo cinematic TOAN AAS</b>\n\n"
+        "Bạn muốn làm quảng cáo cho sản phẩm/dịch vụ gì?\n\n"
+        "Ví dụ: máy xay sinh tố mini màu xanh ngọc, app AI tạo nội dung, khóa học affiliate, quán cà phê mới mở.\n\n"
+        "Bot chỉ tạo ý tưởng, storyboard và prompt, không gọi API ảnh/video thật và không trừ Xu."
+    )
+
+def cinematic_ad_product_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Hủy", callback_data="adconcept|cancel"), InlineKeyboardButton("🏠 Menu chính", callback_data="adconcept|main")],
+    ])
+
+def cinematic_ad_message_text(product: str) -> str:
+    safe_product = re.sub(r"\s+", " ", str(product or "").strip())[:500] or "sản phẩm/dịch vụ của bạn"
+    return (
+        "💡 <b>Bạn muốn truyền tải thông điệp gì?</b>\n\n"
+        f"Sản phẩm/dịch vụ: <b>{html.escape(safe_product)}</b>\n\n"
+        "Chọn nhanh một thông điệp hoặc nhập thông điệp riêng."
+    )
+
+def cinematic_ad_message_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Thời gian / ký ức", callback_data="adconcept|message|memory"),
+            InlineKeyboardButton("Thành công / cơ hội", callback_data="adconcept|message|success"),
+        ],
+        [
+            InlineKeyboardButton("Tự tin / thay đổi bản thân", callback_data="adconcept|message|confidence"),
+            InlineKeyboardButton("Tiết kiệm thời gian", callback_data="adconcept|message|time_save"),
+        ],
+        [
+            InlineKeyboardButton("Sang trọng / đẳng cấp", callback_data="adconcept|message|luxury"),
+            InlineKeyboardButton("Công nghệ / tương lai", callback_data="adconcept|message|future"),
+        ],
+        [
+            InlineKeyboardButton("Gia đình / cảm xúc", callback_data="adconcept|message|family"),
+            InlineKeyboardButton("Before / After", callback_data="adconcept|message|before_after"),
+        ],
+        [InlineKeyboardButton("✍️ Nhập thông điệp khác", callback_data="adconcept|message|custom")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="adconcept|back|product"), InlineKeyboardButton("🏠 Menu chính", callback_data="adconcept|main")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="adconcept|cancel")],
+    ])
+
+def cinematic_ad_message_label(kind: str) -> str:
+    labels = {
+        "memory": "thời gian, ký ức và những khoảnh khắc đáng nhớ",
+        "success": "thành công, cơ hội mới và bước tiến tiếp theo",
+        "confidence": "tự tin, thay đổi bản thân và dám bắt đầu",
+        "time_save": "tiết kiệm thời gian, sống nhẹ hơn và làm việc thông minh hơn",
+        "luxury": "sang trọng, đẳng cấp và cảm giác được nâng tầm",
+        "future": "công nghệ, tương lai và trải nghiệm hiện đại",
+        "family": "gia đình, cảm xúc và sự quan tâm",
+        "before_after": "before/after, chuyển biến rõ ràng trước và sau khi dùng",
+    }
+    return labels.get(str(kind or ""), "thành công, cơ hội mới và bước tiến tiếp theo")
+
+def cinematic_ad_style_text(product: str, message: str) -> str:
+    safe_product = re.sub(r"\s+", " ", str(product or "").strip())[:500] or "sản phẩm/dịch vụ của bạn"
+    safe_message = re.sub(r"\s+", " ", str(message or "").strip())[:500] or "thông điệp thương hiệu"
+    return (
+        "🎨 <b>Bạn muốn phong cách quảng cáo nào?</b>\n\n"
+        f"Sản phẩm/dịch vụ: <b>{html.escape(safe_product)}</b>\n"
+        f"Thông điệp: <b>{html.escape(safe_message)}</b>\n\n"
+        "Chọn phong cách để TOAN AAS dựng concept quảng cáo."
+    )
+
+def cinematic_ad_style_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎬 Cinematic cảm xúc", callback_data="adconcept|style|cinematic"),
+            InlineKeyboardButton("🖤 Đen trắng luxury", callback_data="adconcept|style|bw_luxury"),
+        ],
+        [
+            InlineKeyboardButton("📱 Viral TikTok/Reels", callback_data="adconcept|style|viral"),
+            InlineKeyboardButton("🛒 Bán hàng trực tiếp", callback_data="adconcept|style|direct_sales"),
+        ],
+        [
+            InlineKeyboardButton("👤 UGC đời thường", callback_data="adconcept|style|ugc"),
+            InlineKeyboardButton("🚁 FPV/drone motion", callback_data="adconcept|style|fpv"),
+        ],
+        [InlineKeyboardButton("🧊 3D/product reveal", callback_data="adconcept|style|product_reveal")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="adconcept|back|message"), InlineKeyboardButton("🏠 Menu chính", callback_data="adconcept|main")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="adconcept|cancel")],
+    ])
+
+def cinematic_ad_style_label(style: str) -> str:
+    labels = {
+        "cinematic": "cinematic cảm xúc",
+        "bw_luxury": "đen trắng luxury",
+        "viral": "viral TikTok/Reels",
+        "direct_sales": "bán hàng trực tiếp",
+        "ugc": "UGC đời thường",
+        "fpv": "FPV/drone motion",
+        "product_reveal": "3D/product reveal",
+    }
+    return labels.get(str(style or ""), "cinematic cảm xúc")
+
+def cinematic_ad_concept_text(product: str, message: str, style: str = "cinematic") -> str:
+    safe_product = re.sub(r"\s+", " ", str(product or "").strip())[:500] or "sản phẩm/dịch vụ của bạn"
+    safe_message = re.sub(r"\s+", " ", str(message or "").strip())[:500] or "thông điệp thương hiệu"
+    style_label = cinematic_ad_style_label(style)
+    return (
+        "🎬 <b>CONCEPT QUẢNG CÁO CINEMATIC TOAN AAS</b>\n\n"
+        f"<b>Sản phẩm/dịch vụ:</b> {html.escape(safe_product)}\n"
+        f"<b>Thông điệp:</b> {html.escape(safe_message)}\n"
+        f"<b>Phong cách:</b> {html.escape(style_label)}\n"
+        "Bot chỉ tạo concept/storyboard/prompt, không gọi API ảnh/video thật và không trừ Xu.\n\n"
+        "<b>A. Big idea</b>\n"
+        f"“{html.escape(safe_product)} không chỉ là một lựa chọn, mà là khoảnh khắc giúp người xem cảm thấy {html.escape(safe_message)}.”\n\n"
+        "<b>B. Brand story</b>\n"
+        f"Quảng cáo bắt đầu từ một tình huống rất đời thường: khách hàng đang thiếu thời gian, thiếu cảm hứng hoặc chưa thấy giải pháp rõ ràng. "
+        f"{html.escape(safe_product)} xuất hiện như một điểm chuyển cảm xúc: gọn hơn, sáng hơn, tự tin hơn. Concept hợp với sản phẩm vì nó không chỉ bán tính năng, mà bán cảm giác sau khi sử dụng.\n\n"
+        "<b>C. Script 15s / 30s / 60s</b>\n"
+        "• 15s: Hook cảm xúc → cảnh vấn đề → sản phẩm xuất hiện → kết quả rõ → CTA nhẹ.\n"
+        "• 30s: Hook → câu chuyện ngắn → 3 cảnh chứng minh lợi ích → before/after → CTA.\n"
+        "• 60s: Mở bằng nhân vật/bối cảnh → nỗi đau → hành trình thay đổi → demo sản phẩm → cảm xúc kết thúc → CTA thương hiệu.\n\n"
+        "<b>D. Storyboard từng cảnh</b>\n"
+        "Scene 1 — 0–3s\n"
+        "• Bối cảnh: không gian đời thường, ánh sáng mềm, nhân vật/sản phẩm chưa nổi bật.\n"
+        "• Nhân vật/sản phẩm: người dùng hoặc sản phẩm ở trạng thái trước khi thay đổi.\n"
+        "• Hành động chính: bắt đầu bằng một chi tiết gây tò mò.\n"
+        "• Cảm xúc: chậm, thật, có vấn đề cần giải quyết.\n"
+        "• Camera motion: slow push-in hoặc close-up.\n"
+        "• Text overlay: “Có những thứ nhỏ, nhưng thay đổi cả ngày của bạn.”\n"
+        "• Voiceover: “Đôi khi, điều bạn cần chỉ là một cách bắt đầu khác.”\n\n"
+        "Scene 2 — 3–8s\n"
+        "• Bối cảnh: chuyển sang góc sáng hơn, chủ thể rõ hơn.\n"
+        "• Nhân vật/sản phẩm: sản phẩm bắt đầu xuất hiện như giải pháp.\n"
+        "• Hành động chính: demo lợi ích chính bằng hình ảnh dễ hiểu.\n"
+        "• Cảm xúc: tò mò, bắt đầu tin tưởng.\n"
+        "• Camera motion: orbit nhẹ hoặc dolly-in.\n"
+        "• Text overlay: “Nhanh hơn. Gọn hơn. Dễ dùng hơn.”\n"
+        "• Voiceover: “Một thao tác nhỏ, nhưng giúp mọi thứ mượt hơn.”\n\n"
+        "Scene 3 — 8–15s\n"
+        "• Bối cảnh: kết quả sạch, sáng, có khoảng trống cho CTA.\n"
+        "• Nhân vật/sản phẩm: sản phẩm/nhân vật ở trạng thái tốt hơn.\n"
+        "• Hành động chính: reveal kết quả hoặc before/after.\n"
+        "• Cảm xúc: tự tin, nhẹ nhõm, muốn thử.\n"
+        "• Camera motion: pull-out reveal hoặc match cut theo thời gian.\n"
+        "• Text overlay: “Thử hôm nay. Cảm nhận khác biệt.”\n"
+        "• Voiceover: “Đây là lúc bạn nâng cấp cách mình làm mọi thứ.”\n\n"
+        "<b>E. Shot list cinematic</b>\n"
+        "• close-up sản phẩm\n"
+        "• wide shot bối cảnh\n"
+        "• over-the-shoulder\n"
+        "• slow push-in\n"
+        "• orbit quanh sản phẩm\n"
+        "• match cut theo thời gian\n"
+        "• before/after transition\n"
+        "• clean CTA frame\n\n"
+        "<b>F. Prompt ảnh từng cảnh</b>\n"
+        f"Scene 1 image prompt: realistic cinematic keyframe for {html.escape(safe_product)}, everyday setting, soft natural light, emotional mood, 9:16, no watermark, no extra text.\n"
+        f"Scene 2 image prompt: product/service reveal for {html.escape(safe_product)}, clean commercial lighting, hopeful mood, premium composition, 9:16, no watermark.\n"
+        f"Scene 3 image prompt: final result scene showing {html.escape(safe_message)}, bright clean background, brand ad style, space for CTA, 9:16.\n\n"
+        "<b>G. Prompt video motion từng cảnh</b>\n"
+        "Scene 1 motion: slow push-in, subtle handheld natural motion, emotional pause, cinematic depth of field.\n"
+        "Scene 2 motion: smooth orbit around product/person, gentle light sweep, clean reveal, stable subject.\n"
+        "Scene 3 motion: pull-out reveal, before/after match cut, final CTA frame, no extra text, no watermark.\n\n"
+        "<b>H. Gợi ý nhạc/mood</b>\n"
+        "• piano cinematic\n"
+        "• ambient luxury\n"
+        "• emotional strings\n"
+        "• electronic future\n"
+        "• upbeat viral nếu muốn bản TikTok/Reels\n\n"
+        "<b>I. CTA</b>\n"
+        "CTA nhẹ: “Khám phá cách đơn giản hơn để bắt đầu.”\n"
+        "CTA bán hàng mềm: “Nhắn TOAN AAS để dựng concept/ảnh/video phù hợp sản phẩm của bạn.”"
+    )
+
+async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    uid = query.from_user.id
+    data = query.data or ""
+    parts = data.split("|")
+    action = parts[1] if len(parts) >= 2 else "start"
+    value = parts[2] if len(parts) >= 3 else ""
+
+    if action == "cancel":
+        clear_cinematic_ad_pending(uid)
+        return await safe_edit_query_message(
+            query,
+            "❌ Đã hủy concept quảng cáo cinematic. Bot chưa gọi API và chưa trừ Xu.",
+            reply_markup=main_video_keyboard(get_user_language(uid) or "vi"),
+        )
+    if action == "main":
+        clear_cinematic_ad_pending(uid)
+        clear_media_creator_pending_states(uid)
+        return await safe_edit_query_message(
+            query,
+            "🏠 Đã quay lại menu chính.",
+            reply_markup=localized_main_menu_keyboard(is_admin_user(uid), get_user_language(uid) or "vi"),
+        )
+    if action == "start":
+        clear_media_creator_pending_states(uid)
+        set_cinematic_ad_pending(uid, "product")
+        return await safe_edit_query_message(query, cinematic_ad_product_text(), reply_markup=cinematic_ad_product_keyboard())
+    if action == "back":
+        pending = get_cinematic_ad_pending(uid) or {}
+        if value == "product":
+            set_cinematic_ad_pending(uid, "product")
+            return await safe_edit_query_message(query, cinematic_ad_product_text(), reply_markup=cinematic_ad_product_keyboard())
+        product = pending.get("product") or "sản phẩm/dịch vụ của bạn"
+        set_cinematic_ad_pending(uid, "message", product)
+        return await safe_edit_query_message(query, cinematic_ad_message_text(product), reply_markup=cinematic_ad_message_keyboard())
+    if action == "message":
+        pending = get_cinematic_ad_pending(uid) or {}
+        product = pending.get("product") or "sản phẩm/dịch vụ của bạn"
+        if value == "custom":
+            set_cinematic_ad_pending(uid, "message", product)
+            return await safe_edit_query_message(
+                query,
+                "✍️ Hãy gửi thông điệp bạn muốn truyền tải.\n\nVí dụ: tiết kiệm thời gian để tập trung vào điều quan trọng hơn.\n\nBot chưa gọi API và chưa trừ Xu.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 Quay lại", callback_data="adconcept|back|message")],
+                    [InlineKeyboardButton("❌ Hủy", callback_data="adconcept|cancel"), InlineKeyboardButton("🏠 Menu chính", callback_data="adconcept|main")],
+                ]),
+            )
+        message = cinematic_ad_message_label(value)
+        set_cinematic_ad_pending(uid, "style", product, message)
+        return await safe_edit_query_message(query, cinematic_ad_style_text(product, message), reply_markup=cinematic_ad_style_keyboard())
+    if action == "style":
+        pending = get_cinematic_ad_pending(uid) or {}
+        product = pending.get("product") or "sản phẩm/dịch vụ của bạn"
+        message = pending.get("message") or "thông điệp thương hiệu"
+        clear_cinematic_ad_pending(uid)
+        return await safe_edit_query_message(
+            query,
+            cinematic_ad_concept_text(product, message, value),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔁 Tạo concept khác", callback_data="adconcept|start")],
+                [InlineKeyboardButton("🎥 Gợi ý chuyển động video", callback_data="motion|start")],
+                [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    return await safe_edit_query_message(query, cinematic_ad_product_text(), reply_markup=cinematic_ad_product_keyboard())
+
+async def handle_cinematic_ad_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_cinematic_ad_pending(uid)
+    if not pending:
+        return False
+    text = re.sub(r"\s+", " ", update.message.text.strip())[:500]
+    if not text:
+        return False
+    step = pending.get("step") or "product"
+    if step == "product":
+        set_cinematic_ad_pending(uid, "message", text)
+        await update.message.reply_text(cinematic_ad_message_text(text), parse_mode="HTML", reply_markup=cinematic_ad_message_keyboard())
+        return True
+    if step == "message":
+        product = pending.get("product") or "sản phẩm/dịch vụ của bạn"
+        set_cinematic_ad_pending(uid, "style", product, text)
+        await update.message.reply_text(cinematic_ad_style_text(product, text), parse_mode="HTML", reply_markup=cinematic_ad_style_keyboard())
+        return True
+    product = pending.get("product") or "sản phẩm/dịch vụ của bạn"
+    message = pending.get("message") or "thông điệp thương hiệu"
+    clear_cinematic_ad_pending(uid)
+    await update.message.reply_text(
+        cinematic_ad_concept_text(product, message, text),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔁 Tạo concept khác", callback_data="adconcept|start")],
+            [InlineKeyboardButton("🎥 Gợi ý chuyển động video", callback_data="motion|start")],
+            [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ]),
     )
     return True
@@ -61798,6 +62105,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_creative_motion_pending_text(update, context):
         return
 
+    if await handle_cinematic_ad_pending_text(update, context):
+        return
+
     if await handle_quick_media_pending_text(update, context):
         return
 
@@ -62633,6 +62943,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_creative_motion_callback, pattern=r"^motion\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_cinematic_ad_callback, pattern=r"^adconcept\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))

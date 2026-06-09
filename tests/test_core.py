@@ -1092,6 +1092,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")' in source
     assert 'InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert 'InlineKeyboardButton("🎥 Gợi ý chuyển động video", callback_data="motion|start")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
+    assert 'InlineKeyboardButton("🎬 Concept quảng cáo cinematic", callback_data="adconcept|start")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert 'InlineKeyboardButton("📝 Viết hook/script/caption", callback_data="menu|hint_film")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
@@ -1133,9 +1134,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "handle_public_image_prompt_pending_text(update, context)" in message_source
     assert "handle_public_video_prompt_pending_text(update, context)" in message_source
     assert "handle_creative_motion_pending_text(update, context)" in message_source
+    assert "handle_cinematic_ad_pending_text(update, context)" in message_source
     assert message_source.index("handle_public_image_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_public_video_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_creative_motion_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
+    assert message_source.index("handle_cinematic_ad_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_quick_media_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
     assert "clear_quick_media_pending(uid)" in quick_source
     assert "clear_media_creator_pending_states(uid)" in source_between(source, "async def cmd_cancel", "async def cmd_create_media")
@@ -1372,18 +1375,25 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.get_public_image_prompt_pending("u9") is None
     assert bot.get_public_video_prompt_pending("u9") is None
     assert bot.get_creative_motion_pending("u9") is None
+    assert bot.get_cinematic_ad_pending("u9") is None
     assert bot.get_trend_video_flow_pending("u9") is None
 
 
 def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     source = bot_source_text()
     motion_source = source_between(source, "def creative_motion_pending_key", "TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE")
+    ad_source = source_between(source, "def cinematic_ad_pending_key", "TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE")
     assert 'SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "false")' in source
     assert 'CREATIVE_MOTION_GUIDE_COST_XU = env_int("CREATIVE_MOTION_GUIDE_COST_XU", 0)' in source
     assert 'CallbackQueryHandler(handle_creative_motion_callback, pattern=r"^motion\\|")' in source
+    assert 'CallbackQueryHandler(handle_cinematic_ad_callback, pattern=r"^adconcept\\|")' in source
     assert "shopaikey_image_generate" not in motion_source
     assert "shopaikey_video_create_smoke_test" not in motion_source
     assert "spend_fixed_credit_info" not in motion_source
+    assert "shopaikey_image_generate" not in ad_source
+    assert "shopaikey_video_create_smoke_test" not in ad_source
+    assert "spend_fixed_credit_info" not in ad_source
+    assert "deduct_dynamic_credit" not in ad_source
 
     assert bot.referral_link_for_user("123456", "toanaasbot") == "https://t.me/toanaasbot?start=ref_123456"
     profile_source = source_between(source, "def menu_text_main_profile", "def menu_text_main_guide")
@@ -1435,6 +1445,41 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     pending = bot.get_creative_motion_pending("u_motion")
     assert pending and pending["topic"] == "AI tool affiliate"
     assert bot.clear_creative_motion_pending("u_motion") is True
+
+    product_text = bot.cinematic_ad_product_text()
+    assert "Bạn muốn làm quảng cáo cho sản phẩm/dịch vụ gì" in product_text
+    assert "không gọi API ảnh/video thật" in product_text
+    ad_buttons = [button.text for row in bot.cinematic_ad_message_keyboard().inline_keyboard for button in row]
+    assert "Thời gian / ký ức" in ad_buttons
+    assert "Before / After" in ad_buttons
+    assert "✍️ Nhập thông điệp khác" in ad_buttons
+    style_buttons = [button.text for row in bot.cinematic_ad_style_keyboard().inline_keyboard for button in row]
+    assert "🎬 Cinematic cảm xúc" in style_buttons
+    assert "🖤 Đen trắng luxury" in style_buttons
+    assert "🧊 3D/product reveal" in style_buttons
+    ad_concept = bot.cinematic_ad_concept_text("máy xay sinh tố mini", "tiết kiệm thời gian", "cinematic").lower()
+    assert "big idea" in ad_concept
+    assert "brand story" in ad_concept
+    assert "script 15s / 30s / 60s" in ad_concept
+    assert "storyboard từng cảnh" in ad_concept
+    assert "shot list cinematic" in ad_concept
+    assert "prompt ảnh từng cảnh" in ad_concept
+    assert "prompt video motion từng cảnh" in ad_concept
+    assert "gợi ý nhạc/mood" in ad_concept
+    assert "cta" in ad_concept
+    assert "không gọi api ảnh/video thật" in ad_concept
+    bot.USER_PENDING.pop(bot.cinematic_ad_pending_key("u_ad"), None)
+    bot.set_cinematic_ad_pending("u_ad", "product")
+    pending = bot.get_cinematic_ad_pending("u_ad")
+    assert pending and pending["pending_action"] == "cinematic_ad_concept"
+    assert pending["step"] == "product"
+    bot.set_cinematic_ad_pending("u_ad", "message", "máy xay sinh tố mini")
+    pending = bot.get_cinematic_ad_pending("u_ad")
+    assert pending and pending["product"] == "máy xay sinh tố mini"
+    bot.set_cinematic_ad_pending("u_ad", "style", "máy xay sinh tố mini", "tiết kiệm thời gian")
+    pending = bot.get_cinematic_ad_pending("u_ad")
+    assert pending and pending["message"] == "tiết kiệm thời gian"
+    assert bot.clear_cinematic_ad_pending("u_ad") is True
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
