@@ -3227,6 +3227,7 @@ UI_TEXT = {
         "common.main_menu_back": "🔙 Menu chính",
         "common.cancel": "❌ Hủy",
         "common.confirm": "✅ Xác nhận",
+        "common.skip": "⏭ Bỏ qua",
         "common.try_again_later": "Vui lòng thử lại sau.",
         "common.not_charged": "Bot chưa trừ Xu.",
         "common.no_api_no_charge": "Bot chưa gọi API và chưa trừ Xu.",
@@ -3326,7 +3327,7 @@ UI_TEXT = {
         "video.guided_flow": "✨ Làm theo từng bước",
         "video.concept_short": "🎬 Concept quảng cáo",
         "video.trend_short": "🔥 Video theo trend",
-        "video.motion_short": "🎥 Gợi ý chuyển động",
+        "video.motion_short": "🎥 Gợi ý chuyển động / prompt video",
         "video.quick_admin_public": "🎞 Tạo video nhanh",
         "motion.menu": "🎥 Gợi ý chuyển động video",
         "motion.ask_topic": "🎥 <b>Gợi ý chuyển động video TOAN AAS</b>\n\nBạn muốn làm video về vấn đề gì?\n\nChọn nhóm nhanh bên dưới hoặc nhập trực tiếp chủ đề/sản phẩm/ngành của bạn.\n{cost_line}\n\nBot chỉ tạo gợi ý/prompt, không gọi API ảnh/video thật và chưa trừ Xu.",
@@ -3476,6 +3477,7 @@ UI_TEXT = {
         "common.main_menu_back": "🔙 Main menu",
         "common.cancel": "❌ Cancel",
         "common.confirm": "✅ Confirm",
+        "common.skip": "⏭ Skip",
         "common.try_again_later": "Please try again later.",
         "common.not_charged": "The bot has not charged Xu.",
         "common.no_api_no_charge": "The bot has not called any API and has not charged Xu.",
@@ -3575,7 +3577,7 @@ UI_TEXT = {
         "video.guided_flow": "✨ Step-by-step flow",
         "video.concept_short": "🎬 Ad concept",
         "video.trend_short": "🔥 Trend video",
-        "video.motion_short": "🎥 Motion guide",
+        "video.motion_short": "🎥 Motion / video prompt guide",
         "video.quick_admin_public": "🎞 Quick video",
         "motion.menu": "🎥 Video motion guide",
         "motion.ask_topic": "🎥 <b>TOAN AAS Video Motion Guide</b>\n\nWhat is your video about?\n\nChoose a quick group below or type your own topic/product/industry.\n{cost_line}\n\nThe bot only creates guidance/prompts. It does not call real image/video APIs and has not charged Xu.",
@@ -3725,6 +3727,7 @@ UI_TEXT = {
         "common.main_menu_back": "🔙 主菜单",
         "common.cancel": "❌ 取消",
         "common.confirm": "✅ 确认",
+        "common.skip": "⏭ 跳过",
         "common.try_again_later": "请稍后再试。",
         "common.not_charged": "本次未扣除 Xu。",
         "common.no_api_no_charge": "Bot 未调用 API，也未扣除 Xu。",
@@ -3824,7 +3827,7 @@ UI_TEXT = {
         "video.guided_flow": "✨ 分步制作",
         "video.concept_short": "🎬 广告 concept",
         "video.trend_short": "🔥 Trend 视频",
-        "video.motion_short": "🎥 运动建议",
+        "video.motion_short": "🎥 运动 / 视频 prompt 建议",
         "video.quick_admin_public": "🎞 快速视频",
         "motion.menu": "🎥 视频运动建议",
         "motion.ask_topic": "🎥 <b>TOAN AAS 视频运动建议</b>\n\n你想做什么主题的视频？\n\n请选择下方分类，或直接输入你的主题/产品/行业。\n{cost_line}\n\nBot 只生成建议和 prompt，不调用真实图片/视频 API，也未扣除 Xu。",
@@ -31683,10 +31686,10 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(ui_text(lang, "video.trend_short"), callback_data="trendg|start")],
         [InlineKeyboardButton(ui_text(lang, "video.concept_short"), callback_data="adconcept|start")],
-        [InlineKeyboardButton(ui_text(lang, "video.motion_short"), callback_data="motion|start")],
         [InlineKeyboardButton(ui_text(lang, "video.image_to_video"), callback_data="menu|hint_image_to_video_pack")],
         [InlineKeyboardButton(ui_text(lang, "video.quick_admin_public"), callback_data="create_media|quick_video")],
         [InlineKeyboardButton(ui_text(lang, "video.hook_script"), callback_data="menu|hint_film")],
+        [InlineKeyboardButton(ui_text(lang, "video.motion_short"), callback_data="motion|start")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -33815,6 +33818,35 @@ async def safe_edit_query_message(query, text: str, reply_markup=None, parse_mod
                     return None
         raise
 
+def html_message_to_plain_text(text: str) -> str:
+    plain = re.sub(r"<a\s+href=\"([^\"]+)\"[^>]*>(.*?)</a>", r"\2: \1", str(text or ""), flags=re.I | re.S)
+    plain = re.sub(r"<br\s*/?>", "\n", plain, flags=re.I)
+    plain = re.sub(r"</p\s*>", "\n", plain, flags=re.I)
+    plain = re.sub(r"<[^>]+>", "", plain)
+    return html.unescape(plain)
+
+async def safe_reply_text(message, text: str, reply_markup=None, parse_mode: str | None = "HTML", disable_web_page_preview=None):
+    if not message:
+        return None
+    kwargs = {"reply_markup": reply_markup}
+    if parse_mode is not None:
+        kwargs["parse_mode"] = parse_mode
+    if disable_web_page_preview is not None:
+        kwargs["disable_web_page_preview"] = disable_web_page_preview
+    try:
+        return await message.reply_text(str(text or ""), **kwargs)
+    except Exception as e:
+        logger.warning("safe_reply_text primary failed | %s", sanitize_log_text(str(e))[:240])
+        if parse_mode:
+            try:
+                fallback_kwargs = {"reply_markup": reply_markup}
+                if disable_web_page_preview is not None:
+                    fallback_kwargs["disable_web_page_preview"] = disable_web_page_preview
+                return await message.reply_text(html_message_to_plain_text(text), **fallback_kwargs)
+            except Exception as fallback_error:
+                logger.warning("safe_reply_text fallback failed | %s", sanitize_log_text(str(fallback_error))[:240])
+        return None
+
 def is_soft_telegram_edit_error(error: Exception) -> bool:
     text = str(error or "").lower()
     return any(fragment in text for fragment in (
@@ -35275,6 +35307,7 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
+    lang = user_ui_lang(uid)
     if not SHOPAIKEY_ENABLED:
         save_tool_test_result("shopaikey_video", "DISABLED", "SHOPAIKEY_ENABLED=false; no call", uid)
         return await update.message.reply_text(
@@ -35358,7 +35391,8 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
     await update_waiting_message(waiting_message, "✅ ShopAIKey video submit đã xử lý xong. Không trừ Xu.")
     if task_id and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
         asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, update.effective_chat.id, uid, task_id))
-    await update.message.reply_text(
+    await safe_reply_text(
+        update.message,
         "🎞 <b>ShopAIKey Video Smoke Test</b>\n\n"
         f"• Provider freeze: <code>{html.escape(shopaikey_admin_freeze_warning_text())}</code>\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
@@ -35377,11 +35411,13 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
         reply_markup=shopaikey_video_job_check_keyboard(task_id, lang) if task_id else None,
     )
     finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
+    return
 
 async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
+    lang = user_ui_lang(uid)
     if not SHOPAIKEY_ADMIN_ONLY or not SHOPAIKEY_VIDEO_ADMIN_ONLY:
         return await update.message.reply_text("⛔ ShopAIKey video chỉ cho admin smoke test. Public video OFF.")
     if not context.args:
@@ -35462,7 +35498,7 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
     completed = bool(result_url)
     result_line = f"• Result URL: <a href=\"{html.escape(result_url, quote=True)}\">open</a>\n" if completed else ""
     sent_note = "already sent" if already_sent else ("yes" if output_sent else "no")
-    await update.message.reply_text(
+    response_text = (
         "🎞 <b>ShopAIKey Video Job</b>\n\n"
         f"• Task ID: <code>{html.escape(str(result.get('task_id') or task_id or '-'))}</code>\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
@@ -35473,12 +35509,17 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
         + f"• Output sent: <code>{html.escape(sent_note)}</code>\n"
         f"• Fail reason: <code>{html.escape(str(result.get('fail_reason') or '-')[:220])}</code>\n"
         f"• No Xu deducted: <code>yes</code>\n\n"
-        "Admin-only. Public video vẫn OFF. Không hiển thị API key.",
+        "Admin-only. Public video vẫn OFF. Không hiển thị API key."
+    )
+    await safe_reply_text(
+        update.message,
+        response_text,
         parse_mode="HTML",
         disable_web_page_preview=False,
         reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, resend=bool(result_url and not (output_sent or already_sent))),
     )
     finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
+    return
 
 def shopaikey_video_job_check_keyboard(task_id: str, lang: str = "vi", resend: bool = False) -> InlineKeyboardMarkup | None:
     safe_task_id = str(task_id or "").strip()
@@ -35551,8 +35592,7 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
     result_line = f"• Result: <a href=\"{html.escape(result_url, quote=True)}\">open</a>\n" if result_url else ""
     sent_note = "already sent" if already_sent else ("yes" if output_sent else "no")
     resend_needed = bool(result_url and not (output_sent or already_sent))
-    await safe_edit_or_send(
-        query,
+    response_text = (
         "🎞 <b>ShopAIKey Video Job</b>\n\n"
         f"• Task ID: <code>{html.escape(task_id or '-')}</code>\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
@@ -35562,9 +35602,22 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
         + result_line
         + f"• Output sent: <code>{html.escape(sent_note)}</code>\n"
         f"• No Xu deducted: <code>yes</code>\n\n"
-        "Admin-only. Public video vẫn OFF.",
-        reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, resend=resend_needed),
+        "Admin-only. Public video vẫn OFF."
     )
+    try:
+        return await safe_edit_or_send(
+            query,
+            response_text,
+            reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, resend=resend_needed),
+        )
+    except Exception as e:
+        logger.warning("shopaikey video job callback status reply failed | %s", sanitize_log_text(str(e))[:240])
+        return await safe_reply_text(
+            getattr(query, "message", None),
+            response_text,
+            parse_mode="HTML",
+            reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, resend=resend_needed),
+        )
 
 def shopaikey_public_prompt_from_args(context: ContextTypes.DEFAULT_TYPE) -> str:
     return " ".join(context.args or []).strip()
@@ -44851,10 +44904,10 @@ def cinematic_ad_missing_latest_text(lang: str = "vi") -> str:
 
 def cinematic_ad_expired_session_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "zh":
-        return "⚠️ Concept 会话已过期。请重新创建 concept，或返回主菜单。\nBot 未调用 API，也未扣除 Xu。"
+        return "⚠️ 工作会话已过期。请从菜单重新开始。"
     if normalize_user_language(lang) != "vi":
-        return "⚠️ This concept session has expired. Please create a new concept or return to the main menu.\nThe bot has not called any API and has not charged Xu."
-    return "⚠️ Phiên concept đã hết hạn. Vui lòng tạo concept mới hoặc quay lại menu chính.\nBot chưa gọi API và chưa trừ Xu."
+        return "⚠️ This working session has expired. Please start again from the menu."
+    return "⚠️ Phiên làm việc đã hết hạn. Vui lòng bắt đầu lại từ menu."
 
 def cinematic_ad_expired_session_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -45768,10 +45821,20 @@ def cinematic_ad_message_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(ui_text(lang, "concept_ad.message.family"), callback_data="adconcept|message|family"),
             InlineKeyboardButton(ui_text(lang, "concept_ad.message.before_after"), callback_data="adconcept|message|before_after"),
         ],
-        [InlineKeyboardButton(ui_text(lang, "concept_ad.message.custom"), callback_data="adconcept|message|custom")],
+        [
+            InlineKeyboardButton(ui_text(lang, "concept_ad.message.custom"), callback_data="adconcept|message|custom"),
+            InlineKeyboardButton(ui_text(lang, "common.skip"), callback_data="adconcept|message|skip"),
+        ],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="adconcept|back|product"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel")],
     ])
+
+def cinematic_ad_default_message(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return "清晰易懂地介绍产品/服务，建立信任，并用轻柔 CTA 引导行动。"
+    if normalize_user_language(lang) != "vi":
+        return "introduce the product/service clearly, build trust, and use a light call to action."
+    return "giới thiệu sản phẩm/dịch vụ rõ ràng, dễ hiểu, tạo sự tin tưởng và kêu gọi hành động nhẹ nhàng."
 
 def cinematic_ad_message_label(kind: str, lang: str = "vi") -> str:
     if normalize_user_language(lang) == "zh":
@@ -45829,7 +45892,10 @@ def cinematic_ad_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(ui_text(lang, "concept_ad.style.ugc"), callback_data="adconcept|concept_style_ugc"),
             InlineKeyboardButton(ui_text(lang, "concept_ad.style.fpv"), callback_data="adconcept|concept_style_fpv"),
         ],
-        [InlineKeyboardButton(ui_text(lang, "concept_ad.style.product_reveal"), callback_data="adconcept|concept_style_product_reveal")],
+        [
+            InlineKeyboardButton(ui_text(lang, "concept_ad.style.product_reveal"), callback_data="adconcept|concept_style_product_reveal"),
+            InlineKeyboardButton(ui_text(lang, "common.skip"), callback_data="adconcept|style|skip"),
+        ],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="adconcept|back|message"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel")],
     ])
@@ -46117,6 +46183,8 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
     if action.startswith("concept_style_"):
         value = normalize_cinematic_ad_style_code(action.replace("concept_style_", "", 1))
         action = "style"
+    elif action == "style" and str(value or "").strip().lower() == "skip":
+        value = "direct_sales"
     elif action == "style":
         value = normalize_cinematic_ad_style_code(value)
 
@@ -46390,6 +46458,10 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
                     [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
                 ]),
             )
+        if value == "skip":
+            message = cinematic_ad_default_message(lang)
+            set_cinematic_ad_pending(uid, "style", product, message)
+            return await safe_edit_query_message(query, cinematic_ad_style_text(product, message, lang), reply_markup=cinematic_ad_style_keyboard(lang))
         message = cinematic_ad_message_label(value, lang)
         set_cinematic_ad_pending(uid, "style", product, message)
         return await safe_edit_query_message(query, cinematic_ad_style_text(product, message, lang), reply_markup=cinematic_ad_style_keyboard(lang))
@@ -46774,7 +46846,6 @@ def public_image_success_keyboard(job_id: int, tier: str = "", lang: str = "vi")
         rows.append([InlineKeyboardButton(ui_text(lang, "image.regenerate_paid"), callback_data=f"create_media|image_tier_{tier_norm}")])
     rows.extend([
         [InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data=f"create_media|image_tier_{tier_norm}")],
-        [InlineKeyboardButton(ui_text(lang, "image.music_hint"), callback_data=f"tvflow|music_image_{int(job_id or 0)}")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
@@ -47918,8 +47989,7 @@ def trend_workflow_image_success_keyboard(job_id: int, scene_index: int, lang: s
         rows.append([InlineKeyboardButton(ui_text(lang, "image.regenerate_paid"), callback_data=f"tvflow|regen_scene_{int(scene_index or 1)}")])
     rows.extend([
         [InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data="tvflow|edit_prompt")],
-        [InlineKeyboardButton(ui_text(lang, "image.music_hint"), callback_data=f"tvflow|music_image_{int(job_id or 0)}")],
-        [InlineKeyboardButton(ui_text(lang, "workflow.save_image"), callback_data="tvflow|save_image")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -49152,7 +49222,8 @@ async def run_quick_video_admin_smoke(update: Update, context: ContextTypes.DEFA
     if task_id and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
         asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, update.effective_chat.id, uid, task_id))
     if status == "PASS_SUBMITTED" and task_id:
-        await update.message.reply_text(
+        await safe_reply_text(
+            update.message,
             "🎞 Quick video smoke đã gửi vào queue.\n"
             f"Task: {task_id}\n"
             f"Auto poll: {'ON' if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED else 'OFF'}\n"
@@ -49161,6 +49232,7 @@ async def run_quick_video_admin_smoke(update: Update, context: ContextTypes.DEFA
             "Lưu ý admin: smoke test có thể tốn credit thật của provider.\n\n"
             "Bạn có thể bấm nút kiểm tra job hoặc dùng "
             f"/shopaikey_video_job {task_id}",
+            parse_mode=None,
             reply_markup=shopaikey_video_job_check_keyboard(task_id, lang),
         )
     else:
@@ -49170,8 +49242,13 @@ async def run_quick_video_admin_smoke(update: Update, context: ContextTypes.DEFA
             classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("message") or result.get("detail") or status),
             result.get("message") or result.get("detail") or status,
         )
-        await update.message.reply_text(f"{shopaikey_generation_unavailable_message(status, result.get('message') or result.get('detail') or '')}\nBot chưa trừ Xu.")
+        await safe_reply_text(
+            update.message,
+            f"{shopaikey_generation_unavailable_message(status, result.get('message') or result.get('detail') or '')}\nBot chưa trừ Xu.",
+            parse_mode=None,
+        )
     finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
+    return
 
 async def handle_quick_media_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:

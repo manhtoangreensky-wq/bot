@@ -385,6 +385,9 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "cmd_tool_test_shopaikey_image" in source
     assert "cmd_tool_test_shopaikey_video" in source
     assert "cmd_shopaikey_video_job" in source
+    video_command_source = source_between(source, "async def cmd_tool_test_shopaikey_video", "def shopaikey_video_job_check_keyboard")
+    assert "lang = user_ui_lang(uid)" in video_command_source
+    assert "safe_reply_text" in video_command_source
     assert "shopaikey_image" in source
     assert "shopaikey_video" in source
     assert 'required_text="TEST_OK"' in source
@@ -1259,6 +1262,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     success_buttons = [button for row in bot.public_image_success_keyboard(123, "low").inline_keyboard for button in row]
     assert any(button.callback_data == "tvflow|image_video_prompts_123" for button in success_buttons)
     assert any(button.callback_data == "create_media|image_tier_low" for button in success_buttons)
+    assert len(success_buttons) == 5
+    assert not any(button.callback_data == "tvflow|music_image_123" for button in success_buttons)
     video_tier_text = bot.public_video_tier_selection_text()
     assert "Bạn muốn tạo video chất lượng nào" in video_tier_text
     video_tier_buttons = [button for row in bot.public_video_tier_keyboard().inline_keyboard for button in row]
@@ -1332,7 +1337,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert not any(button.text == "✨ Làm theo từng bước" for button in video_buttons)
     assert any(button.text == "🔥 Video theo trend" and button.callback_data == "trendg|start" for button in video_buttons)
     video_labels = [button.text for button in video_buttons]
-    assert "🎥 Gợi ý chuyển động" in video_labels
+    assert video_labels == [
+        "🔥 Video theo trend",
+        "🎬 Concept quảng cáo",
+        "🖼➡️🎞 Tạo video từ ảnh",
+        "🎞 Tạo video nhanh",
+        "📝 Viết hook/script/caption",
+        "🎥 Gợi ý chuyển động / prompt video",
+        "🏠 Menu chính",
+    ]
     assert "🖼➡️🎞 Tạo video từ ảnh" in video_labels
     assert "✍️ Tạo prompt video" not in video_labels
     assert "📝 Viết hook/script/caption" in video_labels
@@ -1687,10 +1700,31 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "Thời gian / ký ức" in ad_buttons
     assert "Before / After" in ad_buttons
     assert "✍️ Nhập thông điệp khác" in ad_buttons
+    assert "⏭ Bỏ qua" in ad_buttons
+    ad_callback_data = [button.callback_data for row in bot.cinematic_ad_message_keyboard().inline_keyboard for button in row]
+    assert "adconcept|message|skip" in ad_callback_data
+    assert bot.cinematic_ad_default_message() == "giới thiệu sản phẩm/dịch vụ rõ ràng, dễ hiểu, tạo sự tin tưởng và kêu gọi hành động nhẹ nhàng."
     style_buttons = [button.text for row in bot.cinematic_ad_style_keyboard().inline_keyboard for button in row]
     assert "🎬 Điện ảnh cảm xúc" in style_buttons
     assert "🖤 Đen trắng cao cấp" in style_buttons
+    assert "📱 Viral TikTok/Reels" in style_buttons
+    assert "🛒 Bán hàng trực tiếp" in style_buttons
+    assert "👤 UGC đời thường" in style_buttons
+    assert "🚁 Góc bay / quay lướt" in style_buttons
     assert "🧊 Hé lộ sản phẩm 3D" in style_buttons
+    assert "⏭ Bỏ qua" in style_buttons
+    style_callback_data = [button.callback_data for row in bot.cinematic_ad_style_keyboard().inline_keyboard for button in row]
+    assert "adconcept|concept_style_cinematic" in style_callback_data
+    assert "adconcept|concept_style_luxury_bw" in style_callback_data
+    assert "adconcept|concept_style_viral" in style_callback_data
+    assert "adconcept|concept_style_direct_sales" in style_callback_data
+    assert "adconcept|concept_style_ugc" in style_callback_data
+    assert "adconcept|concept_style_fpv" in style_callback_data
+    assert "adconcept|concept_style_product_reveal" in style_callback_data
+    assert "adconcept|style|skip" in style_callback_data
+    assert bot.normalize_cinematic_ad_style_code("luxury_bw") == "bw_luxury"
+    assert bot.normalize_cinematic_ad_style_code("product_reveal") == "product_reveal"
+    assert bot.cinematic_ad_expired_session_text() == "⚠️ Phiên làm việc đã hết hạn. Vui lòng bắt đầu lại từ menu."
     continuation_buttons = [button.text for row in bot.cinematic_ad_continuation_keyboard().inline_keyboard for button in row]
     assert "1️⃣ Chọn gợi ý 1" in continuation_buttons
     assert "2️⃣ Chọn gợi ý 2" in continuation_buttons
