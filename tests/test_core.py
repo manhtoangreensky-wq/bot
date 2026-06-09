@@ -736,6 +736,15 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
         assert video_job_id > 0
         assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is True
         assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
+        queue_text = bot.ui_text("vi", "video.queue_submitted", task_id="task_123", auto_poll="ON")
+        assert "Video sẽ được gửi tự động trong vài phút khi hoàn tất" in queue_text
+        assert "Vui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần" in queue_text
+        public_queue_buttons = [button.text for row in bot.shopaikey_video_job_check_keyboard("task_123", "vi", public_user=True).inline_keyboard for button in row]
+        assert "🔄 Kiểm tra trạng thái video" in public_queue_buttons
+        assert "🏠 Menu chính" in public_queue_buttons
+        assert not any("ShopAIKey" in text for text in public_queue_buttons)
+        admin_queue_buttons = [button.text for row in bot.shopaikey_video_job_check_keyboard("task_123", "vi").inline_keyboard for button in row]
+        assert any("ShopAIKey" in text for text in admin_queue_buttons)
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)

@@ -3313,7 +3313,7 @@ UI_TEXT = {
         "video.premium_message": "👑 Video premium đang mở theo dạng admin duyệt vì chi phí cao. Vui lòng liên hệ admin nếu cần.\nBot chưa gọi API và chưa trừ Xu.",
         "video.active_job": "Bạn đang có một video đang xử lý. Vui lòng chờ hoàn tất trước khi tạo video mới.",
         "video.source_invalid": "⚠️ Ảnh nguồn không còn hợp lệ hoặc thiếu dữ liệu để tạo video. Bot chưa trừ Xu.\nBạn có thể tạo lại ảnh, tạo video từ prompt text hoặc quay lại menu chính.",
-        "video.queue_submitted": "✅ Video đã gửi vào queue.\nTask: {task_id}\nAuto poll: {auto_poll}",
+        "video.queue_submitted": "✅ Video đã được gửi vào hàng chờ tạo.\n\nTOAN AAS đang tạo video cho bạn.\nVideo sẽ được gửi tự động trong vài phút khi hoàn tất.\nVui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần.\n\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "Bạn muốn làm gì tiếp?",
         "video.fail.not_charged": "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau.",
         "video.fail.refunded": "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau.",
@@ -3452,7 +3452,7 @@ UI_TEXT = {
         "video.public_off_options": "🎬 <b>Video thật chưa mở công khai.</b>\n\nHiện tại bot có thể giúp bạn chuẩn bị:\n• Prompt video\n• Motion guide\n• Storyboard\n• Gợi ý nhạc\n\nKhi video public bật, bạn sẽ chọn tier và xác nhận giá trước khi tạo.\nBot chưa gọi API video và chưa trừ Xu.",
         "video.admin_smoke_warning": "🔐 Admin smoke test: không trừ Xu nội bộ, nhưng provider có thể tốn credit thật. Không cần gửi lại lệnh.",
         "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\nGửi prompt video ngắn để test provider.\n\n{warning}",
-        "video.check_job": "🔄 Kiểm tra job video",
+        "video.check_job": "🔄 Kiểm tra trạng thái video",
         "video.resend": "📤 Gửi lại video",
         "music.genre.cinematic": "🎬 Cinematic cảm xúc",
         "music.genre.luxury": "💎 Sang trọng / cao cấp",
@@ -3563,7 +3563,7 @@ UI_TEXT = {
         "video.premium_message": "👑 Premium video requires admin approval because provider cost is high. Please contact admin if needed.\nThe bot has not called any API and has not charged Xu.",
         "video.active_job": "You already have a video being processed. Please wait until it finishes before creating another one.",
         "video.source_invalid": "⚠️ The source image is no longer valid or is missing data for video generation. The bot has not charged Xu.\nYou can recreate the image, create a video from a text prompt, or return to the main menu.",
-        "video.queue_submitted": "✅ Video queued.\nTask: {task_id}\nAuto poll: {auto_poll}",
+        "video.queue_submitted": "✅ Your video has been sent to the creation queue.\n\nTOAN AAS is creating the video for you.\nThe video will be sent automatically in a few minutes when it is ready.\nPlease do not send the command again or create multiple jobs.\n\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "What would you like to do next?",
         "video.fail.not_charged": "⚙️ The video model is busy or temporarily unavailable. The bot has not charged Xu. Please try again later.",
         "video.fail.refunded": "⚙️ The video model is busy or temporarily unavailable. TOAN AAS has refunded {amount} Xu. Please try again later.",
@@ -3702,7 +3702,7 @@ UI_TEXT = {
         "video.public_off_options": "🎬 <b>Real video generation is not public yet.</b>\n\nThe bot can still prepare:\n• Video prompts\n• Motion guide\n• Storyboard\n• Music suggestions\n\nWhen public video is enabled, you will choose a tier and confirm pricing before generation.\nThe bot has not called the video API and has not charged Xu.",
         "video.admin_smoke_warning": "🔐 Admin smoke test: no internal Xu deduction, but the provider may consume real credits. No need to resend the command.",
         "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\nSend a short video prompt to test the provider.\n\n{warning}",
-        "video.check_job": "🔄 Check video job",
+        "video.check_job": "🔄 Check video status",
         "video.resend": "📤 Resend video",
         "music.genre.cinematic": "🎬 Emotional cinematic",
         "music.genre.luxury": "💎 Premium / luxury",
@@ -3813,7 +3813,7 @@ UI_TEXT = {
         "video.premium_message": "👑 Premium 视频因 provider 成本较高，需要 admin 审核。如有需要请联系 admin。\nBot 未调用 API，也未扣除 Xu。",
         "video.active_job": "你已有一个视频正在处理中。请等待完成后再创建新视频。",
         "video.source_invalid": "⚠️ 源图片缺少数据或已不适用于生成视频。本次未扣除 Xu。\n你可以重新生成图片、用文字 prompt 生成视频，或返回主菜单。",
-        "video.queue_submitted": "✅ 视频已加入队列。\nTask: {task_id}\nAuto poll: {auto_poll}",
+        "video.queue_submitted": "✅ 视频已发送到生成队列。\n\nTOAN AAS 正在为你生成视频。\n视频完成后将在几分钟内自动发送。\n请不要重复发送命令或连续创建多个任务。\n\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "你想下一步做什么？",
         "video.fail.not_charged": "⚙️ 视频模型正忙或暂时不可用。本次未扣除 Xu。请稍后再试。",
         "video.fail.refunded": "⚙️ 视频模型正忙或暂时不可用。TOAN AAS 已退回 {amount} Xu。请稍后再试。",
@@ -3952,7 +3952,7 @@ UI_TEXT = {
         "video.public_off_options": "🎬 <b>真实视频生成尚未公开。</b>\n\nBot 目前可以先准备：\n• 视频 prompt\n• Motion guide\n• Storyboard\n• 音乐建议\n\nPublic video 开启后，你会先选择 tier 并确认价格，再生成视频。\nBot 未调用视频 API，也未扣除 Xu。",
         "video.admin_smoke_warning": "🔐 Admin smoke test：不扣除内部 Xu，但 provider 可能消耗真实 credit。不需要重复发送命令。",
         "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\n请发送一个简短视频 prompt 来测试 provider。\n\n{warning}",
-        "video.check_job": "🔄 检查视频 job",
+        "video.check_job": "🔄 检查视频状态",
         "video.resend": "📤 重新发送视频",
         "music.genre.cinematic": "🎬 情感电影感",
         "music.genre.luxury": "💎 高级 / 奢华",
@@ -35597,14 +35597,14 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
     finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
     return
 
-def shopaikey_video_job_check_keyboard(task_id: str, lang: str = "vi", resend: bool = False) -> InlineKeyboardMarkup | None:
+def shopaikey_video_job_check_keyboard(task_id: str, lang: str = "vi", resend: bool = False, public_user: bool = False) -> InlineKeyboardMarkup | None:
     safe_task_id = str(task_id or "").strip()
     callback_data = f"shopai_video_job|{safe_task_id}"
     if not safe_task_id or len(callback_data.encode("utf-8")) > 64:
         return None
     status_callback = f"shopai_video_job|status|{safe_task_id}"
     rows = [[InlineKeyboardButton(ui_text(lang, "video.resend") if resend else ui_text(lang, "video.check_job"), callback_data=callback_data)]]
-    if len(status_callback.encode("utf-8")) <= 64:
+    if not public_user and len(status_callback.encode("utf-8")) <= 64:
         rows.append([InlineKeyboardButton("🧾 Xem trạng thái ShopAIKey" if normalize_user_language(lang) == "vi" else "🧾 ShopAIKey status", callback_data=status_callback)])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")])
     return InlineKeyboardMarkup(rows)
@@ -35616,17 +35616,28 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
     await query.answer()
     uid = query.from_user.id if query.from_user else 0
     lang = user_ui_lang(uid)
-    if not is_admin_user(uid):
-        return await safe_edit_or_send(query, create_media_public_off_message(lang))
     raw_parts = (query.data or "").split("|")
     if len(raw_parts) >= 2 and raw_parts[1] == "main":
         return await safe_edit_or_send(
             query,
             localized_start_menu_text(uid, lang),
             parse_mode="HTML",
-            reply_markup=localized_main_menu_keyboard(True, lang),
+            reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang),
         )
     if len(raw_parts) >= 2 and raw_parts[1] == "status":
+        if not is_admin_user(uid):
+            status_detail_text = (
+                "⚠️ Provider status detail is admin-only. You can use the video status button for your own job."
+                if normalize_user_language(lang) != "vi" else
+                "⚠️ Trạng thái provider chi tiết chỉ dành cho admin. Bạn có thể dùng nút kiểm tra trạng thái video của job của mình."
+            )
+            if normalize_user_language(lang) == "zh":
+                status_detail_text = "⚠️ Provider 详细状态仅限 admin。你可以使用按钮检查自己的视频任务状态。"
+            return await safe_edit_or_send(
+                query,
+                status_detail_text,
+                reply_markup=shopaikey_video_job_check_keyboard(raw_parts[2] if len(raw_parts) >= 3 else "", lang, public_user=True),
+            )
         return await safe_edit_or_send(
             query,
             "🧪 <b>ShopAIKey Status</b>\n\n"
@@ -35640,12 +35651,26 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
             reply_markup=shopaikey_video_job_check_keyboard(raw_parts[2] if len(raw_parts) >= 3 else "", lang),
         )
     task_id = str(raw_parts[1] if len(raw_parts) >= 2 else "").strip()
+    db_job = shopaikey_job_by_task_id(task_id)
+    job_id = int((db_job or {}).get("id") or 0)
+    if not is_admin_user(uid):
+        if not db_job or str((db_job or {}).get("user_id") or "") != str(uid) or bool(int((db_job or {}).get("admin_only") or 0)):
+            not_found_text = (
+                "⚠️ Video job was not found for your account or has expired. The bot has not called a new API and has not charged extra Xu."
+                if normalize_user_language(lang) != "vi" else
+                "⚠️ Không tìm thấy video job của bạn hoặc job đã hết hạn. Bot chưa gọi API mới và chưa trừ thêm Xu."
+            )
+            if normalize_user_language(lang) == "zh":
+                not_found_text = "⚠️ 未找到属于你的 video job，或任务已过期。Bot 未调用新的 API，也未额外扣除 Xu。"
+            return await safe_edit_or_send(
+                query,
+                not_found_text,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")]]),
+            )
     result = await shopaikey_video_job_status(task_id)
     status = str(result.get("status") or "FAIL")
     result_url = str(result.get("result_url") or "")
     output_sent = False
-    db_job = shopaikey_job_by_task_id(task_id)
-    job_id = int((db_job or {}).get("id") or 0)
     already_sent = bool(int((db_job or {}).get("result_sent") or 0))
     if result_url and query.message and not already_sent:
         output_sent, output_file_id = await send_shopaikey_video_result(context.bot, query.message.chat_id, task_id, result_url)
@@ -35664,6 +35689,43 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
             fail_reason=result.get("fail_reason") or "",
             poll_count=int((db_job or {}).get("poll_count") or 0) + 1,
             finished_at=now_text() if shopaikey_db_video_status(status) in {"SUCCESS", "FAILED", "TIMEOUT"} else "",
+        )
+    if not is_admin_user(uid):
+        if normalize_user_language(lang) == "zh":
+            sent_note = "已发送" if (already_sent or output_sent) else "尚未"
+            public_text = (
+                "🎞 <b>TOAN AAS 视频状态</b>\n\n"
+                f"• 状态: <code>{html.escape(status)}</code>\n"
+                f"• 进度: <code>{html.escape(str(result.get('progress') or '-'))}</code>\n"
+                f"• 视频已发送: <code>{html.escape(sent_note)}</code>\n\n"
+                "视频完成后将在几分钟内自动发送。\n"
+                "请不要重复发送命令或连续创建多个任务。"
+            )
+        elif normalize_user_language(lang) != "vi":
+            sent_note = "sent" if (already_sent or output_sent) else "not yet"
+            public_text = (
+                "🎞 <b>TOAN AAS Video Status</b>\n\n"
+                f"• Status: <code>{html.escape(status)}</code>\n"
+                f"• Progress: <code>{html.escape(str(result.get('progress') or '-'))}</code>\n"
+                f"• Video sent: <code>{html.escape(sent_note)}</code>\n\n"
+                "The video will be sent automatically in a few minutes when it is ready.\n"
+                "Please do not send the command again or create multiple jobs."
+            )
+        else:
+            sent_note = "đã gửi" if (already_sent or output_sent) else "chưa"
+            public_text = (
+                "🎞 <b>Trạng thái video TOAN AAS</b>\n\n"
+                f"• Trạng thái: <code>{html.escape(status)}</code>\n"
+                f"• Tiến độ: <code>{html.escape(str(result.get('progress') or '-'))}</code>\n"
+                f"• Video đã gửi: <code>{html.escape(sent_note)}</code>\n\n"
+                "Video sẽ được gửi tự động trong vài phút khi hoàn tất.\n"
+                "Vui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần."
+            )
+        return await safe_edit_or_send(
+            query,
+            public_text,
+            parse_mode="HTML",
+            reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, public_user=True),
         )
     result_line = f"• Result: <a href=\"{html.escape(result_url, quote=True)}\">open</a>\n" if result_url else ""
     sent_note = "already sent" if already_sent else ("yes" if output_sent else "no")
@@ -36143,6 +36205,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=ui_text(lang, "video.queue_submitted", task_id=html.escape(task_id), auto_poll="ON" if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED else "OFF"),
+                reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, public_user=not is_admin_user(uid)),
             )
             if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
                 asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, query.message.chat_id, uid, task_id))
