@@ -32142,11 +32142,26 @@ def menu_text_operator(is_admin: bool) -> str:
 def menu_text_admin() -> str:
     return (
         "📊 <b>Quản Trị</b>\n\n"
-        "<b>A. User & Xu</b>\n• <code>/add</code>\n• <code>/setvip</code>\n\n"
-        "<b>B. Bill thủ công</b>\n• <code>/pending</code>\n• <code>/duyet</code>\n• <code>/tuchoi</code>\n\n"
-        "<b>C. Dashboard</b>\n• <code>/dashboard</code>\n• <code>/stats</code>\n\n"
-        "<b>D. Kiểm tra trước khi bán</b>\n• <code>/providers</code>\n• <code>/sales_ready</code>\n• <code>/costs</code>\n• <code>/payos_test_plan</code>\n• <code>/promo_seed_beta</code>\n• <code>/mark_payos_test</code>\n\n"
-        "<b>E. Góp ý</b>\n• <code>/admin_gopy</code>"
+        "<b>A. User & Xu</b>\n"
+        "• <code>/add</code>\n• <code>/settier</code>\n• <code>/setvip</code>\n"
+        "• <code>/profile_user</code>\n• <code>/ledger_user</code>\n• <code>/member_user</code>\n\n"
+        "<b>B. Bill / Nạp tiền</b>\n"
+        "• <code>/pending</code>\n• <code>/duyet</code>\n• <code>/tuchoi</code>\n"
+        "• <code>/payos_test_plan</code>\n• <code>/mark_payos_test</code>\n\n"
+        "<b>C. Trạng thái hệ thống</b>\n"
+        "• <code>/runtime</code>\n• <code>/data_status</code>\n• <code>/providers</code>\n"
+        "• <code>/dashboard</code>\n• <code>/stats</code>\n• <code>/sales_ready</code>\n\n"
+        "<b>D. ShopAIKey / Provider</b>\n"
+        "• <code>/shopaikey_status</code>\n• <code>/shopaikey_usage</code>\n• <code>/shopaikey_video_job</code>\n"
+        "• <code>/tool_test_shopaikey</code>\n• <code>/tool_test_shopaikey_image</code>\n"
+        "• <code>/tool_test_shopaikey_video</code>\n• <code>/tool_test_shopaikey_tts</code>\n\n"
+        "<b>E. Giá / Sẵn sàng bán</b>\n"
+        "• <code>/banggia</code>\n• <code>/costs</code>\n• <code>/sales_ready</code>\n• <code>/providers</code>\n\n"
+        "<b>F. Maintenance / Freeze</b>\n"
+        "• <code>/maintenance_status</code>\n• <code>/maintenance_on</code>\n• <code>/maintenance_off</code>\n"
+        "• <code>/freeze_tools</code>\n• <code>/unfreeze_tools</code>\n"
+        "• <code>/provider_freeze</code>\n• <code>/provider_unfreeze</code>\n\n"
+        "<b>G. Góp ý / Admin notes</b>\n• <code>/admin_gopy</code>"
     )
 
 def menu_text_system() -> str:

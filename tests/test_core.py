@@ -260,6 +260,29 @@ def test_admin_menu_contains_grouped_operator_and_system():
     button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
     assert "🧠 Operator" in button_texts
     assert "⚙️ Hệ Thống" in button_texts
+    admin_menu = bot.menu_text_admin()
+    for command in [
+        "/add",
+        "/setvip",
+        "/pending",
+        "/duyet",
+        "/tuchoi",
+        "/runtime",
+        "/data_status",
+        "/providers",
+        "/shopaikey_status",
+        "/shopaikey_usage",
+        "/shopaikey_video_job",
+        "/maintenance_status",
+        "/provider_freeze",
+        "/provider_unfreeze",
+    ]:
+        assert command in admin_menu
+    registry = (Path(bot.__file__).resolve().parent / "docs" / "COMMAND_REGISTRY.md").read_text(encoding="utf-8")
+    assert "| `/data_status` |" in registry
+    assert "| `/shopaikey_status` |" in registry
+    assert "| `/shopaikey_usage` |" in registry
+    assert "| `/shopaikey_video_job` |" in registry
 
 
 def test_provider_orchestrator_registry_is_admin_first(monkeypatch):

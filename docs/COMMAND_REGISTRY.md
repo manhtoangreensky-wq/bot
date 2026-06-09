@@ -87,11 +87,18 @@ These handlers remain in code for admin/internal testing but are blocked for nor
 | `/tuchoi` | `cmd_tuchoi` | YES | YES | Reject manual bill. |
 | `/add` | `cmd_admin_add` | YES | YES | Add credit. |
 | `/setvip` | `cmd_setvip` | YES | YES | Set member tier: silver/gold/platinum/diamond/vip only. |
+| `/settier` | `cmd_set_vip` | YES | YES | Set member tier with the current tier policy. |
+| `/set_member_tier` | `cmd_set_vip` | YES | YES | Alias for `/settier`. |
+| `/profile_user` | `cmd_profile_user` | YES | YES | Admin user profile lookup. |
+| `/ledger_user` | `cmd_ledger_user` | YES | YES | Admin Xu ledger lookup. |
+| `/member_user` | `cmd_member_user` | YES | YES | Admin member tier/benefit lookup. |
 | `/admin_gopy` | `cmd_admin_gopy` | YES | YES | View feedback. |
 | `/backup_db` | `cmd_backup_db` | YES | YES | Sends DB file to admin if available. |
 | `/providers` | `cmd_providers` | YES | YES | Provider key status, configured/missing only. |
 | `/costs` | `cmd_costs` | YES | YES | Cost control and paid-provider risk summary. |
 | `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
+| `/runtime` | `cmd_runtime` | YES | YES | Runtime/webhook diagnostics. |
+| `/data_status` | `cmd_data_status` | YES | YES | Persistent DB/backup/volume status. |
 | `/payos_test_plan` | `cmd_payos_test_plan` | YES | YES | Real PayOS 10k manual test checklist. |
 | `/promo_seed_policy` | `cmd_promo_seed_policy` | YES | YES | Seeds Promotion Policy V2.1 codes: FIRST30, SECOND15, WEEKLY10, MONTHLY20, DAILY5, BETA50. |
 | `/promo_seed_beta` | `cmd_promo_seed_beta` | YES | YES | Compatibility alias for `/promo_seed_policy`. |
@@ -104,7 +111,21 @@ These handlers remain in code for admin/internal testing but are blocked for nor
 | `/gift_disable` | `cmd_gift_disable` | YES | YES | Disables a gift/reward code without deleting data. |
 | `/mark_payos_test` | `cmd_mark_payos_test` | YES | YES | Admin records PayOS real test PASS/FAIL/NOT_TESTED; does not alter payments. |
 | `/pricing_admin` | `cmd_pricing_admin` | YES | YES | Admin-only formula/constants for Pricing Engine V2. |
-| `/runtime` | `cmd_runtime` | YES | System menu | Runtime/webhook diagnostics. |
+| `/banggia` | `cmd_pricing` | YES | YES | Public/admin price menu entry shown in admin menu for quick access. |
+| `/shopaikey_status` | `cmd_shopaikey_status` | YES | YES | ShopAIKey admin status, usage and smoke-test snapshots. |
+| `/shopaikey_usage` | `cmd_shopaikey_usage` | YES | YES | ShopAIKey usage monitor, no key leakage. |
+| `/shopaikey_video_job` | `cmd_shopaikey_video_job` | YES | YES | Query ShopAIKey video job status. |
+| `/tool_test_shopaikey` | `cmd_tool_test_shopaikey` | YES | YES | Admin chat smoke test. |
+| `/tool_test_shopaikey_image` | `cmd_tool_test_shopaikey_image` | YES | YES | Admin image smoke test. |
+| `/tool_test_shopaikey_video` | `cmd_tool_test_shopaikey_video` | YES | YES | Admin video smoke test. |
+| `/tool_test_shopaikey_tts` | `cmd_tool_test_shopaikey_tts` | YES | YES | Admin TTS smoke test. |
+| `/maintenance_status` | `cmd_maintenance_status` | YES | YES | Maintenance/freeze status overview. |
+| `/maintenance_on` | `cmd_maintenance_on` | YES | YES | Enable maintenance mode. |
+| `/maintenance_off` | `cmd_maintenance_off` | YES | YES | Disable maintenance mode. |
+| `/freeze_tools` | `cmd_freeze_tools` | YES | YES | Freeze tool usage. |
+| `/unfreeze_tools` | `cmd_unfreeze_tools` | YES | YES | Unfreeze tool usage. |
+| `/provider_freeze` | `cmd_provider_freeze` | YES | YES | Freeze a provider by name/reason. |
+| `/provider_unfreeze` | `cmd_provider_unfreeze` | YES | YES | Unfreeze a provider by name. |
 | `/checkpayos` | `cmd_checkpayos` | YES | System menu | PayOS order check. |
 | `/telegram_status` | `cmd_telegram_status` | YES | System menu | Telegram update mode. |
 | `/telegram_takeover` | `cmd_telegram_takeover` | YES | System menu | Reclaim Telegram webhook/polling. |
