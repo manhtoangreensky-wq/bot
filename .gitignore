@@ -3,6 +3,7 @@
 __pycache__/
 .pytest_cache/
 .pytest_tmp/
+.pytest_tmp*/
 *.py[cod]
 toandaas_system.db
 operator_uploads/

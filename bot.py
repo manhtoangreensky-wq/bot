@@ -221,6 +221,8 @@ def env_int(name: str, default: int = 0) -> int:
     except Exception:
         return int(default)
 
+ADMIN_DEBUG = env_flag("ADMIN_DEBUG", "false")
+
 def normalize_public_base_url(value: str = "") -> str:
     value = (value or "").strip().rstrip("/")
     if not value:
@@ -3384,6 +3386,10 @@ UI_TEXT = {
         "concept.edit_prompt": "Bạn muốn sửa concept như thế nào?\n\nVí dụ: ngắn còn 15s, sang trọng hơn, vui hơn, thêm CTA bán hàng, đổi sang phong cách TikTok.\n\nBot sẽ dùng concept hiện tại, không bắt bạn nhập lại từ đầu.",
         "concept.saved_motion": "✅ Motion guide đã được chọn cho concept này. Bot chưa gọi API và chưa trừ Xu.",
         "video.public_off_prompt_only": "Tạo video thật đang thử nghiệm nội bộ. TOAN AAS đã chuẩn bị prompt video để bạn dùng khi tính năng mở công khai.",
+        "video.public_off_options": "🎬 <b>Video thật chưa mở công khai.</b>\n\nHiện tại bot có thể giúp bạn chuẩn bị:\n• Prompt video\n• Motion guide\n• Storyboard\n• Gợi ý nhạc\n\nKhi video public bật, bạn sẽ chọn tier và xác nhận giá trước khi tạo.\nBot chưa gọi API video và chưa trừ Xu.",
+        "video.admin_smoke_warning": "🔐 Admin smoke test: không trừ Xu nội bộ, nhưng provider có thể tốn credit thật. Không cần gửi lại lệnh.",
+        "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\nGửi prompt video ngắn để test provider.\n\n{warning}",
+        "video.from_image_public_off": "🎬 <b>Video thật chưa mở công khai.</b>\n\nTOAN AAS đã chuẩn bị prompt image-to-video từ ảnh này. Khi public video bật, nút này sẽ chuyển sang bước chọn tier video và xác nhận giá.\n\n<b>Prompt image-to-video</b>\n<code>{prompt}</code>\n\nBot chưa gọi API video và chưa trừ Xu.",
         "workflow.from_concept_confirm": "Tạo workflow đầy đủ từ concept này sẽ tốn {cost} Xu. Bao gồm hook/script/storyboard/prompt ảnh/prompt video. Bạn có muốn tiếp tục không?",
         "workflow.from_concept_title": "🎬 Workflow đầy đủ từ concept này",
         "workflow.image_scene_1": "🖼 Tạo ảnh từ Scene 1",
@@ -3569,6 +3575,10 @@ UI_TEXT = {
         "concept.edit_prompt": "How would you like to edit this concept?\n\nExamples: make it 15 seconds, make it more premium, make it more playful, add a sales CTA, switch to TikTok style.\n\nThe bot will use the current concept; you do not need to enter everything again.",
         "concept.saved_motion": "✅ This motion guide is selected for the concept. The bot has not called any API and has not charged Xu.",
         "video.public_off_prompt_only": "Real video generation is still in internal testing. TOAN AAS has prepared the video prompt for you to use when the feature opens publicly.",
+        "video.public_off_options": "🎬 <b>Real video generation is not public yet.</b>\n\nThe bot can still prepare:\n• Video prompts\n• Motion guide\n• Storyboard\n• Music suggestions\n\nWhen public video is enabled, you will choose a tier and confirm pricing before generation.\nThe bot has not called the video API and has not charged Xu.",
+        "video.admin_smoke_warning": "🔐 Admin smoke test: no internal Xu deduction, but the provider may consume real credits. No need to resend the command.",
+        "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\nSend a short video prompt to test the provider.\n\n{warning}",
+        "video.from_image_public_off": "🎬 <b>Real video generation is not public yet.</b>\n\nTOAN AAS has prepared an image-to-video prompt from this image. When public video is enabled, this button will move to video tier selection and price confirmation.\n\n<b>Image-to-video prompt</b>\n<code>{prompt}</code>\n\nThe bot has not called the video API and has not charged Xu.",
         "workflow.from_concept_confirm": "Creating a full workflow from this concept costs {cost} Xu. It includes hooks, scripts, storyboard, image prompts and video prompts. Do you want to continue?",
         "workflow.from_concept_title": "🎬 Full workflow from this concept",
         "workflow.image_scene_1": "🖼 Create image from Scene 1",
@@ -3754,6 +3764,10 @@ UI_TEXT = {
         "concept.edit_prompt": "你想如何修改这个 concept？\n\n例如：缩短为 15 秒、更高级、更轻松、加入销售 CTA、改成 TikTok 风格。\n\nBot 会使用当前 concept，不需要你重新输入。",
         "concept.saved_motion": "✅ 此 motion guide 已用于当前 concept。Bot 未调用 API，也未扣除 Xu。",
         "video.public_off_prompt_only": "真实视频生成功能仍在内部测试。TOAN AAS 已为你准备视频 prompt，等功能公开后可继续使用。",
+        "video.public_off_options": "🎬 <b>真实视频生成尚未公开。</b>\n\nBot 目前可以先准备：\n• 视频 prompt\n• Motion guide\n• Storyboard\n• 音乐建议\n\nPublic video 开启后，你会先选择 tier 并确认价格，再生成视频。\nBot 未调用视频 API，也未扣除 Xu。",
+        "video.admin_smoke_warning": "🔐 Admin smoke test：不扣除内部 Xu，但 provider 可能消耗真实 credit。不需要重复发送命令。",
+        "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\n请发送一个简短视频 prompt 来测试 provider。\n\n{warning}",
+        "video.from_image_public_off": "🎬 <b>真实视频生成尚未公开。</b>\n\nTOAN AAS 已基于此图片准备 image-to-video prompt。Public video 开启后，此按钮会进入视频 tier 选择和价格确认。\n\n<b>Image-to-video prompt</b>\n<code>{prompt}</code>\n\nBot 未调用视频 API，也未扣除 Xu。",
         "workflow.from_concept_confirm": "基于此 concept 创建完整 workflow 将花费 {cost} Xu，包含 hook、script、storyboard、图片 prompt 和视频 prompt。你要继续吗？",
         "workflow.from_concept_title": "🎬 基于此 concept 的完整 workflow",
         "workflow.image_scene_1": "🖼 从 Scene 1 生成图片",
@@ -33403,6 +33417,7 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
                 and not audio_timeout_safe_error
                 and update.effective_user
                 and is_admin_or_owner(update.effective_user.id)
+                and ADMIN_DEBUG
             ):
                 text += f"\n\n<code>{html.escape(error_name)}: {html.escape(error_text[:800])}</code>"
             await context.bot.send_message(
@@ -33414,11 +33429,11 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Failed to notify user about Telegram handler error")
 
     try:
-        if ADMIN_ID and not image_to_pdf_safe_error and not audio_timeout_safe_error:
+        if ADMIN_ID and ADMIN_DEBUG and not image_to_pdf_safe_error and not audio_timeout_safe_error:
             await context.bot.send_message(
                 chat_id=int(ADMIN_ID),
                 text=(
-                    "🚨 <b>BOT COMMAND ERROR</b>\n\n"
+                    "🚨 <b>BOT COMMAND DEBUG ERROR</b>\n\n"
                     f"<code>{html.escape(error_name)}: {html.escape(error_text)}</code>"
                 ),
                 parse_mode="HTML",
@@ -33430,9 +33445,68 @@ async def safe_edit_query_message(query, text: str, reply_markup=None):
     try:
         return await query.edit_message_text(text, parse_mode="HTML", reply_markup=reply_markup)
     except Exception as e:
-        if "Message is not modified" in str(e):
+        if "message is not modified" in str(e).lower():
             return None
+        if any(fragment in str(e).lower() for fragment in (
+            "there is no text in the message to edit",
+            "query is too old",
+            "message to edit not found",
+            "message can't be edited",
+            "message is not editable",
+        )):
+            logger.warning("safe_edit_query_message fallback | %s", sanitize_log_text(str(e))[:240])
+            message = getattr(query, "message", None)
+            if message:
+                try:
+                    await message.reply_text("Có lỗi nhỏ khi cập nhật màn hình. Bot đã gửi lại bước tiếp theo bên dưới.")
+                    return await message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
+                except Exception as send_error:
+                    logger.warning("safe_edit_query_message fallback failed | %s", sanitize_log_text(str(send_error))[:240])
+                    return None
         raise
+
+def is_soft_telegram_edit_error(error: Exception) -> bool:
+    text = str(error or "").lower()
+    return any(fragment in text for fragment in (
+        "there is no text in the message to edit",
+        "message is not modified",
+        "query is too old",
+        "message to edit not found",
+        "message can't be edited",
+        "message is not editable",
+    ))
+
+async def safe_edit_or_send(query, text: str, reply_markup=None, parse_mode: str | None = "HTML"):
+    """Edit callback message when possible; otherwise send a fresh message."""
+    if not query:
+        return None
+    message = getattr(query, "message", None)
+    try:
+        return await query.edit_message_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            return None
+        if not is_soft_telegram_edit_error(e):
+            raise
+        logger.warning("safe_edit_or_send fallback | %s", sanitize_log_text(str(e))[:240])
+        try:
+            if message:
+                await message.reply_text(
+                    "Có lỗi nhỏ khi cập nhật màn hình. Bot đã gửi lại bước tiếp theo bên dưới."
+                    if parse_mode == "HTML" else
+                    "Có lỗi nhỏ khi cập nhật màn hình. Bot đã gửi lại bước tiếp theo bên dưới."
+                )
+                return await message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+        except Exception as send_error:
+            logger.warning("safe_edit_or_send reply fallback failed | %s", sanitize_log_text(str(send_error))[:240])
+        try:
+            bot = getattr(query, "bot", None)
+            chat_id = getattr(message, "chat_id", None) if message else None
+            if bot and chat_id:
+                return await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode, reply_markup=reply_markup)
+        except Exception as send_error:
+            logger.warning("safe_edit_or_send bot fallback failed | %s", sanitize_log_text(str(send_error))[:240])
+        return None
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -33677,8 +33751,10 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Image tiers: <code>{'/'.join(pricing['image_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         f"• Image tier public: <code>{html.escape(image_tier_public_status_text())}</code>",
         "• Image pricing source: <code>tiered_media_pricing</code>",
-        f"• Video tiers: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
-        f"• Video tier public: <code>{html.escape(video_tier_public_status_text())}</code>",
+        f"• Video tier config: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | enabled/configured <code>{html.escape(video_tier_public_status_text())}</code>",
+        f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
+        f"• Public user can generate real video: <code>{'YES' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'NO'}</code>",
+        f"• Admin video smoke tests: <code>{'available/admin-only' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'disabled'}</code>",
         f"• Video premium: <code>{'admin-only' if VIDEO_PREMIUM_ADMIN_ONLY else ('ON' if VIDEO_TIER_PREMIUM_ENABLED else 'OFF')}</code>",
         "• Video pricing source: <code>tiered_media_pricing</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
@@ -34395,8 +34471,10 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         "• Image pricing source: <code>tiered_media_pricing</code>",
         f"• Image provider cost: low <code>{pricing['image_tiers']['low']['provider_cost']} Xu</code> / standard <code>{pricing['image_tiers']['standard']['provider_cost']} Xu</code> / high <code>{pricing['image_tiers']['high']['provider_cost']} Xu</code>",
         f"• Image model mapping: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
-        f"• Video tiers: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
-        f"• Video tier public: <code>{html.escape(video_tier_public_status_text())}</code>",
+        f"• Video tier config: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | enabled/configured <code>{html.escape(video_tier_public_status_text())}</code>",
+        f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
+        f"• Public user can generate real video: <code>{'YES' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'NO'}</code>",
+        f"• Admin video smoke tests: <code>{'available/admin-only' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'disabled'}</code>",
         f"• Video premium: <code>{'admin-only' if VIDEO_PREMIUM_ADMIN_ONLY else ('ON' if VIDEO_TIER_PREMIUM_ENABLED else 'OFF')}</code>",
         "• Video pricing source: <code>tiered_media_pricing</code>",
         f"• Video provider cost: low <code>{pricing['video_tiers']['low']['provider_cost']} Xu</code> / standard <code>{pricing['video_tiers']['standard']['provider_cost']} Xu</code> / high <code>{pricing['video_tiers']['high']['provider_cost']} Xu</code> / premium <code>{pricing['video_tiers']['premium']['provider_cost']} Xu</code>",
@@ -35270,7 +35348,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     uid = query.from_user.id
     lang = user_ui_lang(uid)
     if len(parts) != 3:
-        return await query.edit_message_text(ui_text(lang, "common.invalid_request"))
+        return await safe_edit_or_send(query, ui_text(lang, "common.invalid_request"))
     _, action, token = parts
     if action == "cancel":
         pending_cancel = pop_shopaikey_pending_confirmation(token, uid) or {}
@@ -35284,10 +35362,10 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             cancel_reason += f"; tier={cancel_tier}"
             record_shopaikey_billing_event(uid, 0, "video_cancelled", 0, 0, 0, cancel_reason)
         record_shopaikey_billing_event(uid, 0, "cancel", 0, 0, 0, cancel_reason)
-        return await query.edit_message_text(ui_text(lang, "common.cancelled_not_charged"))
+        return await safe_edit_or_send(query, ui_text(lang, "common.cancelled_not_charged"))
     pending = pop_shopaikey_pending_confirmation(token, uid)
     if not pending:
-        return await query.edit_message_text(ui_text(lang, "common.expired_not_charged"))
+        return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     job_type = str(pending.get("job_type") or "").lower()
     prompt = str(pending.get("prompt") or "").strip()
     base_cost = int(pending.get("base_cost") or 0)
@@ -35301,13 +35379,13 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     scene_index = int(pending.get("scene_index") or 0)
     enabled, message = shopaikey_public_generation_guard(job_type)
     if not enabled:
-        return await query.edit_message_text(ui_text(lang, "media.public_off"))
+        return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
     if shopaikey_active_job_for_user(uid, job_type):
         if job_type == "video":
-            return await query.edit_message_text(ui_text(lang, "video.active_job"))
-        return await query.edit_message_text(ui_text(lang, "media.job_lock"))
+            return await safe_edit_or_send(query, ui_text(lang, "video.active_job"))
+        return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
     if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
-        return await query.edit_message_text(ui_text(lang, "video.source_invalid"))
+        return await safe_edit_or_send(query, ui_text(lang, "video.source_invalid"))
     balance_before, _, _ = get_user(uid)
     charge = spend_fixed_credit_info(
         uid,
@@ -35349,7 +35427,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     record_shopaikey_billing_event(uid, job_id, "confirm" if job_type == "image" else "video_confirmed", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}{tier_reason}")
     record_shopaikey_billing_event(uid, job_id, "deduct" if job_type == "image" else "video_deducted", deducted, int(balance_before or 0), int(balance_after or 0), f"shopaikey_{job_type}{tier_reason}")
     if job_type == "image":
-        await query.edit_message_text(ui_text(lang, "image.waiting"))
+        await safe_edit_or_send(query, ui_text(lang, "image.waiting"))
         result = await shopaikey_image_generate(prompt, model)
         status = str(result.get("status") or "FAIL")
         image_url = str(result.get("image_url") or "")
@@ -35449,7 +35527,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         credits_after, _, _ = get_user(uid)
         return await context.bot.send_message(chat_id=query.message.chat_id, text=ui_text(lang, "account.balance_left", credits=int(credits_after or 0)))
     if job_type == "video":
-        await query.edit_message_text(ui_text(lang, "video.waiting"))
+        await safe_edit_or_send(query, ui_text(lang, "video.waiting"))
         result = await shopaikey_video_create_smoke_test(model, prompt)
         status = str(result.get("status") or "FAIL")
         task_id = str(result.get("task_id") or "")
@@ -35514,7 +35592,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             chat_id=query.message.chat_id,
             text=public_video_provider_fail_message(deducted_amount, refunded, lang),
         )
-    return await query.edit_message_text(ui_text(lang, "common.invalid_request"))
+    return await safe_edit_or_send(query, ui_text(lang, "common.invalid_request"))
 
 class TranslationProviderError(RuntimeError):
     def __init__(self, statuses: dict, errors: dict):
@@ -44789,40 +44867,40 @@ async def send_or_confirm_trend_video_flow_from_callback(query, uid: int, topic:
     lang = user_ui_lang(uid)
     if not TREND_VIDEO_WORKFLOW_ENABLED:
         if normalize_user_language(lang) == "zh":
-            await query.edit_message_text("🛠 Trend → Video Workflow 暂时维护中。本次未扣除 Xu。")
+            await safe_edit_or_send(query, "🛠 Trend → Video Workflow 暂时维护中。本次未扣除 Xu。")
         elif normalize_user_language(lang) != "vi":
-            await query.edit_message_text("🛠 Trend → Video Workflow is temporarily under maintenance. The bot has not charged Xu.")
+            await safe_edit_or_send(query, "🛠 Trend → Video Workflow is temporarily under maintenance. The bot has not charged Xu.")
         else:
-            await query.edit_message_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
+            await safe_edit_or_send(query, "🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
         return
     if not trend_video_workflow_can_access(uid):
         if normalize_user_language(lang) == "zh":
-            await query.edit_message_text("🧪 Trend video workflow 仍在内部测试，尚未公开。\n本次未扣除 Xu。")
+            await safe_edit_or_send(query, "🧪 Trend video workflow 仍在内部测试，尚未公开。\n本次未扣除 Xu。")
         elif normalize_user_language(lang) != "vi":
-            await query.edit_message_text("🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu.")
+            await safe_edit_or_send(query, "🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu.")
         else:
-            await query.edit_message_text(f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+            await safe_edit_or_send(query, f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
         return
     topic = re.sub(r"\s+", " ", str(topic or "").strip())[:800]
     if not topic:
-        await query.edit_message_text(cinematic_ad_missing_latest_text(lang))
+        await safe_edit_or_send(query, cinematic_ad_missing_latest_text(lang))
         return
     if is_admin_user(uid):
         if normalize_user_language(lang) == "zh":
-            await query.edit_message_text("🎬 正在根据当前 concept 生成 Trend → Video Workflow...\nAdmin preview / no Xu deducted.")
+            await safe_edit_or_send(query, "🎬 正在根据当前 concept 生成 Trend → Video Workflow...\nAdmin preview / no Xu deducted.")
         elif normalize_user_language(lang) != "vi":
-            await query.edit_message_text("🎬 Creating Trend → Video Workflow from the current concept...\nAdmin preview / no Xu deducted.")
+            await safe_edit_or_send(query, "🎬 Creating Trend → Video Workflow from the current concept...\nAdmin preview / no Xu deducted.")
         else:
-            await query.edit_message_text("🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...\nAdmin preview / no Xu deducted.")
+            await safe_edit_or_send(query, "🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...\nAdmin preview / no Xu deducted.")
         await send_trend_video_flow_for_topic_message(query.message, uid, topic, billing_note=trend_workflow_admin_preview_note(), lang=lang)
         return
     if not TREND_WORKFLOW_BILLING_ENABLED:
         if normalize_user_language(lang) == "zh":
-            await query.edit_message_text("🎬 正在根据当前 concept 生成 Trend → Video Workflow...\nBilling workflow OFF，本次未扣除 Xu。")
+            await safe_edit_or_send(query, "🎬 正在根据当前 concept 生成 Trend → Video Workflow...\nBilling workflow OFF，本次未扣除 Xu。")
         elif normalize_user_language(lang) != "vi":
-            await query.edit_message_text("🎬 Creating Trend → Video Workflow from the current concept...\nBilling workflow is OFF, the bot has not charged Xu.")
+            await safe_edit_or_send(query, "🎬 Creating Trend → Video Workflow from the current concept...\nBilling workflow is OFF, the bot has not charged Xu.")
         else:
-            await query.edit_message_text("🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...\nBilling workflow OFF, bot chưa trừ Xu.")
+            await safe_edit_or_send(query, "🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...\nBilling workflow OFF, bot chưa trừ Xu.")
         await send_trend_video_flow_for_topic_message(query.message, uid, topic, billing_note=trend_workflow_billing_off_note(lang), lang=lang)
         return
     total_cost = int(trend_workflow_content_cost_breakdown().get("total") or 0)
@@ -44833,18 +44911,19 @@ async def send_or_confirm_trend_video_flow_from_callback(query, uid: int, topic:
         return
     if TREND_WORKFLOW_REQUIRE_CONFIRM:
         set_trend_workflow_confirm_pending(uid, topic, workflow)
-        await query.edit_message_text(
+        await safe_edit_or_send(
+            query,
             trend_workflow_content_confirm_text(topic, int(credits or 0), lang),
             parse_mode="HTML",
             reply_markup=trend_workflow_content_confirm_keyboard(lang),
         )
         return
     if normalize_user_language(lang) == "zh":
-        await query.edit_message_text("🎬 正在根据当前 concept 生成 Trend → Video Workflow...")
+        await safe_edit_or_send(query, "🎬 正在根据当前 concept 生成 Trend → Video Workflow...")
     elif normalize_user_language(lang) != "vi":
-        await query.edit_message_text("🎬 Creating Trend → Video Workflow from the current concept...")
+        await safe_edit_or_send(query, "🎬 Creating Trend → Video Workflow from the current concept...")
     else:
-        await query.edit_message_text("🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...")
+        await safe_edit_or_send(query, "🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...")
     await execute_confirmed_trend_workflow_content(query.message, uid, topic, workflow)
 
 async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -45203,6 +45282,30 @@ def clear_public_video_prompt_pending(user_id) -> bool:
 def public_video_tier_selection_text(lang: str = "vi") -> str:
     return ui_text(lang, "video.choose_tier.title")
 
+def public_video_off_options_text(lang: str = "vi") -> str:
+    return ui_text(lang, "video.public_off_options")
+
+def image_to_video_public_off_prompt(job_id: int = 0, user_id=0, lang: str = "vi") -> str:
+    job = shopaikey_job_by_id(int(job_id or 0)) if int(job_id or 0) else None
+    prompt_preview = str((job or {}).get("prompt_preview") or "").strip()
+    if not prompt_preview:
+        recent = get_recent_media_state(LAST_USER_IMAGE, safe_int(user_id, 0))
+        prompt_preview = str((recent or {}).get("caption") or (recent or {}).get("file_name") or "").strip()
+    subject = prompt_preview or (
+        "selected image / product scene"
+        if normalize_user_language(lang) != "zh" else
+        "已选择的图片 / 产品场景"
+    )
+    prompt = (
+        f"Animate the selected image into a short clean product video. Subject/context: {subject}. "
+        "Use slow push-in, subtle parallax, stable subject, clean lighting, premium commercial style, "
+        "soft reveal, no watermark, no extra text, no distorted hands or faces. Duration 5 seconds, 16:9 or 9:16 depending on the source image."
+    )
+    text = ui_text(lang, "video.from_image_public_off", prompt=html.escape(prompt[:900]))
+    if is_admin_user(user_id):
+        text += "\n\n" + ui_text(lang, "video.admin_smoke_warning")
+    return text
+
 def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     pricing = video_tier_pricing_payload()
     enabled_map = video_tier_enabled_map()
@@ -45473,7 +45576,8 @@ async def edit_trend_workflow_insufficient_credits(query, current_credits: int, 
         int(current_credits or 0),
         f"required={int(required_credits or 0)}",
     )
-    await query.edit_message_text(
+    await safe_edit_or_send(
+        query,
         trend_workflow_insufficient_credits_text(current_credits, required_credits, lang),
         parse_mode="HTML",
         reply_markup=build_topup_keyboard(uid),
@@ -46248,40 +46352,41 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         clear_trend_workflow_confirm_pending(uid)
         record_trend_workflow_billing_event(uid, workflow, "cancel", 0, 0, 0, "user_cancelled_content_confirmation")
         if normalize_user_language(lang) == "zh":
-            return await query.edit_message_text("❌ 已取消 trend content workflow。本次未调用 provider，也未扣除 Xu。")
-        return await query.edit_message_text("❌ Trend content workflow cancelled. The bot has not called the provider and has not charged Xu." if normalize_user_language(lang) != "vi" else "❌ Đã hủy gói nội dung theo trend. Bot chưa gọi provider và chưa trừ Xu.")
+            return await safe_edit_or_send(query, "❌ 已取消 trend content workflow。本次未调用 provider，也未扣除 Xu。")
+        return await safe_edit_or_send(query, "❌ Trend content workflow cancelled. The bot has not called the provider and has not charged Xu." if normalize_user_language(lang) != "vi" else "❌ Đã hủy gói nội dung theo trend. Bot chưa gọi provider và chưa trừ Xu.")
     if action == "confirm_content":
         pending = get_trend_workflow_confirm_pending(uid)
         if not pending:
-            return await query.edit_message_text(ui_text(lang, "common.expired_not_charged"))
+            return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
         clear_trend_workflow_confirm_pending(uid)
         topic = str(pending.get("topic") or "").strip()
         workflow = str(pending.get("workflow_id") or "")[:80]
         if not TREND_VIDEO_WORKFLOW_ENABLED:
             if normalize_user_language(lang) == "zh":
-                return await query.edit_message_text("🛠 Trend → Video Workflow 暂时维护中。本次未扣除 Xu。")
-            return await query.edit_message_text("🛠 Trend → Video Workflow is temporarily under maintenance. The bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
+                return await safe_edit_or_send(query, "🛠 Trend → Video Workflow 暂时维护中。本次未扣除 Xu。")
+            return await safe_edit_or_send(query, "🛠 Trend → Video Workflow is temporarily under maintenance. The bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
         if not TREND_WORKFLOW_PUBLIC_ENABLED and not is_admin_user(uid):
             if normalize_user_language(lang) == "zh":
-                return await query.edit_message_text("🧪 Trend video workflow 仍在内部测试，尚未公开。\n本次未扣除 Xu。")
-            return await query.edit_message_text("🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+                return await safe_edit_or_send(query, "🧪 Trend video workflow 仍在内部测试，尚未公开。\n本次未扣除 Xu。")
+            return await safe_edit_or_send(query, "🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
         if is_admin_user(uid):
-            await query.edit_message_text("🧪 Admin preview / content-only / no Xu deducted.")
+            await safe_edit_or_send(query, "🧪 Admin preview / content-only / no Xu deducted.")
             return await send_trend_video_flow_for_topic_message(query.message, uid, topic, billing_note=trend_workflow_admin_preview_note(), lang=lang)
         if not TREND_WORKFLOW_BILLING_ENABLED:
             if normalize_user_language(lang) == "zh":
-                await query.edit_message_text("ℹ️ Billing workflow OFF。本次未扣除 Xu。")
+                await safe_edit_or_send(query, "ℹ️ Billing workflow OFF。本次未扣除 Xu。")
             elif normalize_user_language(lang) != "vi":
-                await query.edit_message_text("ℹ️ Billing workflow is OFF. The bot has not charged Xu.")
+                await safe_edit_or_send(query, "ℹ️ Billing workflow is OFF. The bot has not charged Xu.")
             else:
-                await query.edit_message_text("ℹ️ Billing workflow đang OFF. Bot chưa trừ Xu.")
+                await safe_edit_or_send(query, "ℹ️ Billing workflow đang OFF. Bot chưa trừ Xu.")
             return await send_trend_video_flow_for_topic_message(query.message, uid, topic, billing_note=trend_workflow_billing_off_note(lang), lang=lang)
         total_cost = int(trend_workflow_content_cost_breakdown().get("total") or 0)
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend workflow user")
         if int(credits or 0) < total_cost:
             return await edit_trend_workflow_insufficient_credits(query, int(credits or 0), total_cost, uid, workflow)
         record_trend_workflow_billing_event(uid, workflow, "confirm", 0, int(credits or 0), int(credits or 0), "user_confirmed_content_pack")
-        await query.edit_message_text(
+        await safe_edit_or_send(
+            query,
             ("🎬 已确认。正在生成 trend content workflow...\n本步骤不会调用 image/video API。" if normalize_user_language(lang) == "zh" else ("🎬 Confirmed. Creating trend content workflow...\nThe bot does not call image/video APIs in this step." if normalize_user_language(lang) != "vi" else "🎬 Đã xác nhận. Đang tạo gói nội dung theo trend...\nBot không gọi image/video API trong bước này."))
         )
         return await execute_confirmed_trend_workflow_content(query.message, uid, topic, workflow)
@@ -46289,12 +46394,12 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         clear_trend_video_flow_pending(uid)
         clear_trend_workflow_confirm_pending(uid)
         if normalize_user_language(lang) == "zh":
-            return await query.edit_message_text("❌ 已取消 Trend → Video Workflow。Bot 未调用 API，也未扣除 Xu。")
-        return await query.edit_message_text("❌ Trend → Video Workflow cancelled. The bot has not called any API and has not charged Xu." if normalize_user_language(lang) != "vi" else "❌ Đã hủy Trend → Video Workflow. Bot chưa gọi API và chưa trừ Xu.")
+            return await safe_edit_or_send(query, "❌ 已取消 Trend → Video Workflow。Bot 未调用 API，也未扣除 Xu。")
+        return await safe_edit_or_send(query, "❌ Trend → Video Workflow cancelled. The bot has not called any API and has not charged Xu." if normalize_user_language(lang) != "vi" else "❌ Đã hủy Trend → Video Workflow. Bot chưa gọi API và chưa trừ Xu.")
     if not trend_video_workflow_can_access(uid):
         if normalize_user_language(lang) == "zh":
-            return await query.edit_message_text("🧪 Trend video workflow 仍在内部测试，尚未公开。\n本次未扣除 Xu。")
-        return await query.edit_message_text("🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+            return await safe_edit_or_send(query, "🧪 Trend video workflow 仍在内部测试，尚未公开。\n本次未扣除 Xu。")
+        return await safe_edit_or_send(query, "🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
     if action.startswith("regen_scene_"):
         action = "image_scene_" + action.rsplit("_", 1)[-1]
     if action.startswith("image_scene_"):
@@ -46305,17 +46410,17 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         output = trend_workflow_output_for_user(uid, scene_index)
         if not output:
             if normalize_user_language(lang) == "zh":
-                return await query.edit_message_text("⚠️ 未找到最近 workflow 的图片 prompt。请重新运行 /trend_video_flow <主题>。\n本次未扣除 Xu。")
-            return await query.edit_message_text("⚠️ No recent workflow image prompt was found. Please run /trend_video_flow <topic> again.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else "⚠️ Chưa tìm thấy prompt ảnh của workflow gần nhất. Vui lòng chạy lại /trend_video_flow <chủ đề>.\nBot chưa trừ Xu.")
+                return await safe_edit_or_send(query, "⚠️ 未找到最近 workflow 的图片 prompt。请重新运行 /trend_video_flow <主题>。\n本次未扣除 Xu。")
+            return await safe_edit_or_send(query, "⚠️ No recent workflow image prompt was found. Please run /trend_video_flow <topic> again.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else "⚠️ Chưa tìm thấy prompt ảnh của workflow gần nhất. Vui lòng chạy lại /trend_video_flow <chủ đề>.\nBot chưa trừ Xu.")
         enabled, message = shopaikey_public_generation_guard("image")
         if not enabled:
             if is_admin_user(uid) and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
                 if normalize_user_language(lang) == "zh":
-                    return await query.edit_message_text("🧪 Public image 当前 OFF。Admin 可用 /tool_test_workflow_image 单独测试。\nBot 未调用 public API，也未扣除 Xu。")
-                return await query.edit_message_text("🧪 Public image is OFF. Admin can test separately with /tool_test_workflow_image.\nThe bot has not called the public API and has not charged Xu." if normalize_user_language(lang) != "vi" else "🧪 Public image đang OFF. Admin có thể test riêng bằng /tool_test_workflow_image.\nBot chưa gọi API public và chưa trừ Xu.")
-            return await query.edit_message_text(ui_text(lang, "media.public_off"))
+                    return await safe_edit_or_send(query, "🧪 Public image 当前 OFF。Admin 可用 /tool_test_workflow_image 单独测试。\nBot 未调用 public API，也未扣除 Xu。")
+                return await safe_edit_or_send(query, "🧪 Public image is OFF. Admin can test separately with /tool_test_workflow_image.\nThe bot has not called the public API and has not charged Xu." if normalize_user_language(lang) != "vi" else "🧪 Public image đang OFF. Admin có thể test riêng bằng /tool_test_workflow_image.\nBot chưa gọi API public và chưa trừ Xu.")
+            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
         if shopaikey_active_job_for_user(uid, "image"):
-            return await query.edit_message_text(ui_text(lang, "media.job_lock"))
+            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         prompt = str(output.get("image_prompt") or "").strip()
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend workflow user")
         base_cost = image_base_cost_xu()
@@ -46332,7 +46437,8 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             "trend_output_id": int(output.get("id") or 0),
             "source_prompt_type": "image_prompt",
         })
-        return await query.edit_message_text(
+        return await safe_edit_or_send(
+            query,
             (
                 "🖼 <b>确认从 Trend Workflow 生成图片</b>\n\n"
                 f"• Scene: <b>{scene_index}</b>\n"
@@ -46365,11 +46471,16 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             ]),
         )
     if action.startswith("video_from_image_"):
+        job_id = safe_int(action.rsplit("_", 1)[-1], 0)
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
-            return await query.edit_message_text(ui_text(lang, "media.public_off"))
+            return await safe_edit_or_send(
+                query,
+                image_to_video_public_off_prompt(job_id, uid, lang),
+                parse_mode="HTML",
+            )
         if normalize_user_language(lang) == "zh":
-            return await query.edit_message_text("🎞 Public video 需要通过单独的 billing/confirmation guard。\nAdmin 用 ENV 开启 public video 后，可使用 /shopaikey_video_from_image。\n本次未扣除 Xu。")
-        return await query.edit_message_text("🎞 Public video must go through its own billing/confirmation guard.\nUse /shopaikey_video_from_image after admin enables public video via ENV.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🎞 Public video cần đi qua billing/confirmation guard riêng.\nHiện hãy dùng /shopaikey_video_from_image khi admin đã bật public video bằng ENV.\nBot chưa trừ Xu.")
+            return await safe_edit_or_send(query, "🎞 Public video 需要通过单独的 billing/confirmation guard。\nAdmin 用 ENV 开启 public video 后，可使用 /shopaikey_video_from_image。\n本次未扣除 Xu。")
+        return await safe_edit_or_send(query, "🎞 Public video must go through its own billing/confirmation guard.\nUse /shopaikey_video_from_image after admin enables public video via ENV.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🎞 Public video cần đi qua billing/confirmation guard riêng.\nHiện hãy dùng /shopaikey_video_from_image khi admin đã bật public video bằng ENV.\nBot chưa trừ Xu.")
     guidance = {
         "edit_prompt": "✍️ Copy prompt ảnh trong workflow rồi chỉnh lại mô tả. Sau đó dùng /shopaikey_image <prompt đã sửa> khi public image được bật, hoặc admin dùng /tool_test_workflow_image để smoke test.",
         "cancel": "❌ Đã hủy chọn ảnh. Bot chưa gọi API và chưa trừ Xu.",
@@ -46408,7 +46519,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             "ads": "🧪 Ads versions still require admin review/risk check. No auto ads, no income promises.",
             "save": "📌 V1 does not auto-save projects yet. Copy this pack into your note/project. No Xu was charged.",
         }.get(action, "ℹ️ Workflow V1 only creates plan/prompt/script. It does not call real image/video APIs.")
-    await query.edit_message_text(guidance)
+    await safe_edit_or_send(query, guidance, parse_mode=None)
 
 async def handle_trend_video_flow_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
@@ -46666,28 +46777,32 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
     lang = get_user_language(uid) or "vi"
     if action == "cancel":
         clear_media_creator_pending_states(uid)
-        return await query.edit_message_text(
+        return await safe_edit_or_send(
+            query,
             ui_text(lang, "media.cancelled"),
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")]]),
         )
     if action == "main":
         notice = clear_pending_start_notice(uid)
         text = (notice or (ui_text(lang, "media.open_main") + "\n\n")) + localized_start_menu_text(uid, lang)
-        return await query.edit_message_text(
+        return await safe_edit_or_send(
+            query,
             text,
             parse_mode="HTML",
             reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang),
         )
     if action == "support":
         clear_media_creator_pending_states(uid)
-        return await query.edit_message_text(
+        return await safe_edit_or_send(
+            query,
             support_contact_text(),
             parse_mode="HTML",
             reply_markup=support_contact_keyboard(back_to_media=True, lang=lang),
         )
     if action == "pricing":
         clear_media_creator_pending_states(uid)
-        return await query.edit_message_text(
+        return await safe_edit_or_send(
+            query,
             "\n".join(pricing_main_lines_i18n(lang)),
             parse_mode="HTML",
             reply_markup=pricing_main_keyboard(lang),
@@ -46698,25 +46813,26 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_public_video_prompt_pending(uid)
         if not TREND_VIDEO_WORKFLOW_ENABLED:
             if normalize_user_language(lang) == "zh":
-                return await query.edit_message_text("🛠 Trend → Video Workflow 暂时维护中。本次未扣除 Xu。")
-            return await query.edit_message_text("🛠 Trend → Video Workflow is temporarily under maintenance. The bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
+                return await safe_edit_or_send(query, "🛠 Trend → Video Workflow 暂时维护中。本次未扣除 Xu。")
+            return await safe_edit_or_send(query, "🛠 Trend → Video Workflow is temporarily under maintenance. The bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
         if not trend_video_workflow_can_access(uid):
             if normalize_user_language(lang) == "zh":
-                return await query.edit_message_text("🧪 Trend video workflow 仍在内部测试，尚未公开。\n本次未扣除 Xu。")
-            return await query.edit_message_text("🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
+                return await safe_edit_or_send(query, "🧪 Trend video workflow 仍在内部测试，尚未公开。\n本次未扣除 Xu。")
+            return await safe_edit_or_send(query, "🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
         set_trend_video_flow_pending(uid)
-        return await query.edit_message_text(trend_video_pending_prompt_text(), reply_markup=trend_video_pending_keyboard())
+        return await safe_edit_or_send(query, trend_video_pending_prompt_text(lang), reply_markup=trend_video_pending_keyboard(lang))
     if action == "quick_image":
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
         clear_public_video_prompt_pending(uid)
         if shopaikey_active_job_for_user(uid, "image"):
-            return await query.edit_message_text(ui_text(lang, "media.job_lock"))
+            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         enabled, message = shopaikey_public_generation_guard("image")
         if not enabled and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
-            return await query.edit_message_text(ui_text(lang, "media.public_off"))
-        return await query.edit_message_text(
+            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
+        return await safe_edit_or_send(
+            query,
             public_image_tier_selection_text(lang),
             parse_mode="HTML",
             reply_markup=public_image_tier_keyboard(lang),
@@ -46728,24 +46844,32 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         tier = normalize_image_tier(action.replace("image_tier_", "", 1))
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
-            return await query.edit_message_text(ui_text(lang, "image.tier_disabled_message"))
+            return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
         enabled, message = shopaikey_public_generation_guard("image")
         if not enabled:
-            return await query.edit_message_text(ui_text(lang, "media.public_off"))
+            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
         if shopaikey_active_job_for_user(uid, "image"):
-            return await query.edit_message_text(ui_text(lang, "media.job_lock"))
+            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         set_public_image_prompt_pending(uid, tier)
-        return await query.edit_message_text(public_image_prompt_request_text(tier, lang), parse_mode="HTML")
+        return await safe_edit_or_send(query, public_image_prompt_request_text(tier, lang), parse_mode="HTML")
     if action == "quick_video":
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
         clear_public_video_prompt_pending(uid)
         if shopaikey_active_job_for_user(uid, "video"):
-            return await query.edit_message_text(ui_text(lang, "video.active_job"))
+            return await safe_edit_or_send(query, ui_text(lang, "video.active_job"))
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
-            return await query.edit_message_text(ui_text(lang, "media.public_off"))
-        return await query.edit_message_text(
+            if is_admin_user(uid):
+                set_quick_media_pending(uid, "quick_video_prompt")
+                return await safe_edit_or_send(
+                    query,
+                    ui_text(lang, "video.quick_admin_prompt", warning=ui_text(lang, "video.admin_smoke_warning")),
+                    parse_mode="HTML",
+                )
+            return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
+        return await safe_edit_or_send(
+            query,
             public_video_tier_selection_text(lang),
             parse_mode="HTML",
             reply_markup=public_video_tier_keyboard(lang),
@@ -46757,16 +46881,16 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         tier = normalize_video_tier(action.replace("video_tier_", "", 1))
         payload = video_tier_payload(tier)
         if tier == "premium" or payload.get("admin_only"):
-            return await query.edit_message_text(ui_text(lang, "video.premium_message"))
+            return await safe_edit_or_send(query, ui_text(lang, "video.premium_message"))
         if not payload.get("enabled"):
-            return await query.edit_message_text(ui_text(lang, "video.tier_disabled_message"))
+            return await safe_edit_or_send(query, ui_text(lang, "video.tier_disabled_message"))
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
-            return await query.edit_message_text(ui_text(lang, "media.public_off"))
+            return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
         if shopaikey_active_job_for_user(uid, "video"):
-            return await query.edit_message_text(ui_text(lang, "video.active_job"))
+            return await safe_edit_or_send(query, ui_text(lang, "video.active_job"))
         set_public_video_prompt_pending(uid, tier)
-        return await query.edit_message_text(public_video_prompt_request_text(tier, lang), parse_mode="HTML")
-    await query.edit_message_text(create_media_menu_text(lang), reply_markup=create_media_menu_keyboard(lang))
+        return await safe_edit_or_send(query, public_video_prompt_request_text(tier, lang), parse_mode="HTML")
+    await safe_edit_or_send(query, create_media_menu_text(lang), reply_markup=create_media_menu_keyboard(lang))
 
 async def cmd_tool_test_workflow_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -48055,8 +48179,8 @@ async def edit_or_send_pricing_lines(query, lines: list[str], reply_markup: Inli
     if not chunks:
         return
     if len(chunks) == 1:
-        return await query.edit_message_text(chunks[0], parse_mode="HTML", reply_markup=reply_markup)
-    await query.edit_message_text(chunks[0], parse_mode="HTML")
+        return await safe_edit_or_send(query, chunks[0], parse_mode="HTML", reply_markup=reply_markup)
+    await safe_edit_or_send(query, chunks[0], parse_mode="HTML")
     for idx, chunk in enumerate(chunks[1:], 1):
         await query.message.reply_text(
             chunk,

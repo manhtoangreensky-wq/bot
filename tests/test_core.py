@@ -536,7 +536,8 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert "SHOPAIKEY_REFUND_ON_PROVIDER_FAIL" in source
     assert "Pricing mode:" in source and "tiered_media_pricing" in source
     assert "Image tiers:" in source
-    assert "Video tiers:" in source
+    assert "Video tier config:" in source
+    assert "Public video generation:" in source
     assert "Price table source:" in source
     assert "deduct_dynamic_credit(" not in callback_source
     assert "add_credit(" not in callback_source
@@ -994,7 +995,8 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "tvflow|confirm_content" in source
     assert "tvflow|cancel_content" in source
     assert "Đã hủy gói nội dung theo trend" in callback_source
-    assert "media.public_off" in callback_source
+    assert "image_to_video_public_off_prompt" in callback_source
+    assert "safe_edit_or_send" in callback_source
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -1084,6 +1086,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "def public_video_success_keyboard" in source
     assert "async def handle_public_video_prompt_pending_text" in source
     assert "media.creator_title" in helper_source
+    assert "ADMIN_DEBUG" in source
+    assert "BOT COMMAND ERROR" not in source
+    assert "BOT COMMAND DEBUG ERROR" in source
+    assert "def safe_edit_or_send" in source
+    assert bot.is_soft_telegram_edit_error(Exception("BadRequest: There is no text in the message to edit")) is True
+    assert bot.is_soft_telegram_edit_error(Exception("RateLimitError")) is False
+    safe_edit_source = source_between(source, "async def safe_edit_or_send", "async def handle_menu_callback")
+    assert "Có lỗi nhỏ khi cập nhật màn hình" in safe_edit_source
+    assert "message.reply_text" in safe_edit_source
     assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
     assert 'InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")' in source
     assert 'InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video")' in source
@@ -1125,6 +1136,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "set_quick_media_pending(uid, action)" in source
     assert 'set_quick_media_pending(uid, "quick_image_prompt")' not in source  # action is centralized through start/callback helpers.
     assert "quick_image_prompt" in source and "quick_video_prompt" in source
+    assert 'set_quick_media_pending(uid, "quick_video_prompt")' in quick_source
+    assert "video.quick_admin_prompt" in quick_source
+    assert "video.admin_smoke_warning" in quick_source
+    assert "public_video_off_options_text(lang)" in quick_source
     assert "public_image_prompt" in source
     assert "set_public_image_prompt_pending(uid, tier)" in source
     assert "clear_public_image_prompt_pending(uid)" in source
@@ -1156,6 +1171,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "No Xu deducted" in quick_source or "Không trừ Xu" in quick_source
     assert "Quick media menu: <code>enabled/guarded</code>" in source
     assert "Image tier public:" in source
+    assert "Video tier public:" not in source
+    assert "Public video generation:" in source
+    assert "Public user can generate real video:" in source
+    assert "Admin video smoke tests:" in source
     assert "Image pricing source: <code>tiered_media_pricing</code>" in source
     assert "Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>" in source
     assert "Price table source: <code>{html.escape(pricing['price_table_source'])}</code>" in source
@@ -1299,6 +1318,18 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "💳 Xem bảng giá" not in video_labels
     assert "💰 Xem giá" not in video_labels
     assert "📞 Liên hệ admin" not in video_labels
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
+    vi_video_off = bot.public_video_off_options_text("vi")
+    assert "Video thật chưa mở công khai" in vi_video_off
+    assert "Bot chưa gọi API video" in vi_video_off
+    assert "chưa trừ Xu" in vi_video_off
+    en_video_off = bot.public_video_off_options_text("en")
+    assert "Real video generation is not public yet" in en_video_off
+    assert "has not called the video API" in en_video_off
+    from_image_off = bot.image_to_video_public_off_prompt(0, "u_video_off", "vi")
+    assert "Prompt image-to-video" in from_image_off
+    assert "Bot chưa gọi API video" in from_image_off
+    assert "shopaikey_video_create" not in from_image_off
     docs_labels = [button.text for row in bot.main_docs_keyboard("vi").inline_keyboard for button in row]
     assert "💰 Xem giá" not in docs_labels
     topup_labels = [button.text for row in bot.main_topup_keyboard("vi").inline_keyboard for button in row]
@@ -1725,7 +1756,8 @@ def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
     assert "auto_poll_shopaikey_video_job" in command_source
     assert "No Xu deducted" in command_source
     assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED" in callback_source
-    assert "media.public_off" in callback_source
+    assert "image_to_video_public_off_prompt" in callback_source
+    assert "safe_edit_or_send" in callback_source
     assert "spend_fixed_credit_info" not in command_source
     assert "deduct_dynamic_credit" not in command_source
     assert "add_credit(" not in command_source
