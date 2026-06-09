@@ -34,6 +34,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Optional
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
@@ -339,11 +340,17 @@ SHOPAIKEY_VIDEO_ADMIN_ONLY = env_flag("SHOPAIKEY_VIDEO_ADMIN_ONLY", "true")
 SHOPAIKEY_VIDEO_MODEL = _env("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
 SHOPAIKEY_VIDEO_FALLBACK_MODELS = _env("SHOPAIKEY_VIDEO_FALLBACK_MODELS", "veo3.1,veo3.1-fast,veo3.1-pro,veo3.1-4k,veo3.1-fast-components,grok-video-3,grok-video-3-10s")
 SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "true")
-SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "false")
+SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "true")
 IMAGE_TIER_LOW_ENABLED = env_flag("IMAGE_TIER_LOW_ENABLED", "true")
 IMAGE_TIER_STANDARD_ENABLED = env_flag("IMAGE_TIER_STANDARD_ENABLED", "true")
 IMAGE_TIER_HIGH_ENABLED = env_flag("IMAGE_TIER_HIGH_ENABLED", "true")
 SHOPAIKEY_IMAGE_DEFAULT_TIER = _env("SHOPAIKEY_IMAGE_DEFAULT_TIER", "low")
+VIDEO_TIER_LOW_ENABLED = env_flag("VIDEO_TIER_LOW_ENABLED", "true")
+VIDEO_TIER_STANDARD_ENABLED = env_flag("VIDEO_TIER_STANDARD_ENABLED", "true")
+VIDEO_TIER_HIGH_ENABLED = env_flag("VIDEO_TIER_HIGH_ENABLED", "true")
+VIDEO_TIER_PREMIUM_ENABLED = env_flag("VIDEO_TIER_PREMIUM_ENABLED", "false")
+VIDEO_PREMIUM_ADMIN_ONLY = env_flag("VIDEO_PREMIUM_ADMIN_ONLY", "true")
+SHOPAIKEY_VIDEO_DEFAULT_TIER = _env("SHOPAIKEY_VIDEO_DEFAULT_TIER", "low")
 SHOPAIKEY_IMAGE_COST_XU = env_int("SHOPAIKEY_IMAGE_COST_XU", 50)
 SHOPAIKEY_VIDEO_COST_XU = env_int("SHOPAIKEY_VIDEO_COST_XU", 200)
 SHOPAIKEY_TREND_COST_XU = env_int("SHOPAIKEY_TREND_COST_XU", 10)
@@ -27602,6 +27609,53 @@ def video_tier_pricing_payload() -> dict:
         },
     }
 
+def video_tier_enabled_map() -> dict:
+    return {
+        "low": bool(VIDEO_TIER_LOW_ENABLED),
+        "standard": bool(VIDEO_TIER_STANDARD_ENABLED),
+        "high": bool(VIDEO_TIER_HIGH_ENABLED),
+        "premium": bool(VIDEO_TIER_PREMIUM_ENABLED) and not bool(VIDEO_PREMIUM_ADMIN_ONLY),
+    }
+
+def normalize_video_tier(value: str = "") -> str:
+    tier = str(value or "").strip().lower()
+    if tier in {"standard", "std", "normal", "medium"}:
+        return "standard"
+    if tier in {"high", "pro"}:
+        return "high"
+    if tier in {"premium", "vip", "admin"}:
+        return "premium"
+    if tier in {"low", "basic", "cheap", "eco", "economy"}:
+        return "low"
+    fallback = str(SHOPAIKEY_VIDEO_DEFAULT_TIER or "low").strip().lower()
+    return fallback if fallback in {"low", "standard", "high", "premium"} else "low"
+
+def video_tier_payload(tier: str = "") -> dict:
+    tier_norm = normalize_video_tier(tier)
+    pricing = video_tier_pricing_payload()
+    payload = dict(pricing.get(tier_norm) or pricing["low"])
+    payload["tier"] = tier_norm
+    payload["enabled"] = bool(video_tier_enabled_map().get(tier_norm, False))
+    payload["admin_only"] = bool(tier_norm == "premium" and VIDEO_PREMIUM_ADMIN_ONLY)
+    payload["model"] = payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast"
+    return payload
+
+def video_tier_cost_xu(tier: str = "") -> int:
+    return int(video_tier_payload(tier).get("cost") or 0)
+
+def video_tier_public_status_text() -> str:
+    enabled_map = video_tier_enabled_map()
+    return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in ["low", "standard", "high", "premium"])
+
+def video_tier_prompt_for_generation(prompt: str, tier: str = "") -> str:
+    prompt = re.sub(r"\s+", " ", str(prompt or "").strip())[:1200]
+    tier_norm = normalize_video_tier(tier)
+    if tier_norm == "standard":
+        return f"{prompt}. Short clean video, stable motion, professional lighting, 16:9, no watermark, no extra text."
+    if tier_norm == "high":
+        return f"{prompt}. High-quality short commercial video, polished camera movement, stable subject, professional lighting, 16:9, no watermark, no extra text."
+    return f"{prompt}. Short simple video, clean motion, clear subject, 16:9, no watermark, no extra text."
+
 def image_base_cost_xu() -> int:
     return int(image_tier_pricing_payload()["low"]["cost"])
 
@@ -27707,9 +27761,10 @@ def support_contact_keyboard(back_to_media: bool = False) -> InlineKeyboardMarku
 def clear_media_creator_pending_states(user_id) -> bool:
     quick_cleared = clear_quick_media_pending(user_id)
     public_image_cleared = clear_public_image_prompt_pending(user_id)
+    public_video_cleared = clear_public_video_prompt_pending(user_id)
     trend_cleared = clear_trend_video_flow_pending(user_id)
     trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
-    return bool(quick_cleared or public_image_cleared or trend_cleared or trend_confirm_cleared)
+    return bool(quick_cleared or public_image_cleared or public_video_cleared or trend_cleared or trend_confirm_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -27787,6 +27842,31 @@ async def alert_public_image_refund_failure(
         await alert_admin(context, "ShopAIKey public image refund", detail)
     except Exception:
         logger.warning("ShopAIKey public image refund alert failed")
+
+async def alert_public_video_refund_failure(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id,
+    job_id: int,
+    tier: str,
+    amount_xu: int,
+    balance_before: int,
+    balance_after: int,
+    provider_error: str = "",
+    refund_error: str = "",
+) -> None:
+    safe_provider_error = shopaikey_sanitize_error(provider_error)
+    safe_refund_error = shopaikey_sanitize_error(refund_error or "auto_refund_failed")
+    detail = (
+        f"user_id={user_id}; job_id={int(job_id or 0)}; tier={normalize_video_tier(tier)}; "
+        f"amount_xu={int(amount_xu or 0)}; balance_before={int(balance_before or 0)}; "
+        f"balance_after={int(balance_after or 0)}; provider_error={safe_provider_error}; "
+        f"refund_error={safe_refund_error}; timestamp={now_text()}"
+    )
+    record_api_debug("shopaikey", "public_video_refund_failed", "REFUND_FAILED", 0, detail)
+    try:
+        await alert_admin(context, "ShopAIKey public video refund", detail)
+    except Exception:
+        logger.warning("ShopAIKey public video refund alert failed")
 
 def parse_shopaikey_usage(payload: dict) -> dict:
     data = payload if isinstance(payload, dict) else {}
@@ -28953,6 +29033,17 @@ def shopaikey_job_by_task_id(task_id: str) -> dict | None:
     finally:
         conn.close()
 
+def shopaikey_job_by_id(job_id: int) -> dict | None:
+    if not int(job_id or 0):
+        return None
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT * FROM shopaikey_jobs WHERE id=? LIMIT 1", (int(job_id),)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
 def refund_shopaikey_job_if_needed(user_id, job_id: int = 0, task_id: str = "", reason: str = "provider_fail") -> bool:
     if not SHOPAIKEY_REFUND_ON_PROVIDER_FAIL:
         return False
@@ -29201,7 +29292,7 @@ async def send_shopaikey_video_result(bot_client, chat_id, task_id: str, result_
         msg = await bot_client.send_video(
             chat_id=chat_id,
             video=result_url,
-            caption=f"🎞 ShopAIKey video result\nTask: {task_id}\nKhông trừ Xu.",
+            caption=f"🎞 Video TOAN AAS đã tạo xong\nTask: {task_id}",
         )
         file_id = ""
         if getattr(msg, "video", None):
@@ -29242,6 +29333,8 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
             provider_message=result.get("detail") or "",
             fail_reason=result.get("fail_reason") or "",
         )
+        credits_polling, _, _ = get_user(user_id)
+        record_shopaikey_billing_event(user_id, job_id, "video_polling", 0, int(credits_polling or 0), int(credits_polling or 0), f"task_id={task_id}; attempt={attempt}; status={status}")
         if status == "SUCCESS":
             output_sent, file_id = await send_shopaikey_video_result(bot_client, chat_id, task_id, result_url)
             update_shopaikey_job(
@@ -29252,36 +29345,81 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
                 output_file_id=file_id,
                 finished_at=now_text(),
             )
-            return
-        if status in {"FAILED", "FAILURE"} or str(result.get("error_class") or "").upper().startswith("FAIL_"):
-            record_provider_error(
-                "shopaikey",
-                "video",
-                classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("fail_reason") or result.get("detail") or "video_provider_failed"),
-                result.get("fail_reason") or result.get("detail") or "video_provider_failed",
-            )
-            refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, result.get("fail_reason") or result.get("detail") or "video_provider_failed")
+            credits_now, _, _ = get_user(user_id)
+            record_shopaikey_billing_event(user_id, job_id, "video_success", 0, int(credits_now or 0), int(credits_now or 0), f"task_id={task_id}; result_url={'yes' if result_url else 'no'}")
             try:
                 await bot_client.send_message(
                     chat_id=chat_id,
-                    text=(
-                        "⚙️ Video chưa tạo được do nhà cung cấp bận hoặc model tạm lỗi. Vui lòng thử lại sau.\n"
-                        f"Lý do: {shopaikey_generation_unavailable_message(status, result.get('fail_reason') or result.get('detail') or '')}"
-                        + ("\n✅ Bot đã hoàn Xu đã trừ." if refunded else "")
-                    ),
+                    text="Bạn muốn làm gì tiếp?",
+                    reply_markup=public_video_success_keyboard(),
                 )
             except Exception:
                 pass
-            update_shopaikey_job(job_id=job_id, task_id=task_id, status="FAILED", finished_at=now_text())
+            return
+        if status in {"FAILED", "FAILURE"} or str(result.get("error_class") or "").upper().startswith("FAIL_"):
+            provider_error_text = result.get("fail_reason") or result.get("detail") or "video_provider_failed"
+            record_provider_error(
+                "shopaikey",
+                "video",
+                classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, provider_error_text),
+                provider_error_text,
+            )
+            job_snapshot = shopaikey_job_by_id(job_id) or {}
+            deducted_amount = int(job_snapshot.get("xu_deducted") or 0)
+            balance_before_refund, _, _ = get_user(user_id)
+            record_shopaikey_billing_event(user_id, job_id, "video_provider_fail", 0, int(balance_before_refund or 0), int(balance_before_refund or 0), f"task_id={task_id}; error={provider_error_text}")
+            refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, provider_error_text) if deducted_amount > 0 else False
+            balance_after_failure, _, _ = get_user(user_id)
+            if deducted_amount > 0 and refunded:
+                record_shopaikey_billing_event(user_id, job_id, "video_refunded", deducted_amount, int(balance_before_refund or 0), int(balance_after_failure or 0), f"task_id={task_id}; error={provider_error_text}")
+            elif deducted_amount > 0:
+                record_shopaikey_billing_event(user_id, job_id, "video_refund_failed", deducted_amount, int(balance_before_refund or 0), int(balance_after_failure or 0), f"task_id={task_id}; error={provider_error_text}; refund_error=auto_refund_failed")
+                await alert_public_video_refund_failure(context=SimpleNamespace(bot=bot_client), user_id=user_id, job_id=job_id, tier="", amount_xu=deducted_amount, balance_before=int(balance_before_refund or 0), balance_after=int(balance_after_failure or 0), provider_error=provider_error_text, refund_error="auto_refund_failed")
+            try:
+                await bot_client.send_message(
+                    chat_id=chat_id,
+                    text=public_video_provider_fail_message(deducted_amount, refunded),
+                )
+            except Exception:
+                pass
+            update_shopaikey_job(
+                job_id=job_id,
+                task_id=task_id,
+                status="FAILED",
+                refund_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged"),
+                refund_amount=deducted_amount if refunded else 0,
+                refund_reason=provider_error_text,
+                billing_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "failed_not_charged"),
+                finished_at=now_text(),
+            )
             return
     record_provider_error("shopaikey", "video", "TIMEOUT", "video_poll_timeout")
-    refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, "video_poll_timeout")
-    update_shopaikey_job(job_id=job_id, task_id=task_id, status="TIMEOUT", poll_count=max_attempts, finished_at=now_text())
+    job_snapshot = shopaikey_job_by_id(job_id) or {}
+    deducted_amount = int(job_snapshot.get("xu_deducted") or 0)
+    balance_before_refund, _, _ = get_user(user_id)
+    record_shopaikey_billing_event(user_id, job_id, "video_timeout", 0, int(balance_before_refund or 0), int(balance_before_refund or 0), f"task_id={task_id}")
+    refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, "video_poll_timeout") if deducted_amount > 0 else False
+    balance_after_timeout, _, _ = get_user(user_id)
+    if deducted_amount > 0 and refunded:
+        record_shopaikey_billing_event(user_id, job_id, "video_refunded", deducted_amount, int(balance_before_refund or 0), int(balance_after_timeout or 0), f"task_id={task_id}; timeout")
+    elif deducted_amount > 0:
+        record_shopaikey_billing_event(user_id, job_id, "video_refund_failed", deducted_amount, int(balance_before_refund or 0), int(balance_after_timeout or 0), f"task_id={task_id}; timeout; refund_error=auto_refund_failed")
+        await alert_public_video_refund_failure(context=SimpleNamespace(bot=bot_client), user_id=user_id, job_id=job_id, tier="", amount_xu=deducted_amount, balance_before=int(balance_before_refund or 0), balance_after=int(balance_after_timeout or 0), provider_error="video_poll_timeout", refund_error="auto_refund_failed")
+    update_shopaikey_job(
+        job_id=job_id,
+        task_id=task_id,
+        status="TIMEOUT",
+        poll_count=max_attempts,
+        refund_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged"),
+        refund_amount=deducted_amount if refunded else 0,
+        refund_reason="video_poll_timeout",
+        billing_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "timeout_not_charged"),
+        finished_at=now_text(),
+    )
     try:
         await bot_client.send_message(
             chat_id=chat_id,
-            text="⏳ Video đang xử lý lâu hơn dự kiến. Bạn có thể kiểm tra lại sau bằng /shopaikey_video_job <task_id>."
-                 + ("\n✅ Bot đã hoàn Xu đã trừ." if refunded else ""),
+            text=public_video_provider_fail_message(deducted_amount, refunded),
         )
     except Exception:
         return
@@ -32801,6 +32939,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Image tier public: <code>{html.escape(image_tier_public_status_text())}</code>",
         "• Image pricing source: <code>tiered_media_pricing</code>",
         f"• Video tiers: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
+        f"• Video tier public: <code>{html.escape(video_tier_public_status_text())}</code>",
+        f"• Video premium: <code>{'admin-only' if VIDEO_PREMIUM_ADMIN_ONLY else ('ON' if VIDEO_TIER_PREMIUM_ENABLED else 'OFF')}</code>",
+        "• Video pricing source: <code>tiered_media_pricing</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
         f"• Confirm before deduct: <code>{'ON' if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 'OFF'}</code>",
         f"• Billing flow: <code>{html.escape(shopaikey_billing_flow_status_text())}</code>",
@@ -33516,6 +33657,9 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Image provider cost: low <code>{pricing['image_tiers']['low']['provider_cost']} Xu</code> / standard <code>{pricing['image_tiers']['standard']['provider_cost']} Xu</code> / high <code>{pricing['image_tiers']['high']['provider_cost']} Xu</code>",
         f"• Image model mapping: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
         f"• Video tiers: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code> | admin-only <code>{'yes' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'no'}</code>",
+        f"• Video tier public: <code>{html.escape(video_tier_public_status_text())}</code>",
+        f"• Video premium: <code>{'admin-only' if VIDEO_PREMIUM_ADMIN_ONLY else ('ON' if VIDEO_TIER_PREMIUM_ENABLED else 'OFF')}</code>",
+        "• Video pricing source: <code>tiered_media_pricing</code>",
         f"• Video provider cost: low <code>{pricing['video_tiers']['low']['provider_cost']} Xu</code> / standard <code>{pricing['video_tiers']['standard']['provider_cost']} Xu</code> / high <code>{pricing['video_tiers']['high']['provider_cost']} Xu</code> / premium <code>{pricing['video_tiers']['premium']['provider_cost']} Xu</code>",
         f"• Video model mapping: <code>{html.escape(SHOPAIKEY_VIDEO_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code>",
         f"• Refund on provider fail: <code>{'ON' if SHOPAIKEY_REFUND_ON_PROVIDER_FAIL else 'OFF'}</code>",
@@ -33556,7 +33700,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Token: <code>{html.escape(str(usage.get('token_name') or '-'))}</code>",
         f"• Last check: <code>{html.escape(str(usage.get('last_at') or '-'))}</code>",
         "",
-        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; custom Google image endpoint nano-banana PASS; custom video endpoint admin-only; public image controlled by ENV; public video OFF.",
+        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; custom Google image endpoint nano-banana PASS; custom video endpoint admin smoke available; public image/video controlled by ENV and billing guard.",
         "",
         "ShopAIKey không thay OpenRouter/OpenAI/Gemini; raw provider public vẫn đóng, customer flow đi qua guard ENV/billing.",
     ]
@@ -33959,7 +34103,7 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         f"• Provider error code: <code>{html.escape(str(result.get('provider_error_code') or '-'))}</code>\n"
         f"• Provider message: <code>{html.escape(str(result.get('detail') or '-')[:220])}</code>\n\n"
         f"• Friendly message: <code>{html.escape(shopaikey_generation_unavailable_message(status, result.get('detail') or '') if status != 'PASS' else '-')}</code>\n\n"
-        "Endpoint admin-only. Không log prompt/response/key. Không trừ Xu. Public image controlled by ENV; public video vẫn OFF.",
+        "Endpoint admin-only. Không log prompt/response/key. Không trừ Xu. Public image/video controlled by ENV và billing guard.",
         parse_mode="HTML",
     )
     finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
@@ -34273,6 +34417,55 @@ async def handle_public_image_prompt_pending_text(update: Update, context: Conte
     )
     return True
 
+async def handle_public_video_prompt_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_public_video_prompt_pending(uid)
+    if not pending:
+        return False
+    prompt = re.sub(r"\s+", " ", update.message.text.strip())
+    if not prompt:
+        return False
+    clear_public_video_prompt_pending(uid)
+    tier = normalize_video_tier(pending.get("tier") or SHOPAIKEY_VIDEO_DEFAULT_TIER)
+    payload = video_tier_payload(tier)
+    if tier == "premium" or payload.get("admin_only"):
+        await update.message.reply_text("👑 Video premium đang mở theo dạng admin duyệt vì chi phí cao. Vui lòng liên hệ admin nếu cần.\nBot chưa gọi API và chưa trừ Xu.")
+        return True
+    if not payload.get("enabled"):
+        await update.message.reply_text("🧪 Tier video này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.")
+        return True
+    if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+        await update.message.reply_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
+        return True
+    if shopaikey_active_job_for_user(uid, "video"):
+        await update.message.reply_text("Bạn đang có một video đang xử lý. Vui lòng chờ hoàn tất trước khi tạo video mới.")
+        return True
+    credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Video user")
+    base_cost = int(payload.get("cost") or 0)
+    token = set_shopaikey_pending_confirmation(uid, {
+        "job_type": "video",
+        "prompt": video_tier_prompt_for_generation(prompt, tier),
+        "original_prompt": prompt,
+        "base_cost": base_cost,
+        "from_image": False,
+        "video_tier": tier,
+        "tier_label": payload.get("label") or tier,
+        "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+    })
+    record_shopaikey_billing_event(uid, 0, "video_prompt_received", 0, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}")
+    record_shopaikey_billing_event(uid, 0, "video_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}")
+    await update.message.reply_text(
+        public_video_confirm_text(tier, prompt, int(credits or 0)),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Đồng ý tạo video", callback_data=f"shopai|confirm|{token}")],
+            [InlineKeyboardButton("❌ Hủy", callback_data=f"shopai|cancel|{token}")],
+        ]),
+    )
+    return True
+
 async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAULT_TYPE, from_image: bool = False):
     uid = update.effective_user.id
     prompt = shopaikey_public_prompt_from_args(context)
@@ -34286,16 +34479,22 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
         return await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
     source_job = shopaikey_paid_image_source_job(uid) if from_image else None
-    base_cost = shopaikey_video_cost_for_flow(from_image, uid)
+    tier = normalize_video_tier(SHOPAIKEY_VIDEO_DEFAULT_TIER)
+    tier_payload = video_tier_payload(tier)
+    base_cost = int(tier_payload.get("cost") or shopaikey_video_cost_for_flow(from_image, uid))
     final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video")
     if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
         return await reply_insufficient_credits(update, int(credits or 0), final_preview_cost)
     token = set_shopaikey_pending_confirmation(uid, {
         "job_type": "video",
-        "prompt": prompt,
+        "prompt": video_tier_prompt_for_generation(prompt, tier),
+        "original_prompt": prompt,
         "base_cost": base_cost,
         "from_image": from_image,
         "source_job_id": str(source_job.get("id") or "") if source_job else "",
+        "video_tier": tier,
+        "tier_label": tier_payload.get("label") or "Video tiết kiệm",
+        "model": tier_payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
     })
     if from_image and source_job:
         note = f"Video từ ảnh job #{source_job.get('id')}: chỉ trừ phần còn lại."
@@ -34305,6 +34504,7 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
         note = "Video độc lập."
     await update.message.reply_text(
         "🎞 <b>Xác nhận tạo video ShopAIKey</b>\n\n"
+        f"• Tier: <b>{html.escape(tier_payload.get('label') or tier)}</b>\n"
         f"• Chi phí dự kiến: <b>{base_cost} Xu</b>\n"
         f"• Số Xu sẽ trừ: <b>{final_preview_cost} Xu</b>\n"
         f"• Số dư hiện tại: <b>{int(credits or 0)} Xu</b>\n"
@@ -34333,8 +34533,13 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         pending_cancel = pop_shopaikey_pending_confirmation(token, uid) or {}
         cancel_tier = normalize_image_tier(pending_cancel.get("image_tier") or "")
         cancel_reason = "user_cancelled_confirmation"
-        if str(pending_cancel.get("job_type") or "").lower() == "image":
+        cancel_job_type = str(pending_cancel.get("job_type") or "").lower()
+        if cancel_job_type == "image":
             cancel_reason += f"; tier={cancel_tier}"
+        if cancel_job_type == "video":
+            cancel_tier = normalize_video_tier(pending_cancel.get("video_tier") or "")
+            cancel_reason += f"; tier={cancel_tier}"
+            record_shopaikey_billing_event(uid, 0, "video_cancelled", 0, 0, 0, cancel_reason)
         record_shopaikey_billing_event(uid, 0, "cancel", 0, 0, 0, cancel_reason)
         return await query.edit_message_text("❌ Đã huỷ. Bot chưa trừ Xu.")
     pending = pop_shopaikey_pending_confirmation(token, uid)
@@ -34344,7 +34549,12 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     prompt = str(pending.get("prompt") or "").strip()
     base_cost = int(pending.get("base_cost") or 0)
     image_tier = normalize_image_tier(pending.get("image_tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
-    tier_label = str(pending.get("tier_label") or image_tier_payload(image_tier).get("label") or image_tier).strip()
+    video_tier = normalize_video_tier(pending.get("video_tier") or SHOPAIKEY_VIDEO_DEFAULT_TIER)
+    tier_label = str(
+        pending.get("tier_label")
+        or (image_tier_payload(image_tier).get("label") if job_type == "image" else video_tier_payload(video_tier).get("label"))
+        or (image_tier if job_type == "image" else video_tier)
+    ).strip()
     pending_model = str(pending.get("model") or "").strip()
     source_job_id = str(pending.get("source_job_id") or "").strip()
     workflow_id = str(pending.get("workflow_id") or "").strip()
@@ -34354,6 +34564,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     if not enabled:
         return await query.edit_message_text(f"{message}\nBot chưa trừ Xu.")
     if shopaikey_active_job_for_user(uid, job_type):
+        if job_type == "video":
+            return await query.edit_message_text("Bạn đang có một video đang xử lý. Vui lòng chờ hoàn tất trước khi tạo video mới.")
         return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
     if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
         return await query.edit_message_text(
@@ -34372,6 +34584,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         credits_now, _, _ = get_user(uid)
         if job_type == "image":
             record_shopaikey_billing_event(uid, 0, "insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_image; tier={image_tier}; required={int(charge.get('final_cost') or base_cost)}")
+        if job_type == "video":
+            record_shopaikey_billing_event(uid, 0, "video_insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_video; tier={video_tier}; required={int(charge.get('final_cost') or base_cost)}")
         return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or base_cost), uid)
     deducted = int(charge.get("final_cost") or 0)
     balance_after, _, _ = get_user(uid)
@@ -34395,9 +34609,9 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         confirm_required=1 if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 0,
         confirmed_at=confirmed_at,
     )
-    tier_reason = f"; tier={image_tier}; label={tier_label}" if job_type == "image" else ""
-    record_shopaikey_billing_event(uid, job_id, "confirm", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}{tier_reason}")
-    record_shopaikey_billing_event(uid, job_id, "deduct", deducted, int(balance_before or 0), int(balance_after or 0), f"shopaikey_{job_type}{tier_reason}")
+    tier_reason = f"; tier={image_tier}; label={tier_label}" if job_type == "image" else f"; tier={video_tier}; label={tier_label}"
+    record_shopaikey_billing_event(uid, job_id, "confirm" if job_type == "image" else "video_confirmed", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}{tier_reason}")
+    record_shopaikey_billing_event(uid, job_id, "deduct" if job_type == "image" else "video_deducted", deducted, int(balance_before or 0), int(balance_after or 0), f"shopaikey_{job_type}{tier_reason}")
     if job_type == "image":
         await query.edit_message_text(USER_WAIT_IMAGE_MESSAGE)
         result = await shopaikey_image_generate(prompt, model)
@@ -34505,8 +34719,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         credits_after, _, _ = get_user(uid)
         return await context.bot.send_message(chat_id=query.message.chat_id, text=f"💼 Số dư còn lại: {credits_after} Xu")
     if job_type == "video":
-        await query.edit_message_text(USER_WAIT_VIDEO_MESSAGE)
-        result = await shopaikey_video_create_smoke_test("", prompt)
+        await query.edit_message_text("🎞 TOAN AAS đang tạo video cho bạn. Quá trình này có thể mất vài phút. Không cần gửi lại lệnh.")
+        result = await shopaikey_video_create_smoke_test(model, prompt)
         status = str(result.get("status") or "FAIL")
         task_id = str(result.get("task_id") or "")
         attempts = result.get("attempts") or []
@@ -34518,6 +34732,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 model=result.get("selected_model") or result.get("model") or model,
                 attempts=len(attempts),
             )
+            record_shopaikey_billing_event(uid, job_id, "video_provider_submitted", deducted, int(balance_after or 0), int(balance_after or 0), f"task_id={task_id}; tier={video_tier}; provider_status={result.get('provider_status') or '-'}")
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=f"✅ Video đã gửi vào queue.\nTask: {task_id}\nAuto poll: {'ON' if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED else 'OFF'}",
@@ -34525,17 +34740,49 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
                 asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, query.message.chat_id, uid, task_id))
             return
+        provider_error_text = result.get("message") or result.get("detail") or result.get("provider_error_code") or status
         record_provider_error(
             "shopaikey",
             "video",
-            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("message") or result.get("detail") or status),
-            result.get("message") or result.get("detail") or status,
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, provider_error_text),
+            provider_error_text,
         )
-        refunded = refund_shopaikey_job_if_needed(uid, job_id, "", result.get("message") or result.get("detail") or status)
-        update_shopaikey_job(job_id=job_id, status="FAILED", error_class=result.get("error_class") or status, provider_error_code=result.get("provider_error_code") or "", provider_message=result.get("message") or result.get("detail") or "", attempts=len(attempts), finished_at=now_text())
+        deducted_amount = int(deducted or 0)
+        record_shopaikey_billing_event(uid, job_id, "video_provider_fail", 0, int(balance_after or 0), int(balance_after or 0), f"shopaikey_video; tier={video_tier}; error={provider_error_text}")
+        refunded = refund_shopaikey_job_if_needed(uid, job_id, "", provider_error_text) if deducted_amount > 0 else False
+        balance_after_failure, _, _ = get_user(uid)
+        if deducted_amount > 0 and refunded:
+            record_shopaikey_billing_event(uid, job_id, "video_refunded", deducted_amount, int(balance_after or 0), int(balance_after_failure or 0), f"shopaikey_video; tier={video_tier}; error={provider_error_text}")
+        elif deducted_amount > 0:
+            refund_error = "auto_refund_failed"
+            record_shopaikey_billing_event(uid, job_id, "video_refund_failed", deducted_amount, int(balance_after or 0), int(balance_after_failure or 0), f"shopaikey_video; tier={video_tier}; provider_error={provider_error_text}; refund_error={refund_error}")
+            await alert_public_video_refund_failure(
+                context,
+                uid,
+                job_id,
+                video_tier,
+                deducted_amount,
+                int(balance_before or 0),
+                int(balance_after_failure or 0),
+                provider_error_text,
+                refund_error,
+            )
+        update_shopaikey_job(
+            job_id=job_id,
+            status="FAILED",
+            error_class=result.get("error_class") or status,
+            provider_error_code=result.get("provider_error_code") or "",
+            provider_message=provider_error_text,
+            attempts=len(attempts),
+            finished_at=now_text(),
+            refund_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged"),
+            refund_amount=deducted_amount if refunded else 0,
+            refund_reason=provider_error_text,
+            billing_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "failed_not_charged"),
+        )
         return await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text=shopaikey_generation_unavailable_message(status, result.get("message") or result.get("detail") or "") + ("\n✅ Bot đã hoàn Xu đã trừ." if refunded else ""),
+            text=public_video_provider_fail_message(deducted_amount, refunded),
         )
     return await query.edit_message_text("⚠️ Loại job không hợp lệ. Bot chưa gọi provider.")
 
@@ -42958,6 +43205,98 @@ def public_image_success_keyboard(job_id: int, tier: str = "") -> InlineKeyboard
         [InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")],
     ])
 
+def public_video_pending_key(user_id) -> str:
+    return f"public_video_prompt:{user_id}"
+
+def set_public_video_prompt_pending(user_id, tier: str) -> None:
+    tier_payload = video_tier_payload(tier)
+    USER_PENDING[public_video_pending_key(user_id)] = {
+        "pending_action": "public_video_prompt",
+        "tier": tier_payload["tier"],
+        "created_at_ts": time.time(),
+    }
+
+def get_public_video_prompt_pending(user_id) -> dict | None:
+    key = public_video_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "public_video_prompt":
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_public_video_prompt_pending(user_id) -> bool:
+    return USER_PENDING.pop(public_video_pending_key(user_id), None) is not None
+
+def public_video_tier_selection_text() -> str:
+    return "🎞 <b>Bạn muốn tạo video chất lượng nào?</b>\n\nChọn tier video bên dưới. Giá lấy từ <b>💳 Bảng giá</b>."
+
+def public_video_tier_keyboard() -> InlineKeyboardMarkup:
+    pricing = video_tier_pricing_payload()
+    enabled_map = video_tier_enabled_map()
+    rows = []
+    tier_meta = [
+        ("low", "🟢"),
+        ("standard", "🔵"),
+        ("high", "🟣"),
+    ]
+    for tier, icon in tier_meta:
+        payload = pricing[tier]
+        state = "" if enabled_map.get(tier) else " — tạm tắt"
+        rows.append([InlineKeyboardButton(
+            f"{icon} {payload['label']} — {int(payload['cost'])} Xu{state}",
+            callback_data=f"create_media|video_tier_{tier}",
+        )])
+    rows.append([InlineKeyboardButton("👑 Video premium — liên hệ admin", callback_data="create_media|video_tier_premium")])
+    rows.append([InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main_video")])
+    rows.append([InlineKeyboardButton("❌ Hủy", callback_data="create_media|cancel")])
+    return InlineKeyboardMarkup(rows)
+
+def public_video_prompt_request_text(tier: str) -> str:
+    payload = video_tier_payload(tier)
+    return (
+        f"🎞 <b>{html.escape(payload['label'])}</b>\n\n"
+        "Gửi mô tả video bạn muốn tạo.\n\n"
+        "Ví dụ: logo TOAN AAS màu xanh ngọc chuyển động nhẹ, nền trắng sạch, phong cách công nghệ tối giản.\n\n"
+        "Timeout: 10 phút. Gõ /cancel để hủy.\n"
+        "Bot chưa gọi API và chưa trừ Xu."
+    )
+
+def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0) -> str:
+    payload = video_tier_payload(tier)
+    cost = int(payload.get("cost") or 0)
+    return (
+        f"🎞 <b>Tạo video {html.escape(payload['label'])} sẽ tốn {cost} Xu.</b>\n\n"
+        f"• Số dư hiện tại: <b>{int(current_credits or 0)} Xu</b>\n"
+        f"• Prompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\n"
+        "Video AI có thể mất vài phút xử lý.\n"
+        "Bot chỉ trừ Xu sau khi bạn xác nhận.\n"
+        "Không gửi lại lệnh trong lúc bot đang chạy.\n\n"
+        "Bạn có muốn tiếp tục không?"
+    )
+
+def public_video_provider_fail_message(amount_xu: int = 0, refund_done: bool = False) -> str:
+    amount = int(amount_xu or 0)
+    if amount <= 0:
+        return "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau."
+    if refund_done:
+        return f"⚙️ Model tạo video đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau."
+    return (
+        "⚠️ Tác vụ tạo video lỗi sau khi đã trừ Xu. Bot chưa hoàn tự động được. "
+        "Admin đã được ghi nhận để kiểm tra và hoàn Xu thủ công nếu hợp lệ."
+    )
+
+def public_video_success_keyboard(tier: str = "") -> InlineKeyboardMarkup:
+    tier_norm = normalize_video_tier(tier)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔁 Tạo video khác", callback_data=f"create_media|video_tier_{tier_norm}")],
+        [InlineKeyboardButton("✍️ Sửa prompt", callback_data=f"create_media|video_tier_{tier_norm}")],
+        [InlineKeyboardButton("🖼 Tạo ảnh khác", callback_data="create_media|quick_image")],
+        [InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")],
+    ])
+
 def quick_media_pending_key(user_id) -> str:
     return f"quick_media:{user_id}"
 
@@ -42989,7 +43328,7 @@ def quick_media_prompt_text(action: str) -> str:
         return (
             "🎞 <b>Quick Video Admin Smoke Test</b>\n\n"
             "Gửi prompt video ngắn để admin test ShopAIKey video.\n"
-            "Bot không trừ Xu, không mở public video và không log prompt/raw response.\n\n"
+            "Bot không trừ Xu, không tự mở/thay đổi public video và không log prompt/raw response.\n\n"
             "Ví dụ: logo TOAN AAS chuyển động 3 giây, nền trắng sạch, màu xanh ngọc.\n\n"
             "Timeout: 10 phút. Gõ /cancel để hủy."
         )
@@ -44100,6 +44439,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
     if action == "trend":
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
+        clear_public_video_prompt_pending(uid)
         if not TREND_VIDEO_WORKFLOW_ENABLED:
             return await query.edit_message_text("🛠 Trend → Video Workflow đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
         if not trend_video_workflow_can_access(uid):
@@ -44110,6 +44450,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
+        clear_public_video_prompt_pending(uid)
         if shopaikey_active_job_for_user(uid, "image"):
             return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
         enabled, message = shopaikey_public_generation_guard("image")
@@ -44123,6 +44464,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
     if action.startswith("image_tier_"):
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
+        clear_public_video_prompt_pending(uid)
         tier = normalize_image_tier(action.replace("image_tier_", "", 1))
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
@@ -44136,13 +44478,34 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         return await query.edit_message_text(public_image_prompt_request_text(tier), parse_mode="HTML")
     if action == "quick_video":
         clear_trend_video_flow_pending(uid)
-        if not is_admin_user(uid):
-            return await query.edit_message_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
-        pending_action = "quick_video_prompt"
+        clear_quick_media_pending(uid)
+        clear_public_image_prompt_pending(uid)
+        clear_public_video_prompt_pending(uid)
         if shopaikey_active_job_for_user(uid, "video"):
-            return await query.edit_message_text(USER_JOB_LOCK_MESSAGE)
-        set_quick_media_pending(uid, pending_action)
-        return await query.edit_message_text(quick_media_prompt_text(pending_action), parse_mode="HTML")
+            return await query.edit_message_text("Bạn đang có một video đang xử lý. Vui lòng chờ hoàn tất trước khi tạo video mới.")
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+            return await query.edit_message_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
+        return await query.edit_message_text(
+            public_video_tier_selection_text(),
+            parse_mode="HTML",
+            reply_markup=public_video_tier_keyboard(),
+        )
+    if action.startswith("video_tier_"):
+        clear_trend_video_flow_pending(uid)
+        clear_quick_media_pending(uid)
+        clear_public_image_prompt_pending(uid)
+        tier = normalize_video_tier(action.replace("video_tier_", "", 1))
+        payload = video_tier_payload(tier)
+        if tier == "premium" or payload.get("admin_only"):
+            return await query.edit_message_text("👑 Video premium đang mở theo dạng admin duyệt vì chi phí cao. Vui lòng liên hệ admin nếu cần.\nBot chưa gọi API và chưa trừ Xu.")
+        if not payload.get("enabled"):
+            return await query.edit_message_text("🧪 Tier video này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.")
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+            return await query.edit_message_text(f"{create_media_public_off_message()}\nBot chưa trừ Xu.")
+        if shopaikey_active_job_for_user(uid, "video"):
+            return await query.edit_message_text("Bạn đang có một video đang xử lý. Vui lòng chờ hoàn tất trước khi tạo video mới.")
+        set_public_video_prompt_pending(uid, tier)
+        return await query.edit_message_text(public_video_prompt_request_text(tier), parse_mode="HTML")
     await query.edit_message_text(create_media_menu_text(), reply_markup=create_media_menu_keyboard())
 
 async def cmd_tool_test_workflow_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -45482,7 +45845,7 @@ def pricing_main_lines() -> list[str]:
         f"• {video_tiers['low']['label']}: <b>{video_tiers['low']['cost']} Xu</b> — {html.escape(video_tiers['low']['note'])}",
         f"• {video_tiers['standard']['label']}: <b>{video_tiers['standard']['cost']} Xu</b> — {html.escape(video_tiers['standard']['note'])}",
         f"• {video_tiers['high']['label']}: <b>{video_tiers['high']['cost']} Xu</b> — {html.escape(video_tiers['high']['note'])}",
-        f"• {video_tiers['premium']['label']}: <b>{video_tiers['premium']['cost']} Xu</b> — {html.escape(video_tiers['premium']['note'])}",
+        f"• {video_tiers['premium']['label']}: <b>admin-only / liên hệ admin</b> — {html.escape(video_tiers['premium']['note'])}",
         f"• Trạng thái public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
         "<b>E. Workflow nội dung theo trend</b>",
@@ -60986,6 +61349,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_public_image_prompt_pending_text(update, context):
+        return
+
+    if await handle_public_video_prompt_pending_text(update, context):
         return
 
     if await handle_quick_media_pending_text(update, context):
