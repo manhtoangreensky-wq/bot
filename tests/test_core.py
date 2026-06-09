@@ -781,6 +781,32 @@ def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
             os.unlink(db_path)
 
 
+def test_shopaikey_video_status_stale_timeout_and_success_event(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        bot.save_shopaikey_component_snapshot(
+            "video",
+            {"status": "IN_PROGRESS", "model": "veo3.1-fast", "http_status": 200, "latency_ms": 0},
+            "model=veo3.1-fast; task_id=old_task",
+            "test",
+        )
+        bot.set_system_setting("shopaikey_video_last_at", "2000-01-01 00:00:00", "test stale timestamp", "test")
+        monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_STATUS_STALE_SECONDS", 60)
+        stale = bot.shopaikey_video_status_snapshot()
+        assert stale["status"] == "STALE_TIMEOUT"
+        assert "stale video smoke status" in stale["detail"]
+
+        bot.record_api_debug("shopaikey", "shopaikey_video_job", "SUCCESS", 200, "model=veo3.1-fast; task_id=new_task; result_url=sent")
+        latest = bot.shopaikey_video_status_snapshot()
+        assert latest["status"] == "SUCCESS"
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_shopaikey_video_model_fallback_payload_and_reason(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_FALLBACK_MODELS", "veo3.1,veo3.1-fast,grok-video-3,grok-video-3-10s")
@@ -1770,7 +1796,8 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "✍️ Sửa concept" in continuation_buttons
     locked_buttons = [button.text for row in bot.cinematic_ad_locked_keyboard().inline_keyboard for button in row]
     assert "🖼 Ảnh / Prompt ảnh" in locked_buttons
-    assert "🎬 Video / Chuyển động" in locked_buttons
+    assert "🎞 Tạo prompt video từ concept này" in locked_buttons
+    assert "🎬 Tạo video từ concept này" in locked_buttons
     assert "🎵 Nhạc / Âm thanh" in locked_buttons
     motion_choice_buttons = [button.text for row in bot.cinematic_ad_motion_choices_keyboard().inline_keyboard for button in row]
     assert "1️⃣ Chọn gợi ý 1" in motion_choice_buttons
@@ -1798,10 +1825,17 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "1️⃣ Chọn gợi ý 1" in music_choice_buttons
     assert "2️⃣ Chọn gợi ý 2" in music_choice_buttons
     assert "3️⃣ Chọn gợi ý 3" in music_choice_buttons
+    music_selected_buttons = [button.text for row in bot.cinematic_ad_music_selected_keyboard().inline_keyboard for button in row]
+    assert "✅ Lưu gợi ý nhạc" in music_selected_buttons
+    assert "🚫 Không cần nhạc" in music_selected_buttons
+    assert "🎞 Sang bước prompt video" in music_selected_buttons
+    assert "🎵 Tìm nhạc trong kho" not in music_selected_buttons
+    assert "🤖 Prompt tạo nhạc AI" not in music_selected_buttons
     assert "💡 Gợi ý thể loại nhạc" in [button.text for row in bot.cinematic_ad_music_menu_keyboard().inline_keyboard for button in row]
     assert "adconcept|motion_current" in ad_source
     assert "adconcept|image_menu" in ad_source
-    assert "adconcept|video_menu" in ad_source
+    assert "adconcept|video_prompt_current" in ad_source
+    assert "adconcept|video_current" in ad_source
     assert "adconcept|music_menu" in ad_source
     assert "adconcept|image_prompt_current" in ad_source
     assert "adconcept|image_prompt_choice|1" in ad_source
@@ -1866,6 +1900,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "gợi ý video 5 giây" in video_prompts
     assert "tạo video thật đang thử nghiệm nội bộ" in video_prompts
     assert "điều cần tránh" in video_prompts
+    assert "không tạo chữ/text/logo giả" in video_prompts
     assert "đã chọn prompt video 1" in bot.cinematic_ad_selected_video_prompt_text(concept, 1).lower()
     music_suggestions = bot.cinematic_ad_music_from_concept_text(concept).lower()
     assert "bạn có muốn thêm nhạc không" in music_suggestions
@@ -1873,6 +1908,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "2. nhạc hiện đại/công nghệ" in music_suggestions
     assert "3. nhạc tiktok/reels" in music_suggestions
     assert "đã chọn hướng nhạc 1" in bot.cinematic_ad_music_choice_text(concept, 1).lower()
+    assert "tạo nhạc ai/ghép nhạc sẽ mở sau" in bot.ui_text("vi", "concept.music_saved_next").lower()
     video_from_concept = bot.cinematic_ad_video_from_concept_text(concept).lower()
     assert "tạo video thật chưa mở công khai" in video_from_concept
     assert "prompt video đã lưu" in video_from_concept
@@ -2079,7 +2115,10 @@ def test_generation_waiting_duplicate_and_guidance_helpers():
     bot.GENERATION_PENDING_JOBS.clear()
     try:
         assert "TOAN AAS đang tạo ảnh" in bot.get_generation_wait_text("image")
-        assert "Vui lòng không bấm lại nhiều lần" in bot.get_generation_wait_text("image")
+        assert "Vui lòng không gửi lại lệnh" in bot.get_generation_wait_text("image")
+        assert "Ảnh chất lượng cao có thể lâu hơn một chút" in bot.public_image_waiting_text("high")
+        assert "Ảnh chất lượng cao có thể lâu hơn một chút" in bot.public_image_waiting_text("high_warranty")
+        assert "Ảnh chất lượng cao" not in bot.public_image_waiting_text("standard")
         assert "Đang tạo video" in bot.get_generation_wait_text("video")
         assert "Đang tạo giọng nói" in bot.get_generation_wait_text("tts")
         assert "Đang tìm trend" in bot.get_generation_wait_text("trend")

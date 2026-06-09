@@ -379,7 +379,7 @@ SHOPAIKEY_FREEZE_COOLDOWN_MINUTES = env_int("SHOPAIKEY_FREEZE_COOLDOWN_MINUTES",
 USER_BUSY_MESSAGE = _env("USER_BUSY_MESSAGE", "⏳ Tác vụ của bạn đang được xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 USER_PROVIDER_BUSY_MESSAGE = _env("USER_PROVIDER_BUSY_MESSAGE", "⚙️ Hệ thống AI đang bận. TOAN AAS đã ghi nhận, vui lòng thử lại sau ít phút.")
 USER_PROVIDER_MAINTENANCE_MESSAGE = _env("USER_PROVIDER_MAINTENANCE_MESSAGE", "🛠 Tính năng này đang được bảo trì ngắn để đảm bảo chất lượng. Vui lòng quay lại sau.")
-USER_WAIT_IMAGE_MESSAGE = _env("USER_WAIT_IMAGE_MESSAGE", "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không bấm lại nhiều lần.")
+USER_WAIT_IMAGE_MESSAGE = _env("USER_WAIT_IMAGE_MESSAGE", "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không gửi lại lệnh.")
 USER_WAIT_VIDEO_MESSAGE = _env("USER_WAIT_VIDEO_MESSAGE", "🎞 Đang tạo video cho bạn. Quá trình này có thể mất 1–5 phút. Bot sẽ tự gửi kết quả khi hoàn tất.")
 USER_JOB_LOCK_MESSAGE = _env("USER_JOB_LOCK_MESSAGE", "⏳ Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED = env_flag("SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED", "true")
@@ -3282,7 +3282,7 @@ UI_TEXT = {
         "image.prompt_button": "✍️ Tạo prompt ảnh",
         "image.edit_button": "🧩 Sửa ảnh / edit ảnh",
         "image.upscale_button": "📐 Nâng cấp / đổi kích thước ảnh",
-        "image.waiting": "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không bấm lại nhiều lần.",
+        "image.waiting": "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không gửi lại lệnh.",
         "image.tier_disabled_message": "🧪 Tier ảnh này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.",
         "image.success": "✅ Ảnh {label} đã tạo xong.\nJob #{job_id}\n{billing_note}\n\nBạn muốn làm gì tiếp?\n\n• Chốt ảnh này nếu đã hài lòng\n• Tạo prompt video từ ảnh\n• Sửa prompt hoặc tạo lại ảnh",
         "image.success_link": "✅ Ảnh ShopAIKey đã tạo xong nhưng Telegram không gửi trực tiếp được.\n<a href=\"{url}\">Mở ảnh</a>",
@@ -3374,7 +3374,7 @@ UI_TEXT = {
         "concept.workflow_from_current": "🎬 Tạo workflow đầy đủ từ concept này",
         "concept.music_from_current": "🎵 Gợi ý nhạc phù hợp",
         "concept.next_image": "🖼 Ảnh / Prompt ảnh",
-        "concept.next_video": "🎬 Video / Chuyển động",
+        "concept.next_video": "🎞 Tạo prompt video",
         "concept.next_music": "🎵 Nhạc / Âm thanh",
         "concept.image_view_prompt": "🖼 Xem prompt ảnh gợi ý",
         "concept.create_image_low": "🟢 Tạo ảnh tiết kiệm — {cost} Xu",
@@ -3398,7 +3398,7 @@ UI_TEXT = {
         "concept.video_not_public": "🎬 Tạo video thật chưa mở công khai",
         "concept.motion_saved_next": "✅ Đã lưu hướng chuyển động.\n\nBot chưa gọi API video và chưa trừ Xu.\n\nBạn muốn làm gì tiếp?",
         "concept.video_prompt_saved_next": "✅ Prompt video đã được lưu.\nBot chưa gọi API video và chưa trừ Xu.\n\nBạn muốn làm gì tiếp?",
-        "concept.music_none_saved": "✅ Đã chọn xuất video không nhạc.\nBot chưa gọi API và chưa trừ Xu.\n\nBạn muốn làm gì tiếp?",
+        "concept.music_none_saved": "✅ Đã chọn không cần nhạc.\nBot chưa gọi API nhạc/video và chưa trừ Xu.\n\nBot đã lưu lựa chọn này. Tạo nhạc AI/ghép nhạc sẽ mở sau.",
         "concept.music_searching": "🎵 Đang tìm nhạc phù hợp. Bot chưa trừ Xu.",
         "concept.choose_1": "1️⃣ Chọn gợi ý 1",
         "concept.choose_2": "2️⃣ Chọn gợi ý 2",
@@ -3410,7 +3410,7 @@ UI_TEXT = {
         "concept.finish": "✅ Hoàn tất",
         "concept.review_video_prompt": "🎞 Xem lại prompt video",
         "concept.review_image_prompt": "🖼 Xem lại prompt ảnh",
-        "concept.music_saved_next": "✅ Đã lưu gợi ý nhạc.\nBot chưa gọi API nhạc/video và chưa trừ Xu.\n\nBạn muốn làm gì tiếp?",
+        "concept.music_saved_next": "✅ Bot đã lưu gợi ý nhạc. Tạo nhạc AI/ghép nhạc sẽ mở sau.\nBot chưa gọi API nhạc/video và chưa trừ Xu.",
         "concept_ad.trend_current": "🎬 Tạo video theo trend từ concept này",
         "concept_ad.video_current": "🖼➡️🎞 Tạo video từ concept này",
         "concept_ad.again": "🔁 Tạo concept khác",
@@ -3532,7 +3532,7 @@ UI_TEXT = {
         "image.prompt_button": "✍️ Image prompt",
         "image.edit_button": "🧩 Edit image",
         "image.upscale_button": "📐 Upscale / resize image",
-        "image.waiting": "⏳ TOAN AAS is creating your image. This usually takes a few seconds to a few dozen seconds. Please do not tap repeatedly.",
+        "image.waiting": "⏳ TOAN AAS is creating your image. This usually takes a few seconds to a few dozen seconds. Please do not resend the command.",
         "image.tier_disabled_message": "🧪 This image tier is currently disabled. The bot has not called any API and has not charged Xu.",
         "image.success": "✅ {label} image is ready.\nJob #{job_id}\n{billing_note}\n\nWhat would you like to do next?\n\n• Lock this image if you are happy with it\n• Create video prompts from this image\n• Edit the prompt or regenerate the image",
         "image.success_link": "✅ The ShopAIKey image is ready, but Telegram could not send it directly.\n<a href=\"{url}\">Open image</a>",
@@ -3624,7 +3624,7 @@ UI_TEXT = {
         "concept.workflow_from_current": "🎬 Full workflow from this concept",
         "concept.music_from_current": "🎵 Matching music suggestion",
         "concept.next_image": "🖼 Image / image prompt",
-        "concept.next_video": "🎬 Video / motion",
+        "concept.next_video": "🎞 Create video prompt",
         "concept.next_music": "🎵 Music / sound",
         "concept.image_view_prompt": "🖼 View image prompts",
         "concept.create_image_low": "🟢 Create budget image — {cost} Xu",
@@ -3648,7 +3648,7 @@ UI_TEXT = {
         "concept.video_not_public": "🎬 Real video is not public yet",
         "concept.motion_saved_next": "✅ Motion guide saved.\n\nThe bot has not called the video API and has not charged Xu.\n\nWhat would you like to do next?",
         "concept.video_prompt_saved_next": "✅ Video prompt saved.\nThe bot has not called the video API and has not charged Xu.\n\nWhat would you like to do next?",
-        "concept.music_none_saved": "✅ Video without music selected.\nThe bot has not called any API and has not charged Xu.\n\nWhat would you like to do next?",
+        "concept.music_none_saved": "✅ No music selected.\nThe bot has not called music/video APIs and has not charged Xu.\n\nThe bot saved this choice. AI music generation and music mixing will open later.",
         "concept.music_searching": "🎵 Searching music. The bot has not charged Xu.",
         "concept.choose_1": "1️⃣ Choose suggestion 1",
         "concept.choose_2": "2️⃣ Choose suggestion 2",
@@ -3660,7 +3660,7 @@ UI_TEXT = {
         "concept.finish": "✅ Finish",
         "concept.review_video_prompt": "🎞 Review video prompt",
         "concept.review_image_prompt": "🖼 Review image prompt",
-        "concept.music_saved_next": "✅ Music suggestion saved.\nThe bot has not called music/video APIs and has not charged Xu.\n\nWhat would you like to do next?",
+        "concept.music_saved_next": "✅ The bot saved the music suggestion. AI music generation and music mixing will open later.\nThe bot has not called music/video APIs and has not charged Xu.",
         "concept_ad.trend_current": "🎬 Trend workflow from this concept",
         "concept_ad.video_current": "🖼➡️🎞 Video from this concept",
         "concept_ad.again": "🔁 Create another concept",
@@ -3782,7 +3782,7 @@ UI_TEXT = {
         "image.prompt_button": "✍️ 图片 prompt",
         "image.edit_button": "🧩 编辑图片",
         "image.upscale_button": "📐 放大 / 调整图片尺寸",
-        "image.waiting": "⏳ TOAN AAS 正在生成图片，通常需要几秒到几十秒。请不要重复点击。",
+        "image.waiting": "⏳ TOAN AAS 正在生成图片，通常需要几秒到几十秒。请不要重复发送命令。",
         "image.tier_disabled_message": "🧪 此图片档位当前已关闭。Bot 未调用 API，也未扣除 Xu。",
         "image.success": "✅ {label} 已生成完成。\nJob #{job_id}\n{billing_note}\n\n你想下一步做什么？\n\n• 如果满意，请锁定此图片\n• 基于此图片生成 3 个视频 prompt\n• 修改 prompt 或重新生成图片",
         "image.success_link": "✅ ShopAIKey 图片已生成，但 Telegram 无法直接发送。\n<a href=\"{url}\">打开图片</a>",
@@ -3874,7 +3874,7 @@ UI_TEXT = {
         "concept.workflow_from_current": "🎬 基于此 concept 创建完整 workflow",
         "concept.music_from_current": "🎵 适合的音乐建议",
         "concept.next_image": "🖼 图片 / 图片 prompt",
-        "concept.next_video": "🎬 视频 / 运动",
+        "concept.next_video": "🎞 创建视频 prompt",
         "concept.next_music": "🎵 音乐 / 声音",
         "concept.image_view_prompt": "🖼 查看图片 prompt",
         "concept.create_image_low": "🟢 生成经济图片 — {cost} Xu",
@@ -3898,7 +3898,7 @@ UI_TEXT = {
         "concept.video_not_public": "🎬 真实视频尚未公开",
         "concept.motion_saved_next": "✅ 运动建议已保存。\n\nBot 未调用视频 API，也未扣除 Xu。\n\n你想下一步做什么？",
         "concept.video_prompt_saved_next": "✅ 视频 prompt 已保存。\nBot 未调用视频 API，也未扣除 Xu。\n\n你想下一步做什么？",
-        "concept.music_none_saved": "✅ 已选择视频不使用音乐。\nBot 未调用 API，也未扣除 Xu。\n\n你想下一步做什么？",
+        "concept.music_none_saved": "✅ 已选择不使用音乐。\nBot 未调用音乐/视频 API，也未扣除 Xu。\n\nBot 已保存此选择。AI 音乐生成和配乐合成将后续开放。",
         "concept.music_searching": "🎵 正在搜索音乐。Bot 未扣除 Xu。",
         "concept.choose_1": "1️⃣ 选择建议 1",
         "concept.choose_2": "2️⃣ 选择建议 2",
@@ -3910,7 +3910,7 @@ UI_TEXT = {
         "concept.finish": "✅ 完成",
         "concept.review_video_prompt": "🎞 查看视频 prompt",
         "concept.review_image_prompt": "🖼 查看图片 prompt",
-        "concept.music_saved_next": "✅ 音乐建议已保存。\nBot 未调用音乐/视频 API，也未扣除 Xu。\n\n你想下一步做什么？",
+        "concept.music_saved_next": "✅ Bot 已保存音乐建议。AI 音乐生成和配乐合成将后续开放。\nBot 未调用音乐/视频 API，也未扣除 Xu。",
         "concept_ad.trend_current": "🎬 根据这个 concept 生成 trend workflow",
         "concept_ad.video_current": "🖼➡️🎞 根据这个 concept 做视频",
         "concept_ad.again": "🔁 创建另一个 concept",
@@ -25661,7 +25661,7 @@ def generation_pending_key(user_id, tool_type="", normalized_prompt=""):
 def get_generation_wait_text(tool_type: str) -> str:
     tool = str(tool_type or "").lower()
     if "image" in tool:
-        return "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không bấm lại nhiều lần."
+        return USER_WAIT_IMAGE_MESSAGE
     if "video_submit" in tool:
         return "🎬 Đang gửi tác vụ tạo video test... video có thể mất lâu. Không cần gửi lại lệnh."
     if "video" in tool:
@@ -28491,6 +28491,17 @@ def image_tier_warranty_note(tier: str = "", lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return "This package includes 1 retry in the same request." if has_warranty else "This package does not include a free retry."
     return "Gói này kèm 1 lần tạo lại trong cùng yêu cầu." if has_warranty else "Gói này không kèm tạo lại miễn phí."
+
+def public_image_waiting_text(tier: str = "", lang: str = "vi") -> str:
+    tier_norm = normalize_image_tier(tier)
+    base = ui_text(lang, "image.waiting")
+    if tier_norm not in {"high", "high_warranty"}:
+        return base
+    if normalize_user_language(lang) == "zh":
+        return base + "\n图片质量较高时可能需要更久一点。"
+    if normalize_user_language(lang) != "vi":
+        return base + "\nHigh-quality images may take a little longer."
+    return base + "\nẢnh chất lượng cao có thể lâu hơn một chút."
 
 def image_tier_public_status_text() -> str:
     enabled_map = image_tier_enabled_map()
@@ -35985,7 +35996,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     record_shopaikey_billing_event(uid, job_id, "confirm" if job_type == "image" else "video_confirmed", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}{tier_reason}")
     record_shopaikey_billing_event(uid, job_id, "deduct" if job_type == "image" else "video_deducted", deducted, int(balance_before or 0), int(balance_after or 0), f"shopaikey_{job_type}{tier_reason}")
     if job_type == "image":
-        await safe_edit_or_send(query, ui_text(lang, "image.waiting"))
+        await safe_edit_or_send(query, public_image_waiting_text(image_tier, lang), parse_mode=None)
         result = await shopaikey_image_generate(prompt, model)
         status = str(result.get("status") or "FAIL")
         image_url = str(result.get("image_url") or "")
@@ -44916,7 +44927,8 @@ def cinematic_ad_selected_concept_keyboard(lang: str = "vi") -> InlineKeyboardMa
 def cinematic_ad_locked_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(ui_text(lang, "concept.next_image"), callback_data="adconcept|image_menu")],
-        [InlineKeyboardButton(ui_text(lang, "concept.next_video"), callback_data="adconcept|video_menu")],
+        [InlineKeyboardButton(ui_text(lang, "concept.video_prompt_from_current"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.create_video_from_current"), callback_data="adconcept|video_current")],
         [InlineKeyboardButton(ui_text(lang, "concept.next_music"), callback_data="adconcept|music_menu")],
         [InlineKeyboardButton(ui_text(lang, "concept.create_another"), callback_data="adconcept|new")],
         [InlineKeyboardButton(ui_text(lang, "concept.edit_current"), callback_data="adconcept|edit_current")],
@@ -45061,9 +45073,8 @@ def cinematic_ad_music_suggestion_keyboard(lang: str = "vi") -> InlineKeyboardMa
 def cinematic_ad_music_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(ui_text(lang, "concept.save_music"), callback_data="adconcept|music_save")],
-        [InlineKeyboardButton(ui_text(lang, "concept.music_library"), callback_data="adconcept|music_library")],
-        [InlineKeyboardButton(ui_text(lang, "concept.music_ai"), callback_data="adconcept|music_ai")],
         [InlineKeyboardButton(ui_text(lang, "concept.music_none"), callback_data="adconcept|music_none")],
+        [InlineKeyboardButton(ui_text(lang, "concept.next_video_prompt"), callback_data="adconcept|video_prompt_current")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
     ])
 
@@ -45305,6 +45316,7 @@ def cinematic_ad_video_from_concept_text(concept: dict, lang: str = "vi") -> str
     style_label = cinematic_ad_style_label(style, lang)
     selected_idx = max(1, min(3, safe_int(concept.get("video_prompt_choice") or 1, 1)))
     selected_prompt = cinematic_ad_video_prompt_for_index(concept, selected_idx, lang)
+    guard = video_text_render_guard(lang)
     if normalize_user_language(lang) == "zh":
         return (
             "🖼➡️🎞 <b>从这个 concept 生成视频</b>\n\n"
@@ -45316,7 +45328,7 @@ def cinematic_ad_video_from_concept_text(concept: dict, lang: str = "vi") -> str
             "<b>图片 prompt 建议</b>\n"
             f"<code>Commercial cinematic keyframe for {html.escape(product)}, message: {html.escape(message)}, style: {html.escape(style_label)}, clean composition, brand ad look, no watermark, no extra text.</code>\n\n"
             "<b>视频 motion prompt 建议</b>\n"
-            f"<code>Animate this concept into a short {html.escape(style_label)} ad for {html.escape(product)}. Use smooth cinematic camera motion, emotional reveal, clean product focus, stable subject, CTA frame, no watermark, no extra text.</code>\n\n"
+            f"<code>Animate this concept into a short {html.escape(style_label)} ad for {html.escape(product)}. Use smooth cinematic camera motion, emotional reveal, clean product focus, stable subject, final clean frame with space for CTA overlay later. {html.escape(guard)}</code>\n\n"
             "未来开放 public video 时，真实视频生成会经过余额检查、确认扣费和 refund guard。"
         )
     if normalize_user_language(lang) != "vi":
@@ -45330,7 +45342,7 @@ def cinematic_ad_video_from_concept_text(concept: dict, lang: str = "vi") -> str
             "<b>Suggested image prompt</b>\n"
             f"<code>Commercial cinematic keyframe for {html.escape(product)}, message: {html.escape(message)}, style: {html.escape(style_label)}, clean composition, brand ad look, no watermark, no extra text.</code>\n\n"
             "<b>Suggested video motion prompt</b>\n"
-            f"<code>Animate this concept into a short {html.escape(style_label)} ad for {html.escape(product)}. Use smooth cinematic camera motion, emotional reveal, clean product focus, stable subject, CTA frame, no watermark, no extra text.</code>\n\n"
+            f"<code>Animate this concept into a short {html.escape(style_label)} ad for {html.escape(product)}. Use smooth cinematic camera motion, emotional reveal, clean product focus, stable subject, final clean frame with space for CTA overlay later. {html.escape(guard)}</code>\n\n"
             "When public video is enabled later, real video generation will go through balance checks, confirmation and refund guard."
         )
     return (
@@ -45345,7 +45357,7 @@ def cinematic_ad_video_from_concept_text(concept: dict, lang: str = "vi") -> str
         f"<code>Commercial cinematic keyframe for {html.escape(product)}, message: {html.escape(message)}, style: {html.escape(style_label)}, clean composition, brand ad look, no watermark, no extra text.</code>\n\n"
         "<b>Prompt chuyển động video gợi ý</b>\n"
         f"<code>Animate this concept into a short {html.escape(style_label)} ad for {html.escape(product)}. "
-        "Use smooth cinematic camera motion, emotional reveal, clean product focus, stable subject, CTA frame, no watermark, no extra text.</code>\n\n"
+        f"Use smooth cinematic camera motion, emotional reveal, clean product focus, stable subject, final clean frame with space for CTA overlay later. {html.escape(guard)}</code>\n\n"
         "Khi video công khai được mở sau này, flow tạo video thật sẽ đi qua kiểm tra Xu, xác nhận giá và hoàn Xu nếu provider lỗi."
     )
 
@@ -45548,23 +45560,31 @@ def cinematic_ad_selected_image_prompt_text(concept: dict, index: int = 1, lang:
         "Bạn có thể lưu prompt hoặc chọn chất lượng để tạo ảnh thật. Nếu tạo ảnh thật, bot vẫn hỏi xác nhận giá trước."
     )
 
+def video_text_render_guard(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return "不要在画面中生成文字、假 logo、水印或变形 caption；保留干净空间，后续由 ffmpeg/local worker 添加字幕和 CTA。"
+    if normalize_user_language(lang) != "vi":
+        return "Do not render text, fake logos, watermarks or distorted captions inside the video; leave clean space so ffmpeg/local worker can add subtitles and CTA later."
+    return "Không tạo chữ/text/logo giả trong khung hình, không watermark, không caption bị méo; chừa khoảng trống sạch để ffmpeg/local worker thêm phụ đề và CTA sau."
+
 def cinematic_ad_video_prompt_for_index(concept: dict, index: int = 1, lang: str = "vi") -> str:
     product, message, style, _topic = cinematic_ad_concept_input(concept, lang)
     style_label = cinematic_ad_style_label(style, lang)
     idx = max(1, min(3, int(index or 1)))
+    guard = video_text_render_guard(lang)
     if idx == 2:
         return (
             f"10s {style_label} ad for {product}: slow push-in opening, product/problem reveal, orbit hero shot, lifestyle proof, "
-            f"clean CTA frame, message {message}. Avoid blur, flicker, broken text, watermark."
+            f"clean final frame with empty space for CTA overlay later, message {message}. Avoid blur, flicker, broken text, watermark. {guard}"
         )
     if idx == 3:
         return (
             f"15s {style_label} commercial for {product}: 0-3s hook, 3-6s problem, 6-10s product transformation, "
-            f"10-13s proof, 13-15s CTA, stable subject, clean lighting, message {message}. Avoid distorted faces, extra text, watermark."
+            f"10-13s proof, 13-15s clean final frame with empty space for CTA overlay, stable subject, clean lighting, message {message}. Avoid distorted faces, extra text, watermark. {guard}"
         )
     return (
-        f"5s {style_label} ad for {product}: hook reveal, product close-up, one clear benefit, clean CTA, message {message}. "
-        "Avoid blur, distortion, flicker, watermark, broken text."
+        f"5s {style_label} ad for {product}: hook reveal, product close-up, one clear benefit, clean final frame, message {message}. "
+        f"Avoid blur, distortion, flicker, watermark, broken text. {guard}"
     )
 
 def cinematic_ad_video_prompt_from_concept_text(concept: dict, lang: str = "vi") -> str:
@@ -45572,6 +45592,7 @@ def cinematic_ad_video_prompt_from_concept_text(concept: dict, lang: str = "vi")
     prompt_5 = cinematic_ad_video_prompt_for_index(concept, 1, lang)
     prompt_10 = cinematic_ad_video_prompt_for_index(concept, 2, lang)
     prompt_15 = cinematic_ad_video_prompt_for_index(concept, 3, lang)
+    guard = video_text_render_guard(lang)
     if normalize_user_language(lang) == "zh":
         title = "🎞 <b>基于此 concept 的视频 prompt</b>"
         note = ui_text(lang, "video.public_off_prompt_only") if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED else "Public video 已开启时仍需走档位/确认/退款 guard。"
@@ -45591,8 +45612,8 @@ def cinematic_ad_video_prompt_from_concept_text(concept: dict, lang: str = "vi")
             f"<b>Gợi ý video 5 giây</b>\n<code>{html.escape(prompt_5)}</code>\n\n"
             f"<b>Gợi ý video 10 giây</b>\n<code>{html.escape(prompt_10)}</code>\n\n"
             f"<b>Gợi ý video 15 giây</b>\n<code>{html.escape(prompt_15)}</code>\n\n"
-            "<b>Hướng chuyển động</b>\ncamera tiến chậm, xoay nhẹ ở cảnh hero, cắt chuyển cùng hành động, giữ khung CTA cuối.\n\n"
-            "<b>Điều cần tránh</b>\nmờ nhòe, nhấp nháy, mặt bị méo, chữ bị lỗi, watermark, logo lỗi, chất lượng thấp."
+            "<b>Hướng chuyển động</b>\ncamera tiến chậm, xoay nhẹ ở cảnh hero, cắt chuyển cùng hành động, giữ khung cuối sạch, có khoảng trống để thêm CTA sau.\n\n"
+            f"<b>Điều cần tránh</b>\nmờ nhòe, nhấp nháy, mặt bị méo, chữ bị lỗi, watermark, logo lỗi, chất lượng thấp. {html.escape(guard)}"
         )
     return (
         f"{title}\n\n"
@@ -45601,8 +45622,8 @@ def cinematic_ad_video_prompt_from_concept_text(concept: dict, lang: str = "vi")
         f"<b>Prompt 5s</b>\n<code>{html.escape(prompt_5)}</code>\n\n"
         f"<b>Prompt 10s</b>\n<code>{html.escape(prompt_10)}</code>\n\n"
         f"<b>Prompt 15s</b>\n<code>{html.escape(prompt_15)}</code>\n\n"
-        "<b>Motion direction</b>\nslow push-in, orbit hero reveal, match cut, CTA hold.\n\n"
-        "<b>Negative prompt</b>\nblur, flicker, distorted face, broken text, watermark, logo artifacts, low quality."
+        "<b>Motion direction</b>\nslow push-in, orbit hero reveal, match cut, clean final frame with space for CTA overlay later.\n\n"
+        f"<b>Negative prompt</b>\nblur, flicker, distorted face, broken text, watermark, logo artifacts, low quality. {html.escape(guard)}"
     )
 
 def cinematic_ad_selected_video_prompt_text(concept: dict, index: int = 1, lang: str = "vi") -> str:
@@ -46304,6 +46325,13 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
             _product, _message, _style, topic = cinematic_ad_concept_input(concept, lang)
             return await send_or_confirm_trend_video_flow_from_callback(query, uid, topic)
         if action in {"video_current", "create_video_current"}:
+            if not str(value or "").strip():
+                concept = lock_latest_cinematic_ad_concept(uid) or concept
+                return await safe_edit_query_message(
+                    query,
+                    cinematic_ad_video_prompt_from_concept_text(concept, lang),
+                    reply_markup=cinematic_ad_video_prompt_choices_keyboard(lang),
+                )
             idx = max(1, min(3, safe_int(value or concept.get("video_prompt_choice") or 1, 1)))
             concept["video_prompt_choice"] = idx
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
@@ -46330,11 +46358,11 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
         if action == "music_none":
             concept["music_choice"] = "none"
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
-            return await safe_edit_query_message(query, ui_text(lang, "concept.music_none_saved"), reply_markup=cinematic_ad_video_saved_keyboard(lang, is_admin_user(uid)))
+            return await safe_edit_query_message(query, ui_text(lang, "concept.music_none_saved"), reply_markup=cinematic_ad_music_selected_keyboard(lang))
         if action == "music_save":
             concept["music_saved"] = True
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
-            return await safe_edit_query_message(query, ui_text(lang, "concept.music_saved_next"), reply_markup=cinematic_ad_video_saved_keyboard(lang, is_admin_user(uid)))
+            return await safe_edit_query_message(query, ui_text(lang, "concept.music_saved_next"), reply_markup=cinematic_ad_music_selected_keyboard(lang))
         if action == "finalize":
             concept["finalized"] = True
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
@@ -46757,23 +46785,24 @@ def image_to_video_subject_for_job(job_id: int = 0, user_id=0, lang: str = "vi")
 def image_to_video_prompt_from_image(job_id: int = 0, user_id=0, index: int = 1, lang: str = "vi") -> str:
     idx = max(1, min(3, int(index or 1)))
     subject = image_to_video_subject_for_job(job_id, user_id, lang)
+    guard = video_text_render_guard(lang)
     if normalize_user_language(lang) == "zh":
         if idx == 1:
-            return f"基于已选择图片制作 5 秒短视频。主体: {subject}. Camera slow push-in, subtle parallax, stable subject, clean light, keep product sharp, no watermark, no extra text."
+            return f"基于已选择图片制作 5 秒短视频。主体: {subject}. Camera slow push-in, subtle parallax, stable subject, clean light, keep product sharp, no watermark, no extra text. {guard}"
         if idx == 2:
-            return f"基于已选择图片制作 10 秒短广告。主体: {subject}. Start with a clear hook, reveal the product/service, show one benefit, end with a clean CTA frame, smooth camera motion, no distortion."
-        return f"基于已选择图片制作 15 秒 cinematic/lifestyle 视频。主体: {subject}. Add context, smooth cinematic camera movement, emotional reveal, final hero frame for message/CTA, no watermark, no broken text."
+            return f"基于已选择图片制作 10 秒短广告。主体: {subject}. Start with a clear hook, reveal the product/service, show one benefit, end with a clean final frame with space for CTA overlay, smooth camera motion, no distortion. {guard}"
+        return f"基于已选择图片制作 15 秒 cinematic/lifestyle 视频。主体: {subject}. Add context, smooth cinematic camera movement, emotional reveal, final hero frame with empty space for message/CTA overlay, no watermark, no broken text. {guard}"
     if normalize_user_language(lang) != "vi":
         if idx == 1:
-            return f"Create a 5-second video from the selected image. Subject/context: {subject}. Camera slowly pushes in, subtle parallax, stable subject, clean lighting, keep the product sharp, no watermark, no extra text."
+            return f"Create a 5-second video from the selected image. Subject/context: {subject}. Camera slowly pushes in, subtle parallax, stable subject, clean lighting, keep the product sharp, no watermark, no extra text. {guard}"
         if idx == 2:
-            return f"Create a 10-second short ad from the selected image. Subject/context: {subject}. Start with a clear hook, reveal the product/service, show one benefit, end with a clean CTA frame, smooth camera motion, no distortion."
-        return f"Create a 15-second cinematic/lifestyle video from the selected image. Subject/context: {subject}. Add context, smooth cinematic camera movement, emotional reveal, final hero frame for message/CTA, no watermark, no broken text."
+            return f"Create a 10-second short ad from the selected image. Subject/context: {subject}. Start with a clear hook, reveal the product/service, show one benefit, end with a clean final frame with space for CTA overlay, smooth camera motion, no distortion. {guard}"
+        return f"Create a 15-second cinematic/lifestyle video from the selected image. Subject/context: {subject}. Add context, smooth cinematic camera movement, emotional reveal, final hero frame with empty space for message/CTA overlay, no watermark, no broken text. {guard}"
     if idx == 1:
-        return f"Tạo video 5 giây từ ảnh đã chọn. Chủ thể/bối cảnh: {subject}. Camera tiến nhẹ vào sản phẩm, parallax rất nhẹ, giữ sản phẩm rõ nét, ánh sáng sạch, phù hợp test nhanh/chi phí thấp, không watermark, không chữ thừa."
+        return f"Tạo video 5 giây từ ảnh đã chọn. Chủ thể/bối cảnh: {subject}. Camera tiến nhẹ vào sản phẩm, parallax rất nhẹ, giữ sản phẩm rõ nét, ánh sáng sạch, phù hợp test nhanh/chi phí thấp, không watermark, không chữ thừa. {guard}"
     if idx == 2:
-        return f"Tạo video quảng cáo ngắn 10 giây từ ảnh đã chọn. Chủ thể/bối cảnh: {subject}. Mở đầu bằng hook rõ, reveal sản phẩm/dịch vụ, nêu một lợi ích chính, kết thúc bằng khung CTA sạch, chuyển động camera mượt, không méo hình."
-    return f"Tạo video cinematic/lifestyle 15 giây từ ảnh đã chọn. Chủ thể/bối cảnh: {subject}. Có bối cảnh sử dụng, chuyển động camera mượt, reveal cảm xúc, cảnh cuối là hero frame để chốt thông điệp/CTA, không watermark, không chữ lỗi."
+        return f"Tạo video quảng cáo ngắn 10 giây từ ảnh đã chọn. Chủ thể/bối cảnh: {subject}. Mở đầu bằng hook rõ, reveal sản phẩm/dịch vụ, nêu một lợi ích chính, kết thúc bằng khung sạch có khoảng trống để thêm CTA sau, chuyển động camera mượt, không méo hình. {guard}"
+    return f"Tạo video cinematic/lifestyle 15 giây từ ảnh đã chọn. Chủ thể/bối cảnh: {subject}. Có bối cảnh sử dụng, chuyển động camera mượt, reveal cảm xúc, cảnh cuối là hero frame sạch để chèn thông điệp/CTA sau, không watermark, không chữ lỗi. {guard}"
 
 def image_to_video_prompt_choices_text(job_id: int = 0, user_id=0, lang: str = "vi") -> str:
     prompts = [image_to_video_prompt_from_image(job_id, user_id, idx, lang) for idx in range(1, 4)]
@@ -47569,26 +47598,27 @@ def trend_guided_video_prompt_for_index(state: dict, index: int = 1, lang: str =
     trend = str((state or {}).get("custom_trend") or trend_guided_trend_label((state or {}).get("trend_choice") or 1, lang))
     motion = str((state or {}).get("custom_motion") or trend_guided_motion_label((state or {}).get("motion_choice") or 1, lang))
     image_prompt = trend_guided_image_prompt_for_index(state, (state or {}).get("image_prompt_choice") or 1, lang)
+    guard = video_text_render_guard(lang)
     if normalize_user_language(lang) != "vi":
         durations = {1: "5 seconds", 2: "10 seconds", 3: "15 seconds"}
         opening = {1: "a short close-up product hook", 2: "the customer problem", 3: "a before/after story"}[idx]
-        ending = {1: "a soft final CTA", 2: "a clear result and action invitation", 3: "hero shot plus a gentle call to action"}[idx]
+        ending = {1: "a clean final frame with space for CTA overlay", 2: "a clear result and empty space for action text overlay", 3: "hero shot plus clean space for a gentle CTA overlay"}[idx]
         return (
             f"Video prompt {durations[idx]} for {topic}. Video direction: {trend}. "
             f"Motion direction: {motion}. Keyframe image: {image_prompt[:260]}. "
             f"Opening scene: {opening}. Action: reveal the product/service, show the main benefit, then transition to the result. "
             f"Camera motion: smooth push-in, clean transitions, keep the subject clear. Final scene: {ending}. "
-            "Negative prompt: blur, distorted product, extra text, watermark, overly shaky transitions, exaggerated claims."
+            f"Negative prompt: blur, distorted product, extra text, watermark, overly shaky transitions, exaggerated claims. {guard}"
         )
     durations = {1: "5 giây", 2: "10 giây", 3: "15 giây"}
     opening = {1: "hook ngắn bằng cận cảnh sản phẩm", 2: "mở bằng vấn đề khách gặp", 3: "mở bằng câu chuyện trước/sau"}[idx]
-    ending = {1: "CTA nhẹ cuối video", 2: "kết quả rõ và lời mời hành động", 3: "hero shot + lời kêu gọi hành động mềm"}[idx]
+    ending = {1: "khung cuối sạch có khoảng trống để thêm CTA sau", 2: "kết quả rõ và khoảng trống để chèn lời mời hành động", 3: "hero shot + khoảng trống sạch cho CTA mềm"}[idx]
     return (
         f"Gợi ý video {durations[idx]} cho {topic}. Hướng video: {trend}. "
         f"Hướng chuyển động: {motion}. Ảnh khung chính: {image_prompt[:260]}. "
         f"Cảnh mở đầu: {opening}. Hành động: reveal sản phẩm/dịch vụ, nêu lợi ích chính, chuyển sang kết quả. "
         f"Chuyển động camera: push-in mượt, chuyển cảnh sạch, giữ chủ thể rõ. Cảnh cuối: {ending}. "
-        "Điều cần tránh: mờ nhòe, méo sản phẩm, chữ thừa, watermark, chuyển cảnh quá giật, cam kết quá mức."
+        f"Điều cần tránh: mờ nhòe, méo sản phẩm, chữ thừa, watermark, chuyển cảnh quá giật, cam kết quá mức. {guard}"
     )
 
 def trend_guided_video_prompts_text(state: dict, lang: str = "vi") -> str:
@@ -49175,7 +49205,7 @@ async def run_quick_image_admin_smoke(update: Update, context: ContextTypes.DEFA
         admin_only=True,
         xu_cost_planned=0,
     )
-    waiting = await update.message.reply_text(ui_text(lang, "image.waiting"))
+    waiting = await update.message.reply_text(public_image_waiting_text(SHOPAIKEY_IMAGE_DEFAULT_TIER, lang))
     result = await shopaikey_image_generate(prompt)
     status = str(result.get("status") or "FAIL")
     image_url = str(result.get("image_url") or "")
