@@ -3223,12 +3223,21 @@ UI_TEXT = {
         "common.invalid_request": "⚠️ Yêu cầu không hợp lệ. Bot chưa gọi provider.",
         "common.open_main_menu": "Mở menu chính bên dưới.",
         "common.pending_cancelled_main": "❌ Đã hủy thao tác đang chờ. Mở menu chính bên dưới.",
+        "common.done": "✅ Hoàn tất",
+        "common.edit": "✍️ Sửa",
+        "common.try_again": "🔁 Thử lại",
+        "common.continue": "➡️ Tiếp tục",
         "account.balance_left": "💼 Số dư còn lại: {credits} Xu",
         "account.ref_link_button": "🎁 Link giới thiệu của tôi",
+        "account.referral_button": "🎁 Link giới thiệu của tôi",
         "account.ref_policy_button": "📋 Cách nhận thưởng giới thiệu",
         "account.ref_stats_button": "👥 Người đã giới thiệu",
         "account.ref_hint": "Bấm nút bên dưới để xem link giới thiệu, quyền lợi và lịch sử.",
+        "account.referral_main_hint": "Bấm nút bên dưới để xem link giới thiệu, quyền lợi và lịch sử.",
+        "account.ref_link_title": "🎁 <b>Link giới thiệu TOAN AAS của bạn:</b>",
+        "account.ref_link_body": "Bạn có thể gửi link này cho bạn bè/khách hàng. Khi họ đăng ký hoặc nạp Xu hợp lệ, hệ thống sẽ ghi nhận theo chính sách giới thiệu hiện hành.\n\nGhi nhận giới thiệu trước, chính sách thưởng có thể cấu hình sau.",
         "pricing.xu": "💰 Bảng giá Xu",
+        "pricing.video_low": "Video tiết kiệm",
         "pricing.plans": "📦 Gói tháng",
         "pricing.vip": "⭐ Dịch vụ VIP",
         "pricing.member": "🪪 Thành viên",
@@ -3309,18 +3318,43 @@ UI_TEXT = {
         "motion.education": "Giáo dục / hướng dẫn",
         "motion.story": "Story cinematic",
         "motion.custom": "✍️ Nhập chủ đề khác",
+        "motion.style.cinematic": "🎬 Cinematic",
+        "motion.style.tiktok": "📱 TikTok/Reels nhanh",
+        "motion.style.tutorial": "🧑‍🏫 Tutorial hướng dẫn",
+        "motion.style.ads": "🛒 Quảng cáo bán hàng",
+        "motion.style.fpv": "🚁 FPV/drone motion",
+        "motion.style.reveal": "🧊 3D/product reveal",
+        "motion.style.ugc": "😄 UGC đời thường",
         "motion.ask_style": "🎬 <b>Bạn muốn phong cách nào?</b>\n\nChủ đề: <b>{topic}</b>\n\nChọn một phong cách để TOAN AAS tạo bản đồ chuyển động/cảnh quay.",
         "motion.cancelled": "❌ Đã hủy gợi ý chuyển động video. Bot chưa gọi API và chưa trừ Xu.",
         "motion.again": "🔁 Gợi ý chủ đề khác",
+        "motion.from_concept_title": "🎥 Motion guide từ concept này",
+        "motion.timeline": "Timeline từng giây",
+        "motion.camera_motion": "Camera motion",
+        "motion.use_this": "✅ Dùng motion guide này",
+        "motion.create_another": "🔁 Tạo motion guide khác",
         "concept_ad.menu": "🎬 Concept quảng cáo cinematic",
         "concept_ad.ask_product": "🎬 <b>Concept quảng cáo cinematic TOAN AAS</b>\n\nBạn muốn làm quảng cáo cho sản phẩm/dịch vụ gì?\n\nVí dụ: máy xay sinh tố mini màu xanh ngọc, app AI tạo nội dung, khóa học affiliate, quán cà phê mới mở.\n\nBot chỉ tạo ý tưởng, storyboard và prompt, không gọi API ảnh/video thật và không trừ Xu.",
         "concept_ad.ask_message": "💡 <b>Bạn muốn truyền tải thông điệp gì?</b>\n\nSản phẩm/dịch vụ: <b>{product}</b>\n\nChọn nhanh một thông điệp hoặc nhập thông điệp riêng.",
         "concept_ad.ask_style": "🎨 <b>Bạn muốn phong cách quảng cáo nào?</b>\n\nSản phẩm/dịch vụ: <b>{product}</b>\nThông điệp: <b>{message}</b>\n\nChọn phong cách để TOAN AAS dựng concept quảng cáo.",
         "concept_ad.continue": "✅ Chốt concept / Tạo tiếp từ concept này",
+        "concept.lock": "✅ Hoàn tất / Chốt concept này",
+        "concept.locked_title": "✅ Concept đã được lưu.",
+        "concept.next_question": "Bạn muốn làm gì tiếp?",
         "concept_ad.motion_current": "🎥 Gợi ý chuyển động từ concept này",
+        "concept.motion_from_current": "🎥 Tạo motion guide từ concept này",
+        "concept.image_prompt_from_current": "🖼 Tạo prompt ảnh từ concept này",
+        "concept.video_prompt_from_current": "🎞 Tạo prompt video từ concept này",
+        "concept.create_image_from_current": "🖼 Tạo ảnh từ concept này",
+        "concept.create_video_from_current": "🎬 Tạo video từ concept này",
+        "concept.workflow_from_current": "🎬 Tạo workflow đầy đủ từ concept này",
+        "concept.music_from_current": "🎵 Gợi ý nhạc phù hợp",
         "concept_ad.trend_current": "🎬 Tạo video theo trend từ concept này",
         "concept_ad.video_current": "🖼➡️🎞 Tạo video từ concept này",
         "concept_ad.again": "🔁 Tạo concept khác",
+        "concept.create_another": "🔁 Tạo concept khác",
+        "concept.edit_current": "✍️ Sửa concept",
+        "concept.current_missing": "⚠️ Concept hiện tại không còn trong phiên làm việc. Vui lòng tạo concept mới.",
         "concept_ad.cancelled": "❌ Đã hủy concept quảng cáo cinematic. Bot chưa gọi API và chưa trừ Xu.",
         "concept_ad.missing_latest": "⚠️ Chưa tìm thấy concept quảng cáo gần nhất hoặc concept đã hết hạn.\n\nVui lòng bấm 🎬 Concept quảng cáo cinematic để tạo lại concept.\nBot chưa gọi API và chưa trừ Xu.",
         "concept_ad.new": "🎬 Tạo concept mới",
@@ -3341,6 +3375,17 @@ UI_TEXT = {
         "concept_ad.style.ugc": "👤 UGC đời thường",
         "concept_ad.style.fpv": "🚁 FPV/drone motion",
         "concept_ad.style.product_reveal": "🧊 3D/product reveal",
+        "concept.image_prompt_1": "🖼 Tạo ảnh AI từ prompt 1",
+        "concept.image_prompt_2": "🖼 Tạo ảnh AI từ prompt 2",
+        "concept.video_from_prompt": "🎬 Tạo video từ prompt này",
+        "concept.video_prompt_view": "🎞 Xem prompt video",
+        "concept.motion_view": "🎥 Xem motion guide",
+        "concept.back_locked": "🔙 Quay lại concept đã chốt",
+        "concept.edit_prompt": "Bạn muốn sửa concept như thế nào?\n\nVí dụ: ngắn còn 15s, sang trọng hơn, vui hơn, thêm CTA bán hàng, đổi sang phong cách TikTok.\n\nBot sẽ dùng concept hiện tại, không bắt bạn nhập lại từ đầu.",
+        "concept.saved_motion": "✅ Motion guide đã được chọn cho concept này. Bot chưa gọi API và chưa trừ Xu.",
+        "video.public_off_prompt_only": "Tạo video thật đang thử nghiệm nội bộ. TOAN AAS đã chuẩn bị prompt video để bạn dùng khi tính năng mở công khai.",
+        "workflow.from_concept_confirm": "Tạo workflow đầy đủ từ concept này sẽ tốn {cost} Xu. Bao gồm hook/script/storyboard/prompt ảnh/prompt video. Bạn có muốn tiếp tục không?",
+        "workflow.from_concept_title": "🎬 Workflow đầy đủ từ concept này",
         "workflow.image_scene_1": "🖼 Tạo ảnh từ Scene 1",
         "workflow.image_scene_2": "🖼 Tạo ảnh từ Scene 2",
         "workflow.image_scene_3": "🖼 Tạo ảnh từ Scene 3",
@@ -3363,12 +3408,21 @@ UI_TEXT = {
         "common.invalid_request": "⚠️ Invalid request. The bot has not called the provider.",
         "common.open_main_menu": "Opening the main menu below.",
         "common.pending_cancelled_main": "❌ Pending action cancelled. Opening the main menu below.",
+        "common.done": "✅ Done",
+        "common.edit": "✍️ Edit",
+        "common.try_again": "🔁 Try again",
+        "common.continue": "➡️ Continue",
         "account.balance_left": "💼 Balance left: {credits} Xu",
         "account.ref_link_button": "🎁 My referral link",
+        "account.referral_button": "🎁 My referral link",
         "account.ref_policy_button": "📋 Referral rewards guide",
         "account.ref_stats_button": "👥 My referred users",
         "account.ref_hint": "Use the buttons below to view your referral link, benefits and history.",
+        "account.referral_main_hint": "Use the buttons below to view your referral link, benefits and history.",
+        "account.ref_link_title": "🎁 <b>Your TOAN AAS referral link:</b>",
+        "account.ref_link_body": "You can share this link with friends or customers. When they register or complete a valid Xu top-up, the system records it under the current referral policy.\n\nReferral tracking is recorded first; reward policy can be configured later.",
         "pricing.xu": "💰 Xu pricing",
+        "pricing.video_low": "Budget video",
         "pricing.plans": "📦 Monthly plans",
         "pricing.vip": "⭐ VIP services",
         "pricing.member": "🪪 Membership",
@@ -3449,18 +3503,43 @@ UI_TEXT = {
         "motion.education": "Education / tutorial",
         "motion.story": "Cinematic story",
         "motion.custom": "✍️ Type another topic",
+        "motion.style.cinematic": "🎬 Cinematic",
+        "motion.style.tiktok": "📱 Fast TikTok/Reels",
+        "motion.style.tutorial": "🧑‍🏫 Tutorial",
+        "motion.style.ads": "🛒 Sales ad",
+        "motion.style.fpv": "🚁 FPV/drone motion",
+        "motion.style.reveal": "🧊 3D/product reveal",
+        "motion.style.ugc": "😄 Everyday UGC",
         "motion.ask_style": "🎬 <b>Choose a style</b>\n\nTopic: <b>{topic}</b>\n\nChoose a style so TOAN AAS can build the motion/shot map.",
         "motion.cancelled": "❌ Video motion guide cancelled. The bot has not called any API and has not charged Xu.",
         "motion.again": "🔁 Try another topic",
+        "motion.from_concept_title": "🎥 Motion guide from this concept",
+        "motion.timeline": "Second-by-second timeline",
+        "motion.camera_motion": "Camera motion",
+        "motion.use_this": "✅ Use this motion guide",
+        "motion.create_another": "🔁 Create another motion guide",
         "concept_ad.menu": "🎬 Cinematic ad concept",
         "concept_ad.ask_product": "🎬 <b>TOAN AAS Cinematic Ad Concept</b>\n\nWhat product or service is this ad for?\n\nExample: turquoise mini blender, AI content app, affiliate course, new coffee shop.\n\nThe bot only creates ideas, storyboard and prompts. It does not call real image/video APIs and has not charged Xu.",
         "concept_ad.ask_message": "💡 <b>What message do you want to convey?</b>\n\nProduct/service: <b>{product}</b>\n\nChoose a quick message or type your own.",
         "concept_ad.ask_style": "🎨 <b>Choose an advertising style</b>\n\nProduct/service: <b>{product}</b>\nMessage: <b>{message}</b>\n\nChoose a style so TOAN AAS can build the ad concept.",
         "concept_ad.continue": "✅ Lock concept / Continue from this concept",
+        "concept.lock": "✅ Finish / lock this concept",
+        "concept.locked_title": "✅ Concept saved.",
+        "concept.next_question": "What would you like to do next?",
         "concept_ad.motion_current": "🎥 Motion guide from this concept",
+        "concept.motion_from_current": "🎥 Create motion guide from this concept",
+        "concept.image_prompt_from_current": "🖼 Create image prompts from this concept",
+        "concept.video_prompt_from_current": "🎞 Create video prompt from this concept",
+        "concept.create_image_from_current": "🖼 Create image from this concept",
+        "concept.create_video_from_current": "🎬 Create video from this concept",
+        "concept.workflow_from_current": "🎬 Full workflow from this concept",
+        "concept.music_from_current": "🎵 Matching music suggestion",
         "concept_ad.trend_current": "🎬 Trend workflow from this concept",
         "concept_ad.video_current": "🖼➡️🎞 Video from this concept",
         "concept_ad.again": "🔁 Create another concept",
+        "concept.create_another": "🔁 Create another concept",
+        "concept.edit_current": "✍️ Edit concept",
+        "concept.current_missing": "⚠️ The current concept is no longer in this session. Please create a new concept.",
         "concept_ad.cancelled": "❌ Cinematic ad concept cancelled. The bot has not called any API and has not charged Xu.",
         "concept_ad.missing_latest": "⚠️ No recent ad concept was found, or it has expired.\n\nPlease press 🎬 Cinematic ad concept to create a new one.\nThe bot has not called any API and has not charged Xu.",
         "concept_ad.new": "🎬 Create new concept",
@@ -3481,6 +3560,17 @@ UI_TEXT = {
         "concept_ad.style.ugc": "👤 Everyday UGC",
         "concept_ad.style.fpv": "🚁 FPV/drone motion",
         "concept_ad.style.product_reveal": "🧊 3D/product reveal",
+        "concept.image_prompt_1": "🖼 Create AI image from prompt 1",
+        "concept.image_prompt_2": "🖼 Create AI image from prompt 2",
+        "concept.video_from_prompt": "🎬 Create video from this prompt",
+        "concept.video_prompt_view": "🎞 View video prompt",
+        "concept.motion_view": "🎥 View motion guide",
+        "concept.back_locked": "🔙 Back to locked concept",
+        "concept.edit_prompt": "How would you like to edit this concept?\n\nExamples: make it 15 seconds, make it more premium, make it more playful, add a sales CTA, switch to TikTok style.\n\nThe bot will use the current concept; you do not need to enter everything again.",
+        "concept.saved_motion": "✅ This motion guide is selected for the concept. The bot has not called any API and has not charged Xu.",
+        "video.public_off_prompt_only": "Real video generation is still in internal testing. TOAN AAS has prepared the video prompt for you to use when the feature opens publicly.",
+        "workflow.from_concept_confirm": "Creating a full workflow from this concept costs {cost} Xu. It includes hooks, scripts, storyboard, image prompts and video prompts. Do you want to continue?",
+        "workflow.from_concept_title": "🎬 Full workflow from this concept",
         "workflow.image_scene_1": "🖼 Create image from Scene 1",
         "workflow.image_scene_2": "🖼 Create image from Scene 2",
         "workflow.image_scene_3": "🖼 Create image from Scene 3",
@@ -3503,12 +3593,21 @@ UI_TEXT = {
         "common.invalid_request": "⚠️ 请求无效。Bot 未调用 provider。",
         "common.open_main_menu": "下方为主菜单。",
         "common.pending_cancelled_main": "❌ 已取消等待中的操作。下方为主菜单。",
+        "common.done": "✅ 完成",
+        "common.edit": "✍️ 修改",
+        "common.try_again": "🔁 再试一次",
+        "common.continue": "➡️ 继续",
         "account.balance_left": "💼 剩余余额：{credits} Xu",
         "account.ref_link_button": "🎁 我的邀请链接",
+        "account.referral_button": "🎁 我的邀请链接",
         "account.ref_policy_button": "📋 邀请奖励说明",
         "account.ref_stats_button": "👥 我邀请的用户",
         "account.ref_hint": "请使用下方按钮查看邀请链接、权益和记录。",
+        "account.referral_main_hint": "请使用下方按钮查看邀请链接、权益和记录。",
+        "account.ref_link_title": "🎁 <b>你的 TOAN AAS 邀请链接:</b>",
+        "account.ref_link_body": "你可以把此链接发送给朋友或客户。当他们注册或完成有效 Xu 充值时，系统会按当前邀请政策记录。\n\n先记录邀请关系，奖励政策可后续配置。",
         "pricing.xu": "💰 Xu 价格",
+        "pricing.video_low": "经济视频",
         "pricing.plans": "📦 月度套餐",
         "pricing.vip": "⭐ VIP 服务",
         "pricing.member": "🪪 会员",
@@ -3589,18 +3688,43 @@ UI_TEXT = {
         "motion.education": "教育 / 教程",
         "motion.story": "电影感故事",
         "motion.custom": "✍️ 输入其他主题",
+        "motion.style.cinematic": "🎬 Cinematic",
+        "motion.style.tiktok": "📱 快节奏 TikTok/Reels",
+        "motion.style.tutorial": "🧑‍🏫 教程",
+        "motion.style.ads": "🛒 销售广告",
+        "motion.style.fpv": "🚁 FPV/drone motion",
+        "motion.style.reveal": "🧊 3D/product reveal",
+        "motion.style.ugc": "😄 日常 UGC",
         "motion.ask_style": "🎬 <b>选择风格</b>\n\n主题：<b>{topic}</b>\n\n请选择风格，TOAN AAS 会生成镜头运动方案。",
         "motion.cancelled": "❌ 已取消视频运动建议。Bot 未调用 API，也未扣除 Xu。",
         "motion.again": "🔁 换一个主题",
+        "motion.from_concept_title": "🎥 基于此 concept 的 motion guide",
+        "motion.timeline": "逐秒 timeline",
+        "motion.camera_motion": "镜头运动",
+        "motion.use_this": "✅ 使用此 motion guide",
+        "motion.create_another": "🔁 生成另一个 motion guide",
         "concept_ad.menu": "🎬 电影感广告概念",
         "concept_ad.ask_product": "🎬 <b>TOAN AAS 电影感广告概念</b>\n\n你想为哪个产品或服务制作广告？\n\n示例：青绿色迷你搅拌机、AI 内容应用、affiliate 课程、新咖啡店。\n\nBot 只生成创意、分镜和 prompt，不调用真实图片/视频 API，也未扣除 Xu。",
         "concept_ad.ask_message": "💡 <b>你想传达什么信息？</b>\n\n产品/服务：<b>{product}</b>\n\n请选择一个信息方向，或输入自己的信息。",
         "concept_ad.ask_style": "🎨 <b>选择广告风格</b>\n\n产品/服务：<b>{product}</b>\n信息：<b>{message}</b>\n\n请选择风格，TOAN AAS 会生成广告 concept。",
         "concept_ad.continue": "✅ 确认 concept / 继续使用这个 concept",
+        "concept.lock": "✅ 完成 / 锁定此 concept",
+        "concept.locked_title": "✅ Concept 已保存。",
+        "concept.next_question": "你想下一步做什么？",
         "concept_ad.motion_current": "🎥 根据这个 concept 生成运动建议",
+        "concept.motion_from_current": "🎥 基于此 concept 创建 motion guide",
+        "concept.image_prompt_from_current": "🖼 基于此 concept 创建图片 prompt",
+        "concept.video_prompt_from_current": "🎞 基于此 concept 创建视频 prompt",
+        "concept.create_image_from_current": "🖼 基于此 concept 创建图片",
+        "concept.create_video_from_current": "🎬 基于此 concept 创建视频",
+        "concept.workflow_from_current": "🎬 基于此 concept 创建完整 workflow",
+        "concept.music_from_current": "🎵 适合的音乐建议",
         "concept_ad.trend_current": "🎬 根据这个 concept 生成 trend workflow",
         "concept_ad.video_current": "🖼➡️🎞 根据这个 concept 做视频",
         "concept_ad.again": "🔁 创建另一个 concept",
+        "concept.create_another": "🔁 创建另一个 concept",
+        "concept.edit_current": "✍️ 修改 concept",
+        "concept.current_missing": "⚠️ 当前 concept 已不在本次会话中。请重新创建 concept。",
         "concept_ad.cancelled": "❌ 已取消电影感广告 concept。Bot 未调用 API，也未扣除 Xu。",
         "concept_ad.missing_latest": "⚠️ 未找到最近的广告 concept，或 concept 已过期。\n\n请点击 🎬 电影感广告概念 重新创建。\nBot 未调用 API，也未扣除 Xu。",
         "concept_ad.new": "🎬 创建新 concept",
@@ -3621,6 +3745,17 @@ UI_TEXT = {
         "concept_ad.style.ugc": "👤 日常 UGC",
         "concept_ad.style.fpv": "🚁 FPV/drone motion",
         "concept_ad.style.product_reveal": "🧊 3D/product reveal",
+        "concept.image_prompt_1": "🖼 使用 prompt 1 创建 AI 图片",
+        "concept.image_prompt_2": "🖼 使用 prompt 2 创建 AI 图片",
+        "concept.video_from_prompt": "🎬 使用此 prompt 创建视频",
+        "concept.video_prompt_view": "🎞 查看视频 prompt",
+        "concept.motion_view": "🎥 查看 motion guide",
+        "concept.back_locked": "🔙 返回已锁定 concept",
+        "concept.edit_prompt": "你想如何修改这个 concept？\n\n例如：缩短为 15 秒、更高级、更轻松、加入销售 CTA、改成 TikTok 风格。\n\nBot 会使用当前 concept，不需要你重新输入。",
+        "concept.saved_motion": "✅ 此 motion guide 已用于当前 concept。Bot 未调用 API，也未扣除 Xu。",
+        "video.public_off_prompt_only": "真实视频生成功能仍在内部测试。TOAN AAS 已为你准备视频 prompt，等功能公开后可继续使用。",
+        "workflow.from_concept_confirm": "基于此 concept 创建完整 workflow 将花费 {cost} Xu，包含 hook、script、storyboard、图片 prompt 和视频 prompt。你要继续吗？",
+        "workflow.from_concept_title": "🎬 基于此 concept 的完整 workflow",
         "workflow.image_scene_1": "🖼 从 Scene 1 生成图片",
         "workflow.image_scene_2": "🖼 从 Scene 2 生成图片",
         "workflow.image_scene_3": "🖼 从 Scene 3 生成图片",
@@ -31924,14 +32059,12 @@ def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
 
-def referral_account_link_text(user_id, bot_username: str = "") -> str:
+def referral_account_link_text(user_id, bot_username: str = "", lang: str = "vi") -> str:
     link = referral_link_for_user(user_id, bot_username or BOT_USERNAME)
     return (
-        "🎁 <b>Link giới thiệu TOAN AAS của bạn:</b>\n"
+        f"{ui_text(lang, 'account.ref_link_title')}\n"
         f"<code>{html.escape(link)}</code>\n\n"
-        "Bạn có thể gửi link này cho bạn bè/khách hàng. Khi họ đăng ký hoặc nạp Xu hợp lệ, "
-        "hệ thống sẽ ghi nhận theo chính sách giới thiệu hiện hành.\n\n"
-        "Ghi nhận giới thiệu trước, chính sách thưởng có thể cấu hình sau."
+        f"{ui_text(lang, 'account.ref_link_body')}"
     )
 
 def referral_account_policy_text(user_id) -> str:
@@ -32253,7 +32386,7 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "main_profile":
         return menu_text_main_profile_i18n(user_id or "__customer__", lang), main_profile_keyboard(lang)
     if action == "profile_ref_link":
-        return referral_account_link_text(user_id or "__customer__", BOT_USERNAME), main_profile_keyboard(lang)
+        return referral_account_link_text(user_id or "__customer__", BOT_USERNAME, lang), main_profile_keyboard(lang)
     if action == "profile_ref_policy":
         return referral_account_policy_text(user_id or "__customer__"), main_profile_keyboard(lang)
     if action == "profile_ref_stats":
@@ -43754,7 +43887,32 @@ def creative_motion_topic_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="motion|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
 
-def creative_motion_topic_label(kind: str) -> str:
+def creative_motion_topic_label(kind: str, lang: str = "vi") -> str:
+    key = str(kind or "product")
+    if normalize_user_language(lang) == "zh":
+        labels = {
+            "product": "产品/广告视频",
+            "affiliate": "affiliate / TikTok Shop 视频",
+            "ai_tool": "AI 工具/软件介绍视频",
+            "place": "地产/地点/空间视频",
+            "fashion": "时尚/模特/lifestyle 视频",
+            "food": "美食/餐厅/饮品视频",
+            "education": "教育/教程视频",
+            "story": "电影感故事视频",
+        }
+        return labels.get(key, labels["product"])
+    if normalize_user_language(lang) != "vi":
+        labels = {
+            "product": "product / sales ad video",
+            "affiliate": "affiliate / TikTok Shop video",
+            "ai_tool": "AI tool / software intro video",
+            "place": "real estate / place / space video",
+            "fashion": "fashion / model / lifestyle video",
+            "food": "food / restaurant / drink video",
+            "education": "education / tutorial video",
+            "story": "cinematic story video",
+        }
+        return labels.get(key, labels["product"])
     labels = {
         "product": "video sản phẩm / quảng cáo bán hàng",
         "affiliate": "video affiliate / TikTok Shop",
@@ -43765,7 +43923,7 @@ def creative_motion_topic_label(kind: str) -> str:
         "education": "video giáo dục / hướng dẫn / tutorial",
         "story": "story cinematic / kể chuyện cảm xúc",
     }
-    return labels.get(str(kind or ""), "video sản phẩm / quảng cáo bán hàng")
+    return labels.get(key, labels["product"])
 
 def creative_motion_style_text(topic: str, lang: str = "vi") -> str:
     safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500] or "video quảng cáo sản phẩm"
@@ -43774,22 +43932,45 @@ def creative_motion_style_text(topic: str, lang: str = "vi") -> str:
 def creative_motion_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎬 Cinematic", callback_data="motion|style|cinematic"),
-            InlineKeyboardButton("📱 TikTok/Reels nhanh", callback_data="motion|style|tiktok"),
+            InlineKeyboardButton(ui_text(lang, "motion.style.cinematic"), callback_data="motion|style|cinematic"),
+            InlineKeyboardButton(ui_text(lang, "motion.style.tiktok"), callback_data="motion|style|tiktok"),
         ],
         [
-            InlineKeyboardButton("🧑‍🏫 Tutorial hướng dẫn", callback_data="motion|style|tutorial"),
-            InlineKeyboardButton("🛒 Quảng cáo bán hàng", callback_data="motion|style|ads"),
+            InlineKeyboardButton(ui_text(lang, "motion.style.tutorial"), callback_data="motion|style|tutorial"),
+            InlineKeyboardButton(ui_text(lang, "motion.style.ads"), callback_data="motion|style|ads"),
         ],
         [
-            InlineKeyboardButton("🚁 FPV/drone motion", callback_data="motion|style|fpv"),
-            InlineKeyboardButton("🧊 3D/product reveal", callback_data="motion|style|reveal"),
+            InlineKeyboardButton(ui_text(lang, "motion.style.fpv"), callback_data="motion|style|fpv"),
+            InlineKeyboardButton(ui_text(lang, "motion.style.reveal"), callback_data="motion|style|reveal"),
         ],
-        [InlineKeyboardButton("😄 UGC đời thường", callback_data="motion|style|ugc")],
+        [InlineKeyboardButton(ui_text(lang, "motion.style.ugc"), callback_data="motion|style|ugc")],
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="motion|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
 
-def creative_motion_style_label(style: str) -> str:
+def creative_motion_style_label(style: str, lang: str = "vi") -> str:
+    key = str(style or "cinematic")
+    if normalize_user_language(lang) == "zh":
+        labels = {
+            "cinematic": "cinematic",
+            "tiktok": "快节奏 TikTok/Reels",
+            "tutorial": "教程",
+            "ads": "销售广告",
+            "fpv": "FPV/drone motion",
+            "reveal": "3D/product reveal",
+            "ugc": "日常 UGC",
+        }
+        return labels.get(key, labels["cinematic"])
+    if normalize_user_language(lang) != "vi":
+        labels = {
+            "cinematic": "cinematic",
+            "tiktok": "fast TikTok/Reels",
+            "tutorial": "tutorial",
+            "ads": "sales ad",
+            "fpv": "FPV/drone motion",
+            "reveal": "3D/product reveal",
+            "ugc": "everyday UGC",
+        }
+        return labels.get(key, labels["cinematic"])
     labels = {
         "cinematic": "cinematic",
         "tiktok": "TikTok/Reels nhanh",
@@ -43799,11 +43980,11 @@ def creative_motion_style_label(style: str) -> str:
         "reveal": "3D/product reveal",
         "ugc": "UGC đời thường",
     }
-    return labels.get(str(style or ""), "cinematic")
+    return labels.get(key, labels["cinematic"])
 
 def creative_motion_guide_text(topic: str, style: str = "cinematic", lang: str = "vi") -> str:
     safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500] or "video quảng cáo sản phẩm"
-    style_label = creative_motion_style_label(style)
+    style_label = creative_motion_style_label(style, lang)
     if normalize_user_language(lang) == "zh":
         return (
             "🎥 <b>TOAN AAS 视频运动建议</b>\n\n"
@@ -43925,7 +44106,7 @@ async def handle_creative_motion_callback(update: Update, context: ContextTypes.
                 ui_text(lang, "motion.ask_topic", cost_line=html.escape(ui_text(lang, "common.no_api_no_charge"))),
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="motion|cancel")]]),
             )
-        topic = creative_motion_topic_label(value)
+        topic = creative_motion_topic_label(value, lang)
         set_creative_motion_pending(uid, "style", topic)
         return await safe_edit_query_message(query, creative_motion_style_text(topic, lang), reply_markup=creative_motion_style_keyboard(lang))
     if action == "style":
@@ -43975,12 +44156,13 @@ LAST_CINEMATIC_AD_CONCEPTS: dict[str, dict] = {}
 def cinematic_ad_pending_key(user_id) -> str:
     return f"cinematic_ad_concept:{user_id}"
 
-def set_cinematic_ad_pending(user_id, step: str = "product", product: str = "", message: str = "") -> None:
+def set_cinematic_ad_pending(user_id, step: str = "product", product: str = "", message: str = "", style: str = "cinematic") -> None:
     USER_PENDING[cinematic_ad_pending_key(user_id)] = {
         "pending_action": "cinematic_ad_concept",
         "step": str(step or "product"),
         "product": str(product or "")[:500],
         "message": str(message or "")[:500],
+        "style": str(style or "cinematic")[:80],
         "created_at_ts": time.time(),
     }
 
@@ -44018,6 +44200,7 @@ def save_cinematic_ad_concept(user_id, product: str, message: str, style: str = 
         "style": str(style or "cinematic")[:80],
         "topic": cinematic_ad_concept_topic(product, message, style, lang),
         "lang": normalize_user_language(lang) or "vi",
+        "locked": False,
         "created_at_ts": time.time(),
     }
     LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(user_id)] = concept
@@ -44033,55 +44216,137 @@ def get_latest_cinematic_ad_concept(user_id) -> dict | None:
         return None
     return concept
 
+def lock_latest_cinematic_ad_concept(user_id) -> dict | None:
+    concept = get_latest_cinematic_ad_concept(user_id)
+    if not concept:
+        return None
+    concept["locked"] = True
+    concept["locked_at_ts"] = time.time()
+    LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(user_id)] = concept
+    return concept
+
+def cinematic_ad_concept_input(concept: dict, lang: str = "vi") -> tuple[str, str, str, str]:
+    product = str(concept.get("product") or "").strip() or ("产品/服务" if normalize_user_language(lang) == "zh" else ("product/service" if normalize_user_language(lang) != "vi" else "sản phẩm/dịch vụ"))
+    message = str(concept.get("message") or "").strip() or ("品牌信息" if normalize_user_language(lang) == "zh" else ("brand message" if normalize_user_language(lang) != "vi" else "thông điệp thương hiệu"))
+    style = str(concept.get("style") or "cinematic").strip() or "cinematic"
+    topic = str(concept.get("topic") or "").strip() or cinematic_ad_concept_topic(product, message, style, lang)
+    return product, message, style, topic
+
 def cinematic_ad_missing_latest_text(lang: str = "vi") -> str:
     return ui_text(lang, "concept_ad.missing_latest")
 
 def cinematic_ad_continuation_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "concept_ad.continue"), callback_data="adconcept|continue")],
-        [InlineKeyboardButton(ui_text(lang, "concept_ad.motion_current"), callback_data="adconcept|motion_current")],
-        [InlineKeyboardButton(ui_text(lang, "concept_ad.trend_current"), callback_data="adconcept|trend_current")],
-        [InlineKeyboardButton(ui_text(lang, "concept_ad.video_current"), callback_data="adconcept|video_current")],
-        [InlineKeyboardButton(ui_text(lang, "concept_ad.again"), callback_data="adconcept|start")],
+        [InlineKeyboardButton(ui_text(lang, "concept.lock"), callback_data="adconcept|lock")],
+        [InlineKeyboardButton(ui_text(lang, "concept.motion_from_current"), callback_data="adconcept|motion_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.image_prompt_from_current"), callback_data="adconcept|image_prompt_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.video_prompt_from_current"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.create_image_from_current"), callback_data="adconcept|create_image_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.create_video_from_current"), callback_data="adconcept|create_video_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.workflow_from_current"), callback_data="adconcept|workflow_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.create_another"), callback_data="adconcept|new")],
+        [InlineKeyboardButton(ui_text(lang, "concept.edit_current"), callback_data="adconcept|edit_current")],
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
     ])
 
+def cinematic_ad_locked_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "concept.motion_from_current"), callback_data="adconcept|motion_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.image_prompt_from_current"), callback_data="adconcept|image_prompt_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.video_prompt_from_current"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.create_image_from_current"), callback_data="adconcept|create_image_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.create_video_from_current"), callback_data="adconcept|create_video_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.music_from_current"), callback_data="adconcept|music_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.workflow_from_current"), callback_data="adconcept|workflow_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.create_another"), callback_data="adconcept|new")],
+        [InlineKeyboardButton(ui_text(lang, "concept.edit_current"), callback_data="adconcept|edit_current")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
+    ])
+
+def cinematic_ad_motion_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "motion.use_this"), callback_data="adconcept|use_motion_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.video_prompt_from_current"), callback_data="adconcept|video_prompt_from_motion")],
+        [InlineKeyboardButton(ui_text(lang, "concept.image_prompt_from_current"), callback_data="adconcept|image_prompt_from_motion")],
+        [InlineKeyboardButton(ui_text(lang, "motion.create_another"), callback_data="adconcept|motion_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
+        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
+    ])
+
+def cinematic_ad_image_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "concept.image_prompt_1"), callback_data="adconcept|image_ai|1")],
+        [InlineKeyboardButton(ui_text(lang, "concept.image_prompt_2"), callback_data="adconcept|image_ai|2")],
+        [InlineKeyboardButton(ui_text(lang, "concept.edit_current"), callback_data="adconcept|edit_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
+        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
+    ])
+
+def cinematic_ad_video_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "concept.video_from_prompt"), callback_data="adconcept|create_video_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.motion_from_current"), callback_data="adconcept|motion_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.edit_current"), callback_data="adconcept|edit_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
+        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
+    ])
+
+def cinematic_ad_video_off_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "concept.video_prompt_view"), callback_data="adconcept|video_prompt_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.motion_view"), callback_data="adconcept|motion_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.music_from_current"), callback_data="adconcept|music_current")],
+        [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
+        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
+    ])
+
+def cinematic_ad_image_tier_keyboard(prompt_index: int = 1, lang: str = "vi") -> InlineKeyboardMarkup:
+    idx = max(1, min(5, int(prompt_index or 1)))
+    rows = []
+    for tier in ["low", "standard", "high"]:
+        payload = image_tier_payload(tier)
+        state = "" if payload.get("enabled") else ui_text(lang, "image.tier_disabled")
+        rows.append([InlineKeyboardButton(
+            f"{localized_image_tier_label(tier, lang)} — {int(payload.get('cost') or 0)} Xu{state}",
+            callback_data=f"adconcept|image_ai_tier|{idx}|{tier}",
+        )])
+    rows.append([InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel")])
+    return InlineKeyboardMarkup(rows)
+
 def cinematic_ad_continue_text(concept: dict, lang: str = "vi") -> str:
-    product = concept.get("product") or ("产品/服务" if normalize_user_language(lang) == "zh" else ("product/service" if normalize_user_language(lang) != "vi" else "sản phẩm/dịch vụ"))
-    message = concept.get("message") or ("品牌信息" if normalize_user_language(lang) == "zh" else ("brand message" if normalize_user_language(lang) != "vi" else "thông điệp thương hiệu"))
-    style_label = cinematic_ad_style_label(concept.get("style") or "cinematic", lang)
+    product, message, style, _topic = cinematic_ad_concept_input(concept, lang)
+    style_label = cinematic_ad_style_label(style, lang)
     if normalize_user_language(lang) == "zh":
         return (
-            "✅ <b>已确认电影感广告 concept</b>\n\n"
+            f"{ui_text(lang, 'concept.locked_title')}\n\n"
             f"• 产品/服务: <b>{html.escape(product)}</b>\n"
             f"• 信息: <b>{html.escape(message)}</b>\n"
             f"• 风格: <b>{html.escape(style_label)}</b>\n\n"
-            "你想基于这个 concept 继续做什么？\n"
+            f"{ui_text(lang, 'concept.next_question')}\n"
             "Bot 会复用当前 concept，不需要你重新输入。"
         )
     if normalize_user_language(lang) != "vi":
         return (
-            "✅ <b>Cinematic ad concept locked</b>\n\n"
+            f"{ui_text(lang, 'concept.locked_title')}\n\n"
             f"• Product/service: <b>{html.escape(product)}</b>\n"
             f"• Message: <b>{html.escape(message)}</b>\n"
             f"• Style: <b>{html.escape(style_label)}</b>\n\n"
-            "What would you like to do next from this concept?\n"
+            f"{ui_text(lang, 'concept.next_question')}\n"
             "The bot will reuse the current concept data, so you do not need to enter it again."
         )
     return (
-        "✅ <b>Đã chốt concept quảng cáo cinematic</b>\n\n"
+        f"{ui_text(lang, 'concept.locked_title')}\n\n"
         f"• Sản phẩm/dịch vụ: <b>{html.escape(product)}</b>\n"
         f"• Thông điệp: <b>{html.escape(message)}</b>\n"
         f"• Phong cách: <b>{html.escape(style_label)}</b>\n\n"
-        "Bạn muốn đi tiếp từ concept này theo hướng nào?\n"
+        f"{ui_text(lang, 'concept.next_question')}\n"
         "Bot sẽ dùng lại dữ liệu concept hiện tại, không bắt bạn nhập lại từ đầu."
     )
 
 def cinematic_ad_video_from_concept_text(concept: dict, lang: str = "vi") -> str:
-    product = concept.get("product") or ("产品/服务" if normalize_user_language(lang) == "zh" else ("product/service" if normalize_user_language(lang) != "vi" else "sản phẩm/dịch vụ"))
-    message = concept.get("message") or ("品牌信息" if normalize_user_language(lang) == "zh" else ("brand message" if normalize_user_language(lang) != "vi" else "thông điệp thương hiệu"))
-    style_label = cinematic_ad_style_label(concept.get("style") or "cinematic", lang)
-    topic = concept.get("topic") or cinematic_ad_concept_topic(product, message, style_label)
+    product, message, style, topic = cinematic_ad_concept_input(concept, lang)
+    style_label = cinematic_ad_style_label(style, lang)
     if normalize_user_language(lang) == "zh":
         return (
             "🖼➡️🎞 <b>从这个 concept 生成视频</b>\n\n"
@@ -44117,6 +44382,145 @@ def cinematic_ad_video_from_concept_text(concept: dict, lang: str = "vi") -> str
         f"<code>Animate this concept into a short {html.escape(style_label)} ad for {html.escape(product)}. "
         "Use smooth cinematic camera motion, emotional reveal, clean product focus, stable subject, CTA frame, no watermark, no extra text.</code>\n\n"
         "Khi public video được mở sau này, flow tạo video thật sẽ đi qua kiểm tra Xu, xác nhận và refund guard."
+    )
+
+def cinematic_ad_image_prompt_for_index(concept: dict, index: int = 1, lang: str = "vi") -> str:
+    product, message, style, _topic = cinematic_ad_concept_input(concept, lang)
+    style_label = cinematic_ad_style_label(style, lang)
+    idx = max(1, min(5, int(index or 1)))
+    base = {
+        1: "vertical 9:16 cinematic opening keyframe",
+        2: "premium product hero shot",
+        3: "lifestyle scene with natural human context",
+        4: "emotional cinematic close-up",
+        5: "clean CTA final frame",
+    }.get(idx, "vertical 9:16 cinematic keyframe")
+    return (
+        f"{base} for {product}, message: {message}, style: {style_label}, "
+        "professional commercial lighting, clear subject, brand-safe composition, high quality, no watermark, no extra text. "
+        "Negative prompt: blur, distortion, deformed hands, extra text, watermark, logo artifacts, low quality."
+    )
+
+def cinematic_ad_motion_from_concept_text(concept: dict, lang: str = "vi") -> str:
+    product, message, style, topic = cinematic_ad_concept_input(concept, lang)
+    style_label = cinematic_ad_style_label(style, lang)
+    if normalize_user_language(lang) == "zh":
+        return (
+            f"{ui_text(lang, 'motion.from_concept_title')}\n\n"
+            f"Concept: <b>{html.escape(topic)}</b>\n"
+            f"Style: <b>{html.escape(style_label)}</b>\n"
+            "Bot 只生成 motion guide，不调用真实视频 API，也未扣除 Xu。\n\n"
+            f"<b>A. {ui_text(lang, 'motion.timeline')}</b>\n"
+            "0-3s: slow push-in 打开情绪 hook。\n3-6s: 产品/问题 reveal。\n6-10s: orbit 或 dolly 展示转折。\n10-15s: hero shot + soft CTA。\n\n"
+            f"<b>B. {ui_text(lang, 'motion.camera_motion')}</b>\n"
+            "slow push-in, orbit, dolly-in, match cut, close-up reveal, clean CTA hold.\n\n"
+            "<b>C. Transition</b>\nmatch cut, before/after swipe, light flare reveal, whip pan.\n\n"
+            "<b>D. Shot list</b>\nclose-up product, wide lifestyle shot, over-the-shoulder usage, orbit hero reveal, final CTA frame.\n\n"
+            "<b>E. Prompt video motion</b>\n"
+            f"<code>Animate a short {html.escape(style_label)} commercial for {html.escape(product)} about {html.escape(message)}. Smooth cinematic camera movement, stable subject, emotional reveal, clean lighting, no watermark, no extra text.</code>\n\n"
+            "<b>F. Music / mood</b>\npiano cinematic, ambient luxury, emotional strings, electronic future."
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"{ui_text(lang, 'motion.from_concept_title')}\n\n"
+            f"Concept: <b>{html.escape(topic)}</b>\n"
+            f"Style: <b>{html.escape(style_label)}</b>\n"
+            "The bot only creates a motion guide. It does not call the video API and has not charged Xu.\n\n"
+            f"<b>A. {ui_text(lang, 'motion.timeline')}</b>\n"
+            "0-3s: slow push-in to open the emotional hook.\n3-6s: product/problem reveal.\n6-10s: orbit or dolly to show the turning point.\n10-15s: hero shot + soft CTA.\n\n"
+            f"<b>B. {ui_text(lang, 'motion.camera_motion')}</b>\n"
+            "slow push-in, orbit, dolly-in, match cut, close-up reveal, clean CTA hold.\n\n"
+            "<b>C. Transition</b>\nmatch cut, before/after swipe, light flare reveal, whip pan.\n\n"
+            "<b>D. Shot list</b>\nclose-up product, wide lifestyle shot, over-the-shoulder usage, orbit hero reveal, final CTA frame.\n\n"
+            "<b>E. Video motion prompt</b>\n"
+            f"<code>Animate a short {html.escape(style_label)} commercial for {html.escape(product)} about {html.escape(message)}. Smooth cinematic camera movement, stable subject, emotional reveal, clean lighting, no watermark, no extra text.</code>\n\n"
+            "<b>F. Music / mood</b>\npiano cinematic, ambient luxury, emotional strings, electronic future."
+        )
+    return (
+        f"{ui_text(lang, 'motion.from_concept_title')}\n\n"
+        f"Concept: <b>{html.escape(topic)}</b>\n"
+        f"Phong cách: <b>{html.escape(style_label)}</b>\n"
+        "Bot chỉ tạo motion guide, không gọi API video thật và chưa trừ Xu.\n\n"
+        f"<b>A. {ui_text(lang, 'motion.timeline')}</b>\n"
+        "0-3s: slow push-in mở hook cảm xúc.\n3-6s: reveal sản phẩm/vấn đề.\n6-10s: orbit hoặc dolly để tạo điểm chuyển.\n10-15s: hero shot + CTA mềm.\n\n"
+        f"<b>B. {ui_text(lang, 'motion.camera_motion')}</b>\n"
+        "slow push-in, orbit, dolly-in, match cut, close-up reveal, clean CTA hold.\n\n"
+        "<b>C. Transition</b>\nmatch cut, before/after swipe, light flare reveal, whip pan.\n\n"
+        "<b>D. Shot list</b>\nclose-up sản phẩm, wide shot bối cảnh, over-the-shoulder khi sử dụng, orbit hero reveal, final CTA frame.\n\n"
+        "<b>E. Prompt video motion</b>\n"
+        f"<code>Animate a short {html.escape(style_label)} commercial for {html.escape(product)} about {html.escape(message)}. Smooth cinematic camera movement, stable subject, emotional reveal, clean lighting, no watermark, no extra text.</code>\n\n"
+        "<b>F. Gợi ý nhạc/mood</b>\npiano cinematic, ambient luxury, emotional strings, electronic future."
+    )
+
+def cinematic_ad_image_prompts_from_concept_text(concept: dict, lang: str = "vi") -> str:
+    product, message, style, topic = cinematic_ad_concept_input(concept, lang)
+    if normalize_user_language(lang) == "zh":
+        title = "🖼 <b>基于此 concept 的图片 prompt</b>"
+        note = "Bot 只准备 prompt。选择 prompt 后仍会进入图片档位和确认扣费流程。"
+    elif normalize_user_language(lang) != "vi":
+        title = "🖼 <b>Image prompts from this concept</b>"
+        note = "The bot only prepares prompts. Choosing a prompt still goes through image tier selection and confirmation."
+    else:
+        title = "🖼 <b>Prompt ảnh từ concept này</b>"
+        note = "Bot chỉ chuẩn bị prompt. Khi chọn prompt để tạo ảnh, bot vẫn đi qua chọn tier và xác nhận giá."
+    prompts = [cinematic_ad_image_prompt_for_index(concept, i, lang) for i in range(1, 6)]
+    lines = [title, "", f"Concept: <b>{html.escape(topic)}</b>", note, ""]
+    labels = ["vertical 9:16", "product shot", "hero shot", "lifestyle shot", "cinematic shot"]
+    for idx, prompt in enumerate(prompts, start=1):
+        lines.append(f"<b>{idx}. {html.escape(labels[idx-1])}</b>\n<code>{html.escape(prompt)}</code>")
+    return "\n\n".join(lines)
+
+def cinematic_ad_video_prompt_from_concept_text(concept: dict, lang: str = "vi") -> str:
+    product, message, style, topic = cinematic_ad_concept_input(concept, lang)
+    style_label = cinematic_ad_style_label(style, lang)
+    prompt_5 = f"5s {style_label} ad for {product}: hook reveal, product close-up, clean CTA, message {message}, no watermark, no extra text."
+    prompt_10 = f"10s {style_label} ad for {product}: slow push-in, problem reveal, orbit product hero, lifestyle proof, CTA frame, message {message}."
+    prompt_15 = f"15s {style_label} commercial for {product}: 0-3s hook, 3-6s problem, 6-10s product transformation, 10-13s proof, 13-15s CTA, stable subject, clean lighting."
+    if normalize_user_language(lang) == "zh":
+        title = "🎞 <b>基于此 concept 的视频 prompt</b>"
+        note = ui_text(lang, "video.public_off_prompt_only") if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED else "Public video 已开启时仍需走档位/确认/退款 guard。"
+    elif normalize_user_language(lang) != "vi":
+        title = "🎞 <b>Video prompt from this concept</b>"
+        note = ui_text(lang, "video.public_off_prompt_only") if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED else "When public video is enabled, it still goes through tier selection, confirmation and refund guard."
+    else:
+        title = "🎞 <b>Prompt video từ concept này</b>"
+        note = ui_text(lang, "video.public_off_prompt_only") if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED else "Khi public video được bật, flow vẫn đi qua chọn tier, xác nhận và refund guard."
+    return (
+        f"{title}\n\n"
+        f"Concept: <b>{html.escape(topic)}</b>\n"
+        f"{html.escape(note)}\n\n"
+        f"<b>Prompt 5s</b>\n<code>{html.escape(prompt_5)}</code>\n\n"
+        f"<b>Prompt 10s</b>\n<code>{html.escape(prompt_10)}</code>\n\n"
+        f"<b>Prompt 15s</b>\n<code>{html.escape(prompt_15)}</code>\n\n"
+        "<b>Motion direction</b>\nslow push-in, orbit hero reveal, match cut, CTA hold.\n\n"
+        "<b>Negative prompt</b>\nblur, flicker, distorted face, broken text, watermark, logo artifacts, low quality."
+    )
+
+def cinematic_ad_music_from_concept_text(concept: dict, lang: str = "vi") -> str:
+    _product, _message, style, topic = cinematic_ad_concept_input(concept, lang)
+    style_label = cinematic_ad_style_label(style, lang)
+    if normalize_user_language(lang) == "zh":
+        return (
+            "🎵 <b>适合此 concept 的音乐建议</b>\n\n"
+            f"Concept: <b>{html.escape(topic)}</b>\n"
+            f"Style: <b>{html.escape(style_label)}</b>\n\n"
+            "• piano cinematic\n• ambient luxury\n• emotional strings\n• electronic future\n• upbeat viral\n\n"
+            "可用 /music_library 或 /sfx_library 查找可试听素材。商业使用前请检查 license。Bot 未扣除 Xu。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎵 <b>Music suggestion for this concept</b>\n\n"
+            f"Concept: <b>{html.escape(topic)}</b>\n"
+            f"Style: <b>{html.escape(style_label)}</b>\n\n"
+            "• piano cinematic\n• ambient luxury\n• emotional strings\n• electronic future\n• upbeat viral\n\n"
+            "Use /music_library or /sfx_library to find preview assets. Check the license before commercial use. The bot has not charged Xu."
+        )
+    return (
+        "🎵 <b>Gợi ý nhạc phù hợp cho concept này</b>\n\n"
+        f"Concept: <b>{html.escape(topic)}</b>\n"
+        f"Phong cách: <b>{html.escape(style_label)}</b>\n\n"
+        "• piano cinematic\n• ambient luxury\n• emotional strings\n• electronic future\n• upbeat viral\n\n"
+        "Dùng /music_library hoặc /sfx_library để tìm nhạc/SFX nghe thử. Kiểm tra license trước khi dùng thương mại. Bot chưa trừ Xu."
     )
 
 def cinematic_ad_product_text(lang: str = "vi") -> str:
@@ -44430,9 +44834,9 @@ async def send_or_confirm_trend_video_flow_from_callback(query, uid: int, topic:
     if TREND_WORKFLOW_REQUIRE_CONFIRM:
         set_trend_workflow_confirm_pending(uid, topic, workflow)
         await query.edit_message_text(
-            trend_workflow_content_confirm_text(topic, int(credits or 0)),
+            trend_workflow_content_confirm_text(topic, int(credits or 0), lang),
             parse_mode="HTML",
-            reply_markup=trend_workflow_content_confirm_keyboard(),
+            reply_markup=trend_workflow_content_confirm_keyboard(lang),
         )
         return
     if normalize_user_language(lang) == "zh":
@@ -44453,6 +44857,7 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
     parts = data.split("|")
     action = parts[1] if len(parts) >= 2 else "start"
     value = parts[2] if len(parts) >= 3 else ""
+    extra = parts[3] if len(parts) >= 4 else ""
     lang = user_ui_lang(uid)
 
     if action == "cancel":
@@ -44470,39 +44875,122 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
             ui_text(lang, "common.open_main_menu"),
             reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang),
         )
-    if action == "start":
+    if action in {"start", "new"}:
         clear_media_creator_pending_states(uid)
+        if action == "new":
+            LAST_CINEMATIC_AD_CONCEPTS.pop(cinematic_ad_latest_key(uid), None)
         set_cinematic_ad_pending(uid, "product")
         return await safe_edit_query_message(query, cinematic_ad_product_text(lang), reply_markup=cinematic_ad_product_keyboard(lang))
-    if action in {"continue", "motion_current", "trend_current", "video_current"}:
+    if action in {
+        "continue", "lock", "back_locked", "motion_current", "use_motion_current",
+        "image_prompt_current", "image_prompt_from_motion", "video_prompt_current", "video_prompt_from_motion",
+        "create_image_current", "create_video_current", "video_current", "trend_current", "workflow_current",
+        "music_current", "edit_current", "image_ai", "image_ai_tier",
+    }:
         concept = get_latest_cinematic_ad_concept(uid)
         if not concept:
             return await safe_edit_query_message(
                 query,
-                cinematic_ad_missing_latest_text(lang),
+                ui_text(lang, "concept.current_missing"),
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton(ui_text(lang, "concept_ad.new"), callback_data="adconcept|start")],
                     [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
                 ]),
             )
-        if action == "continue":
-            return await safe_edit_query_message(query, cinematic_ad_continue_text(concept, lang), reply_markup=cinematic_ad_continuation_keyboard(lang))
+        if action in {"continue", "lock", "back_locked"}:
+            concept = lock_latest_cinematic_ad_concept(uid) or concept
+            return await safe_edit_query_message(query, cinematic_ad_continue_text(concept, lang), reply_markup=cinematic_ad_locked_keyboard(lang))
         if action == "motion_current":
-            topic = concept.get("topic") or cinematic_ad_concept_topic(concept.get("product"), concept.get("message"), concept.get("style"), lang)
             return await safe_edit_query_message(
                 query,
-                creative_motion_guide_text(topic, concept.get("style") or "cinematic", lang),
+                cinematic_ad_motion_from_concept_text(concept, lang),
+                reply_markup=cinematic_ad_motion_keyboard(lang),
+            )
+        if action == "use_motion_current":
+            return await safe_edit_query_message(query, ui_text(lang, "concept.saved_motion"), reply_markup=cinematic_ad_locked_keyboard(lang))
+        if action in {"image_prompt_current", "image_prompt_from_motion", "create_image_current"}:
+            return await safe_edit_query_message(
+                query,
+                cinematic_ad_image_prompts_from_concept_text(concept, lang),
+                reply_markup=cinematic_ad_image_prompt_keyboard(lang),
+            )
+        if action in {"video_prompt_current", "video_prompt_from_motion"}:
+            return await safe_edit_query_message(
+                query,
+                cinematic_ad_video_prompt_from_concept_text(concept, lang),
+                reply_markup=cinematic_ad_video_prompt_keyboard(lang),
+            )
+        if action in {"trend_current", "workflow_current"}:
+            _product, _message, _style, topic = cinematic_ad_concept_input(concept, lang)
+            return await send_or_confirm_trend_video_flow_from_callback(query, uid, topic)
+        if action in {"video_current", "create_video_current"}:
+            return await safe_edit_query_message(
+                query,
+                cinematic_ad_video_from_concept_text(concept, lang),
+                reply_markup=cinematic_ad_video_off_keyboard(lang),
+            )
+        if action == "music_current":
+            return await safe_edit_query_message(query, cinematic_ad_music_from_concept_text(concept, lang), reply_markup=cinematic_ad_locked_keyboard(lang))
+        if action == "edit_current":
+            product, message, style, _topic = cinematic_ad_concept_input(concept, lang)
+            set_cinematic_ad_pending(uid, "edit", product, message, style)
+            return await safe_edit_query_message(
+                query,
+                ui_text(lang, "concept.edit_prompt"),
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(ui_text(lang, "concept_ad.continue"), callback_data="adconcept|continue")],
-                    [InlineKeyboardButton(ui_text(lang, "concept_ad.trend_current"), callback_data="adconcept|trend_current")],
-                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
+                    [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
+                    [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
                 ]),
             )
-        if action == "trend_current":
-            topic = concept.get("topic") or cinematic_ad_concept_topic(concept.get("product"), concept.get("message"), concept.get("style"), lang)
-            return await send_or_confirm_trend_video_flow_from_callback(query, uid, topic)
-        if action == "video_current":
-            return await safe_edit_query_message(query, cinematic_ad_video_from_concept_text(concept, lang), reply_markup=cinematic_ad_continuation_keyboard(lang))
+        if action == "image_ai":
+            prompt_index = safe_int(value, 1)
+            if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
+                return await safe_edit_query_message(query, ui_text(lang, "media.public_off"))
+            if shopaikey_active_job_for_user(uid, "image"):
+                return await safe_edit_query_message(query, ui_text(lang, "media.job_lock"))
+            return await safe_edit_query_message(
+                query,
+                public_image_tier_selection_text(lang),
+                parse_mode="HTML",
+                reply_markup=cinematic_ad_image_tier_keyboard(prompt_index, lang),
+            )
+        if action == "image_ai_tier":
+            prompt_index = safe_int(value, 1)
+            tier = normalize_image_tier(extra or SHOPAIKEY_IMAGE_DEFAULT_TIER)
+            payload = image_tier_payload(tier)
+            if not payload.get("enabled"):
+                return await safe_edit_query_message(query, ui_text(lang, "image.tier_disabled_message"))
+            if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
+                return await safe_edit_query_message(query, ui_text(lang, "media.public_off"))
+            if shopaikey_active_job_for_user(uid, "image"):
+                return await safe_edit_query_message(query, ui_text(lang, "media.job_lock"))
+            prompt = cinematic_ad_image_prompt_for_index(concept, prompt_index, lang)
+            credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Concept image user")
+            base_cost = int(payload.get("cost") or 0)
+            final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
+            if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+                return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
+            token = set_shopaikey_pending_confirmation(uid, {
+                "job_type": "image",
+                "prompt": image_tier_prompt_for_generation(prompt, tier),
+                "original_prompt": prompt,
+                "base_cost": base_cost,
+                "from_image": False,
+                "image_tier": tier,
+                "tier_label": payload.get("label") or tier,
+                "model": payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+                "source": "cinematic_ad_concept",
+            })
+            return await safe_edit_query_message(
+                query,
+                public_image_confirm_text(tier, prompt, int(credits or 0), lang),
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=f"shopai|confirm|{token}")],
+                    [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=f"shopai|cancel|{token}")],
+                    [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
+                ]),
+            )
     if action == "back":
         pending = get_cinematic_ad_pending(uid) or {}
         if value == "product":
@@ -44563,6 +45051,22 @@ async def handle_cinematic_ad_pending_text(update: Update, context: ContextTypes
         return True
     product = pending.get("product") or ("你的产品/服务" if normalize_user_language(lang) == "zh" else ("your product/service" if normalize_user_language(lang) != "vi" else "sản phẩm/dịch vụ của bạn"))
     message = pending.get("message") or ("品牌信息" if normalize_user_language(lang) == "zh" else ("brand message" if normalize_user_language(lang) != "vi" else "thông điệp thương hiệu"))
+    if step == "edit":
+        style = str(pending.get("style") or "cinematic").strip() or "cinematic"
+        if normalize_user_language(lang) == "zh":
+            revised_message = f"{message}; 修改方向: {text}"
+        elif normalize_user_language(lang) != "vi":
+            revised_message = f"{message}; edit direction: {text}"
+        else:
+            revised_message = f"{message}; chỉnh theo yêu cầu: {text}"
+        save_cinematic_ad_concept(uid, product, revised_message, style, lang)
+        clear_cinematic_ad_pending(uid)
+        await update.message.reply_text(
+            cinematic_ad_concept_text(product, revised_message, style, lang),
+            parse_mode="HTML",
+            reply_markup=cinematic_ad_continuation_keyboard(lang),
+        )
+        return True
     save_cinematic_ad_concept(uid, product, message, text, lang)
     clear_cinematic_ad_pending(uid)
     await update.message.reply_text(

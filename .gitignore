@@ -2,6 +2,7 @@
 *.env
 __pycache__/
 .pytest_cache/
+.pytest_tmp/
 *.py[cod]
 toandaas_system.db
 operator_uploads/

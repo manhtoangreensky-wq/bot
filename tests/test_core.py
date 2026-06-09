@@ -1427,7 +1427,16 @@ def test_public_flow_i18n_helpers_do_not_mix_vietnamese():
         bot.cinematic_ad_style_text("mini blender", "save time", "en"),
         bot.cinematic_ad_concept_text("mini blender", "save time", "cinematic", "en"),
         bot.cinematic_ad_continue_text({"product": "mini blender", "message": "save time", "style": "cinematic"}, "en"),
+        bot.cinematic_ad_motion_from_concept_text({"product": "mini blender", "message": "save time", "style": "cinematic"}, "en"),
+        bot.cinematic_ad_image_prompts_from_concept_text({"product": "mini blender", "message": "save time", "style": "cinematic"}, "en"),
+        bot.cinematic_ad_video_prompt_from_concept_text({"product": "mini blender", "message": "save time", "style": "cinematic"}, "en"),
+        bot.cinematic_ad_music_from_concept_text({"product": "mini blender", "message": "save time", "style": "cinematic"}, "en"),
         bot.cinematic_ad_video_from_concept_text({"product": "mini blender", "message": "save time", "style": "cinematic"}, "en"),
+        flatten_keyboard_text(bot.cinematic_ad_locked_keyboard("en")),
+        flatten_keyboard_text(bot.cinematic_ad_motion_keyboard("en")),
+        flatten_keyboard_text(bot.cinematic_ad_image_prompt_keyboard("en")),
+        flatten_keyboard_text(bot.cinematic_ad_video_prompt_keyboard("en")),
+        flatten_keyboard_text(bot.cinematic_ad_video_off_keyboard("en")),
         "\n".join(bot.trend_video_flow_sections_i18n("mini blender product review", "Xu: 0 Xu — no charge.", "en")),
         bot.trend_workflow_content_confirm_text("mini blender", 1000, "en"),
         flatten_keyboard_text(bot.trend_workflow_content_confirm_keyboard("en")),
@@ -1465,6 +1474,17 @@ def test_public_flow_i18n_helpers_do_not_mix_vietnamese():
         bot.cinematic_ad_message_text("迷你搅拌机", "zh"),
         bot.cinematic_ad_style_text("迷你搅拌机", "节省时间", "zh"),
         bot.cinematic_ad_concept_text("迷你搅拌机", "节省时间", "cinematic", "zh"),
+        bot.cinematic_ad_continue_text({"product": "迷你搅拌机", "message": "节省时间", "style": "cinematic"}, "zh"),
+        bot.cinematic_ad_motion_from_concept_text({"product": "迷你搅拌机", "message": "节省时间", "style": "cinematic"}, "zh"),
+        bot.cinematic_ad_image_prompts_from_concept_text({"product": "迷你搅拌机", "message": "节省时间", "style": "cinematic"}, "zh"),
+        bot.cinematic_ad_video_prompt_from_concept_text({"product": "迷你搅拌机", "message": "节省时间", "style": "cinematic"}, "zh"),
+        bot.cinematic_ad_music_from_concept_text({"product": "迷你搅拌机", "message": "节省时间", "style": "cinematic"}, "zh"),
+        bot.cinematic_ad_video_from_concept_text({"product": "迷你搅拌机", "message": "节省时间", "style": "cinematic"}, "zh"),
+        flatten_keyboard_text(bot.cinematic_ad_locked_keyboard("zh")),
+        flatten_keyboard_text(bot.cinematic_ad_motion_keyboard("zh")),
+        flatten_keyboard_text(bot.cinematic_ad_image_prompt_keyboard("zh")),
+        flatten_keyboard_text(bot.cinematic_ad_video_prompt_keyboard("zh")),
+        flatten_keyboard_text(bot.cinematic_ad_video_off_keyboard("zh")),
         "\n".join(bot.trend_video_flow_sections_i18n("迷你搅拌机产品广告", "Xu: 0 Xu — no charge.", "zh")),
         bot.trend_workflow_content_confirm_text("迷你搅拌机", 1000, "zh"),
         bot.trend_workflow_insufficient_credits_text(10, 70, "zh"),
@@ -1561,13 +1581,27 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "🖤 Đen trắng luxury" in style_buttons
     assert "🧊 3D/product reveal" in style_buttons
     continuation_buttons = [button.text for row in bot.cinematic_ad_continuation_keyboard().inline_keyboard for button in row]
-    assert "✅ Chốt concept / Tạo tiếp từ concept này" in continuation_buttons
-    assert "🎥 Gợi ý chuyển động từ concept này" in continuation_buttons
-    assert "🎬 Tạo video theo trend từ concept này" in continuation_buttons
-    assert "🖼➡️🎞 Tạo video từ concept này" in continuation_buttons
+    assert "✅ Hoàn tất / Chốt concept này" in continuation_buttons
+    assert "🎥 Tạo motion guide từ concept này" in continuation_buttons
+    assert "🖼 Tạo prompt ảnh từ concept này" in continuation_buttons
+    assert "🎞 Tạo prompt video từ concept này" in continuation_buttons
+    assert "🖼 Tạo ảnh từ concept này" in continuation_buttons
+    assert "🎬 Tạo video từ concept này" in continuation_buttons
+    assert "🎬 Tạo workflow đầy đủ từ concept này" in continuation_buttons
+    assert "🔁 Tạo concept khác" in continuation_buttons
+    assert "✍️ Sửa concept" in continuation_buttons
+    locked_buttons = [button.text for row in bot.cinematic_ad_locked_keyboard().inline_keyboard for button in row]
+    assert "🎵 Gợi ý nhạc phù hợp" in locked_buttons
+    assert "🔙 Quay lại concept đã chốt" in [button.text for row in bot.cinematic_ad_motion_keyboard().inline_keyboard for button in row]
+    assert "🖼 Tạo ảnh AI từ prompt 1" in [button.text for row in bot.cinematic_ad_image_prompt_keyboard().inline_keyboard for button in row]
+    assert "🎬 Tạo video từ prompt này" in [button.text for row in bot.cinematic_ad_video_prompt_keyboard().inline_keyboard for button in row]
     assert "adconcept|motion_current" in ad_source
-    assert "adconcept|trend_current" in ad_source
-    assert "adconcept|video_current" in ad_source
+    assert "adconcept|image_prompt_current" in ad_source
+    assert "adconcept|video_prompt_current" in ad_source
+    assert "adconcept|create_image_current" in ad_source
+    assert "adconcept|create_video_current" in ad_source
+    assert "adconcept|workflow_current" in ad_source
+    assert "adconcept|edit_current" in ad_source
     assert "send_or_confirm_trend_video_flow_from_callback" in ad_source
     ad_concept = bot.cinematic_ad_concept_text("máy xay sinh tố mini", "tiết kiệm thời gian", "cinematic").lower()
     assert "big idea" in ad_concept
@@ -1591,12 +1625,33 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     bot.set_cinematic_ad_pending("u_ad", "style", "máy xay sinh tố mini", "tiết kiệm thời gian")
     pending = bot.get_cinematic_ad_pending("u_ad")
     assert pending and pending["message"] == "tiết kiệm thời gian"
+    bot.set_cinematic_ad_pending("u_ad", "edit", "máy xay sinh tố mini", "tiết kiệm thời gian", "cinematic")
+    pending = bot.get_cinematic_ad_pending("u_ad")
+    assert pending and pending["style"] == "cinematic"
     assert bot.clear_cinematic_ad_pending("u_ad") is True
     concept = bot.save_cinematic_ad_concept("u_ad", "máy xay sinh tố mini", "tiết kiệm thời gian", "cinematic")
     latest = bot.get_latest_cinematic_ad_concept("u_ad")
     assert latest and latest["product"] == "máy xay sinh tố mini"
     assert "concept quảng cáo" in latest["topic"]
+    locked = bot.lock_latest_cinematic_ad_concept("u_ad")
+    assert locked and locked["locked"] is True
     assert "dùng lại dữ liệu concept hiện tại" in bot.cinematic_ad_continue_text(concept).lower()
+    motion_from_concept = bot.cinematic_ad_motion_from_concept_text(concept).lower()
+    assert "motion guide" in motion_from_concept
+    assert "timeline" in motion_from_concept
+    assert "camera motion" in motion_from_concept
+    assert "không gọi api video thật" in motion_from_concept
+    image_prompts = bot.cinematic_ad_image_prompts_from_concept_text(concept).lower()
+    assert "prompt ảnh từ concept này" in image_prompts
+    assert "1. vertical" in image_prompts
+    assert "2. product" in image_prompts
+    assert "negative prompt" in image_prompts
+    video_prompts = bot.cinematic_ad_video_prompt_from_concept_text(concept).lower()
+    assert "prompt 5s" in video_prompts
+    assert "tạo video thật đang thử nghiệm nội bộ" in video_prompts
+    music_suggestions = bot.cinematic_ad_music_from_concept_text(concept).lower()
+    assert "/music_library" in music_suggestions
+    assert "/sfx_library" in music_suggestions
     video_from_concept = bot.cinematic_ad_video_from_concept_text(concept).lower()
     assert "public video" in video_from_concept
     assert "off" in video_from_concept
