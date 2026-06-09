@@ -1264,6 +1264,36 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any(button.callback_data == "create_media|image_tier_low" for button in success_buttons)
     assert len(success_buttons) == 5
     assert not any(button.callback_data == "tvflow|music_image_123" for button in success_buttons)
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        warranty_job_id = bot.create_shopaikey_job(
+            "u_warranty",
+            "chat_warranty",
+            "image",
+            model="nano-banana",
+            prompt="warranty prompt",
+            status="IN_PROGRESS",
+            admin_only=False,
+            xu_cost_planned=250,
+            retry_warranty_count=1,
+        )
+        assert bot.image_job_retry_warranty_remaining(warranty_job_id) == 0
+        bot.update_shopaikey_job(job_id=warranty_job_id, status="SUCCESS")
+        assert bot.image_job_retry_warranty_remaining(warranty_job_id) == 1
+        warranty_buttons = [button for row in bot.public_image_success_keyboard(warranty_job_id, "standard_warranty").inline_keyboard for button in row]
+        assert any(button.callback_data == f"tvflow|image_warranty_retry_{warranty_job_id}" for button in warranty_buttons)
+        bot.update_shopaikey_job(job_id=warranty_job_id, retry_warranty_used=1)
+        assert bot.image_job_retry_warranty_remaining(warranty_job_id) == 0
+        exhausted_buttons = [button.text for row in bot.image_warranty_retry_exhausted_keyboard().inline_keyboard for button in row]
+        assert "🖼 Tạo ảnh mới theo bảng giá" in exhausted_buttons
+        assert "✍️ Sửa prompt ảnh" in exhausted_buttons
+        assert "Bạn đã dùng hết 1 lần tạo lại bảo hành" in bot.image_warranty_retry_exhausted_text()
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
     video_tier_text = bot.public_video_tier_selection_text()
     assert "Bạn muốn tạo video chất lượng nào" in video_tier_text
     video_tier_buttons = [button for row in bot.public_video_tier_keyboard().inline_keyboard for button in row]
@@ -1721,10 +1751,16 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "adconcept|concept_style_ugc" in style_callback_data
     assert "adconcept|concept_style_fpv" in style_callback_data
     assert "adconcept|concept_style_product_reveal" in style_callback_data
-    assert "adconcept|style|skip" in style_callback_data
+    assert "adconcept|concept_style_skip" in style_callback_data
+    assert "adconcept|style|skip" not in style_callback_data
     assert bot.normalize_cinematic_ad_style_code("luxury_bw") == "bw_luxury"
     assert bot.normalize_cinematic_ad_style_code("product_reveal") == "product_reveal"
+    assert bot.normalize_cinematic_ad_style_code("skip") == "direct_sales"
     assert bot.cinematic_ad_expired_session_text() == "⚠️ Phiên làm việc đã hết hạn. Vui lòng bắt đầu lại từ menu."
+    for style_code in ["cinematic", "bw_luxury", "viral", "direct_sales", "ugc", "fpv", "product_reveal"]:
+        concept_text = bot.cinematic_ad_concept_text("máy xay sinh tố mini", bot.cinematic_ad_default_message(), style_code)
+        assert len(concept_text) > 3900
+        assert all(len(chunk) <= 3600 for chunk in bot.split_telegram_html_text(concept_text))
     continuation_buttons = [button.text for row in bot.cinematic_ad_continuation_keyboard().inline_keyboard for button in row]
     assert "1️⃣ Chọn gợi ý 1" in continuation_buttons
     assert "2️⃣ Chọn gợi ý 2" in continuation_buttons
@@ -1776,6 +1812,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "adconcept|create_video_current" in ad_source
     assert "adconcept|edit_current" in ad_source
     assert "send_or_confirm_trend_video_flow_from_callback" in ad_source
+    assert "safe_edit_or_send_long_html" in source
     ad_concept = bot.cinematic_ad_concept_text("máy xay sinh tố mini", "tiết kiệm thời gian", "cinematic").lower()
     assert "big idea" in ad_concept
     assert "brand story" in ad_concept
@@ -2041,7 +2078,8 @@ def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
 def test_generation_waiting_duplicate_and_guidance_helpers():
     bot.GENERATION_PENDING_JOBS.clear()
     try:
-        assert "Đang tạo ảnh" in bot.get_generation_wait_text("image")
+        assert "TOAN AAS đang tạo ảnh" in bot.get_generation_wait_text("image")
+        assert "Vui lòng không bấm lại nhiều lần" in bot.get_generation_wait_text("image")
         assert "Đang tạo video" in bot.get_generation_wait_text("video")
         assert "Đang tạo giọng nói" in bot.get_generation_wait_text("tts")
         assert "Đang tìm trend" in bot.get_generation_wait_text("trend")

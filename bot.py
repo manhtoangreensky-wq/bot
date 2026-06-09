@@ -379,7 +379,7 @@ SHOPAIKEY_FREEZE_COOLDOWN_MINUTES = env_int("SHOPAIKEY_FREEZE_COOLDOWN_MINUTES",
 USER_BUSY_MESSAGE = _env("USER_BUSY_MESSAGE", "⏳ Tác vụ của bạn đang được xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 USER_PROVIDER_BUSY_MESSAGE = _env("USER_PROVIDER_BUSY_MESSAGE", "⚙️ Hệ thống AI đang bận. TOAN AAS đã ghi nhận, vui lòng thử lại sau ít phút.")
 USER_PROVIDER_MAINTENANCE_MESSAGE = _env("USER_PROVIDER_MAINTENANCE_MESSAGE", "🛠 Tính năng này đang được bảo trì ngắn để đảm bảo chất lượng. Vui lòng quay lại sau.")
-USER_WAIT_IMAGE_MESSAGE = _env("USER_WAIT_IMAGE_MESSAGE", "🖼 Đang tạo ảnh cho bạn, vui lòng chờ một chút. Không cần gửi lại lệnh.")
+USER_WAIT_IMAGE_MESSAGE = _env("USER_WAIT_IMAGE_MESSAGE", "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không bấm lại nhiều lần.")
 USER_WAIT_VIDEO_MESSAGE = _env("USER_WAIT_VIDEO_MESSAGE", "🎞 Đang tạo video cho bạn. Quá trình này có thể mất 1–5 phút. Bot sẽ tự gửi kết quả khi hoàn tất.")
 USER_JOB_LOCK_MESSAGE = _env("USER_JOB_LOCK_MESSAGE", "⏳ Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED = env_flag("SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED", "true")
@@ -3282,7 +3282,7 @@ UI_TEXT = {
         "image.prompt_button": "✍️ Tạo prompt ảnh",
         "image.edit_button": "🧩 Sửa ảnh / edit ảnh",
         "image.upscale_button": "📐 Nâng cấp / đổi kích thước ảnh",
-        "image.waiting": "🖼 Đang tạo ảnh cho bạn, vui lòng chờ một chút. Không cần gửi lại lệnh.",
+        "image.waiting": "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không bấm lại nhiều lần.",
         "image.tier_disabled_message": "🧪 Tier ảnh này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.",
         "image.success": "✅ Ảnh {label} đã tạo xong.\nJob #{job_id}\n{billing_note}\n\nBạn muốn làm gì tiếp?\n\n• Chốt ảnh này nếu đã hài lòng\n• Tạo prompt video từ ảnh\n• Sửa prompt hoặc tạo lại ảnh",
         "image.success_link": "✅ Ảnh ShopAIKey đã tạo xong nhưng Telegram không gửi trực tiếp được.\n<a href=\"{url}\">Mở ảnh</a>",
@@ -3532,7 +3532,7 @@ UI_TEXT = {
         "image.prompt_button": "✍️ Image prompt",
         "image.edit_button": "🧩 Edit image",
         "image.upscale_button": "📐 Upscale / resize image",
-        "image.waiting": "🖼 Creating your image. Please wait a moment and do not resend the command.",
+        "image.waiting": "⏳ TOAN AAS is creating your image. This usually takes a few seconds to a few dozen seconds. Please do not tap repeatedly.",
         "image.tier_disabled_message": "🧪 This image tier is currently disabled. The bot has not called any API and has not charged Xu.",
         "image.success": "✅ {label} image is ready.\nJob #{job_id}\n{billing_note}\n\nWhat would you like to do next?\n\n• Lock this image if you are happy with it\n• Create video prompts from this image\n• Edit the prompt or regenerate the image",
         "image.success_link": "✅ The ShopAIKey image is ready, but Telegram could not send it directly.\n<a href=\"{url}\">Open image</a>",
@@ -3782,7 +3782,7 @@ UI_TEXT = {
         "image.prompt_button": "✍️ 图片 prompt",
         "image.edit_button": "🧩 编辑图片",
         "image.upscale_button": "📐 放大 / 调整图片尺寸",
-        "image.waiting": "🖼 正在为你生成图片，请稍候，不需要重复发送命令。",
+        "image.waiting": "⏳ TOAN AAS 正在生成图片，通常需要几秒到几十秒。请不要重复点击。",
         "image.tier_disabled_message": "🧪 此图片档位当前已关闭。Bot 未调用 API，也未扣除 Xu。",
         "image.success": "✅ {label} 已生成完成。\nJob #{job_id}\n{billing_note}\n\n你想下一步做什么？\n\n• 如果满意，请锁定此图片\n• 基于此图片生成 3 个视频 prompt\n• 修改 prompt 或重新生成图片",
         "image.success_link": "✅ ShopAIKey 图片已生成，但 Telegram 无法直接发送。\n<a href=\"{url}\">打开图片</a>",
@@ -25661,7 +25661,7 @@ def generation_pending_key(user_id, tool_type="", normalized_prompt=""):
 def get_generation_wait_text(tool_type: str) -> str:
     tool = str(tool_type or "").lower()
     if "image" in tool:
-        return "🖼 Đang tạo ảnh cho bạn... vui lòng chờ một chút. Không cần gửi lại lệnh, bot sẽ trả kết quả khi xong."
+        return "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không bấm lại nhiều lần."
     if "video_submit" in tool:
         return "🎬 Đang gửi tác vụ tạo video test... video có thể mất lâu. Không cần gửi lại lệnh."
     if "video" in tool:
@@ -33847,6 +33847,57 @@ async def safe_reply_text(message, text: str, reply_markup=None, parse_mode: str
                 logger.warning("safe_reply_text fallback failed | %s", sanitize_log_text(str(fallback_error))[:240])
         return None
 
+def split_telegram_html_text(text: str, limit: int = 3600) -> list[str]:
+    raw_text = str(text or "")
+    if len(raw_text) <= limit:
+        return [raw_text]
+    chunks: list[str] = []
+    current = ""
+    for paragraph in raw_text.split("\n\n"):
+        piece = paragraph if not current else "\n\n" + paragraph
+        if len(current) + len(piece) <= limit:
+            current += piece
+            continue
+        if current:
+            chunks.append(current)
+            current = ""
+        if len(paragraph) <= limit:
+            current = paragraph
+            continue
+        for start in range(0, len(paragraph), limit):
+            chunks.append(paragraph[start:start + limit])
+    if current:
+        chunks.append(current)
+    return chunks or [raw_text[:limit]]
+
+async def safe_reply_long_html(message, text: str, reply_markup=None):
+    chunks = split_telegram_html_text(text)
+    sent = None
+    for index, chunk in enumerate(chunks):
+        sent = await safe_reply_text(
+            message,
+            chunk,
+            parse_mode="HTML",
+            reply_markup=reply_markup if index == len(chunks) - 1 else None,
+        )
+    return sent
+
+async def safe_edit_or_send_long_html(query, text: str, reply_markup=None):
+    chunks = split_telegram_html_text(text)
+    if len(chunks) == 1:
+        return await safe_edit_query_message(query, chunks[0], parse_mode="HTML", reply_markup=reply_markup)
+    await safe_edit_query_message(query, chunks[0], parse_mode="HTML", reply_markup=None)
+    message = getattr(query, "message", None)
+    sent = None
+    for index, chunk in enumerate(chunks[1:], start=1):
+        sent = await safe_reply_text(
+            message,
+            chunk,
+            parse_mode="HTML",
+            reply_markup=reply_markup if index == len(chunks) - 1 else None,
+        )
+    return sent
+
 def is_soft_telegram_edit_error(error: Exception) -> bool:
     text = str(error or "").lower()
     return any(fragment in text for fragment in (
@@ -35738,82 +35789,7 @@ async def handle_image_warranty_retry_pending_text(update: Update, context: Cont
         return False
     clear_image_warranty_retry_pending(uid)
     parent_job_id = int(pending.get("job_id") or 0)
-    parent = shopaikey_image_job_for_user(parent_job_id, uid)
-    if not parent or image_job_retry_warranty_remaining(parent_job_id) <= 0:
-        await update.message.reply_text(ui_text(lang, "common.expired_not_charged"))
-        return True
-    if shopaikey_active_job_for_user(uid, "image"):
-        await update.message.reply_text(ui_text(lang, "media.job_lock"))
-        return True
-    if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED and not is_admin_user(uid):
-        await update.message.reply_text(ui_text(lang, "media.public_off"))
-        return True
-    original = str(parent.get("prompt_preview") or "").strip()
-    retry_prompt = (
-        f"{original}\n\nWarranty retry adjustment: {edit_note}\n"
-        "Keep the same product/topic and make only a small revision. No watermark, no extra text."
-    )[:1400]
-    await update.message.reply_text(
-        "🔁 Đang tạo lại ảnh bảo hành. Bot không trừ thêm Xu.\nProvider có thể vẫn tốn credit thật." if normalize_user_language(lang) == "vi" else
-        "🔁 Creating the warranty retry image. The bot will not charge extra Xu.\nThe provider may still consume real credit."
-    )
-    model = str(parent.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana")
-    job_id = create_shopaikey_job(
-        uid,
-        update.message.chat_id,
-        "image",
-        model=model,
-        prompt=retry_prompt,
-        status="IN_PROGRESS",
-        admin_only=False,
-        xu_cost_planned=0,
-        source_job_id=str(parent_job_id),
-        retry_warranty_count=0,
-        retry_warranty_parent_job_id=parent_job_id,
-    )
-    update_shopaikey_job(job_id=job_id, billing_status="warranty_retry", confirm_required=0, confirmed_at=now_text())
-    result = await shopaikey_image_generate(retry_prompt, model)
-    status = str(result.get("status") or "FAIL")
-    image_url = str(result.get("image_url") or "")
-    if status == "PASS" and image_url:
-        parent_used = max(0, int(parent.get("retry_warranty_used") or 0)) + 1
-        update_shopaikey_job(job_id=parent_job_id, retry_warranty_used=parent_used)
-        update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, result_sent=1, model=result.get("model") or model, attempts=1, finished_at=now_text())
-        caption = ui_text(
-            lang,
-            "image.success",
-            label=html.escape(localized_image_tier_label("standard_warranty", lang)),
-            job_id=int(job_id or 0),
-            billing_note=html.escape("Đã dùng 1 lần tạo lại bảo hành. Bot không trừ thêm Xu." if normalize_user_language(lang) == "vi" else "Used 1 warranty retry. The bot did not charge extra Xu."),
-        )
-        try:
-            await context.bot.send_photo(
-                chat_id=update.message.chat_id,
-                photo=image_url,
-                caption=caption,
-                reply_markup=public_image_success_keyboard(job_id, "standard", lang),
-            )
-        except Exception:
-            await update.message.reply_text(ui_text(lang, "image.success_link", url=html.escape(image_url, quote=True)), parse_mode="HTML")
-        return True
-    provider_error_text = result.get("detail") or result.get("provider_error_code") or result.get("error_class") or status
-    update_shopaikey_job(
-        job_id=job_id,
-        status="FAILED",
-        error_class=result.get("error_class") or status,
-        provider_error_code=result.get("provider_error_code") or "",
-        provider_message=provider_error_text,
-        attempts=1,
-        finished_at=now_text(),
-        refund_status="not_charged",
-        refund_reason="warranty_retry_provider_fail",
-    )
-    await update.message.reply_text(
-        "⚙️ Tạo lại ảnh bảo hành bị lỗi provider. Bot chưa trừ thêm Xu và chưa tính là đã dùng lượt bảo hành. Vui lòng thử lại sau."
-        if normalize_user_language(lang) == "vi" else
-        "⚙️ The warranty retry failed due to provider error. The bot did not charge extra Xu and did not consume the warranty retry. Please try again later."
-    )
-    return True
+    return await execute_image_warranty_retry(context, update.message.chat_id, uid, parent_job_id, lang, edit_note)
 
 async def handle_public_video_prompt_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
@@ -36033,6 +36009,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                     source="workflow_image_generation",
                     job_id=job_id,
                 )
+            update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, model=result.get("model") or model, attempts=1, finished_at=now_text())
             success_markup = trend_workflow_image_success_keyboard(job_id, scene_index, lang) if (workflow_id or trend_output_id) else public_image_success_keyboard(job_id, image_tier, lang)
             success_caption = ui_text(
                 lang,
@@ -45894,7 +45871,7 @@ def cinematic_ad_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(ui_text(lang, "concept_ad.style.product_reveal"), callback_data="adconcept|concept_style_product_reveal"),
-            InlineKeyboardButton(ui_text(lang, "common.skip"), callback_data="adconcept|style|skip"),
+            InlineKeyboardButton(ui_text(lang, "common.skip"), callback_data="adconcept|concept_style_skip"),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="adconcept|back|message"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="adconcept|cancel")],
@@ -45923,6 +45900,7 @@ def normalize_cinematic_ad_style_code(style: str = "") -> str:
         "product_reveal": "product_reveal",
         "3d_product_reveal": "product_reveal",
         "product_3d": "product_reveal",
+        "skip": "direct_sales",
     }
     return aliases.get(value, "cinematic")
 
@@ -46477,7 +46455,7 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
         message = pending.get("message")
         save_cinematic_ad_concept(uid, product, message, value, lang)
         clear_cinematic_ad_pending(uid)
-        return await safe_edit_query_message(
+        return await safe_edit_or_send_long_html(
             query,
             cinematic_ad_concept_text(product, message, value, lang),
             reply_markup=cinematic_ad_continuation_keyboard(lang),
@@ -46517,17 +46495,17 @@ async def handle_cinematic_ad_pending_text(update: Update, context: ContextTypes
             revised_message = f"{message}; chỉnh theo yêu cầu: {text}"
         save_cinematic_ad_concept(uid, product, revised_message, style, lang)
         clear_cinematic_ad_pending(uid)
-        await update.message.reply_text(
+        await safe_reply_long_html(
+            update.message,
             cinematic_ad_concept_text(product, revised_message, style, lang),
-            parse_mode="HTML",
             reply_markup=cinematic_ad_continuation_keyboard(lang),
         )
         return True
     save_cinematic_ad_concept(uid, product, message, text, lang)
     clear_cinematic_ad_pending(uid)
-    await update.message.reply_text(
+    await safe_reply_long_html(
+        update.message,
         cinematic_ad_concept_text(product, message, text, lang),
-        parse_mode="HTML",
         reply_markup=cinematic_ad_continuation_keyboard(lang),
     )
     return True
@@ -46612,6 +46590,102 @@ def image_warranty_retry_request_text(job_id: int = 0, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return f"🔁 <b>Image warranty retry</b>\n\nSend the small adjustment you want.\nJob #{int(job_id or 0)} can use the warranty retry once, only for the same request/topic.\n\nIf this is a completely new request, please create a new image job.\nThe bot has not called the API and has not charged Xu."
     return f"🔁 <b>Tạo lại ảnh bảo hành</b>\n\nHãy gửi chỉnh sửa nhẹ bạn muốn.\nJob #{int(job_id or 0)} chỉ được dùng bảo hành 1 lần trong cùng yêu cầu/chủ đề.\n\nNếu bạn đổi hoàn toàn yêu cầu, hãy tạo job ảnh mới theo bảng giá.\nBot chưa gọi API và chưa trừ Xu."
+
+def image_warranty_retry_exhausted_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return "Bạn đã dùng hết 1 lần tạo lại bảo hành cho ảnh này. Bạn có thể tạo ảnh mới theo bảng giá."
+    if normalize_user_language(lang) != "vi":
+        return "You have used the 1 warranty retry for this image. You can create a new image using the pricing table."
+    return "Bạn đã dùng hết 1 lần tạo lại bảo hành cho ảnh này. Bạn có thể tạo ảnh mới theo bảng giá."
+
+def image_warranty_retry_exhausted_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Tạo ảnh mới theo bảng giá" if normalize_user_language(lang) == "vi" else "🖼 Create a new image", callback_data="create_media|quick_image")],
+        [InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data="create_media|quick_image")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+async def execute_image_warranty_retry(context: ContextTypes.DEFAULT_TYPE, chat_id, uid, parent_job_id: int, lang: str = "vi", edit_note: str = "") -> bool:
+    parent = shopaikey_image_job_for_user(parent_job_id, uid)
+    if not parent or image_job_retry_warranty_remaining(parent_job_id) <= 0:
+        await context.bot.send_message(chat_id=chat_id, text=image_warranty_retry_exhausted_text(lang), reply_markup=image_warranty_retry_exhausted_keyboard(lang))
+        return True
+    if shopaikey_active_job_for_user(uid, "image"):
+        await context.bot.send_message(chat_id=chat_id, text=ui_text(lang, "media.job_lock"))
+        return True
+    if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED and not is_admin_user(uid):
+        await context.bot.send_message(chat_id=chat_id, text=ui_text(lang, "media.public_off"))
+        return True
+    original = str(parent.get("prompt_preview") or "").strip()
+    adjustment = str(edit_note or "").strip()
+    retry_prompt = (
+        f"{original}\n\n"
+        + (f"Warranty retry adjustment: {adjustment}\n" if adjustment else "Warranty retry: regenerate once with a cleaner result while keeping the same request.\n")
+        + "Keep the same product/topic and make only a small revision. No watermark, no extra text."
+    )[:1400]
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "🔁 Đang tạo lại ảnh bảo hành. Bot không trừ thêm Xu.\nProvider có thể vẫn tốn credit thật."
+            if normalize_user_language(lang) == "vi" else
+            "🔁 Creating the warranty retry image. The bot will not charge extra Xu.\nThe provider may still consume real credit."
+        ),
+    )
+    model = str(parent.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana")
+    job_id = create_shopaikey_job(
+        uid,
+        chat_id,
+        "image",
+        model=model,
+        prompt=retry_prompt,
+        status="IN_PROGRESS",
+        admin_only=is_admin_user(uid),
+        xu_cost_planned=0,
+        source_job_id=str(parent_job_id),
+        retry_warranty_count=0,
+        retry_warranty_parent_job_id=parent_job_id,
+    )
+    update_shopaikey_job(job_id=job_id, billing_status="warranty_retry", confirm_required=0, confirmed_at=now_text())
+    result = await shopaikey_image_generate(retry_prompt, model)
+    status = str(result.get("status") or "FAIL")
+    image_url = str(result.get("image_url") or "")
+    if status == "PASS" and image_url:
+        parent_used = max(0, int(parent.get("retry_warranty_used") or 0)) + 1
+        update_shopaikey_job(job_id=parent_job_id, retry_warranty_used=parent_used)
+        update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, result_sent=1, model=result.get("model") or model, attempts=1, finished_at=now_text())
+        caption = ui_text(
+            lang,
+            "image.success",
+            label=html.escape(localized_image_tier_label("standard", lang)),
+            job_id=int(job_id or 0),
+            billing_note=html.escape("Đã dùng 1 lần tạo lại bảo hành. Bot không trừ thêm Xu." if normalize_user_language(lang) == "vi" else "Used 1 warranty retry. The bot did not charge extra Xu."),
+        )
+        try:
+            await context.bot.send_photo(chat_id=chat_id, photo=image_url, caption=caption, reply_markup=public_image_success_keyboard(job_id, "standard", lang))
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text=ui_text(lang, "image.success_link", url=html.escape(image_url, quote=True)), parse_mode="HTML")
+        return True
+    provider_error_text = result.get("detail") or result.get("provider_error_code") or result.get("error_class") or status
+    update_shopaikey_job(
+        job_id=job_id,
+        status="FAILED",
+        error_class=result.get("error_class") or status,
+        provider_error_code=result.get("provider_error_code") or "",
+        provider_message=provider_error_text,
+        attempts=1,
+        finished_at=now_text(),
+        refund_status="not_charged",
+        refund_reason="warranty_retry_provider_fail",
+    )
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "⚙️ Tạo lại ảnh bảo hành bị lỗi provider. Bot chưa trừ thêm Xu và chưa tính là đã dùng lượt bảo hành. Vui lòng thử lại sau."
+            if normalize_user_language(lang) == "vi" else
+            "⚙️ The warranty retry failed due to provider error. The bot did not charge extra Xu and did not consume the warranty retry. Please try again later."
+        ),
+    )
+    return True
 
 def public_image_tier_selection_text(lang: str = "vi") -> str:
     return ui_text(lang, "image.choose_tier.title")
@@ -48919,18 +48993,12 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         )
     if action.startswith("image_warranty_retry_"):
         job_id = safe_int(action.rsplit("_", 1)[-1], 0)
-        if not shopaikey_image_job_for_user(job_id, uid) or image_job_retry_warranty_remaining(job_id) <= 0:
-            return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
-        set_image_warranty_retry_pending(uid, job_id)
-        return await safe_edit_or_send(
+        await safe_edit_or_send(
             query,
-            image_warranty_retry_request_text(job_id, lang),
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="tvflow|cancel")],
-                [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-            ]),
+            "🔁 Đang kiểm tra quyền tạo lại ảnh bảo hành. Bot không trừ thêm Xu." if normalize_user_language(lang) == "vi" else "🔁 Checking warranty retry eligibility. The bot will not charge extra Xu.",
+            parse_mode=None,
         )
+        return await execute_image_warranty_retry(context, query.message.chat_id, uid, job_id, lang)
     guidance = {
         "edit_prompt": "✍️ Copy prompt ảnh trong workflow rồi chỉnh lại mô tả. Sau đó dùng /shopaikey_image <prompt đã sửa> khi public image được bật, hoặc admin dùng /tool_test_workflow_image để smoke test.",
         "cancel": "❌ Đã hủy chọn ảnh. Bot chưa gọi API và chưa trừ Xu.",
@@ -49107,7 +49175,7 @@ async def run_quick_image_admin_smoke(update: Update, context: ContextTypes.DEFA
         admin_only=True,
         xu_cost_planned=0,
     )
-    waiting = await update.message.reply_text("🖼 Đang tạo ảnh, vui lòng chờ một chút. Không cần gửi lại lệnh.")
+    waiting = await update.message.reply_text(ui_text(lang, "image.waiting"))
     result = await shopaikey_image_generate(prompt)
     status = str(result.get("status") or "FAIL")
     image_url = str(result.get("image_url") or "")
