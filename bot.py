@@ -3312,7 +3312,7 @@ UI_TEXT = {
         "video.tier_disabled_message": "🧪 Tier video này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.",
         "video.premium_message": "👑 Video premium đang mở theo dạng admin duyệt vì chi phí cao. Vui lòng liên hệ admin nếu cần.\nBot chưa gọi API và chưa trừ Xu.",
         "video.active_job": "Bạn đang có một video đang xử lý. Vui lòng chờ hoàn tất trước khi tạo video mới.",
-        "video.source_invalid": "⚠️ Ảnh nguồn đã được dùng hoặc không còn hợp lệ để giảm phần video. Bot chưa trừ Xu.\nVui lòng gửi lại lệnh tạo video để hệ thống tính chi phí hiện tại.",
+        "video.source_invalid": "⚠️ Ảnh nguồn không còn hợp lệ hoặc thiếu dữ liệu để tạo video. Bot chưa trừ Xu.\nBạn có thể tạo lại ảnh, tạo video từ prompt text hoặc quay lại menu chính.",
         "video.queue_submitted": "✅ Video đã gửi vào queue.\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "Bạn muốn làm gì tiếp?",
         "video.fail.not_charged": "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau.",
@@ -3562,7 +3562,7 @@ UI_TEXT = {
         "video.tier_disabled_message": "🧪 This video tier is currently disabled. The bot has not called any API and has not charged Xu.",
         "video.premium_message": "👑 Premium video requires admin approval because provider cost is high. Please contact admin if needed.\nThe bot has not called any API and has not charged Xu.",
         "video.active_job": "You already have a video being processed. Please wait until it finishes before creating another one.",
-        "video.source_invalid": "⚠️ The source image has already been used or is no longer valid for video cost handling. The bot has not charged Xu.\nPlease start the video command again so the system can calculate the current cost.",
+        "video.source_invalid": "⚠️ The source image is no longer valid or is missing data for video generation. The bot has not charged Xu.\nYou can recreate the image, create a video from a text prompt, or return to the main menu.",
         "video.queue_submitted": "✅ Video queued.\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "What would you like to do next?",
         "video.fail.not_charged": "⚙️ The video model is busy or temporarily unavailable. The bot has not charged Xu. Please try again later.",
@@ -3812,7 +3812,7 @@ UI_TEXT = {
         "video.tier_disabled_message": "🧪 此视频档位当前已关闭。Bot 未调用 API，也未扣除 Xu。",
         "video.premium_message": "👑 Premium 视频因 provider 成本较高，需要 admin 审核。如有需要请联系 admin。\nBot 未调用 API，也未扣除 Xu。",
         "video.active_job": "你已有一个视频正在处理中。请等待完成后再创建新视频。",
-        "video.source_invalid": "⚠️ 源图片已被使用或不再适用于视频费用处理。本次未扣除 Xu。\n请重新发起视频命令，让系统重新计算当前费用。",
+        "video.source_invalid": "⚠️ 源图片缺少数据或已不适用于生成视频。本次未扣除 Xu。\n你可以重新生成图片、用文字 prompt 生成视频，或返回主菜单。",
         "video.queue_submitted": "✅ 视频已加入队列。\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "你想下一步做什么？",
         "video.fail.not_charged": "⚙️ 视频模型正忙或暂时不可用。本次未扣除 Xu。请稍后再试。",
@@ -28327,12 +28327,7 @@ def shopaikey_paid_image_source_job(user_id) -> dict | None:
               AND UPPER(image.status)='SUCCESS'
               AND image.admin_only=0
               AND image.xu_deducted > 0
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM shopaikey_jobs video
-                  WHERE video.job_type='video'
-                    AND video.source_job_id=CAST(image.id AS TEXT)
-              )
+              AND (COALESCE(image.result_url, '') <> '' OR COALESCE(image.output_file_id, '') <> '')
             ORDER BY image.id DESC
             LIMIT 1
             """,
@@ -28358,13 +28353,7 @@ def shopaikey_paid_image_source_available(user_id, source_job_id: str) -> bool:
               AND image.job_type='image'
               AND UPPER(image.status)='SUCCESS'
               AND image.admin_only=0
-              AND image.xu_deducted > 0
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM shopaikey_jobs video
-                  WHERE video.job_type='video'
-                    AND video.source_job_id=CAST(image.id AS TEXT)
-              )
+              AND (COALESCE(image.result_url, '') <> '' OR COALESCE(image.output_file_id, '') <> '')
             LIMIT 1
             """,
             (int(source), uid),
@@ -35493,7 +35482,7 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
         f"• No Xu deducted: <code>yes</code>\n\n"
         + (f"Auto poll: <code>{'ON' if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED else 'OFF'}</code>\n" if task_id else "")
         + (f"Kiểm tra tiếp: <code>/shopaikey_video_job {html.escape(task_id)}</code>\n\n" if task_id else "")
-        + "Endpoint admin-only. Smoke test có thể tốn credit thật của provider. Không log prompt/response/key. Public video vẫn OFF.",
+        + "Endpoint admin-only. Smoke test có thể tốn credit thật của provider. Không log prompt/response/key. Public video do ENV/billing guard kiểm soát.",
         parse_mode="HTML",
         reply_markup=shopaikey_video_job_check_keyboard(task_id, lang) if task_id else None,
     )
@@ -35506,7 +35495,7 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
     uid = update.effective_user.id
     lang = user_ui_lang(uid)
     if not SHOPAIKEY_ADMIN_ONLY or not SHOPAIKEY_VIDEO_ADMIN_ONLY:
-        return await update.message.reply_text("⛔ ShopAIKey video chỉ cho admin smoke test. Public video OFF.")
+        return await update.message.reply_text("⛔ ShopAIKey video job status chỉ cho admin smoke test. Public video do ENV/billing guard kiểm soát.")
     if not context.args:
         return await update.message.reply_text("Cú pháp: /shopaikey_video_job <task_id>")
     task_id = str(context.args[0] or "").strip()
@@ -35596,7 +35585,7 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
         + f"• Output sent: <code>{html.escape(sent_note)}</code>\n"
         f"• Fail reason: <code>{html.escape(str(result.get('fail_reason') or '-')[:220])}</code>\n"
         f"• No Xu deducted: <code>yes</code>\n\n"
-        "Admin-only. Public video vẫn OFF. Không hiển thị API key."
+        "Admin-only. Public video do ENV/billing guard kiểm soát. Không hiển thị API key."
     )
     await safe_reply_text(
         update.message,
@@ -35689,7 +35678,7 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
         + result_line
         + f"• Output sent: <code>{html.escape(sent_note)}</code>\n"
         f"• No Xu deducted: <code>yes</code>\n\n"
-        "Admin-only. Public video vẫn OFF."
+        "Admin-only. Public video do ENV/billing guard kiểm soát."
     )
     try:
         return await safe_edit_or_send(
@@ -35908,9 +35897,9 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
         "model": tier_payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
     })
     if from_image and source_job:
-        note = f"Video từ ảnh job #{source_job.get('id')}: chỉ trừ phần còn lại."
+        note = f"Video từ ảnh job #{source_job.get('id')}: ảnh và video là 2 bước riêng, video tính theo tier hiện tại."
     elif from_image:
-        note = "Chưa tìm thấy ảnh ShopAIKey đã trừ Xu chưa dùng; tính như video độc lập."
+        note = "Chưa tìm thấy ảnh ShopAIKey hợp lệ; tính như video độc lập."
     else:
         note = "Video độc lập."
     await update.message.reply_text(
@@ -35977,7 +35966,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             return await safe_edit_or_send(query, ui_text(lang, "video.active_job"))
         return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
     if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
-        return await safe_edit_or_send(query, ui_text(lang, "video.source_invalid"))
+        return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
     balance_before, _, _ = get_user(uid)
     charge = spend_fixed_credit_info(
         uid,
@@ -36055,12 +36044,21 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 billing_note=html.escape(public_image_success_billing_note(deducted, lang, is_admin_user(uid) and int(deducted or 0) <= 0)),
             )
             try:
-                await context.bot.send_photo(
+                sent_photo_message = await context.bot.send_photo(
                     chat_id=query.message.chat_id,
                     photo=image_url,
                     caption=success_caption,
                     reply_markup=success_markup,
                 )
+                output_file_id = ""
+                try:
+                    photos = getattr(sent_photo_message, "photo", None) or []
+                    if photos:
+                        output_file_id = str(getattr(photos[-1], "file_id", "") or "")
+                except Exception:
+                    output_file_id = ""
+                if output_file_id:
+                    update_shopaikey_job(job_id=job_id, output_file_id=output_file_id)
                 output_sent = True
             except Exception:
                 await context.bot.send_message(
@@ -38188,11 +38186,22 @@ def video_package_music_label(package: dict, lang: str = "vi") -> str:
 
 def build_image_to_video_public_package(user_id, job_id: int = 0, index: int = 1, lang: str = "vi") -> dict:
     prompt = image_to_video_prompt_from_image(job_id, user_id, index, lang)
+    image_source = shopaikey_image_source_payload(job_id, user_id)
     return {
         "source": "image_to_video",
         "concept_text": image_to_video_subject_for_job(job_id, user_id, lang),
         "generated_image_id": str(int(job_id or 0)),
         "source_job_id": str(int(job_id or 0)) if int(job_id or 0) else "",
+        "image_job_id": image_source.get("image_job_id") or str(int(job_id or 0)),
+        "telegram_file_id": image_source.get("telegram_file_id") or "",
+        "generated_image_url": image_source.get("image_url") or "",
+        "image_url": image_source.get("image_url") or "",
+        "image_prompt": image_source.get("image_prompt") or image_to_video_subject_for_job(job_id, user_id, lang),
+        "source_flow": "image_to_video",
+        "warranty_status": {
+            "retry_warranty_count": int(image_source.get("warranty_retry_count") or 0),
+            "retry_warranty_used": int(image_source.get("warranty_retry_used") or 0),
+        },
         "video_prompt": prompt,
         "video_prompt_choice": max(1, min(3, int(index or 1))),
         "music_choice": {"type": "not_selected", "label": "music_not_selected"},
@@ -47160,7 +47169,13 @@ async def execute_image_warranty_retry(context: ContextTypes.DEFAULT_TYPE, chat_
             billing_note=html.escape("Đã dùng 1 lần tạo lại bảo hành. Bot không trừ thêm Xu." if normalize_user_language(lang) == "vi" else "Used 1 warranty retry. The bot did not charge extra Xu."),
         )
         try:
-            await context.bot.send_photo(chat_id=chat_id, photo=image_url, caption=caption, reply_markup=public_image_success_keyboard(job_id, "standard", lang))
+            sent_photo_message = await context.bot.send_photo(chat_id=chat_id, photo=image_url, caption=caption, reply_markup=public_image_success_keyboard(job_id, "standard", lang))
+            try:
+                photos = getattr(sent_photo_message, "photo", None) or []
+                if photos:
+                    update_shopaikey_job(job_id=job_id, output_file_id=str(getattr(photos[-1], "file_id", "") or ""))
+            except Exception:
+                pass
         except Exception:
             await context.bot.send_message(chat_id=chat_id, text=ui_text(lang, "image.success_link", url=html.escape(image_url, quote=True)), parse_mode="HTML")
         return True
@@ -47238,6 +47253,21 @@ def shopaikey_image_job_for_user(job_id: int = 0, user_id=0) -> dict | None:
     if is_admin_user(user_id):
         return job
     return None
+
+def shopaikey_image_source_payload(job_id: int = 0, user_id=0) -> dict:
+    job = shopaikey_image_job_for_user(job_id, user_id) or {}
+    if not job:
+        return {}
+    return {
+        "image_job_id": str(job.get("id") or ""),
+        "image_url": str(job.get("result_url") or "").strip(),
+        "telegram_file_id": str(job.get("output_file_id") or "").strip(),
+        "image_prompt": str(job.get("prompt_preview") or "").strip()[:500],
+        "tier": str(job.get("billing_status") or "").strip()[:80],
+        "warranty_retry_count": max(0, int(job.get("retry_warranty_count") or 0)),
+        "warranty_retry_used": max(0, int(job.get("retry_warranty_used") or 0)),
+        "created_at": str(job.get("created_at") or ""),
+    }
 
 def image_to_video_subject_for_job(job_id: int = 0, user_id=0, lang: str = "vi") -> str:
     job = shopaikey_image_job_for_user(job_id, user_id) or {}
@@ -47377,6 +47407,31 @@ def image_to_video_public_off_keyboard(job_id: int = 0, index: int = 1, lang: st
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
+def video_missing_source_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return (
+            "⚠️ <b>TOAN AAS 暂时没有足够图片/prompt 数据来生成视频。</b>\n\n"
+            "请选择下一步。Bot 未调用视频 API，也未扣除 Xu。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "⚠️ <b>TOAN AAS does not have enough image/prompt data to create the video.</b>\n\n"
+            "Choose the next step below. The bot has not called the video API and has not charged Xu."
+        )
+    return (
+        "⚠️ <b>TOAN AAS chưa có đủ ảnh/prompt để tạo video.</b>\n\n"
+        "Bạn muốn tạo prompt video từ concept, tạo ảnh khung chính, hay quay lại chỉnh prompt?\n"
+        "Bot chưa gọi API video và chưa trừ Xu."
+    )
+
+def video_missing_source_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Tạo lại ảnh khung chính" if normalize_user_language(lang) == "vi" else "🖼 Recreate key image", callback_data="create_media|image_tier_low")],
+        [InlineKeyboardButton("🎞 Tạo video từ prompt text thay vì ảnh" if normalize_user_language(lang) == "vi" else "🎞 Create video from text prompt", callback_data="create_media|quick_video")],
+        [InlineKeyboardButton("✍️ Sửa prompt ảnh" if normalize_user_language(lang) == "vi" else "✍️ Edit image prompt", callback_data="create_media|image_tier_standard")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
 def image_to_video_music_suggestions_text(job_id: int = 0, user_id=0, lang: str = "vi") -> str:
     subject = image_to_video_subject_for_job(job_id, user_id, lang)
     if normalize_user_language(lang) == "zh":
@@ -47410,6 +47465,7 @@ def image_job_retry_warranty_remaining(job_id: int = 0) -> int:
 
 def public_image_success_keyboard(job_id: int, tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     tier_norm = normalize_image_tier(tier)
+    # Locked UX: tests guard these post-image actions for warranty and image-to-video continuity.
     rows = [
         [InlineKeyboardButton(ui_text(lang, "image.lock"), callback_data="tvflow|save_image")],
         [InlineKeyboardButton(ui_text(lang, "image.to_video"), callback_data=f"tvflow|image_video_prompts_{int(job_id or 0)}")],
@@ -47538,6 +47594,8 @@ def public_video_pending_payload_from_package(tier: str, package: dict) -> dict:
         "base_cost": int(payload.get("cost") or 0),
         "from_image": str((package or {}).get("source") or "") == "image_to_video",
         "source_job_id": str((package or {}).get("source_job_id") or "")[:80],
+        "image_url": str((package or {}).get("image_url") or (package or {}).get("generated_image_url") or "")[:1000],
+        "telegram_file_id": str((package or {}).get("telegram_file_id") or "")[:220],
         "video_tier": tier_norm,
         "tier_label": payload.get("label") or tier_norm,
         "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
@@ -48311,6 +48369,7 @@ def trend_guided_music_choice_text(state: dict, index: int = 1, lang: str = "vi"
     return f"🎵 <b>Đã chọn hướng nhạc {idx}: {html.escape(names[idx])}</b>\n\nBot chưa gọi API nhạc/video và chưa trừ Xu."
 
 def trend_guided_music_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    # Locked UX from music flow: every music branch must return to video finalize/tier selection.
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Chốt nhạc này" if normalize_user_language(lang) == "vi" else "✅ Lock this music", callback_data="trendg|music_save")],
         [InlineKeyboardButton("🎬 Tạo video / chốt video với nhạc này" if normalize_user_language(lang) == "vi" else "🎬 Finalize video with this music", callback_data="trendg|video_real")],
@@ -49706,7 +49765,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         "cancel": "❌ Đã hủy chọn ảnh. Bot chưa gọi API và chưa trừ Xu.",
         "save_image": "💾 Telegram đã lưu ảnh trong chat. Nếu cần lưu project tự động, đây là backlog sau. Bot chưa trừ thêm Xu.",
         "image_prompt": "🖼 Copy prompt ảnh trong gói này, hoặc dùng /image_prompt <chủ đề> để viết lại prompt ảnh đẹp hơn.",
-        "video_prompt": "🎞 Copy prompt video trong gói này, hoặc reply ảnh rồi dùng /image_to_video_pack <mô tả chuyển động>. Public video vẫn OFF.",
+        "video_prompt": "🎞 Copy prompt video trong gói này, hoặc reply ảnh rồi dùng /image_to_video_pack <mô tả chuyển động>. Nếu public video đang ON, bot sẽ cho chọn tier và xác nhận giá trước khi tạo.",
         "tts": "🔊 Dùng /tool_test_shopaikey_tts nếu admin muốn smoke test TTS, hoặc dùng /translate_voice /transcribe cho audio. Workflow này chưa trừ Xu.",
         "music": "🎵 Dùng /music_library <mood> hoặc /sfx_library <từ khóa> để tìm nhạc/SFX nghe thử. Kiểm tra license trước khi dùng thương mại.",
         "rewrite": "✍️ Gửi lại /trend_video_flow <chủ đề + phong cách mới> để bot tạo lại pack theo hướng khác.",
@@ -49719,7 +49778,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             "cancel": "❌ 已取消选择图片。Bot 未调用 API，也未扣除 Xu。",
             "save_image": "💾 Telegram 已在聊天中保留图片。自动保存到 project 是后续 backlog。本次未额外扣除 Xu。",
             "image_prompt": "🖼 请复制本 workflow 的图片 prompt，或使用 /image_prompt <主题> 重写 prompt。",
-            "video_prompt": "🎞 请复制本 workflow 的视频 prompt，或 reply 图片后使用 /image_to_video_pack <motion 描述>。Public video 仍然 OFF。",
+            "video_prompt": "🎞 请复制本 workflow 的视频 prompt，或 reply 图片后使用 /image_to_video_pack <motion 描述>。如果 public video 为 ON，Bot 会进入 tier 选择和价格确认。",
             "tts": "🔊 Admin 可用 /tool_test_shopaikey_tts 做 smoke test；音频可使用 /translate_voice 或 /transcribe。本 workflow 未扣除 Xu。",
             "music": "🎵 使用 /music_library <mood> 或 /sfx_library <关键词> 查找音乐/SFX。商业使用前请检查 license。",
             "rewrite": "✍️ 重新发送 /trend_video_flow <新主题 + 风格>，Bot 会生成另一个方向。",
@@ -49732,7 +49791,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             "cancel": "❌ Image selection cancelled. The bot has not called any API and has not charged Xu.",
             "save_image": "💾 Telegram keeps the image in chat. Automatic project saving is a later backlog. No extra Xu was charged.",
             "image_prompt": "🖼 Copy the image prompt in this workflow, or use /image_prompt <topic> to rewrite it.",
-            "video_prompt": "🎞 Copy the video prompt in this workflow, or reply to an image and use /image_to_video_pack <motion description>. Public video is still OFF.",
+            "video_prompt": "🎞 Copy the video prompt in this workflow, or reply to an image and use /image_to_video_pack <motion description>. If public video is ON, the bot moves to tier selection and price confirmation.",
             "tts": "🔊 Admin can use /tool_test_shopaikey_tts for a smoke test; use /translate_voice or /transcribe for audio. This workflow has not charged Xu.",
             "music": "🎵 Use /music_library <mood> or /sfx_library <keyword> to find music/SFX previews. Check license before commercial use.",
             "rewrite": "✍️ Send /trend_video_flow <new topic + style> to generate another direction.",
@@ -50160,8 +50219,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
                 )
             source_job_id = str(package.get("source_job_id") or "").strip()
             if source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
-                clear_public_video_package_context(uid)
-                return await safe_edit_or_send(query, ui_text(lang, "video.source_invalid"))
+                return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
             credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Video user")
             pending_payload = public_video_pending_payload_from_package(tier, package)
             base_cost = int(pending_payload.get("base_cost") or 0)
@@ -50169,7 +50227,6 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
                 return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
             token = set_shopaikey_pending_confirmation(uid, pending_payload)
-            clear_public_video_package_context(uid)
             record_shopaikey_billing_event(uid, 0, "video_package_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; source={pending_payload.get('source') or '-'}; package={pending_payload.get('package_id') or '-'}")
             return await safe_edit_or_send(
                 query,

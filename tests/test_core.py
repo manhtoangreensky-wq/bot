@@ -721,12 +721,20 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
         assert int(credits_after_refund) == 100
         assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
         image_job_id = bot.create_shopaikey_job("u2", "c2", "image", model="nano-banana", prompt="prompt", status="SUCCESS", admin_only=False, xu_cost_planned=320)
-        bot.update_shopaikey_job(job_id=image_job_id, xu_deducted=320)
+        bot.update_shopaikey_job(job_id=image_job_id, xu_deducted=320, result_url="https://example.com/image.png", output_file_id="telegram_photo_id")
         assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is True
+        image_package = bot.build_image_to_video_public_package("u2", image_job_id, 1)
+        assert image_package["source_job_id"] == str(image_job_id)
+        assert image_package["image_job_id"] == str(image_job_id)
+        assert image_package["image_url"] == "https://example.com/image.png"
+        assert image_package["telegram_file_id"] == "telegram_photo_id"
+        package_payload = bot.public_video_pending_payload_from_package("low", image_package)
+        assert package_payload["source_job_id"] == str(image_job_id)
+        assert package_payload["image_url"] == "https://example.com/image.png"
         assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
         video_job_id = bot.create_shopaikey_job("u2", "c2", "video", model="veo3.1-fast", prompt="video", status="QUEUED", admin_only=False, xu_cost_planned=640, source_job_id=str(image_job_id))
         assert video_job_id > 0
-        assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is False
+        assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is True
         assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
     finally:
         if os.path.exists(db_path):
@@ -1324,6 +1332,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any(button.callback_data == "create_media|image_tier_low" for button in success_buttons)
     assert len(success_buttons) == 5
     assert not any(button.callback_data == "tvflow|music_image_123" for button in success_buttons)
+    missing_source_buttons = [button.text for row in bot.video_missing_source_keyboard().inline_keyboard for button in row]
+    assert "🖼 Tạo lại ảnh khung chính" in missing_source_buttons
+    assert "🎞 Tạo video từ prompt text thay vì ảnh" in missing_source_buttons
+    assert "✍️ Sửa prompt ảnh" in missing_source_buttons
+    assert "TOAN AAS chưa có đủ ảnh/prompt để tạo video" in bot.video_missing_source_text()
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setattr(bot, "DB_FILE", db_path)
@@ -1788,6 +1801,16 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "trendg|music_select_1" in music_callbacks
     assert "trendg|music_select_2" in music_callbacks
     assert "trendg|music_select_3" in music_callbacks
+    trend_music_selected_buttons = [button.text for row in bot.trend_guided_music_selected_keyboard().inline_keyboard for button in row]
+    assert "✅ Chốt nhạc này" in trend_music_selected_buttons
+    assert "🎬 Tạo video / chốt video với nhạc này" in trend_music_selected_buttons
+    assert "🚫 Bỏ nhạc và tạo video không nhạc" in trend_music_selected_buttons
+    assert "🎞 Quay lại prompt video" in trend_music_selected_buttons
+    trend_library_followup_buttons = [button.text for row in bot.selected_music_video_followup_keyboard("trend_guided").inline_keyboard for button in row]
+    assert "🎬 Tạo video / chốt video với nhạc này" in trend_library_followup_buttons
+    assert "🚫 Bỏ nhạc và tạo video không nhạc" in trend_library_followup_buttons
+    trend_ai_music_buttons = [button.text for row in bot.trend_guided_music_ai_selected_keyboard().inline_keyboard for button in row]
+    assert "🎬 Tạo video / chốt video với prompt nhạc này" in trend_ai_music_buttons
     video_off_text = bot.trend_guided_video_public_off_text(bot.get_trend_video_flow_pending("u_trend") or {})
     assert "Tạo video thật chưa mở công khai" in video_off_text
     assert "chưa trừ Xu" in video_off_text
