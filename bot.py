@@ -47804,15 +47804,15 @@ def trend_video_pending_prompt_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🔥 <b>Trend Video TOAN AAS</b>\n\n"
-            "What product, service or topic do you want to make a video about?\n\n"
+            "What product, service or topic do you want to make a trend-based video about?\n\n"
             "Examples: turquoise mini blender, AI content app, affiliate course, new coffee shop.\n\n"
-            "The bot will give you 3 directions to choose from. It has not called image/video APIs and has not charged Xu."
+            "The bot will ask how you want to choose a trend first. It has not called image/video APIs and has not charged Xu."
         )
     return (
         "🔥 <b>Video theo trend TOAN AAS</b>\n\n"
-        "Bạn muốn làm video về sản phẩm/dịch vụ/chủ đề gì?\n\n"
+        "Bạn muốn làm video theo trend cho sản phẩm/dịch vụ/chủ đề gì?\n\n"
         "Ví dụ: máy xay sinh tố mini màu xanh ngọc, app AI tạo nội dung, khóa học affiliate, quán cà phê mới mở.\n\n"
-        "Bot sẽ đưa 3 hướng để chọn. Bot chưa gọi API ảnh/video và chưa trừ Xu."
+        "Bot sẽ hỏi cách lấy trend trước. Bot chưa gọi API ảnh/video và chưa trừ Xu."
     )
 
 def trend_video_pending_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -47836,15 +47836,15 @@ def trend_guided_trend_label(index: int, lang: str = "vi") -> str:
     idx = max(1, min(3, int(index or 1)))
     if normalize_user_language(lang) != "vi":
         labels = {
-            1: "emotional story direction",
-            2: "direct sales direction",
-            3: "viral TikTok/Reels direction",
+            1: "Before/after trend",
+            2: "POV / everyday situation trend",
+            3: "Quick tips trend",
         }
         return labels[idx]
     labels = {
-        1: "hướng cảm xúc / câu chuyện",
-        2: "hướng bán hàng trực tiếp",
-        3: "hướng viral TikTok/Reels",
+        1: "Trend before/after",
+        2: "Trend POV / tình huống đời thường",
+        3: "Trend quick tips / mẹo nhanh",
     }
     return labels[idx]
 
@@ -47863,16 +47863,16 @@ def trend_guided_choice_summary(kind: str, index: int, state: dict, lang: str = 
     if kind == "trend":
         if normalize_user_language(lang) != "vi":
             names = {
-                1: ("Emotional story", f"Tell a before/after or memorable moment around {topic}."),
-                2: ("Direct sales", f"Problem → benefit → proof → call to action for {topic}."),
-                3: ("Viral TikTok/Reels", f"Strong first 3 seconds, fast cuts and a clear ending CTA for {topic}."),
+                1: ("Before/after", f"Show the problem before using {topic}, then reveal the result after using it."),
+                2: ("POV / everyday situation", f"Put the viewer in a familiar situation where {topic} appears as the solution."),
+                3: ("Quick tips", f"Give 3 short tips and position {topic} as the tool that saves time."),
             }
             name, body = names[idx]
             return f"{name}: {body}"
         names = {
-            1: ("Hướng cảm xúc / câu chuyện", f"Kể câu chuyện trước/sau hoặc khoảnh khắc đáng nhớ xoay quanh {topic}."),
-            2: ("Hướng bán hàng trực tiếp", f"Nêu vấn đề → lợi ích → bằng chứng → lời kêu gọi hành động cho {topic}."),
-            3: ("Hướng viral TikTok/Reels", f"Hook mạnh 3 giây đầu, chuyển cảnh nhanh và CTA rõ cho {topic}."),
+            1: ("Trend before/after", f"Nêu vấn đề trước khi dùng {topic}, rồi chuyển sang kết quả sau khi dùng."),
+            2: ("Trend POV / tình huống đời thường", f"Đặt người xem vào tình huống quen thuộc, {topic} xuất hiện như giải pháp."),
+            3: ("Trend quick tips / mẹo nhanh", f"Đưa 3 mẹo ngắn, {topic} là công cụ giúp tiết kiệm thời gian."),
         }
         name, body = names[idx]
         return f"{name}: {body}"
@@ -47890,45 +47890,87 @@ def trend_guided_choice_summary(kind: str, index: int, state: dict, lang: str = 
         }[idx]
     return ""
 
-def trend_guided_trend_choices_text(topic: str, lang: str = "vi") -> str:
+def trend_guided_trend_source_text(topic: str, lang: str = "vi") -> str:
     safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500] or ("your topic" if normalize_user_language(lang) != "vi" else "chủ đề của bạn")
     if normalize_user_language(lang) != "vi":
         return (
-            "🔥 <b>Choose 1 of 3 video directions</b>\n\n"
+            "🔥 <b>Trend source</b>\n\n"
             f"Topic: <b>{html.escape(safe_topic)}</b>\n\n"
-            "<b>1. Emotional story direction</b>\n"
-            "• Best for lifestyle, branding and emotional products.\n"
-            "• Main idea: tell a before/after story or a memorable moment.\n\n"
-            "<b>2. Direct sales direction</b>\n"
-            "• Best for products, courses, affiliate and shops.\n"
-            "• Main idea: problem → benefit → proof → call to action.\n\n"
-            "<b>3. Viral TikTok/Reels direction</b>\n"
-            "• Best for short, easy-to-watch videos.\n"
-            "• Main idea: strong first 3 seconds, quick cuts and final CTA.\n\n"
+            "How do you want TOAN AAS to pick the trend?\n\n"
+            "Live internet trend search is still guarded/admin-only when not enabled. Public users receive content-only trend suggestions.\n\n"
             "The bot has not called image/video APIs and has not charged Xu."
         )
     return (
-        "🔥 <b>Chọn 1 trong 3 hướng video</b>\n\n"
+        "🔥 <b>Chọn cách lấy trend</b>\n\n"
         f"Chủ đề: <b>{html.escape(safe_topic)}</b>\n\n"
-        "<b>1️⃣ Hướng cảm xúc / câu chuyện</b>\n"
-        "• Phù hợp: sản phẩm cần tạo cảm xúc, thương hiệu, lifestyle.\n"
-        "• Ý chính: kể câu chuyện trước/sau hoặc khoảnh khắc đáng nhớ.\n\n"
-        "<b>2️⃣ Hướng bán hàng trực tiếp</b>\n"
-        "• Phù hợp: bán sản phẩm, khóa học, affiliate, shop.\n"
-        "• Ý chính: nêu vấn đề → lợi ích → bằng chứng → lời kêu gọi hành động.\n\n"
-        "<b>3️⃣ Hướng viral TikTok/Reels</b>\n"
-        "• Phù hợp: video ngắn, dễ xem, bắt trend.\n"
-        "• Ý chính: hook mạnh 3 giây đầu, chuyển cảnh nhanh, CTA cuối.\n\n"
+        "Bạn muốn TOAN AAS lấy trend theo cách nào?\n\n"
+        "Nếu Trend Live chưa mở công khai, bot sẽ dùng gợi ý trend content-only, không gọi tìm kiếm internet.\n\n"
+        "Bot chưa gọi API ảnh/video và chưa trừ Xu."
+    )
+
+def trend_guided_trend_source_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔥 Suggest 3 popular trends", callback_data="trendg|trend_source_popular")],
+            [InlineKeyboardButton("🔎 Suggest trends for this topic", callback_data="trendg|trend_source_search")],
+            [InlineKeyboardButton("✍️ I will enter my own trend", callback_data="trendg|trend_source_custom")],
+            [InlineKeyboardButton("➡️ Skip trend, create a normal video", callback_data="trendg|trend_source_skip")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔥 Gợi ý 3 trend phổ biến", callback_data="trendg|trend_source_popular")],
+        [InlineKeyboardButton("🔎 Tìm trend theo ngành/chủ đề", callback_data="trendg|trend_source_search")],
+        [InlineKeyboardButton("✍️ Tôi tự nhập trend", callback_data="trendg|trend_source_custom")],
+        [InlineKeyboardButton("➡️ Bỏ qua trend, tạo video thường", callback_data="trendg|trend_source_skip")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
+    ])
+
+def trend_guided_trend_choices_text(topic: str, lang: str = "vi") -> str:
+    safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500] or ("your topic" if normalize_user_language(lang) != "vi" else "chủ đề của bạn")
+    source = ""
+    if normalize_user_language(lang) == "vi":
+        source = "TOAN AAS sẽ gợi ý trend phù hợp theo chủ đề. Trend live từ internet sẽ mở sau.\n\n"
+    else:
+        source = "TOAN AAS will suggest trends for this topic. Live internet trend search will open later.\n\n"
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🔥 <b>Choose 1 of 3 trend ideas</b>\n\n"
+            f"Topic: <b>{html.escape(safe_topic)}</b>\n\n"
+            f"{source}"
+            "<b>1. Before/after trend</b>\n"
+            "• Show the problem before using the product.\n"
+            "• Cut to the result after using it.\n\n"
+            "<b>2. POV / everyday situation trend</b>\n"
+            "• Put viewers in a familiar situation.\n"
+            "• The product appears naturally as the solution.\n\n"
+            "<b>3. Quick tips trend</b>\n"
+            "• Share 3 short tips.\n"
+            "• The product becomes the tool that saves time.\n\n"
+            "The bot has not called image/video APIs and has not charged Xu."
+        )
+    return (
+        "🔥 <b>Chọn 1 trong 3 trend video</b>\n\n"
+        f"Chủ đề: <b>{html.escape(safe_topic)}</b>\n\n"
+        f"{source}"
+        "<b>1️⃣ Trend before/after</b>\n"
+        "• Nêu vấn đề trước khi dùng sản phẩm.\n"
+        "• Chuyển cảnh sang kết quả sau khi dùng.\n\n"
+        "<b>2️⃣ Trend POV / tình huống đời thường</b>\n"
+        "• Đặt người xem vào một tình huống quen thuộc.\n"
+        "• Sản phẩm xuất hiện như giải pháp tự nhiên.\n\n"
+        "<b>3️⃣ Trend quick tips / mẹo nhanh</b>\n"
+        "• Đưa 3 mẹo ngắn, dễ xem.\n"
+        "• Sản phẩm là công cụ giúp tiết kiệm thời gian.\n\n"
         "Bot chưa gọi API ảnh/video và chưa trừ Xu."
     )
 
 def trend_guided_trend_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn hướng 1" if normalize_user_language(lang) == "vi" else "1️⃣ Choose direction 1", callback_data="trendg|trend_select_1")],
-        [InlineKeyboardButton("2️⃣ Chọn hướng 2" if normalize_user_language(lang) == "vi" else "2️⃣ Choose direction 2", callback_data="trendg|trend_select_2")],
-        [InlineKeyboardButton("3️⃣ Chọn hướng 3" if normalize_user_language(lang) == "vi" else "3️⃣ Choose direction 3", callback_data="trendg|trend_select_3")],
-        [InlineKeyboardButton("🔁 Tạo lại 3 hướng khác" if normalize_user_language(lang) == "vi" else "🔁 Regenerate 3 directions", callback_data="trendg|trend_choices")],
-        [InlineKeyboardButton("✍️ Nhập hướng riêng" if normalize_user_language(lang) == "vi" else "✍️ Enter custom direction", callback_data="trendg|trend_custom")],
+        [InlineKeyboardButton("1️⃣ Chọn trend 1" if normalize_user_language(lang) == "vi" else "1️⃣ Choose trend 1", callback_data="trendg|trend_select_1")],
+        [InlineKeyboardButton("2️⃣ Chọn trend 2" if normalize_user_language(lang) == "vi" else "2️⃣ Choose trend 2", callback_data="trendg|trend_select_2")],
+        [InlineKeyboardButton("3️⃣ Chọn trend 3" if normalize_user_language(lang) == "vi" else "3️⃣ Choose trend 3", callback_data="trendg|trend_select_3")],
+        [InlineKeyboardButton("🔁 Tạo lại 3 trend khác" if normalize_user_language(lang) == "vi" else "🔁 Regenerate 3 trends", callback_data="trendg|trend_source_popular")],
+        [InlineKeyboardButton("✍️ Nhập trend riêng" if normalize_user_language(lang) == "vi" else "✍️ Enter custom trend", callback_data="trendg|trend_source_custom")],
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="trendg|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
     ])
 
@@ -47939,25 +47981,27 @@ def trend_guided_selected_trend_text(state: dict, index: int = 1, lang: str = "v
         chosen = html.escape(custom or trend_guided_trend_label(idx, lang))
         summary = html.escape(custom or trend_guided_choice_summary("trend", idx, state, lang))
         return (
-            f"✅ <b>You selected: {chosen}</b>\n\n"
+            f"✅ <b>Selected trend: {chosen}</b>\n\n"
             f"<b>Summary:</b>\n{summary}\n\n"
+            "The bot will use this trend for concept, motion, image prompt and video prompt.\n\n"
             "The bot has not called image/video APIs and has not charged Xu.\n\n"
             "What would you like to do next?"
         )
     chosen = html.escape(custom or trend_guided_trend_label(idx, lang))
     summary = html.escape(custom or trend_guided_choice_summary("trend", idx, state, lang))
     return (
-        f"✅ <b>Bạn đã chọn: {chosen}</b>\n\n"
+        f"✅ <b>Đã chọn trend: {chosen}</b>\n\n"
         f"<b>Tóm tắt:</b>\n{summary}\n\n"
+        "Bot sẽ dùng trend này để tạo concept/chuyển động/prompt ảnh/prompt video.\n\n"
         "Bot chưa gọi API ảnh/video và chưa trừ Xu.\n\n"
         "Bạn muốn làm gì tiếp?"
     )
 
 def trend_guided_selected_trend_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Chốt hướng này" if normalize_user_language(lang) == "vi" else "✅ Lock this direction", callback_data="trendg|trend_lock")],
-        [InlineKeyboardButton("✍️ Sửa hướng này" if normalize_user_language(lang) == "vi" else "✍️ Edit this direction", callback_data="trendg|trend_custom")],
-        [InlineKeyboardButton("🔁 Chọn lại 3 hướng" if normalize_user_language(lang) == "vi" else "🔁 Choose again", callback_data="trendg|trend_choices")],
+        [InlineKeyboardButton("✅ Chốt trend này" if normalize_user_language(lang) == "vi" else "✅ Lock this trend", callback_data="trendg|trend_lock")],
+        [InlineKeyboardButton("✍️ Sửa trend" if normalize_user_language(lang) == "vi" else "✍️ Edit trend", callback_data="trendg|trend_source_custom")],
+        [InlineKeyboardButton("🔁 Chọn trend khác" if normalize_user_language(lang) == "vi" else "🔁 Choose another trend", callback_data="trendg|trend_choices")],
         [InlineKeyboardButton("➡️ Sang bước chuyển động" if normalize_user_language(lang) == "vi" else "➡️ Next: motion", callback_data="trendg|motion_step")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
     ])
@@ -49111,7 +49155,9 @@ async def send_or_confirm_trend_video_flow(update: Update, context: ContextTypes
 
 async def send_trend_guided_choices_message(message, uid: int, topic: str, lang: str = "vi"):
     safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500]
-    clear_trend_video_flow_pending(uid)
+    state = get_trend_video_flow_pending(uid) or {}
+    if not state:
+        clear_trend_video_flow_pending(uid)
     set_trend_video_flow_pending(
         uid,
         "trend_choices",
@@ -49125,11 +49171,38 @@ async def send_trend_guided_choices_message(message, uid: int, topic: str, lang:
         custom_image_prompt="",
         custom_video_prompt="",
         music_choice="",
+        trend_locked=False,
+        motion_locked=False,
     )
     return await message.reply_text(
         trend_guided_trend_choices_text(safe_topic, lang),
         parse_mode="HTML",
         reply_markup=trend_guided_trend_choices_keyboard(lang),
+    )
+
+async def send_trend_guided_source_message(message, uid: int, topic: str, lang: str = "vi"):
+    safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500]
+    clear_trend_video_flow_pending(uid)
+    set_trend_video_flow_pending(
+        uid,
+        "trend_source",
+        topic=safe_topic,
+        trend_choice=0,
+        motion_choice=0,
+        image_prompt_choice=0,
+        video_prompt_choice=0,
+        custom_trend="",
+        custom_motion="",
+        custom_image_prompt="",
+        custom_video_prompt="",
+        music_choice="",
+        trend_locked=False,
+        motion_locked=False,
+    )
+    return await message.reply_text(
+        trend_guided_trend_source_text(safe_topic, lang),
+        parse_mode="HTML",
+        reply_markup=trend_guided_trend_source_keyboard(lang),
     )
 
 async def trend_guided_start_from_query(query, uid: int, lang: str = "vi"):
@@ -49166,7 +49239,7 @@ async def cmd_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYP
         clear_trend_video_flow_pending(uid)
         set_trend_video_flow_pending(uid, "topic")
         return await update.message.reply_text(trend_video_pending_prompt_text(lang), parse_mode="HTML", reply_markup=trend_video_pending_keyboard(lang))
-    await send_trend_guided_choices_message(update.message, uid, topic, lang)
+    await send_trend_guided_source_message(update.message, uid, topic, lang)
 
 async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -49200,30 +49273,49 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, trend_guided_project_missing_text(lang), reply_markup=trend_guided_main_keyboard(lang))
 
     if action == "trend_choices":
+        set_trend_video_flow_pending(uid, "trend_source")
+        state = get_trend_video_flow_pending(uid) or state
+        return await safe_edit_or_send(
+            query,
+            trend_guided_trend_source_text(trend_guided_topic(state), lang),
+            parse_mode="HTML",
+            reply_markup=trend_guided_trend_source_keyboard(lang),
+        )
+    if action in {"trend_source_popular", "trend_source_search"}:
+        set_trend_video_flow_pending(uid, "trend_choices", trend_source=("industry" if action == "trend_source_search" else "popular"), trend_locked=False, motion_locked=False)
+        state = get_trend_video_flow_pending(uid) or state
         return await safe_edit_or_send(
             query,
             trend_guided_trend_choices_text(trend_guided_topic(state), lang),
             parse_mode="HTML",
             reply_markup=trend_guided_trend_choices_keyboard(lang),
         )
+    if action == "trend_source_custom":
+        set_trend_video_flow_pending(uid, "trend_custom", trend_source="manual")
+        return await safe_edit_or_send(query, "✍️ Please enter the trend/video style you want to follow." if normalize_user_language(lang) != "vi" else "✍️ Bạn hãy nhập trend/mẫu video bạn muốn bắt chước.", reply_markup=trend_video_pending_keyboard(lang))
+    if action == "trend_source_skip":
+        skip_label = "Normal video without a selected trend" if normalize_user_language(lang) != "vi" else "Bỏ qua trend, tạo video thường"
+        set_trend_video_flow_pending(uid, "trend_selected", trend_choice=0, custom_trend=skip_label, trend_source="skip", trend_locked=False, motion_locked=False)
+        state = get_trend_video_flow_pending(uid) or state
+        return await safe_edit_or_send(query, trend_guided_selected_trend_text(state, 1, lang), parse_mode="HTML", reply_markup=trend_guided_selected_trend_keyboard(lang))
     if action.startswith("trend_select_"):
         idx = max(1, min(3, safe_int(action.rsplit("_", 1)[-1], 1)))
-        set_trend_video_flow_pending(uid, "trend_selected", trend_choice=idx, custom_trend="")
+        set_trend_video_flow_pending(uid, "trend_selected", trend_choice=idx, custom_trend="", trend_locked=False, motion_locked=False)
         state = get_trend_video_flow_pending(uid) or state
         return await safe_edit_or_send(query, trend_guided_selected_trend_text(state, idx, lang), parse_mode="HTML", reply_markup=trend_guided_selected_trend_keyboard(lang))
     if action == "trend_custom":
-        set_trend_video_flow_pending(uid, "trend_custom")
-        return await safe_edit_or_send(query, "✍️ Send your custom video direction in one short sentence." if normalize_user_language(lang) != "vi" else "✍️ Hãy nhập hướng video riêng của bạn trong một câu ngắn.", reply_markup=trend_video_pending_keyboard(lang))
+        set_trend_video_flow_pending(uid, "trend_custom", trend_source="manual")
+        return await safe_edit_or_send(query, "✍️ Please enter the trend/video style you want to follow." if normalize_user_language(lang) != "vi" else "✍️ Bạn hãy nhập trend/mẫu video bạn muốn bắt chước.", reply_markup=trend_video_pending_keyboard(lang))
     if action in {"trend_review", "trend_lock"}:
         if action == "trend_lock":
             set_trend_video_flow_pending(uid, "trend_selected", trend_locked=True)
             state = get_trend_video_flow_pending(uid) or state
-            notice = "✅ Direction locked. Next: choose motion." if normalize_user_language(lang) != "vi" else "✅ Đã chốt hướng này. Tiếp theo: chọn chuyển động cho video."
+            notice = "✅ Trend locked. Next: choose motion." if normalize_user_language(lang) != "vi" else "✅ Đã chốt trend này. Tiếp theo: chọn chuyển động cho video."
             return await safe_edit_or_send(query, f"{notice}\n\n" + trend_guided_motion_choices_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_motion_choices_keyboard(lang))
         idx = int(state.get("trend_choice") or 1)
         return await safe_edit_or_send(query, trend_guided_selected_trend_text(state, idx, lang), parse_mode="HTML", reply_markup=trend_guided_selected_trend_keyboard(lang))
     if action == "motion_step":
-        set_trend_video_flow_pending(uid, "motion_choices")
+        set_trend_video_flow_pending(uid, "motion_choices", trend_locked=True)
         state = get_trend_video_flow_pending(uid) or state
         return await safe_edit_or_send(query, trend_guided_motion_choices_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_motion_choices_keyboard(lang))
     if action.startswith("motion_select_"):
@@ -49668,7 +49760,7 @@ async def handle_trend_video_flow_pending_text(update: Update, context: ContextT
         return True
     step = str(pending.get("step") or "topic")
     if step == "trend_custom":
-        set_trend_video_flow_pending(uid, "trend_selected", custom_trend=topic, trend_choice=0)
+        set_trend_video_flow_pending(uid, "trend_selected", custom_trend=topic, trend_choice=0, trend_source="manual", trend_locked=False, motion_locked=False)
         state = get_trend_video_flow_pending(uid) or {}
         await update.message.reply_text(
             trend_guided_selected_trend_text(state, 1, lang),
@@ -49703,7 +49795,7 @@ async def handle_trend_video_flow_pending_text(update: Update, context: ContextT
             reply_markup=trend_guided_selected_video_prompt_keyboard(lang, is_admin_user(uid)),
         )
         return True
-    await send_trend_guided_choices_message(update.message, uid, topic, lang)
+    await send_trend_guided_source_message(update.message, uid, topic, lang)
     return True
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):

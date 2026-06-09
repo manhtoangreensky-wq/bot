@@ -953,7 +953,12 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "TREND_VIDEO_PENDING_TTL_SECONDS" in source
     assert "handle_trend_video_flow_pending_text(update, context)" in message_source
     assert message_source.index("handle_trend_video_flow_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
-    assert "send_trend_guided_choices_message(update.message, uid, topic, lang)" in pending_source
+    assert "send_trend_guided_source_message(update.message, uid, topic, lang)" in pending_source
+    assert "trend_guided_trend_source_text" in source
+    assert "trendg|trend_source_popular" in source
+    assert "trendg|trend_source_search" in source
+    assert "trendg|trend_source_custom" in source
+    assert "trendg|trend_source_skip" in source
     assert "clear_trend_video_flow_pending(uid)" in source
     assert "shopaikey_image_generate" not in combined_source
     assert "shopaikey_video_create" not in combined_source
@@ -1738,22 +1743,35 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert bot.clear_creative_motion_pending("u_motion") is True
 
     trend_prompt = bot.trend_video_pending_prompt_text()
-    assert "Bạn muốn làm video về sản phẩm/dịch vụ/chủ đề gì" in trend_prompt
+    assert "Bạn muốn làm video theo trend cho sản phẩm/dịch vụ/chủ đề gì" in trend_prompt
     assert "mục tiêu + phong cách + nền tảng" not in trend_prompt
     bot.USER_PENDING.pop(bot.trend_video_pending_key("u_trend"), None)
-    bot.set_trend_video_flow_pending("u_trend", "trend_choices", topic="máy xay sinh tố mini")
+    bot.set_trend_video_flow_pending("u_trend", "trend_source", topic="máy xay sinh tố mini")
     pending = bot.get_trend_video_flow_pending("u_trend")
     assert pending and pending["pending_action"] == "trend_video_flow"
     assert pending["topic"] == "máy xay sinh tố mini"
+    source_text = bot.trend_guided_trend_source_text("máy xay sinh tố mini")
+    assert "Bạn muốn TOAN AAS lấy trend theo cách nào" in source_text
+    source_callbacks = [button.callback_data for row in bot.trend_guided_trend_source_keyboard().inline_keyboard for button in row]
+    assert "trendg|trend_source_popular" in source_callbacks
+    assert "trendg|trend_source_search" in source_callbacks
+    assert "trendg|trend_source_custom" in source_callbacks
+    assert "trendg|trend_source_skip" in source_callbacks
+    bot.set_trend_video_flow_pending("u_trend", "trend_choices", topic="máy xay sinh tố mini", trend_source="popular")
     trend_text = bot.trend_guided_trend_choices_text("máy xay sinh tố mini")
-    assert "Chọn 1 trong 3 hướng video" in trend_text
-    assert "Hướng cảm xúc / câu chuyện" in trend_text
-    assert "Hướng bán hàng trực tiếp" in trend_text
-    assert "Hướng viral TikTok/Reels" in trend_text
+    assert "Chọn 1 trong 3 trend video" in trend_text
+    assert "Trend before/after" in trend_text
+    assert "Trend POV / tình huống đời thường" in trend_text
+    assert "Trend quick tips / mẹo nhanh" in trend_text
+    assert "Trend live từ internet sẽ mở sau" in trend_text
     trend_callbacks = [button.callback_data for row in bot.trend_guided_trend_choices_keyboard().inline_keyboard for button in row]
     assert "trendg|trend_select_1" in trend_callbacks
     assert "trendg|trend_select_2" in trend_callbacks
     assert "trendg|trend_select_3" in trend_callbacks
+    assert "trendg|trend_source_popular" in trend_callbacks
+    selected_trend_text = bot.trend_guided_selected_trend_text(bot.get_trend_video_flow_pending("u_trend") or {}, 1)
+    assert "Đã chọn trend" in selected_trend_text
+    assert "Bot sẽ dùng trend này để tạo concept/chuyển động/prompt ảnh/prompt video" in selected_trend_text
     motion_callbacks = [button.callback_data for row in bot.trend_guided_motion_choices_keyboard().inline_keyboard for button in row]
     assert "trendg|motion_select_1" in motion_callbacks
     assert "trendg|motion_select_2" in motion_callbacks
