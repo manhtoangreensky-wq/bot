@@ -340,7 +340,7 @@ SHOPAIKEY_VIDEO_ADMIN_ONLY = env_flag("SHOPAIKEY_VIDEO_ADMIN_ONLY", "true")
 SHOPAIKEY_VIDEO_MODEL = _env("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
 SHOPAIKEY_VIDEO_FALLBACK_MODELS = _env("SHOPAIKEY_VIDEO_FALLBACK_MODELS", "veo3.1,veo3.1-fast,veo3.1-pro,veo3.1-4k,veo3.1-fast-components,grok-video-3,grok-video-3-10s")
 SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "true")
-SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "true")
+SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "false")
 IMAGE_TIER_LOW_ENABLED = env_flag("IMAGE_TIER_LOW_ENABLED", "true")
 IMAGE_TIER_STANDARD_ENABLED = env_flag("IMAGE_TIER_STANDARD_ENABLED", "true")
 IMAGE_TIER_HIGH_ENABLED = env_flag("IMAGE_TIER_HIGH_ENABLED", "true")
@@ -354,6 +354,7 @@ SHOPAIKEY_VIDEO_DEFAULT_TIER = _env("SHOPAIKEY_VIDEO_DEFAULT_TIER", "low")
 SHOPAIKEY_IMAGE_COST_XU = env_int("SHOPAIKEY_IMAGE_COST_XU", 50)
 SHOPAIKEY_VIDEO_COST_XU = env_int("SHOPAIKEY_VIDEO_COST_XU", 200)
 SHOPAIKEY_TREND_COST_XU = env_int("SHOPAIKEY_TREND_COST_XU", 10)
+CREATIVE_MOTION_GUIDE_COST_XU = env_int("CREATIVE_MOTION_GUIDE_COST_XU", 0)
 SHOPAIKEY_REFUND_ON_PROVIDER_FAIL = env_flag("SHOPAIKEY_REFUND_ON_PROVIDER_FAIL", "true")
 SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT = env_flag("SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT", "true")
 SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED = env_flag("SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED", "true")
@@ -681,8 +682,8 @@ PLAN_CATALOG = {
         "duration_days": 30,
         "required_member_tier": "silver",
         "plan_xu": 600,
-        "vip_estimate": "2–4 tác vụ VIP nhỏ hoặc nhiều tác vụ nhẹ",
-        "description": "Dành cho người mới làm content",
+        "vip_estimate": "khoảng 12 ảnh tiết kiệm hoặc 8 workflow trend content-only, hoặc nhiều tác vụ nhỏ",
+        "description": "Dành cho người mới làm content: chat thường, dịch ngắn, PDF cơ bản, prompt ảnh/video và workflow nhỏ",
     },
     "creator": {
         "name": "Creator",
@@ -690,8 +691,8 @@ PLAN_CATALOG = {
         "duration_days": 30,
         "required_member_tier": "silver",
         "plan_xu": 1300,
-        "vip_estimate": "5–8 tác vụ VIP nhỏ hoặc nhiều tác vụ thường",
-        "description": "Dành cho người làm nội dung đều đặn",
+        "vip_estimate": "khoảng 26 ảnh tiết kiệm hoặc 18 workflow trend content-only, hoặc vài ảnh tiêu chuẩn + task nhỏ",
+        "description": "Dành cho creator, affiliate hoặc shop nhỏ cần prompt/content/ảnh đều đặn",
     },
     "pro": {
         "name": "Pro",
@@ -699,8 +700,8 @@ PLAN_CATALOG = {
         "duration_days": 30,
         "required_member_tier": "gold",
         "plan_xu": 3000,
-        "vip_estimate": "10–20 tác vụ VIP nhỏ hoặc nhiều tác vụ thường",
-        "description": "Dành cho người dùng thường xuyên",
+        "vip_estimate": "khoảng 60 ảnh tiết kiệm, 10 ảnh tiêu chuẩn hoặc 42 workflow trend content-only",
+        "description": "Dành cho người dùng thường xuyên, có thể ưu tiên queue/tác vụ file/audio vừa khi công cụ mở",
     },
     "business": {
         "name": "Business",
@@ -708,8 +709,8 @@ PLAN_CATALOG = {
         "duration_days": 30,
         "required_member_tier": "gold_or_admin_approve",
         "plan_xu": 8000,
-        "vip_estimate": "nhiều lượt VIP hơn Pro",
-        "description": "Dành cho đội nhóm nhỏ",
+        "vip_estimate": "khoảng 160 ảnh tiết kiệm, 26 ảnh tiêu chuẩn hoặc 16 ảnh chất lượng cao",
+        "description": "Dành cho team nhỏ, shop hoặc affiliate team cần workflow content + ảnh + voice/audio",
     },
 }
 
@@ -1631,6 +1632,19 @@ def init_db():
         order_code TEXT DEFAULT '',
         updated_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS plan_purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        plan_code TEXT,
+        purchase_month TEXT,
+        purchase_count INTEGER DEFAULT 1,
+        order_code TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',
+        source TEXT DEFAULT '',
+        created_at TEXT,
+        updated_at TEXT,
+        UNIQUE(user_id, plan_code, purchase_month)
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS local_worker_jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -2434,6 +2448,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_birthday_review_user_status ON birthday_review_requests(user_id, status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_plans_status ON user_plans(plan_status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_plans_expires ON user_plans(plan_expires_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_plan_purchases_user_month ON plan_purchases(user_id, purchase_month)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_plan_purchases_status ON plan_purchases(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_status ON local_worker_jobs(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_created ON local_worker_jobs(created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_workflow_image_assets_user ON workflow_image_assets(user_id, created_at)")
@@ -3635,6 +3651,78 @@ def user_can_buy_plan(user_id, plan_id: str) -> tuple[bool, str]:
         return False, f"Gói này yêu cầu từ {plan_required_tier_label(plan_id)}. Hạng hiện tại của bạn: {get_member_badge(tier)}."
     return True, "eligible"
 
+def current_plan_purchase_month(dt: datetime | None = None) -> str:
+    dt = dt or vn_now()
+    return dt.strftime("%Y-%m")
+
+def monthly_plan_purchase_row(user_id, plan_id: str, purchase_month: str = "", conn=None) -> dict | None:
+    plan_id = normalize_plan_id(plan_id)
+    if not plan_id:
+        return None
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT user_id, plan_code, purchase_month, purchase_count, order_code, status, source, created_at, updated_at
+               FROM plan_purchases
+               WHERE user_id=? AND plan_code=? AND purchase_month=?
+               LIMIT 1""",
+            (str(user_id), plan_id, purchase_month or current_plan_purchase_month()),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "user_id": row[0],
+            "plan_code": row[1],
+            "purchase_month": row[2],
+            "purchase_count": int(row[3] or 0),
+            "order_code": row[4] or "",
+            "status": row[5] or "",
+            "source": row[6] or "",
+            "created_at": row[7] or "",
+            "updated_at": row[8] or "",
+        }
+    finally:
+        if own_conn:
+            conn.close()
+
+def monthly_plan_purchase_block_message(plan_id: str, purchase_month: str = "") -> str:
+    label = plan_label(plan_id) or str(plan_id or "").title()
+    month = purchase_month or current_plan_purchase_month()
+    return (
+        f"Bạn đã mua gói {label} trong tháng {month}. "
+        f"Mỗi gói chỉ mua 1 lần/tháng. Bạn có thể dùng gói khác nếu đủ điều kiện hoặc chờ tháng sau."
+    )
+
+def can_purchase_monthly_plan(user_id, plan_id: str, purchase_month: str = "", conn=None) -> tuple[bool, str]:
+    row = monthly_plan_purchase_row(user_id, plan_id, purchase_month=purchase_month, conn=conn)
+    if row and str(row.get("status") or "").lower() in {"paid", "active"}:
+        return False, monthly_plan_purchase_block_message(plan_id, row.get("purchase_month") or purchase_month)
+    return True, "eligible"
+
+def record_monthly_plan_purchase_conn(conn, user_id, plan_id: str, order_code: str = "", status: str = "active", source: str = "payos") -> None:
+    plan_id = normalize_plan_id(plan_id)
+    if not plan_id:
+        return
+    month = current_plan_purchase_month()
+    now = now_text()
+    conn.execute(
+        """INSERT INTO plan_purchases
+        (user_id, plan_code, purchase_month, purchase_count, order_code, status, source, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(user_id, plan_code, purchase_month) DO UPDATE SET
+            purchase_count=CASE
+                WHEN plan_purchases.status IN ('paid','active') THEN plan_purchases.purchase_count
+                ELSE plan_purchases.purchase_count + 1
+            END,
+            order_code=excluded.order_code,
+            status=excluded.status,
+            source=excluded.source,
+            updated_at=excluded.updated_at""",
+        (str(user_id), plan_id, month, 1, str(order_code or ""), str(status or "active"), str(source or ""), now, now),
+    )
+
 def get_user_plan(user_id, conn=None) -> dict:
     own_conn = conn is None
     if own_conn:
@@ -3694,6 +3782,7 @@ def activate_user_plan_conn(conn, user_id, plan_id: str, days: int | None = None
             updated_at=excluded.updated_at""",
         (str(user_id), plan_id, plan["name"], started_at, expires_at, plan_xu, plan_xu, "active", str(order_code or ""), now_text()),
     )
+    record_monthly_plan_purchase_conn(conn, user_id, plan_id, order_code=order_code, status="active", source=source)
     record_usage_event_conn(
         conn,
         user_id,
@@ -4399,8 +4488,8 @@ def referral_stats_for_user(user_id, conn=None) -> dict:
     try:
         uid = str(user_id)
         total = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=?", (uid,)).fetchone()[0] or 0)
-        pending = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND COALESCE(status,'pending')='pending'", (uid,)).fetchone()[0] or 0)
-        rewarded = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND COALESCE(status,'')='rewarded'", (uid,)).fetchone()[0] or 0)
+        pending = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND COALESCE(status,'registered') IN ('pending','registered','trial_claimed','paid_topup','reward_pending')", (uid,)).fetchone()[0] or 0)
+        rewarded = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND COALESCE(status,'') IN ('rewarded','reward_paid')", (uid,)).fetchone()[0] or 0)
         qualified_no_reward = int(conn.execute("SELECT COUNT(*) FROM referrals WHERE referrer_user_id=? AND COALESCE(status,'')='qualified_no_reward'", (uid,)).fetchone()[0] or 0)
         reward_xu = int(conn.execute("SELECT COALESCE(SUM(reward_xu),0) FROM referrals WHERE referrer_user_id=?", (uid,)).fetchone()[0] or 0)
         recent = conn.execute(
@@ -4455,7 +4544,7 @@ def register_referral(referred_user_id, referrer_user_id, user_existed_before: b
                 str(referred_user_id),
                 str(referrer_user_id),
                 f"ref_{referrer_user_id}",
-                "pending",
+                "registered",
                 now_text(),
                 0,
                 now_text(),
@@ -4500,21 +4589,21 @@ def award_referral_bonus_if_needed(conn, referred_user_id, order_code="", amount
     result["referrer_user_id"] = str(referrer_id or "")
     if not referrer_id or str(referrer_id) == str(referred_user_id):
         c.execute(
-            "UPDATE referrals SET status='rejected', note=? WHERE referred_user_id=? AND COALESCE(status,'pending')='pending'",
+            "UPDATE referrals SET status='invalid', note=? WHERE referred_user_id=? AND COALESCE(status,'registered') IN ('pending','registered','trial_claimed','paid_topup','reward_pending')",
             ("Rejected self-ref/invalid referrer", str(referred_user_id)),
         )
-        result["status"] = "rejected"
+        result["status"] = "invalid"
         return result
-    if int(bonus_paid or 0) == 1 or str(status) == "rewarded":
+    if int(bonus_paid or 0) == 1 or str(status) in {"rewarded", "reward_paid"}:
         result["status"] = "duplicate"
         return result
     if not is_first_deposit:
         c.execute(
-            """UPDATE referrals SET status='rejected', note=?
-            WHERE referred_user_id=? AND COALESCE(status,'pending')='pending'""",
+            """UPDATE referrals SET status='invalid', note=?
+            WHERE referred_user_id=? AND COALESCE(status,'registered') IN ('pending','registered','trial_claimed','paid_topup','reward_pending')""",
             ("No reward because this was not the first successful deposit", str(referred_user_id)),
         )
-        result["status"] = "rejected"
+        result["status"] = "invalid"
         return result
 
     c.execute(
@@ -4524,7 +4613,7 @@ def award_referral_bonus_if_needed(conn, referred_user_id, order_code="", amount
     profile = get_member_profile(referrer_id, conn=conn)
     tier = profile.get("tier") or "none"
     reward_xu = member_referral_reward(int(base_xu or 0), tier)
-    final_status = "rewarded" if reward_xu > 0 else "qualified_no_reward"
+    final_status = "reward_paid" if reward_xu > 0 else "qualified_no_reward"
     if reward_xu > 0:
         c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (int(reward_xu), str(referrer_id)))
         record_credit_event(
@@ -27762,9 +27851,10 @@ def clear_media_creator_pending_states(user_id) -> bool:
     quick_cleared = clear_quick_media_pending(user_id)
     public_image_cleared = clear_public_image_prompt_pending(user_id)
     public_video_cleared = clear_public_video_prompt_pending(user_id)
+    creative_motion_cleared = clear_creative_motion_pending(user_id)
     trend_cleared = clear_trend_video_flow_pending(user_id)
     trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
-    return bool(quick_cleared or public_image_cleared or public_video_cleared or trend_cleared or trend_confirm_cleared)
+    return bool(quick_cleared or public_image_cleared or public_video_cleared or creative_motion_cleared or trend_cleared or trend_confirm_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -30645,6 +30735,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🎞 Quick video", callback_data="create_media|quick_video")],
             [InlineKeyboardButton("🎬 Trend video workflow", callback_data="create_media|trend")],
+            [InlineKeyboardButton("🎥 Video motion guide", callback_data="motion|start")],
             [InlineKeyboardButton("🖼➡️🎞 Image to video", callback_data="menu|hint_image_to_video_pack")],
             [InlineKeyboardButton("✍️ Video prompt", callback_data="menu|hint_film")],
             [InlineKeyboardButton("📝 Hook/script/caption", callback_data="menu|hint_film")],
@@ -30653,6 +30744,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")],
         [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
+        [InlineKeyboardButton("🎥 Gợi ý chuyển động video", callback_data="motion|start")],
         [InlineKeyboardButton("🖼➡️🎞 Tạo video từ ảnh", callback_data="menu|hint_image_to_video_pack")],
         [InlineKeyboardButton("✍️ Tạo prompt video", callback_data="menu|hint_film")],
         [InlineKeyboardButton("📝 Viết hook/script/caption", callback_data="menu|hint_film")],
@@ -31376,13 +31468,77 @@ def menu_text_main_profile(user_id) -> str:
         return "👤 <b>TÀI KHOẢN</b>\n\nGõ <code>/profile</code> để xem số dư Xu, hạng thành viên và thông tin tài khoản."
     credits, total_spent, is_vip = get_user(user_id)
     balance = "Vô hạn" if is_admin_user(user_id) else f"{int(credits)} Xu"
+    ref_link = referral_link_for_user(user_id, BOT_USERNAME)
     return (
         "👤 <b>TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{html.escape(str(user_id))}</code>\n"
         f"• 🪪 Hạng: <b>{html.escape(get_role_badge(user_id))}</b>\n"
         f"• Số dư: <b>{html.escape(balance)}</b>\n\n"
+        "🎁 <b>Link giới thiệu của bạn</b>\n"
+        f"<code>{html.escape(ref_link)}</code>\n\n"
         "Gõ <code>/profile</code> để xem chi tiết referral, birthday gift và quyền lợi thành viên."
     )
+
+def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎁 My referral link", callback_data="menu|profile_ref_link")],
+            [InlineKeyboardButton("📋 Referral policy", callback_data="menu|profile_ref_policy")],
+            [InlineKeyboardButton("👥 My referrals", callback_data="menu|profile_ref_stats")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎁 Link giới thiệu của tôi", callback_data="menu|profile_ref_link")],
+        [InlineKeyboardButton("📋 Cách nhận thưởng giới thiệu", callback_data="menu|profile_ref_policy")],
+        [InlineKeyboardButton("👥 Người đã giới thiệu", callback_data="menu|profile_ref_stats")],
+        [InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")],
+    ])
+
+def referral_account_link_text(user_id, bot_username: str = "") -> str:
+    link = referral_link_for_user(user_id, bot_username or BOT_USERNAME)
+    return (
+        "🎁 <b>Link giới thiệu TOAN AAS của bạn:</b>\n"
+        f"<code>{html.escape(link)}</code>\n\n"
+        "Bạn có thể gửi link này cho bạn bè/khách hàng. Khi họ đăng ký hoặc nạp Xu hợp lệ, "
+        "hệ thống sẽ ghi nhận theo chính sách giới thiệu hiện hành.\n\n"
+        "Ghi nhận giới thiệu trước, chính sách thưởng có thể cấu hình sau."
+    )
+
+def referral_account_policy_text(user_id) -> str:
+    profile = get_member_profile(user_id)
+    return (
+        "📋 <b>CÁCH NHẬN THƯỞNG GIỚI THIỆU</b>\n\n"
+        "• Bạn bè phải là tài khoản mới.\n"
+        "• Bạn bè cần nạp Xu lần đầu thành công.\n"
+        "• Không tự mời, không tài khoản ảo/spam.\n"
+        "• Xu thưởng không rút tiền, không chuyển nhượng.\n"
+        "• Admin có quyền khóa referral nếu phát hiện gian lận.\n\n"
+        "<b>Mức thưởng tối đa theo hạng</b>\n"
+        f"{member_referral_policy_table_text()}\n\n"
+        f"Hạng hiện tại của bạn: <b>{html.escape(profile.get('tier_badge') or profile.get('tier_label') or '-')}</b>\n"
+        f"Chính sách hiện tại: <b>{html.escape(member_referral_policy_text(profile))}</b>"
+    )
+
+def referral_account_stats_text(user_id) -> str:
+    stats = referral_stats_for_user(user_id)
+    lines = [
+        "👥 <b>NGƯỜI ĐÃ GIỚI THIỆU</b>",
+        "",
+        f"• Đã bấm link: <b>{stats['total']}</b>",
+        f"• Đang ghi nhận/chờ điều kiện: <b>{stats['pending']}</b>",
+        f"• Đã thưởng: <b>{stats['rewarded']}</b>",
+        f"• Đủ điều kiện nhưng chưa có thưởng: <b>{stats['qualified_no_reward']}</b>",
+        f"• Tổng Xu thưởng: <b>{stats['reward_xu']} Xu</b>",
+    ]
+    if stats["recent"]:
+        lines.extend(["", "<b>5 referral gần nhất</b>"])
+        for referred_id, status, reward_xu, created_at in stats["recent"]:
+            safe_referred = str(referred_id or "")
+            masked = safe_referred[:4] + "..." + safe_referred[-3:] if len(safe_referred) > 7 else safe_referred
+            lines.append(f"• <code>{html.escape(masked)}</code> | {html.escape(str(status))} | +{int(reward_xu or 0)} Xu | {html.escape(str(created_at or '-')[:16])}")
+    else:
+        lines.append("\nChưa có referral nào được ghi nhận.")
+    return "\n".join(lines)
 
 def menu_text_main_guide() -> str:
     return (
@@ -31602,11 +31758,14 @@ def menu_text_main_profile_i18n(user_id, lang: str) -> str:
         return "👤 <b>ACCOUNT</b>\n\nUse <code>/profile</code> to view balance, tier and account information."
     credits, _total_spent, _is_vip = get_user(user_id)
     balance = "Unlimited" if is_admin_user(user_id) else f"{int(credits)} Xu"
+    ref_link = referral_link_for_user(user_id, BOT_USERNAME)
     return (
         "👤 <b>ACCOUNT</b>\n\n"
         f"• ID: <code>{html.escape(str(user_id))}</code>\n"
         f"• Tier: <b>{html.escape(get_role_badge(user_id))}</b>\n"
         f"• Balance: <b>{html.escape(balance)}</b>\n\n"
+        "🎁 <b>Your referral link</b>\n"
+        f"<code>{html.escape(ref_link)}</code>\n\n"
         "Use <code>/profile</code> for referral, birthday and member details."
     )
 
@@ -31651,7 +31810,13 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "main_topup":
         return menu_text_main_topup_i18n(lang), main_topup_keyboard(lang)
     if action == "main_profile":
-        return menu_text_main_profile_i18n(user_id or "__customer__", lang), localized_public_back_keyboard(lang)
+        return menu_text_main_profile_i18n(user_id or "__customer__", lang), main_profile_keyboard(lang)
+    if action == "profile_ref_link":
+        return referral_account_link_text(user_id or "__customer__", BOT_USERNAME), main_profile_keyboard(lang)
+    if action == "profile_ref_policy":
+        return referral_account_policy_text(user_id or "__customer__"), main_profile_keyboard(lang)
+    if action == "profile_ref_stats":
+        return referral_account_stats_text(user_id or "__customer__"), main_profile_keyboard(lang)
     if action == "main_guide":
         return menu_text_main_guide_i18n(lang), main_guide_keyboard(lang)
     if action.startswith("hint_"):
@@ -31685,7 +31850,7 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
     if action == "main_topup":
         return menu_text_main_topup(), main_topup_keyboard()
     if action == "main_profile":
-        return "👤 <b>TÀI KHOẢN</b>\n\nGõ <code>/profile</code> để xem số dư Xu, hạng thành viên và thông tin tài khoản.", public_back_keyboard()
+        return menu_text_main_profile("__customer__"), main_profile_keyboard()
     if action == "main_guide":
         return menu_text_main_guide(), main_guide_keyboard()
     if action == "ai_basic":
@@ -38823,19 +38988,19 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
         ) or 0)
         ref_qualified = int(sql_scalar(
             conn,
-            "SELECT COUNT(*) FROM referrals WHERE status IN ('rewarded','qualified_no_reward') AND rewarded_at BETWEEN ? AND ?",
+            "SELECT COUNT(*) FROM referrals WHERE status IN ('rewarded','reward_paid','qualified_no_reward') AND rewarded_at BETWEEN ? AND ?",
             (start_at, end_at),
             0,
         ) or 0)
         ref_rewards_paid = int(sql_scalar(
             conn,
-            "SELECT COUNT(*) FROM referrals WHERE status='rewarded' AND rewarded_at BETWEEN ? AND ?",
+            "SELECT COUNT(*) FROM referrals WHERE status IN ('rewarded','reward_paid') AND rewarded_at BETWEEN ? AND ?",
             (start_at, end_at),
             0,
         ) or 0)
         ref_xu_rewarded = int(sql_scalar(
             conn,
-            "SELECT COALESCE(SUM(reward_xu),0) FROM referrals WHERE status='rewarded' AND rewarded_at BETWEEN ? AND ?",
+            "SELECT COALESCE(SUM(reward_xu),0) FROM referrals WHERE status IN ('rewarded','reward_paid') AND rewarded_at BETWEEN ? AND ?",
             (start_at, end_at),
             0,
         ) or 0)
@@ -43100,6 +43265,240 @@ async def cmd_creative_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await reply_html_lines(update, creative_flow_text(idea).splitlines())
 
+CREATIVE_MOTION_PENDING_TTL_SECONDS = 10 * 60
+
+def creative_motion_pending_key(user_id) -> str:
+    return f"creative_motion:{user_id}"
+
+def set_creative_motion_pending(user_id, step: str = "topic", topic: str = "") -> None:
+    USER_PENDING[creative_motion_pending_key(user_id)] = {
+        "pending_action": "creative_motion",
+        "step": str(step or "topic"),
+        "topic": str(topic or "")[:500],
+        "created_at_ts": time.time(),
+    }
+
+def get_creative_motion_pending(user_id) -> dict | None:
+    key = creative_motion_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "creative_motion":
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > CREATIVE_MOTION_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_creative_motion_pending(user_id) -> bool:
+    return USER_PENDING.pop(creative_motion_pending_key(user_id), None) is not None
+
+def creative_motion_topic_text() -> str:
+    cost_line = (
+        "Đang miễn phí giai đoạn thử nghiệm."
+        if int(CREATIVE_MOTION_GUIDE_COST_XU or 0) <= 0
+        else f"Chi phí dự kiến: {int(CREATIVE_MOTION_GUIDE_COST_XU)} Xu, bot sẽ hỏi xác nhận trước khi trừ."
+    )
+    return (
+        "🎥 <b>Gợi ý chuyển động video TOAN AAS</b>\n\n"
+        "Bạn muốn làm video về vấn đề gì?\n\n"
+        "Chọn nhóm nhanh bên dưới hoặc nhập trực tiếp chủ đề/sản phẩm/ngành của bạn.\n"
+        f"{html.escape(cost_line)}\n\n"
+        "Bot chỉ tạo gợi ý/prompt, không gọi API ảnh/video thật và chưa trừ Xu."
+    )
+
+def creative_motion_topic_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Sản phẩm / quảng cáo", callback_data="motion|topic|product"),
+            InlineKeyboardButton("Affiliate / TikTok Shop", callback_data="motion|topic|affiliate"),
+        ],
+        [
+            InlineKeyboardButton("AI tool / phần mềm", callback_data="motion|topic|ai_tool"),
+            InlineKeyboardButton("BĐS / địa điểm", callback_data="motion|topic|place"),
+        ],
+        [
+            InlineKeyboardButton("Thời trang / người mẫu", callback_data="motion|topic|fashion"),
+            InlineKeyboardButton("Food / quán ăn", callback_data="motion|topic|food"),
+        ],
+        [
+            InlineKeyboardButton("Giáo dục / hướng dẫn", callback_data="motion|topic|education"),
+            InlineKeyboardButton("Story cinematic", callback_data="motion|topic|story"),
+        ],
+        [InlineKeyboardButton("✍️ Nhập chủ đề khác", callback_data="motion|topic|custom")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="motion|cancel"), InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")],
+    ])
+
+def creative_motion_topic_label(kind: str) -> str:
+    labels = {
+        "product": "video sản phẩm / quảng cáo bán hàng",
+        "affiliate": "video affiliate / TikTok Shop",
+        "ai_tool": "video giới thiệu AI tool / phần mềm",
+        "place": "video bất động sản / địa điểm / không gian",
+        "fashion": "video thời trang / người mẫu / lifestyle",
+        "food": "video food / quán ăn / đồ uống",
+        "education": "video giáo dục / hướng dẫn / tutorial",
+        "story": "story cinematic / kể chuyện cảm xúc",
+    }
+    return labels.get(str(kind or ""), "video sản phẩm / quảng cáo bán hàng")
+
+def creative_motion_style_text(topic: str) -> str:
+    safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500] or "video quảng cáo sản phẩm"
+    return (
+        "🎬 <b>Bạn muốn phong cách nào?</b>\n\n"
+        f"Chủ đề: <b>{html.escape(safe_topic)}</b>\n\n"
+        "Chọn một phong cách để TOAN AAS tạo bản đồ chuyển động/cảnh quay."
+    )
+
+def creative_motion_style_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎬 Cinematic", callback_data="motion|style|cinematic"),
+            InlineKeyboardButton("📱 TikTok/Reels nhanh", callback_data="motion|style|tiktok"),
+        ],
+        [
+            InlineKeyboardButton("🧑‍🏫 Tutorial hướng dẫn", callback_data="motion|style|tutorial"),
+            InlineKeyboardButton("🛒 Quảng cáo bán hàng", callback_data="motion|style|ads"),
+        ],
+        [
+            InlineKeyboardButton("🚁 FPV/drone motion", callback_data="motion|style|fpv"),
+            InlineKeyboardButton("🧊 3D/product reveal", callback_data="motion|style|reveal"),
+        ],
+        [InlineKeyboardButton("😄 UGC đời thường", callback_data="motion|style|ugc")],
+        [InlineKeyboardButton("❌ Hủy", callback_data="motion|cancel"), InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")],
+    ])
+
+def creative_motion_style_label(style: str) -> str:
+    labels = {
+        "cinematic": "cinematic",
+        "tiktok": "TikTok/Reels nhanh",
+        "tutorial": "tutorial hướng dẫn",
+        "ads": "quảng cáo bán hàng",
+        "fpv": "FPV/drone motion",
+        "reveal": "3D/product reveal",
+        "ugc": "UGC đời thường",
+    }
+    return labels.get(str(style or ""), "cinematic")
+
+def creative_motion_guide_text(topic: str, style: str = "cinematic") -> str:
+    safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500] or "video quảng cáo sản phẩm"
+    style_label = creative_motion_style_label(style)
+    return (
+        "🎥 <b>GỢI Ý CHUYỂN ĐỘNG / CẢNH QUAY TOAN AAS</b>\n\n"
+        f"<b>Chủ đề:</b> {html.escape(safe_topic)}\n"
+        f"<b>Phong cách:</b> {html.escape(style_label)}\n"
+        f"<b>Chi phí:</b> {'miễn phí giai đoạn thử nghiệm' if int(CREATIVE_MOTION_GUIDE_COST_XU or 0) <= 0 else str(int(CREATIVE_MOTION_GUIDE_COST_XU)) + ' Xu'}\n"
+        "Bot chỉ tạo gợi ý/prompt, không gọi API ảnh/video thật và không trừ Xu trong flow miễn phí.\n\n"
+        "<b>A. Ý tưởng video 15s/30s</b>\n"
+        "• 15s: Hook mạnh → demo/chuyển cảnh nhanh → lợi ích chính → CTA.\n"
+        "• 30s: Hook → vấn đề → 3 cảnh chứng minh → before/after → CTA nhẹ.\n\n"
+        "<b>B. Bản đồ chuyển động từng giây</b>\n"
+        "0–3s: Start follow hoặc slow push-in vào chủ thể để mở hook.\n"
+        "3–6s: Rush to object/corner, reveal vấn đề hoặc điểm đau.\n"
+        "6–12s: Orbit quanh sản phẩm/nhân vật, kết hợp pan left/right hoặc top-down reveal.\n"
+        "12–15s: Exit/reveal/CTA, giữ khung sạch để đặt text overlay.\n"
+        "15–30s: Nếu làm bản 30s, thêm walkthrough, before/after và close-up bằng chứng.\n\n"
+        "<b>C. Gợi ý camera motion</b>\n"
+        "• slow push-in\n"
+        "• orbit\n"
+        "• pan left/right\n"
+        "• whip transition\n"
+        "• FPV chase\n"
+        "• top-down reveal\n"
+        "• handheld natural\n"
+        "• dolly in/out\n"
+        "• split-screen before/after\n"
+        "• product reveal\n\n"
+        "<b>D. Prompt ảnh đầu vào</b>\n"
+        f"Clean vertical 9:16 keyframe for {html.escape(safe_topic)}, clear subject, commercial lighting, suitable for {html.escape(style_label)} video, no watermark, no extra text.\n\n"
+        "<b>E. Prompt video motion</b>\n"
+        f"Animate the image into a short {html.escape(style_label)} video about {html.escape(safe_topic)}. "
+        "Use smooth camera movement, stable subject, natural motion, clean lighting, 9:16, no watermark, no extra text. "
+        "Timeline: 0-3s push-in, 3-6s quick reveal, 6-12s orbit/dolly, 12-15s CTA reveal.\n\n"
+        "<b>F. Text overlay</b>\n"
+        "• 0–3s: Đừng bỏ qua bước này\n"
+        "• 3–8s: Vấn đề thật là...\n"
+        "• 8–12s: Cách xử lý nhanh\n"
+        "• 12–15s: Lưu lại / Nhắn admin / Xem chi tiết\n\n"
+        "<b>G. Voiceover ngắn</b>\n"
+        f"“Nếu bạn đang làm nội dung về {html.escape(safe_topic)}, hãy bắt đầu bằng một cảnh hook rõ, sau đó cho người xem thấy chuyển động/demo thật trước khi CTA.”\n\n"
+        "<b>H. CTA</b>\n"
+        "Lưu lại để dùng cho video sau, hoặc bấm 🎬 Tạo video theo trend để tạo hook/script/storyboard đầy đủ."
+    )
+
+async def handle_creative_motion_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    uid = query.from_user.id
+    data = query.data or ""
+    parts = data.split("|")
+    action = parts[1] if len(parts) >= 2 else "start"
+    value = parts[2] if len(parts) >= 3 else ""
+    if action == "cancel":
+        clear_creative_motion_pending(uid)
+        return await safe_edit_query_message(
+            query,
+            "❌ Đã hủy gợi ý chuyển động video. Bot chưa gọi API và chưa trừ Xu.",
+            reply_markup=main_video_keyboard(get_user_language(uid) or "vi"),
+        )
+    if action == "start":
+        clear_media_creator_pending_states(uid)
+        set_creative_motion_pending(uid, "topic")
+        return await safe_edit_query_message(query, creative_motion_topic_text(), reply_markup=creative_motion_topic_keyboard())
+    if action == "topic":
+        if value == "custom":
+            set_creative_motion_pending(uid, "topic")
+            return await safe_edit_query_message(
+                query,
+                "✍️ Hãy gửi chủ đề/sản phẩm/ngành bạn muốn làm video.\n\nVí dụ: video quảng cáo AI tool cho người mới làm affiliate\n\nBot chưa gọi API và chưa trừ Xu.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="motion|cancel")]]),
+            )
+        topic = creative_motion_topic_label(value)
+        set_creative_motion_pending(uid, "style", topic)
+        return await safe_edit_query_message(query, creative_motion_style_text(topic), reply_markup=creative_motion_style_keyboard())
+    if action == "style":
+        pending = get_creative_motion_pending(uid) or {}
+        topic = pending.get("topic") or "video quảng cáo sản phẩm"
+        clear_creative_motion_pending(uid)
+        return await safe_edit_query_message(
+            query,
+            creative_motion_guide_text(topic, value),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔁 Gợi ý chủ đề khác", callback_data="motion|start")],
+                [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
+                [InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    return await safe_edit_query_message(query, creative_motion_topic_text(), reply_markup=creative_motion_topic_keyboard())
+
+async def handle_creative_motion_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_creative_motion_pending(uid)
+    if not pending:
+        return False
+    text = re.sub(r"\s+", " ", update.message.text.strip())[:500]
+    if not text:
+        return False
+    step = pending.get("step") or "topic"
+    if step == "topic":
+        set_creative_motion_pending(uid, "style", text)
+        await update.message.reply_text(creative_motion_style_text(text), parse_mode="HTML", reply_markup=creative_motion_style_keyboard())
+        return True
+    clear_creative_motion_pending(uid)
+    await update.message.reply_text(
+        creative_motion_guide_text(pending.get("topic") or text, text),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔁 Gợi ý chủ đề khác", callback_data="motion|start")],
+            [InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")],
+            [InlineKeyboardButton("🔙 Menu chính", callback_data="menu|main")],
+        ]),
+    )
+    return True
+
 TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE = "🧪 Tính năng tạo video theo trend đang thử nghiệm nội bộ, chưa mở công khai."
 
 def trend_video_workflow_status_text() -> str:
@@ -43852,6 +44251,24 @@ def trend_video_flow_sections(topic: str, billing_note: str = "") -> list[str]:
             f"3. Motion: before/after board transforms from messy notes to clean workflow. Camera movement: side dolly. Duration: 5s. Style: educational product demo. Negative prompt: unreadable letters, distorted interface.\n"
             f"4. Motion: product/tool interface scrolls smoothly, cursor highlights one action. Camera movement: screen-record walkthrough. Duration: 6s. Style: clean SaaS tutorial. Negative prompt: fake claims, aggressive flashing.\n"
             f"5. Motion: end frame settles with soft fade and clear CTA area. Camera movement: static clean frame. Duration: 3s. Style: minimal brand video. Negative prompt: too much text, watermark, overexposure."
+        ),
+        (
+            "🎥 GỢI Ý CHUYỂN ĐỘNG/CẢNH QUAY\n\n"
+            "1. Motion đơn giản/dễ tạo\n"
+            "0–3s: camera follow nhân vật từ sau lưng hoặc slow push-in vào sản phẩm.\n"
+            "3–6s: rush vào góc sản phẩm/điểm đau chính.\n"
+            "6–12s: orbit nhẹ quanh sản phẩm hoặc top-down reveal checklist.\n"
+            "12–15s: reveal kết quả + CTA, khung sạch để đặt chữ.\n\n"
+            "2. Motion cinematic\n"
+            "0–3s: low-angle hero shot, soft rim light.\n"
+            "3–6s: dolly in/out tạo chiều sâu.\n"
+            "6–12s: orbit cinematic quanh chủ thể, chuyển bằng match cut.\n"
+            "12–15s: fade out với CTA tinh gọn.\n\n"
+            "3. Motion viral/TikTok style\n"
+            "0–2s: whip transition vào hook.\n"
+            "2–5s: handheld natural hoặc screen-record walkthrough.\n"
+            "5–10s: split-screen before/after.\n"
+            "10–15s: zoom nhanh vào kết quả, overlay CTA rõ."
         ),
         (
             "F. TTS / NHẠC / CAPTION / CTA\n\n"
@@ -45854,6 +46271,7 @@ def pricing_main_lines() -> list[str]:
         f"• Hook/script/storyboard: <b>{pricing['workflow_script_storyboard_cost']} Xu</b>",
         f"• Prompt pack: <b>{pricing['workflow_prompt_pack_cost']} Xu</b>",
         f"• Tổng gói content-only: <b>{pricing['workflow_content_total_cost']} Xu</b>",
+        f"• Gợi ý chuyển động video: <b>{int(CREATIVE_MOTION_GUIDE_COST_XU or 0)} Xu</b> — đang miễn phí giai đoạn thử nghiệm." if int(CREATIVE_MOTION_GUIDE_COST_XU or 0) <= 0 else f"• Gợi ý chuyển động video: <b>{int(CREATIVE_MOTION_GUIDE_COST_XU)} Xu</b>",
         "• Gói này chưa bao gồm tạo ảnh/video thật. Ảnh/video tính riêng theo bảng giá Hình ảnh AI / Video AI.",
         "",
         "<b>F. Dịch thuật</b>",
@@ -45948,12 +46366,16 @@ def pricing_plans_lines() -> list[str]:
     return [
         "📦 <b>GÓI THÁNG TOAN AAS</b>",
         "",
-        "Gói tháng = quyền dùng công cụ + hạn mức xử lý + lượt dịch vụ VIP.",
+        "Gói tháng = quyền dùng công cụ + Xu xử lý/tháng + hạn mức ưu tiên.",
         "Gói tháng không phải nạp Xu thô và không phải unlimited mọi tác vụ nặng.",
         "Tác vụ phát sinh xem tại <b>💳 Bảng giá tổng</b>.",
+        "Xu xử lý/tháng có thể dùng cho nhiều công cụ theo bảng giá hiện hành.",
+        "Video AI thật không bao gồm miễn phí đại trà khi public video chưa ổn định.",
         "",
         "<b>ĐIỀU KIỆN MUA GÓI:</b>",
         "• Chỉ thành viên từ 🥈 Silver / Bạc trở lên mới được mua gói tháng.",
+        "• Mỗi loại gói tháng chỉ được mua 1 lần trong mỗi tháng.",
+        "• Đã mua Creator tháng này thì không mua lại Creator, nhưng có thể mua Pro/Business nếu đủ điều kiện.",
         "• Tiền mua gói tháng KHÔNG tính vào tổng nạp để nâng hạng thành viên.",
         "• Hạn mức trong gói dùng trong kỳ gói, không rút tiền, không chuyển nhượng.",
         "• Vượt hạn mức gói có thể nạp thêm Xu để dùng tiếp.",
@@ -45966,27 +46388,33 @@ def pricing_plans_lines() -> list[str]:
         "",
         "<b>Starter — 49.000đ/tháng</b>",
         "Điều kiện: từ 🥈 Silver trở lên",
-        "• Dành cho người mới làm content.",
         "• Có 600 Xu xử lý/tháng.",
-        "• Hạn mức nhỏ cho tác vụ thường; tác vụ nặng dùng Xu.",
+        "• Phù hợp chat thường, dịch ngắn, PDF cơ bản, prompt ảnh/video và workflow nhỏ.",
+        "• Ước tính khoảng 12 ảnh tiết kiệm hoặc 8 workflow trend content-only nếu chỉ dùng một nhóm tác vụ.",
+        "• Không bao gồm video AI thật miễn phí.",
         "",
         "<b>Creator — 99.000đ/tháng</b>",
         "Điều kiện: từ 🥈 Silver trở lên",
-        "• Dành cho người làm nội dung đều đặn.",
         "• Có 1.300 Xu xử lý/tháng.",
-        "• Hạn mức cao hơn Starter cho chat/dịch/tác vụ thường.",
+        "• Phù hợp creator/affiliate/shop nhỏ.",
+        "• Ước tính khoảng 26 ảnh tiết kiệm hoặc 18 workflow trend content-only.",
+        "• Ưu tiên prompt/content/ảnh; không bao gồm video AI thật miễn phí.",
         "",
         "<b>Pro — 199.000đ/tháng</b>",
         "Điều kiện khuyến nghị: từ 🥇 Gold trở lên",
-        "• Dành cho người dùng thường xuyên.",
         "• Có 3.000 Xu xử lý/tháng.",
-        "• Ưu tiên tác vụ thường/file/audio khi công cụ được mở.",
+        "• Phù hợp dùng thường xuyên.",
+        "• Ước tính khoảng 60 ảnh tiết kiệm, 10 ảnh tiêu chuẩn hoặc 42 workflow trend content-only.",
+        "• Có thể ưu tiên queue/tác vụ file/audio vừa khi công cụ được mở.",
+        "• Video AI thật vẫn tính Xu theo tier nếu mở.",
         "",
         "<b>Business — 499.000đ/tháng</b>",
         "Điều kiện khuyến nghị: từ 🥇 Gold trở lên hoặc admin duyệt",
-        "• Dành cho đội nhóm nhỏ.",
         "• Có 8.000 Xu xử lý/tháng.",
-        "• Hạn mức cao hơn cho chiến dịch nội dung/shop/team nhỏ.",
+        "• Phù hợp team nhỏ/shop/affiliate team.",
+        "• Ước tính khoảng 160 ảnh tiết kiệm, 26 ảnh tiêu chuẩn hoặc 16 ảnh chất lượng cao.",
+        "• Có thể có ưu tiên xử lý và hỗ trợ admin.",
+        "• Video AI thật vẫn tính Xu theo tier, không unlimited.",
         "",
         "<b>Lệnh mua gói:</b>",
         "• <code>/buy_plan starter</code>",
@@ -45997,12 +46425,13 @@ def pricing_plans_lines() -> list[str]:
         "<b>Thanh toán gói tháng:</b>",
         "• Dùng <code>/buy_plan &lt;plan&gt;</code> hoặc bấm nút mua gói để tạo checkout PayOS.",
         "• Khi PayOS thanh toán thành công, bot tự kích hoạt gói và hạn mức tương ứng.",
+        "• Mỗi plan_code chỉ mua 1 lần trong cùng tháng; sang tháng mới reset quyền mua theo plan.",
         "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
         "• Nếu PayOS/webhook lỗi, admin có thể cấp gói thủ công.",
         "• Lệnh admin: <code>/admin_grant_plan &lt;user_id&gt; &lt;plan&gt; &lt;days&gt;</code>, <code>/admin_revoke_plan &lt;user_id&gt;</code>, <code>/admin_plan_status &lt;user_id&gt;</code>.",
         "",
         "<b>Ghi chú:</b>",
-        "• Số lượt VIP chỉ là ước tính vì mỗi công cụ có mức tốn API/server khác nhau.",
+        "• Các con số ảnh/workflow chỉ là ước tính theo bảng giá hiện tại.",
         "• Tác vụ phát sinh xem tại Bảng giá tổng, không nhồi lại trong menu gói tháng.",
         "• Gói tháng không tự nâng hạng thành viên và không cộng vào tổng nạp thành viên.",
     ]
@@ -46157,6 +46586,18 @@ async def start_plan_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
                 [InlineKeyboardButton("📦 Xem gói tháng", callback_data="pricing|plans")],
+            ]),
+        )
+    monthly_allowed, monthly_reason = can_purchase_monthly_plan(uid, plan_id)
+    if not monthly_allowed:
+        return await message.reply_text(
+            "⚠️ <b>Gói tháng đã được mua trong tháng này.</b>\n\n"
+            f"{html.escape(monthly_reason)}\n\n"
+            "Bot chưa tạo checkout mới và chưa kích hoạt gói mới.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📦 Xem gói tháng", callback_data="pricing|plans")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
     if flag_on("emergency_lock") or flag_on("payment_freeze"):
@@ -61354,6 +61795,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_public_video_prompt_pending_text(update, context):
         return
 
+    if await handle_creative_motion_pending_text(update, context):
+        return
+
     if await handle_quick_media_pending_text(update, context):
         return
 
@@ -62188,6 +62632,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_creative_motion_callback, pattern=r"^motion\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))

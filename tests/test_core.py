@@ -326,7 +326,7 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_VIDEO_MODEL=veo3.1-fast" in env_example
     assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
     assert "SHOPAIKEY_PUBLIC_IMAGE_ENABLED=true" in env_example
-    assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED=true" in env_example
+    assert "SHOPAIKEY_PUBLIC_VIDEO_ENABLED=false" in env_example
     assert "IMAGE_TIER_LOW_ENABLED=true" in env_example
     assert "IMAGE_TIER_STANDARD_ENABLED=true" in env_example
     assert "IMAGE_TIER_HIGH_ENABLED=true" in env_example
@@ -337,6 +337,7 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "VIDEO_TIER_PREMIUM_ENABLED=false" in env_example
     assert "VIDEO_PREMIUM_ADMIN_ONLY=true" in env_example
     assert "SHOPAIKEY_VIDEO_DEFAULT_TIER=low" in env_example
+    assert "CREATIVE_MOTION_GUIDE_COST_XU=0" in env_example
     assert "IMAGE_BASE_COST_XU=50" in env_example
     assert "VIDEO_BASE_COST_XU=300" in env_example
     assert "MEDIA_PRICE_MULTIPLIER=2" in env_example
@@ -966,7 +967,11 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
         "nhạc",
         "caption",
         "cta",
-            "public image: off; public video: on",
+            "public image: off; public video: off",
+            "gợi ý chuyển động/cảnh quay",
+            "motion đơn giản/dễ tạo",
+            "motion cinematic",
+            "motion viral/tiktok style",
         "không tạo ảnh-video thật",
     ]:
         assert marker in joined
@@ -1086,6 +1091,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'InlineKeyboardButton("🖼 Tạo ảnh AI nhanh", callback_data="create_media|quick_image")' in source
     assert 'InlineKeyboardButton("🎞 Tạo video nhanh", callback_data="create_media|quick_video")' in source
     assert 'InlineKeyboardButton("🎬 Tạo video theo trend", callback_data="create_media|trend")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
+    assert 'InlineKeyboardButton("🎥 Gợi ý chuyển động video", callback_data="motion|start")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert 'InlineKeyboardButton("📝 Viết hook/script/caption", callback_data="menu|hint_film")' in source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
@@ -1126,8 +1132,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "handle_quick_media_pending_text(update, context)" in message_source
     assert "handle_public_image_prompt_pending_text(update, context)" in message_source
     assert "handle_public_video_prompt_pending_text(update, context)" in message_source
+    assert "handle_creative_motion_pending_text(update, context)" in message_source
     assert message_source.index("handle_public_image_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_public_video_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
+    assert message_source.index("handle_creative_motion_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_quick_media_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
     assert "clear_quick_media_pending(uid)" in quick_source
     assert "clear_media_creator_pending_states(uid)" in source_between(source, "async def cmd_cancel", "async def cmd_create_media")
@@ -1236,6 +1244,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Ảnh tiêu chuẩn: <b>777 Xu</b>" in pricing_text
     assert "Video tiết kiệm: <b>654 Xu</b>" in pricing_text
     assert "Video premium/admin-only: <b>admin-only / liên hệ admin</b>" in pricing_text
+    assert "Gợi ý chuyển động video" in pricing_text
+    assert "đang miễn phí giai đoạn thử nghiệm" in pricing_text
     assert "Gói nội dung theo trend: <b>24 Xu</b>" in pricing_text
     assert "Tổng gói content-only: <b>24 Xu</b>" in pricing_text
     assert "Dịch văn bản ngắn: từ <b>5 Xu</b>" in pricing_text
@@ -1278,6 +1288,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any(button.text == "🎞 Tạo video nhanh" and button.callback_data == "create_media|quick_video" for button in video_buttons)
     assert any(button.text == "🎬 Tạo video theo trend" and button.callback_data == "create_media|trend" for button in video_buttons)
     video_labels = [button.text for button in video_buttons]
+    assert "🎥 Gợi ý chuyển động video" in video_labels
     assert "🖼➡️🎞 Tạo video từ ảnh" in video_labels
     assert "✍️ Tạo prompt video" in video_labels
     assert "📝 Viết hook/script/caption" in video_labels
@@ -1354,12 +1365,129 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     bot.set_quick_media_pending("u9", "quick_image_prompt")
     bot.set_public_image_prompt_pending("u9", "standard")
     bot.set_public_video_prompt_pending("u9", "standard")
+    bot.set_creative_motion_pending("u9", "topic")
     bot.set_trend_video_flow_pending("u9")
     assert bot.clear_pending_start_notice("u9").startswith("❌ Đã hủy thao tác đang chờ")
     assert bot.get_quick_media_pending("u9") is None
     assert bot.get_public_image_prompt_pending("u9") is None
     assert bot.get_public_video_prompt_pending("u9") is None
+    assert bot.get_creative_motion_pending("u9") is None
     assert bot.get_trend_video_flow_pending("u9") is None
+
+
+def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
+    source = bot_source_text()
+    motion_source = source_between(source, "def creative_motion_pending_key", "TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE")
+    assert 'SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", "false")' in source
+    assert 'CREATIVE_MOTION_GUIDE_COST_XU = env_int("CREATIVE_MOTION_GUIDE_COST_XU", 0)' in source
+    assert 'CallbackQueryHandler(handle_creative_motion_callback, pattern=r"^motion\\|")' in source
+    assert "shopaikey_image_generate" not in motion_source
+    assert "shopaikey_video_create_smoke_test" not in motion_source
+    assert "spend_fixed_credit_info" not in motion_source
+
+    assert bot.referral_link_for_user("123456", "toanaasbot") == "https://t.me/toanaasbot?start=ref_123456"
+    profile_source = source_between(source, "def menu_text_main_profile", "def menu_text_main_guide")
+    assert "🎁 <b>Link giới thiệu của bạn</b>" in profile_source
+    assert "referral_link_for_user(user_id" in profile_source
+    profile_buttons = [button.text for row in bot.main_profile_keyboard("vi").inline_keyboard for button in row]
+    assert "🎁 Link giới thiệu của tôi" in profile_buttons
+    assert "📋 Cách nhận thưởng giới thiệu" in profile_buttons
+    assert "👥 Người đã giới thiệu" in profile_buttons
+    assert "Ghi nhận giới thiệu trước" in bot.referral_account_link_text("123456", "toanaasbot")
+
+    plan_text = "\n".join(bot.pricing_plans_lines())
+    assert "Gói tháng = quyền dùng công cụ + Xu xử lý/tháng + hạn mức ưu tiên" in plan_text
+    assert "Mỗi loại gói tháng chỉ được mua 1 lần trong mỗi tháng" in plan_text
+    assert "Video AI thật không bao gồm miễn phí đại trà" in plan_text
+    assert "Starter — 49.000đ/tháng" in plan_text and "600 Xu xử lý/tháng" in plan_text
+    assert "Creator — 99.000đ/tháng" in plan_text and "1.300 Xu xử lý/tháng" in plan_text
+    assert "Pro — 199.000đ/tháng" in plan_text and "3.000 Xu xử lý/tháng" in plan_text
+    assert "Business — 499.000đ/tháng" in plan_text and "8.000 Xu xử lý/tháng" in plan_text
+    assert "unlimited" in plan_text.lower()
+    assert "Tiền mua gói tháng không tính vào tổng nạp" in plan_text
+
+    topic_text = bot.creative_motion_topic_text()
+    assert "Bạn muốn làm video về vấn đề gì" in topic_text
+    assert "không gọi API ảnh/video thật" in topic_text
+    motion_buttons = [button.text for row in bot.creative_motion_topic_keyboard().inline_keyboard for button in row]
+    assert "Sản phẩm / quảng cáo" in motion_buttons
+    assert "Affiliate / TikTok Shop" in motion_buttons
+    assert "✍️ Nhập chủ đề khác" in motion_buttons
+    style_text = bot.creative_motion_style_text("video quảng cáo AI tool cho affiliate")
+    assert "Bạn muốn phong cách nào" in style_text
+    guide = bot.creative_motion_guide_text("video quảng cáo AI tool cho người mới làm affiliate", "tiktok").lower()
+    assert "0–3s" in guide
+    assert "3–6s" in guide
+    assert "6–12s" in guide
+    assert "12–15s" in guide
+    assert "prompt ảnh đầu vào" in guide
+    assert "prompt video motion" in guide
+    assert "text overlay" in guide
+    assert "voiceover ngắn" in guide
+    assert "cta" in guide
+
+    bot.USER_PENDING.pop(bot.creative_motion_pending_key("u_motion"), None)
+    bot.set_creative_motion_pending("u_motion", "topic")
+    pending = bot.get_creative_motion_pending("u_motion")
+    assert pending and pending["pending_action"] == "creative_motion"
+    assert pending["step"] == "topic"
+    bot.set_creative_motion_pending("u_motion", "style", "AI tool affiliate")
+    pending = bot.get_creative_motion_pending("u_motion")
+    assert pending and pending["topic"] == "AI tool affiliate"
+    assert bot.clear_creative_motion_pending("u_motion") is True
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(plan_purchases)").fetchall()}
+            assert {"user_id", "plan_code", "purchase_month", "purchase_count", "order_code", "status"}.issubset(cols)
+            conn.execute(
+                "INSERT OR REPLACE INTO member_tier_overrides (user_id, tier, reason, updated_at) VALUES (?,?,?,?)",
+                ("9001", "gold", "unit test", bot.now_text()),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO member_tier_overrides (user_id, tier, reason, updated_at) VALUES (?,?,?,?)",
+                ("9002", "silver", "unit test", bot.now_text()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        assert bot.user_can_buy_plan("9003", "starter")[0] is False
+        assert bot.user_can_buy_plan("9002", "starter")[0] is True
+        assert bot.user_can_buy_plan("9001", "pro")[0] is True
+        assert bot.can_purchase_monthly_plan("9001", "creator")[0] is True
+        conn = bot.db_connect()
+        try:
+            info = bot.activate_user_plan_conn(conn, "9001", "creator", order_code="order_creator", source="payos")
+            conn.commit()
+        finally:
+            conn.close()
+        assert info["plan_id"] == "creator"
+        assert bot.can_purchase_monthly_plan("9001", "creator")[0] is False
+        assert "Mỗi gói chỉ mua 1 lần/tháng" in bot.can_purchase_monthly_plan("9001", "creator")[1]
+        assert bot.can_purchase_monthly_plan("9001", "pro")[0] is True
+        credits, total_spent, _ = bot.get_user("9001")
+        assert int(total_spent or 0) == 0
+
+        ref_result = bot.register_referral("9004", "9001", user_existed_before=False)
+        assert ref_result["registered"] is True
+        conn = bot.db_connect()
+        try:
+            row = conn.execute("SELECT referrer_user_id, status FROM referrals WHERE referred_user_id=?", ("9004",)).fetchone()
+            user_row = conn.execute("SELECT referred_by FROM users WHERE user_id=?", ("9004",)).fetchone()
+        finally:
+            conn.close()
+        assert row[0] == "9001"
+        assert row[1] == "registered"
+        assert user_row[0] == "9001"
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
 
 
 def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
