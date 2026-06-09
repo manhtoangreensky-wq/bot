@@ -1315,7 +1315,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     video_labels = [button.text for button in video_buttons]
     assert "🎥 Gợi ý chuyển động" in video_labels
     assert "🖼➡️🎞 Tạo video từ ảnh" in video_labels
-    assert "✍️ Tạo prompt video" in video_labels
+    assert "✍️ Tạo prompt video" not in video_labels
     assert "📝 Viết hook/script/caption" in video_labels
     assert "💳 Xem bảng giá" not in video_labels
     assert "💰 Xem giá" not in video_labels
@@ -1614,27 +1614,51 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "🖤 Đen trắng luxury" in style_buttons
     assert "🧊 3D/product reveal" in style_buttons
     continuation_buttons = [button.text for row in bot.cinematic_ad_continuation_keyboard().inline_keyboard for button in row]
+    assert "1️⃣ Chọn gợi ý 1" in continuation_buttons
+    assert "2️⃣ Chọn gợi ý 2" in continuation_buttons
+    assert "3️⃣ Chọn gợi ý 3" in continuation_buttons
     assert "✅ Hoàn tất / Chốt concept này" in continuation_buttons
-    assert "🔁 Tạo concept khác" in continuation_buttons
+    assert "🔁 Tạo lại 3 gợi ý" in continuation_buttons
     assert "✍️ Sửa concept" in continuation_buttons
     locked_buttons = [button.text for row in bot.cinematic_ad_locked_keyboard().inline_keyboard for button in row]
     assert "🖼 Ảnh / Prompt ảnh" in locked_buttons
     assert "🎬 Video / Chuyển động" in locked_buttons
     assert "🎵 Nhạc / Âm thanh" in locked_buttons
+    motion_choice_buttons = [button.text for row in bot.cinematic_ad_motion_choices_keyboard().inline_keyboard for button in row]
+    assert "1️⃣ Chọn gợi ý 1" in motion_choice_buttons
+    assert "2️⃣ Chọn gợi ý 2" in motion_choice_buttons
+    assert "3️⃣ Chọn gợi ý 3" in motion_choice_buttons
     assert "🔙 Quay lại concept đã chốt" in [button.text for row in bot.cinematic_ad_motion_keyboard().inline_keyboard for button in row]
     assert "✅ Lưu hướng chuyển động" in [button.text for row in bot.cinematic_ad_motion_keyboard().inline_keyboard for button in row]
-    assert "✅ Lưu prompt ảnh" in [button.text for row in bot.cinematic_ad_image_prompt_keyboard().inline_keyboard for button in row]
-    assert "🖼 Tạo ảnh AI từ prompt 1" in [button.text for row in bot.cinematic_ad_image_prompt_keyboard().inline_keyboard for button in row]
-    assert "✅ Lưu prompt video" in [button.text for row in bot.cinematic_ad_video_prompt_keyboard().inline_keyboard for button in row]
-    assert "🎬 Tạo video thật từ prompt này" in [button.text for row in bot.cinematic_ad_video_prompt_keyboard().inline_keyboard for button in row]
+    image_choice_buttons = [button.text for row in bot.cinematic_ad_image_prompt_choices_keyboard().inline_keyboard for button in row]
+    assert "1️⃣ Chọn gợi ý 1" in image_choice_buttons
+    assert "2️⃣ Chọn gợi ý 2" in image_choice_buttons
+    assert "3️⃣ Chọn gợi ý 3" in image_choice_buttons
+    selected_image_buttons = [button.text for row in bot.cinematic_ad_image_prompt_selected_keyboard(1).inline_keyboard for button in row]
+    assert "✅ Lưu prompt ảnh" in selected_image_buttons
+    assert any("Tạo ảnh tiết kiệm" in label for label in selected_image_buttons)
+    video_choice_buttons = [button.text for row in bot.cinematic_ad_video_prompt_choices_keyboard().inline_keyboard for button in row]
+    assert "1️⃣ Chọn gợi ý 1" in video_choice_buttons
+    assert "2️⃣ Chọn gợi ý 2" in video_choice_buttons
+    assert "3️⃣ Chọn gợi ý 3" in video_choice_buttons
+    selected_video_buttons = [button.text for row in bot.cinematic_ad_video_prompt_selected_keyboard(1).inline_keyboard for button in row]
+    assert "✅ Lưu prompt video" in selected_video_buttons
+    assert "🎬 Tạo video thật từ prompt này" in selected_video_buttons
+    music_choice_buttons = [button.text for row in bot.cinematic_ad_music_suggestion_keyboard().inline_keyboard for button in row]
+    assert "1️⃣ Chọn gợi ý 1" in music_choice_buttons
+    assert "2️⃣ Chọn gợi ý 2" in music_choice_buttons
+    assert "3️⃣ Chọn gợi ý 3" in music_choice_buttons
     assert "💡 Gợi ý thể loại nhạc" in [button.text for row in bot.cinematic_ad_music_menu_keyboard().inline_keyboard for button in row]
     assert "adconcept|motion_current" in ad_source
     assert "adconcept|image_menu" in ad_source
     assert "adconcept|video_menu" in ad_source
     assert "adconcept|music_menu" in ad_source
     assert "adconcept|image_prompt_current" in ad_source
+    assert "adconcept|image_prompt_choice|1" in ad_source
     assert "adconcept|video_prompt_current" in ad_source
-    assert "adconcept|create_image_current" in ad_source
+    assert "adconcept|video_prompt_choice|1" in ad_source
+    assert "adconcept|music_choice|1" in ad_source
+    assert "adconcept|image_ai_tier|1|low" in ad_source
     assert "adconcept|create_video_current" in ad_source
     assert "adconcept|edit_current" in ad_source
     assert "send_or_confirm_trend_video_flow_from_callback" in ad_source
@@ -1649,6 +1673,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "gợi ý nhạc/mood" in ad_concept
     assert "cta" in ad_concept
     assert "không gọi api ảnh/video thật" in ad_concept
+    assert "3 hướng ý tưởng để chọn" in ad_concept
     bot.USER_PENDING.pop(bot.cinematic_ad_pending_key("u_ad"), None)
     bot.set_cinematic_ad_pending("u_ad", "product")
     pending = bot.get_cinematic_ad_pending("u_ad")
@@ -1673,26 +1698,35 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "dùng lại dữ liệu concept hiện tại" in bot.cinematic_ad_continue_text(concept).lower()
     motion_from_concept = bot.cinematic_ad_motion_from_concept_text(concept).lower()
     assert "hướng chuyển động" in motion_from_concept
-    assert "lộ trình từng giây" in motion_from_concept
+    assert "ý tưởng video 15 giây" in motion_from_concept
     assert "chuyển động camera" in motion_from_concept
     assert "không gọi api video thật" in motion_from_concept
+    motion_choices = bot.cinematic_ad_motion_choices_text(concept).lower()
+    assert "1. chuyển động đơn giản" in motion_choices
+    assert "2. chuyển động điện ảnh" in motion_choices
+    assert "3. chuyển động tiktok/reels" in motion_choices
     image_prompts = bot.cinematic_ad_image_prompts_from_concept_text(concept).lower()
     assert "prompt ảnh khung chính từ concept này" in image_prompts
-    assert "1. khung mở đầu" in image_prompts
-    assert "2. khung hero sản phẩm" in image_prompts
+    assert "prompt ảnh 1: ảnh sản phẩm chính" in image_prompts
+    assert "prompt ảnh 2: ảnh bối cảnh sử dụng" in image_prompts
     assert "điều cần tránh" in image_prompts
+    assert "đã chọn prompt ảnh 1" in bot.cinematic_ad_selected_image_prompt_text(concept, 1).lower()
     video_prompts = bot.cinematic_ad_video_prompt_from_concept_text(concept).lower()
     assert "gợi ý video 5 giây" in video_prompts
     assert "tạo video thật đang thử nghiệm nội bộ" in video_prompts
     assert "điều cần tránh" in video_prompts
+    assert "đã chọn prompt video 1" in bot.cinematic_ad_selected_video_prompt_text(concept, 1).lower()
     music_suggestions = bot.cinematic_ad_music_from_concept_text(concept).lower()
-    assert "/music_library" in music_suggestions
-    assert "/sfx_library" in music_suggestions
-    assert "prompt tạo nhạc" in music_suggestions
+    assert "bạn có muốn thêm nhạc không" in music_suggestions
+    assert "1. nhạc điện ảnh cảm xúc" in music_suggestions
+    assert "2. nhạc hiện đại/công nghệ" in music_suggestions
+    assert "3. nhạc tiktok/reels" in music_suggestions
+    assert "đã chọn hướng nhạc 1" in bot.cinematic_ad_music_choice_text(concept, 1).lower()
     video_from_concept = bot.cinematic_ad_video_from_concept_text(concept).lower()
     assert "tạo video thật chưa mở công khai" in video_from_concept
-    assert "off" in video_from_concept
+    assert "prompt video đã lưu" in video_from_concept
     assert "không gọi api video và không trừ xu" in video_from_concept
+    assert "đã hoàn tất luồng sáng tạo" in bot.cinematic_ad_finalize_text(concept).lower()
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -2025,13 +2059,25 @@ def test_topup_keyboard_preserves_package_callbacks():
 def test_customer_guide_is_public_and_policy_aligned():
     guide_index = bot.guide_index_text()
     guide_credit = bot.guide_section_text("credits")
+    guide_image = bot.guide_section_text("image_ai")
+    guide_video = bot.guide_section_text("video_ai")
+    guide_step = bot.guide_section_text("guided_video")
+    guide_music = bot.guide_section_text("music_add")
     keyboard = bot.main_menu_keyboard(False)
     button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
 
     assert "/huongdan 1" in guide_index
+    assert "Hướng dẫn tạo ảnh AI" in guide_index
+    assert "Hướng dẫn tạo video AI" in guide_index
+    assert "Làm video theo từng bước" in guide_index
+    assert "Hướng dẫn thêm nhạc" in guide_index
     assert "📘 Hướng Dẫn" in button_texts
     assert "50.000đ → 500 Xu + 30 Xu Launch Bonus" in guide_credit
     assert "100.000đ → 1.000 Xu + 50 Xu Launch Bonus" in guide_credit
+    assert "chỉ sau khi bạn xác nhận" in guide_image.lower()
+    assert "không gọi api video và không trừ xu" in guide_video.lower()
+    assert "3 gợi ý cụ thể ở mỗi bước" in guide_step.lower()
+    assert "nhạc là tùy chọn" in guide_music.lower()
     assert bot.package_launch_bonus_xu(50000) == 30
     assert bot.package_launch_bonus_xu(100000) == 50
 
