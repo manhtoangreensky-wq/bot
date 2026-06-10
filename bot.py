@@ -727,6 +727,10 @@ PLAN_CATALOG = {
         "description": "Dành cho team nhỏ, shop hoặc affiliate team cần workflow content + ảnh + voice/audio",
     },
 }
+MONTHLY_STARTER_PRICE_VND = env_int("MONTHLY_STARTER_PRICE_VND", 49000)
+MONTHLY_CREATOR_PRICE_VND = env_int("MONTHLY_CREATOR_PRICE_VND", 99000)
+MONTHLY_SHOP_PRICE_VND = env_int("MONTHLY_SHOP_PRICE_VND", 299000)
+MONTHLY_PRO_PRICE_VND = env_int("MONTHLY_PRO_PRICE_VND", 499000)
 
 # ─── MANUAL BANK FALLBACK ────────────────────────────────────────────────────
 MANUAL_BANK_NAME      = _env("MANUAL_BANK_NAME", "ACB")
@@ -24487,7 +24491,7 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
         c.execute(
             """SELECT user_id, amount, xu, status, expires_at,
                       COALESCE(order_type,'topup'), COALESCE(plan_id,''), COALESCE(plan_name,''),
-                      COALESCE(duration_days,0), COALESCE(plan_xu,0)
+                      COALESCE(duration_days,0), COALESCE(plan_xu,0), COALESCE(metadata_json,'')
                FROM payos_orders WHERE order_code=?""",
             (str(order_code),)
         )
@@ -24496,8 +24500,14 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             conn.rollback()
             return False, "order_not_found", {}
 
-        target_id, expected_amount, xu, status, expires_at, order_type, plan_id, plan_name, duration_days, plan_xu = order
+        target_id, expected_amount, xu, status, expires_at, order_type, plan_id, plan_name, duration_days, plan_xu, metadata_json = order
         order_type = str(order_type or "topup")
+        try:
+            metadata = json.loads(metadata_json or "{}") if metadata_json else {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+        except Exception:
+            metadata = {}
         stored_xu = int(xu or 0)
         calculated_base_xu = package_base_xu(expected_amount)
         base_xu = calculated_base_xu if calculated_base_xu > 0 else stored_xu
@@ -24510,6 +24520,7 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             "plan_id": plan_id or "",
             "plan_name": plan_name or "",
             "plan_xu": int(plan_xu or 0),
+            "metadata": metadata,
         }
 
         if status == PAYOS_STATUS_PAID:
@@ -24530,6 +24541,83 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
         if c.fetchone():
             conn.rollback()
             return False, "duplicate", info
+
+        if order_type == "package_purchase":
+            package_type = "monthly" if str(metadata.get("package_type") or "").lower() == "monthly" else "combo"
+            package_code = str(metadata.get("package_code") or plan_id or "").strip().lower()
+            entry = package_catalog_entry(package_code, package_type)
+            if not entry:
+                conn.rollback()
+                return False, "invalid_package_order", info
+            user_row = c.execute("SELECT 1 FROM users WHERE user_id=?", (str(target_id),)).fetchone()
+            if not user_row:
+                c.execute(
+                    "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent, has_deposited) VALUES (?,?,?,?,?,?,?)",
+                    (str(target_id), "PayOS package user", 0, 0, now_text(), 0, 0),
+                )
+            package_result = grant_user_package_conn(
+                conn,
+                target_id,
+                package_code,
+                package_type,
+                "payos",
+                days=int(duration_days or entry.get("default_days") or 0),
+                note=f"PayOS order {order_code}",
+                source=f"payos_{package_type}",
+            )
+            if not package_result.get("ok"):
+                conn.rollback()
+                return False, package_result.get("reason") or "package_grant_failed", info
+            c.execute(
+                "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
+                (PAYOS_STATUS_PAID, now_text(), str(order_code)),
+            )
+            c.execute(
+                "INSERT INTO payos_processed (order_code, processed_at) VALUES (?,?)",
+                (str(order_code), now_text()),
+            )
+            item_summary = package_items_summary(entry.get("items") or {})
+            record_usage_event_conn(
+                conn,
+                target_id,
+                event_type="payment_payos_package_success",
+                tool_name="package_wallet",
+                command="/webhook/payos",
+                status="paid",
+                xu_delta=0,
+                amount_vnd=int(amount_vnd or 0),
+                provider="payos",
+                detail=f"order={order_code}; package_type={package_type}; package_code={package_code}; counts_for_member_tier=false",
+            )
+            record_audit(
+                conn,
+                "payos",
+                "system",
+                "package.paid",
+                "payos_order",
+                str(order_code),
+                before={"status": status, "amount": expected_amount, "order_type": order_type},
+                after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "package_type": package_type, "package_code": package_code, "amount": amount_vnd},
+                note="PayOS package paid; saved to package wallet; not counted as top-up",
+            )
+            emit_event(
+                conn,
+                "package.paid",
+                "payos",
+                {"order_code": str(order_code), "user_id": str(target_id), "amount": int(amount_vnd), "package_type": package_type, "package_code": package_code},
+                status="processed",
+            )
+            info.update({
+                "xu": 0,
+                "package_type": package_type,
+                "package_code": package_code,
+                "package_label": entry.get("label") or package_code,
+                "package_items": item_summary,
+                "package_id": int(package_result.get("package_id") or 0),
+                "expires_at": package_result.get("expires_at") or "",
+            })
+            conn.commit()
+            return True, "package_success", info
 
         if order_type == "plan_purchase":
             if not normalize_plan_id(plan_id):
@@ -27402,7 +27490,8 @@ def admin_center_text(section: str = "main") -> str:
         "• <code>/grant_monthly &lt;ID&gt; &lt;plan_code&gt; &lt;days&gt; [note]</code> — cấp gói tháng admin, không cộng Xu\n"
         "• <code>/user_packages &lt;ID&gt;</code> — xem lượt còn lại\n"
         "• <code>/adjust_package &lt;ID&gt; &lt;package_id_or_code&gt; &lt;item_type&gt; &lt;delta&gt; [note]</code> — chỉnh lượt thủ công\n"
-        "• <code>/revoke_package &lt;ID&gt; &lt;package_id_or_code&gt; [note]</code> — thu hồi gói/combo\n\n"
+        "• <code>/revoke_package &lt;ID&gt; &lt;package_id_or_code&gt; [note]</code> — thu hồi gói/combo\n"
+        "• Khách mua combo/gói tháng bằng nút trong Bảng giá; PayOS thành công sẽ lưu vào Gói của tôi, không cộng Xu và không tính điểm nâng hạng.\n\n"
         "<b>D. Bill thủ công</b>\n"
         "• <code>/pending</code> — xem bill đang chờ\n"
         "• <code>/duyet &lt;bill_id&gt; &lt;Xu&gt;</code> — duyệt bill sau khi đối soát tiền thật\n"
@@ -27419,6 +27508,9 @@ def admin_center_text(section: str = "main") -> str:
         "• <code>/tool_test_image_debug</code> — test image provider\n"
         "• <code>/sales_ready</code> — kiểm tra sẵn sàng bán\n\n"
         "<b>G. Báo cáo</b>\n"
+        "• <code>/runtime</code>\n"
+        "• <code>/data_status</code>\n"
+        "• <code>/providers</code>\n"
         "• <code>/dashboard</code>\n"
         "• <code>/stats</code>\n"
         "• <code>/admin_report_month YYYY-MM</code>\n"
@@ -28969,7 +29061,7 @@ def video_combo_pricing_payload() -> list[dict]:
             "rank_points": False,
         },
         {
-            "code": "steady_499k",
+            "code": "posting_499k",
             "label": "📅 Combo Đăng Đều",
             "display_price": "499k",
             "price_vnd": 499000,
@@ -29092,29 +29184,29 @@ def package_catalog_payload() -> dict:
     return {
         "combos": {
             "tiktok_99k": {
-                "label": "Combo TikTok 99k",
+                "label": "🎁 Combo Ưu Đãi TikTok — 99k",
                 "items": {"video_common": 3},
-                "note": "3 lượt Video Phổ Thông.",
+                "note": "3 video Phổ Thông; khuyến nghị 9:16.",
             },
             "basic_199k": {
-                "label": "Combo Cơ Bản 199k",
+                "label": "📦 Combo Cơ Bản — 199k",
                 "items": {"video_common": 3, "image_standard": 2},
                 "note": "3 video phổ thông + 2 ảnh tiêu chuẩn.",
             },
             "standard_299k": {
-                "label": "Combo Tiêu Chuẩn 299k",
+                "label": "⭐ Combo Tiêu Chuẩn — 299k",
                 "items": {"video_standard": 4, "image_standard": 3, "trend_workflow": 1},
-                "note": "Gói đều hơn cho nội dung bán hàng/review.",
+                "note": "4 video Tiêu Chuẩn + 3 ảnh Standard + 1 workflow ý tưởng/trend.",
             },
             "posting_499k": {
-                "label": "Combo Đăng Đều 499k",
+                "label": "📅 Combo Đăng Đều — 499k",
                 "items": {"video_common": 5, "video_standard": 5},
-                "note": "Dành cho lịch đăng nhiều video.",
+                "note": "5 video Phổ Thông + 5 video Tiêu Chuẩn.",
             },
             "product_ads_699k": {
-                "label": "Combo Quảng Cáo Sản Phẩm 699k",
+                "label": "🚀 Combo Quảng Cáo Sản Phẩm — 699k",
                 "items": {"image_high": 5, "video_standard": 3, "video_high": 1, "trend_workflow": 2},
-                "note": "Ảnh/video quảng cáo sản phẩm.",
+                "note": "5 ảnh High + 3 video Tiêu Chuẩn + 1 video Cao Cấp + 2 workflow concept/trend.",
             },
             "pro_branding": {
                 "label": "Pro Branding",
@@ -29125,22 +29217,22 @@ def package_catalog_payload() -> dict:
         },
         "monthly": {
             "starter_monthly": {
-                "label": "Starter Monthly",
+                "label": "📆 Starter Monthly",
                 "default_days": 30,
                 "items": {"image_standard": 10, "video_common": 3, "trend_workflow": 3},
             },
             "creator_monthly": {
-                "label": "Creator Monthly",
+                "label": "📆 Creator Monthly",
                 "default_days": 30,
                 "items": {"image_standard": 20, "video_standard": 8, "trend_workflow": 5},
             },
             "shop_monthly": {
-                "label": "Shop Monthly",
+                "label": "📆 Shop Monthly",
                 "default_days": 30,
                 "items": {"image_high": 30, "video_standard": 12, "video_high": 3, "trend_workflow": 10},
             },
             "pro_monthly": {
-                "label": "Pro Monthly",
+                "label": "📆 Pro Monthly",
                 "default_days": 30,
                 "items": {"image_high": 50, "video_standard": 20, "video_high": 5, "trend_workflow": 15},
             },
@@ -29194,6 +29286,67 @@ def package_catalog_entry(code: str, package_type: str = "") -> dict:
             entry["package_type"] = "combo" if group == "combos" else "monthly"
             return entry
     return {}
+
+def package_purchase_price_vnd(package_type: str, code: str) -> int:
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan"} else "combo"
+    code = str(code or "").strip().lower()
+    if package_type == "combo":
+        for item in video_combo_pricing_payload():
+            if str(item.get("code") or "").strip().lower() == code:
+                return max(0, int(item.get("price_vnd") or 0))
+        return 0
+    monthly_prices = {
+        "starter_monthly": MONTHLY_STARTER_PRICE_VND,
+        "creator_monthly": MONTHLY_CREATOR_PRICE_VND,
+        "shop_monthly": MONTHLY_SHOP_PRICE_VND,
+        "pro_monthly": MONTHLY_PRO_PRICE_VND,
+    }
+    return max(0, int(monthly_prices.get(code) or 0))
+
+def package_purchase_display_price(package_type: str, code: str) -> str:
+    price = package_purchase_price_vnd(package_type, code)
+    if price <= 0:
+        return "liên hệ admin"
+    if price % 1000 == 0:
+        return f"{price // 1000}k"
+    return f"{price:,}đ".replace(",", ".")
+
+def package_purchase_kind_label(package_type: str) -> str:
+    return "Gói tháng" if str(package_type or "").strip().lower() in {"monthly", "month", "plan"} else "Combo"
+
+def package_purchase_description(package_type: str, code: str) -> str:
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan"} else "combo"
+    safe_code = re.sub(r"[^a-zA-Z0-9]", "", str(code or "").upper())[:10]
+    prefix = "AASMONTH" if package_type == "monthly" else "AASCOMBO"
+    desc = f"{prefix}{safe_code}"[:25]
+    return desc or "TOANAASPKG"
+
+def package_purchase_success_message(info: dict) -> str:
+    label = str(info.get("package_label") or info.get("plan_name") or info.get("package_code") or "gói")
+    package_type = str(info.get("package_type") or "").strip().lower()
+    kind = package_purchase_kind_label(package_type)
+    items = str(info.get("package_items") or "").strip()
+    expires_at = str(info.get("expires_at") or "").strip()
+    expires_line = f"• Hết hạn: <code>{html.escape(expires_at)}</code>\n" if expires_at else ""
+    return (
+        "✅ <b>ĐÃ KÍCH HOẠT GÓI DỊCH VỤ</b>\n\n"
+        f"• Loại: <b>{html.escape(kind)}</b>\n"
+        f"• Tên: <b>{html.escape(label)}</b>\n"
+        f"• Lượt đã lưu vào: <b>📦 Gói của tôi</b>\n"
+        f"{expires_line}"
+        f"• Lượt: {html.escape(items or '-')}\n\n"
+        "Khi dùng tạo ảnh/video/workflow, bot sẽ tự gợi ý dùng lượt trong gói và tự trừ lượt nếu bạn chọn.\n"
+        "Gói/combo không cộng điểm nâng hạng thành viên và không quy đổi thành Xu tự do."
+    )
+
+def package_purchase_checkout_keyboard(checkout_url: str = "", package_type: str = "combo") -> InlineKeyboardMarkup:
+    rows = []
+    if checkout_url:
+        rows.append([InlineKeyboardButton("💳 Thanh toán PayOS", url=checkout_url)])
+    rows.append([InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")])
+    rows.append([InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data="pricing|plans" if package_type == "monthly" else "pricing|combo")])
+    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
 
 def package_catalog_text() -> str:
     catalog = package_catalog_payload()
@@ -29253,34 +29406,37 @@ def expire_user_packages_lazy(user_id) -> None:
     finally:
         conn.close()
 
+def record_package_event_conn(conn, user_id, package_id: int = 0, package_item_id: int = 0, related_job_id: int = 0, item_type: str = "", event_type: str = "", delta_quantity: int = 0, balance_before: int = 0, balance_after: int = 0, created_by: str = "", reason: str = "") -> None:
+    conn.execute(
+        """INSERT INTO package_events
+        (user_id, package_id, package_item_id, related_job_id, item_type, event_type,
+         delta_quantity, balance_before, balance_after, created_by, reason, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(user_id or ""),
+            int(package_id or 0),
+            int(package_item_id or 0),
+            int(related_job_id or 0),
+            normalize_package_item_type(item_type),
+            str(event_type or "")[:40],
+            int(delta_quantity or 0),
+            int(balance_before or 0),
+            int(balance_after or 0),
+            str(created_by or "")[:80],
+            sanitize_provider_error(str(reason or ""))[:260],
+            now_text(),
+        ),
+    )
+
 def record_package_event(user_id, package_id: int = 0, package_item_id: int = 0, related_job_id: int = 0, item_type: str = "", event_type: str = "", delta_quantity: int = 0, balance_before: int = 0, balance_after: int = 0, created_by: str = "", reason: str = "") -> None:
     conn = db_connect()
     try:
-        conn.execute(
-            """INSERT INTO package_events
-            (user_id, package_id, package_item_id, related_job_id, item_type, event_type,
-             delta_quantity, balance_before, balance_after, created_by, reason, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                str(user_id or ""),
-                int(package_id or 0),
-                int(package_item_id or 0),
-                int(related_job_id or 0),
-                normalize_package_item_type(item_type),
-                str(event_type or "")[:40],
-                int(delta_quantity or 0),
-                int(balance_before or 0),
-                int(balance_after or 0),
-                str(created_by or "")[:80],
-                sanitize_provider_error(str(reason or ""))[:260],
-                now_text(),
-            ),
-        )
+        record_package_event_conn(conn, user_id, package_id, package_item_id, related_job_id, item_type, event_type, delta_quantity, balance_before, balance_after, created_by, reason)
         conn.commit()
     finally:
         conn.close()
 
-def grant_user_package(user_id, code: str, package_type: str = "combo", admin_id: str = "", days: int = 0, note: str = "") -> dict:
+def grant_user_package_conn(conn, user_id, code: str, package_type: str = "combo", admin_id: str = "", days: int = 0, note: str = "", source: str = "admin_grant") -> dict:
     uid = str(user_id or "").strip()
     package_type = "monthly" if str(package_type or "").lower() == "monthly" else "combo"
     entry = package_catalog_entry(code, package_type)
@@ -29291,45 +29447,49 @@ def grant_user_package(user_id, code: str, package_type: str = "combo", admin_id
     if package_type == "monthly":
         effective_days = max(1, int(days or entry.get("default_days") or 30))
         expires_at = (datetime.now() + timedelta(days=effective_days)).strftime("%Y-%m-%d %H:%M:%S")
+    cur = conn.execute(
+        """INSERT INTO user_packages
+        (user_id, package_code, package_type, label, source, status, granted_by, granted_at, starts_at, expires_at, note)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            uid,
+            str(code or "").strip().lower(),
+            package_type,
+            str(entry.get("label") or code)[:160],
+            str(source or "admin_grant")[:60],
+            "active",
+            str(admin_id or "")[:80],
+            now,
+            now,
+            expires_at,
+            sanitize_provider_error(str(note or ""))[:260],
+        ),
+    )
+    package_id = int(cur.lastrowid or 0)
+    items = entry.get("items") or {}
+    for item_type, quantity in items.items():
+        normalized = normalize_package_item_type(item_type)
+        qty = max(0, int(quantity or 0))
+        if not normalized or qty <= 0:
+            continue
+        conn.execute(
+            """INSERT INTO user_package_items
+            (package_id, user_id, item_type, total_quantity, used_quantity, refunded_quantity,
+             remaining_quantity, status, expires_at, updated_at, note)
+            VALUES (?,?,?,?,0,0,?,'active',?,?,?)""",
+            (package_id, uid, normalized, qty, qty, expires_at, now, sanitize_provider_error(str(note or ""))[:220]),
+        )
+    record_package_event_conn(conn, uid, package_id, 0, 0, "", "grant", 0, 0, 0, admin_id or source, f"{package_type}:{code}; {note or ''}")
+    return {"ok": True, "package_id": package_id, "entry": entry, "expires_at": expires_at}
+
+def grant_user_package(user_id, code: str, package_type: str = "combo", admin_id: str = "", days: int = 0, note: str = "", source: str = "admin_grant") -> dict:
     conn = db_connect()
     try:
-        cur = conn.execute(
-            """INSERT INTO user_packages
-            (user_id, package_code, package_type, label, source, status, granted_by, granted_at, starts_at, expires_at, note)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                uid,
-                str(code or "").strip().lower(),
-                package_type,
-                str(entry.get("label") or code)[:160],
-                "admin_grant",
-                "active",
-                str(admin_id or "")[:80],
-                now,
-                now,
-                expires_at,
-                sanitize_provider_error(str(note or ""))[:260],
-            ),
-        )
-        package_id = int(cur.lastrowid or 0)
-        items = entry.get("items") or {}
-        for item_type, quantity in items.items():
-            normalized = normalize_package_item_type(item_type)
-            qty = max(0, int(quantity or 0))
-            if not normalized or qty <= 0:
-                continue
-            conn.execute(
-                """INSERT INTO user_package_items
-                (package_id, user_id, item_type, total_quantity, used_quantity, refunded_quantity,
-                 remaining_quantity, status, expires_at, updated_at, note)
-                VALUES (?,?,?,?,0,0,?,'active',?,?,?)""",
-                (package_id, uid, normalized, qty, qty, expires_at, now, sanitize_provider_error(str(note or ""))[:220]),
-            )
+        result = grant_user_package_conn(conn, user_id, code, package_type, admin_id, days, note, source)
         conn.commit()
+        return result
     finally:
         conn.close()
-    record_package_event(uid, package_id, 0, 0, "", "grant", 0, 0, 0, admin_id, f"{package_type}:{code}; {note or ''}")
-    return {"ok": True, "package_id": package_id, "entry": entry, "expires_at": expires_at}
 
 def active_package_item_for_user(user_id, item_type: str) -> dict | None:
     uid = str(user_id or "").strip()
@@ -29539,21 +29699,22 @@ def user_package_rows(user_id) -> list[dict]:
 def user_package_summary_text(user_id, admin_view: bool = False) -> str:
     rows = user_package_rows(user_id)
     if not rows:
-        return "🎁 Gói/combo: chưa có gói đang hoạt động."
+        return "📦 <b>Gói của tôi</b>\n\nBạn chưa có combo/gói tháng đang hoạt động."
     by_package: dict[int, dict] = {}
     for row in rows:
         package_id = int(row.get("package_id") or 0)
         package = by_package.setdefault(package_id, {"row": row, "items": []})
         if row.get("item_type"):
             package["items"].append(row)
-    lines = ["🎁 <b>Gói/combo đang có</b>"]
+    lines = ["📦 <b>Gói của tôi</b>"]
     for package_id, package in by_package.items():
         row = package["row"]
         status = str(row.get("status") or "-")
+        package_type = "Gói tháng" if str(row.get("package_type") or "") == "monthly" else "Combo"
         expires = str(row.get("expires_at") or "")
         expires_text = f" | hết hạn {html.escape(expires[:16])}" if expires else ""
         id_text = f"#{package_id} " if admin_view else ""
-        lines.append(f"• {id_text}<b>{html.escape(row.get('label') or row.get('package_code') or '-')}</b> — <code>{html.escape(status)}</code>{expires_text}")
+        lines.append(f"• {id_text}<b>{html.escape(row.get('label') or row.get('package_code') or '-')}</b> — {package_type} — <code>{html.escape(status)}</code>{expires_text}")
         item_parts = []
         for item in package["items"]:
             remaining = int(item.get("remaining_quantity") or 0)
@@ -33427,7 +33588,7 @@ def main_topup_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
     uid = str(user_id or "0")
     if not uid.isdigit():
         uid = "0"
-    back_label = "🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back"
+    back_label = "🔙 Quay lại bảng giá" if normalize_user_language(lang) == "vi" else "🔙 Back to pricing"
     main_label = ui_text(lang, "common.main_menu")
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 10k", callback_data=payos_package_callback_data("10k", uid)), InlineKeyboardButton("💳 20k", callback_data=payos_package_callback_data("20k", uid))],
@@ -53760,22 +53921,43 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    labels = {
+        "vi": {
+            "topup": "💳 Nạp Xu", "video": "🎬 Giá video", "image": "🖼 Giá ảnh",
+            "combo": "🎁 Combo", "my": "📦 Gói của tôi", "monthly": "📆 Gói tháng",
+            "member": "👑 Thành viên", "terms": "📜 Điều khoản Xu", "main": "🏠 Menu chính",
+        },
+        "en": {
+            "topup": "💳 Top up Xu", "video": "🎬 Video pricing", "image": "🖼 Image pricing",
+            "combo": "🎁 Combos", "my": "📦 My packages", "monthly": "📆 Monthly plans",
+            "member": "👑 Membership", "terms": "📜 Xu terms", "main": "🏠 Main menu",
+        },
+        "zh": {
+            "topup": "💳 充值 Xu", "video": "🎬 视频价格", "image": "🖼 图片价格",
+            "combo": "🎁 组合套餐", "my": "📦 我的套餐", "monthly": "📆 月度套餐",
+            "member": "👑 会员等级", "terms": "📜 Xu 条款", "main": "🏠 主菜单",
+        },
+    }.get(lang, {})
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
-            InlineKeyboardButton("🎬 Giá video", callback_data="pricing|video"),
+            InlineKeyboardButton(labels.get("topup", "💳 Top up Xu"), callback_data="menu|main_topup"),
+            InlineKeyboardButton(labels.get("video", "🎬 Video pricing"), callback_data="pricing|video"),
         ],
         [
-            InlineKeyboardButton("🖼 Giá ảnh", callback_data="pricing|image"),
-            InlineKeyboardButton("🎁 Combo", callback_data="pricing|combo"),
+            InlineKeyboardButton(labels.get("image", "🖼 Image pricing"), callback_data="pricing|image"),
+            InlineKeyboardButton(labels.get("combo", "🎁 Combos"), callback_data="pricing|combo"),
         ],
         [
-            InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages"),
-            InlineKeyboardButton("👑 Thành viên", callback_data="pricing|member"),
+            InlineKeyboardButton(labels.get("my", "📦 My packages"), callback_data="pricing|my_packages"),
+            InlineKeyboardButton(labels.get("monthly", "📆 Monthly plans"), callback_data="pricing|plans"),
         ],
         [
-            InlineKeyboardButton(ui_text(lang, "pricing.terms"), callback_data="pricing|terms"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            InlineKeyboardButton(labels.get("member", "👑 Membership"), callback_data="pricing|member"),
+            InlineKeyboardButton(labels.get("terms", "📜 Xu terms"), callback_data="pricing|terms"),
+        ],
+        [
+            InlineKeyboardButton(labels.get("main", "🏠 Main menu"), callback_data="menu|main"),
         ],
     ])
 
@@ -53786,23 +53968,29 @@ def pricing_xu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def pricing_plans_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 我的套餐", "📞 联系管理员", "🔙 返回价格", "🏠 主菜单"]
+    elif lang == "en":
+        labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 My packages", "📞 Contact admin", "🔙 Back to pricing", "🏠 Main menu"]
+    else:
+        labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 Gói của tôi", "📞 Liên hệ admin", "🔙 Quay lại bảng giá", "🏠 Menu chính"]
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(ui_text(lang, "pricing.buy_starter"), callback_data="buy_plan|starter"),
-            InlineKeyboardButton(ui_text(lang, "pricing.buy_creator"), callback_data="buy_plan|creator"),
+            InlineKeyboardButton(labels[0], callback_data="pkgbuy|monthly|starter_monthly"),
+            InlineKeyboardButton(labels[1], callback_data="pkgbuy|monthly|creator_monthly"),
         ],
         [
-            InlineKeyboardButton(ui_text(lang, "pricing.buy_pro"), callback_data="buy_plan|pro"),
-            InlineKeyboardButton(ui_text(lang, "pricing.buy_business"), callback_data="buy_plan|business"),
-        ],
-        [InlineKeyboardButton(ui_text(lang, "pricing.topup"), callback_data="menu|main_topup")],
-        [
-            InlineKeyboardButton(ui_text(lang, "pricing.vip"), callback_data="pricing|vip"),
-            InlineKeyboardButton(ui_text(lang, "pricing.member_conditions"), callback_data="pricing|member"),
+            InlineKeyboardButton(labels[2], callback_data="pkgbuy|monthly|shop_monthly"),
+            InlineKeyboardButton(labels[3], callback_data="pkgbuy|monthly|pro_monthly"),
         ],
         [
-            InlineKeyboardButton(ui_text(lang, "pricing.terms"), callback_data="pricing|terms"),
-            InlineKeyboardButton(ui_text(lang, "pricing.back"), callback_data="pricing|main"),
+            InlineKeyboardButton(labels[4], callback_data="pricing|my_packages"),
+            InlineKeyboardButton(labels[5], callback_data="menu|support"),
+        ],
+        [
+            InlineKeyboardButton(labels[6], callback_data="pricing|main"),
+            InlineKeyboardButton(labels[7], callback_data="menu|main"),
         ],
     ])
 
@@ -53816,12 +54004,26 @@ def vip_services_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def member_policy_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("👑 我的等级", callback_data="menu|main_profile"), InlineKeyboardButton("🎂 更新生日", callback_data="pricing|birthday")],
+            [InlineKeyboardButton("📜 等级政策", callback_data="pricing|member")],
+            [InlineKeyboardButton("🔙 返回价格", callback_data="pricing|main"), InlineKeyboardButton("🏠 主菜单", callback_data="menu|main")],
+        ])
+    if lang == "en":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("👑 My tier", callback_data="menu|main_profile"), InlineKeyboardButton("🎂 Update birthday", callback_data="pricing|birthday")],
+            [InlineKeyboardButton("📜 Tier policy", callback_data="pricing|member")],
+            [InlineKeyboardButton("🔙 Back to pricing", callback_data="pricing|main"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(ui_text(lang, "pricing.plans"), callback_data="pricing|plans"),
-            InlineKeyboardButton(ui_text(lang, "pricing.xu"), callback_data="pricing|xu"),
+            InlineKeyboardButton("👑 Hạng của tôi", callback_data="menu|main_profile"),
+            InlineKeyboardButton("🎂 Cập nhật ngày sinh", callback_data="pricing|birthday"),
         ],
-        [InlineKeyboardButton(ui_text(lang, "pricing.back"), callback_data="pricing|main")],
+        [InlineKeyboardButton("📜 Chính sách hạng", callback_data="pricing|member")],
+        [InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def pricing_terms_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -53881,20 +54083,6 @@ async def edit_or_send_pricing_lines(query, lines: list[str], reply_markup: Inli
 
 def pricing_main_lines() -> list[str]:
     pricing = media_workflow_pricing_payload()
-    return [
-        "💳 <b>BẢNG GIÁ TOAN AAS</b>",
-        "",
-        "Chọn nhóm giá bạn muốn xem bên dưới. TOAN AAS gom giá về một nơi để tránh nhầm giữa nạp Xu, combo/gói dịch vụ và tác vụ AI.",
-        "",
-        "• <b>Nạp Xu:</b> chọn mệnh giá 10k, 20k, 50k, 100k, 200k, 500k.",
-        "• <b>Hình ảnh AI:</b> giá theo tier ảnh và bảo hành tạo lại nếu có.",
-        "• <b>Video AI:</b> giá theo tier video, có xác nhận trước khi trừ Xu.",
-        "• <b>Combo:</b> gói ưu đãi tiết kiệm, không cộng điểm nâng hạng/thưởng nạp và không quy đổi toàn bộ thành Xu tự do.",
-        f"• <b>Workflow trend content-only:</b> {int(pricing.get('workflow_content_total_cost') or 0)} Xu, chưa bao gồm tạo ảnh/video thật.",
-        "",
-        "Provider lỗi/quota/timeout: bot không trừ Xu hoặc hoàn Xu nếu đã trừ theo policy.",
-        f"Pricing mode: <code>{html.escape(pricing.get('billing_mode') or 'tiered_media_pricing')}</code>",
-    ]
     image_tiers = pricing["image_tiers"]
     video_tiers = pricing["video_tiers"]
     image_items = [
@@ -53928,6 +54116,7 @@ def pricing_main_lines() -> list[str]:
         "",
         "<b>A. Nạp Xu / Mệnh giá</b>",
         "• 10.000đ → <b>100 Xu</b>",
+        "• 20.000đ → <b>200 Xu</b>",
         "• 50.000đ → <b>500 Xu</b>",
         "• 100.000đ → <b>1.000 Xu</b>",
         "• 200.000đ → <b>2.000 Xu</b>",
@@ -53951,9 +54140,10 @@ def pricing_main_lines() -> list[str]:
         "• Tỉ lệ khung hình: 9:16, 16:9, 1:1, 4:5, 3:4. Combo TikTok khuyến nghị 9:16 nhưng không khóa cứng.",
         f"• Trạng thái public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
-        "<b>E. Combo video</b>",
+        "<b>E. Combo dịch vụ</b>",
         *combo_items,
-        "• Combo không tính điểm nâng hạng/thưởng nạp và không làm thay đổi mệnh giá nạp Xu thường.",
+        "• Combo là lượt dịch vụ ưu đãi, không cộng Xu, không tính điểm nâng hạng/thưởng nạp và không làm thay đổi mệnh giá nạp Xu thường.",
+        "• Sau khi thanh toán PayOS thành công, combo nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt khi dùng.",
         "",
         "<b>F. Workflow nội dung theo trend</b>",
         f"• Gói nội dung theo trend: <b>{pricing['workflow_content_total_cost']} Xu</b>",
@@ -53997,9 +54187,9 @@ def pricing_main_lines() -> list[str]:
         *doc_items,
         "",
         "<b>K. Gói tháng</b>",
-        "• Free / Starter / Creator / Pro / Business.",
-        "• Gói tháng gồm hạn mức/quyền lợi + Xu xử lý/tháng.",
-        "• Không phải unlimited tác vụ nặng.",
+        "• Starter / Creator / Shop / Pro là hạn mức dịch vụ theo tháng, tách riêng với hạng thành viên.",
+        "• Gói tháng không cộng Xu tự do, không tính tổng nạp nâng hạng và không chạy bonus nạp.",
+        "• Sau khi thanh toán PayOS thành công, hạn mức nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt khi dùng.",
         "• Tác vụ phát sinh hoặc vượt hạn mức xem tại Bảng giá tổng này.",
         "",
         "<b>L. Thành viên</b>",
@@ -54077,16 +54267,21 @@ def pricing_combo_lines() -> list[str]:
         rows.append(f"• {html.escape(label)} — <b>{html.escape(price)}</b> — {summary}".replace(",", "."))
     rows.extend([
         "",
-        "Nếu combo checkout chưa bật, hãy liên hệ admin để mua combo hoặc nạp Xu theo mệnh giá.",
+        "Bấm nút combo bên dưới để mua bằng PayOS. Thanh toán thành công sẽ tự lưu lượt vào <b>📦 Gói của tôi</b>.",
+        "Khi dùng ảnh/video/workflow, bot tự gợi ý dùng lượt trong gói và tự trừ lượt nếu bạn chọn.",
+        "Combo không phải nạp Xu, không cộng điểm nâng hạng và không chạy bonus nạp.",
     ])
     return rows
 
 def pricing_detail_keyboard(section: str = "main", lang: str = "vi") -> InlineKeyboardMarkup:
     rows = []
     if section == "combo":
-        rows.append([InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")])
-        rows.append([InlineKeyboardButton("💳 Mua/Nạp Xu", callback_data="menu|main_topup")])
-        rows.append([InlineKeyboardButton("👨‍💼 Liên hệ admin để mua combo", callback_data="menu|support")])
+        rows.extend([
+            [InlineKeyboardButton("🎁 TikTok 99k", callback_data="pkgbuy|combo|tiktok_99k"), InlineKeyboardButton("📦 Cơ Bản 199k", callback_data="pkgbuy|combo|basic_199k")],
+            [InlineKeyboardButton("⭐ Tiêu Chuẩn 299k", callback_data="pkgbuy|combo|standard_299k"), InlineKeyboardButton("📅 Đăng Đều 499k", callback_data="pkgbuy|combo|posting_499k")],
+            [InlineKeyboardButton("🚀 Quảng Cáo 699k", callback_data="pkgbuy|combo|product_ads_699k")],
+            [InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
+        ])
     elif section in {"image", "video"}:
         rows.append([
             InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
@@ -54094,6 +54289,23 @@ def pricing_detail_keyboard(section: str = "main", lang: str = "vi") -> InlineKe
         ])
     rows.append([InlineKeyboardButton(ui_text(lang, "pricing.back"), callback_data="pricing|main"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+def my_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎁 购买组合套餐", callback_data="pricing|combo"), InlineKeyboardButton("📆 月度套餐", callback_data="pricing|plans")],
+            [InlineKeyboardButton("🔙 返回价格", callback_data="pricing|main"), InlineKeyboardButton("🏠 主菜单", callback_data="menu|main")],
+        ])
+    if lang == "en":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎁 Buy combo", callback_data="pricing|combo"), InlineKeyboardButton("📆 Monthly plans", callback_data="pricing|plans")],
+            [InlineKeyboardButton("🔙 Back to pricing", callback_data="pricing|main"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎁 Mua combo", callback_data="pricing|combo"), InlineKeyboardButton("📆 Gói tháng", callback_data="pricing|plans")],
+        [InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
 
 def pricing_xu_lines() -> list[str]:
     return [
@@ -54127,77 +54339,36 @@ def pricing_xu_lines() -> list[str]:
     ]
 
 def pricing_plans_lines() -> list[str]:
+    catalog = package_catalog_payload().get("monthly") or {}
+    def plan_line(code: str) -> str:
+        entry = catalog.get(code) or {}
+        return (
+            f"• {html.escape(entry.get('label') or code)} — <b>{html.escape(package_purchase_display_price('monthly', code))}</b> "
+            f"— {html.escape(package_items_summary(entry.get('items') or {}))} "
+            f"({int(entry.get('default_days') or 30)} ngày)"
+        )
     return [
         "📦 <b>GÓI THÁNG TOAN AAS</b>",
         "",
-        "Gói tháng = quyền dùng công cụ + Xu xử lý/tháng + hạn mức ưu tiên.",
-        "Gói tháng không phải nạp Xu thô và không phải unlimited mọi tác vụ nặng.",
-        "Tác vụ phát sinh xem tại <b>💳 Bảng giá tổng</b>.",
-        "Xu xử lý/tháng có thể dùng cho nhiều công cụ theo bảng giá hiện hành.",
-        "Video AI thật không bao gồm miễn phí đại trà khi public video chưa ổn định.",
+        "Gói tháng là hạn mức dịch vụ theo tháng, tách riêng với <b>👑 Thành viên</b> và tách riêng với <b>💳 Nạp Xu</b>.",
+        "Khách mua bằng nút bên dưới. PayOS thanh toán thành công thì hạn mức tự lưu vào <b>📦 Gói của tôi</b>.",
+        "Khi dùng tạo ảnh/video/workflow, bot tự gợi ý dùng lượt trong gói và tự trừ lượt nếu bạn chọn.",
         "",
-        "<b>ĐIỀU KIỆN MUA GÓI:</b>",
-        "• Chỉ thành viên từ 🥈 Silver / Bạc trở lên mới được mua gói tháng.",
-        "• Mỗi loại gói tháng chỉ được mua 1 lần trong mỗi tháng.",
-        "• Đã mua Creator tháng này thì không mua lại Creator, nhưng có thể mua Pro/Business nếu đủ điều kiện.",
-        "• Tiền mua gói tháng KHÔNG tính vào tổng nạp để nâng hạng thành viên.",
-        "• Hạn mức trong gói dùng trong kỳ gói, không rút tiền, không chuyển nhượng.",
-        "• Vượt hạn mức gói có thể nạp thêm Xu để dùng tiếp.",
-        "• Admin có thể cấp gói thủ công khi thanh toán lỗi, tặng quà hoặc khuyến mãi.",
+        "<b>Các gói đang có</b>",
+        plan_line("starter_monthly"),
+        plan_line("creator_monthly"),
+        plan_line("shop_monthly"),
+        plan_line("pro_monthly"),
         "",
-        "<b>Free — 0đ/tháng</b>",
-        "• Trial 200 Xu một lần nếu tài khoản hợp lệ.",
-        "• Dùng công cụ public cơ bản theo hạn mức chống spam.",
-        "• Tác vụ nặng dùng Xu theo Bảng giá tổng.",
+        "<b>Quy tắc</b>",
+        "• Gói tháng không phải thành viên, không tự nâng hạng thành viên.",
+        "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng.",
+        "• Gói tháng không cộng Xu tự do, không chạy launch bonus/top-up bonus.",
+        "• Hạn mức trong gói không rút tiền, không chuyển nhượng và có thể hết hạn theo kỳ.",
+        "• Vượt hạn mức thì dùng Xu hoặc mua gói/combo khác.",
+        "• Nếu PayOS/webhook lỗi, admin có thể cấp lại gói thủ công sau khi đối soát.",
         "",
-        "<b>Starter — 49.000đ/tháng</b>",
-        "Điều kiện: từ 🥈 Silver trở lên",
-        "• Có 600 Xu xử lý/tháng.",
-        "• Phù hợp chat thường, dịch ngắn, PDF cơ bản, prompt ảnh/video và workflow nhỏ.",
-        "• Ước tính khoảng 12 ảnh tiết kiệm hoặc 8 workflow trend content-only nếu chỉ dùng một nhóm tác vụ.",
-        "• Không bao gồm video AI thật miễn phí.",
-        "",
-        "<b>Creator — 99.000đ/tháng</b>",
-        "Điều kiện: từ 🥈 Silver trở lên",
-        "• Có 1.300 Xu xử lý/tháng.",
-        "• Phù hợp creator/affiliate/shop nhỏ.",
-        "• Ước tính khoảng 26 ảnh tiết kiệm hoặc 18 workflow trend content-only.",
-        "• Ưu tiên prompt/content/ảnh; không bao gồm video AI thật miễn phí.",
-        "",
-        "<b>Pro — 199.000đ/tháng</b>",
-        "Điều kiện khuyến nghị: từ 🥇 Gold trở lên",
-        "• Có 3.000 Xu xử lý/tháng.",
-        "• Phù hợp dùng thường xuyên.",
-        "• Ước tính khoảng 60 ảnh tiết kiệm, 10 ảnh tiêu chuẩn hoặc 42 workflow trend content-only.",
-        "• Có thể ưu tiên queue/tác vụ file/audio vừa khi công cụ được mở.",
-        "• Video AI thật vẫn tính Xu theo tier nếu mở.",
-        "",
-        "<b>Business — 499.000đ/tháng</b>",
-        "Điều kiện khuyến nghị: từ 🥇 Gold trở lên hoặc admin duyệt",
-        "• Có 8.000 Xu xử lý/tháng.",
-        "• Phù hợp team nhỏ/shop/affiliate team.",
-        "• Ước tính khoảng 160 ảnh tiết kiệm, 26 ảnh tiêu chuẩn hoặc 16 ảnh chất lượng cao.",
-        "• Có thể có ưu tiên xử lý và hỗ trợ admin.",
-        "• Video AI thật vẫn tính Xu theo tier, không unlimited.",
-        "",
-        "<b>Lệnh mua gói:</b>",
-        "• <code>/buy_plan starter</code>",
-        "• <code>/buy_plan creator</code>",
-        "• <code>/buy_plan pro</code>",
-        "• <code>/buy_plan business</code>",
-        "",
-        "<b>Thanh toán gói tháng:</b>",
-        "• Dùng <code>/buy_plan &lt;plan&gt;</code> hoặc bấm nút mua gói để tạo checkout PayOS.",
-        "• Khi PayOS thanh toán thành công, bot tự kích hoạt gói và hạn mức tương ứng.",
-        "• Mỗi plan_code chỉ mua 1 lần trong cùng tháng; sang tháng mới reset quyền mua theo plan.",
-        "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
-        "• Nếu PayOS/webhook lỗi, admin có thể cấp gói thủ công.",
-        "• Lệnh admin: <code>/admin_grant_plan &lt;user_id&gt; &lt;plan&gt; &lt;days&gt;</code>, <code>/admin_revoke_plan &lt;user_id&gt;</code>, <code>/admin_plan_status &lt;user_id&gt;</code>.",
-        "",
-        "<b>Ghi chú:</b>",
-        "• Các con số ảnh/workflow chỉ là ước tính theo bảng giá hiện tại.",
-        "• Tác vụ phát sinh xem tại Bảng giá tổng, không nhồi lại trong menu gói tháng.",
-        "• Gói tháng không tự nâng hạng thành viên và không cộng vào tổng nạp thành viên.",
+        "Bấm nút gói tháng bên dưới để mua. Bot không yêu cầu khách gõ lệnh mua gói.",
     ]
 
 def vip_services_lines() -> list[str]:
@@ -54232,39 +54403,44 @@ def vip_services_lines() -> list[str]:
 
 def member_policy_lines() -> list[str]:
     return [
-        "🪪 <b>ĐIỀU KIỆN MUA GÓI THÁNG</b>",
+        "👑 <b>THÀNH VIÊN TOAN AAS</b>",
         "",
-        "TOAN AAS tách riêng:",
-        "1. Hạng thành viên",
-        "2. Gói tháng",
-        "3. Xu xử lý",
+        "Thành viên là <b>hạng khách hàng</b>, tách riêng với <b>📆 Gói tháng</b> và <b>🎁 Combo</b>.",
+        "Hạng thành viên tính theo tổng nạp Xu thành công qua top-up, không tính tiền mua combo/gói tháng.",
         "",
-        "<b>Hạng thành viên:</b>",
-        "• Tính theo tổng nạp Xu thủ công thành công.",
-        "• Dùng để mở điều kiện mua gói tháng và giảm Xu khi dùng dịch vụ đủ điều kiện.",
-        "• Không chia quá nhiều quyền công cụ phức tạp theo hạng.",
+        "<b>Hạng & điều kiện</b>",
+        "• 🌱 Newbie: mặc định.",
+        f"• 🥈 Silver: từ {MEMBER_TIER_THRESHOLDS.get('silver', 0):,}đ tổng nạp.".replace(",", "."),
+        f"• 🥇 Gold: từ {MEMBER_TIER_THRESHOLDS.get('gold', 0):,}đ tổng nạp.".replace(",", "."),
+        f"• 💠 Platinum: từ {MEMBER_TIER_THRESHOLDS.get('platinum', 0):,}đ tổng nạp.".replace(",", "."),
+        f"• 💎 Diamond: từ {MEMBER_TIER_THRESHOLDS.get('diamond', 0):,}đ tổng nạp.".replace(",", "."),
+        f"• 👑 VIP: từ {MEMBER_TIER_THRESHOLDS.get('vip', 0):,}đ tổng nạp hoặc admin duyệt.".replace(",", "."),
         "",
-        "<b>Gói tháng:</b>",
-        "• Là quyền dùng/hạn mức dịch vụ theo tháng.",
-        "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
-        "• Hạn mức gói không rút tiền, không chuyển nhượng.",
-        "• Hết kỳ gói, hạn mức còn lại có thể hết hạn theo chính sách đang bật.",
+        "<b>Ưu đãi khi dùng dịch vụ</b>",
+        f"• Newbie: giảm {MEMBER_TOOL_DISCOUNT_POLICY.get('newbie', 0)}% Xu.",
+        f"• Silver: giảm {MEMBER_TOOL_DISCOUNT_POLICY.get('silver', 0)}% Xu.",
+        f"• Gold: giảm {MEMBER_TOOL_DISCOUNT_POLICY.get('gold', 0)}% Xu.",
+        f"• Platinum: giảm {MEMBER_TOOL_DISCOUNT_POLICY.get('platinum', 0)}% Xu.",
+        f"• Diamond: giảm {MEMBER_TOOL_DISCOUNT_POLICY.get('diamond', 0)}% Xu.",
+        f"• VIP: giảm {MEMBER_TOOL_DISCOUNT_POLICY.get('vip', 0)}% Xu.",
         "",
-        "<b>Điều kiện đề xuất:</b>",
-        "• Starter / Creator: từ 🥈 Silver trở lên.",
-        "• Pro / Business: từ 🥇 Gold trở lên hoặc admin duyệt.",
-        "• Admin có quyền cấp gói thủ công cho khách đặc biệt, tặng quà, khuyến mãi hoặc xử lý lỗi thanh toán.",
+        "<b>Quà sinh nhật theo hạng</b>",
+        f"• Silver: {MEMBER_BIRTHDAY_GIFT_XU.get('silver', 0)} Xu.",
+        f"• Gold: {MEMBER_BIRTHDAY_GIFT_XU.get('gold', 0)} Xu.",
+        f"• Platinum: {MEMBER_BIRTHDAY_GIFT_XU.get('platinum', 0)} Xu.",
+        f"• Diamond: {MEMBER_BIRTHDAY_GIFT_XU.get('diamond', 0)} Xu.",
+        f"• VIP: {MEMBER_BIRTHDAY_GIFT_XU.get('vip', 0)} Xu.",
+        "• Cần cập nhật ngày sinh và admin có thể review để chống lạm dụng.",
         "",
-        "<b>Member policy giữ đơn giản:</b>",
-        "• Các hạng thành viên gần như dùng cùng bộ công cụ public.",
-        "• Khác biệt chính là % giảm Xu khi dùng dịch vụ đủ điều kiện.",
-        "• Có bonus lên hạng một lần nếu chính sách đang bật.",
-        "• Không giảm tiền nạp theo hạng.",
-        "• Không cộng thêm Xu định kỳ theo hạng.",
-        "• Mệnh giá nạp Xu gốc giống nhau cho mọi user.",
+        "<b>Referral</b>",
+        "• Thưởng giới thiệu theo hạng và chỉ khi người được mời là tài khoản mới, nạp lần đầu thành công, không spam/fake.",
+        "• Admin có quyền khóa referral nếu phát hiện gian lận.",
         "",
-        "<b>Lý do:</b>",
-        "Điều kiện này giúp tránh lạm dụng/lạm phát hạn mức, đồng thời giữ gói tháng cho khách có nhu cầu thật.",
+        "<b>Không trộn chính sách</b>",
+        "• Mua combo/gói tháng không phải nạp Xu và không cộng điểm nâng hạng.",
+        "• Mệnh giá nạp Xu gốc giống nhau cho mọi hạng.",
+        "• Hạng thành viên không cộng thêm Xu định kỳ.",
+        "• Xu/gói/lượt dịch vụ không rút tiền, không chuyển nhượng.",
     ]
 
 def pricing_terms_lines() -> list[str]:
@@ -54474,6 +54650,132 @@ def plan_purchase_keyboard(checkout_url: str = "") -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
+async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, package_type: str, code: str, message=None):
+    message = message or update.message
+    uid = update.effective_user.id
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan"} else "combo"
+    code = str(code or "").strip().lower()
+    entry = package_catalog_entry(code, package_type)
+    if not entry or entry.get("manual"):
+        return await message.reply_text(
+            "⚠️ Gói này cần admin hỗ trợ. Bot chưa tạo đơn và chưa trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
+                [InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data="pricing|plans" if package_type == "monthly" else "pricing|combo")],
+            ]),
+        )
+    get_user(uid, update.effective_user.first_name or update.effective_user.username or "")
+    if package_type == "monthly":
+        existing = resolve_package_for_user(uid, code)
+        if existing and str(existing.get("status") or "") == "active" and not package_expired(existing.get("expires_at") or ""):
+            return await message.reply_text(
+                "⚠️ Bạn đang có gói tháng này còn hiệu lực.\n\n"
+                "Vui lòng dùng hết hoặc chờ hết kỳ trước khi mua lại cùng gói. Bot chưa tạo đơn mới.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
+                    [InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data="pricing|plans")],
+                ]),
+            )
+    amount = package_purchase_price_vnd(package_type, code)
+    if amount <= 0:
+        return await message.reply_text(
+            "⚠️ Giá gói này chưa cấu hình tự động.\n\n"
+            "Vui lòng bấm Liên hệ admin để được hỗ trợ. Bot chưa tạo đơn, chưa cộng/trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
+                [InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
+                [InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data="pricing|plans" if package_type == "monthly" else "pricing|combo")],
+            ]),
+        )
+    if flag_on("emergency_lock") or flag_on("payment_freeze"):
+        return await message.reply_text("⚠️ Thanh toán đang tạm khóa an toàn. Bot chưa tạo đơn gói dịch vụ.")
+    if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
+        return await message.reply_text("❌ Chưa cấu hình đủ PayOS để mua gói dịch vụ. Bot chưa tạo đơn.")
+
+    order_code = generate_order_code()
+    duration_days = int(entry.get("default_days") or 0) if package_type == "monthly" else 0
+    label = str(entry.get("label") or code)
+    item_summary = package_items_summary(entry.get("items") or {})
+    metadata = {
+        "type": "package_purchase",
+        "package_type": package_type,
+        "package_code": code,
+        "package_label": label,
+        "telegram_user_id": str(uid),
+        "duration_days": duration_days,
+    }
+    create_order(
+        order_code,
+        uid,
+        amount,
+        0,
+        base_xu=0,
+        launch_bonus_xu=0,
+        package_amount_vnd=0,
+        order_type="package_purchase",
+        plan_id=code,
+        plan_name=label,
+        duration_days=duration_days,
+        plan_xu=0,
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+    return_url = make_payos_return_url(context)
+    payos_body = {
+        "orderCode": int(order_code),
+        "amount": int(amount),
+        "description": package_purchase_description(package_type, code),
+        "cancelUrl": return_url,
+        "returnUrl": return_url,
+    }
+    try:
+        res, res_data, raw_preview, _raw_str = await create_payos_payment_request(payos_body)
+        data = res_data if isinstance(res_data, dict) else {}
+        checkout_data = data.get("data") if isinstance(data.get("data"), dict) else {}
+        checkout_url = checkout_data.get("checkoutUrl", "")
+        payment_link_id = checkout_data.get("paymentLinkId", "")
+        if getattr(res, "status_code", "") == 200 and data.get("code") == "00" and checkout_url:
+            update_order_checkout_info(order_code, checkout_url, payment_link_id)
+            record_usage_event(
+                uid,
+                username=update.effective_user.username or update.effective_user.first_name or "",
+                event_type="package_purchase_created",
+                tool_name="package_wallet",
+                command="/pricing_button",
+                status="pending",
+                amount_vnd=amount,
+                provider="payos",
+                detail=f"order={order_code}; package_type={package_type}; code={code}; counts_for_member_tier=false",
+            )
+            kind = package_purchase_kind_label(package_type)
+            expires_line = f"• Thời hạn: <b>{duration_days} ngày</b>\n" if duration_days else ""
+            return await message.reply_text(
+                f"📦 <b>Thanh toán {html.escape(kind)}</b>\n\n"
+                f"• Tên: <b>{html.escape(label)}</b>\n"
+                f"• Giá: <b>{amount:,}đ</b>\n"
+                f"{expires_line}"
+                f"• Lượt sau khi thanh toán: {html.escape(item_summary)}\n"
+                "• Sau khi PayOS xác nhận, bot tự lưu vào <b>📦 Gói của tôi</b>.\n"
+                "• Khi dùng dịch vụ, bot tự gợi ý dùng lượt trong gói và trừ lượt nếu bạn chọn.\n"
+                "• Không cộng Xu, không tính điểm nâng hạng, không chạy bonus nạp.\n\n"
+                f"• Mã đơn: <code>{order_code}</code>",
+                parse_mode="HTML",
+                reply_markup=package_purchase_checkout_keyboard(checkout_url, package_type),
+            )
+        update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        return await message.reply_text(
+            "❌ PayOS chưa tạo được link thanh toán gói dịch vụ.\n"
+            "Bot chưa kích hoạt gói, chưa cộng/trừ Xu.\n\n"
+            f"Chi tiết ngắn: <code>{html.escape(str(data.get('desc') or data.get('message') or raw_preview or '-')[:220])}</code>",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        logger.warning("Package PayOS create failed: %s", sanitize_log_text(str(e))[:220])
+        return await message.reply_text(
+            "❌ PayOS chưa tạo được link thanh toán gói dịch vụ.\n"
+            "Bot chưa kích hoạt gói, chưa cộng/trừ Xu.",
+        )
+
 async def start_plan_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, plan_id: str, message=None):
     message = message or update.message
     uid = update.effective_user.id
@@ -54481,7 +54783,7 @@ async def start_plan_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not plan_id:
         return await message.reply_text(
             "⚠️ Gói tháng không hợp lệ.\n\n"
-            "Dùng: <code>/buy_plan starter</code>, <code>/buy_plan creator</code>, <code>/buy_plan pro</code> hoặc <code>/buy_plan business</code>.",
+            "Vui lòng mở <b>💳 Bảng giá</b> → <b>📆 Gói tháng</b> rồi bấm gói muốn mua. Bot chưa tạo đơn.",
             parse_mode="HTML",
         )
     plan = PLAN_CATALOG[plan_id]
@@ -54604,14 +54906,39 @@ async def start_plan_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 async def cmd_buy_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(
+            "📆 Gói tháng hiện mua bằng nút trong Bảng giá.\n\n"
+            "Vui lòng mở <b>💳 Bảng giá</b> → <b>📆 Gói tháng</b> rồi bấm gói muốn mua. Bot chưa tạo đơn.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📆 Gói tháng", callback_data="pricing|plans")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
     plan_id = context.args[0] if context.args else ""
     return await start_plan_purchase(update, context, plan_id)
 
 async def handle_buy_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    if not is_admin_user(query.from_user.id):
+        return await safe_edit_or_send(
+            query,
+            "📆 Gói tháng hiện mua bằng nút trong Bảng giá. Bot chưa tạo đơn.",
+            reply_markup=pricing_plans_keyboard(get_user_language(query.from_user.id)),
+        )
     plan_id = (query.data.split("|", 1)[1] if "|" in query.data else "").strip()
     return await start_plan_purchase(update, context, plan_id, message=query.message)
+
+async def handle_package_purchase_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split("|")
+    if len(parts) < 3:
+        return await safe_edit_or_send(query, "⚠️ Gói không hợp lệ. Bot chưa tạo đơn.")
+    package_type, code = parts[1], parts[2]
+    return await start_package_purchase(update, context, package_type, code, message=query.message)
 
 async def cmd_admin_grant_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -54717,13 +55044,22 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if action == "combo":
         return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_detail_keyboard("combo", lang))
     if action == "my_packages":
-        return await edit_or_send_pricing_lines(query, [user_package_summary_text(query.from_user.id)], pricing_detail_keyboard("combo", lang))
+        return await edit_or_send_pricing_lines(query, [user_package_summary_text(query.from_user.id)], my_packages_keyboard(lang))
     if action == "plans":
         return await edit_or_send_pricing_lines(query, pricing_plans_lines_i18n(lang), pricing_plans_keyboard(lang))
     if action == "vip":
         return await edit_or_send_pricing_lines(query, vip_services_lines(), vip_services_keyboard(lang))
     if action == "member":
         return await edit_or_send_pricing_lines(query, member_policy_lines(), member_policy_keyboard(lang))
+    if action == "birthday":
+        text = (
+            "🎂 <b>Cập nhật ngày sinh</b>\n\n"
+            "Bạn có thể cập nhật ngày sinh để nhận quà sinh nhật theo hạng khi chính sách đủ điều kiện.\n\n"
+            "Gõ <code>/birthday DD-MM</code> hoặc <code>/birthday DD/MM</code>.\n"
+            "Ví dụ: <code>/birthday 20-10</code>\n\n"
+            "Admin có thể review để chống lạm dụng. Bot chưa trừ Xu."
+        )
+        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=member_policy_keyboard(lang))
     if action == "terms":
         return await edit_or_send_pricing_lines(query, pricing_terms_lines(), pricing_terms_keyboard(lang))
     return await edit_or_send_pricing_lines(query, pricing_main_lines_i18n(lang), pricing_main_keyboard(lang))
@@ -70679,6 +71015,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_package_purchase_callback, pattern=r"^pkgbuy\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_buy_plan_callback, pattern=r"^buy_plan\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
@@ -74364,6 +74701,37 @@ async def webhook_payos(request: Request):
     if not processed:
         logger.warning(f"PayOS webhook ignored: {desc} | order={order_code} | amount={amount_vnd} | info={info}")
         return JSONResponse({"code": "00", "desc": desc})
+
+    if info.get("order_type") == "package_purchase":
+        target_id = info["target_id"]
+        logger.info(f"✅ PayOS package purchase success package={info.get('package_code')} user={target_id} | Đơn: {order_code}")
+        if tg_app:
+            try:
+                await tg_app.bot.send_message(
+                    chat_id=target_id,
+                    text=package_purchase_success_message(info),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
+                        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                    ]),
+                )
+                await tg_app.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        "📦 <b>AUTO PACKAGE PAYOS SUCCESS</b>\n\n"
+                        f"🆔 User: <code>{html.escape(str(target_id))}</code>\n"
+                        f"📦 Loại: <b>{html.escape(package_purchase_kind_label(info.get('package_type') or 'combo'))}</b>\n"
+                        f"🎁 Gói: <b>{html.escape(info.get('package_label') or info.get('package_code') or '')}</b>\n"
+                        f"💰 Số tiền: <b>{amount_vnd:,}đ</b>\n"
+                        f"📋 Order Code: <code>{html.escape(str(order_code))}</code>\n"
+                        "Không cộng Xu, không tính tổng nạp nâng hạng, không chạy launch bonus."
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"Package notify error: {e}")
+        return JSONResponse({"code": "00", "desc": "package_success"})
 
     if info.get("order_type") == "plan_purchase":
         target_id = info["target_id"]

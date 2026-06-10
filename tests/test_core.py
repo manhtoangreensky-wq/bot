@@ -1,5 +1,6 @@
 import hmac
 import hashlib
+import json
 import os
 import re
 import sqlite3
@@ -1005,7 +1006,57 @@ def test_package_wallet_admin_grant_deduct_refund_and_revoke(monkeypatch):
         assert bot.active_package_item_for_user("pkg_user", "video_common") is None
         summary = bot.user_package_summary_text("pkg_user", admin_view=True)
         assert "revoked" in summary
-        assert "Combo TikTok 99k" in summary
+        assert "Combo Ưu Đãi TikTok" in summary
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_payos_package_purchase_grants_wallet_without_xu_or_rank_points(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    try:
+        bot.init_db()
+        user_id = "pkg-payos-user"
+        bot.get_user(user_id, "PayOS Package User")
+        before_credits, before_spent, _ = bot.get_user(user_id)
+        metadata = {
+            "type": "package_purchase",
+            "package_type": "combo",
+            "package_code": "tiktok_99k",
+            "package_label": "🎁 Combo Ưu Đãi TikTok — 99k",
+        }
+        bot.create_order(
+            "900001",
+            user_id,
+            99000,
+            0,
+            base_xu=0,
+            launch_bonus_xu=0,
+            package_amount_vnd=0,
+            order_type="package_purchase",
+            plan_id="tiktok_99k",
+            plan_name="🎁 Combo Ưu Đãi TikTok — 99k",
+            metadata_json=json.dumps(metadata, ensure_ascii=False),
+        )
+        processed, desc, info = bot.process_payos_paid_order("900001", 99000)
+        assert processed is True
+        assert desc == "package_success"
+        assert info["order_type"] == "package_purchase"
+        assert info["package_type"] == "combo"
+        assert info["package_code"] == "tiktok_99k"
+        item = bot.active_package_item_for_user(user_id, "video_common")
+        assert item
+        assert int(item["remaining_quantity"]) == 3
+        after_credits, after_spent, _ = bot.get_user(user_id)
+        assert int(after_credits) == int(before_credits)
+        assert int(after_spent) == int(before_spent)
+        assert bot.member_total_paid_vnd(user_id) == 0
+        message = bot.package_purchase_success_message(info)
+        assert "📦 Gói của tôi" in message
+        assert "không cộng điểm nâng hạng" in message
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
@@ -1711,11 +1762,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "654 Xu" not in bot.create_media_pricing_text()
     pricing_text = "\n".join(bot.pricing_main_lines())
     assert "BẢNG GIÁ TOAN AAS" in pricing_text
-    assert "Nạp Xu:" in pricing_text
-    assert "Hình ảnh AI:" in pricing_text
-    assert "Video AI:" in pricing_text
-    assert "Combo:" in pricing_text
-    assert "Workflow trend content-only" in pricing_text
+    assert "Nạp Xu / Mệnh giá" in pricing_text
+    assert "Hình ảnh AI" in pricing_text
+    assert "Video AI" in pricing_text
+    assert "Combo dịch vụ" in pricing_text
+    assert "Workflow nội dung theo trend" in pricing_text
     assert "provider cost" not in pricing_text.lower()
     assert "tiered_media_pricing" in pricing_text
     price_keyboard_labels = [button.text for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
@@ -1725,6 +1776,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🖼 Giá ảnh",
         "🎁 Combo",
         "📦 Gói của tôi",
+        "📆 Gói tháng",
         "👑 Thành viên",
         "📜 Điều khoản Xu",
         "🏠 Menu chính",
@@ -1741,10 +1793,18 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Combo Ưu Đãi TikTok" in combo_price_text
     assert "khuyến nghị 9:16" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
+    combo_callbacks = [button.callback_data for row in bot.pricing_detail_keyboard("combo", "vi").inline_keyboard for button in row]
+    assert "pkgbuy|combo|tiktok_99k" in combo_callbacks
+    assert "pkgbuy|combo|posting_499k" in combo_callbacks
     xu_text = "\n".join(bot.pricing_xu_lines())
     assert xu_text.count("💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>") == 1
     plan_text = "\n".join(bot.pricing_plans_lines())
-    assert "Tác vụ phát sinh xem tại <b>💳 Bảng giá tổng</b>" in plan_text
+    assert "Gói tháng là hạn mức dịch vụ theo tháng" in plan_text
+    assert "📦 Gói của tôi" in plan_text
+    assert "/buy_plan" not in plan_text
+    plan_callbacks = [button.callback_data for row in bot.pricing_plans_keyboard("vi").inline_keyboard for button in row]
+    assert "pkgbuy|monthly|starter_monthly" in plan_callbacks
+    assert "pkgbuy|monthly|pro_monthly" in plan_callbacks
     assert "Giá tác vụ dịch tham khảo" not in plan_text
     assert "<code>/translate_voice</code>: từ 30–80 Xu/audio ngắn" not in plan_text
     assert "Music / Audio Factory" not in plan_text
@@ -1814,7 +1874,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         ["💳 10k", "💳 20k"],
         ["💳 50k", "💳 100k"],
         ["💳 200k", "💳 500k"],
-        ["🏦 Nạp thủ công", "🔙 Quay lại"],
+        ["🏦 Nạp thủ công", "🔙 Quay lại bảng giá"],
         ["🏠 Menu chính"],
     ]
     guide_labels = [button.text for row in bot.main_guide_keyboard("vi").inline_keyboard for button in row]
@@ -2130,14 +2190,14 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "https://t.me/toanaasbot?start=ref_123456" in bot.referral_account_link_text("123456", "toanaasbot")
 
     plan_text = "\n".join(bot.pricing_plans_lines())
-    assert "Gói tháng = quyền dùng công cụ + Xu xử lý/tháng + hạn mức ưu tiên" in plan_text
-    assert "Mỗi loại gói tháng chỉ được mua 1 lần trong mỗi tháng" in plan_text
-    assert "Video AI thật không bao gồm miễn phí đại trà" in plan_text
-    assert "Starter — 49.000đ/tháng" in plan_text and "600 Xu xử lý/tháng" in plan_text
-    assert "Creator — 99.000đ/tháng" in plan_text and "1.300 Xu xử lý/tháng" in plan_text
-    assert "Pro — 199.000đ/tháng" in plan_text and "3.000 Xu xử lý/tháng" in plan_text
-    assert "Business — 499.000đ/tháng" in plan_text and "8.000 Xu xử lý/tháng" in plan_text
-    assert "unlimited" in plan_text.lower()
+    assert "Gói tháng là hạn mức dịch vụ theo tháng" in plan_text
+    assert "PayOS thanh toán thành công thì hạn mức tự lưu vào <b>📦 Gói của tôi</b>" in plan_text
+    assert "📆 Starter Monthly" in plan_text
+    assert "📆 Creator Monthly" in plan_text
+    assert "📆 Shop Monthly" in plan_text
+    assert "📆 Pro Monthly" in plan_text
+    assert "Bot không yêu cầu khách gõ lệnh mua gói" in plan_text
+    assert "/buy_plan" not in plan_text
     assert "Tiền mua gói tháng không tính vào tổng nạp" in plan_text
 
     topic_text = bot.creative_motion_topic_text()
