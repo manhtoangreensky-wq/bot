@@ -1960,16 +1960,17 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any(button.text == "🔥 Video theo trend" and button.callback_data == "trendg|start" for button in video_buttons)
     video_labels = [button.text for button in video_buttons]
     assert video_labels == [
+        "🧩 Kịch bản → Ảnh → Video",
+        "🎞 Ghép ảnh có sẵn thành video",
         "🎬 Tạo video nhanh",
-        "🖼➡️🎬 Tạo video từ ảnh",
-        "🎞 Ghép ảnh thành video",
+        "🖼➡️🎬 Tạo video AI từ ảnh",
         "🔥 Video theo trend",
         "🧠 Concept quảng cáo",
         "🎥 Gợi ý chuyển động / prompt video",
         "🔙 Quay lại",
         "🏠 Menu chính",
     ]
-    assert "🖼➡️🎬 Tạo video từ ảnh" in video_labels
+    assert "🖼➡️🎬 Tạo video AI từ ảnh" in video_labels
     assert "✍️ Tạo prompt video" not in video_labels
     assert "💳 Xem bảng giá" not in video_labels
     assert "💰 Xem giá" not in video_labels
@@ -3005,6 +3006,66 @@ def test_generation_waiting_duplicate_and_guidance_helpers():
         bot.GENERATION_PENDING_JOBS.clear()
 
 
+def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
+    source = bot_source_text()
+    assert 'CommandHandler("storyboard_video", cmd_storyboard_video)' in source
+    assert 'CallbackQueryHandler(handle_storyboard_callback, pattern=r"^storyboard\\|")' in source
+    assert "handle_storyboard_pending_text(update, context)" in source
+    message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
+    assert message_source.index("handle_storyboard_pending_text") < message_source.index("is_probable_media_tags_text")
+    video_keyboard_source = source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
+    assert "🧩 Kịch bản → Ảnh → Video" in video_keyboard_source
+    assert "🎞 Ghép ảnh có sẵn thành video" in video_keyboard_source
+    assert "🎬 Tạo video nhanh" in video_keyboard_source
+    assert "🖼➡️🎬 Tạo video AI từ ảnh" in video_keyboard_source
+    assert "🔥 Video theo trend" in video_keyboard_source
+    assert "🧠 Concept quảng cáo" in video_keyboard_source
+
+    init_source = source_between(source, "def init_db():", "def get_user_language")
+    assert "CREATE TABLE IF NOT EXISTS storyboard_projects" in init_source
+    assert "CREATE TABLE IF NOT EXISTS storyboard_scenes" in init_source
+    assert "CREATE TABLE IF NOT EXISTS storyboard_videos" in init_source
+    assert "DROP TABLE" not in init_source
+
+    scripts = bot.storyboard_suggest_scripts("máy xay sinh tố mini màu xanh ngọc")
+    assert len(scripts) == 3
+    scripts_text = bot.storyboard_scripts_text("máy xay sinh tố mini màu xanh ngọc", scripts)
+    assert "Kịch bản 1" in scripts_text
+    assert "Kịch bản 2" in scripts_text
+    assert "Kịch bản 3" in scripts_text
+    scenes3 = bot.storyboard_build_scenes("review sản phẩm nhanh", 3)
+    scenes5 = bot.storyboard_build_scenes("review sản phẩm nhanh", 5)
+    scenes7 = bot.storyboard_build_scenes("review sản phẩm nhanh", 7)
+    scenes4 = bot.storyboard_build_scenes("review sản phẩm nhanh", 4)
+    assert len(scenes3) == 3
+    assert len(scenes5) == 5
+    assert len(scenes7) == 7
+    assert len(scenes4) == 4
+    assert "Prompt ảnh" in bot.storyboard_text(scenes3)
+
+    tier_labels = [button.text for row in bot.storyboard_image_tier_keyboard().inline_keyboard for button in row]
+    assert any("Ảnh tiết kiệm" in label and "50 Xu/ảnh" in label for label in tier_labels)
+    assert any("Ảnh tiêu chuẩn" in label and "200 Xu/ảnh" in label for label in tier_labels)
+    assert any("Ảnh chất lượng cao" in label and "400 Xu/ảnh" in label for label in tier_labels)
+    monkeypatch.setattr(bot, "shopaikey_preview_final_cost", lambda _user_id, base_cost, _event_type: int(base_cost or 0))
+    state = {"scenes": scenes5, "image_tier": "standard"}
+    confirm_text = bot.storyboard_image_confirm_text(state, "not_admin_user")
+    assert "5" in confirm_text
+    assert "200 Xu/ảnh" in confirm_text
+    assert "1.000 Xu" in confirm_text or "1000 Xu" in confirm_text
+    warranty_buttons = [button.text for row in bot.storyboard_image_confirm_keyboard("standard").inline_keyboard for button in row]
+    assert any("Thêm bảo hành" in label and "250 Xu/ảnh" in label for label in warranty_buttons)
+
+    assert bot.frame_video_price_for_state({"effect": "none"}) == bot.FRAME_VIDEO_BASIC_PRICE_XU
+    assert bot.frame_video_price_for_state({"effect": "fade"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
+    status = bot.frame_video_status_payload()
+    assert status["basic_price_xu"] == bot.FRAME_VIDEO_BASIC_PRICE_XU
+    assert status["effect_price_xu"] == bot.FRAME_VIDEO_EFFECT_PRICE_XU
+    assert status["music_price_xu"] == bot.FRAME_VIDEO_MUSIC_PRICE_XU
+    assert "Gợi ý nhạc" in str(bot.frame_video_music_keyboard().inline_keyboard)
+    assert "shopaikey_video_create_smoke_test" not in source_between(source, "async def handle_storyboard_callback", "async def handle_storyboard_pending_text")
+
+
 def test_critical_sales_ready_commands_remain_registered():
     source = bot_source_text()
     handler_lines = [line.strip() for line in source.splitlines() if "CommandHandler(" in line]
@@ -3052,6 +3113,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "shopaikey_video_from_image": "cmd_shopaikey_video_from_image_public",
         "trend_video_flow": "cmd_trend_video_flow",
         "create_media": "cmd_create_media",
+        "storyboard_video": "cmd_storyboard_video",
         "quick_image_test": "cmd_quick_image_test",
         "quick_video_test": "cmd_quick_video_test",
         "frame_video_status": "cmd_frame_video_status",

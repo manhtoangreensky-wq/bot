@@ -906,7 +906,10 @@ WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)
 WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)
 WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", 20)
 FRAME_VIDEO_PRICE_XU = env_int("FRAME_VIDEO_PRICE_XU", 50)
-FRAME_VIDEO_MAX_IMAGES = max(2, min(10, env_int("FRAME_VIDEO_MAX_IMAGES", 10)))
+FRAME_VIDEO_BASIC_PRICE_XU = env_int("FRAME_VIDEO_BASIC_PRICE_XU", FRAME_VIDEO_PRICE_XU)
+FRAME_VIDEO_EFFECT_PRICE_XU = env_int("FRAME_VIDEO_EFFECT_PRICE_XU", 100)
+FRAME_VIDEO_MUSIC_PRICE_XU = env_int("FRAME_VIDEO_MUSIC_PRICE_XU", 150)
+FRAME_VIDEO_MAX_IMAGES = max(2, min(20, env_int("FRAME_VIDEO_MAX_IMAGES", 10)))
 FRAME_VIDEO_RENDER_TIMEOUT_SECONDS = max(30, env_int("FRAME_VIDEO_RENDER_TIMEOUT_SECONDS", 180))
 MEDIA_FACTORY_PACK_COST = 500
 AUDIO_BASE_COST    = 30
@@ -1790,6 +1793,52 @@ def init_db():
         reason TEXT,
         created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS storyboard_projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        source_type TEXT DEFAULT '',
+        title TEXT DEFAULT '',
+        selected_script TEXT DEFAULT '',
+        scene_count INTEGER DEFAULT 0,
+        ratio TEXT DEFAULT '',
+        duration_per_frame REAL DEFAULT 0,
+        effect TEXT DEFAULT '',
+        music_choice TEXT DEFAULT '',
+        status TEXT DEFAULT 'draft',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS storyboard_scenes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER,
+        scene_index INTEGER,
+        scene_title TEXT DEFAULT '',
+        scene_description TEXT DEFAULT '',
+        image_prompt TEXT DEFAULT '',
+        image_tier TEXT DEFAULT '',
+        image_price_xu INTEGER DEFAULT 0,
+        image_job_id INTEGER DEFAULT 0,
+        image_file_id TEXT DEFAULT '',
+        image_url TEXT DEFAULT '',
+        status TEXT DEFAULT 'draft',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS storyboard_videos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER,
+        render_type TEXT DEFAULT 'basic',
+        price_xu INTEGER DEFAULT 0,
+        output_file_id TEXT DEFAULT '',
+        output_path TEXT DEFAULT '',
+        output_url TEXT DEFAULT '',
+        status TEXT DEFAULT 'draft',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_storyboard_projects_user ON storyboard_projects(user_id, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_storyboard_scenes_project ON storyboard_scenes(project_id, scene_index)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_storyboard_videos_project ON storyboard_videos(project_id, status)")
     c.execute("""CREATE TABLE IF NOT EXISTS user_packages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -30037,7 +30086,8 @@ def clear_media_creator_pending_states(user_id) -> bool:
     trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
     feedback_cleared = clear_feedback_pending(user_id)
     frame_video_cleared = clear_frame_video_state(user_id)
-    return bool(quick_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or frame_video_cleared)
+    storyboard_cleared = clear_storyboard_state(user_id)
+    return bool(quick_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or frame_video_cleared or storyboard_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -33224,7 +33274,7 @@ TOOL_FREEZE_COMMANDS = {
     "image_tools", "image_prompt", "image_pack", "image_studio", "image_story", "image_story_prompt",
     "story_video", "shot_variations", "image_to_story_pack", "image_variations", "creative_flow",
     "video_from_image", "image_to_video_pack", "ai_image", "ai_image_edit",
-    "create_media", "quick_image_test", "quick_video_test", "frame_video_status", "tool_test_frame_video",
+    "create_media", "quick_image_test", "quick_video_test", "storyboard_video", "frame_video_status", "tool_test_frame_video",
     "music", "music_tools", "music_prompt", "music_library", "sfx_library", "media_library",
     "play_music", "play_sfx", "play_media", "select_music", "select_sfx", "select_media",
     "music_policy", "music_bg", "music_song", "add_music", "add_voice_to_video",
@@ -33610,9 +33660,10 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
         return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🧩 Kịch bản → Ảnh → Video", callback_data="storyboard|start")],
+            [InlineKeyboardButton("🎞 Ghép ảnh có sẵn thành video", callback_data="framevideo|start")],
             [InlineKeyboardButton("🎬 Tạo video nhanh", callback_data="create_media|quick_video")],
-            [InlineKeyboardButton("🖼➡️🎬 Tạo video từ ảnh", callback_data="menu|hint_image_to_video_pack")],
-            [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data="framevideo|start")],
+            [InlineKeyboardButton("🖼➡️🎬 Tạo video AI từ ảnh", callback_data="menu|hint_image_to_video_pack")],
             [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start")],
             [InlineKeyboardButton("🧠 Concept quảng cáo", callback_data="adconcept|start")],
             [InlineKeyboardButton("🎥 Gợi ý chuyển động / prompt video", callback_data="motion|start")],
@@ -33620,9 +33671,10 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧩 Script → Images → Video", callback_data="storyboard|start")],
+        [InlineKeyboardButton("🎞 Use my existing images", callback_data="framevideo|start")],
         [InlineKeyboardButton(ui_text(lang, "video.quick_admin_public"), callback_data="create_media|quick_video")],
         [InlineKeyboardButton(ui_text(lang, "video.image_to_video"), callback_data="menu|hint_image_to_video_pack")],
-        [InlineKeyboardButton("🎞 Image frames to video", callback_data="framevideo|start")],
         [InlineKeyboardButton(ui_text(lang, "video.trend_short"), callback_data="trendg|start")],
         [InlineKeyboardButton("🧠 Concept quảng cáo" if lang == "vi" else ui_text(lang, "video.concept_short"), callback_data="adconcept|start")],
         [InlineKeyboardButton(ui_text(lang, "video.motion_short"), callback_data="motion|start")],
@@ -36259,7 +36311,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | image/video generation priced by tier, separate from content workflow",
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
-        f"• Frame video / ffmpeg slideshow: <code>{'public ON' if frame_video.get('public_enabled') else 'public OFF'}</code> | price <code>{int(frame_video.get('price_xu') or 0)} Xu</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
+        f"• Frame video / ffmpeg slideshow: <code>{'public ON' if frame_video.get('public_enabled') else 'public OFF'}</code> | basic/effect/music <code>{int(frame_video.get('basic_price_xu') or 0)}/{int(frame_video.get('effect_price_xu') or 0)}/{int(frame_video.get('music_price_xu') or 0)} Xu</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
         "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
@@ -42384,7 +42436,10 @@ def frame_video_status_payload() -> dict:
     ffmpeg_path = frame_video_ffmpeg_path()
     return {
         "public_enabled": bool(FRAME_VIDEO_PUBLIC_ENABLED),
-        "price_xu": int(FRAME_VIDEO_PRICE_XU or 0),
+        "price_xu": int(FRAME_VIDEO_BASIC_PRICE_XU or 0),
+        "basic_price_xu": int(FRAME_VIDEO_BASIC_PRICE_XU or 0),
+        "effect_price_xu": int(FRAME_VIDEO_EFFECT_PRICE_XU or 0),
+        "music_price_xu": int(FRAME_VIDEO_MUSIC_PRICE_XU or 0),
         "max_images": int(FRAME_VIDEO_MAX_IMAGES or 10),
         "ttl_seconds": int(FRAME_VIDEO_STATE_TTL_SECONDS or 600),
         "ffmpeg_configured": bool(ffmpeg_path),
@@ -42392,6 +42447,23 @@ def frame_video_status_payload() -> dict:
         "local_worker_enabled": bool(worker.get("enabled")),
         "local_worker_connected": bool(worker.get("connected")),
     }
+
+def frame_video_render_type(state: dict) -> str:
+    effect = frame_video_effect_payload((state or {}).get("effect") or "fade").get("token") or "fade"
+    music_choice = str((state or {}).get("music_choice") or "").strip().lower()
+    if music_choice and music_choice not in {"skip", "none"} and bool((state or {}).get("music_merge_enabled")):
+        return "music"
+    if effect and effect != "none":
+        return "effect"
+    return "basic"
+
+def frame_video_price_for_state(state: dict) -> int:
+    render_type = frame_video_render_type(state)
+    if render_type == "music":
+        return int(FRAME_VIDEO_MUSIC_PRICE_XU or 0)
+    if render_type == "effect":
+        return int(FRAME_VIDEO_EFFECT_PRICE_XU or 0)
+    return int(FRAME_VIDEO_BASIC_PRICE_XU or FRAME_VIDEO_PRICE_XU or 0)
 
 def set_frame_video_state(user_id, state: dict) -> dict:
     now_ts = time.time()
@@ -42479,18 +42551,41 @@ def frame_video_effect_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
+def frame_video_music_text(state: dict) -> str:
+    effect = frame_video_effect_payload(state.get("effect") or "fade")
+    return (
+        "🎵 <b>Bạn có muốn thêm nhạc nền không?</b>\n\n"
+        f"• Hiệu ứng đã chọn: <b>{html.escape(effect['label'])}</b>\n\n"
+        "V1 có thể lưu lựa chọn/gợi ý nhạc. Nếu ghép nhạc chưa mở ổn định, bot sẽ render video im lặng và gợi ý thêm nhạc sau."
+    )
+
+def frame_video_music_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎵 Gợi ý nhạc", callback_data="framevideo|music|suggest")],
+        [InlineKeyboardButton("🎧 Chọn từ kho nhạc", callback_data="framevideo|music|library")],
+        [InlineKeyboardButton("⏭ Bỏ qua nhạc", callback_data="framevideo|music|skip")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|effect")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+    ])
+
 def frame_video_confirm_text(state: dict, user_id=0) -> str:
     ratio = frame_video_ratio_payload(state.get("ratio") or "9x16")
     duration = frame_video_duration_payload(state.get("duration") or "standard")
     effect = frame_video_effect_payload(state.get("effect") or "fade")
     count = len(state.get("photos") or [])
-    final_cost = shopaikey_preview_final_cost(user_id, int(FRAME_VIDEO_PRICE_XU or 0), "frame_video_basic")
+    render_type = frame_video_render_type(state)
+    base_cost = frame_video_price_for_state(state)
+    final_cost = shopaikey_preview_final_cost(user_id, base_cost, f"frame_video_{render_type}")
+    music_choice = str(state.get("music_choice") or "skip")
+    music_line = "Bỏ qua nhạc" if music_choice in {"", "skip", "none"} else f"Lưu/gợi ý nhạc: {music_choice}"
     return (
         "🎞 <b>Ghép ảnh thành video</b>\n\n"
         f"• Số ảnh: <b>{count}</b>\n"
         f"• Tỷ lệ: <b>{html.escape(ratio['label'])}</b>\n"
         f"• Thời lượng: <b>{html.escape(duration['label'])}</b>\n"
         f"• Hiệu ứng: <b>{html.escape(effect['label'])}</b>\n\n"
+        f"• Nhạc: <b>{html.escape(music_line)}</b>\n"
+        f"• Gói render: <b>{html.escape(render_type)}</b>\n\n"
         f"Tính năng này sẽ tốn <b>{final_cost} Xu</b>.\n"
         "Bot chỉ trừ Xu sau khi bạn xác nhận."
     )
@@ -42498,7 +42593,7 @@ def frame_video_confirm_text(state: dict, user_id=0) -> str:
 def frame_video_confirm_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Tạo video", callback_data="framevideo|confirm")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|effect")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|music")],
         [InlineKeyboardButton("❌ Hủy", callback_data="framevideo|cancel")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
@@ -42510,6 +42605,305 @@ def frame_video_success_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎞 Tạo video khác", callback_data="framevideo|start")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
+
+def storyboard_pending_key(user_id) -> str:
+    return f"storyboard_video:{user_id}"
+
+def set_storyboard_state(user_id, state: dict) -> dict:
+    now_ts = time.time()
+    state = dict(state or {})
+    state["type"] = "storyboard_video"
+    state.setdefault("created_at_ts", now_ts)
+    state["updated_at_ts"] = now_ts
+    state["expires_at_ts"] = now_ts + (20 * 60)
+    USER_PENDING[storyboard_pending_key(user_id)] = state
+    return state
+
+def get_storyboard_state(user_id) -> dict:
+    key = storyboard_pending_key(user_id)
+    state = USER_PENDING.get(key) or {}
+    if not isinstance(state, dict) or state.get("type") != "storyboard_video":
+        if state:
+            USER_PENDING.pop(key, None)
+        return {}
+    if float(state.get("expires_at_ts") or 0) < time.time():
+        USER_PENDING.pop(key, None)
+        return {}
+    return state
+
+def clear_storyboard_state(user_id) -> bool:
+    return USER_PENDING.pop(storyboard_pending_key(user_id), None) is not None
+
+def storyboard_start_text() -> str:
+    return (
+        "🧩 <b>Kịch bản → Ảnh → Video TOAN AAS</b>\n\n"
+        "Bạn muốn bắt đầu bằng cách nào?\n\n"
+        "V1 không dùng ShopAIKey VEO/video AI provider. Video cuối được ghép từ ảnh bằng ffmpeg/local worker, nên vẫn dùng được khi VEO đang freeze."
+    )
+
+def storyboard_start_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✨ Bot gợi ý kịch bản", callback_data="storyboard|suggest"), InlineKeyboardButton("📝 Tôi có kịch bản sẵn", callback_data="storyboard|script")],
+        [InlineKeyboardButton("🖼 Tôi có ảnh sẵn", callback_data="storyboard|images"), InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main_video")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def storyboard_idea_request_text() -> str:
+    return (
+        "✨ <b>Bot gợi ý kịch bản</b>\n\n"
+        "Hãy gửi ý tưởng sản phẩm/nội dung.\n\n"
+        "Ví dụ: <code>Máy xay sinh tố mini màu xanh ngọc, bán cho dân văn phòng, video TikTok 15 giây.</code>\n\n"
+        "Bot chưa gọi API ảnh/video và chưa trừ Xu."
+    )
+
+def storyboard_script_request_text() -> str:
+    return (
+        "📝 <b>Gửi kịch bản sẵn</b>\n\n"
+        "Hãy gửi kịch bản, mô tả, hoặc ý tưởng chính. Bot sẽ chia thành các cảnh theo thứ tự.\n\n"
+        "Bot chưa gọi API ảnh/video và chưa trừ Xu."
+    )
+
+def storyboard_safe_text(value: str, limit: int = 900) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())[:limit]
+
+def storyboard_suggest_scripts(idea: str) -> list[dict]:
+    safe = storyboard_safe_text(idea, 500)
+    subject = safe or "sản phẩm/dịch vụ của bạn"
+    return [
+        {
+            "title": "Review sản phẩm nhanh",
+            "hook": f"Bạn chỉ có vài giây để cho người xem thấy {subject} giải quyết vấn đề gì.",
+            "main": "Mở bằng cảnh sản phẩm, cho thấy cách dùng nhanh, kết thúc bằng lợi ích rõ.",
+            "scenes": "3-5 cảnh: hook sản phẩm, vấn đề, thao tác chính, kết quả, CTA.",
+            "cta": "Thử ngay hôm nay hoặc nhắn TOAN AAS để lấy prompt/video pack.",
+            "style": "Sáng sạch, product demo, nhịp nhanh, hợp TikTok/Reels.",
+        },
+        {
+            "title": "Before/After giải quyết vấn đề",
+            "hook": "Trước khi có giải pháp, mọi thứ mất thời gian và dễ rối.",
+            "main": f"Dùng {subject} như bước chuyển từ tình trạng cũ sang kết quả tốt hơn.",
+            "scenes": "5 cảnh: trước, nỗi đau, giải pháp xuất hiện, sau khi dùng, CTA.",
+            "cta": "Muốn kết quả tương tự? Bắt đầu từ bước nhỏ hôm nay.",
+            "style": "Before/after rõ, chuyển cảnh sạch, cảm xúc tích cực.",
+        },
+        {
+            "title": "Lifestyle dùng hằng ngày",
+            "hook": f"Một khoảnh khắc đời thường làm nổi bật vì sao {subject} đáng nhớ.",
+            "main": "Đưa sản phẩm vào bối cảnh sử dụng thật, nhẹ nhàng, gần gũi.",
+            "scenes": "5-7 cảnh: bối cảnh, nhu cầu, dùng thử, chi tiết đẹp, kết quả, CTA.",
+            "cta": "Lưu lại ý tưởng này và biến thành video ngắn cho kênh của bạn.",
+            "style": "Lifestyle, ánh sáng tự nhiên, cảm giác UGC nhưng gọn đẹp.",
+        },
+    ]
+
+def storyboard_scripts_text(idea: str, scripts: list[dict]) -> str:
+    lines = ["✨ <b>TOAN AAS gợi ý 3 kịch bản ngắn</b>", "", f"Ý tưởng: <code>{html.escape(storyboard_safe_text(idea, 260))}</code>", ""]
+    for idx, item in enumerate(scripts[:3], start=1):
+        lines.extend([
+            f"<b>Kịch bản {idx}: {html.escape(item['title'])}</b>",
+            f"• Hook: {html.escape(item['hook'])}",
+            f"• Ý chính: {html.escape(item['main'])}",
+            f"• Cảnh đề xuất: {html.escape(item['scenes'])}",
+            f"• CTA: {html.escape(item['cta'])}",
+            f"• Phong cách hình ảnh: {html.escape(item['style'])}",
+            "",
+        ])
+    return "\n".join(lines).strip()
+
+def storyboard_scripts_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Chọn kịch bản 1", callback_data="storyboard|select|1")],
+        [InlineKeyboardButton("✅ Chọn kịch bản 2", callback_data="storyboard|select|2")],
+        [InlineKeyboardButton("✅ Chọn kịch bản 3", callback_data="storyboard|select|3")],
+        [InlineKeyboardButton("📝 Gửi kịch bản khác", callback_data="storyboard|script")],
+        [InlineKeyboardButton("✏️ Sửa ý tưởng", callback_data="storyboard|suggest")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def storyboard_scene_count_text() -> str:
+    return (
+        "🎞 <b>Chọn số cảnh/ảnh</b>\n\n"
+        "Bạn muốn làm video bằng bao nhiêu cảnh/ảnh?\n\n"
+        "V1 khuyến nghị 2-10 cảnh để render nhanh. Có thể nhập tối đa 20 cảnh nếu thật sự cần."
+    )
+
+def storyboard_scene_count_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("3 cảnh — ngắn gọn", callback_data="storyboard|count|3")],
+        [InlineKeyboardButton("5 cảnh — cân bằng", callback_data="storyboard|count|5")],
+        [InlineKeyboardButton("7 cảnh — đầy đủ hơn", callback_data="storyboard|count|7")],
+        [InlineKeyboardButton("🔢 Số khác", callback_data="storyboard|count_custom")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def storyboard_build_scenes(script: str, count: int) -> list[dict]:
+    safe_script = storyboard_safe_text(script, 900)
+    scene_count = max(2, min(20, int(count or 5)))
+    phase_names = ["Hook", "Vấn đề", "Giải pháp", "Cách dùng", "Kết quả", "Bằng chứng", "CTA"]
+    scenes = []
+    for idx in range(1, scene_count + 1):
+        phase = phase_names[min(len(phase_names) - 1, int((idx - 1) * len(phase_names) / max(scene_count, 1)))]
+        title = f"Cảnh {idx}: {phase}"
+        description = f"{phase} cho video dựa trên kịch bản: {safe_script}"
+        prompt = (
+            f"Scene {idx}/{scene_count}, {phase.lower()} for a short social ad based on: {safe_script}. "
+            "Photorealistic storyboard keyframe, clean composition, product/service clearly visible, vertical short-video friendly, no watermark, no extra text."
+        )
+        scenes.append({
+            "scene_index": idx,
+            "scene_title": title,
+            "scene_description": description,
+            "image_prompt": prompt[:1200],
+            "motion": "Zoom nhẹ hoặc fade chuyển cảnh, giữ chủ thể rõ.",
+            "caption": f"Caption ngắn cho {phase.lower()} + CTA nhẹ.",
+        })
+    return scenes
+
+def storyboard_text(scenes: list[dict], project_id: int = 0) -> str:
+    lines = ["🧩 <b>Storyboard TOAN AAS</b>", ""]
+    if project_id:
+        lines.append(f"Project: <code>{int(project_id)}</code>")
+        lines.append("")
+    for scene in scenes:
+        lines.extend([
+            f"<b>{html.escape(scene['scene_title'])}</b>",
+            f"• Mục tiêu cảnh: {html.escape(scene['scene_description'][:260])}",
+            f"• Prompt ảnh: <code>{html.escape(scene['image_prompt'][:360])}</code>",
+            f"• Gợi ý chuyển động: {html.escape(scene.get('motion') or '')}",
+            f"• Caption/voice: {html.escape(scene.get('caption') or '')}",
+            "",
+        ])
+    return "\n".join(lines).strip()
+
+def storyboard_ready_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Dùng storyboard này", callback_data="storyboard|use")],
+        [InlineKeyboardButton("✏️ Sửa từng cảnh", callback_data="storyboard|edit_scene"), InlineKeyboardButton("🔄 Gợi ý lại", callback_data="storyboard|regen")],
+        [InlineKeyboardButton("🖼 Tôi dùng ảnh có sẵn", callback_data="storyboard|images")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def storyboard_image_tier_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🟢 Ảnh tiết kiệm — {image_tier_cost_xu('low')} Xu/ảnh", callback_data="storyboard|tier|low")],
+        [InlineKeyboardButton(f"🔵 Ảnh tiêu chuẩn — {image_tier_cost_xu('standard')} Xu/ảnh", callback_data="storyboard|tier|standard")],
+        [InlineKeyboardButton(f"🟣 Ảnh chất lượng cao — {image_tier_cost_xu('high')} Xu/ảnh", callback_data="storyboard|tier|high")],
+        [InlineKeyboardButton("🖼 Tôi dùng ảnh có sẵn", callback_data="storyboard|images")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="storyboard|use")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def storyboard_image_confirm_text(state: dict, user_id=0) -> str:
+    tier = normalize_image_tier(state.get("image_tier") or "standard")
+    scenes = list(state.get("scenes") or [])
+    count = len(scenes)
+    price_each = image_tier_cost_xu(tier)
+    base_total = int(price_each * count)
+    final_total = shopaikey_preview_final_cost(user_id, base_total, "storyboard_image")
+    warranty = image_tier_retry_warranty_count(tier)
+    note = "Gói này không kèm tạo lại miễn phí." if warranty <= 0 else "Gói này kèm 1 lần tạo lại trong cùng yêu cầu/cảnh."
+    return (
+        "🖼 <b>Tạo ảnh storyboard</b>\n\n"
+        f"Bạn sắp tạo <b>{count}</b> ảnh storyboard bằng gói <b>{html.escape(localized_image_tier_label(tier, 'vi'))}</b>.\n"
+        f"Giá: <b>{price_each} Xu/ảnh</b>\n"
+        f"Tổng: <b>{final_total} Xu</b>\n"
+        f"{html.escape(note)}\n\n"
+        "Bot chỉ trừ Xu sau khi bạn xác nhận."
+    )
+
+def storyboard_image_confirm_keyboard(tier: str = "") -> InlineKeyboardMarkup:
+    tier_norm = normalize_image_tier(tier)
+    rows = [[InlineKeyboardButton("✅ Tạo ảnh", callback_data="storyboard|confirm_images")]]
+    if tier_norm == "standard":
+        rows.append([InlineKeyboardButton(f"🛡 Thêm bảo hành — {image_tier_cost_xu('standard_warranty')} Xu/ảnh", callback_data="storyboard|warranty")])
+    elif tier_norm == "high":
+        rows.append([InlineKeyboardButton(f"🛡 Thêm bảo hành — {image_tier_cost_xu('high_warranty')} Xu/ảnh", callback_data="storyboard|warranty")])
+    rows.extend([
+        [InlineKeyboardButton("✏️ Sửa prompt", callback_data="storyboard|edit_scene")],
+        [InlineKeyboardButton("🖼 Tôi dùng ảnh có sẵn", callback_data="storyboard|images")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="storyboard|use"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+def storyboard_after_images_keyboard(project_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎞 Ghép các ảnh này thành video", callback_data=f"storyboard|render|{int(project_id or 0)}")],
+        [InlineKeyboardButton("🔁 Tạo lại cảnh chưa ưng", callback_data="storyboard|edit_scene")],
+        [InlineKeyboardButton("✏️ Sửa prompt cảnh", callback_data="storyboard|edit_scene")],
+        [InlineKeyboardButton("💾 Lưu bộ ảnh/storyboard", callback_data="storyboard|save")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def create_storyboard_project(user_id, source_type: str, title: str, selected_script: str, scenes: list[dict]) -> int:
+    now = now_text()
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO storyboard_projects
+               (user_id, source_type, title, selected_script, scene_count, status, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (str(user_id), source_type, title[:300], selected_script[:1800], len(scenes or []), "storyboard_ready", now, now),
+        )
+        project_id = int(cur.lastrowid)
+        for scene in scenes or []:
+            cur.execute(
+                """INSERT INTO storyboard_scenes
+                   (project_id, scene_index, scene_title, scene_description, image_prompt, status, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (
+                    project_id,
+                    int(scene.get("scene_index") or 0),
+                    str(scene.get("scene_title") or "")[:300],
+                    str(scene.get("scene_description") or "")[:900],
+                    str(scene.get("image_prompt") or "")[:1400],
+                    "prompt_ready",
+                    now,
+                    now,
+                ),
+            )
+        conn.commit()
+        return project_id
+    finally:
+        conn.close()
+
+def storyboard_scenes_for_project(project_id: int) -> list[dict]:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM storyboard_scenes WHERE project_id=? ORDER BY scene_index ASC",
+            (int(project_id or 0),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+def update_storyboard_scene_asset(project_id: int, scene_index: int, image_job_id: int = 0, image_file_id: str = "", image_url: str = "", tier: str = "", price_xu: int = 0, status: str = "image_ready") -> None:
+    conn = db_connect()
+    try:
+        conn.execute(
+            """UPDATE storyboard_scenes
+               SET image_job_id=?, image_file_id=?, image_url=?, image_tier=?, image_price_xu=?, status=?, updated_at=?
+               WHERE project_id=? AND scene_index=?""",
+            (int(image_job_id or 0), str(image_file_id or ""), str(image_url or ""), normalize_image_tier(tier), int(price_xu or 0), status, now_text(), int(project_id or 0), int(scene_index or 0)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def create_storyboard_video_record(project_id: int, render_type: str, price_xu: int, status: str = "handoff_to_frame_video") -> int:
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO storyboard_videos (project_id, render_type, price_xu, status, created_at, updated_at)
+               VALUES (?,?,?,?,?,?)""",
+            (int(project_id or 0), str(render_type or "basic"), int(price_xu or 0), status, now_text(), now_text()),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    finally:
+        conn.close()
 
 def frame_video_main_menu_text(uid, lang: str = "vi") -> str:
     notice = clear_pending_start_notice(uid)
@@ -53200,7 +53594,7 @@ async def cmd_frame_video_status(update: Update, context: ContextTypes.DEFAULT_T
         "🎞 <b>Frame Video / Ghép ảnh thành video</b>",
         "",
         f"• Public: <code>{'ON' if status.get('public_enabled') else 'OFF'}</code>",
-        f"• Price: <code>{int(status.get('price_xu') or 0)} Xu</code>",
+        f"• Price basic/effect/music: <code>{int(status.get('basic_price_xu') or 0)}/{int(status.get('effect_price_xu') or 0)}/{int(status.get('music_price_xu') or 0)} Xu</code>",
         f"• Max images: <code>{int(status.get('max_images') or 0)}</code>",
         f"• State TTL: <code>{int(status.get('ttl_seconds') or 0)}s</code>",
         f"• ffmpeg: <code>{'configured' if status.get('ffmpeg_configured') else 'missing'}</code>",
@@ -53335,6 +53729,10 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             state["step"] = "effect"
             set_frame_video_state(uid, state)
             return await safe_edit_or_send(query, frame_video_effect_text(state), parse_mode="HTML", reply_markup=frame_video_effect_keyboard())
+        if target == "music":
+            state["step"] = "music"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(query, frame_video_music_text(state), parse_mode="HTML", reply_markup=frame_video_music_keyboard())
 
     if action == "ratio" and len(parts) > 2:
         state["ratio"] = parts[2]
@@ -53350,6 +53748,21 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
 
     if action == "effect" and len(parts) > 2:
         state["effect"] = parts[2]
+        state["step"] = "music"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(query, frame_video_music_text(state), parse_mode="HTML", reply_markup=frame_video_music_keyboard())
+
+    if action == "music" and len(parts) > 2:
+        choice = str(parts[2] or "skip").strip().lower()
+        if choice == "suggest":
+            state["music_choice"] = "Vui tươi / năng động, sang trọng / nhẹ nhàng, hoặc công nghệ / hiện đại"
+            state["music_merge_enabled"] = False
+        elif choice == "library":
+            state["music_choice"] = "Chọn từ kho nhạc ở bước sau (/music_library)"
+            state["music_merge_enabled"] = False
+        else:
+            state["music_choice"] = "skip"
+            state["music_merge_enabled"] = False
         state["step"] = "confirm"
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, frame_video_confirm_text(state, uid), parse_mode="HTML", reply_markup=frame_video_confirm_keyboard())
@@ -53365,10 +53778,12 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             clear_frame_video_state(uid)
             return await safe_edit_or_send(query, "Công cụ ghép video đang bảo trì, vui lòng thử lại sau. Bot chưa trừ Xu.", parse_mode=None)
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Frame video user")
-        preview_cost = shopaikey_preview_final_cost(uid, int(FRAME_VIDEO_PRICE_XU or 0), "frame_video_basic")
+        render_type = frame_video_render_type(state)
+        base_cost = frame_video_price_for_state(state)
+        preview_cost = shopaikey_preview_final_cost(uid, int(base_cost or 0), f"frame_video_{render_type}")
         if int(credits or 0) < preview_cost and not is_admin_user(uid):
             return await edit_insufficient_credits(query, int(credits or 0), preview_cost, uid)
-        charge = spend_fixed_credit_info(uid, int(FRAME_VIDEO_PRICE_XU or 0), "spend_frame_video_basic", "Ghép ảnh thành video")
+        charge = spend_fixed_credit_info(uid, int(base_cost or 0), f"spend_frame_video_{render_type}", "Ghép ảnh thành video")
         if not charge.get("ok"):
             credits_now, _, _ = get_user(uid)
             return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or preview_cost), uid)
@@ -53447,6 +53862,273 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
                 return await safe_edit_or_send(query, "⚠️ Ghép video lỗi tạm thời. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ.", parse_mode=None)
 
     return await safe_edit_or_send(query, frame_video_collect_text(len(state.get("photos") or [])), reply_markup=frame_video_collect_keyboard(), parse_mode=None)
+
+async def cmd_storyboard_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    clear_media_creator_pending_states(uid)
+    set_storyboard_state(uid, {"step": "start"})
+    await update.message.reply_text(storyboard_start_text(), parse_mode="HTML", reply_markup=storyboard_start_keyboard())
+
+async def storyboard_start_user_images(query, uid) -> None:
+    clear_storyboard_state(uid)
+    if not FRAME_VIDEO_PUBLIC_ENABLED and not is_admin_user(uid):
+        await safe_edit_or_send(query, "Công cụ ghép video đang bảo trì, vui lòng thử lại sau. Bot chưa trừ Xu.", parse_mode=None)
+        return
+    set_frame_video_state(uid, {"step": "collect", "photos": [], "source": "storyboard_user_images"})
+    await safe_edit_or_send(
+        query,
+        "🖼 <b>Tôi có ảnh sẵn</b>\n\n"
+        "Gửi ảnh theo đúng thứ tự bạn muốn xuất hiện trong video. Tối thiểu 2 ảnh. Khi gửi xong bấm ✅ Xong.\n\n"
+        + frame_video_collect_text(0),
+        parse_mode="HTML",
+        reply_markup=frame_video_collect_keyboard(),
+    )
+
+def storyboard_store_project_in_state(uid, state: dict, scene_count: int) -> dict:
+    selected_script = str(state.get("selected_script") or state.get("idea") or "").strip()
+    source_type = str(state.get("source_type") or "user_script")
+    scenes = storyboard_build_scenes(selected_script, scene_count)
+    title = storyboard_safe_text(selected_script, 120) or "Storyboard TOAN AAS"
+    project_id = create_storyboard_project(uid, source_type, title, selected_script, scenes)
+    state.update({
+        "step": "storyboard_ready",
+        "project_id": project_id,
+        "scene_count": len(scenes),
+        "scenes": scenes,
+    })
+    set_storyboard_state(uid, state)
+    return state
+
+async def storyboard_reply_ready(message_or_query, state: dict, via_query: bool = False):
+    text = storyboard_text(list(state.get("scenes") or []), int(state.get("project_id") or 0))
+    if via_query:
+        return await safe_edit_or_send(message_or_query, text, parse_mode="HTML", reply_markup=storyboard_ready_keyboard())
+    return await message_or_query.reply_text(text, parse_mode="HTML", reply_markup=storyboard_ready_keyboard())
+
+async def storyboard_generate_images_for_query(query, context: ContextTypes.DEFAULT_TYPE, uid, state: dict) -> None:
+    scenes = list(state.get("scenes") or [])
+    project_id = int(state.get("project_id") or 0)
+    tier = normalize_image_tier(state.get("image_tier") or "standard")
+    if not scenes or not project_id:
+        await safe_edit_or_send(query, "⚠️ Storyboard chưa sẵn sàng. Bot chưa gọi API và chưa trừ Xu.", parse_mode=None)
+        return
+    if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED and not is_admin_user(uid):
+        await safe_edit_or_send(query, ui_text(user_ui_lang(uid), "media.public_off"), parse_mode=None)
+        return
+    if not SHOPAIKEY_API_KEY:
+        await safe_edit_or_send(query, "🛠 Tạo ảnh storyboard đang thiếu provider. Bot chưa trừ Xu.", parse_mode=None)
+        return
+    await safe_edit_or_send(
+        query,
+        f"🖼 Đang tạo {len(scenes)} ảnh storyboard theo thứ tự cảnh. Vui lòng chờ, không cần gửi lại lệnh.",
+        parse_mode=None,
+    )
+    generated_count = 0
+    for scene in scenes:
+        scene_index = int(scene.get("scene_index") or 0)
+        raw_prompt = str(scene.get("image_prompt") or "")
+        prompt = image_tier_prompt_for_generation(raw_prompt, tier, "9:16")
+        price_each = image_tier_cost_xu(tier)
+        balance_before, _, _ = get_user(uid)
+        deducted = 0
+        if not is_admin_user(uid):
+            preview_cost = shopaikey_preview_final_cost(uid, price_each, "storyboard_image")
+            if int(balance_before or 0) < preview_cost:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=f"⚠️ Không đủ Xu để tạo cảnh {scene_index}. Bot dừng tại đây, các ảnh đã tạo vẫn được lưu.",
+                )
+                return
+            charge = spend_fixed_credit_info(uid, price_each, "storyboard_image", f"Storyboard image scene {scene_index}", True)
+            if not charge.get("ok"):
+                credits_now, _, _ = get_user(uid)
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=f"⚠️ Không đủ Xu để tạo cảnh {scene_index}. Số dư hiện tại: {int(credits_now or 0)} Xu.",
+                )
+                return
+            deducted = int(charge.get("final_cost") or 0)
+        job_id = create_shopaikey_job(
+            uid,
+            query.message.chat_id,
+            "image",
+            model=SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            prompt=prompt,
+            status="IN_PROGRESS",
+            admin_only=is_admin_user(uid),
+            xu_cost_planned=price_each,
+            retry_warranty_count=image_tier_retry_warranty_count(tier),
+        )
+        update_shopaikey_job(job_id=job_id, xu_deducted=deducted, billing_status="deducted" if deducted else "admin_free", confirmed_at=now_text(), confirm_required=0)
+        result = await shopaikey_image_generate(prompt, SHOPAIKEY_IMAGE_MODEL or "nano-banana", aspect_ratio="9:16", tier=tier)
+        status = str(result.get("status") or "FAIL")
+        image_url = str(result.get("image_url") or "")
+        if status != "PASS" or not image_url:
+            provider_error = result.get("detail") or result.get("error_class") or status
+            refunded = refund_shopaikey_job_if_needed(uid, job_id, "", provider_error) if deducted > 0 else False
+            update_shopaikey_job(
+                job_id=job_id,
+                status="FAILED",
+                error_class=result.get("error_class") or status,
+                provider_message=provider_error,
+                refund_status="refunded" if refunded else ("not_charged" if deducted <= 0 else "refund_failed"),
+                refund_amount=deducted if refunded else 0,
+                refund_reason=provider_error,
+                finished_at=now_text(),
+            )
+            update_storyboard_scene_asset(project_id, scene_index, image_job_id=job_id, tier=tier, price_xu=deducted, status="image_failed")
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=f"⚙️ Cảnh {scene_index}/{len(scenes)} lỗi provider. TOAN AAS đã hoàn Xu nếu cảnh này đã bị trừ. Storyboard vẫn được lưu để thử lại sau.",
+            )
+            return
+        output_file_id = ""
+        try:
+            sent = await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=image_url,
+                caption=f"✅ Cảnh {scene_index}/{len(scenes)} đã xong.\nJob #{job_id}\nĐã trừ: {deducted} Xu.",
+            )
+            photos = getattr(sent, "photo", None) or []
+            if photos:
+                output_file_id = str(getattr(photos[-1], "file_id", "") or "")
+        except Exception:
+            await context.bot.send_message(chat_id=query.message.chat_id, text=ui_text("vi", "image.success_link", url=html.escape(image_url, quote=True)), parse_mode="HTML")
+        update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, result_sent=1, output_file_id=output_file_id, attempts=1, finished_at=now_text())
+        update_storyboard_scene_asset(project_id, scene_index, image_job_id=job_id, image_file_id=output_file_id, image_url=image_url, tier=tier, price_xu=deducted, status="image_ready")
+        generated_count += 1
+    state["step"] = "images_ready"
+    state["generated_count"] = generated_count
+    set_storyboard_state(uid, state)
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="✅ Đã tạo xong bộ ảnh storyboard.",
+        reply_markup=storyboard_after_images_keyboard(project_id),
+    )
+
+async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "start"
+    uid = query.from_user.id if query.from_user else 0
+    if action == "start":
+        clear_media_creator_pending_states(uid)
+        set_storyboard_state(uid, {"step": "start"})
+        return await safe_edit_or_send(query, storyboard_start_text(), parse_mode="HTML", reply_markup=storyboard_start_keyboard())
+    if action == "suggest":
+        clear_storyboard_state(uid)
+        set_storyboard_state(uid, {"step": "await_idea", "source_type": "ai_suggested"})
+        return await safe_edit_or_send(query, storyboard_idea_request_text(), parse_mode="HTML")
+    if action == "script":
+        clear_storyboard_state(uid)
+        set_storyboard_state(uid, {"step": "await_script", "source_type": "user_script"})
+        return await safe_edit_or_send(query, storyboard_script_request_text(), parse_mode="HTML")
+    if action == "images":
+        return await storyboard_start_user_images(query, uid)
+    state = get_storyboard_state(uid)
+    if not state:
+        return await safe_edit_or_send(query, "⏰ Storyboard đã hết hạn hoặc đã xử lý. Bot chưa trừ Xu.", parse_mode=None)
+    if action == "select" and len(parts) > 2:
+        scripts = list(state.get("scripts") or [])
+        idx = max(1, min(3, int(parts[2] or 1))) - 1
+        selected = scripts[idx] if idx < len(scripts) else {}
+        selected_script = "\n".join([
+            str(selected.get("title") or ""),
+            str(selected.get("hook") or ""),
+            str(selected.get("main") or ""),
+            str(selected.get("scenes") or ""),
+            str(selected.get("cta") or ""),
+            str(selected.get("style") or ""),
+        ]).strip()
+        state.update({"step": "choose_count", "selected_script": selected_script, "source_type": "ai_suggested"})
+        set_storyboard_state(uid, state)
+        return await safe_edit_or_send(query, storyboard_scene_count_text(), parse_mode="HTML", reply_markup=storyboard_scene_count_keyboard())
+    if action == "count" and len(parts) > 2:
+        state = storyboard_store_project_in_state(uid, state, int(parts[2] or 5))
+        return await storyboard_reply_ready(query, state, via_query=True)
+    if action == "count_custom":
+        state["step"] = "await_count_custom"
+        set_storyboard_state(uid, state)
+        return await safe_edit_or_send(query, "🔢 Hãy nhập số cảnh bạn muốn. V1 khuyến nghị 2-10, tối đa kỹ thuật 20 cảnh.", parse_mode=None)
+    if action == "use":
+        state["step"] = "choose_image_tier"
+        set_storyboard_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            "🖼 <b>Chọn gói tạo ảnh storyboard</b>\n\nMặc định không kèm bảo hành để tránh rối. Bạn có thể bật bảo hành ở bước confirm.",
+            parse_mode="HTML",
+            reply_markup=storyboard_image_tier_keyboard(),
+        )
+    if action == "regen":
+        scene_count = int(state.get("scene_count") or 5)
+        state = storyboard_store_project_in_state(uid, state, scene_count)
+        return await storyboard_reply_ready(query, state, via_query=True)
+    if action == "edit_scene":
+        return await safe_edit_or_send(query, "✏️ Sửa từng cảnh sẽ mở chi tiết ở bản tiếp theo. V1: bạn có thể bấm 🔄 Gợi ý lại hoặc gửi kịch bản khác.", parse_mode=None, reply_markup=storyboard_ready_keyboard())
+    if action == "tier" and len(parts) > 2:
+        tier = normalize_image_tier(parts[2])
+        if tier not in {"low", "standard", "high"}:
+            tier = "standard"
+        state["image_tier"] = tier
+        state["step"] = "confirm_images"
+        set_storyboard_state(uid, state)
+        return await safe_edit_or_send(query, storyboard_image_confirm_text(state, uid), parse_mode="HTML", reply_markup=storyboard_image_confirm_keyboard(tier))
+    if action == "warranty":
+        tier = normalize_image_tier(state.get("image_tier") or "standard")
+        if tier == "standard":
+            state["image_tier"] = "standard_warranty"
+        elif tier == "high":
+            state["image_tier"] = "high_warranty"
+        else:
+            return await safe_edit_or_send(query, "🟢 Ảnh tiết kiệm không có bảo hành. Hãy chọn gói tiêu chuẩn hoặc chất lượng cao nếu cần bảo hành.", parse_mode=None)
+        set_storyboard_state(uid, state)
+        return await safe_edit_or_send(query, storyboard_image_confirm_text(state, uid), parse_mode="HTML", reply_markup=storyboard_image_confirm_keyboard(state["image_tier"]))
+    if action == "confirm_images":
+        return await storyboard_generate_images_for_query(query, context, uid, state)
+    if action == "render" and len(parts) > 2:
+        project_id = int(parts[2] or 0)
+        rows = storyboard_scenes_for_project(project_id)
+        photos = [{"file_id": str(row.get("image_file_id") or "")} for row in rows if str(row.get("image_file_id") or "")]
+        if len(photos) < 2:
+            return await safe_edit_or_send(query, "⚠️ Chưa đủ ảnh có file_id để ghép video. Hãy tạo đủ ảnh hoặc dùng nhánh gửi ảnh có sẵn.", parse_mode=None, reply_markup=storyboard_after_images_keyboard(project_id))
+        set_frame_video_state(uid, {"step": "ratio", "photos": photos[:FRAME_VIDEO_MAX_IMAGES], "source": "storyboard_project", "project_id": project_id})
+        create_storyboard_video_record(project_id, "handoff_to_frame_video", frame_video_price_for_state({"effect": "fade"}))
+        return await safe_edit_or_send(query, frame_video_ratio_text(get_frame_video_state(uid)), parse_mode="HTML", reply_markup=frame_video_ratio_keyboard())
+    if action == "save":
+        return await safe_edit_or_send(query, "💾 Storyboard/bộ ảnh đã được lưu trong project hiện tại. Bạn có thể quay lại ghép video từ bộ ảnh này.", parse_mode=None)
+    return await safe_edit_or_send(query, storyboard_start_text(), parse_mode="HTML", reply_markup=storyboard_start_keyboard())
+
+async def handle_storyboard_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    state = get_storyboard_state(uid)
+    if not state:
+        return False
+    text = storyboard_safe_text(update.message.text, 1400)
+    step = str(state.get("step") or "")
+    if step == "await_idea":
+        scripts = storyboard_suggest_scripts(text)
+        state.update({"step": "script_options", "idea": text, "scripts": scripts, "source_type": "ai_suggested"})
+        set_storyboard_state(uid, state)
+        await update.message.reply_text(storyboard_scripts_text(text, scripts), parse_mode="HTML", reply_markup=storyboard_scripts_keyboard())
+        return True
+    if step == "await_script":
+        state.update({"step": "choose_count", "selected_script": text, "source_type": "user_script"})
+        set_storyboard_state(uid, state)
+        await update.message.reply_text(storyboard_scene_count_text(), parse_mode="HTML", reply_markup=storyboard_scene_count_keyboard())
+        return True
+    if step == "await_count_custom":
+        match = re.search(r"\d+", text)
+        if not match:
+            await update.message.reply_text("⚠️ Vui lòng nhập số cảnh, ví dụ: 4 hoặc 8. Bot chưa trừ Xu.")
+            return True
+        scene_count = max(2, min(20, int(match.group(0))))
+        state = storyboard_store_project_in_state(uid, state, scene_count)
+        await storyboard_reply_ready(update.message, state, via_query=False)
+        return True
+    return False
 
 async def run_quick_image_admin_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str) -> None:
     uid = update.effective_user.id if update.effective_user else 0
@@ -71318,6 +72000,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_feedback_pending_text(update, context):
         return
 
+    if await handle_storyboard_pending_text(update, context):
+        return
+
     if await handle_trend_video_flow_pending_text(update, context):
         return
 
@@ -72026,6 +72711,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("create_media", cmd_create_media))
     tg_app.add_handler(CommandHandler("quick_image_test", cmd_quick_image_test))
     tg_app.add_handler(CommandHandler("quick_video_test", cmd_quick_video_test))
+    tg_app.add_handler(CommandHandler("storyboard_video", cmd_storyboard_video))
     tg_app.add_handler(CommandHandler("frame_video_status", cmd_frame_video_status))
     tg_app.add_handler(CommandHandler("tool_test_frame_video", cmd_tool_test_frame_video))
     tg_app.add_handler(CommandHandler("image_tools", cmd_image_tools))
@@ -72189,6 +72875,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_creative_motion_callback, pattern=r"^motion\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_cinematic_ad_callback, pattern=r"^adconcept\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_storyboard_callback, pattern=r"^storyboard\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_frame_video_callback, pattern=r"^framevideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
