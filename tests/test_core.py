@@ -258,8 +258,12 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "Runtime" in text
     keyboard = bot.main_menu_keyboard(True)
     button_texts = [button.text for row in keyboard.inline_keyboard for button in row]
-    assert "🧠 Operator" in button_texts
-    assert "⚙️ Hệ Thống" in button_texts
+    assert "🔐 Admin" in button_texts
+    assert "🧠 Operator" not in button_texts
+    assert "⚙️ Hệ Thống" not in button_texts
+    admin_nav_labels = [button.text for row in bot.menu_nav_keyboard("admin", True).inline_keyboard for button in row]
+    assert "🧠 Operator" in admin_nav_labels
+    assert "⚙️ Hệ thống" in admin_nav_labels
     admin_menu = bot.menu_text_admin()
     for command in [
         "/add",
@@ -1438,7 +1442,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
     assert 'InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")' in source
     assert 'InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image")' in source
-    assert 'InlineKeyboardButton("🎬 Tạo video AI", callback_data="create_media|quick_video")' in source
+    assert 'InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")' in source
     assert 'InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start")' in source
     assert 'InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")' in source
     assert 'InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
@@ -1449,8 +1453,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'ui_text(lang, "video.trend_short")' in video_keyboard_source
     assert 'callback_data="trendg|start"' in video_keyboard_source
     assert 'ui_text(lang, "video.motion_short")' in video_keyboard_source
-    assert 'ui_text(lang, "video.concept_short")' in video_keyboard_source
-    assert 'ui_text(lang, "video.hook_script")' in video_keyboard_source
+    assert 'ui_text(lang, "video.concept_short")' in video_keyboard_source or "Concept quảng cáo" in video_keyboard_source
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
     for callback_data in [
@@ -1698,36 +1701,37 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "321 Xu" not in bot.create_media_pricing_text()
     assert "654 Xu" not in bot.create_media_pricing_text()
     pricing_text = "\n".join(bot.pricing_main_lines())
-    assert "C. Hình ảnh AI" in pricing_text
-    assert "D. Video AI" in pricing_text
-    assert "E. Combo video" in pricing_text
-    assert "F. Workflow nội dung theo trend" in pricing_text
-    assert "G. Dịch thuật" in pricing_text
-    assert "H. Voice / TTS / STT" in pricing_text
-    assert "I. Nhạc / SFX / Audio" in pricing_text
-    assert "J. Tài liệu / PDF" in pricing_text
-    assert "K. Gói tháng" in pricing_text
-    assert "L. Thành viên" in pricing_text
-    assert "M. Điều khoản Xu" in pricing_text
-    assert "Ảnh tiết kiệm: <b>321 Xu</b>" in pricing_text
-    assert "Ảnh tiêu chuẩn: <b>777 Xu</b>" in pricing_text
-    assert "Video Trải Nghiệm: <b>654 Xu</b>" in pricing_text
-    assert "Video Cơ Bản: <b>765 Xu</b>" in pricing_text
-    assert "Video Phổ Thông: <b>876 Xu</b>" in pricing_text
-    assert "Video premium/admin-only: <b>admin-only / liên hệ admin</b>" in pricing_text
-    assert "Combo TikTok 99k" in pricing_text
-    assert "khuyến nghị 9:16" in pricing_text
-    assert "không tính điểm nâng hạng/thưởng nạp" in pricing_text
-    assert "Gợi ý chuyển động video" in pricing_text
-    assert "đang miễn phí giai đoạn thử nghiệm" in pricing_text
-    assert "Gói nội dung theo trend: <b>24 Xu</b>" in pricing_text
-    assert "Tổng gói content-only: <b>24 Xu</b>" in pricing_text
-    assert "Dịch văn bản ngắn: từ <b>5 Xu</b>" in pricing_text
-    assert "Dịch/lồng tiếng video: từ <b>800 Xu</b>" in pricing_text
-    assert "TTS/voice ngắn" in pricing_text
-    assert "Tìm nhạc/SFX library" in pricing_text
+    assert "BẢNG GIÁ TOAN AAS" in pricing_text
+    assert "Nạp Xu:" in pricing_text
+    assert "Hình ảnh AI:" in pricing_text
+    assert "Video AI:" in pricing_text
+    assert "Combo:" in pricing_text
+    assert "Workflow trend content-only" in pricing_text
     assert "provider cost" not in pricing_text.lower()
     assert "tiered_media_pricing" in pricing_text
+    price_keyboard_labels = [button.text for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
+    assert price_keyboard_labels == [
+        "💳 Nạp Xu",
+        "🎬 Giá video",
+        "🖼 Giá ảnh",
+        "🎁 Combo",
+        "📦 Gói của tôi",
+        "👑 Thành viên",
+        "📜 Điều khoản Xu",
+        "🏠 Menu chính",
+    ]
+    image_price_text = "\n".join(bot.pricing_image_lines())
+    video_price_text = "\n".join(bot.pricing_video_lines())
+    combo_price_text = "\n".join(bot.pricing_combo_lines())
+    assert "Ảnh tiết kiệm: <b>321 Xu</b>" in image_price_text
+    assert "Ảnh tiêu chuẩn: <b>777 Xu</b>" in image_price_text
+    assert "Video Trải Nghiệm: <b>654 Xu</b>" in video_price_text
+    assert "Video Cơ Bản: <b>765 Xu</b>" in video_price_text
+    assert "Video Phổ Thông: <b>876 Xu</b>" in video_price_text
+    assert "Video premium/admin-only: <b>admin-only / liên hệ admin</b>" in video_price_text
+    assert "Combo TikTok 99k" in combo_price_text
+    assert "khuyến nghị 9:16" in combo_price_text
+    assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
     xu_text = "\n".join(bot.pricing_xu_lines())
     assert xu_text.count("💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>") == 1
     plan_text = "\n".join(bot.pricing_plans_lines())
@@ -1766,17 +1770,16 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any(button.text == "🔥 Video theo trend" and button.callback_data == "trendg|start" for button in video_buttons)
     video_labels = [button.text for button in video_buttons]
     assert video_labels == [
-        "🔥 Video theo trend",
-        "🎬 Concept quảng cáo",
-        "🖼➡️🎞 Tạo video từ ảnh",
         "🎞 Tạo video nhanh",
-        "📝 Viết hook/script/caption",
+        "🖼➡️🎞 Tạo video từ ảnh",
+        "🔥 Video theo trend",
+        "🧠 Concept quảng cáo",
         "🎥 Gợi ý chuyển động / prompt video",
+        "🔙 Quay lại",
         "🏠 Menu chính",
     ]
     assert "🖼➡️🎞 Tạo video từ ảnh" in video_labels
     assert "✍️ Tạo prompt video" not in video_labels
-    assert "📝 Viết hook/script/caption" in video_labels
     assert "💳 Xem bảng giá" not in video_labels
     assert "💰 Xem giá" not in video_labels
     assert "📞 Liên hệ admin" not in video_labels
@@ -1796,6 +1799,13 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "💰 Xem giá" not in docs_labels
     topup_labels = [button.text for row in bot.main_topup_keyboard("vi").inline_keyboard for button in row]
     assert "💰 Xem giá" not in topup_labels
+    assert [[button.text for button in row] for row in bot.main_topup_keyboard("vi").inline_keyboard] == [
+        ["💳 10k", "💳 20k"],
+        ["💳 50k", "💳 100k"],
+        ["💳 200k", "💳 500k"],
+        ["🏦 Nạp thủ công", "🔙 Quay lại"],
+        ["🏠 Menu chính"],
+    ]
     guide_labels = [button.text for row in bot.main_guide_keyboard("vi").inline_keyboard for button in row]
     assert "💰 Bảng giá" not in guide_labels
     create_media_labels = [button.text for row in bot.create_media_menu_keyboard().inline_keyboard for button in row]
@@ -2797,16 +2807,16 @@ def test_customer_guide_is_public_and_policy_aligned():
     assert "📚 Hướng dẫn" in button_texts
     assert "💬 Góp ý / Báo lỗi" in button_texts
     assert "🚀 Bắt đầu nhanh" in guide_labels
-    assert "🖼 Hướng dẫn tạo ảnh" in guide_labels
-    assert "🎬 Hướng dẫn tạo video" in guide_labels
-    assert "🔥 Hướng dẫn video theo trend" in guide_labels
-    assert "🎵 Hướng dẫn thêm nhạc / bỏ nhạc" in guide_labels
-    assert "💰 Hướng dẫn Xu & nạp tiền" in guide_labels
-    assert "🔁 Hoàn Xu khi lỗi" in guide_labels
-    assert "❓ Câu hỏi thường gặp" in guide_labels
-    assert "👨‍💼 Liên hệ admin" in guide_labels
+    assert "🖼 Tạo ảnh" in guide_labels
+    assert "🎬 Tạo video" in guide_labels
+    assert "🔥 Video trend" in guide_labels
+    assert "🎵 Nhạc video" in guide_labels
+    assert "💰 Xu & nạp" in guide_labels
+    assert "❓ FAQ & hoàn Xu" in guide_labels
+    assert "👨‍💼 Admin" in guide_labels
+    assert "📜 Điều khoản" not in guide_labels
     assert "menu|guide_quick_start" in guide_callbacks
-    assert "menu|guide_refund" in guide_callbacks
+    assert "menu|guide_refund" not in guide_callbacks
     assert "menu|guide_faq" in guide_callbacks
     assert "Bắt đầu nhanh với TOAN AAS" in guide_quick
     assert "Tạo ảnh AI" in guide_quick

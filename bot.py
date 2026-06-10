@@ -679,14 +679,14 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 user_memory: dict = {}
 
-# ─── DANH SÁCH GÓI CƯỚC NẠP ────────────────────────────────────────────────────
+# ─── DANH SÁCH MỆNH GIÁ NẠP ───────────────────────────────────────────────────
 PAYMENT_PACKAGES = {
-    "10k":  {"amount":  10000, "xu":  100,  "text": "Gói Dùng Thử: 10.000đ ➔ 100 Xu"},
-    "20k":  {"amount":  20000, "xu":  200,  "text": "Gói Nhỏ: 20.000đ ➔ 200 Xu"},
-    "50k":  {"amount":  50000, "xu":  500,  "text": "Gói Trung: 50.000đ ➔ 500 Xu"},
-    "100k": {"amount": 100000, "xu": 1000,  "text": "Gói Tiêu Chuẩn: 100.000đ ➔ 1.000 Xu"},
-    "200k": {"amount": 200000, "xu": 2000,  "text": "Gói Nâng Cao: 200.000đ ➔ 2.000 Xu"},
-    "500k": {"amount": 500000, "xu": 5000,  "text": "Gói Doanh Nghiệp: 500.000đ ➔ 5.000 Xu"}
+    "10k":  {"amount":  10000, "xu":  100,  "text": "Mệnh giá 10k: 10.000đ ➔ 100 Xu"},
+    "20k":  {"amount":  20000, "xu":  200,  "text": "Mệnh giá 20k: 20.000đ ➔ 200 Xu"},
+    "50k":  {"amount":  50000, "xu":  500,  "text": "Mệnh giá 50k: 50.000đ ➔ 500 Xu"},
+    "100k": {"amount": 100000, "xu": 1000,  "text": "Mệnh giá 100k: 100.000đ ➔ 1.000 Xu"},
+    "200k": {"amount": 200000, "xu": 2000,  "text": "Mệnh giá 200k: 200.000đ ➔ 2.000 Xu"},
+    "500k": {"amount": 500000, "xu": 5000,  "text": "Mệnh giá 500k: 500.000đ ➔ 5.000 Xu"}
 }
 
 PLAN_CATALOG = {
@@ -4778,12 +4778,11 @@ def payos_checkout_unavailable_text(pkg_key: str, amount: int, order_code: int, 
     reason_line = f"\n\nLý do kỹ thuật: <code>{html.escape(str(reason)[:180])}</code>" if reason else ""
     return (
         "⚠️ <b>PayOS QR động hiện chưa tạo được checkout URL.</b>\n\n"
-        f"• Gói: <code>{html.escape(str(pkg_key))}</code>\n"
+        f"• Mệnh giá: <code>{html.escape(str(pkg_key))}</code>\n"
         f"• Số tiền: <b>{int(amount):,}đ</b>\n"
         f"• Mã đơn thử: <code>{order_code}</code>\n\n"
         "Bot đã hủy đơn PayOS này và <b>không cộng Xu</b>.\n"
-        "Bạn có thể thử lại sau, hoặc nếu cần hỗ trợ thì dùng:\n"
-        f"<code>/thucong {html.escape(str(pkg_key))}</code>\n\n"
+        "Bạn có thể thử lại sau, hoặc bấm <b>Nạp thủ công</b> nếu cần hỗ trợ.\n\n"
         "Lưu ý an toàn:\n"
         "• Xu chỉ được cộng tự động khi PayOS xác nhận thanh toán thành công.\n"
         "• Nếu dùng bill thủ công, admin chỉ duyệt sau khi đối soát tiền thật đã vào tài khoản."
@@ -27033,7 +27032,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
     if pkg_key not in PAYMENT_PACKAGES:
-        await query.edit_message_text("❌ Gói nạp không hợp lệ.")
+        await query.edit_message_text("❌ Mệnh giá nạp không hợp lệ.")
         return
 
     pkg = PAYMENT_PACKAGES[pkg_key]
@@ -27102,11 +27101,11 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             update_order_checkout_info(order_code, checkout_url, checkout_data.get("paymentLinkId", ""))
             promo_attach = attach_pending_promo_to_order(uid, order_code, amount, base_xu)
             launch_preview_line = (
-                f"🎁 Launch Bonus dự kiến: <b>+{launch_preview} Xu</b> nếu còn lần đầu mua gói này.\n"
+                f"🎁 Launch Bonus dự kiến: <b>+{launch_preview} Xu</b> nếu còn lần đầu mua mệnh giá này.\n"
                 if launch_preview else ""
             )
             total_preview_line = (
-                f"🧾 Tổng Xu gói này sau PayOS success: <b>+{xu} Xu</b>\n"
+                f"🧾 Tổng Xu mệnh giá này sau PayOS success: <b>+{xu} Xu</b>\n"
                 if launch_preview else ""
             )
             promo_line = ""
@@ -27119,12 +27118,12 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             elif promo_attach.get("code") and promo_attach.get("reason") not in {"no_pending"}:
                 reason_text = promo_code_status_message(str(promo_attach.get("reason") or ""))
                 promo_line = (
-                    f"⚠️ Mã <code>{html.escape(promo_attach.get('code') or '')}</code> chưa đủ điều kiện cho gói này "
+                    f"⚠️ Mã <code>{html.escape(promo_attach.get('code') or '')}</code> chưa đủ điều kiện cho mệnh giá này "
                     f"({html.escape(reason_text)}), đơn vẫn tạo bình thường.\n"
                 )
             qr_text = (
                 f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
-                f"📋 Gói lựa chọn: <b>{pkg['text']}</b>\n"
+                f"📋 Mệnh giá lựa chọn: <b>{pkg['text']}</b>\n"
                 f"💰 Số tiền cần chuyển: <b>{amount:,}đ</b>\n"
                 f"🪙 Xu gốc: <b>+{base_xu} Xu</b>\n"
                 f"{launch_preview_line}"
@@ -32204,19 +32203,19 @@ CUSTOMER_GUIDE_SECTIONS = [
         "credits",
         "Xu, nạp tiền, ưu đãi",
         (
-            "💳 <b>Xu dịch vụ, gói nạp và ưu đãi</b>\n\n"
+            "💳 <b>Xu dịch vụ, mệnh giá nạp và ưu đãi</b>\n\n"
             "Xu dịch vụ là đơn vị nội bộ để dùng công cụ trong TOAN AAS. User mới nhận <b>200 Xu dịch vụ trải nghiệm</b>.\n"
             "Mỗi ID Telegram chỉ nhận 200 Xu trải nghiệm một lần. Xóa chat, block bot rồi start lại hoặc đổi username không làm nhận lại 200 Xu.\n"
             "Bạn có thể dùng <code>/trial_status</code> để kiểm tra trạng thái trial của mình.\n\n"
-            "<b>Gói nạp:</b>\n"
+            "<b>Mệnh giá nạp:</b>\n"
             "• 10.000đ: 100 Xu dịch vụ, dùng thử\n"
             "• 20.000đ: 200 Xu dịch vụ, dùng thử thêm\n"
-            "• 50.000đ → 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua gói 50k (tổng 530 Xu dịch vụ)\n"
-            "• 100.000đ → 1.000 Xu + 50 Xu Launch Bonus nếu lần đầu mua gói 100k (tổng 1.050 Xu dịch vụ)\n"
-            "• 200.000đ → 2.000 Xu + 150 Xu Launch Bonus nếu lần đầu mua gói 200k (tổng 2.150 Xu dịch vụ)\n"
-            "• 500.000đ → 5.000 Xu + 500 Xu Launch Bonus nếu lần đầu mua gói 500k (tổng 5.500 Xu dịch vụ)\n\n"
+            "• 50.000đ → 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua mệnh giá 50k (tổng 530 Xu dịch vụ)\n"
+            "• 100.000đ → 1.000 Xu + 50 Xu Launch Bonus nếu lần đầu mua mệnh giá 100k (tổng 1.050 Xu dịch vụ)\n"
+            "• 200.000đ → 2.000 Xu + 150 Xu Launch Bonus nếu lần đầu mua mệnh giá 200k (tổng 2.150 Xu dịch vụ)\n"
+            "• 500.000đ → 5.000 Xu + 500 Xu Launch Bonus nếu lần đầu mua mệnh giá 500k (tổng 5.500 Xu dịch vụ)\n\n"
             "<b>Promo code nạp tiền:</b>\n"
-            "Nhập <code>/promo FIRST30</code> trước khi nạp. Promo áp dụng từ gói 50k, mỗi đơn chỉ dùng 1 mã, "
+            "Nhập <code>/promo FIRST30</code> trước khi nạp. Promo áp dụng từ mệnh giá 50k, mỗi đơn chỉ dùng 1 mã, "
             "không cộng dồn và chỉ cộng Xu dịch vụ sau khi thanh toán thành công.\n\n"
             "<b>Gift code:</b>\n"
             "Gift public hợp lệ sẽ cộng Xu dịch vụ trực tiếp. Riêng mã <code>BETA*</code> là mã sự kiện/test, cần admin cấp theo ID Telegram trước.\n\n"
@@ -32243,7 +32242,7 @@ CUSTOMER_GUIDE_SECTIONS = [
             "<b>PayOS QR động:</b>\n"
             "1. Gõ <code>/naptien</code>.\n"
             "2. Nếu có mã ưu đãi, nhập mã trước, ví dụ <code>/promo FIRST30</code>.\n"
-            "3. Chọn gói muốn nạp.\n"
+            "3. Chọn mệnh giá muốn nạp.\n"
             "4. Bot tạo link/QR thanh toán.\n"
             "5. Mở app ngân hàng, quét QR hoặc bấm link thanh toán.\n"
             "6. Thanh toán đúng số tiền và chờ hệ thống cộng Xu dịch vụ.\n"
@@ -33034,17 +33033,15 @@ def admin_internal_command(handler):
 
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="create_media|quick_video")],
+        [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
         [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("🎵 Nhạc / âm thanh", callback_data="menu|main_music")],
         [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
         [InlineKeyboardButton("👤 Tài khoản của tôi", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
         [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
-        rows.append([InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
-    else:
-        rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
+        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
     return InlineKeyboardMarkup(rows)
 
 def language_choice_text() -> str:
@@ -33081,44 +33078,38 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         rows = [
-            [InlineKeyboardButton("🖼 AI 图片", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🖼 AI 图片", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
             [InlineKeyboardButton("🔥 Trend 视频", callback_data="trendg|start"), InlineKeyboardButton("🎵 音乐 / 音效", callback_data="menu|main_music")],
             [InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
             [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")],
         ]
         if is_admin:
-            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")])
-            rows.append([InlineKeyboardButton("⚙️ 系统", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
-        else:
-            rows.append([InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")])
+            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
         return InlineKeyboardMarkup(rows)
     if lang == "vi":
         rows = [
-            [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
             [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("🎵 Nhạc / âm thanh", callback_data="menu|main_music")],
             [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👤 Tài khoản của tôi", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
             [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
         ]
         if is_admin:
-            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
-            rows.append([InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
-        else:
-            rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
+            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
         return InlineKeyboardMarkup(rows)
     rows = [
-        [InlineKeyboardButton("🖼 AI Image", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 AI Video", callback_data="create_media|quick_video")],
+        [InlineKeyboardButton("🖼 AI Image", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
         [InlineKeyboardButton("🔥 Trend Video", callback_data="trendg|start"), InlineKeyboardButton("🎵 Music / Sound", callback_data="menu|main_music")],
         [InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
         [InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
         [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("🌍 Change language", callback_data="back_lang")])
-        rows.append([InlineKeyboardButton("⚙️ System", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
-    else:
-        rows.append([InlineKeyboardButton("🌍 Change language", callback_data="back_lang")])
+        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
     return InlineKeyboardMarkup(rows)
 
 def localized_start_menu_text(user_id, lang: str) -> str:
@@ -33255,21 +33246,21 @@ def menu_parent_action(section: str = "main") -> str:
         "main_topup": "main_topup",
         "admin": "main",
         "admin_subpage": "admin",
-        "system": "main",
+        "system": "admin",
         "affiliate": "main",
-        "operator": "main",
+        "operator": "admin",
     }
     return parent_map.get(str(section or "main"), "main")
 
 def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "video.trend_short"), callback_data="trendg|start")],
-        [InlineKeyboardButton(ui_text(lang, "video.concept_short"), callback_data="adconcept|start")],
-        [InlineKeyboardButton(ui_text(lang, "video.image_to_video"), callback_data="menu|hint_image_to_video_pack")],
         [InlineKeyboardButton(ui_text(lang, "video.quick_admin_public"), callback_data="create_media|quick_video")],
-        [InlineKeyboardButton(ui_text(lang, "video.hook_script"), callback_data="menu|hint_film")],
+        [InlineKeyboardButton(ui_text(lang, "video.image_to_video"), callback_data="menu|hint_image_to_video_pack")],
+        [InlineKeyboardButton(ui_text(lang, "video.trend_short"), callback_data="trendg|start")],
+        [InlineKeyboardButton("🧠 Concept quảng cáo" if lang == "vi" else ui_text(lang, "video.concept_short"), callback_data="adconcept|start")],
         [InlineKeyboardButton(ui_text(lang, "video.motion_short"), callback_data="motion|start")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -33378,37 +33369,36 @@ def main_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def main_topup_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 Use /naptien", callback_data="menu|hint_naptien")],
-            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
-        ])
+def main_topup_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
+    uid = str(user_id or "0")
+    if not uid.isdigit():
+        uid = "0"
+    back_label = "🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back"
+    main_label = ui_text(lang, "common.main_menu")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien")],
-        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("💳 10k", callback_data=payos_package_callback_data("10k", uid)), InlineKeyboardButton("💳 20k", callback_data=payos_package_callback_data("20k", uid))],
+        [InlineKeyboardButton("💳 50k", callback_data=payos_package_callback_data("50k", uid)), InlineKeyboardButton("💳 100k", callback_data=payos_package_callback_data("100k", uid))],
+        [InlineKeyboardButton("💳 200k", callback_data=payos_package_callback_data("200k", uid)), InlineKeyboardButton("💳 500k", callback_data=payos_package_callback_data("500k", uid))],
+        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data("manual_custom", uid)), InlineKeyboardButton(back_label, callback_data="pricing|main")],
+        [InlineKeyboardButton(main_label, callback_data="menu|main")],
     ])
 
 def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🚀 Quick start", callback_data="menu|guide_quick_start")],
-            [InlineKeyboardButton("🖼 Image guide", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Video guide", callback_data="menu|guide_video_ai")],
-            [InlineKeyboardButton("🔥 Trend video guide", callback_data="menu|guide_guided_video")],
-            [InlineKeyboardButton("🎵 Music / no music", callback_data="menu|guide_music_add")],
-            [InlineKeyboardButton("💰 Xu / top-up", callback_data="menu|guide_credits"), InlineKeyboardButton("🔁 Refunds", callback_data="menu|guide_refund")],
-            [InlineKeyboardButton("❓ FAQ", callback_data="menu|guide_faq"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
-            [InlineKeyboardButton("📜 Terms", callback_data="menu|legal"), InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🖼 Create image", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Create video", callback_data="menu|guide_video_ai")],
+            [InlineKeyboardButton("🔥 Trend video", callback_data="menu|guide_guided_video"), InlineKeyboardButton("🎵 Video music", callback_data="menu|guide_music_add")],
+            [InlineKeyboardButton("💰 Xu & top-up", callback_data="menu|guide_credits"), InlineKeyboardButton("❓ FAQ & refunds", callback_data="menu|guide_faq")],
+            [InlineKeyboardButton("👨‍💼 Admin", callback_data="menu|support"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
             [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Bắt đầu nhanh", callback_data="menu|guide_quick_start")],
-        [InlineKeyboardButton("🖼 Hướng dẫn tạo ảnh", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Hướng dẫn tạo video", callback_data="menu|guide_video_ai")],
-        [InlineKeyboardButton("🔥 Hướng dẫn video theo trend", callback_data="menu|guide_guided_video")],
-        [InlineKeyboardButton("🎵 Hướng dẫn thêm nhạc / bỏ nhạc", callback_data="menu|guide_music_add")],
-        [InlineKeyboardButton("💰 Hướng dẫn Xu & nạp tiền", callback_data="menu|guide_credits"), InlineKeyboardButton("🔁 Hoàn Xu khi lỗi", callback_data="menu|guide_refund")],
-        [InlineKeyboardButton("❓ Câu hỏi thường gặp", callback_data="menu|guide_faq"), InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
-        [InlineKeyboardButton("📜 Điều khoản", callback_data="menu|legal"), InlineKeyboardButton("🌐 TOAN AAS Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🖼 Tạo ảnh", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Tạo video", callback_data="menu|guide_video_ai")],
+        [InlineKeyboardButton("🔥 Video trend", callback_data="menu|guide_guided_video"), InlineKeyboardButton("🎵 Nhạc video", callback_data="menu|guide_music_add")],
+        [InlineKeyboardButton("💰 Xu & nạp", callback_data="menu|guide_credits"), InlineKeyboardButton("❓ FAQ & hoàn Xu", callback_data="menu|guide_faq")],
+        [InlineKeyboardButton("👨‍💼 Admin", callback_data="menu|support"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -33429,6 +33419,10 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("🔁 Postback Setup", callback_data="menu|hint_postback_setup")])
     elif section == "billing":
         rows.append([InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien"), InlineKeyboardButton("👤 Cú pháp /profile", callback_data="menu|hint_profile")])
+    elif section == "admin" and is_admin:
+        rows.append([InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
+        rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Combo", callback_data="pricing|combo")])
+        rows.append([InlineKeyboardButton("🔄 Video jobs", callback_data="menu|hint_video_status")])
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{menu_parent_action(section)}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -33998,8 +33992,10 @@ def menu_text_main_quick() -> str:
 def menu_text_main_topup() -> str:
     return (
         "💳 <b>NẠP XU DỊCH VỤ</b>\n\n"
-        "Dùng <code>/naptien</code> để mở flow nạp Xu hiện có và chọn gói.\n"
-        "Bot sẽ tạo QR động nếu cổng tự động hoạt động, hoặc hướng dẫn QR thủ công khi cần.\n\n"
+        "Chọn mệnh giá bên dưới. Bot sẽ mở QR PayOS động nếu cổng tự động hoạt động, "
+        "hoặc hướng dẫn nạp thủ công khi cần.\n\n"
+        "Mệnh giá nạp Xu tách riêng với combo/gói tháng. Combo không cộng điểm nâng hạng/thưởng nạp "
+        "và không quy đổi toàn bộ thành Xu tự do.\n\n"
         "Không cần gửi mật khẩu, không cần gửi thông tin thẻ. Xu được quản lý theo ID Telegram."
     )
 
@@ -34076,9 +34072,7 @@ def referral_account_stats_text(user_id) -> str:
 def menu_text_main_guide() -> str:
     return (
         "📚 <b>HƯỚNG DẪN</b>\n\n"
-        "Chọn một mục bên dưới để xem nhanh cách dùng TOAN AAS.\n\n"
-        "Nếu bạn là khách mới, nên bắt đầu bằng <b>🚀 Bắt đầu nhanh</b>.\n"
-        "Các bước tạo thật đều có xác nhận trước khi trừ Xu. Nếu chỉ mở hướng dẫn, bot không gọi API và không trừ Xu."
+        "Chọn mục bạn muốn xem. Người mới nên bấm 🚀 <b>Bắt đầu nhanh</b> trước."
     )
 
 def menu_hint_text(action: str) -> tuple[str, str]:
@@ -34286,8 +34280,7 @@ def menu_text_main_topup_i18n(lang: str) -> str:
         return menu_text_main_topup()
     return (
         "💳 <b>TOP UP XU</b>\n\n"
-        "Use <code>/naptien</code> to open the top-up flow and select a package.\n"
-        "The bot uses dynamic PayOS QR when available, or manual bank transfer fallback when needed.\n\n"
+        "Choose an amount below. The bot will open the current PayOS QR flow or manual transfer fallback when needed.\n\n"
         "Never send passwords, OTPs, API keys or card information."
     )
 
@@ -34357,7 +34350,7 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "main_quick":
         return menu_text_main_quick_i18n(lang), main_quick_keyboard(lang)
     if action == "main_topup":
-        return menu_text_main_topup_i18n(lang), main_topup_keyboard(lang)
+        return menu_text_main_topup_i18n(lang), main_topup_keyboard(lang, user_id)
     if action == "main_profile":
         return menu_text_main_profile_i18n(user_id or "__customer__", lang), main_profile_keyboard(lang)
     if action == "profile_packages":
@@ -34810,7 +34803,7 @@ def service_credit_terms_text() -> str:
         "• Công cụ nhạc/media chỉ trừ Xu khi chính sách giá và provider đã mở rõ; nếu provider lỗi trước khi có output, bot không trừ Xu.\n"
         "• Có thể được tặng thêm trong chương trình khuyến mãi, hỗ trợ kỹ thuật hoặc sự kiện.\n"
         "• TOAN AAS có quyền khóa/thu hồi Xu dịch vụ khuyến mãi nếu phát hiện gian lận, spam, lạm dụng hoặc lỗi hệ thống.\n\n"
-        "Các gói nạp là gói Xu dịch vụ trả trước để sử dụng công cụ trong TOAN AAS. "
+        "Các mệnh giá nạp là mức Xu dịch vụ trả trước để sử dụng công cụ trong TOAN AAS. "
         f"Khi cần hỗ trợ, liên hệ: {support_link_html()}"
     )
 
@@ -43426,18 +43419,18 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Tạo tài khoản mới nhận 200 Xu trải nghiệm",
         "• Có thể thử 1 video basic trước khi nạp thêm",
         "• Nạp lần đầu từ 50k nên dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu mã còn hiệu lực",
-        "• Gói 100k/200k/500k có Launch Bonus lần đầu mua từng gói",
+        "• Mệnh giá 100k/200k/500k có Launch Bonus lần đầu mua từng mệnh giá",
         "• Mã beta/internal chỉ dùng khi admin gửi riêng, không public cho user",
-        "• Khuyến nghị bắt đầu bằng gói 50k hoặc 100k để đủ Xu tạo nhiều Content Pack",
+        "• Khuyến nghị bắt đầu bằng mệnh giá 50k hoặc 100k để đủ Xu tạo nhiều Content Pack",
         "• Không cam kết doanh thu, công cụ giúp tạo nội dung nhanh hơn và có quy trình rõ hơn",
         "",
         "<b>Gói 2 — Creator Start</b>",
-        "• Nạp 50k nhận 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua gói 50k",
+        "• Nạp 50k nhận 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua mệnh giá 50k",
         "• Phù hợp tạo nhiều script/caption cho Facebook, TikTok, YouTube",
         "• Gợi ý dùng: <code>/film</code>, <code>/growth_ai</code>, <code>/campaign_report</code>",
         "",
         "<b>Gói 3 — Creator Builder</b>",
-        "• Nạp 100k nhận 1.000 Xu gốc + 50 Xu Launch Bonus nếu lần đầu mua gói 100k",
+        "• Nạp 100k nhận 1.000 Xu gốc + 50 Xu Launch Bonus nếu lần đầu mua mệnh giá 100k",
         "• Phù hợp test nội dung Facebook/TikTok/YouTube trong 7 ngày",
         "• Gồm: <code>/film</code>, <code>/growth_ai</code>, <code>/campaign_report</code>",
         "",
@@ -43509,7 +43502,7 @@ def promo_code_status_message(status: str) -> str:
         "already_used": "Mã này đã được dùng đủ lượt cho tài khoản của bạn.",
         "period_already_used": "Mã này đã được dùng trong kỳ hiện tại. Hãy chờ kỳ reset tiếp theo.",
         "min_amount_not_met": "Gói 10k/20k không áp dụng mã ưu đãi. Vui lòng chọn gói từ 50k trở lên.",
-        "min_amount": "Gói nạp chưa đạt số tiền tối thiểu của mã.",
+        "min_amount": "Mệnh giá nạp chưa đạt số tiền tối thiểu của mã.",
         "first_topup_only": "Mã FIRST30 chỉ dành cho lần nạp đầu tiên.",
         "second_topup_only": "Mã SECOND15 chỉ dành cho lần nạp thứ 2.",
         "owner_only": "Mã ưu đãi cá nhân này chỉ dùng cho đúng tài khoản được cấp.",
@@ -43624,7 +43617,7 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Mã đang chờ dùng đến: <code>{html.escape(info.get('expires_at') or '-')}</code>\n"
             "• Mỗi đơn chỉ áp dụng 1 mã\n"
             "• Không cộng dồn mã khác\n"
-            "• Có thể cộng với Launch Bonus nếu gói đó còn lần đầu mua gói\n"
+            "• Có thể cộng với Launch Bonus nếu mệnh giá đó còn lần đầu mua\n"
             "• Áp dụng cho lần nạp tiếp theo nếu đủ điều kiện\n\n"
             "Dùng <code>/naptien</code> để mua/nạp Xu dịch vụ.",
             parse_mode="HTML",
@@ -43695,14 +43688,14 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "4. <code>WEEKLY10</code> — ưu đãi tuần từ 50k: +10% Xu dịch vụ",
         "5. <code>DAILY5</code> — ưu đãi ngày từ 50k: +5% Xu dịch vụ",
         "",
-        "🎁 <b>Launch Bonus theo gói:</b>",
-        "• Lần đầu mua gói 50k: +30 Xu dịch vụ",
-        "• Lần đầu mua gói 100k: +50 Xu dịch vụ",
-        "• Lần đầu mua gói 200k: +150 Xu dịch vụ",
-        "• Lần đầu mua gói 500k: +500 Xu dịch vụ",
+        "🎁 <b>Launch Bonus theo mệnh giá:</b>",
+        "• Lần đầu mua mệnh giá 50k: +30 Xu dịch vụ",
+        "• Lần đầu mua mệnh giá 100k: +50 Xu dịch vụ",
+        "• Lần đầu mua mệnh giá 200k: +150 Xu dịch vụ",
+        "• Lần đầu mua mệnh giá 500k: +500 Xu dịch vụ",
         "",
-        "Mỗi tài khoản chỉ nhận Launch Bonus 1 lần cho từng gói.",
-        "Các lần mua lại cùng gói sẽ nhận Xu dịch vụ gốc.",
+        "Mỗi tài khoản chỉ nhận Launch Bonus 1 lần cho từng mệnh giá.",
+        "Các lần mua lại cùng mệnh giá sẽ nhận Xu dịch vụ gốc.",
         "",
         "⚠️ <b>Quy tắc:</b>",
         "• FIRST30: mỗi tài khoản dùng 1 lần cho lần nạp đầu từ 50k",
@@ -43710,7 +43703,7 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• WEEKLY10: mỗi tài khoản dùng 1 lần/tuần, reset 00:00 thứ 2",
         "• MONTHLY20: mỗi tài khoản dùng 1 lần/tháng, reset 00:00 ngày 1",
         "• DAILY5: mỗi tài khoản dùng 1 lần/ngày, reset 00:00 mỗi ngày",
-        "• Gói 10k/20k không áp dụng mã ưu đãi",
+        "• Mệnh giá 10k/20k không áp dụng mã ưu đãi",
         "• Mỗi đơn nạp chỉ áp dụng 1 mã",
         "• Không cộng dồn mã",
         "• Mã mới sẽ thay mã đang chờ dùng",
@@ -43966,7 +43959,7 @@ async def cmd_trial_bonus_status(update: Update, context: ContextTypes.DEFAULT_T
     lines = [
         "🎁 <b>Trial Bonus Anti-Spam Status</b>",
         "",
-        "Scope: <code>chỉ áp dụng 200 Xu miễn phí, không áp dụng gói nạp trả phí/promo trả phí</code>",
+        "Scope: <code>chỉ áp dụng 200 Xu miễn phí, không áp dụng mệnh giá nạp trả phí/promo trả phí</code>",
         f"• Enabled: <code>{'yes' if TRIAL_BONUS_ENABLED else 'no'}</code>",
         f"• Amount: <code>{int(TRIAL_BONUS_AMOUNT or 0)} Xu</code>",
         f"• Require IP: <code>{'yes' if TRIAL_BONUS_REQUIRE_IP else 'no'}</code>",
@@ -53596,8 +53589,8 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "",
         "🎁 <b>Chính sách ưu đãi và thành viên vẫn giữ nguyên</b>",
         "• User mới nhận <b>200 Xu dịch vụ</b> trải nghiệm một lần theo ID Telegram.",
-        "• Launch Bonus lần đầu mua gói 50k/100k/200k/500k vẫn giữ theo chính sách đang bật.",
-        "• Gói nạp nhận Xu gốc giống nhau cho mọi user; hạng thành viên không làm tăng Xu gói nạp.",
+        "• Launch Bonus lần đầu mua mệnh giá 50k/100k/200k/500k vẫn giữ theo chính sách đang bật.",
+        "• Mệnh giá nạp nhận Xu gốc giống nhau cho mọi user; hạng thành viên không làm tăng Xu theo mệnh giá nạp.",
         "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ đủ điều kiện:",
         "  🌱 Newbie: 0%",
         "  🥈 Silver: 2%",
@@ -53650,7 +53643,7 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Khuyến mãi dùng % giảm hoặc tặng Xu.",
         "• Không bán dưới giá vốn.",
         "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ: Newbie 0%, Silver 2%, Gold 4%, Platinum 6%, Diamond 8%, VIP 10%.",
-        "• Không có đặc quyền Chat 0 Xu theo hạng và không tăng Xu gói nạp theo hạng.",
+        "• Không có đặc quyền Chat 0 Xu theo hạng và không tăng Xu theo mệnh giá nạp.",
         "• Video/render thật sau này phải có bảng giá riêng.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -53658,12 +53651,16 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(ui_text(lang, "pricing.xu"), callback_data="pricing|xu"),
-            InlineKeyboardButton(ui_text(lang, "pricing.plans"), callback_data="pricing|plans"),
+            InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
+            InlineKeyboardButton("🎬 Giá video", callback_data="pricing|video"),
         ],
         [
-            InlineKeyboardButton(ui_text(lang, "pricing.vip"), callback_data="pricing|vip"),
-            InlineKeyboardButton(ui_text(lang, "pricing.member"), callback_data="pricing|member"),
+            InlineKeyboardButton("🖼 Giá ảnh", callback_data="pricing|image"),
+            InlineKeyboardButton("🎁 Combo", callback_data="pricing|combo"),
+        ],
+        [
+            InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages"),
+            InlineKeyboardButton("👑 Thành viên", callback_data="pricing|member"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "pricing.terms"), callback_data="pricing|terms"),
@@ -53674,11 +53671,7 @@ def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def pricing_xu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(ui_text(lang, "pricing.topup"), callback_data="menu|main_topup")],
-        [
-            InlineKeyboardButton(ui_text(lang, "pricing.plans"), callback_data="pricing|plans"),
-            InlineKeyboardButton(ui_text(lang, "pricing.member"), callback_data="pricing|member"),
-        ],
-        [InlineKeyboardButton(ui_text(lang, "pricing.back"), callback_data="pricing|main")],
+        [InlineKeyboardButton(ui_text(lang, "pricing.back"), callback_data="pricing|main"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def pricing_plans_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -53777,6 +53770,20 @@ async def edit_or_send_pricing_lines(query, lines: list[str], reply_markup: Inli
 
 def pricing_main_lines() -> list[str]:
     pricing = media_workflow_pricing_payload()
+    return [
+        "💳 <b>BẢNG GIÁ TOAN AAS</b>",
+        "",
+        "Chọn nhóm giá bạn muốn xem bên dưới. TOAN AAS gom giá về một nơi để tránh nhầm giữa nạp Xu, combo/gói dịch vụ và tác vụ AI.",
+        "",
+        "• <b>Nạp Xu:</b> chọn mệnh giá 10k, 20k, 50k, 100k, 200k, 500k.",
+        "• <b>Hình ảnh AI:</b> giá theo tier ảnh và bảo hành tạo lại nếu có.",
+        "• <b>Video AI:</b> giá theo tier video, có xác nhận trước khi trừ Xu.",
+        "• <b>Combo:</b> gói ưu đãi tiết kiệm, không cộng điểm nâng hạng/thưởng nạp và không quy đổi toàn bộ thành Xu tự do.",
+        f"• <b>Workflow trend content-only:</b> {int(pricing.get('workflow_content_total_cost') or 0)} Xu, chưa bao gồm tạo ảnh/video thật.",
+        "",
+        "Provider lỗi/quota/timeout: bot không trừ Xu hoặc hoàn Xu nếu đã trừ theo policy.",
+        f"Pricing mode: <code>{html.escape(pricing.get('billing_mode') or 'tiered_media_pricing')}</code>",
+    ]
     image_tiers = pricing["image_tiers"]
     video_tiers = pricing["video_tiers"]
     image_items = [
@@ -53833,7 +53840,7 @@ def pricing_main_lines() -> list[str]:
         "",
         "<b>E. Combo video</b>",
         *combo_items,
-        "• Combo không tính điểm nâng hạng/thưởng nạp và không làm thay đổi gói nạp Xu thường.",
+        "• Combo không tính điểm nâng hạng/thưởng nạp và không làm thay đổi mệnh giá nạp Xu thường.",
         "",
         "<b>F. Workflow nội dung theo trend</b>",
         f"• Gói nội dung theo trend: <b>{pricing['workflow_content_total_cost']} Xu</b>",
@@ -53883,7 +53890,7 @@ def pricing_main_lines() -> list[str]:
         "• Tác vụ phát sinh hoặc vượt hạn mức xem tại Bảng giá tổng này.",
         "",
         "<b>L. Thành viên</b>",
-        "• Hạng thành viên không làm tăng Xu gói nạp.",
+        "• Hạng thành viên không làm tăng Xu theo mệnh giá nạp.",
         "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ đủ điều kiện.",
         "• Rank-up/top-up bonus nếu có thì chỉ theo chính sách hiện hành.",
         "",
@@ -53902,6 +53909,79 @@ def pricing_main_lines() -> list[str]:
         "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
     ]
 
+def pricing_image_lines() -> list[str]:
+    pricing = image_tier_pricing_payload()
+    rows = [
+        "🖼 <b>GIÁ HÌNH ẢNH AI</b>",
+        "",
+        "Chọn tier ảnh trong flow tạo ảnh. Bot luôn hỏi xác nhận trước khi trừ Xu.",
+        "",
+    ]
+    for tier in IMAGE_TIER_ORDER:
+        payload = pricing.get(tier) or {}
+        warranty = int(payload.get("retry_warranty_count") or 0)
+        warranty_text = "Kèm 1 lần tạo lại trong cùng yêu cầu." if warranty > 0 else "Không kèm tạo lại miễn phí."
+        rows.append(f"• {payload.get('label') or tier}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(warranty_text)}")
+    rows.extend([
+        "",
+        "Nếu provider lỗi/quota/timeout: bot hoàn Xu nếu đã trừ theo chính sách hiện có.",
+    ])
+    return rows
+
+def pricing_video_lines() -> list[str]:
+    pricing = video_tier_pricing_payload()
+    rows = [
+        "🎬 <b>GIÁ VIDEO AI</b>",
+        "",
+        "Chọn tier video trong flow tạo video. Bot luôn hỏi xác nhận trước khi trừ Xu.",
+        "",
+    ]
+    for tier in VIDEO_TIER_ORDER:
+        payload = pricing.get(tier) or {}
+        if tier == "premium":
+            rows.append(f"• {payload.get('label') or 'Video premium'}: <b>admin-only / liên hệ admin</b> — {html.escape(payload.get('note') or '')}")
+        else:
+            rows.append(f"• {payload.get('label') or tier}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(payload.get('note') or '')}")
+    rows.extend([
+        "",
+        "Tỉ lệ hỗ trợ: 9:16, 16:9, 1:1, 4:5, 3:4.",
+        "Video sẽ vào queue và tự gửi kết quả khi hoàn tất.",
+    ])
+    return rows
+
+def pricing_combo_lines() -> list[str]:
+    combos = video_combo_pricing_payload()
+    rows = [
+        "🎁 <b>COMBO TOAN AAS</b>",
+        "",
+        "Combo là gói ưu đãi tiết kiệm, không cộng điểm nâng hạng/thưởng nạp và không quy đổi toàn bộ thành Xu tự do.",
+        "",
+    ]
+    for item in combos:
+        label = str(item.get("label") or "")
+        price = int(item.get("price_vnd") or 0)
+        summary = html.escape(str(item.get("summary") or ""))
+        rows.append(f"• {html.escape(label)} — <b>{price:,}đ</b> — {summary}".replace(",", "."))
+    rows.extend([
+        "",
+        "Nếu combo checkout chưa bật, hãy liên hệ admin để mua combo hoặc nạp Xu theo mệnh giá.",
+    ])
+    return rows
+
+def pricing_detail_keyboard(section: str = "main", lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    if section == "combo":
+        rows.append([InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")])
+        rows.append([InlineKeyboardButton("💳 Mua/Nạp Xu", callback_data="menu|main_topup")])
+        rows.append([InlineKeyboardButton("👨‍💼 Liên hệ admin để mua combo", callback_data="menu|support")])
+    elif section in {"image", "video"}:
+        rows.append([
+            InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
+            InlineKeyboardButton("🎁 Combo", callback_data="pricing|combo"),
+        ])
+    rows.append([InlineKeyboardButton(ui_text(lang, "pricing.back"), callback_data="pricing|main"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
 def pricing_xu_lines() -> list[str]:
     return [
         "💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>",
@@ -53909,15 +53989,16 @@ def pricing_xu_lines() -> list[str]:
         "<b>Quy đổi nội bộ:</b>",
         "10.000đ = 100 Xu dịch vụ",
         "",
-        "<b>Gói nạp:</b>",
+        "<b>Mệnh giá nạp:</b>",
         "• 10.000đ → 100 Xu",
+        "• 20.000đ → 200 Xu",
         "• 50.000đ → 500 Xu",
         "• 100.000đ → 1.000 Xu",
         "• 200.000đ → 2.000 Xu",
         "• 500.000đ → 5.000 Xu",
         "• 1.000.000đ → 10.000 Xu nếu có mở",
         "",
-        "<b>Launch Bonus lần đầu mua gói:</b>",
+        "<b>Launch Bonus lần đầu mua mệnh giá:</b>",
         "• 50k: 500 Xu gốc + 30 Xu = 530 Xu",
         "• 100k: 1.000 Xu gốc + 50 Xu = 1.050 Xu",
         "• 200k: 2.000 Xu gốc + 150 Xu = 2.150 Xu",
@@ -53925,8 +54006,8 @@ def pricing_xu_lines() -> list[str]:
         "",
         "<b>Quy tắc:</b>",
         "• Nạp Xu thủ công CÓ tính vào tổng nạp để xét hạng thành viên.",
-        "• Gói nạp nhận Xu gốc giống nhau cho mọi user.",
-        "• Hạng thành viên không làm tăng Xu gói nạp.",
+        "• Mệnh giá nạp nhận Xu gốc giống nhau cho mọi user.",
+        "• Hạng thành viên không làm tăng Xu theo mệnh giá nạp.",
         "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ đủ điều kiện.",
         "• Gói tháng là sản phẩm tách biệt, không nằm trong bảng nạp Xu.",
         "• Xu không rút tiền, không chuyển nhượng.",
@@ -54067,7 +54148,7 @@ def member_policy_lines() -> list[str]:
         "• Có bonus lên hạng một lần nếu chính sách đang bật.",
         "• Không giảm tiền nạp theo hạng.",
         "• Không cộng thêm Xu định kỳ theo hạng.",
-        "• Gói nạp Xu gốc giống nhau cho mọi user.",
+        "• Mệnh giá nạp Xu gốc giống nhau cho mọi user.",
         "",
         "<b>Lý do:</b>",
         "Điều kiện này giúp tránh lạm dụng/lạm phát hạn mức, đồng thời giữ gói tháng cho khách có nhu cầu thật.",
@@ -54238,11 +54319,11 @@ def pricing_plans_lines_i18n(lang: str = "vi") -> list[str]:
 
 async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
-    await update.message.reply_text(
-        "\n".join(pricing_main_lines_i18n(lang)),
-        parse_mode="HTML",
-        reply_markup=pricing_main_keyboard(lang),
-    )
+    try:
+        await send_pricing_lines(update.message, pricing_main_lines_i18n(lang), pricing_main_keyboard(lang), limit=3600)
+    except Exception as e:
+        logger.warning("Pricing command failed | %s", sanitize_log_text(str(e))[:240])
+        await update.message.reply_text("⚠️ Bảng giá đang tải lỗi tạm thời. Bot chưa trừ Xu. Vui lòng thử lại sau.")
 
 async def cmd_pricing_xu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
@@ -54516,6 +54597,14 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
         clear_media_creator_pending_states(query.from_user.id)
     if action == "xu":
         return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang), pricing_xu_keyboard(lang))
+    if action == "image":
+        return await edit_or_send_pricing_lines(query, pricing_image_lines(), pricing_detail_keyboard("image", lang))
+    if action == "video":
+        return await edit_or_send_pricing_lines(query, pricing_video_lines(), pricing_detail_keyboard("video", lang))
+    if action == "combo":
+        return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_detail_keyboard("combo", lang))
+    if action == "my_packages":
+        return await edit_or_send_pricing_lines(query, [user_package_summary_text(query.from_user.id)], pricing_detail_keyboard("combo", lang))
     if action == "plans":
         return await edit_or_send_pricing_lines(query, pricing_plans_lines_i18n(lang), pricing_plans_keyboard(lang))
     if action == "vip":
@@ -54806,7 +54895,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         discount_rate = int(get_member_service_discount_rate(uid) or 0)
         member_note = (
             f"🎯 Ưu đãi {html.escape(badge)}: giảm <b>{discount_rate}%</b> khi tiêu Xu cho dịch vụ đủ điều kiện.\n"
-            "Gói nạp nhận Xu gốc giống mọi khách hàng; hạng thành viên không cộng thêm Xu định kỳ khi nạp."
+            "Mệnh giá nạp nhận Xu gốc giống mọi khách hàng; hạng thành viên không cộng thêm Xu định kỳ khi nạp."
         )
     lines = [
         "🤖 <b>Chế độ AI hiện tại</b>",
@@ -55213,10 +55302,10 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Lưu ý: nếu nhập mã khác, mã mới sẽ thay mã này.\n\n"
         )
     payment_freeze_on = flag_on("payment_freeze")
-    payment_title = "MUA/NẠP GÓI XU DỊCH VỤ — QR THỦ CÔNG AN TOÀN" if payment_freeze_on else "MUA/NẠP GÓI XU DỊCH VỤ (QR ĐỘNG) — TOAN AAS"
+    payment_title = "NẠP XU DỊCH VỤ — QR THỦ CÔNG AN TOÀN" if payment_freeze_on else "NẠP XU DỊCH VỤ (QR ĐỘNG) — TOAN AAS"
     payment_mode_note = (
         "🚧 <b>PayOS QR động đang khóa an toàn.</b>\n"
-        "Nếu cần nạp thủ công, dùng <code>/thucong 10k</code>, <code>/thucong 50k</code> hoặc gói tương ứng. "
+        "Nếu cần nạp thủ công, bấm <b>🏦 Nạp thủ công</b> bên dưới. "
         "Admin/owner chỉ cộng Xu sau khi đối soát tiền thật đã vào tài khoản.\n\n"
         if payment_freeze_on else
         "⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. "
@@ -55227,36 +55316,34 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 ID Telegram: <code>{uid}</code>\n"
         f"🪙 Số dư hiện tại: <b>{credits} Xu dịch vụ</b>\n\n"
         f"🎁 <b>Có mã ưu đãi?</b>\n"
-        f"Nhập <code>/promo FIRST30</code> trước khi chọn gói nạp.\n"
+        f"Nhập <code>/promo FIRST30</code> trước khi chọn mệnh giá nạp.\n"
         f"Ưu đãi áp dụng cho đơn nạp từ 50.000đ trở lên.\n"
-        f"Gói 10k/20k dùng để thử nghiệm, không áp dụng mã ưu đãi.\n"
+        f"Mệnh giá 10k/20k dùng để thử nghiệm, không áp dụng mã ưu đãi.\n"
         f"Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n\n"
         f"{pending_text}"
-        f"<b>🛒 BẢNG GÓI XU DỊCH VỤ:</b>\n"
-        f"Quy đổi sử dụng nội bộ theo gói: 10.000đ = 100 Xu dịch vụ.\n"
-        f"• Gói Dùng Thử: 10.000đ: <b>100 Xu dịch vụ</b>\n"
-        f"• Gói Nhỏ: 20.000đ: <b>200 Xu dịch vụ</b>\n"
-        f"• Gói Trung: 50.000đ: <b>500 Xu dịch vụ</b> + 30 Xu dịch vụ Launch Bonus lần đầu mua gói = <b>530 Xu dịch vụ</b>\n"
-        f"• Gói Tiêu Chuẩn: 100.000đ: <b>1.000 Xu dịch vụ</b> + 50 Xu dịch vụ Launch Bonus lần đầu mua gói = <b>1.050 Xu dịch vụ</b>\n"
-        f"• Gói Nâng Cao: 200.000đ: <b>2.000 Xu dịch vụ</b> + 150 Xu dịch vụ Launch Bonus lần đầu mua gói = <b>2.150 Xu dịch vụ</b>\n"
-        f"• Gói Doanh Nghiệp: 500.000đ: <b>5.000 Xu dịch vụ</b> + 500 Xu dịch vụ Launch Bonus lần đầu mua gói = <b>5.500 Xu dịch vụ</b>\n\n"
-        f"🎁 Launch Bonus theo gói chỉ áp dụng 1 lần cho mỗi tài khoản ở từng gói 50k/100k/200k/500k.\n"
-        f"Các lần mua lại cùng gói sẽ nhận Xu dịch vụ gốc.\n\n"
-        f"🪪 Hạng thành viên không làm tăng Xu gói nạp. Ưu đãi hạng chỉ áp dụng khi bạn tiêu Xu cho dịch vụ đủ điều kiện.\n\n"
+        f"<b>🛒 MỆNH GIÁ NẠP XU:</b>\n"
+        f"Quy đổi sử dụng nội bộ: 10.000đ = 100 Xu dịch vụ.\n"
+        f"• 10k: <b>100 Xu dịch vụ</b>\n"
+        f"• 20k: <b>200 Xu dịch vụ</b>\n"
+        f"• 50k: <b>500 Xu dịch vụ</b> + 30 Xu dịch vụ Launch Bonus lần đầu mua = <b>530 Xu dịch vụ</b>\n"
+        f"• 100k: <b>1.000 Xu dịch vụ</b> + 50 Xu dịch vụ Launch Bonus lần đầu mua = <b>1.050 Xu dịch vụ</b>\n"
+        f"• 200k: <b>2.000 Xu dịch vụ</b> + 150 Xu dịch vụ Launch Bonus lần đầu mua = <b>2.150 Xu dịch vụ</b>\n"
+        f"• 500k: <b>5.000 Xu dịch vụ</b> + 500 Xu dịch vụ Launch Bonus lần đầu mua = <b>5.500 Xu dịch vụ</b>\n\n"
+        f"🎁 Launch Bonus theo mệnh giá chỉ áp dụng 1 lần cho mỗi tài khoản ở từng mệnh giá 50k/100k/200k/500k.\n"
+        f"Các lần mua lại cùng mệnh giá sẽ nhận Xu dịch vụ gốc.\n\n"
+        f"🪪 Hạng thành viên không làm tăng Xu theo mệnh giá nạp. Ưu đãi hạng chỉ áp dụng khi bạn tiêu Xu cho dịch vụ đủ điều kiện.\n\n"
         f"🎁 Trial {TRIAL_CREDITS} Xu chỉ cấp 1 lần theo ID Telegram. Xóa chat hoặc start lại không làm nhận lại trial.\n\n"
         f"{service_credit_legal_note()}\n\n"
         f"🏦 Nếu phải nạp thủ công, nội dung chuyển khoản sẽ là: <code>AAS {uid} &lt;order_code&gt;</code>\n\n"
         f"{payment_mode_note}"
-        f"👇 <b>Vui lòng click chọn gói cước mong muốn dưới đây:</b>"
+        f"👇 <b>Vui lòng bấm chọn mệnh giá muốn nạp:</b>"
     )
     buttons = [
-        [InlineKeyboardButton("🧪 Gói Dùng Thử (10k)", callback_data=payos_package_callback_data("10k", uid))],
-        [InlineKeyboardButton("📦 Gói Nhỏ (20k)", callback_data=payos_package_callback_data("20k", uid))],
-        [InlineKeyboardButton("⚡ Gói Trung (50k)", callback_data=payos_package_callback_data("50k", uid))],
-        [InlineKeyboardButton("⭐ Gói Tiêu Chuẩn (100k)", callback_data=payos_package_callback_data("100k", uid))],
-        [InlineKeyboardButton("🚀 Gói Nâng Cao (200k)", callback_data=payos_package_callback_data("200k", uid))],
-        [InlineKeyboardButton("🏢 Gói Doanh Nghiệp (500k)", callback_data=payos_package_callback_data("500k", uid))],
-        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data("manual_custom", uid))],
+        [InlineKeyboardButton("💳 10k", callback_data=payos_package_callback_data("10k", uid)), InlineKeyboardButton("💳 20k", callback_data=payos_package_callback_data("20k", uid))],
+        [InlineKeyboardButton("💳 50k", callback_data=payos_package_callback_data("50k", uid)), InlineKeyboardButton("💳 100k", callback_data=payos_package_callback_data("100k", uid))],
+        [InlineKeyboardButton("💳 200k", callback_data=payos_package_callback_data("200k", uid)), InlineKeyboardButton("💳 500k", callback_data=payos_package_callback_data("500k", uid))],
+        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data("manual_custom", uid)), InlineKeyboardButton("🔙 Quay lại", callback_data="pricing|main")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ]
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -67454,7 +67541,7 @@ def member_referral_policy_text(profile: dict) -> str:
     cap = int(profile.get("ref_cap") or 0)
     if percent <= 0 or cap <= 0:
         return "Newbie: chưa mở thưởng Xu, hệ thống chỉ ghi nhận referral."
-    return f"{percent}% Xu gốc gói nạp đầu tiên, tối đa {cap} Xu cho mỗi khách được giới thiệu nạp lần đầu."
+    return f"{percent}% Xu gốc mệnh giá nạp đầu tiên, tối đa {cap} Xu cho mỗi khách được giới thiệu nạp lần đầu."
 
 def member_referral_policy_table_text() -> str:
     return (
@@ -67577,7 +67664,7 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         service_line = (
             f"• Ưu đãi dịch vụ hiện tại: giảm <b>{int(get_member_service_discount_rate(uid) or 0)}%</b> khi tiêu Xu\n"
             "• Hạng thành viên không cộng thêm Xu định kỳ khi nạp tiền\n"
-            "• Gói nạp 10k/20k/50k/100k/200k/500k nhận Xu gốc như nhau cho mọi khách"
+            "• Mệnh giá nạp 10k/20k/50k/100k/200k/500k nhận Xu gốc như nhau cho mọi khách"
         )
     text = (
         "🪪 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
@@ -67618,7 +67705,7 @@ async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 👑 VIP — từ 100.000.000đ hoặc admin duyệt: giảm 10% khi tiêu Xu",
         "",
         "<b>Nguyên tắc quan trọng</b>",
-        "• Gói nạp giống nhau cho mọi khách hàng.",
+        "• Mệnh giá nạp giống nhau cho mọi khách hàng.",
         "• Không áp dụng discount thành viên vào số Xu nạp.",
         "• Không có cộng thêm Xu định kỳ theo hạng ở mỗi lần nạp.",
         "• Gold nạp 100.000đ vẫn nhận Xu gốc như mọi khách; Gold chỉ được giảm 4% khi tiêu Xu cho dịch vụ.",
@@ -68209,7 +68296,7 @@ async def cmd_set_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "\n\n🎁 <b>Ưu đãi hạng đã cập nhật:</b>\n"
             f"• Giảm {tier_discount}% khi tiêu Xu cho dịch vụ đủ điều kiện\n"
             "• Không cộng thêm Xu định kỳ theo hạng ở mỗi lần nạp\n"
-            "• Gói nạp vẫn nhận Xu gốc giống mọi khách hàng"
+            "• Mệnh giá nạp vẫn nhận Xu gốc giống mọi khách hàng"
         )
     notify_warning = ""
     try:
@@ -69450,7 +69537,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
         expected_line = (
-            f"💰 Gói khách chọn: <b>{amount:,}đ → {xu} Xu</b>\n"
+            f"💰 Mệnh giá khách chọn: <b>{amount:,}đ → {xu} Xu</b>\n"
             f"🆔 Mã đơn: <code>{order_code}</code>\n"
             if amount and xu and order_code else ""
         )
