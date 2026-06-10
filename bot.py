@@ -30967,6 +30967,7 @@ SHOPAIKEY_ACTIVE_JOB_STATUSES = {
     "STARTED",
     "GENERATING",
 }
+SHOPAIKEY_IMAGE_CONFIRM_SUPPRESS_MINUTES = env_int("SHOPAIKEY_IMAGE_CONFIRM_SUPPRESS_MINUTES", 30)
 
 def record_provider_error(provider: str, tool: str, error_class: str, message: str = "") -> dict:
     provider = str(provider or "unknown").strip().lower()
@@ -31242,6 +31243,41 @@ def shopaikey_active_job_for_user(user_id, job_type: str = "") -> dict | None:
         return dict(rows[0]) if rows else None
     finally:
         conn.close()
+
+def shopaikey_recent_image_job_for_callback(user_id, minutes: int | None = None) -> dict | None:
+    uid = str(user_id or "").strip()
+    if not uid:
+        return None
+    window_minutes = max(1, int(minutes if minutes is not None else SHOPAIKEY_IMAGE_CONFIRM_SUPPRESS_MINUTES or 30))
+    since = datetime_text(datetime.now() - timedelta(minutes=window_minutes))
+    statuses = tuple(sorted(set(SHOPAIKEY_ACTIVE_JOB_STATUSES) | {"SUCCESS"}))
+    placeholders = ",".join("?" for _ in statuses)
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            f"""
+            SELECT *
+            FROM shopaikey_jobs
+            WHERE user_id=?
+              AND job_type='image'
+              AND UPPER(status) IN ({placeholders})
+              AND COALESCE(updated_at, created_at, '')>=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (uid, *statuses, since),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def shopaikey_processed_callback_text(lang: str = "vi", job: dict | None = None) -> str:
+    if normalize_user_language(lang) == "zh":
+        return "此请求已处理。请查看下方结果。"
+    if normalize_user_language(lang) != "vi":
+        return "This request has already been processed. Please check the result below."
+    return "Yêu cầu này đã được xử lý. Vui lòng xem kết quả bên dưới."
 
 def record_shopaikey_billing_event(user_id, job_id: int, event_type: str, amount_xu: int = 0, balance_before: int = 0, balance_after: int = 0, reason: str = ""):
     conn = db_connect()
@@ -38164,6 +38200,9 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         return await safe_edit_or_send(query, ui_text(lang, "common.invalid_request"))
     pending = pop_shopaikey_pending_confirmation(token, uid)
     if not pending:
+        recent_image_job = shopaikey_recent_image_job_for_callback(uid)
+        if recent_image_job:
+            return await safe_edit_or_send(query, shopaikey_processed_callback_text(lang, recent_image_job))
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     job_type = str(pending.get("job_type") or "").lower()
     prompt = str(pending.get("prompt") or "").strip()

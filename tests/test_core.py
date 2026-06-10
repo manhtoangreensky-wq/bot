@@ -1710,6 +1710,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.video_tier_payload("premium")["admin_only"] is True
     assert bot.video_tier_payload("premium")["enabled"] is False
     assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / standard:ON / high:ON / premium:OFF"
+    callback_source = source_between(bot_source_text(), "async def handle_shopaikey_public_callback", "class TranslationProviderError")
+    assert "shopaikey_recent_image_job_for_callback" in callback_source
+    assert callback_source.index("shopaikey_recent_image_job_for_callback") < callback_source.index("common.expired_not_charged")
     tier_text = bot.public_image_tier_selection_text()
     assert "Bạn muốn tạo ảnh chất lượng nào" in tier_text
     tier_buttons = [button for row in bot.public_image_tier_keyboard().inline_keyboard for button in row]
@@ -1752,8 +1755,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
             retry_warranty_count=1,
         )
         assert bot.image_job_retry_warranty_remaining(warranty_job_id) == 0
+        active_callback_job = bot.shopaikey_recent_image_job_for_callback("u_warranty")
+        assert active_callback_job and int(active_callback_job["id"]) == warranty_job_id
+        assert "đã được xử lý" in bot.shopaikey_processed_callback_text("vi", active_callback_job)
+        assert "Bot chưa trừ Xu" not in bot.shopaikey_processed_callback_text("vi", active_callback_job)
         bot.update_shopaikey_job(job_id=warranty_job_id, status="SUCCESS")
         assert bot.image_job_retry_warranty_remaining(warranty_job_id) == 1
+        success_callback_job = bot.shopaikey_recent_image_job_for_callback("u_warranty")
+        assert success_callback_job and int(success_callback_job["id"]) == warranty_job_id
         warranty_buttons = [button for row in bot.public_image_success_keyboard(warranty_job_id, "standard_warranty").inline_keyboard for button in row]
         assert any(button.callback_data == f"tvflow|image_warranty_retry_{warranty_job_id}" for button in warranty_buttons)
         bot.update_shopaikey_job(job_id=warranty_job_id, retry_warranty_used=1)
@@ -1762,6 +1771,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         assert "🖼 Tạo ảnh mới theo bảng giá" in exhausted_buttons
         assert "✍️ Sửa prompt ảnh" in exhausted_buttons
         assert "Bạn đã dùng hết 1 lần tạo lại bảo hành" in bot.image_warranty_retry_exhausted_text()
+        conn = bot.db_connect()
+        try:
+            old_time = "2000-01-01 00:00:00"
+            conn.execute("UPDATE shopaikey_jobs SET updated_at=?, created_at=? WHERE id=?", (old_time, old_time, warranty_job_id))
+            conn.commit()
+        finally:
+            conn.close()
+        assert bot.shopaikey_recent_image_job_for_callback("u_warranty", minutes=30) is None
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
