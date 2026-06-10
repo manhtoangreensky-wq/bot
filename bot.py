@@ -53925,18 +53925,18 @@ def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     labels = {
         "vi": {
             "topup": "💳 Nạp Xu", "video": "🎬 Giá video", "image": "🖼 Giá ảnh",
-            "combo": "🎁 Combo", "my": "📦 Gói của tôi", "monthly": "📆 Gói tháng",
-            "member": "👑 Thành viên", "terms": "📜 Điều khoản Xu", "main": "🏠 Menu chính",
+            "combo": "🎁 Combo", "my": "📦 Gói của tôi", "monthly": "📅 Gói tháng",
+            "terms": "📜 Điều khoản Xu", "main": "🏠 Menu chính",
         },
         "en": {
             "topup": "💳 Top up Xu", "video": "🎬 Video pricing", "image": "🖼 Image pricing",
-            "combo": "🎁 Combos", "my": "📦 My packages", "monthly": "📆 Monthly plans",
-            "member": "👑 Membership", "terms": "📜 Xu terms", "main": "🏠 Main menu",
+            "combo": "🎁 Combos", "my": "📦 My packages", "monthly": "📅 Monthly plans",
+            "terms": "📜 Xu terms", "main": "🏠 Main menu",
         },
         "zh": {
             "topup": "💳 充值 Xu", "video": "🎬 视频价格", "image": "🖼 图片价格",
-            "combo": "🎁 组合套餐", "my": "📦 我的套餐", "monthly": "📆 月度套餐",
-            "member": "👑 会员等级", "terms": "📜 Xu 条款", "main": "🏠 主菜单",
+            "combo": "🎁 组合套餐", "my": "📦 我的套餐", "monthly": "📅 月度套餐",
+            "terms": "📜 Xu 条款", "main": "🏠 主菜单",
         },
     }.get(lang, {})
     return InlineKeyboardMarkup([
@@ -53950,13 +53950,10 @@ def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(labels.get("my", "📦 My packages"), callback_data="pricing|my_packages"),
-            InlineKeyboardButton(labels.get("monthly", "📆 Monthly plans"), callback_data="pricing|plans"),
+            InlineKeyboardButton(labels.get("monthly", "📅 Monthly plans"), callback_data="pricing|plans"),
         ],
         [
-            InlineKeyboardButton(labels.get("member", "👑 Membership"), callback_data="pricing|member"),
             InlineKeyboardButton(labels.get("terms", "📜 Xu terms"), callback_data="pricing|terms"),
-        ],
-        [
             InlineKeyboardButton(labels.get("main", "🏠 Main menu"), callback_data="menu|main"),
         ],
     ])

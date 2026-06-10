@@ -1776,8 +1776,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🖼 Giá ảnh",
         "🎁 Combo",
         "📦 Gói của tôi",
-        "📆 Gói tháng",
-        "👑 Thành viên",
+        "📅 Gói tháng",
         "📜 Điều khoản Xu",
         "🏠 Menu chính",
     ]
