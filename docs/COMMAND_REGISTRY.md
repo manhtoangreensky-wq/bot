@@ -112,6 +112,12 @@ These handlers remain in code for admin/internal testing but are blocked for nor
 | `/mark_payos_test` | `cmd_mark_payos_test` | YES | YES | Admin records PayOS real test PASS/FAIL/NOT_TESTED; does not alter payments. |
 | `/pricing_admin` | `cmd_pricing_admin` | YES | YES | Admin-only formula/constants for Pricing Engine V2. |
 | `/banggia` | `cmd_pricing` | YES | YES | Public/admin price menu entry shown in admin menu for quick access. |
+| `/package_catalog` | `cmd_package_catalog` | YES | YES | Lists admin-grantable combo/monthly package catalog. |
+| `/grant_combo` | `cmd_grant_combo` | YES | YES | Admin grants a combo package; does not add Xu or rank/top-up points. |
+| `/grant_monthly` | `cmd_grant_monthly` | YES | YES | Admin grants a monthly package with expiry; does not add Xu or rank/top-up points. |
+| `/user_packages` | `cmd_user_packages` | YES | YES | Shows a user's active/revoked package wallet and remaining item slots. |
+| `/adjust_package` | `cmd_adjust_package` | YES | YES | Admin adjusts package item quantities without changing Xu balance. |
+| `/revoke_package` | `cmd_revoke_package` | YES | YES | Admin revokes a package while preserving history. |
 | `/shopaikey_status` | `cmd_shopaikey_status` | YES | YES | ShopAIKey admin status, usage and smoke-test snapshots. |
 | `/shopaikey_usage` | `cmd_shopaikey_usage` | YES | YES | ShopAIKey usage monitor, no key leakage. |
 | `/shopaikey_video_job` | `cmd_shopaikey_video_job` | YES | YES | Query ShopAIKey video job status. |

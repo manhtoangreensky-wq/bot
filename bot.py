@@ -1742,6 +1742,51 @@ def init_db():
         reason TEXT,
         created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_packages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        package_code TEXT,
+        package_type TEXT DEFAULT 'combo',
+        label TEXT DEFAULT '',
+        source TEXT DEFAULT 'admin_grant',
+        status TEXT DEFAULT 'active',
+        granted_by TEXT DEFAULT '',
+        granted_at TEXT,
+        starts_at TEXT,
+        expires_at TEXT DEFAULT '',
+        revoked_at TEXT DEFAULT '',
+        revoked_by TEXT DEFAULT '',
+        note TEXT DEFAULT ''
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_package_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        package_id INTEGER,
+        user_id TEXT,
+        item_type TEXT,
+        total_quantity INTEGER DEFAULT 0,
+        used_quantity INTEGER DEFAULT 0,
+        refunded_quantity INTEGER DEFAULT 0,
+        remaining_quantity INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'active',
+        expires_at TEXT DEFAULT '',
+        updated_at TEXT,
+        note TEXT DEFAULT ''
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS package_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        package_id INTEGER DEFAULT 0,
+        package_item_id INTEGER DEFAULT 0,
+        related_job_id INTEGER DEFAULT 0,
+        item_type TEXT DEFAULT '',
+        event_type TEXT,
+        delta_quantity INTEGER DEFAULT 0,
+        balance_before INTEGER DEFAULT 0,
+        balance_after INTEGER DEFAULT 0,
+        created_by TEXT DEFAULT '',
+        reason TEXT DEFAULT '',
+        created_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS trend_workflow_outputs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -2459,6 +2504,12 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_trial_bonus_claims_ip ON trial_bonus_claims(ip_hash)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_trial_bonus_claims_prefix ON trial_bonus_claims(ip_prefix_hash)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_trial_bonus_claims_created ON trial_bonus_claims(created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_packages_user_status ON user_packages(user_id, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_packages_code ON user_packages(user_id, package_code, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_package_items_user_type ON user_package_items(user_id, item_type, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_package_items_package ON user_package_items(package_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_package_events_user ON package_events(user_id, created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_package_events_job_refund ON package_events(related_job_id, package_item_id, event_type)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_media_factory_jobs_user ON media_factory_jobs(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_media_factory_jobs_status ON media_factory_jobs(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_trend_workflow_outputs_user ON trend_workflow_outputs(user_id, created_at)")
@@ -2508,6 +2559,11 @@ def init_db():
         ("retry_warranty_count", "INTEGER DEFAULT 0"),
         ("retry_warranty_used", "INTEGER DEFAULT 0"),
         ("retry_warranty_parent_job_id", "INTEGER DEFAULT 0"),
+        ("package_id", "INTEGER DEFAULT 0"),
+        ("package_item_id", "INTEGER DEFAULT 0"),
+        ("package_item_type", "TEXT DEFAULT ''"),
+        ("package_units_used", "INTEGER DEFAULT 0"),
+        ("package_refund_status", "TEXT DEFAULT ''"),
     ]:
         try:
             c.execute(f"ALTER TABLE shopaikey_jobs ADD COLUMN {col} {col_type}")
@@ -27314,27 +27370,34 @@ def admin_center_text(section: str = "main") -> str:
         "• <code>/set_member_tier &lt;ID&gt; &lt;tier&gt;</code> — alias của /settier\n"
         "• <code>/setvip &lt;ID&gt; &lt;silver|gold|platinum|diamond|vip&gt;</code> — đặt nhanh 5 hạng đã chốt; không hỗ trợ standard/basic/0\n"
         "• <code>/member_user &lt;ID&gt;</code> — xem hạng/quyền lợi user\n\n"
-        "<b>C. Bill thủ công</b>\n"
+        "<b>C. Gói / Combo</b>\n"
+        "• <code>/package_catalog</code> — xem catalog combo/gói tháng\n"
+        "• <code>/grant_combo &lt;ID&gt; &lt;combo_code&gt; [note]</code> — cấp combo admin, không cộng Xu\n"
+        "• <code>/grant_monthly &lt;ID&gt; &lt;plan_code&gt; &lt;days&gt; [note]</code> — cấp gói tháng admin, không cộng Xu\n"
+        "• <code>/user_packages &lt;ID&gt;</code> — xem lượt còn lại\n"
+        "• <code>/adjust_package &lt;ID&gt; &lt;package_id_or_code&gt; &lt;item_type&gt; &lt;delta&gt; [note]</code> — chỉnh lượt thủ công\n"
+        "• <code>/revoke_package &lt;ID&gt; &lt;package_id_or_code&gt; [note]</code> — thu hồi gói/combo\n\n"
+        "<b>D. Bill thủ công</b>\n"
         "• <code>/pending</code> — xem bill đang chờ\n"
         "• <code>/duyet &lt;bill_id&gt; &lt;Xu&gt;</code> — duyệt bill sau khi đối soát tiền thật\n"
         "• <code>/tuchoi &lt;bill_id&gt;</code> — từ chối bill\n"
         "• <code>/thucong</code> — hướng dẫn khách nạp thủ công\n\n"
-        "<b>D. PayOS</b>\n"
+        "<b>E. PayOS</b>\n"
         "• <code>/payos_debug_create 10000</code> — test tạo checkout\n"
         "• <code>/payos_status &lt;order_code&gt;</code>\n"
         "• <code>/checkpayos &lt;order_code&gt;</code>\n"
         "• <code>/payos_key_fingerprint</code>\n\n"
-        "<b>E. Provider & Tool</b>\n"
+        "<b>F. Provider & Tool</b>\n"
         "• <code>/providers</code> — xem trạng thái API\n"
         "• <code>/tool_test_ai</code> — test AI\n"
         "• <code>/tool_test_image_debug</code> — test image provider\n"
         "• <code>/sales_ready</code> — kiểm tra sẵn sàng bán\n\n"
-        "<b>F. Báo cáo</b>\n"
+        "<b>G. Báo cáo</b>\n"
         "• <code>/dashboard</code>\n"
         "• <code>/stats</code>\n"
         "• <code>/admin_report_month YYYY-MM</code>\n"
         "• <code>/admin_report_year YYYY</code>\n\n"
-        "<b>G. Bảo mật</b>\n"
+        "<b>H. Bảo mật</b>\n"
         "• <code>/admin_docs</code>\n"
         "• <code>/security_status</code>\n"
         "• <code>/risk_checklist</code>\n"
@@ -27365,6 +27428,122 @@ async def cmd_admin_tools_help(update: Update, context: ContextTypes.DEFAULT_TYP
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     await update.message.reply_text(admin_center_text("tools"), parse_mode="HTML")
+
+async def cmd_package_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(package_catalog_text(), parse_mode="HTML")
+
+async def cmd_grant_combo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = context.args or []
+    if len(args) < 2:
+        return await update.message.reply_text("Cú pháp: /grant_combo <ID> <combo_code> [note]")
+    user_id = args[0]
+    combo_code = args[1]
+    note = " ".join(args[2:]).strip()
+    result = grant_user_package(user_id, combo_code, "combo", str(update.effective_user.id), 0, note)
+    if not result.get("ok"):
+        return await update.message.reply_text("⚠️ Không cấp được combo. Kiểm tra ID hoặc combo_code bằng /package_catalog.")
+    entry = result.get("entry") or {}
+    await update.message.reply_text(
+        "✅ Đã cấp combo.\n\n"
+        f"• User: <code>{html.escape(str(user_id))}</code>\n"
+        f"• Package ID: <code>{int(result.get('package_id') or 0)}</code>\n"
+        f"• Combo: <code>{html.escape(str(combo_code))}</code> — <b>{html.escape(entry.get('label') or combo_code)}</b>\n"
+        f"• Lượt: {html.escape(package_items_summary(entry.get('items') or {}))}\n\n"
+        "Gói/combo không quy đổi thành Xu và không tính điểm rank/top-up.",
+        parse_mode="HTML",
+    )
+
+async def cmd_grant_monthly(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = context.args or []
+    if len(args) < 3:
+        return await update.message.reply_text("Cú pháp: /grant_monthly <ID> <plan_code> <days> [note]")
+    user_id = args[0]
+    plan_code = args[1]
+    try:
+        days = max(1, int(args[2]))
+    except Exception:
+        return await update.message.reply_text("⚠️ days phải là số ngày, ví dụ: /grant_monthly 7817576663 starter_monthly 30")
+    note = " ".join(args[3:]).strip()
+    result = grant_user_package(user_id, plan_code, "monthly", str(update.effective_user.id), days, note)
+    if not result.get("ok"):
+        return await update.message.reply_text("⚠️ Không cấp được gói tháng. Kiểm tra ID hoặc plan_code bằng /package_catalog.")
+    entry = result.get("entry") or {}
+    await update.message.reply_text(
+        "✅ Đã cấp gói tháng.\n\n"
+        f"• User: <code>{html.escape(str(user_id))}</code>\n"
+        f"• Package ID: <code>{int(result.get('package_id') or 0)}</code>\n"
+        f"• Plan: <code>{html.escape(str(plan_code))}</code> — <b>{html.escape(entry.get('label') or plan_code)}</b>\n"
+        f"• Hạn: <code>{html.escape(str(result.get('expires_at') or '-')[:16])}</code>\n"
+        f"• Lượt: {html.escape(package_items_summary(entry.get('items') or {}))}\n\n"
+        "Gói tháng là lượt dịch vụ, không cộng Xu và không tính điểm rank/top-up.",
+        parse_mode="HTML",
+    )
+
+async def cmd_user_packages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = context.args or []
+    if not args:
+        return await update.message.reply_text("Cú pháp: /user_packages <ID>")
+    user_id = args[0]
+    await update.message.reply_text(
+        f"🎁 <b>GÓI / COMBO USER</b>\n\nUser: <code>{html.escape(str(user_id))}</code>\n\n{user_package_summary_text(user_id, admin_view=True)}",
+        parse_mode="HTML",
+    )
+
+async def cmd_adjust_package(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = context.args or []
+    if len(args) < 4:
+        return await update.message.reply_text("Cú pháp: /adjust_package <ID> <package_id_or_code> <item_type> <delta> [note]")
+    user_id, identifier, item_type_raw, delta_raw = args[:4]
+    item_type = normalize_package_item_type(item_type_raw)
+    if not item_type:
+        return await update.message.reply_text("⚠️ item_type không hợp lệ. Xem /package_catalog hoặc dùng video_common/image_standard/trend_workflow...")
+    try:
+        delta = int(delta_raw)
+    except Exception:
+        return await update.message.reply_text("⚠️ delta phải là số, ví dụ +2 hoặc -1.")
+    note = " ".join(args[4:]).strip()
+    result = adjust_user_package_item(user_id, identifier, item_type, delta, str(update.effective_user.id), note)
+    if not result.get("ok"):
+        return await update.message.reply_text(f"⚠️ Không chỉnh được gói: {html.escape(str(result.get('reason') or 'unknown'))}", parse_mode="HTML")
+    await update.message.reply_text(
+        "✅ Đã chỉnh lượt gói/combo.\n\n"
+        f"• User: <code>{html.escape(str(user_id))}</code>\n"
+        f"• Package ID: <code>{int(result.get('package_id') or 0)}</code>\n"
+        f"• Item: <b>{html.escape(package_item_display_name(item_type))}</b>\n"
+        f"• Trước/Sau: <b>{int(result.get('before') or 0)}</b> → <b>{int(result.get('after') or 0)}</b>\n\n"
+        "Không có Xu nào được cộng/trừ.",
+        parse_mode="HTML",
+    )
+
+async def cmd_revoke_package(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = context.args or []
+    if len(args) < 2:
+        return await update.message.reply_text("Cú pháp: /revoke_package <ID> <package_id_or_code> [note]")
+    user_id = args[0]
+    identifier = args[1]
+    note = " ".join(args[2:]).strip()
+    result = revoke_user_package(user_id, identifier, str(update.effective_user.id), note)
+    if not result.get("ok"):
+        return await update.message.reply_text("⚠️ Không tìm thấy gói/combo để thu hồi.")
+    await update.message.reply_text(
+        "✅ Đã thu hồi gói/combo.\n\n"
+        f"• User: <code>{html.escape(str(user_id))}</code>\n"
+        f"• Package ID: <code>{int(result.get('package_id') or 0)}</code>\n\n"
+        "Dữ liệu lịch sử được giữ lại, không xóa DB.",
+        parse_mode="HTML",
+    )
 
 async def cmd_profile_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -28815,6 +28994,609 @@ def media_workflow_pricing_payload() -> dict:
         "legacy_shopaikey_image_fallback": max(0, int(SHOPAIKEY_IMAGE_COST_XU or 0)),
         "legacy_shopaikey_video_fallback": max(0, int(SHOPAIKEY_VIDEO_COST_XU or 0)),
     }
+
+PACKAGE_WALLET_ENABLED = True
+PACKAGE_ADMIN_GRANT_ENABLED = True
+PACKAGE_REFUND_GUARD_ENABLED = True
+PACKAGE_RANK_POINTS_EXCLUDED = True
+
+PACKAGE_ITEM_TYPES = {
+    "image_low",
+    "image_standard",
+    "image_standard_warranty",
+    "image_high",
+    "image_high_warranty",
+    "video_experience",
+    "video_basic",
+    "video_common",
+    "video_standard",
+    "video_high",
+    "trend_workflow",
+    "music_prompt",
+    "music_library",
+    "custom_credit",
+}
+
+PACKAGE_ITEM_LABELS = {
+    "image_low": "Ảnh tiết kiệm",
+    "image_standard": "Ảnh tiêu chuẩn",
+    "image_standard_warranty": "Ảnh tiêu chuẩn + bảo hành",
+    "image_high": "Ảnh chất lượng cao",
+    "image_high_warranty": "Ảnh chất lượng cao + bảo hành",
+    "video_experience": "Video Trải Nghiệm",
+    "video_basic": "Video Cơ Bản",
+    "video_common": "Video Phổ Thông",
+    "video_standard": "Video Tiêu Chuẩn",
+    "video_high": "Video Cao Cấp",
+    "trend_workflow": "Trend workflow",
+    "music_prompt": "Music prompt",
+    "music_library": "Music/SFX library",
+    "custom_credit": "Custom credit",
+}
+
+def package_catalog_payload() -> dict:
+    return {
+        "combos": {
+            "tiktok_99k": {
+                "label": "Combo TikTok 99k",
+                "items": {"video_common": 3},
+                "note": "3 lượt Video Phổ Thông.",
+            },
+            "basic_199k": {
+                "label": "Combo Cơ Bản 199k",
+                "items": {"video_common": 3, "image_standard": 2},
+                "note": "3 video phổ thông + 2 ảnh tiêu chuẩn.",
+            },
+            "standard_299k": {
+                "label": "Combo Tiêu Chuẩn 299k",
+                "items": {"video_standard": 4, "image_standard": 3, "trend_workflow": 1},
+                "note": "Gói đều hơn cho nội dung bán hàng/review.",
+            },
+            "posting_499k": {
+                "label": "Combo Đăng Đều 499k",
+                "items": {"video_common": 5, "video_standard": 5},
+                "note": "Dành cho lịch đăng nhiều video.",
+            },
+            "product_ads_699k": {
+                "label": "Combo Quảng Cáo Sản Phẩm 699k",
+                "items": {"image_high": 5, "video_standard": 3, "video_high": 1, "trend_workflow": 2},
+                "note": "Ảnh/video quảng cáo sản phẩm.",
+            },
+            "pro_branding": {
+                "label": "Pro Branding",
+                "items": {},
+                "manual": True,
+                "note": "Manual/admin managed.",
+            },
+        },
+        "monthly": {
+            "starter_monthly": {
+                "label": "Starter Monthly",
+                "default_days": 30,
+                "items": {"image_standard": 10, "video_common": 3, "trend_workflow": 3},
+            },
+            "creator_monthly": {
+                "label": "Creator Monthly",
+                "default_days": 30,
+                "items": {"image_standard": 20, "video_standard": 8, "trend_workflow": 5},
+            },
+            "shop_monthly": {
+                "label": "Shop Monthly",
+                "default_days": 30,
+                "items": {"image_high": 30, "video_standard": 12, "video_high": 3, "trend_workflow": 10},
+            },
+            "pro_monthly": {
+                "label": "Pro Monthly",
+                "default_days": 30,
+                "items": {"image_high": 50, "video_standard": 20, "video_high": 5, "trend_workflow": 15},
+            },
+        },
+    }
+
+def normalize_package_item_type(value: str = "") -> str:
+    raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "video_low": "video_experience",
+        "video_trial": "video_experience",
+        "video_pho_thong": "video_common",
+        "video_phothong": "video_common",
+        "video_tieu_chuan": "video_standard",
+        "video_tieuchuan": "video_standard",
+        "image_standard_plus": "image_standard_warranty",
+        "image_high_plus": "image_high_warranty",
+    }
+    item_type = aliases.get(raw, raw)
+    return item_type if item_type in PACKAGE_ITEM_TYPES else ""
+
+def package_item_display_name(item_type: str, lang: str = "vi") -> str:
+    normalized = normalize_package_item_type(item_type)
+    return PACKAGE_ITEM_LABELS.get(normalized, normalized or "-")
+
+def package_item_type_for_image_tier(tier: str = "") -> str:
+    tier_norm = normalize_image_tier(tier)
+    return f"image_{tier_norm}"
+
+def package_item_type_for_video_tier(tier: str = "") -> str:
+    tier_norm = normalize_video_tier(tier)
+    return {
+        "low": "video_experience",
+        "basic": "video_basic",
+        "common": "video_common",
+        "standard": "video_standard",
+        "high": "video_high",
+    }.get(tier_norm, "")
+
+def package_catalog_entry(code: str, package_type: str = "") -> dict:
+    catalog = package_catalog_payload()
+    safe_code = str(code or "").strip().lower()
+    safe_type = str(package_type or "").strip().lower()
+    if safe_type in {"combo", "combos"}:
+        return dict((catalog.get("combos") or {}).get(safe_code) or {})
+    if safe_type in {"monthly", "month", "plan"}:
+        return dict((catalog.get("monthly") or {}).get(safe_code) or {})
+    for group in ("combos", "monthly"):
+        entry = dict((catalog.get(group) or {}).get(safe_code) or {})
+        if entry:
+            entry["package_type"] = "combo" if group == "combos" else "monthly"
+            return entry
+    return {}
+
+def package_catalog_text() -> str:
+    catalog = package_catalog_payload()
+    lines = [
+        "🎁 <b>PACKAGE CATALOG TOAN AAS</b>",
+        "",
+        "<b>Combo</b>",
+    ]
+    for code, entry in (catalog.get("combos") or {}).items():
+        items = entry.get("items") or {}
+        item_text = ", ".join(f"{package_item_display_name(k)} x{int(v or 0)}" for k, v in items.items()) or "manual/admin managed"
+        lines.append(f"• <code>{html.escape(code)}</code> — {html.escape(entry.get('label') or code)}: {html.escape(item_text)}")
+    lines.extend(["", "<b>Gói tháng</b>"])
+    for code, entry in (catalog.get("monthly") or {}).items():
+        items = entry.get("items") or {}
+        item_text = ", ".join(f"{package_item_display_name(k)} x{int(v or 0)}" for k, v in items.items())
+        lines.append(f"• <code>{html.escape(code)}</code> — {html.escape(entry.get('label') or code)} ({int(entry.get('default_days') or 30)} ngày): {html.escape(item_text)}")
+    lines.extend([
+        "",
+        "Các gói/combo là lượt dịch vụ, không quy đổi thành Xu, không tính điểm rank/top-up.",
+    ])
+    return "\n".join(lines)
+
+def package_items_summary(items: dict) -> str:
+    return ", ".join(f"{package_item_display_name(k)} x{int(v or 0)}" for k, v in (items or {}).items()) or "manual/admin managed"
+
+def parse_package_identifier(value: str = "") -> tuple[str, str]:
+    raw = str(value or "").strip()
+    if raw.isdigit():
+        return "id", raw
+    return "code", raw.lower()
+
+def package_expired(expires_at: str = "") -> bool:
+    expires_at = str(expires_at or "").strip()
+    if not expires_at:
+        return False
+    expires_dt = parse_now_text(expires_at)
+    return bool(expires_dt and datetime.now() > expires_dt)
+
+def expire_user_packages_lazy(user_id) -> None:
+    uid = str(user_id or "").strip()
+    if not uid:
+        return
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    now = now_text()
+    try:
+        rows = conn.execute(
+            "SELECT id, expires_at FROM user_packages WHERE user_id=? AND status='active' AND COALESCE(expires_at,'')<>''",
+            (uid,),
+        ).fetchall()
+        for row in rows:
+            if package_expired(row["expires_at"]):
+                conn.execute("UPDATE user_packages SET status='expired' WHERE id=?", (int(row["id"]),))
+                conn.execute("UPDATE user_package_items SET status='expired', updated_at=? WHERE package_id=? AND status='active'", (now, int(row["id"])))
+        conn.commit()
+    finally:
+        conn.close()
+
+def record_package_event(user_id, package_id: int = 0, package_item_id: int = 0, related_job_id: int = 0, item_type: str = "", event_type: str = "", delta_quantity: int = 0, balance_before: int = 0, balance_after: int = 0, created_by: str = "", reason: str = "") -> None:
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO package_events
+            (user_id, package_id, package_item_id, related_job_id, item_type, event_type,
+             delta_quantity, balance_before, balance_after, created_by, reason, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id or ""),
+                int(package_id or 0),
+                int(package_item_id or 0),
+                int(related_job_id or 0),
+                normalize_package_item_type(item_type),
+                str(event_type or "")[:40],
+                int(delta_quantity or 0),
+                int(balance_before or 0),
+                int(balance_after or 0),
+                str(created_by or "")[:80],
+                sanitize_provider_error(str(reason or ""))[:260],
+                now_text(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def grant_user_package(user_id, code: str, package_type: str = "combo", admin_id: str = "", days: int = 0, note: str = "") -> dict:
+    uid = str(user_id or "").strip()
+    package_type = "monthly" if str(package_type or "").lower() == "monthly" else "combo"
+    entry = package_catalog_entry(code, package_type)
+    if not uid or not entry:
+        return {"ok": False, "reason": "invalid_user_or_code"}
+    now = now_text()
+    expires_at = ""
+    if package_type == "monthly":
+        effective_days = max(1, int(days or entry.get("default_days") or 30))
+        expires_at = (datetime.now() + timedelta(days=effective_days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = db_connect()
+    try:
+        cur = conn.execute(
+            """INSERT INTO user_packages
+            (user_id, package_code, package_type, label, source, status, granted_by, granted_at, starts_at, expires_at, note)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                uid,
+                str(code or "").strip().lower(),
+                package_type,
+                str(entry.get("label") or code)[:160],
+                "admin_grant",
+                "active",
+                str(admin_id or "")[:80],
+                now,
+                now,
+                expires_at,
+                sanitize_provider_error(str(note or ""))[:260],
+            ),
+        )
+        package_id = int(cur.lastrowid or 0)
+        items = entry.get("items") or {}
+        for item_type, quantity in items.items():
+            normalized = normalize_package_item_type(item_type)
+            qty = max(0, int(quantity or 0))
+            if not normalized or qty <= 0:
+                continue
+            conn.execute(
+                """INSERT INTO user_package_items
+                (package_id, user_id, item_type, total_quantity, used_quantity, refunded_quantity,
+                 remaining_quantity, status, expires_at, updated_at, note)
+                VALUES (?,?,?,?,0,0,?,'active',?,?,?)""",
+                (package_id, uid, normalized, qty, qty, expires_at, now, sanitize_provider_error(str(note or ""))[:220]),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    record_package_event(uid, package_id, 0, 0, "", "grant", 0, 0, 0, admin_id, f"{package_type}:{code}; {note or ''}")
+    return {"ok": True, "package_id": package_id, "entry": entry, "expires_at": expires_at}
+
+def active_package_item_for_user(user_id, item_type: str) -> dict | None:
+    uid = str(user_id or "").strip()
+    normalized = normalize_package_item_type(item_type)
+    if not uid or not normalized or not PACKAGE_WALLET_ENABLED:
+        return None
+    expire_user_packages_lazy(uid)
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT i.*, p.package_code, p.package_type, p.label AS package_label
+            FROM user_package_items i
+            JOIN user_packages p ON p.id=i.package_id
+            WHERE i.user_id=?
+              AND i.item_type=?
+              AND i.status='active'
+              AND p.status='active'
+              AND i.remaining_quantity > 0
+              AND (COALESCE(i.expires_at,'')='' OR i.expires_at > ?)
+            ORDER BY CASE WHEN COALESCE(i.expires_at,'')='' THEN 1 ELSE 0 END ASC, i.expires_at ASC, i.id ASC
+            LIMIT 1
+            """,
+            (uid, normalized, now_text()),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def deduct_package_item_for_job(user_id, item_type: str, related_job_id: int = 0, note: str = "") -> dict:
+    item = active_package_item_for_user(user_id, item_type)
+    if not item:
+        return {"ok": False, "reason": "no_active_item"}
+    package_item_id = int(item.get("id") or 0)
+    before = int(item.get("remaining_quantity") or 0)
+    if before <= 0:
+        return {"ok": False, "reason": "empty"}
+    conn = db_connect()
+    try:
+        cur = conn.execute(
+            """UPDATE user_package_items
+            SET used_quantity=used_quantity+1,
+                remaining_quantity=remaining_quantity-1,
+                updated_at=?
+            WHERE id=? AND user_id=? AND item_type=? AND status='active' AND remaining_quantity > 0""",
+            (now_text(), package_item_id, str(user_id or ""), normalize_package_item_type(item_type)),
+        )
+        conn.commit()
+        if cur.rowcount <= 0:
+            return {"ok": False, "reason": "race_or_empty"}
+    finally:
+        conn.close()
+    after = before - 1
+    record_package_event(
+        user_id,
+        int(item.get("package_id") or 0),
+        package_item_id,
+        related_job_id,
+        item_type,
+        "use",
+        -1,
+        before,
+        after,
+        "",
+        note,
+    )
+    item["remaining_quantity"] = after
+    return {"ok": True, "item": item, "remaining_after": after}
+
+def refund_package_item_for_job(user_id, job_id: int, reason: str = "provider_fail") -> bool:
+    if not PACKAGE_REFUND_GUARD_ENABLED or not int(job_id or 0):
+        return False
+    job = shopaikey_job_by_id(int(job_id or 0))
+    if not job:
+        return False
+    package_item_id = int(job.get("package_item_id") or 0)
+    package_id = int(job.get("package_id") or 0)
+    item_type = normalize_package_item_type(job.get("package_item_type") or "")
+    if not package_item_id or not item_type:
+        return False
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        existing = conn.execute(
+            "SELECT id FROM package_events WHERE related_job_id=? AND package_item_id=? AND event_type='refund' LIMIT 1",
+            (int(job_id), package_item_id),
+        ).fetchone()
+        if existing:
+            return False
+        row = conn.execute("SELECT * FROM user_package_items WHERE id=? AND user_id=? LIMIT 1", (package_item_id, str(user_id or ""))).fetchone()
+        if not row:
+            return False
+        before = int(row["remaining_quantity"] or 0)
+        total = int(row["total_quantity"] or 0)
+        after = min(total, before + 1)
+        if after <= before:
+            return False
+        conn.execute(
+            """UPDATE user_package_items
+            SET used_quantity=CASE WHEN used_quantity > 0 THEN used_quantity-1 ELSE 0 END,
+                refunded_quantity=refunded_quantity+1,
+                remaining_quantity=?,
+                updated_at=?
+            WHERE id=?""",
+            (after, now_text(), package_item_id),
+        )
+        conn.execute(
+            """INSERT INTO package_events
+            (user_id, package_id, package_item_id, related_job_id, item_type, event_type,
+             delta_quantity, balance_before, balance_after, created_by, reason, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id or ""),
+                package_id,
+                package_item_id,
+                int(job_id),
+                item_type,
+                "refund",
+                1,
+                before,
+                after,
+                "system",
+                sanitize_provider_error(str(reason or ""))[:260],
+                now_text(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    update_shopaikey_job(job_id=int(job_id), package_refund_status="refunded", billing_status="package_refunded")
+    return True
+
+def package_offer_text(item: dict, fallback_confirm_text: str, lang: str = "vi") -> str:
+    item_type = str((item or {}).get("item_type") or "")
+    remaining = int((item or {}).get("remaining_quantity") or 0)
+    package_label = str((item or {}).get("package_label") or (item or {}).get("package_code") or "gói/combo")
+    expires = str((item or {}).get("expires_at") or "").strip()
+    expire_line = f"\n• Hết hạn: <code>{html.escape(expires[:16])}</code>" if expires else ""
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"{fallback_confirm_text}\n\n"
+            "🎁 <b>Package wallet available</b>\n"
+            f"• Package: <b>{html.escape(package_label)}</b>\n"
+            f"• Item: <b>{html.escape(package_item_display_name(item_type, lang))}</b>\n"
+            f"• Remaining: <b>{remaining}</b>{expire_line}\n\n"
+            "Do you want to use a package slot instead of Xu?"
+        )
+    return (
+        f"{fallback_confirm_text}\n\n"
+        "🎁 <b>Bạn đang có lượt trong gói/combo</b>\n"
+        f"• Gói: <b>{html.escape(package_label)}</b>\n"
+        f"• Lượt: <b>{html.escape(package_item_display_name(item_type, lang))}</b>\n"
+        f"• Còn: <b>{remaining}</b>{expire_line}\n\n"
+        "Bạn muốn dùng lượt trong gói thay vì trừ Xu không?"
+    )
+
+def package_use_choice_keyboard(job_type: str, token: str, tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
+    use_label = "✅ Use package slot" if normalize_user_language(lang) != "vi" else "✅ Dùng lượt trong gói"
+    xu_label = "💰 Use Xu" if normalize_user_language(lang) != "vi" else "💰 Dùng Xu"
+    back_label = ui_text(lang, "common.back")
+    callback_prefix = "create_media|quick_image" if str(job_type or "") == "image" else "create_media|quick_video"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(use_label, callback_data=f"shopai|package|{token}")],
+        [InlineKeyboardButton(xu_label, callback_data=f"shopai|confirm|{token}")],
+        [InlineKeyboardButton(back_label, callback_data=callback_prefix)],
+    ])
+
+def package_provider_fail_message(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "⚙️ The provider is temporarily busy. TOAN AAS has returned the package slot to your wallet. Please try again later."
+    return "⚙️ Model AI đang bận. TOAN AAS đã hoàn lại 1 lượt trong gói của bạn, vui lòng thử lại sau."
+
+def package_wallet_status_payload() -> dict:
+    return {
+        "wallet_enabled": bool(PACKAGE_WALLET_ENABLED),
+        "admin_grant_combo": bool(PACKAGE_ADMIN_GRANT_ENABLED),
+        "admin_grant_monthly": bool(PACKAGE_ADMIN_GRANT_ENABLED),
+        "refund_guard": bool(PACKAGE_REFUND_GUARD_ENABLED),
+        "rank_points_excluded": bool(PACKAGE_RANK_POINTS_EXCLUDED),
+    }
+
+def user_package_rows(user_id) -> list[dict]:
+    uid = str(user_id or "").strip()
+    if not uid:
+        return []
+    expire_user_packages_lazy(uid)
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT p.id AS package_id, p.package_code, p.package_type, p.label, p.status,
+                   p.expires_at, i.id AS item_id, i.item_type, i.total_quantity,
+                   i.used_quantity, i.refunded_quantity, i.remaining_quantity, i.status AS item_status
+            FROM user_packages p
+            LEFT JOIN user_package_items i ON i.package_id=p.id
+            WHERE p.user_id=?
+            ORDER BY CASE p.status WHEN 'active' THEN 0 ELSE 1 END, p.id DESC, i.id ASC
+            """,
+            (uid,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+def user_package_summary_text(user_id, admin_view: bool = False) -> str:
+    rows = user_package_rows(user_id)
+    if not rows:
+        return "🎁 Gói/combo: chưa có gói đang hoạt động."
+    by_package: dict[int, dict] = {}
+    for row in rows:
+        package_id = int(row.get("package_id") or 0)
+        package = by_package.setdefault(package_id, {"row": row, "items": []})
+        if row.get("item_type"):
+            package["items"].append(row)
+    lines = ["🎁 <b>Gói/combo đang có</b>"]
+    for package_id, package in by_package.items():
+        row = package["row"]
+        status = str(row.get("status") or "-")
+        expires = str(row.get("expires_at") or "")
+        expires_text = f" | hết hạn {html.escape(expires[:16])}" if expires else ""
+        id_text = f"#{package_id} " if admin_view else ""
+        lines.append(f"• {id_text}<b>{html.escape(row.get('label') or row.get('package_code') or '-')}</b> — <code>{html.escape(status)}</code>{expires_text}")
+        item_parts = []
+        for item in package["items"]:
+            remaining = int(item.get("remaining_quantity") or 0)
+            total = int(item.get("total_quantity") or 0)
+            item_parts.append(f"{package_item_display_name(item.get('item_type') or '')}: {remaining}/{total}")
+        if item_parts:
+            lines.append("  " + html.escape("; ".join(item_parts)))
+    return "\n".join(lines)
+
+def user_package_account_short_text(user_id) -> str:
+    rows = [row for row in user_package_rows(user_id) if str(row.get("status") or "") == "active" and row.get("item_type")]
+    if not rows:
+        return "🎁 Gói/combo: chưa có gói đang hoạt động."
+    totals: dict[str, int] = {}
+    for row in rows:
+        item_type = normalize_package_item_type(row.get("item_type") or "")
+        totals[item_type] = totals.get(item_type, 0) + int(row.get("remaining_quantity") or 0)
+    parts = [f"{package_item_display_name(k)}: {v}" for k, v in totals.items() if v > 0]
+    return "🎁 Gói/combo còn lượt: " + (", ".join(parts) if parts else "0")
+
+def resolve_package_for_user(user_id, identifier: str) -> dict | None:
+    uid = str(user_id or "").strip()
+    mode, value = parse_package_identifier(identifier)
+    if not uid or not value:
+        return None
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        if mode == "id":
+            row = conn.execute("SELECT * FROM user_packages WHERE user_id=? AND id=? LIMIT 1", (uid, int(value))).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM user_packages WHERE user_id=? AND package_code=? ORDER BY id DESC LIMIT 1", (uid, value)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+def adjust_user_package_item(user_id, identifier: str, item_type: str, delta: int, admin_id: str = "", note: str = "") -> dict:
+    package = resolve_package_for_user(user_id, identifier)
+    normalized = normalize_package_item_type(item_type)
+    delta = int(delta or 0)
+    if not package or not normalized or delta == 0:
+        return {"ok": False, "reason": "invalid_package_item_or_delta"}
+    package_id = int(package.get("id") or 0)
+    uid = str(user_id or "").strip()
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT * FROM user_package_items WHERE package_id=? AND item_type=? LIMIT 1", (package_id, normalized)).fetchone()
+        now = now_text()
+        if not row and delta > 0:
+            conn.execute(
+                """INSERT INTO user_package_items
+                (package_id, user_id, item_type, total_quantity, used_quantity, refunded_quantity,
+                 remaining_quantity, status, expires_at, updated_at, note)
+                VALUES (?,?,?,?,0,0,?,'active',?,?,?)""",
+                (package_id, uid, normalized, delta, delta, package.get("expires_at") or "", now, sanitize_provider_error(note)[:220]),
+            )
+            before = 0
+            after = delta
+            item_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+        elif row:
+            before = int(row["remaining_quantity"] or 0)
+            after = max(0, before + delta)
+            total_after = max(after, int(row["total_quantity"] or 0) + max(delta, 0))
+            status = "active" if after > 0 and str(package.get("status") or "") == "active" else str(row["status"] or "active")
+            conn.execute(
+                """UPDATE user_package_items
+                SET total_quantity=?, remaining_quantity=?, status=?, updated_at=?, note=?
+                WHERE id=?""",
+                (total_after, after, status, now, sanitize_provider_error(note)[:220], int(row["id"])),
+            )
+            item_id = int(row["id"])
+        else:
+            return {"ok": False, "reason": "cannot_reduce_missing_item"}
+        conn.commit()
+    finally:
+        conn.close()
+    record_package_event(uid, package_id, item_id, 0, normalized, "adjust", delta, before, after, admin_id, note)
+    return {"ok": True, "package_id": package_id, "item_id": item_id, "before": before, "after": after}
+
+def revoke_user_package(user_id, identifier: str, admin_id: str = "", note: str = "") -> dict:
+    package = resolve_package_for_user(user_id, identifier)
+    if not package:
+        return {"ok": False, "reason": "package_not_found"}
+    package_id = int(package.get("id") or 0)
+    conn = db_connect()
+    try:
+        conn.execute(
+            "UPDATE user_packages SET status='revoked', revoked_at=?, revoked_by=?, note=? WHERE id=?",
+            (now_text(), str(admin_id or "")[:80], sanitize_provider_error(str(note or ""))[:260], package_id),
+        )
+        conn.execute("UPDATE user_package_items SET status='revoked', updated_at=? WHERE package_id=?", (now_text(), package_id))
+        conn.commit()
+    finally:
+        conn.close()
+    record_package_event(user_id, package_id, 0, 0, "", "revoke", 0, 0, 0, admin_id, note)
+    return {"ok": True, "package_id": package_id}
 
 def shopaikey_video_cost_for_flow(from_image: bool = False, user_id=None) -> int:
     return video_base_cost_xu()
@@ -30267,7 +31049,7 @@ def record_shopaikey_billing_event(user_id, job_id: int, event_type: str, amount
     finally:
         conn.close()
 
-def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", prompt: str = "", status: str = "QUEUED", admin_only: bool = True, xu_cost_planned: int = 0, source_job_id: str = "", retry_warranty_count: int = 0, retry_warranty_parent_job_id: int = 0) -> int:
+def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", prompt: str = "", status: str = "QUEUED", admin_only: bool = True, xu_cost_planned: int = 0, source_job_id: str = "", retry_warranty_count: int = 0, retry_warranty_parent_job_id: int = 0, package_id: int = 0, package_item_id: int = 0, package_item_type: str = "", package_units_used: int = 0) -> int:
     now = now_text()
     conn = db_connect()
     try:
@@ -30277,8 +31059,9 @@ def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", promp
             (user_id, chat_id, job_type, provider, model, status, prompt_hash, prompt_preview,
              xu_cost_planned, xu_deducted, refund_amount, billing_status, confirm_required, confirmed_at,
              source_job_id, retry_warranty_count, retry_warranty_used, retry_warranty_parent_job_id,
+             package_id, package_item_id, package_item_type, package_units_used, package_refund_status,
              admin_only, attempts, poll_count, created_at, updated_at)
-            VALUES (?, ?, ?, 'shopaikey', ?, ?, ?, ?, ?, 0, 0, ?, ?, '', ?, ?, 0, ?, ?, 0, 0, ?, ?)
+            VALUES (?, ?, ?, 'shopaikey', ?, ?, ?, ?, ?, 0, 0, ?, ?, '', ?, ?, 0, ?, ?, ?, ?, ?, '', ?, 0, 0, ?, ?)
             """,
             (
                 str(user_id or ""),
@@ -30294,6 +31077,10 @@ def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", promp
                 str(source_job_id or "")[:80],
                 max(0, int(retry_warranty_count or 0)),
                 max(0, int(retry_warranty_parent_job_id or 0)),
+                max(0, int(package_id or 0)),
+                max(0, int(package_item_id or 0)),
+                str(package_item_type or "")[:60],
+                max(0, int(package_units_used or 0)),
                 1 if admin_only else 0,
                 now,
                 now,
@@ -30311,6 +31098,7 @@ def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
         "attempts", "poll_count", "finished_at", "xu_deducted", "refund_status", "refund_amount", "refund_reason",
         "billing_status", "confirm_required", "confirmed_at", "source_job_id",
         "retry_warranty_count", "retry_warranty_used", "retry_warranty_parent_job_id",
+        "package_id", "package_item_id", "package_item_type", "package_units_used", "package_refund_status",
     }
     updates = {}
     if job_id and str(task_id or "").strip():
@@ -30324,10 +31112,12 @@ def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
             updates[key] = shopaikey_sanitize_error(str(value or ""))[:260]
         elif key == "result_url":
             updates[key] = str(value or "").strip()[:1000]
-        elif key in {"result_sent", "attempts", "poll_count", "xu_deducted", "refund_amount", "confirm_required", "retry_warranty_count", "retry_warranty_used", "retry_warranty_parent_job_id"}:
+        elif key in {"result_sent", "attempts", "poll_count", "xu_deducted", "refund_amount", "confirm_required", "retry_warranty_count", "retry_warranty_used", "retry_warranty_parent_job_id", "package_id", "package_item_id", "package_units_used"}:
             updates[key] = int(value or 0)
-        elif key in {"refund_status", "refund_reason", "billing_status"}:
+        elif key in {"refund_status", "refund_reason", "billing_status", "package_refund_status"}:
             updates[key] = shopaikey_sanitize_error(str(value or ""))[:160]
+        elif key == "package_item_type":
+            updates[key] = str(value or "")[:60]
         elif key == "confirmed_at":
             updates[key] = str(value or "")[:40]
         elif key == "source_job_id":
@@ -30479,6 +31269,8 @@ def mark_stale_public_video_jobs(user_id: str = "", limit: int = 50) -> list[dic
             f"timeout_minutes={timeout_minutes}",
         )
         refunded = refund_shopaikey_job_if_needed(job.get("user_id") or "", job_id, job.get("task_id") or "", "stale_video_timeout") if deducted_amount > 0 else False
+        package_used = bool(int(job.get("package_item_id") or 0) and int(job.get("package_units_used") or 0))
+        package_refunded = refund_package_item_for_job(job.get("user_id") or "", job_id, "stale_video_timeout") if package_used else False
         balance_after, _, _ = get_user(job.get("user_id") or "")
         if deducted_amount > 0 and refunded:
             record_shopaikey_billing_event(
@@ -30508,7 +31300,8 @@ def mark_stale_public_video_jobs(user_id: str = "", limit: int = 50) -> list[dic
             refund_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged"),
             refund_amount=deducted_amount if refunded else 0,
             refund_reason="stale_video_timeout",
-            billing_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "timeout_not_charged"),
+            billing_status="package_refunded" if package_refunded else ("refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "timeout_not_charged")),
+            package_refund_status="refunded" if package_refunded else ("refund_failed" if package_used else ""),
             finished_at=now_text(),
         )
         record_system_event(
@@ -30835,8 +31628,10 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
             )
             job_snapshot = shopaikey_job_by_id(job_id) or {}
             deducted_amount = int(job_snapshot.get("xu_deducted") or 0)
+            package_used = bool(int(job_snapshot.get("package_item_id") or 0) and int(job_snapshot.get("package_units_used") or 0))
             balance_before_refund, _, _ = get_user(user_id)
             record_shopaikey_billing_event(user_id, job_id, "video_provider_fail", 0, int(balance_before_refund or 0), int(balance_before_refund or 0), f"task_id={task_id}; error={provider_error_text}")
+            package_refunded = refund_package_item_for_job(user_id, job_id, provider_error_text) if package_used else False
             refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, provider_error_text) if deducted_amount > 0 else False
             balance_after_failure, _, _ = get_user(user_id)
             if deducted_amount > 0 and refunded:
@@ -30847,7 +31642,7 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
             try:
                 await bot_client.send_message(
                     chat_id=chat_id,
-                    text=public_video_provider_fail_message(deducted_amount, refunded, lang),
+                    text=package_provider_fail_message(lang) if package_used and package_refunded else public_video_provider_fail_message(deducted_amount, refunded, lang),
                 )
             except Exception:
                 pass
@@ -30858,15 +31653,18 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
                 refund_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged"),
                 refund_amount=deducted_amount if refunded else 0,
                 refund_reason=provider_error_text,
-                billing_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "failed_not_charged"),
+                billing_status="package_refunded" if package_refunded else ("refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "failed_not_charged")),
+                package_refund_status="refunded" if package_refunded else ("refund_failed" if package_used else ""),
                 finished_at=now_text(),
             )
             return
     record_provider_error("shopaikey", "video", "TIMEOUT", "video_poll_timeout")
     job_snapshot = shopaikey_job_by_id(job_id) or {}
     deducted_amount = int(job_snapshot.get("xu_deducted") or 0)
+    package_used = bool(int(job_snapshot.get("package_item_id") or 0) and int(job_snapshot.get("package_units_used") or 0))
     balance_before_refund, _, _ = get_user(user_id)
     record_shopaikey_billing_event(user_id, job_id, "video_timeout", 0, int(balance_before_refund or 0), int(balance_before_refund or 0), f"task_id={task_id}")
+    package_refunded = refund_package_item_for_job(user_id, job_id, "video_poll_timeout") if package_used else False
     refunded = refund_shopaikey_job_if_needed(user_id, job_id, task_id, "video_poll_timeout") if deducted_amount > 0 else False
     balance_after_timeout, _, _ = get_user(user_id)
     if deducted_amount > 0 and refunded:
@@ -30882,13 +31680,14 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
         refund_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged"),
         refund_amount=deducted_amount if refunded else 0,
         refund_reason="video_poll_timeout",
-        billing_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "timeout_not_charged"),
+        billing_status="package_refunded" if package_refunded else ("refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "timeout_not_charged")),
+        package_refund_status="refunded" if package_refunded else ("refund_failed" if package_used else ""),
         finished_at=now_text(),
     )
     try:
         await bot_client.send_message(
             chat_id=chat_id,
-            text=public_video_provider_fail_message(deducted_amount, refunded, lang),
+            text=package_provider_fail_message(lang) if package_used and package_refunded else public_video_provider_fail_message(deducted_amount, refunded, lang),
         )
     except Exception:
         return
@@ -31191,6 +31990,12 @@ def sales_readiness_payload() -> dict:
         "promo_guide": callable(globals().get("cmd_promo_guide")),
         "promo_seed_policy": callable(globals().get("cmd_promo_seed_policy")),
         "promo_seed_beta": callable(globals().get("cmd_promo_seed_beta")),
+        "package_catalog": callable(globals().get("cmd_package_catalog")),
+        "grant_combo": callable(globals().get("cmd_grant_combo")),
+        "grant_monthly": callable(globals().get("cmd_grant_monthly")),
+        "user_packages": callable(globals().get("cmd_user_packages")),
+        "adjust_package": callable(globals().get("cmd_adjust_package")),
+        "revoke_package": callable(globals().get("cmd_revoke_package")),
         "emergency_status": callable(globals().get("cmd_emergency_status")),
         "ops_plan": callable(globals().get("cmd_ops_plan")),
         "guide_menu": callable(globals().get("main_guide_keyboard")) and callable(globals().get("guide_section_text")),
@@ -31283,6 +32088,7 @@ def sales_readiness_payload() -> dict:
         "video_aspect_ratios": list(media_aspect_ratio_options("video")),
         "video_combos": media_pricing.get("video_combos") or [],
         "combo_rank_points_excluded": True,
+        "package_wallet": package_wallet_status_payload(),
         "refund_guard": bool(SHOPAIKEY_REFUND_ON_PROVIDER_FAIL),
         "job_lock": bool(SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED),
         "blockers": blockers,
@@ -32032,6 +32838,7 @@ EMERGENCY_ALLOWED_ADMIN_COMMANDS = {
     "admin_doc_ip", "admin_doc_risk", "admin_doc_checklist", "admin_doc_b2c",
     "admin_doc_b2b", "admin_doc_nda", "admin_doc_tax", "admin_doc_converter", "admin_doc_sources",
     "maintenance_status", "provider_freeze", "provider_unfreeze",
+    "package_catalog", "grant_combo", "grant_monthly", "user_packages", "adjust_package", "revoke_package",
 }
 PAYMENT_FREEZE_COMMANDS = {
     "duyet", "tuchoi", "checkpayos", "payos_status", "payos_verify", "payos_debug_create", "mark_payos_test",
@@ -32881,22 +33688,25 @@ def menu_text_admin() -> str:
         "<b>B. Bill / Nạp tiền</b>\n"
         "• <code>/pending</code>\n• <code>/duyet</code>\n• <code>/tuchoi</code>\n"
         "• <code>/payos_test_plan</code>\n• <code>/mark_payos_test</code>\n\n"
-        "<b>C. Trạng thái hệ thống</b>\n"
+        "<b>C. Gói / Combo</b>\n"
+        "• <code>/package_catalog</code>\n• <code>/grant_combo</code>\n• <code>/grant_monthly</code>\n"
+        "• <code>/user_packages</code>\n• <code>/adjust_package</code>\n• <code>/revoke_package</code>\n\n"
+        "<b>D. Trạng thái hệ thống</b>\n"
         "• <code>/runtime</code>\n• <code>/data_status</code>\n• <code>/providers</code>\n"
         "• <code>/dashboard</code>\n• <code>/stats</code>\n• <code>/sales_ready</code>\n\n"
-        "<b>D. ShopAIKey / Provider</b>\n"
+        "<b>E. ShopAIKey / Provider</b>\n"
         "• <code>/shopaikey_status</code>\n• <code>/shopaikey_usage</code>\n• <code>/shopaikey_video_job</code>\n"
         "• <code>/tool_test_shopaikey</code>\n• <code>/tool_test_shopaikey_image</code>\n"
         "• <code>/tool_test_shopaikey_video</code>\n• <code>/tool_test_shopaikey_tts</code>\n\n"
-        "<b>E. Giá / Sẵn sàng bán</b>\n"
+        "<b>F. Giá / Sẵn sàng bán</b>\n"
         "• <code>/banggia</code>\n• <code>/costs</code>\n• <code>/sales_ready</code>\n• <code>/providers</code>\n\n"
-        "<b>F. Maintenance / Freeze / Refund / Queue</b>\n"
+        "<b>G. Maintenance / Freeze / Refund / Queue</b>\n"
         "• <code>/freeze_status</code>\n• <code>/maintenance_status</code>\n• <code>/maintenance_on</code>\n• <code>/maintenance_off</code>\n"
         "• <code>/freeze_video</code>\n• <code>/unfreeze_video</code>\n"
         "• <code>/queue_status</code>\n• <code>/job_status</code>\n• <code>/refund_job</code>\n• <code>/clear_job_lock</code>\n"
         "• <code>/freeze_tools</code>\n• <code>/unfreeze_tools</code>\n"
         "• <code>/provider_freeze</code>\n• <code>/provider_unfreeze</code>\n\n"
-        "<b>G. Góp ý / Admin notes</b>\n• <code>/admin_gopy</code>"
+        "<b>H. Góp ý / Admin notes</b>\n• <code>/admin_gopy</code>"
     )
 
 def menu_text_system() -> str:
@@ -33175,14 +33985,16 @@ def menu_text_main_profile(user_id) -> str:
         "👤 <b>TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{html.escape(str(user_id))}</code>\n"
         f"• 🪪 Hạng: <b>{html.escape(get_role_badge(user_id))}</b>\n"
-        f"• Số dư: <b>{html.escape(balance)}</b>\n\n"
+        f"• Số dư: <b>{html.escape(balance)}</b>\n"
+        f"• {user_package_account_short_text(user_id)}\n\n"
         f"{ui_text('vi', 'account.ref_hint')}\n"
-        "Dùng các nút bên dưới để nạp Xu, xem bảng giá, xem link giới thiệu hoặc liên hệ hỗ trợ."
+        "Dùng các nút bên dưới để nạp Xu, xem combo/gói, xem bảng giá, xem link giới thiệu hoặc liên hệ hỗ trợ."
     )
 
 def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 Nạp Xu" if normalize_user_language(lang) == "vi" else "💰 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("💳 Bảng giá" if normalize_user_language(lang) == "vi" else "💳 Pricing", callback_data="pricing|main")],
+        [InlineKeyboardButton("🎁 Combo của tôi" if normalize_user_language(lang) == "vi" else "🎁 My packages", callback_data="menu|profile_packages")],
         [InlineKeyboardButton("📚 Hướng dẫn Xu" if normalize_user_language(lang) == "vi" else "📚 Xu guide", callback_data="menu|guide_credits"), InlineKeyboardButton("👨‍💼 Hỗ trợ" if normalize_user_language(lang) == "vi" else "👨‍💼 Support", callback_data="menu|support")],
         [InlineKeyboardButton(ui_text(lang, "account.ref_link_button"), callback_data="menu|profile_ref_link")],
         [InlineKeyboardButton(ui_text(lang, "account.ref_policy_button"), callback_data="menu|profile_ref_policy")],
@@ -33468,7 +34280,8 @@ def menu_text_main_profile_i18n(user_id, lang: str) -> str:
             "👤 <b>账户</b>\n\n"
             f"• ID: <code>{html.escape(str(user_id))}</code>\n"
             f"• 等级: <b>{html.escape(get_role_badge(user_id))}</b>\n"
-            f"• 余额: <b>{html.escape(balance)}</b>\n\n"
+            f"• 余额: <b>{html.escape(balance)}</b>\n"
+            f"• {user_package_account_short_text(user_id)}\n\n"
             f"{ui_text(lang, 'account.ref_hint')}\n"
             "使用 <code>/profile</code> 查看邀请、生日礼物和会员详情。"
         )
@@ -33476,7 +34289,8 @@ def menu_text_main_profile_i18n(user_id, lang: str) -> str:
         "👤 <b>ACCOUNT</b>\n\n"
         f"• ID: <code>{html.escape(str(user_id))}</code>\n"
         f"• Tier: <b>{html.escape(get_role_badge(user_id))}</b>\n"
-        f"• Balance: <b>{html.escape(balance)}</b>\n\n"
+        f"• Balance: <b>{html.escape(balance)}</b>\n"
+        f"• {user_package_account_short_text(user_id)}\n\n"
         f"{ui_text(lang, 'account.ref_hint')}\n"
         "Use <code>/profile</code> for referral, birthday and member details."
     )
@@ -33519,6 +34333,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return menu_text_main_topup_i18n(lang), main_topup_keyboard(lang)
     if action == "main_profile":
         return menu_text_main_profile_i18n(user_id or "__customer__", lang), main_profile_keyboard(lang)
+    if action == "profile_packages":
+        return user_package_summary_text(user_id or "__customer__"), main_profile_keyboard(lang)
     if action == "profile_ref_link":
         return referral_account_link_text(user_id or "__customer__", BOT_USERNAME, lang), main_profile_keyboard(lang)
     if action == "profile_ref_policy":
@@ -34924,6 +35740,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pricing = media_workflow_pricing_payload()
     maintenance_on, _maintenance_message = is_system_maintenance()
     provider_freeze_on = provider_freeze_runtime_on("shopaikey")
+    package_wallet = package_wallet_status_payload()
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
         cobalt_note = "OK to smoke test"
@@ -34975,6 +35792,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Video tier config: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | enabled/configured <code>{html.escape(video_tier_public_status_text())}</code>",
         f"• Video aspect ratios: <code>{html.escape('/'.join(media_aspect_ratio_options('video')))}</code>",
         f"• Video combos: <code>{len(pricing.get('video_combos') or [])}</code> | rank/top-up points <code>excluded</code>",
+        f"• Package wallet: <code>{'ON' if package_wallet.get('wallet_enabled') else 'OFF'}</code> | admin grant combo <code>{'ON' if package_wallet.get('admin_grant_combo') else 'OFF'}</code> | monthly <code>{'ON' if package_wallet.get('admin_grant_monthly') else 'OFF'}</code>",
+        f"• Package refund guard: <code>{'ON' if package_wallet.get('refund_guard') else 'OFF'}</code> | rank/top-up points excluded <code>{'ON' if package_wallet.get('rank_points_excluded') else 'OFF'}</code>",
         f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         f"• Public user can generate real video: <code>{'YES' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'NO'}</code>",
         f"• Admin video smoke tests: <code>{'available/admin-only' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'disabled'}</code>",
@@ -35012,7 +35831,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image generation: <code>{html.escape(trend_workflow_image_generation_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image'))}</code>",
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
+        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -35677,6 +36496,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     video_freeze = provider_freeze_display("shopaikey_video")
     maintenance_on, _maintenance_message = is_system_maintenance()
     pricing = media_workflow_pricing_payload()
+    package_wallet = package_wallet_status_payload()
     lines = [
         "🧪 <b>ShopAIKey Experimental Provider</b>",
         "",
@@ -35701,6 +36521,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Video tier config: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | enabled/configured <code>{html.escape(video_tier_public_status_text())}</code>",
         f"• Video aspect ratios: <code>{html.escape('/'.join(media_aspect_ratio_options('video')))}</code>",
         f"• Video combos: <code>{len(pricing.get('video_combos') or [])}</code> | rank/top-up points <code>excluded</code>",
+        f"• Package wallet: <code>{'ON' if package_wallet.get('wallet_enabled') else 'OFF'}</code> | admin grant combo <code>{'ON' if package_wallet.get('admin_grant_combo') else 'OFF'}</code> | monthly <code>{'ON' if package_wallet.get('admin_grant_monthly') else 'OFF'}</code>",
+        f"• Package refund guard: <code>{'ON' if package_wallet.get('refund_guard') else 'OFF'}</code> | combo rank/top-up excluded <code>{'ON' if package_wallet.get('rank_points_excluded') else 'OFF'}</code>",
         f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         f"• Public user can generate real video: <code>{'YES' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'NO'}</code>",
         f"• Admin video smoke tests: <code>{'available/admin-only' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'disabled'}</code>",
@@ -36942,6 +37764,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             record_shopaikey_billing_event(uid, 0, "video_cancelled", 0, 0, 0, cancel_reason)
         record_shopaikey_billing_event(uid, 0, "cancel", 0, 0, 0, cancel_reason)
         return await safe_edit_or_send(query, ui_text(lang, "common.cancelled_not_charged"))
+    if action not in {"confirm", "package"}:
+        return await safe_edit_or_send(query, ui_text(lang, "common.invalid_request"))
     pending = pop_shopaikey_pending_confirmation(token, uid)
     if not pending:
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
@@ -36972,47 +37796,105 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
         return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
     balance_before, _, _ = get_user(uid)
-    charge = spend_fixed_credit_info(
-        uid,
-        base_cost,
-        f"shopaikey_{job_type}",
-        f"ShopAIKey {job_type}: {shopaikey_safe_prompt_preview(prompt)}",
-        True,
-    )
-    if not charge.get("ok"):
-        credits_now, _, _ = get_user(uid)
-        if job_type == "image":
-            record_shopaikey_billing_event(uid, 0, "insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_image; tier={image_tier}; required={int(charge.get('final_cost') or base_cost)}")
-        if job_type == "video":
-            record_shopaikey_billing_event(uid, 0, "video_insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_video; tier={video_tier}; required={int(charge.get('final_cost') or base_cost)}")
-        return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or base_cost), uid)
-    deducted = int(charge.get("final_cost") or 0)
-    balance_after, _, _ = get_user(uid)
     model = (pending_model or SHOPAIKEY_IMAGE_MODEL or "nano-banana") if job_type == "image" else (SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")
-    job_id = create_shopaikey_job(
-        uid,
-        query.message.chat_id,
-        job_type,
-        model=model,
-        prompt=prompt,
-        status="IN_PROGRESS" if job_type == "image" else "QUEUED",
-        admin_only=False,
-        xu_cost_planned=base_cost,
-        source_job_id=source_job_id,
-        retry_warranty_count=retry_warranty_count,
+    package_used = False
+    package_item_type = normalize_package_item_type(
+        pending.get("package_item_type") or (
+            package_item_type_for_image_tier(image_tier) if job_type == "image" else package_item_type_for_video_tier(video_tier)
+        )
     )
+    package_use_result = {}
+    if action == "package":
+        package_item = active_package_item_for_user(uid, package_item_type)
+        if not package_item:
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Lượt trong gói không còn khả dụng hoặc đã hết hạn. Bot chưa gọi API và chưa trừ Xu.",
+            )
+        job_id = create_shopaikey_job(
+            uid,
+            query.message.chat_id,
+            job_type,
+            model=model,
+            prompt=prompt,
+            status="IN_PROGRESS" if job_type == "image" else "QUEUED",
+            admin_only=False,
+            xu_cost_planned=base_cost,
+            source_job_id=source_job_id,
+            retry_warranty_count=retry_warranty_count,
+            package_id=int(package_item.get("package_id") or 0),
+            package_item_id=int(package_item.get("id") or 0),
+            package_item_type=package_item_type,
+            package_units_used=1,
+        )
+        package_use_result = deduct_package_item_for_job(
+            uid,
+            package_item_type,
+            job_id,
+            f"shopaikey_{job_type}; tier={image_tier if job_type == 'image' else video_tier}",
+        )
+        if not package_use_result.get("ok"):
+            update_shopaikey_job(job_id=job_id, status="CANCELLED", billing_status="package_unavailable")
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Lượt trong gói không còn khả dụng hoặc đã hết hạn. Bot chưa gọi API và chưa trừ Xu.",
+            )
+        deducted = 0
+        balance_after = balance_before
+        package_used = True
+    else:
+        charge = spend_fixed_credit_info(
+            uid,
+            base_cost,
+            f"shopaikey_{job_type}",
+            f"ShopAIKey {job_type}: {shopaikey_safe_prompt_preview(prompt)}",
+            True,
+        )
+        if not charge.get("ok"):
+            credits_now, _, _ = get_user(uid)
+            if job_type == "image":
+                record_shopaikey_billing_event(uid, 0, "insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_image; tier={image_tier}; required={int(charge.get('final_cost') or base_cost)}")
+            if job_type == "video":
+                record_shopaikey_billing_event(uid, 0, "video_insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_video; tier={video_tier}; required={int(charge.get('final_cost') or base_cost)}")
+            return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or base_cost), uid)
+        deducted = int(charge.get("final_cost") or 0)
+        balance_after, _, _ = get_user(uid)
+        job_id = create_shopaikey_job(
+            uid,
+            query.message.chat_id,
+            job_type,
+            model=model,
+            prompt=prompt,
+            status="IN_PROGRESS" if job_type == "image" else "QUEUED",
+            admin_only=False,
+            xu_cost_planned=base_cost,
+            source_job_id=source_job_id,
+            retry_warranty_count=retry_warranty_count,
+        )
     confirmed_at = now_text()
     update_shopaikey_job(
         job_id=job_id,
         xu_deducted=deducted,
-        billing_status="deducted" if deducted > 0 else "admin_free",
+        billing_status="package_deducted" if package_used else ("deducted" if deducted > 0 else "admin_free"),
         confirm_required=1 if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 0,
         confirmed_at=confirmed_at,
         retry_warranty_count=retry_warranty_count,
+        package_id=int((package_use_result.get("item") or {}).get("package_id") or 0) if package_used else 0,
+        package_item_id=int((package_use_result.get("item") or {}).get("id") or 0) if package_used else 0,
+        package_item_type=package_item_type if package_used else "",
+        package_units_used=1 if package_used else 0,
     )
     tier_reason = f"; tier={image_tier}; label={tier_label}" if job_type == "image" else f"; tier={video_tier}; label={tier_label}"
     record_shopaikey_billing_event(uid, job_id, "confirm" if job_type == "image" else "video_confirmed", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}{tier_reason}")
-    record_shopaikey_billing_event(uid, job_id, "deduct" if job_type == "image" else "video_deducted", deducted, int(balance_before or 0), int(balance_after or 0), f"shopaikey_{job_type}{tier_reason}")
+    record_shopaikey_billing_event(
+        uid,
+        job_id,
+        ("package_use" if job_type == "image" else "video_package_use") if package_used else ("deduct" if job_type == "image" else "video_deducted"),
+        0 if package_used else deducted,
+        int(balance_before or 0),
+        int(balance_after or 0),
+        f"shopaikey_{job_type}{tier_reason}; package_item={package_item_type if package_used else '-'}",
+    )
     if job_type == "image":
         await safe_edit_or_send(query, public_image_waiting_text(image_tier, lang), parse_mode=None)
         result = await shopaikey_image_generate(prompt, model)
@@ -37045,7 +37927,11 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 "image.success",
                 label=html.escape(tier_label),
                 job_id=int(job_id or 0),
-                billing_note=html.escape(public_image_success_billing_note(deducted, lang, is_admin_user(uid) and int(deducted or 0) <= 0)),
+                billing_note=html.escape(
+                    "Đã dùng 1 lượt trong gói/combo. Bot không trừ Xu."
+                    if package_used and normalize_user_language(lang) == "vi"
+                    else ("Used 1 package slot. The bot did not charge Xu." if package_used else public_image_success_billing_note(deducted, lang, is_admin_user(uid) and int(deducted or 0) <= 0))
+                ),
             )
             try:
                 sent_photo_message = await context.bot.send_photo(
@@ -37082,6 +37968,26 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             )
             deducted_amount = int(deducted or 0)
             record_shopaikey_billing_event(uid, job_id, "provider_fail", 0, int(balance_after or 0), int(balance_after or 0), f"shopaikey_image; tier={image_tier}; error={provider_error_text}")
+            if package_used:
+                package_refunded = refund_package_item_for_job(uid, job_id, provider_error_text)
+                update_shopaikey_job(
+                    job_id=job_id,
+                    status="FAILED",
+                    error_class=result.get("error_class") or status,
+                    provider_error_code=result.get("provider_error_code") or "",
+                    provider_message=provider_error_text,
+                    attempts=1,
+                    finished_at=now_text(),
+                    refund_status="not_applicable",
+                    refund_amount=0,
+                    refund_reason=provider_error_text,
+                    billing_status="package_refunded" if package_refunded else "package_refund_failed",
+                    package_refund_status="refunded" if package_refunded else "refund_failed",
+                )
+                return await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=package_provider_fail_message(lang) if package_refunded else "⚠️ Provider lỗi. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra lượt gói nếu cần.",
+                )
             refunded = refund_shopaikey_job_if_needed(uid, job_id, "", provider_error_text) if deducted_amount > 0 else False
             balance_after_failure, _, _ = get_user(uid)
             refund_status = "refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged")
@@ -37161,6 +38067,26 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         )
         deducted_amount = int(deducted or 0)
         record_shopaikey_billing_event(uid, job_id, "video_provider_fail", 0, int(balance_after or 0), int(balance_after or 0), f"shopaikey_video; tier={video_tier}; error={provider_error_text}")
+        if package_used:
+            package_refunded = refund_package_item_for_job(uid, job_id, provider_error_text)
+            update_shopaikey_job(
+                job_id=job_id,
+                status="FAILED",
+                error_class=result.get("error_class") or status,
+                provider_error_code=result.get("provider_error_code") or "",
+                provider_message=provider_error_text,
+                attempts=len(attempts),
+                finished_at=now_text(),
+                refund_status="not_applicable",
+                refund_amount=0,
+                refund_reason=provider_error_text,
+                billing_status="package_refunded" if package_refunded else "package_refund_failed",
+                package_refund_status="refunded" if package_refunded else "refund_failed",
+            )
+            return await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=package_provider_fail_message(lang) if package_refunded else "⚠️ Provider lỗi. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra lượt gói nếu cần.",
+            )
         refunded = refund_shopaikey_job_if_needed(uid, job_id, "", provider_error_text) if deducted_amount > 0 else False
         balance_after_failure, _, _ = get_user(uid)
         if deducted_amount > 0 and refunded:
@@ -42132,6 +43058,7 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image_aspects = data.get("image_aspect_ratios") or []
     video_aspects = data.get("video_aspect_ratios") or []
     video_combos = data.get("video_combos") or []
+    package_wallet = data.get("package_wallet") or {}
     blockers = data["blockers"] or []
     lines = [
         "🚀 <b>TOAN AAS Sales Readiness</b>",
@@ -42156,6 +43083,8 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Video queue active: <code>{int(video_queue.get('running') or 0)}</code> | queued <code>{int(video_queue.get('queued') or 0)}</code>",
         f"• Refund guard: <code>{'ON' if data.get('refund_guard') else 'OFF'}</code>",
         f"• Job lock: <code>{'ON' if data.get('job_lock') else 'OFF'}</code>",
+        f"• Package wallet: <code>{'ON' if package_wallet.get('wallet_enabled') else 'OFF'}</code> | admin grant combo <code>{'ON' if package_wallet.get('admin_grant_combo') else 'OFF'}</code> | monthly <code>{'ON' if package_wallet.get('admin_grant_monthly') else 'OFF'}</code>",
+        f"• Package refund guard: <code>{'ON' if package_wallet.get('refund_guard') else 'OFF'}</code> | rank/top-up excluded <code>{'ON' if package_wallet.get('rank_points_excluded') else 'OFF'}</code>",
         f"• Guide menu: <code>{'ON' if commands.get('guide_menu') else 'OFF'}</code>",
         f"• UX polish: <code>{'ON' if commands.get('ux_polish') else 'OFF'}</code>",
         f"• Feedback loop: <code>{'ON' if commands.get('feedback_loop') else 'OFF'}</code>",
@@ -47622,7 +48551,7 @@ async def send_or_confirm_trend_video_flow_from_callback(query, uid: int, topic:
             query,
             trend_workflow_content_confirm_text(topic, int(credits or 0), lang),
             parse_mode="HTML",
-            reply_markup=trend_workflow_content_confirm_keyboard(lang),
+            reply_markup=trend_workflow_content_confirm_keyboard(lang, bool(active_package_item_for_user(uid, "trend_workflow"))),
         )
         return
     if normalize_user_language(lang) == "zh":
@@ -48889,7 +49818,7 @@ def trend_workflow_content_confirm_text(topic: str, current_credits: int = 0, la
         "Bot chỉ trừ Xu sau khi bạn bấm xác nhận."
     )
 
-def trend_workflow_content_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def trend_workflow_content_confirm_keyboard(lang: str = "vi", has_package: bool = False) -> InlineKeyboardMarkup:
     total = int(trend_workflow_content_cost_breakdown().get("total") or 0)
     if normalize_user_language(lang) == "zh":
         continue_label = f"✅ 继续 -{total} Xu"
@@ -48897,10 +49826,13 @@ def trend_workflow_content_confirm_keyboard(lang: str = "vi") -> InlineKeyboardM
         continue_label = f"✅ Continue -{total} Xu"
     else:
         continue_label = f"✅ Tiếp tục -{total} Xu"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(continue_label, callback_data="tvflow|confirm_content")],
-        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="tvflow|cancel_content")],
-    ])
+    rows = []
+    if has_package:
+        package_label = "✅ Dùng lượt trong gói" if normalize_user_language(lang) == "vi" else "✅ Use package slot"
+        rows.append([InlineKeyboardButton(package_label, callback_data="tvflow|confirm_content_package")])
+    rows.append([InlineKeyboardButton(continue_label, callback_data="tvflow|confirm_content")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="tvflow|cancel_content")])
+    return InlineKeyboardMarkup(rows)
 
 def record_trend_workflow_billing_event(user_id, workflow_id: str, event_type: str, amount_xu: int = 0, balance_before: int = 0, balance_after: int = 0, reason: str = "") -> None:
     safe_workflow = str(workflow_id or "")[:80]
@@ -50198,52 +51130,69 @@ def trend_workflow_billing_off_note(lang: str = "vi") -> str:
         return "Xu: 0 Xu — public workflow billing is OFF. Image/video are still priced separately if public access is enabled."
     return "Xu: 0 Xu — public workflow billing OFF. Image/video vẫn tính riêng nếu bật public."
 
-async def execute_confirmed_trend_workflow_content(message, user_id, topic: str, workflow_id: str = "") -> None:
+async def execute_confirmed_trend_workflow_content(message, user_id, topic: str, workflow_id: str = "", use_package: bool = False) -> None:
     uid = user_id or 0
     lang = user_ui_lang(uid)
     workflow = str(workflow_id or "")[:80] or trend_workflow_id(uid)
     total_cost = int(trend_workflow_content_cost_breakdown().get("total") or 0)
     balance_before, _, _ = get_user(uid)
-    charge = spend_fixed_credit_info(
-        uid,
-        total_cost,
-        "trend_workflow_content",
-        f"Trend workflow content: {str(topic or '')[:120]}",
-        apply_member_discount_flag=False,
-    )
-    if not charge.get("ok"):
-        credits_now, _, _ = get_user(uid)
+    package_use_result = {}
+    if use_package:
+        package_use_result = deduct_package_item_for_job(uid, "trend_workflow", 0, f"trend_workflow_content; workflow_id={workflow}")
+        if not package_use_result.get("ok"):
+            return await message.reply_text("⚠️ Lượt Trend Workflow trong gói không còn khả dụng hoặc đã hết hạn. Bot chưa gọi API và chưa trừ Xu.")
+        deducted = 0
+        balance_after = balance_before
         record_trend_workflow_billing_event(
             uid,
             workflow,
-            "insufficient_balance",
+            "package_use",
             0,
-            int(credits_now or 0),
-            int(credits_now or 0),
-            f"required={total_cost}; after_confirm_charge_failed",
+            int(balance_before or 0),
+            int(balance_after or 0),
+            "confirmed_content_pack_package",
         )
-        return await message.reply_text(
-            trend_workflow_insufficient_credits_text(int(credits_now or 0), total_cost),
-            parse_mode="HTML",
-            reply_markup=build_topup_keyboard(uid),
+    else:
+        charge = spend_fixed_credit_info(
+            uid,
+            total_cost,
+            "trend_workflow_content",
+            f"Trend workflow content: {str(topic or '')[:120]}",
+            apply_member_discount_flag=False,
         )
-    deducted = int(charge.get("final_cost") or 0)
-    balance_after, _, _ = get_user(uid)
-    record_trend_workflow_billing_event(
-        uid,
-        workflow,
-        "deduct",
-        deducted,
-        int(balance_before or 0),
-        int(balance_after or 0),
-        "confirmed_content_pack",
-    )
+        if not charge.get("ok"):
+            credits_now, _, _ = get_user(uid)
+            record_trend_workflow_billing_event(
+                uid,
+                workflow,
+                "insufficient_balance",
+                0,
+                int(credits_now or 0),
+                int(credits_now or 0),
+                f"required={total_cost}; after_confirm_charge_failed",
+            )
+            return await message.reply_text(
+                trend_workflow_insufficient_credits_text(int(credits_now or 0), total_cost),
+                parse_mode="HTML",
+                reply_markup=build_topup_keyboard(uid),
+            )
+        deducted = int(charge.get("final_cost") or 0)
+        balance_after, _, _ = get_user(uid)
+        record_trend_workflow_billing_event(
+            uid,
+            workflow,
+            "deduct",
+            deducted,
+            int(balance_before or 0),
+            int(balance_after or 0),
+            "confirmed_content_pack",
+        )
     try:
         await send_trend_video_flow_for_topic_message(
             message,
             uid,
             topic,
-            billing_note=trend_workflow_billed_note(deducted, lang),
+            billing_note=("Xu: 0 Xu — đã dùng 1 lượt Trend Workflow trong gói/combo." if use_package and normalize_user_language(lang) == "vi" else ("Xu: 0 Xu — used 1 Trend Workflow package slot." if use_package else trend_workflow_billed_note(deducted, lang))),
             lang=lang,
         )
         record_trend_workflow_billing_event(
@@ -50256,14 +51205,19 @@ async def execute_confirmed_trend_workflow_content(message, user_id, topic: str,
             "content_pack_sent",
         )
     except Exception as exc:
-        refunded = refund_charged_credit(
-            uid,
-            deducted,
-            "trend_workflow_refund",
-            workflow,
-            f"Hoàn Xu Trend Workflow do lỗi gửi pack: {sanitize_provider_error(str(exc))[:120]}",
-            deducted > 0,
-        )
+        if use_package and package_use_result.get("item"):
+            item = package_use_result.get("item") or {}
+            adjust_user_package_item(uid, str(item.get("package_id") or ""), "trend_workflow", 1, "system", f"refund workflow send failed: {workflow}")
+            refunded = True
+        else:
+            refunded = refund_charged_credit(
+                uid,
+                deducted,
+                "trend_workflow_refund",
+                workflow,
+                f"Hoàn Xu Trend Workflow do lỗi gửi pack: {sanitize_provider_error(str(exc))[:120]}",
+                deducted > 0,
+            )
         credits_after_refund, _, _ = get_user(uid)
         if refunded:
             record_trend_workflow_billing_event(
@@ -50321,7 +51275,7 @@ async def send_or_confirm_trend_video_flow(update: Update, context: ContextTypes
         return await update.message.reply_text(
             trend_workflow_content_confirm_text(topic, int(credits or 0), lang),
             parse_mode="HTML",
-            reply_markup=trend_workflow_content_confirm_keyboard(lang),
+            reply_markup=trend_workflow_content_confirm_keyboard(lang, bool(active_package_item_for_user(uid, "trend_workflow"))),
         )
     await execute_confirmed_trend_workflow_content(update.message, uid, topic, workflow)
 
@@ -50656,13 +51610,14 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         if normalize_user_language(lang) == "zh":
             return await safe_edit_or_send(query, "❌ 已取消 trend content workflow。本次未调用 provider，也未扣除 Xu。")
         return await safe_edit_or_send(query, "❌ Trend content workflow cancelled. The bot has not called the provider and has not charged Xu." if normalize_user_language(lang) != "vi" else "❌ Đã hủy gói nội dung theo trend. Bot chưa gọi provider và chưa trừ Xu.")
-    if action == "confirm_content":
+    if action in {"confirm_content", "confirm_content_package"}:
         pending = get_trend_workflow_confirm_pending(uid)
         if not pending:
             return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
         clear_trend_workflow_confirm_pending(uid)
         topic = str(pending.get("topic") or "").strip()
         workflow = str(pending.get("workflow_id") or "")[:80]
+        use_package = action == "confirm_content_package"
         if not TREND_VIDEO_WORKFLOW_ENABLED:
             if normalize_user_language(lang) == "zh":
                 return await safe_edit_or_send(query, "🛠 Trend → Video Workflow 暂时维护中。本次未扣除 Xu。")
@@ -50684,14 +51639,16 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             return await send_trend_video_flow_for_topic_message(query.message, uid, topic, billing_note=trend_workflow_billing_off_note(lang), lang=lang)
         total_cost = int(trend_workflow_content_cost_breakdown().get("total") or 0)
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend workflow user")
-        if int(credits or 0) < total_cost:
+        if use_package and not active_package_item_for_user(uid, "trend_workflow"):
+            return await safe_edit_or_send(query, "⚠️ Lượt Trend Workflow trong gói không còn khả dụng hoặc đã hết hạn. Bot chưa gọi API và chưa trừ Xu.")
+        if int(credits or 0) < total_cost and not use_package:
             return await edit_trend_workflow_insufficient_credits(query, int(credits or 0), total_cost, uid, workflow)
-        record_trend_workflow_billing_event(uid, workflow, "confirm", 0, int(credits or 0), int(credits or 0), "user_confirmed_content_pack")
+        record_trend_workflow_billing_event(uid, workflow, "package_confirm" if use_package else "confirm", 0, int(credits or 0), int(credits or 0), "user_confirmed_content_pack")
         await safe_edit_or_send(
             query,
             ("🎬 已确认。正在生成 trend content workflow...\n本步骤不会调用 image/video API。" if normalize_user_language(lang) == "zh" else ("🎬 Confirmed. Creating trend content workflow...\nThe bot does not call image/video APIs in this step." if normalize_user_language(lang) != "vi" else "🎬 Đã xác nhận. Đang tạo gói nội dung theo trend...\nBot không gọi image/video API trong bước này."))
         )
-        return await execute_confirmed_trend_workflow_content(query.message, uid, topic, workflow)
+        return await execute_confirmed_trend_workflow_content(query.message, uid, topic, workflow, use_package=use_package)
     if action in {"cancel_pending", "cancel"}:
         clear_trend_video_flow_pending(uid)
         clear_trend_workflow_confirm_pending(uid)
@@ -51312,7 +52269,9 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Image user")
         base_cost = int(payload.get("cost") or 0)
         final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
-        if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+        package_item_type = package_item_type_for_image_tier(tier)
+        package_item = active_package_item_for_user(uid, package_item_type)
+        if int(credits or 0) < final_preview_cost and not is_admin_user(uid) and not package_item:
             return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
         token = set_shopaikey_pending_confirmation(uid, {
             "job_type": "image",
@@ -51325,12 +52284,18 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             "model": payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
             "retry_warranty_count": int(payload.get("retry_warranty_count") or 0),
             "aspect_ratio": aspect,
+            "package_item_type": package_item_type,
         })
+        confirm_text = public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect)
+        confirm_markup = shopaikey_confirm_keyboard("image", token, tier, lang)
+        if package_item:
+            confirm_text = package_offer_text(package_item, confirm_text, lang)
+            confirm_markup = package_use_choice_keyboard("image", token, tier, lang)
         return await safe_edit_or_send(
             query,
-            public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect),
+            confirm_text,
             parse_mode="HTML",
-            reply_markup=shopaikey_confirm_keyboard("image", token, tier, lang),
+            reply_markup=confirm_markup,
         )
     if action.startswith("video_aspect_"):
         aspect = media_aspect_ratio_from_token(action.replace("video_aspect_", "", 1), "video")
@@ -51377,16 +52342,24 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
         base_cost = int(pending_payload.get("base_cost") or 0)
         final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video")
-        if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+        package_item_type = package_item_type_for_video_tier(tier)
+        package_item = active_package_item_for_user(uid, package_item_type)
+        pending_payload["package_item_type"] = package_item_type
+        if int(credits or 0) < final_preview_cost and not is_admin_user(uid) and not package_item:
             return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
         token = set_shopaikey_pending_confirmation(uid, pending_payload)
         record_shopaikey_billing_event(uid, 0, "video_prompt_received", 0, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
         record_shopaikey_billing_event(uid, 0, "video_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
+        confirm_text = public_video_confirm_text(tier, raw_prompt, int(credits or 0), lang, pending_payload.get("music_label") or "", aspect)
+        confirm_markup = shopaikey_confirm_keyboard("video", token, tier, lang)
+        if package_item:
+            confirm_text = package_offer_text(package_item, confirm_text, lang)
+            confirm_markup = package_use_choice_keyboard("video", token, tier, lang)
         return await safe_edit_or_send(
             query,
-            public_video_confirm_text(tier, raw_prompt, int(credits or 0), lang, pending_payload.get("music_label") or "", aspect),
+            confirm_text,
             parse_mode="HTML",
-            reply_markup=shopaikey_confirm_keyboard("video", token, tier, lang),
+            reply_markup=confirm_markup,
         )
     if action.startswith("image_tier_"):
         clear_trend_video_flow_pending(uid)
@@ -69441,6 +70414,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("profile_user", cmd_profile_user))
     tg_app.add_handler(CommandHandler("member_user", cmd_member_user))
     tg_app.add_handler(CommandHandler("ledger_user", cmd_ledger_user))
+    tg_app.add_handler(CommandHandler("package_catalog", cmd_package_catalog))
+    tg_app.add_handler(CommandHandler("grant_combo", cmd_grant_combo))
+    tg_app.add_handler(CommandHandler("grant_monthly", cmd_grant_monthly))
+    tg_app.add_handler(CommandHandler("user_packages", cmd_user_packages))
+    tg_app.add_handler(CommandHandler("adjust_package", cmd_adjust_package))
+    tg_app.add_handler(CommandHandler("revoke_package", cmd_revoke_package))
     tg_app.add_handler(CommandHandler("deduct",     cmd_admin_deduct))
     tg_app.add_handler(CommandHandler("setvip",      cmd_setvip))
     tg_app.add_handler(CommandHandler("set_vip",     cmd_set_vip))

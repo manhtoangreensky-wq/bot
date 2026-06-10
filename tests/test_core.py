@@ -273,6 +273,12 @@ def test_admin_menu_contains_grouped_operator_and_system():
         "/shopaikey_status",
         "/shopaikey_usage",
         "/shopaikey_video_job",
+        "/package_catalog",
+        "/grant_combo",
+        "/grant_monthly",
+        "/user_packages",
+        "/adjust_package",
+        "/revoke_package",
         "/maintenance_status",
         "/freeze_status",
         "/freeze_video",
@@ -290,6 +296,12 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "| `/shopaikey_status` |" in registry
     assert "| `/shopaikey_usage` |" in registry
     assert "| `/shopaikey_video_job` |" in registry
+    assert "| `/package_catalog` |" in registry
+    assert "| `/grant_combo` |" in registry
+    assert "| `/grant_monthly` |" in registry
+    assert "| `/user_packages` |" in registry
+    assert "| `/adjust_package` |" in registry
+    assert "| `/revoke_package` |" in registry
     assert "| `/freeze_status` |" in registry
     assert "| `/freeze_video` |" in registry
     assert "| `/unfreeze_video` |" in registry
@@ -909,6 +921,87 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
         assert not any("ShopAIKey" in text for text in public_queue_buttons)
         admin_queue_buttons = [button.text for row in bot.shopaikey_video_job_check_keyboard("task_123", "vi").inline_keyboard for button in row]
         assert any("ShopAIKey" in text for text in admin_queue_buttons)
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_package_wallet_admin_grant_deduct_refund_and_revoke(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            package_tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('user_packages','user_package_items','package_events')"
+                ).fetchall()
+            }
+            job_cols = {row[1] for row in conn.execute("PRAGMA table_info(shopaikey_jobs)").fetchall()}
+        finally:
+            conn.close()
+        assert {"user_packages", "user_package_items", "package_events"}.issubset(package_tables)
+        assert {"package_id", "package_item_id", "package_item_type", "package_units_used", "package_refund_status"}.issubset(job_cols)
+        assert "tiktok_99k" in bot.package_catalog_payload()["combos"]
+        assert "starter_monthly" in bot.package_catalog_payload()["monthly"]
+        assert bot.package_item_type_for_video_tier("common") == "video_common"
+        assert bot.package_item_type_for_image_tier("standard_warranty") == "image_standard_warranty"
+
+        bot.get_user("pkg_user", "Pkg User")
+        conn = bot.db_connect()
+        try:
+            conn.execute("UPDATE users SET credits=777, total_spent=0 WHERE user_id=?", ("pkg_user",))
+            conn.commit()
+        finally:
+            conn.close()
+        before_credits, before_spent, _ = bot.get_user("pkg_user")
+        granted = bot.grant_user_package("pkg_user", "tiktok_99k", "combo", "admin", 0, "pytest")
+        assert granted["ok"] is True
+        item = bot.active_package_item_for_user("pkg_user", "video_common")
+        assert item
+        assert int(item["remaining_quantity"]) == 3
+        after_grant_credits, after_grant_spent, _ = bot.get_user("pkg_user")
+        assert int(after_grant_credits) == int(before_credits)
+        assert int(after_grant_spent) == int(before_spent)
+
+        job_id = bot.create_shopaikey_job(
+            "pkg_user",
+            "chat",
+            "video",
+            model="veo3.1-fast",
+            prompt="video prompt",
+            status="QUEUED",
+            admin_only=False,
+            xu_cost_planned=bot.video_tier_cost_xu("common"),
+            package_id=int(item["package_id"]),
+            package_item_id=int(item["id"]),
+            package_item_type="video_common",
+            package_units_used=1,
+        )
+        used = bot.deduct_package_item_for_job("pkg_user", "video_common", job_id, "pytest use")
+        assert used["ok"] is True
+        assert int(used["remaining_after"]) == 2
+        credits_after_use, spent_after_use, _ = bot.get_user("pkg_user")
+        assert int(credits_after_use) == int(before_credits)
+        assert int(spent_after_use) == int(before_spent)
+
+        assert bot.refund_package_item_for_job("pkg_user", job_id, "provider_fail") is True
+        assert bot.refund_package_item_for_job("pkg_user", job_id, "provider_fail_again") is False
+        refunded_item = bot.active_package_item_for_user("pkg_user", "video_common")
+        assert int(refunded_item["remaining_quantity"]) == 3
+
+        adjusted = bot.adjust_user_package_item("pkg_user", str(granted["package_id"]), "video_common", 2, "admin", "pytest adjust")
+        assert adjusted["ok"] is True
+        assert int(adjusted["after"]) == 5
+        revoked = bot.revoke_user_package("pkg_user", str(granted["package_id"]), "admin", "pytest revoke")
+        assert revoked["ok"] is True
+        assert bot.active_package_item_for_user("pkg_user", "video_common") is None
+        summary = bot.user_package_summary_text("pkg_user", admin_view=True)
+        assert "revoked" in summary
+        assert "Combo TikTok 99k" in summary
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
@@ -2572,6 +2665,12 @@ def test_critical_sales_ready_commands_remain_registered():
         "quick_video_test": "cmd_quick_video_test",
         "shopaikey_status": "cmd_shopaikey_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
+        "package_catalog": "cmd_package_catalog",
+        "grant_combo": "cmd_grant_combo",
+        "grant_monthly": "cmd_grant_monthly",
+        "user_packages": "cmd_user_packages",
+        "adjust_package": "cmd_adjust_package",
+        "revoke_package": "cmd_revoke_package",
         "freeze_status": "cmd_freeze_status",
         "freeze_video": "cmd_freeze_video",
         "unfreeze_video": "cmd_unfreeze_video",
