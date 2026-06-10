@@ -1155,7 +1155,7 @@ def test_trend_video_flow_admin_first_prompt_only(monkeypatch):
     assert "update_trend_workflow_generated_image" in shopai_callback_source
     assert "trend_workflow_image_success_keyboard" in shopai_callback_source
     assert "image.success" in shopai_callback_source
-    assert "🎞 Tạo 3 prompt video từ ảnh này" in source
+    assert "🎬 Biến ảnh thành video" in source
 
     monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ENABLED", True)
     monkeypatch.setattr(bot, "TREND_VIDEO_WORKFLOW_ADMIN_ONLY", True)
@@ -1336,9 +1336,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Có lỗi nhỏ khi cập nhật màn hình" not in safe_edit_source
     assert "message.reply_text" in safe_edit_source
     assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
-    assert 'InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")' in source
-    assert 'InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video")' in source
-    assert 'InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image")' in source
+    assert 'InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")' in source
+    assert 'InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image")' in source
+    assert 'InlineKeyboardButton("🎬 Tạo video AI", callback_data="create_media|quick_video")' in source
+    assert 'InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start")' in source
+    assert 'InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")' in source
+    assert 'InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
     video_keyboard_source = source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert 'ui_text(lang, "image.quick_button")' in source
     assert 'ui_text(lang, "video.guided_flow")' not in video_keyboard_source
@@ -1389,10 +1392,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "set_public_video_prompt_pending(uid, tier)" in source
     assert "clear_public_video_prompt_pending(uid)" in source
     assert "handle_quick_media_pending_text(update, context)" in message_source
+    assert "handle_feedback_pending_text(update, context)" in message_source
     assert "handle_public_image_prompt_pending_text(update, context)" in message_source
     assert "handle_public_video_prompt_pending_text(update, context)" in message_source
     assert "handle_creative_motion_pending_text(update, context)" in message_source
     assert "handle_cinematic_ad_pending_text(update, context)" in message_source
+    assert message_source.index("handle_feedback_pending_text(update, context)") < message_source.index("handle_trend_video_flow_pending_text(update, context)")
     assert message_source.index("handle_public_image_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_public_video_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_creative_motion_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
@@ -1400,6 +1405,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert message_source.index("handle_quick_media_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
     assert "clear_quick_media_pending(uid)" in quick_source
     assert "clear_media_creator_pending_states(uid)" in source_between(source, "async def cmd_cancel", "async def cmd_create_media")
+    assert 'CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\\|")' in source
+    assert 'CommandHandler("feedback",    cmd_admin_gopy)' in source
     assert "run_quick_image_admin_smoke" in quick_source
     assert "run_quick_video_admin_smoke" in quick_source
     assert "shopaikey_image_generate(prompt)" in quick_source
@@ -1496,7 +1503,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     success_buttons = [button for row in bot.public_image_success_keyboard(123, "low").inline_keyboard for button in row]
     assert any(button.callback_data == "tvflow|image_video_prompts_123" for button in success_buttons)
     assert any(button.callback_data == "create_media|image_tier_low" for button in success_buttons)
-    assert len(success_buttons) == 5
+    assert any(button.text == "💾 Lưu ảnh/package" for button in success_buttons)
+    assert len(success_buttons) == 7
     assert not any(button.callback_data == "tvflow|music_image_123" for button in success_buttons)
     missing_source_buttons = [button.text for row in bot.video_missing_source_keyboard().inline_keyboard for button in row]
     assert "🖼 Tạo lại ảnh khung chính" in missing_source_buttons
@@ -1601,11 +1609,13 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "send_pricing_lines(query.message, pricing_xu_lines()" not in pricing_callback_source
     start_labels = [button.text for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard for button in row]
     assert "🎨 Media Creator" not in start_labels
-    assert "🎬 Tạo nội dung / Video" in start_labels
-    assert "🖼 Hình ảnh" in start_labels
+    assert "🖼 Tạo ảnh AI" in start_labels
+    assert "🎬 Tạo video AI" in start_labels
+    assert "🔥 Video theo trend" in start_labels
     assert "🎞 Video" not in start_labels
-    assert "📞 Liên hệ admin" in start_labels
-    assert "💳 Bảng giá" in start_labels
+    assert "👨‍💼 Liên hệ admin" in start_labels
+    assert "💰 Nạp Xu / Bảng giá" in start_labels
+    assert "💬 Góp ý / Báo lỗi" in start_labels
     for keyboard in [
         bot.main_menu_keyboard(False),
         bot.localized_main_menu_keyboard(False, "vi"),
@@ -1613,7 +1623,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         bot.localized_main_menu_keyboard(False, "zh"),
     ]:
         voice_rows = [row for row in keyboard.inline_keyboard if any(button.callback_data == "menu|main_audio" for button in row)]
-        assert voice_rows and len(voice_rows[0]) == 2
+        assert not voice_rows
     image_labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
     assert "🖼 Tạo ảnh AI nhanh" in image_labels
     assert "💳 Xem bảng giá" not in image_labels
@@ -1730,6 +1740,49 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.get_creative_motion_pending("u9") is None
     assert bot.get_cinematic_ad_pending("u9") is None
     assert bot.get_trend_video_flow_pending("u9") is None
+
+
+def test_customer_feedback_loop_state_and_storage(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        conn = bot.db_connect()
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(feedback)").fetchall()}
+        finally:
+            conn.close()
+        assert {"category", "context", "status", "reviewed_at", "resolved_at"}.issubset(columns)
+        assert "Góp ý / Báo lỗi" in bot.feedback_start_text("vi")
+        feedback_buttons = [button.callback_data for row in bot.feedback_category_keyboard("vi").inline_keyboard for button in row if button.callback_data]
+        assert "feedback|cat|image_not_right" in feedback_buttons
+        assert "feedback|cat|video_slow" in feedback_buttons
+        assert "feedback|cancel" in feedback_buttons
+
+        bot.USER_PENDING.pop(bot.feedback_pending_key("u_feedback"), None)
+        bot.set_feedback_pending("u_feedback", "video_slow")
+        pending = bot.get_feedback_pending("u_feedback")
+        assert pending and pending["pending_action"] == "feedback"
+        assert pending["category"] == "video_slow"
+
+        class FakeUser:
+            id = "u_feedback"
+            username = "tester"
+            first_name = "Tester"
+
+        feedback_id = bot.store_customer_feedback(FakeUser(), "video_slow", "Video tạo hơi lâu", "trend_video_flow")
+        assert feedback_id > 0
+        conn = bot.db_connect()
+        try:
+            row = conn.execute("SELECT category, content, context, status FROM feedback WHERE id=?", (feedback_id,)).fetchone()
+        finally:
+            conn.close()
+        assert row == ("video_slow", "Video tạo hơi lâu", "trend_video_flow", "new")
+        assert bot.clear_feedback_pending("u_feedback") is True
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
 
 
 def test_public_flow_i18n_helpers_do_not_mix_vietnamese():
@@ -2401,7 +2454,7 @@ def test_generation_waiting_duplicate_and_guidance_helpers():
     bot.GENERATION_PENDING_JOBS.clear()
     try:
         assert "TOAN AAS đang tạo ảnh" in bot.get_generation_wait_text("image")
-        assert "Vui lòng không gửi lại lệnh" in bot.get_generation_wait_text("image")
+        assert "không cần gửi lại lệnh" in bot.get_generation_wait_text("image")
         assert "Ảnh chất lượng cao có thể lâu hơn một chút" in bot.public_image_waiting_text("high")
         assert "Ảnh chất lượng cao có thể lâu hơn một chút" in bot.public_image_waiting_text("high_warranty")
         assert "Ảnh chất lượng cao" not in bot.public_image_waiting_text("standard")
@@ -2560,7 +2613,8 @@ def test_customer_guide_is_public_and_policy_aligned():
     assert "Hướng dẫn tạo video AI" in guide_index
     assert "Làm video theo trend từng bước" in guide_index
     assert "Hướng dẫn thêm nhạc" in guide_index
-    assert "📘 Hướng Dẫn" in button_texts
+    assert "📚 Hướng dẫn" in button_texts
+    assert "💬 Góp ý / Báo lỗi" in button_texts
     assert "🚀 Bắt đầu nhanh" in guide_labels
     assert "🖼 Hướng dẫn tạo ảnh" in guide_labels
     assert "🎬 Hướng dẫn tạo video" in guide_labels

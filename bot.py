@@ -385,7 +385,7 @@ SHOPAIKEY_VIDEO_FREEZE_COOLDOWN_LONG_MINUTES = env_int("SHOPAIKEY_VIDEO_FREEZE_C
 USER_BUSY_MESSAGE = _env("USER_BUSY_MESSAGE", "⏳ Tác vụ của bạn đang được xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 USER_PROVIDER_BUSY_MESSAGE = _env("USER_PROVIDER_BUSY_MESSAGE", "⚙️ Hệ thống AI đang bận. TOAN AAS đã ghi nhận, vui lòng thử lại sau ít phút.")
 USER_PROVIDER_MAINTENANCE_MESSAGE = _env("USER_PROVIDER_MAINTENANCE_MESSAGE", "🛠 Tính năng này đang được bảo trì ngắn để đảm bảo chất lượng. Vui lòng quay lại sau.")
-USER_WAIT_IMAGE_MESSAGE = _env("USER_WAIT_IMAGE_MESSAGE", "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không gửi lại lệnh.")
+USER_WAIT_IMAGE_MESSAGE = _env("USER_WAIT_IMAGE_MESSAGE", "🖼 TOAN AAS đang tạo ảnh cho bạn.\nQuá trình này thường mất một lúc ngắn.\nVui lòng chờ, không cần gửi lại lệnh.")
 USER_WAIT_VIDEO_MESSAGE = _env("USER_WAIT_VIDEO_MESSAGE", "🎞 Đang tạo video cho bạn. Quá trình này có thể mất 1–5 phút. Bot sẽ tự gửi kết quả khi hoàn tất.")
 USER_JOB_LOCK_MESSAGE = _env("USER_JOB_LOCK_MESSAGE", "⏳ Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED = env_flag("SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED", "true")
@@ -1594,7 +1594,15 @@ def init_db():
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS feedback (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT, username TEXT, content TEXT, timestamp DATETIME
+        user_id TEXT,
+        username TEXT,
+        category TEXT DEFAULT '',
+        content TEXT,
+        context TEXT DEFAULT '',
+        status TEXT DEFAULT 'new',
+        reviewed_at TEXT DEFAULT '',
+        resolved_at TEXT DEFAULT '',
+        timestamp DATETIME
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS pending_deposits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2470,6 +2478,19 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_status ON local_worker_jobs(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_local_worker_jobs_created ON local_worker_jobs(created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_workflow_image_assets_user ON workflow_image_assets(user_id, created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_category ON feedback(category)")
+    for col, col_type in [
+        ("category", "TEXT DEFAULT ''"),
+        ("context", "TEXT DEFAULT ''"),
+        ("status", "TEXT DEFAULT 'new'"),
+        ("reviewed_at", "TEXT DEFAULT ''"),
+        ("resolved_at", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE feedback ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
     for col, col_type in [
         ("refund_status", "TEXT DEFAULT ''"),
         ("refund_amount", "INTEGER DEFAULT 0"),
@@ -3290,7 +3311,7 @@ UI_TEXT = {
         "image.prompt_button": "✍️ Tạo prompt ảnh",
         "image.edit_button": "🧩 Sửa ảnh / edit ảnh",
         "image.upscale_button": "📐 Nâng cấp / đổi kích thước ảnh",
-        "image.waiting": "⏳ TOAN AAS đang tạo ảnh. Thường mất vài giây đến vài chục giây. Vui lòng không gửi lại lệnh.",
+        "image.waiting": "🖼 TOAN AAS đang tạo ảnh cho bạn.\nQuá trình này thường mất một lúc ngắn.\nVui lòng chờ, không cần gửi lại lệnh.",
         "image.tier_disabled_message": "🧪 Tier ảnh này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.",
         "image.success": "✅ Ảnh {label} đã tạo xong.\nJob #{job_id}\n{billing_note}\n\nBạn muốn làm gì tiếp?\n\n• Chốt ảnh này nếu đã hài lòng\n• Tạo prompt video từ ảnh\n• Sửa prompt hoặc tạo lại ảnh",
         "image.success_link": "✅ Ảnh ShopAIKey đã tạo xong nhưng Telegram không gửi trực tiếp được.\n<a href=\"{url}\">Mở ảnh</a>",
@@ -3300,7 +3321,7 @@ UI_TEXT = {
         "image.prompt.ask": "🖼 <b>{label}</b>\n\nGửi mô tả ảnh bạn muốn tạo.\n\nVí dụ: logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản.\n\nTimeout: 10 phút. Gõ /cancel để hủy.\nBot chưa gọi API và chưa trừ Xu.",
         "image.confirm.cost": "🖼 <b>Tạo ảnh {label} sẽ tốn {cost} Xu.</b>\n\n• Số dư hiện tại: <b>{credits} Xu</b>\n• Bảo hành: {warranty_note}\n• Prompt: <code>{prompt}</code>\n\nBạn có muốn tiếp tục không?\nBot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn Xu theo chính sách.",
         "image.lock": "✅ Chốt ảnh này",
-        "image.to_video": "🎞 Tạo 3 prompt video từ ảnh này",
+        "image.to_video": "🎬 Biến ảnh thành video",
         "image.regenerate": "🔁 Tạo lại ảnh",
         "image.regenerate_paid": "🔁 Tạo lại ảnh theo bảng giá",
         "image.warranty_retry": "🔁 Tạo lại ảnh bảo hành 1 lần",
@@ -3321,7 +3342,7 @@ UI_TEXT = {
         "video.premium_message": "👑 Video premium đang mở theo dạng admin duyệt vì chi phí cao. Vui lòng liên hệ admin nếu cần.\nBot chưa gọi API và chưa trừ Xu.",
         "video.active_job": "Bạn đang có một video đang xử lý. Vui lòng chờ hoàn tất trước khi tạo video mới.",
         "video.source_invalid": "⚠️ Ảnh nguồn không còn hợp lệ hoặc thiếu dữ liệu để tạo video. Bot chưa trừ Xu.\nBạn có thể tạo lại ảnh, tạo video từ prompt text hoặc quay lại menu chính.",
-        "video.queue_submitted": "✅ Video đã được gửi vào hàng chờ tạo.\n\nTOAN AAS đang tạo video cho bạn.\nVideo sẽ được gửi tự động trong vài phút khi hoàn tất.\nVui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần.\n\nTask: {task_id}\nAuto poll: {auto_poll}",
+        "video.queue_submitted": "✅ Video đã được gửi vào hàng chờ tạo.\n\nTOAN AAS đang tạo video cho bạn.\nVideo sẽ được gửi tự động trong vài phút khi hoàn tất.\n\nVui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần để tránh trùng job.\n\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "Bạn muốn làm gì tiếp?",
         "video.fail.not_charged": "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau.",
         "video.fail.refunded": "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau.",
@@ -3540,7 +3561,7 @@ UI_TEXT = {
         "image.prompt_button": "✍️ Image prompt",
         "image.edit_button": "🧩 Edit image",
         "image.upscale_button": "📐 Upscale / resize image",
-        "image.waiting": "⏳ TOAN AAS is creating your image. This usually takes a few seconds to a few dozen seconds. Please do not resend the command.",
+        "image.waiting": "🖼 TOAN AAS is creating your image.\nThis usually takes a short moment.\nPlease wait and do not resend the command.",
         "image.tier_disabled_message": "🧪 This image tier is currently disabled. The bot has not called any API and has not charged Xu.",
         "image.success": "✅ {label} image is ready.\nJob #{job_id}\n{billing_note}\n\nWhat would you like to do next?\n\n• Lock this image if you are happy with it\n• Create video prompts from this image\n• Edit the prompt or regenerate the image",
         "image.success_link": "✅ The ShopAIKey image is ready, but Telegram could not send it directly.\n<a href=\"{url}\">Open image</a>",
@@ -3571,7 +3592,7 @@ UI_TEXT = {
         "video.premium_message": "👑 Premium video requires admin approval because provider cost is high. Please contact admin if needed.\nThe bot has not called any API and has not charged Xu.",
         "video.active_job": "You already have a video being processed. Please wait until it finishes before creating another one.",
         "video.source_invalid": "⚠️ The source image is no longer valid or is missing data for video generation. The bot has not charged Xu.\nYou can recreate the image, create a video from a text prompt, or return to the main menu.",
-        "video.queue_submitted": "✅ Your video has been sent to the creation queue.\n\nTOAN AAS is creating the video for you.\nThe video will be sent automatically in a few minutes when it is ready.\nPlease do not send the command again or create multiple jobs.\n\nTask: {task_id}\nAuto poll: {auto_poll}",
+        "video.queue_submitted": "✅ Your video has been sent to the creation queue.\n\nTOAN AAS is creating the video for you.\nThe video will be sent automatically in a few minutes when it is ready.\n\nPlease do not send the command again or create multiple jobs to avoid duplicates.\n\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "What would you like to do next?",
         "video.fail.not_charged": "⚙️ The video model is busy or temporarily unavailable. The bot has not charged Xu. Please try again later.",
         "video.fail.refunded": "⚙️ The video model is busy or temporarily unavailable. TOAN AAS has refunded {amount} Xu. Please try again later.",
@@ -3790,7 +3811,7 @@ UI_TEXT = {
         "image.prompt_button": "✍️ 图片 prompt",
         "image.edit_button": "🧩 编辑图片",
         "image.upscale_button": "📐 放大 / 调整图片尺寸",
-        "image.waiting": "⏳ TOAN AAS 正在生成图片，通常需要几秒到几十秒。请不要重复发送命令。",
+        "image.waiting": "🖼 TOAN AAS 正在为你生成图片。\n通常只需要一小段时间。\n请等待，不要重复发送命令。",
         "image.tier_disabled_message": "🧪 此图片档位当前已关闭。Bot 未调用 API，也未扣除 Xu。",
         "image.success": "✅ {label} 已生成完成。\nJob #{job_id}\n{billing_note}\n\n你想下一步做什么？\n\n• 如果满意，请锁定此图片\n• 基于此图片生成 3 个视频 prompt\n• 修改 prompt 或重新生成图片",
         "image.success_link": "✅ ShopAIKey 图片已生成，但 Telegram 无法直接发送。\n<a href=\"{url}\">打开图片</a>",
@@ -3821,7 +3842,7 @@ UI_TEXT = {
         "video.premium_message": "👑 Premium 视频因 provider 成本较高，需要 admin 审核。如有需要请联系 admin。\nBot 未调用 API，也未扣除 Xu。",
         "video.active_job": "你已有一个视频正在处理中。请等待完成后再创建新视频。",
         "video.source_invalid": "⚠️ 源图片缺少数据或已不适用于生成视频。本次未扣除 Xu。\n你可以重新生成图片、用文字 prompt 生成视频，或返回主菜单。",
-        "video.queue_submitted": "✅ 视频已发送到生成队列。\n\nTOAN AAS 正在为你生成视频。\n视频完成后将在几分钟内自动发送。\n请不要重复发送命令或连续创建多个任务。\n\nTask: {task_id}\nAuto poll: {auto_poll}",
+        "video.queue_submitted": "✅ 视频已发送到生成队列。\n\nTOAN AAS 正在为你生成视频。\n视频完成后将在几分钟内自动发送。\n\n请不要重复发送命令或连续创建多个任务，以避免重复 job。\n\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "你想下一步做什么？",
         "video.fail.not_charged": "⚙️ 视频模型正忙或暂时不可用。本次未扣除 Xu。请稍后再试。",
         "video.fail.refunded": "⚙️ 视频模型正忙或暂时不可用。TOAN AAS 已退回 {amount} Xu。请稍后再试。",
@@ -28716,6 +28737,118 @@ def support_contact_keyboard(back_to_media: bool = False, lang: str = "vi") -> I
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
+FEEDBACK_CATEGORY_LABELS = {
+    "hard_to_use": "Bot khó hiểu",
+    "image_not_right": "Ảnh chưa đúng ý",
+    "video_not_right": "Video chưa đúng ý",
+    "video_slow": "Tạo video lâu",
+    "topup_error": "Lỗi nạp Xu",
+    "other_error": "Lỗi khác",
+    "feature_request": "Tôi muốn đề xuất tính năng mới",
+}
+
+def feedback_pending_key(user_id) -> str:
+    return f"feedback:{user_id}"
+
+def feedback_start_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return "💬 <b>反馈 / 报错</b>\n\n请选择你想反馈的问题类型。Bot 未调用 AI/API，也未扣除 Xu。"
+    if normalize_user_language(lang) != "vi":
+        return "💬 <b>Feedback / Bug report</b>\n\nChoose what you want to report. The bot has not called any AI/API and has not charged Xu."
+    return "💬 <b>Góp ý / Báo lỗi</b>\n\nBạn muốn góp ý điều gì cho TOAN AAS?\n\nChọn nhanh một nhóm bên dưới. Bot chưa gọi AI/API và chưa trừ Xu."
+
+def feedback_category_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    labels = FEEDBACK_CATEGORY_LABELS
+    if normalize_user_language(lang) != "vi":
+        labels = {
+            "hard_to_use": "Bot is confusing",
+            "image_not_right": "Image result is not right",
+            "video_not_right": "Video result is not right",
+            "video_slow": "Video generation is slow",
+            "topup_error": "Top-up issue",
+            "other_error": "Other issue",
+            "feature_request": "Feature request",
+        }
+    rows = [
+        [InlineKeyboardButton(f"1️⃣ {labels['hard_to_use']}", callback_data="feedback|cat|hard_to_use")],
+        [InlineKeyboardButton(f"2️⃣ {labels['image_not_right']}", callback_data="feedback|cat|image_not_right")],
+        [InlineKeyboardButton(f"3️⃣ {labels['video_not_right']}", callback_data="feedback|cat|video_not_right")],
+        [InlineKeyboardButton(f"4️⃣ {labels['video_slow']}", callback_data="feedback|cat|video_slow")],
+        [InlineKeyboardButton(f"5️⃣ {labels['topup_error']}", callback_data="feedback|cat|topup_error")],
+        [InlineKeyboardButton(f"6️⃣ {labels['other_error']}", callback_data="feedback|cat|other_error")],
+        [InlineKeyboardButton(f"7️⃣ {labels['feature_request']}", callback_data="feedback|cat|feature_request")],
+        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="feedback|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+def set_feedback_pending(user_id, category: str) -> None:
+    slug = str(category or "").strip()
+    if slug not in FEEDBACK_CATEGORY_LABELS:
+        slug = "other_error"
+    USER_PENDING[feedback_pending_key(user_id)] = {
+        "pending_action": "feedback",
+        "category": slug,
+        "created_at_ts": time.time(),
+    }
+
+def get_feedback_pending(user_id) -> dict | None:
+    key = feedback_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "feedback":
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_feedback_pending(user_id) -> bool:
+    return USER_PENDING.pop(feedback_pending_key(user_id), None) is not None
+
+def feedback_message_prompt(category: str, lang: str = "vi") -> str:
+    label = FEEDBACK_CATEGORY_LABELS.get(str(category or ""), FEEDBACK_CATEGORY_LABELS["other_error"])
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"💬 <b>Feedback category:</b> {html.escape(label)}\n\n"
+            "Please send one message describing the issue or suggestion.\n"
+            "If relevant, include the job ID, button name, or screen where it happened.\n\n"
+            "The bot has not called AI/API and has not charged Xu."
+        )
+    return (
+        f"💬 <b>Nhóm góp ý:</b> {html.escape(label)}\n\n"
+        "Bạn hãy gửi một tin nhắn mô tả lỗi/góp ý.\n"
+        "Nếu có, hãy kèm job ID, nút đã bấm hoặc màn hình đang dùng.\n\n"
+        "Bot chưa gọi AI/API và chưa trừ Xu."
+    )
+
+def feedback_context_for_user(user_id) -> str:
+    uid = str(user_id or "")
+    active = []
+    for key, value in list(USER_PENDING.items()):
+        if key.endswith(f":{uid}") and isinstance(value, dict):
+            action = value.get("pending_action")
+            if action and action != "feedback":
+                active.append(str(action))
+    return ",".join(active[:5])
+
+def store_customer_feedback(user, category: str, content: str, context: str = "") -> int:
+    uid = str(getattr(user, "id", "") or "")
+    username = getattr(user, "username", "") or getattr(user, "first_name", "") or ""
+    slug = str(category or "").strip() or "other_error"
+    text = re.sub(r"\s+", " ", str(content or "").strip())[:2000]
+    ctx = re.sub(r"\s+", " ", str(context or "").strip())[:500]
+    conn = db_connect()
+    try:
+        cur = conn.execute(
+            """INSERT INTO feedback (user_id, username, category, content, context, status, timestamp)
+            VALUES (?,?,?,?,?,?,?)""",
+            (uid, username, slug, text, ctx, "new", now_text()),
+        )
+        conn.commit()
+        return int(cur.lastrowid or 0)
+    finally:
+        conn.close()
+
 def clear_media_creator_pending_states(user_id) -> bool:
     quick_cleared = clear_quick_media_pending(user_id)
     public_image_cleared = clear_public_image_prompt_pending(user_id)
@@ -28725,7 +28858,8 @@ def clear_media_creator_pending_states(user_id) -> bool:
     cinematic_ad_cleared = clear_cinematic_ad_pending(user_id)
     trend_cleared = clear_trend_video_flow_pending(user_id)
     trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
-    return bool(quick_cleared or public_image_cleared or public_video_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared)
+    feedback_cleared = clear_feedback_pending(user_id)
+    return bool(quick_cleared or public_image_cleared or public_video_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -30944,6 +31078,8 @@ def sales_readiness_payload() -> dict:
         "emergency_status": callable(globals().get("cmd_emergency_status")),
         "ops_plan": callable(globals().get("cmd_ops_plan")),
         "guide_menu": callable(globals().get("main_guide_keyboard")) and callable(globals().get("guide_section_text")),
+        "ux_polish": callable(globals().get("public_image_success_keyboard")) and callable(globals().get("public_video_success_keyboard")),
+        "feedback_loop": callable(globals().get("handle_feedback_callback")) and callable(globals().get("handle_feedback_pending_text")),
     }
     blockers = []
     if not db_status["ok"]:
@@ -31936,19 +32072,15 @@ def admin_internal_command(handler):
 
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-        [InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
-        [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs")],
-        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
-        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support"), InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main")],
-        [InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
-        [InlineKeyboardButton("📘 Hướng Dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="create_media|quick_video")],
+        [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("🎵 Nhạc / âm thanh", callback_data="menu|main_music")],
+        [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
+        [InlineKeyboardButton("👤 Tài khoản của tôi", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
+        [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
     ]
     if is_admin:
-        rows.extend([
-            [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang"), InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin")],
-            [InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")],
-        ])
+        rows.append([InlineKeyboardButton("📊 Quản Trị", callback_data="menu|admin"), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
+        rows.append([InlineKeyboardButton("⚙️ Hệ Thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
     else:
         rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
     return InlineKeyboardMarkup(rows)
@@ -31987,54 +32119,42 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         rows = [
-            [InlineKeyboardButton("🎬 内容 / 视频", callback_data="menu|main_video"), InlineKeyboardButton("🤖 AI 助手", callback_data="menu|main_ai")],
-            [InlineKeyboardButton("🖼 图片工具", callback_data="menu|main_image"), InlineKeyboardButton("🎙 语音工具", callback_data="menu|main_audio")],
-            [InlineKeyboardButton("🎵 音乐 / SFX", callback_data="menu|main_music"), InlineKeyboardButton("📄 文档工具", callback_data="menu|main_docs")],
-            [InlineKeyboardButton("🌐 翻译", callback_data="menu|translate"), InlineKeyboardButton("🧠 记忆/提醒", callback_data="menu|main_memory")],
-            [InlineKeyboardButton("📞 支持", callback_data="menu|support"), InlineKeyboardButton("💳 价格", callback_data="pricing|main")],
-            [InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 账户", callback_data="menu|main_profile")],
-            [InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🖼 AI 图片", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🔥 Trend 视频", callback_data="trendg|start"), InlineKeyboardButton("🎵 音乐 / 音效", callback_data="menu|main_music")],
+            [InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
+            [InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
+            [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
         ]
         if is_admin:
-            rows.extend([
-                [InlineKeyboardButton("🌍 切换语言", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")],
-                [InlineKeyboardButton("⚙️ 系统", callback_data="menu|system")],
-            ])
+            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")])
+            rows.append([InlineKeyboardButton("⚙️ 系统", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
         else:
             rows.append([InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")])
         return InlineKeyboardMarkup(rows)
     if lang == "vi":
         rows = [
-            [InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Hỏi AI", callback_data="menu|main_ai")],
-            [InlineKeyboardButton("🖼 Hình ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
-            [InlineKeyboardButton("🎵 Nhạc / SFX", callback_data="menu|main_music"), InlineKeyboardButton("📄 Tài liệu", callback_data="menu|main_docs")],
-            [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate"), InlineKeyboardButton("🧠 Ghi nhớ", callback_data="menu|main_memory")],
-            [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support"), InlineKeyboardButton("💳 Bảng giá", callback_data="pricing|main")],
-            [InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
-            [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("🎵 Nhạc / âm thanh", callback_data="menu|main_music")],
+            [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
+            [InlineKeyboardButton("👤 Tài khoản của tôi", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
+            [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
         ]
         if is_admin:
-            rows.extend([
-                [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")],
-                [InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system")],
-            ])
+            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
+            rows.append([InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
         else:
             rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
         return InlineKeyboardMarkup(rows)
     rows = [
-        [InlineKeyboardButton("🎬 Content / Video", callback_data="menu|main_video"), InlineKeyboardButton("🤖 Ask AI", callback_data="menu|main_ai")],
-        [InlineKeyboardButton("🖼 Images", callback_data="menu|main_image"), InlineKeyboardButton("🎙 Voice", callback_data="menu|main_audio")],
-        [InlineKeyboardButton("🎵 Music / SFX", callback_data="menu|main_music"), InlineKeyboardButton("📄 Documents", callback_data="menu|main_docs")],
-        [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate"), InlineKeyboardButton("🧠 Memory", callback_data="menu|main_memory")],
-        [InlineKeyboardButton("📞 Support", callback_data="menu|support"), InlineKeyboardButton("💳 Pricing", callback_data="pricing|main")],
-        [InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("👤 Account", callback_data="menu|main_profile")],
-        [InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🖼 AI Image", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 AI Video", callback_data="create_media|quick_video")],
+        [InlineKeyboardButton("🔥 Trend Video", callback_data="trendg|start"), InlineKeyboardButton("🎵 Music / Sound", callback_data="menu|main_music")],
+        [InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
+        [InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
+        [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
     ]
     if is_admin:
-        rows.extend([
-            [InlineKeyboardButton("🌍 Change language", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")],
-            [InlineKeyboardButton("⚙️ System", callback_data="menu|system")],
-        ])
+        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin"), InlineKeyboardButton("🌍 Change language", callback_data="back_lang")])
+        rows.append([InlineKeyboardButton("⚙️ System", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
     else:
         rows.append([InlineKeyboardButton("🌍 Change language", callback_data="back_lang")])
     return InlineKeyboardMarkup(rows)
@@ -32929,11 +33049,13 @@ def menu_text_main_profile(user_id) -> str:
         f"• 🪪 Hạng: <b>{html.escape(get_role_badge(user_id))}</b>\n"
         f"• Số dư: <b>{html.escape(balance)}</b>\n\n"
         f"{ui_text('vi', 'account.ref_hint')}\n"
-        "Gõ <code>/profile</code> để xem chi tiết referral, birthday gift và quyền lợi thành viên."
+        "Dùng các nút bên dưới để nạp Xu, xem bảng giá, xem link giới thiệu hoặc liên hệ hỗ trợ."
     )
 
 def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💰 Nạp Xu" if normalize_user_language(lang) == "vi" else "💰 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("💳 Bảng giá" if normalize_user_language(lang) == "vi" else "💳 Pricing", callback_data="pricing|main")],
+        [InlineKeyboardButton("📚 Hướng dẫn Xu" if normalize_user_language(lang) == "vi" else "📚 Xu guide", callback_data="menu|guide_credits"), InlineKeyboardButton("👨‍💼 Hỗ trợ" if normalize_user_language(lang) == "vi" else "👨‍💼 Support", callback_data="menu|support")],
         [InlineKeyboardButton(ui_text(lang, "account.ref_link_button"), callback_data="menu|profile_ref_link")],
         [InlineKeyboardButton(ui_text(lang, "account.ref_policy_button"), callback_data="menu|profile_ref_policy")],
         [InlineKeyboardButton(ui_text(lang, "account.ref_stats_button"), callback_data="menu|profile_ref_stats")],
@@ -34535,6 +34657,23 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await safe_edit_query_message(query, text, reply_markup=translate_language_keyboard(False, lang))
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
     await safe_edit_query_message(query, text, reply_markup=keyboard)
+
+async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = (query.data or "").strip()
+    uid = query.from_user.id
+    lang = user_ui_lang(uid)
+    if data == "feedback|start":
+        return await safe_edit_or_send(query, feedback_start_text(lang), parse_mode="HTML", reply_markup=feedback_category_keyboard(lang))
+    if data == "feedback|cancel":
+        clear_feedback_pending(uid)
+        return await safe_edit_or_send(query, ui_text(lang, "common.cancelled_not_charged"), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
+    if data.startswith("feedback|cat|"):
+        category = data.split("|", 2)[2]
+        set_feedback_pending(uid, category)
+        return await safe_edit_or_send(query, feedback_message_prompt(category, lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="feedback|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
+    return await query.answer("Feedback action not supported.", show_alert=True)
 
 async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -41944,6 +42083,8 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Refund guard: <code>{'ON' if data.get('refund_guard') else 'OFF'}</code>",
         f"• Job lock: <code>{'ON' if data.get('job_lock') else 'OFF'}</code>",
         f"• Guide menu: <code>{'ON' if commands.get('guide_menu') else 'OFF'}</code>",
+        f"• UX polish: <code>{'ON' if commands.get('ux_polish') else 'OFF'}</code>",
+        f"• Feedback loop: <code>{'ON' if commands.get('feedback_loop') else 'OFF'}</code>",
         f"• Backup command: <code>{'available' if commands.get('backup_db') else 'missing'}</code>",
         f"• Ops plan: <code>{'available' if commands.get('ops_plan') else 'missing'}</code> — <code>/ops_plan</code>",
         "",
@@ -48285,7 +48426,9 @@ def public_image_success_keyboard(job_id: int, tier: str = "", lang: str = "vi")
     else:
         rows.append([InlineKeyboardButton(ui_text(lang, "image.regenerate_paid"), callback_data=f"create_media|image_tier_{tier_norm}")])
     rows.extend([
+        [InlineKeyboardButton("🖼 Tạo ảnh mới" if normalize_user_language(lang) == "vi" else "🖼 Create new image", callback_data="create_media|quick_image")],
         [InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data=f"create_media|image_tier_{tier_norm}")],
+        [InlineKeyboardButton("💾 Lưu ảnh/package" if normalize_user_language(lang) == "vi" else "💾 Save image/package", callback_data="tvflow|save_image")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
@@ -48425,9 +48568,12 @@ def public_video_provider_fail_message(amount_xu: int = 0, refund_done: bool = F
 def public_video_success_keyboard(tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     tier_norm = normalize_video_tier(tier)
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎵 Thêm nhạc nếu chưa có" if normalize_user_language(lang) == "vi" else "🎵 Add music if needed", callback_data="menu|main_music")],
         [InlineKeyboardButton(ui_text(lang, "video.create_another"), callback_data=f"create_media|video_tier_{tier_norm}")],
         [InlineKeyboardButton(ui_text(lang, "video.edit_prompt"), callback_data=f"create_media|video_tier_{tier_norm}")],
         [InlineKeyboardButton(ui_text(lang, "video.create_image"), callback_data="create_media|quick_image")],
+        [InlineKeyboardButton("🔥 Tạo video theo trend" if normalize_user_language(lang) == "vi" else "🔥 Trend video", callback_data="trendg|start")],
+        [InlineKeyboardButton("💬 Góp ý kết quả" if normalize_user_language(lang) == "vi" else "💬 Give feedback", callback_data="feedback|start")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
 
@@ -49574,7 +49720,9 @@ def trend_workflow_image_success_keyboard(job_id: int, scene_index: int, lang: s
     else:
         rows.append([InlineKeyboardButton(ui_text(lang, "image.regenerate_paid"), callback_data=f"tvflow|regen_scene_{int(scene_index or 1)}")])
     rows.extend([
+        [InlineKeyboardButton("🖼 Tạo ảnh mới" if normalize_user_language(lang) == "vi" else "🖼 Create new image", callback_data="create_media|quick_image")],
         [InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data="tvflow|edit_prompt")],
+        [InlineKeyboardButton("💾 Lưu ảnh/package" if normalize_user_language(lang) == "vi" else "💾 Save image/package", callback_data="tvflow|save_image")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
@@ -66855,18 +67003,12 @@ async def cmd_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     content = " ".join(context.args)
     if not content:
         return await update.message.reply_text(
-            "⚠️ VD: <code>/gopy Thêm thanh toán Momo đi bot</code>", parse_mode="HTML"
+            "⚠️ VD: <code>/gopy Thêm thanh toán Momo đi bot</code>\n\n"
+            "Bạn cũng có thể bấm <b>💬 Góp ý / Báo lỗi</b> ở menu chính để chọn nhóm góp ý.",
+            parse_mode="HTML",
         )
-    conn = db_connect()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO feedback (user_id, username, content, timestamp) VALUES (?,?,?,?)",
-        (str(update.effective_user.id), update.effective_user.first_name,
-         content, now_text())
-    )
-    conn.commit()
-    conn.close()
-    await update.message.reply_text("✅ <b>Cảm ơn!</b> Góp ý đã được ghi nhận.", parse_mode="HTML")
+    feedback_id = store_customer_feedback(update.effective_user, "free_text", content, "command:/gopy")
+    await update.message.reply_text(f"✅ <b>Cảm ơn!</b> Góp ý đã được ghi nhận.\nMã góp ý: <code>{feedback_id}</code>", parse_mode="HTML")
 
 # ─── ADMIN COMMANDS ───────────────────────────────────────────────────────────
 async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66903,25 +67045,57 @@ async def cmd_admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_admin_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(context.args or [])
     conn = db_connect()
-    c = conn.cursor()
-    c.execute(
-        "SELECT username, content FROM feedback WHERE timestamp >= ?",
-        ((datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S"),)
-    )
-    rows = c.fetchall()
-    conn.close()
+    try:
+        if len(args) >= 2 and args[0].lower() in {"reviewed", "resolved"} and str(args[1]).isdigit():
+            status = args[0].lower()
+            field = "reviewed_at" if status == "reviewed" else "resolved_at"
+            conn.execute(
+                f"UPDATE feedback SET status=?, {field}=? WHERE id=?",
+                (status, now_text(), int(args[1])),
+            )
+            conn.commit()
+            return await update.message.reply_text(f"✅ Feedback #{int(args[1])} đã chuyển sang <b>{status}</b>.", parse_mode="HTML")
+        category_filter = args[0].strip() if args else ""
+        if category_filter and category_filter.lower() in {"all", "*", "-"}:
+            category_filter = ""
+        if category_filter:
+            rows = conn.execute(
+                """SELECT id, user_id, username, category, content, context, status, timestamp
+                FROM feedback
+                WHERE category=?
+                ORDER BY id DESC LIMIT 15""",
+                (category_filter,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT id, user_id, username, category, content, context, status, timestamp
+                FROM feedback
+                ORDER BY id DESC LIMIT 15"""
+            ).fetchall()
+    finally:
+        conn.close()
     if not rows:
-        return await update.message.reply_text("📭 Hòm thư 7 ngày qua trống.")
-    summary = AgentGemini.chat(
-        "Tóm tắt yêu cầu khách hàng cực ngắn gọn:",
-        "\n".join([f"- {r[0]}: {r[1]}" for r in rows]),
-        ADMIN_ID
-    )
-    await update.message.reply_text(
-        f"📊 <b>BÁO CÁO GÓP Ý (7 NGÀY)</b>\n\n{summary}", parse_mode="HTML"
-    )
+        return await update.message.reply_text("📭 Hòm thư góp ý đang trống.")
+    lines = [
+        "📊 <b>GÓP Ý / BÁO LỖI MỚI NHẤT</b>",
+        "",
+        "Lọc theo nhóm: <code>/feedback image_not_right</code>",
+        "Đánh dấu: <code>/feedback reviewed &lt;id&gt;</code> hoặc <code>/feedback resolved &lt;id&gt;</code>",
+        "",
+    ]
+    for fid, user_id, username, category, content, context_text, status, timestamp in rows:
+        safe_content = html.escape(str(content or "")[:260])
+        safe_context = html.escape(str(context_text or "")[:120])
+        lines.append(
+            f"#{int(fid)} | <b>{html.escape(str(category or '-'))}</b> | <code>{html.escape(str(status or 'new'))}</code> | {html.escape(str(timestamp or '')[:16])}\n"
+            f"• User: <code>{html.escape(str(user_id or '-'))}</code> {html.escape(str(username or ''))}\n"
+            f"• Nội dung: {safe_content}\n"
+            f"• Context: <code>{safe_context or '-'}</code>"
+        )
+    await update.message.reply_text("\n\n".join(lines), parse_mode="HTML")
 
 async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -68091,11 +68265,48 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
         )
     await update.message.reply_text(audio_voice_received_text(), reply_markup=voice_translation_action_keyboard())
 
+async def handle_feedback_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_feedback_pending(uid)
+    if not pending:
+        return False
+    text = update.message.text.strip()
+    if not text:
+        return True
+    category = str(pending.get("category") or "other_error")
+    context_text = feedback_context_for_user(uid)
+    feedback_id = store_customer_feedback(update.effective_user, category, text, context_text)
+    clear_feedback_pending(uid)
+    lang = user_ui_lang(uid)
+    if normalize_user_language(lang) != "vi":
+        message = (
+            "✅ <b>Thank you.</b> TOAN AAS has recorded your feedback.\n\n"
+            f"Feedback ID: <code>{feedback_id}</code>\n"
+            "The bot has not called AI/API and has not charged Xu."
+        )
+    else:
+        message = (
+            "✅ <b>Cảm ơn bạn.</b> TOAN AAS đã ghi nhận góp ý/báo lỗi.\n\n"
+            f"Mã góp ý: <code>{feedback_id}</code>\n"
+            "Bot chưa gọi AI/API và chưa trừ Xu."
+        )
+    await update.message.reply_text(
+        message,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+    )
+    return True
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     text = update.message.text.strip()
     uid  = update.effective_user.id
+
+    if await handle_feedback_pending_text(update, context):
+        return
 
     if await handle_trend_video_flow_pending_text(update, context):
         return
@@ -68915,6 +69126,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("gopy",        cmd_gopy))
     tg_app.add_handler(CommandHandler("add",         cmd_admin_add))
     tg_app.add_handler(CommandHandler("admin_gopy",  cmd_admin_gopy))
+    tg_app.add_handler(CommandHandler("feedback",    cmd_admin_gopy))
     tg_app.add_handler(CommandHandler("duyet",       cmd_duyet))
     tg_app.add_handler(CommandHandler("checkpayos",  cmd_checkpayos))
     tg_app.add_handler(CommandHandler("payos_status", cmd_checkpayos))
@@ -68963,6 +69175,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_video_job_callback, pattern=r"^shopai_video_job\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
