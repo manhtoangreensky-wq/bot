@@ -28845,6 +28845,16 @@ def image_tier_public_status_text() -> str:
 
 MEDIA_VIDEO_ASPECT_RATIOS = ("9:16", "16:9", "1:1", "4:5", "3:4")
 MEDIA_IMAGE_ASPECT_RATIOS = ("9:16", "16:9", "1:1", "4:5", "3:4", "3:2", "4:3")
+IMAGE_RATIO_UNSUPPORTED_MESSAGE = "⚠️ Tỷ lệ ảnh này hiện chưa được provider hỗ trợ ổn định. Vui lòng chọn 9:16, 1:1 hoặc thử lại sau."
+SHOPAIKEY_IMAGE_SIZE_BY_RATIO = {
+    "9:16": (768, 1344),
+    "16:9": (1344, 768),
+    "1:1": (1024, 1024),
+    "4:5": (1024, 1280),
+    "3:4": (960, 1280),
+    "3:2": (1200, 800),
+    "4:3": (1024, 768),
+}
 
 def media_aspect_ratio_options(kind: str = "video") -> tuple[str, ...]:
     return MEDIA_IMAGE_ASPECT_RATIOS if str(kind or "").lower() == "image" else MEDIA_VIDEO_ASPECT_RATIOS
@@ -28885,6 +28895,51 @@ def media_aspect_ratio_label(aspect_ratio: str = "", kind: str = "video", lang: 
         "4:3": "🖥 4:3 — Slide/classic screen",
     }
     return (labels_vi if is_vi else labels_en).get(aspect, f"📐 {aspect}")
+
+def normalize_image_provider_key(provider: str = "") -> str:
+    value = str(provider or "").strip().lower()
+    if "shopaikey" in value or "nano" in value or "banana" in value or not value:
+        return "shopaikey"
+    return value
+
+def get_image_size_for_ratio(ratio: str, tier: str = "", provider: str = "") -> dict:
+    provider_key = normalize_image_provider_key(provider)
+    raw_ratio = str(ratio or "").strip().lower().replace("x", ":").replace(" ", "")
+    requested = raw_ratio if raw_ratio in set(MEDIA_IMAGE_ASPECT_RATIOS) else ("9:16" if not raw_ratio else raw_ratio)
+    mapping = SHOPAIKEY_IMAGE_SIZE_BY_RATIO if provider_key == "shopaikey" else {}
+    provider_supported = requested in mapping
+    final_ratio = requested if provider_supported else "9:16"
+    width, height = mapping.get(final_ratio, SHOPAIKEY_IMAGE_SIZE_BY_RATIO["9:16"])
+    fallback_note = "" if provider_supported else IMAGE_RATIO_UNSUPPORTED_MESSAGE
+    return {
+        "width": int(width),
+        "height": int(height),
+        "size_string": f"{int(width)}x{int(height)}",
+        "ratio": final_ratio,
+        "ratio_label": media_aspect_ratio_label(final_ratio, "image", "vi"),
+        "provider": provider_key,
+        "provider_supported": provider_supported,
+        "fallback_note": fallback_note,
+        "tier": normalize_image_tier(tier) if tier else "",
+    }
+
+def infer_image_aspect_ratio_from_prompt(prompt: str = "", default: str = "9:16") -> str:
+    text = str(prompt or "")
+    match = re.search(r"\bAspect\s+ratio\s+([0-9]+\s*[:x]\s*[0-9]+)", text, flags=re.IGNORECASE)
+    if match:
+        return normalize_media_aspect_ratio(match.group(1), default, "image")
+    for ratio in MEDIA_IMAGE_ASPECT_RATIOS:
+        if re.search(rf"(?<!\d){re.escape(ratio)}(?!\d)", text):
+            return normalize_media_aspect_ratio(ratio, default, "image")
+    return normalize_media_aspect_ratio(default, "9:16", "image")
+
+def image_aspect_result_line(aspect_ratio: str = "", lang: str = "vi") -> str:
+    label = media_aspect_ratio_label(aspect_ratio, "image", lang)
+    if normalize_user_language(lang) == "zh":
+        return f"画面比例: {label}"
+    if normalize_user_language(lang) != "vi":
+        return f"Aspect ratio: {label}"
+    return f"Tỷ lệ: {label}"
 
 def media_aspect_instruction(aspect_ratio: str = "", kind: str = "video") -> str:
     aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", kind)
@@ -30485,17 +30540,56 @@ def shopaikey_provider_error_from_payload(payload: dict) -> tuple[str, str]:
         return "", shopaikey_sanitize_error(str(error)[:260])
     return "", ""
 
-async def shopaikey_image_generate(prompt: str, model: str = "") -> dict:
+async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: str = "", tier: str = "") -> dict:
+    model_name = model or SHOPAIKEY_IMAGE_MODEL or "nano-banana"
+    inferred_ratio = str(aspect_ratio or infer_image_aspect_ratio_from_prompt(prompt, "9:16") or "9:16").strip()
+    size_info = get_image_size_for_ratio(inferred_ratio, tier, "shopaikey")
     if not SHOPAIKEY_API_KEY:
-        return {"status": "MISSING", "http_status": 0, "latency_ms": 0, "error_class": "missing_api_key", "detail": "SHOPAIKEY_API_KEY missing"}
+        return {
+            "status": "MISSING",
+            "http_status": 0,
+            "latency_ms": 0,
+            "model": model_name,
+            "size": size_info["size_string"],
+            "aspect_ratio": size_info["ratio"],
+            "size_sent": size_info["size_string"],
+            "error_class": "missing_api_key",
+            "detail": "SHOPAIKEY_API_KEY missing",
+        }
     safe_prompt = str(prompt or "").strip()[:1200]
     if not safe_prompt:
-        return {"status": "FAIL_BAD_REQUEST", "http_status": 0, "latency_ms": 0, "model": model or SHOPAIKEY_IMAGE_MODEL or "nano-banana", "size": "9:16", "image_url": "", "provider_error_code": "", "error_class": "empty_prompt", "detail": "empty prompt"}
+        return {
+            "status": "FAIL_BAD_REQUEST",
+            "http_status": 0,
+            "latency_ms": 0,
+            "model": model_name,
+            "size": size_info["size_string"],
+            "aspect_ratio": size_info["ratio"],
+            "size_sent": size_info["size_string"],
+            "image_url": "",
+            "provider_error_code": "",
+            "error_class": "empty_prompt",
+            "detail": "empty prompt",
+        }
+    if not size_info.get("provider_supported"):
+        return {
+            "status": "FAIL_UNSUPPORTED_ASPECT",
+            "http_status": 0,
+            "latency_ms": 0,
+            "model": model_name,
+            "size": size_info["size_string"],
+            "aspect_ratio": size_info["ratio"],
+            "size_sent": size_info["size_string"],
+            "image_url": "",
+            "provider_error_code": "UNSUPPORTED_ASPECT_RATIO",
+            "error_class": "FAIL_UNSUPPORTED_ASPECT",
+            "detail": size_info.get("fallback_note") or IMAGE_RATIO_UNSUPPORTED_MESSAGE,
+        }
     started = time.perf_counter()
     payload = {
-        "model": model or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+        "model": model_name,
         "prompt": safe_prompt,
-        "size": "9:16",
+        "size": size_info["size_string"],
         "format": "png",
         "response_format": "url",
         "image_urls": [],
@@ -30525,10 +30619,12 @@ async def shopaikey_image_generate(prompt: str, model: str = "") -> dict:
                     "latency_ms": latency_ms,
                     "model": payload["model"],
                     "size": size,
+                    "aspect_ratio": size_info["ratio"],
+                    "size_sent": payload["size"],
                     "image_url": image_url,
                     "provider_error_code": "",
                     "error_class": "",
-                    "detail": f"model={payload['model']}; http={res.status_code}; latency_ms={latency_ms}; size={size}; output_url=yes",
+                    "detail": f"model={payload['model']}; http={res.status_code}; latency_ms={latency_ms}; ratio={size_info['ratio']}; size_sent={payload['size']}; size={size}; output_url=yes",
                 }
             return {
                 "status": "FAIL_NO_IMAGE_URL",
@@ -30536,6 +30632,8 @@ async def shopaikey_image_generate(prompt: str, model: str = "") -> dict:
                 "latency_ms": latency_ms,
                 "model": payload["model"],
                 "size": size,
+                "aspect_ratio": size_info["ratio"],
+                "size_sent": payload["size"],
                 "image_url": "",
                 "provider_error_code": "",
                 "error_class": "FAIL_NO_IMAGE_URL",
@@ -30549,6 +30647,8 @@ async def shopaikey_image_generate(prompt: str, model: str = "") -> dict:
             "latency_ms": latency_ms,
             "model": payload["model"],
             "size": payload["size"],
+            "aspect_ratio": size_info["ratio"],
+            "size_sent": payload["size"],
             "image_url": "",
             "provider_error_code": provider_code,
             "error_class": shopaikey_classify_video_error(res.status_code, detail),
@@ -30563,14 +30663,21 @@ async def shopaikey_image_generate(prompt: str, model: str = "") -> dict:
             "latency_ms": latency_ms,
             "model": payload["model"],
             "size": payload["size"],
+            "aspect_ratio": size_info["ratio"],
+            "size_sent": payload["size"],
             "image_url": "",
             "provider_error_code": "",
             "error_class": error_class,
             "detail": shopaikey_sanitize_error(str(e)),
         }
 
-async def shopaikey_image_smoke_test() -> dict:
-    return await shopaikey_image_generate("TOAN AAS image smoke test: simple turquoise AI automation logo, clean white background, no extra text")
+async def shopaikey_image_smoke_test(aspect_ratio: str = "9:16") -> dict:
+    prompt = image_tier_prompt_for_generation(
+        "TOAN AAS image smoke test: simple turquoise AI automation logo, clean white background, no extra text",
+        "low",
+        aspect_ratio,
+    )
+    return await shopaikey_image_generate(prompt, aspect_ratio=aspect_ratio, tier="low")
 
 def shopaikey_video_payload_data(payload: dict) -> dict:
     if not isinstance(payload, dict):
@@ -37554,24 +37661,30 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         return await update.message.reply_text(
             "⏳ Bạn đang có một tác vụ đang chạy. Vui lòng chờ kết quả hoặc kiểm tra trạng thái."
         )
+    ratio_arg = str(context.args[0] or "").strip() if context.args else "9:16"
+    size_info = get_image_size_for_ratio(ratio_arg, "low", "shopaikey")
+    if not size_info.get("provider_supported"):
+        return await update.message.reply_text(IMAGE_RATIO_UNSUPPORTED_MESSAGE)
+    aspect_ratio = str(size_info.get("ratio") or "9:16")
     tool_type = "shopaikey_image"
-    normalized_prompt = normalize_generation_prompt("shopaikey image smoke test nano-banana")
+    normalized_prompt = normalize_generation_prompt(f"shopaikey image smoke test nano-banana {aspect_ratio}")
     if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
         return await update.message.reply_text("⏳ Yêu cầu trước của bạn vẫn đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
     start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_shopaikey_image")
     smoke_prompt = "TOAN AAS image smoke test: simple turquoise AI automation logo, clean white background, no extra text"
+    job_prompt = image_tier_prompt_for_generation(smoke_prompt, "low", aspect_ratio)
     job_id = create_shopaikey_job(
         uid,
         update.effective_chat.id,
         "image",
         model=SHOPAIKEY_IMAGE_MODEL or "nano-banana",
-        prompt=smoke_prompt,
+        prompt=job_prompt,
         status="IN_PROGRESS",
         admin_only=True,
         xu_cost_planned=0,
     )
     waiting_message = await send_waiting_message(update, context, "image") if SHOPAIKEY_IMAGE_WAITING_MESSAGE_ENABLED else None
-    result = await shopaikey_image_smoke_test()
+    result = await shopaikey_image_smoke_test(aspect_ratio)
     status = str(result.get("status") or "FAIL")
     image_url = str(result.get("image_url") or "")
     output_sent = False
@@ -37579,7 +37692,9 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         caption = (
             "🖼 ShopAIKey Image Smoke Test — PASS\n"
             f"Model: {result.get('model') or SHOPAIKEY_IMAGE_MODEL}\n"
+            f"Ratio: {result.get('aspect_ratio') or aspect_ratio}\n"
             f"Size: {result.get('size') or '-'}\n"
+            f"Size sent: {result.get('size_sent') or size_info.get('size_string') or '-'}\n"
             "Không trừ Xu."
         )
         try:
@@ -37599,7 +37714,8 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
                 output_sent = False
     detail = (
         f"model={result.get('model') or SHOPAIKEY_IMAGE_MODEL}; http={result.get('http_status')}; "
-        f"latency_ms={result.get('latency_ms')}; size={result.get('size') or '-'}; "
+        f"latency_ms={result.get('latency_ms')}; ratio={result.get('aspect_ratio') or aspect_ratio}; "
+        f"size_sent={result.get('size_sent') or size_info.get('size_string') or '-'}; size={result.get('size') or '-'}; "
         f"output_sent={'yes' if output_sent else 'no'}; "
         f"provider_error_code={result.get('provider_error_code') or '-'}; "
         f"error_class={result.get('error_class') or '-'}; detail={result.get('detail') or '-'}"
@@ -37633,6 +37749,8 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         f"• Status: <code>{html.escape(status)}</code>\n"
         f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
         f"• Model: <code>{html.escape(str(result.get('model') or SHOPAIKEY_IMAGE_MODEL or '-'))}</code>\n"
+        f"• Ratio requested: <code>{html.escape(str(aspect_ratio))}</code>\n"
+        f"• Size sent: <code>{html.escape(str(result.get('size_sent') or size_info.get('size_string') or '-'))}</code>\n"
         f"• Size: <code>{html.escape(str(result.get('size') or '-'))}</code>\n"
         f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n"
         f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n"
@@ -38220,6 +38338,11 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     base_cost = int(pending.get("base_cost") or 0)
     image_tier = normalize_image_tier(pending.get("image_tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
     video_tier = normalize_video_tier(pending.get("video_tier") or SHOPAIKEY_VIDEO_DEFAULT_TIER)
+    image_aspect_ratio = normalize_media_aspect_ratio(
+        pending.get("aspect_ratio") or infer_image_aspect_ratio_from_prompt(prompt, "9:16"),
+        "9:16",
+        "image",
+    ) if job_type == "image" else ""
     tier_label = localized_image_tier_label(image_tier, lang) if job_type == "image" else localized_video_tier_label(video_tier, lang)
     pending_model = str(pending.get("model") or "").strip()
     source_job_id = str(pending.get("source_job_id") or "").strip()
@@ -38243,6 +38366,10 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
     balance_before, _, _ = get_user(uid)
     model = (pending_model or SHOPAIKEY_IMAGE_MODEL or "nano-banana") if job_type == "image" else (SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")
+    if job_type == "image":
+        image_size_info = get_image_size_for_ratio(image_aspect_ratio, image_tier, model)
+        if not image_size_info.get("provider_supported"):
+            return await safe_edit_or_send(query, IMAGE_RATIO_UNSUPPORTED_MESSAGE, parse_mode=None)
     package_used = False
     package_item_type = normalize_package_item_type(
         pending.get("package_item_type") or (
@@ -38343,7 +38470,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     )
     if job_type == "image":
         await safe_edit_or_send(query, public_image_waiting_text(image_tier, lang), parse_mode=None)
-        result = await shopaikey_image_generate(prompt, model)
+        result = await shopaikey_image_generate(prompt, model, aspect_ratio=image_aspect_ratio, tier=image_tier)
         status = str(result.get("status") or "FAIL")
         image_url = str(result.get("image_url") or "")
         output_sent = False
@@ -38379,6 +38506,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                     else ("Used 1 package slot. The bot did not charge Xu." if package_used else public_image_success_billing_note(deducted, lang, is_admin_user(uid) and int(deducted or 0) <= 0))
                 ),
             )
+            success_caption = f"{success_caption}\n{image_aspect_result_line(result.get('aspect_ratio') or image_aspect_ratio, lang)}"
             try:
                 sent_photo_message = await context.bot.send_photo(
                     chat_id=query.message.chat_id,
@@ -49902,6 +50030,7 @@ async def execute_image_warranty_retry(context: ContextTypes.DEFAULT_TYPE, chat_
         await context.bot.send_message(chat_id=chat_id, text=ui_text(lang, "media.public_off"))
         return True
     original = str(parent.get("prompt_preview") or "").strip()
+    retry_aspect_ratio = infer_image_aspect_ratio_from_prompt(original, "9:16")
     adjustment = str(edit_note or "").strip()
     retry_prompt = (
         f"{original}\n\n"
@@ -49931,7 +50060,7 @@ async def execute_image_warranty_retry(context: ContextTypes.DEFAULT_TYPE, chat_
         retry_warranty_parent_job_id=parent_job_id,
     )
     update_shopaikey_job(job_id=job_id, billing_status="warranty_retry", confirm_required=0, confirmed_at=now_text())
-    result = await shopaikey_image_generate(retry_prompt, model)
+    result = await shopaikey_image_generate(retry_prompt, model, aspect_ratio=retry_aspect_ratio)
     status = str(result.get("status") or "FAIL")
     image_url = str(result.get("image_url") or "")
     if status == "PASS" and image_url:
@@ -49945,6 +50074,7 @@ async def execute_image_warranty_retry(context: ContextTypes.DEFAULT_TYPE, chat_
             job_id=int(job_id or 0),
             billing_note=html.escape("Đã dùng 1 lần tạo lại bảo hành. Bot không trừ thêm Xu." if normalize_user_language(lang) == "vi" else "Used 1 warranty retry. The bot did not charge extra Xu."),
         )
+        caption = f"{caption}\n{image_aspect_result_line(result.get('aspect_ratio') or retry_aspect_ratio, lang)}"
         try:
             sent_photo_message = await context.bot.send_photo(chat_id=chat_id, photo=image_url, caption=caption, reply_markup=public_image_success_keyboard(job_id, "standard", lang))
             try:
@@ -50045,16 +50175,18 @@ def public_media_aspect_ratio_keyboard(kind: str, lang: str = "vi") -> InlineKey
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
-def with_aspect_line(text: str, aspect_ratio: str = "", lang: str = "vi") -> str:
-    aspect = str(aspect_ratio or "").strip()
+def with_aspect_line(text: str, aspect_ratio: str = "", lang: str = "vi", kind: str = "image") -> str:
+    kind_norm = "image" if str(kind or "").lower() == "image" else "video"
+    aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", kind_norm)
     if not aspect:
         return text
+    label = media_aspect_ratio_label(aspect, kind_norm, lang) if kind_norm == "image" else aspect
     if normalize_user_language(lang) == "zh":
-        line = f"• 画面比例: <b>{html.escape(aspect)}</b>"
+        line = f"• 画面比例: <b>{html.escape(label)}</b>"
     elif normalize_user_language(lang) != "vi":
-        line = f"• Aspect ratio: <b>{html.escape(aspect)}</b>"
+        line = f"• Aspect ratio: <b>{html.escape(label)}</b>"
     else:
-        line = f"• Tỉ lệ khung hình: <b>{html.escape(aspect)}</b>"
+        line = f"• Tỉ lệ khung hình: <b>{html.escape(label)}</b>"
     return text.replace("• Prompt:", f"{line}\n• Prompt:", 1)
 
 def shopaikey_confirm_keyboard(job_type: str, token: str, tier: str, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -50081,7 +50213,7 @@ def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         credits=int(current_credits or 0),
         warranty_note=html.escape(image_tier_warranty_note(tier, lang)),
         prompt=html.escape(shopaikey_safe_prompt_preview(prompt)),
-    ), aspect_ratio, lang)
+    ), aspect_ratio, lang, "image")
 
 def public_image_success_billing_note(deducted: int = 0, lang: str = "vi", admin_internal_free: bool = False) -> str:
     amount = int(deducted or 0)
@@ -50433,7 +50565,7 @@ def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
             extra = f"\n• Nhạc: <code>{html.escape(music)}</code>\n• Public video: <code>ON</code>"
         marker = "\n\nVideo AI" if "Video AI" in text else ("\n\nAI video" if "AI video" in text else "")
         text = text.replace(marker, extra + marker, 1) if marker else text + extra
-    return with_aspect_line(text, aspect_ratio, lang)
+    return with_aspect_line(text, aspect_ratio, lang, "video")
 
 def public_video_pending_payload_from_package(tier: str, package: dict, aspect_ratio: str = "") -> dict:
     tier_norm = normalize_video_tier(tier)

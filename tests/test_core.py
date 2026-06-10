@@ -1746,6 +1746,30 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "777 Xu" in bot.public_image_confirm_text("standard", "ảnh sản phẩm", 1000)
     assert "Gói này không kèm tạo lại miễn phí" in bot.public_image_confirm_text("standard", "ảnh sản phẩm", 1000)
     assert "Gói này kèm 1 lần tạo lại trong cùng yêu cầu" in bot.public_image_confirm_text("standard_warranty", "ảnh sản phẩm", 1000)
+    image_confirm_16x9 = bot.public_image_confirm_text("standard", "ảnh sản phẩm", 1000, aspect_ratio="16:9")
+    assert "Tỉ lệ khung hình" in image_confirm_16x9
+    assert "16:9" in image_confirm_16x9
+    assert "YouTube ngang" in image_confirm_16x9
+    size_16x9 = bot.get_image_size_for_ratio("16:9", "standard", "shopaikey")
+    assert size_16x9["size_string"] == "1344x768"
+    assert size_16x9["width"] > size_16x9["height"]
+    assert bot.get_image_size_for_ratio("9:16", "low", "shopaikey")["size_string"] == "768x1344"
+    assert bot.get_image_size_for_ratio("2:1", "low", "shopaikey")["provider_supported"] is False
+    assert bot.infer_image_aspect_ratio_from_prompt("Product scene. Aspect ratio 4:5. No watermark.") == "4:5"
+    image_generate_source = source_between(bot_source_text(), "async def shopaikey_image_generate", "async def shopaikey_image_smoke_test")
+    assert '"size": "9:16"' not in image_generate_source
+    assert '"size": size_info["size_string"]' in image_generate_source
+    assert "get_image_size_for_ratio" in image_generate_source
+    image_smoke_source = source_between(bot_source_text(), "async def cmd_tool_test_shopaikey_image", "async def cmd_tool_test_shopaikey_video")
+    assert "context.args" in image_smoke_source
+    assert "Ratio requested" in image_smoke_source
+    assert "Size sent" in image_smoke_source
+    public_callback_source = source_between(bot_source_text(), "async def handle_shopaikey_public_callback", "class TranslationProviderError")
+    assert "image_aspect_ratio" in public_callback_source
+    assert "shopaikey_image_generate(prompt, model, aspect_ratio=image_aspect_ratio, tier=image_tier)" in public_callback_source
+    warranty_retry_source = source_between(bot_source_text(), "async def execute_image_warranty_retry", "def public_image_tier_selection_text")
+    assert "retry_aspect_ratio = infer_image_aspect_ratio_from_prompt" in warranty_retry_source
+    assert "shopaikey_image_generate(retry_prompt, model, aspect_ratio=retry_aspect_ratio)" in warranty_retry_source
     success_buttons = [button for row in bot.public_image_success_keyboard(123, "low").inline_keyboard for button in row]
     assert any(button.callback_data == "tvflow|image_video_prompts_123" for button in success_buttons)
     assert any(button.callback_data == "create_media|image_tier_low" for button in success_buttons)
