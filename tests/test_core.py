@@ -265,6 +265,8 @@ def test_admin_menu_contains_grouped_operator_and_system():
     admin_nav_labels = [button.text for row in bot.menu_nav_keyboard("admin", True).inline_keyboard for button in row]
     assert "🧠 Operator" in admin_nav_labels
     assert "⚙️ Hệ thống" in admin_nav_labels
+    assert "🎁 Gói / Combo" in admin_nav_labels
+    assert "🧊 Freeze / Queue" in admin_nav_labels
     admin_menu = bot.menu_text_admin()
     for command in [
         "/add",
@@ -296,6 +298,15 @@ def test_admin_menu_contains_grouped_operator_and_system():
         "/provider_unfreeze",
     ]:
         assert command in admin_menu
+    assert "cộng Xu trực tiếp" in admin_menu
+    assert "đối soát tiền thật" in admin_menu
+    assert "kiểm tra job video" in admin_menu
+    assert "hoàn Xu/lượt thủ công" in admin_menu
+    system_menu = bot.menu_text_system()
+    assert "/data_status" in system_menu and "persistent volume" in system_menu
+    operator_menu = bot.menu_text_operator(True)
+    assert "/mission_add &lt;mục_tiêu&gt;" in operator_menu
+    assert "worker nhận tác vụ" in operator_menu
     registry = (Path(bot.__file__).resolve().parent / "docs" / "COMMAND_REGISTRY.md").read_text(encoding="utf-8")
     assert "| `/data_status` |" in registry
     assert "| `/shopaikey_status` |" in registry
@@ -997,6 +1008,40 @@ def test_package_wallet_admin_grant_deduct_refund_and_revoke(monkeypatch):
         assert bot.refund_package_item_for_job("pkg_user", job_id, "provider_fail_again") is False
         refunded_item = bot.active_package_item_for_user("pkg_user", "video_common")
         assert int(refunded_item["remaining_quantity"]) == 3
+        bot.update_shopaikey_job(job_id=job_id, status="FAILED", finished_at=bot.now_text())
+
+        job_id2 = bot.create_shopaikey_job(
+            "pkg_user",
+            "chat",
+            "video",
+            model="veo3.1-fast",
+            prompt="video prompt retry guard",
+            status="IN_PROGRESS",
+            admin_only=False,
+            xu_cost_planned=bot.video_tier_cost_xu("common"),
+            package_id=int(item["package_id"]),
+            package_item_id=int(item["id"]),
+            package_item_type="video_common",
+            package_units_used=1,
+        )
+        used2 = bot.deduct_package_item_for_job("pkg_user", "video_common", job_id2, "pytest terminal fail")
+        assert used2["ok"] is True
+        assert int(used2["remaining_after"]) == 2
+        terminal_summary = bot.finalize_public_video_terminal_failure(
+            bot.shopaikey_job_by_id(job_id2),
+            {"status": "FAILED", "detail": "No available channel"},
+            "FAILED",
+        )
+        assert terminal_summary["package_refunded"] is True
+        assert bot.shopaikey_active_job_for_user("pkg_user", "video") is None
+        terminal_summary_again = bot.finalize_public_video_terminal_failure(
+            bot.shopaikey_job_by_id(job_id2),
+            {"status": "FAILED", "detail": "No available channel again"},
+            "FAILED",
+        )
+        assert terminal_summary_again["package_refunded"] is True
+        terminal_item = bot.active_package_item_for_user("pkg_user", "video_common")
+        assert int(terminal_item["remaining_quantity"]) == 3
 
         adjusted = bot.adjust_user_package_item("pkg_user", str(granted["package_id"]), "video_common", 2, "admin", "pytest adjust")
         assert adjusted["ok"] is True
@@ -1198,6 +1243,7 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
     assert bot.normalize_shopaikey_video_status("FAILURE") == "FAILED"
     assert bot.normalize_shopaikey_video_status("failed") == "FAILED"
     assert bot.shopaikey_db_video_status("FAIL_NO_AVAILABLE_CHANNEL") == "FAILED"
+    assert bot.shopaikey_db_video_status("FAILED_TIMEOUT") == "TIMEOUT"
 
     assert bot.shopaikey_extract_task_id({"task_id": "task_direct"}) == "task_direct"
     assert bot.shopaikey_extract_task_id({"data": {"task_id": "task_nested"}}) == "task_nested"
@@ -1213,6 +1259,15 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
     assert bot.shopaikey_video_result_url(nested_result) == "https://example.com/nested.mp4"
     assert "secret" not in bot.shopaikey_sanitize_error("https://x.test/usage?apiKey=secret")
     assert len(bot.shopaikey_sanitize_error("x" * 1000)) <= 500
+    failed_text = bot.public_video_status_message("FAILED", job={}, fail_summary={"not_charged": True}, lang="vi")
+    assert "Video tạo thất bại" in failed_text
+    assert "Video sẽ được gửi tự động" not in failed_text
+    failed_buttons = [button.text for row in bot.public_video_failed_keyboard(123, "vi").inline_keyboard for button in row]
+    assert "🔁 Thử tạo lại" in failed_buttons
+    assert "🎬 Chọn gói video khác" in failed_buttons
+    assert "👨‍💼 Liên hệ admin" in failed_buttons
+    processing_text = bot.public_video_status_message("IN_PROGRESS", progress="20", lang="vi")
+    assert "Video sẽ được gửi tự động trong vài phút khi hoàn tất" in processing_text
 
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", False)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)

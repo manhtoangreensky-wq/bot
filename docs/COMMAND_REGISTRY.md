@@ -77,6 +77,8 @@ These handlers remain in code for admin/internal testing but are blocked for nor
 
 ## Admin Commands
 
+Admin menu groups in `bot.py` should show a short purpose and example syntax for high-risk commands, especially Xu, bill, package wallet, provider, freeze, queue, and refund commands. Do not show secrets or raw provider responses in admin menus.
+
 | Command | Handler | Protected? | In admin menu? | Notes |
 |---|---|---:|---:|---|
 | `/dashboard` | `cmd_dashboard` | YES | YES | Main admin dashboard. |

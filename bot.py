@@ -30677,7 +30677,9 @@ def shopaikey_db_video_status(value: str) -> str:
     status = str(value or "").upper()
     if status in {"QUEUED", "IN_PROGRESS", "SUCCESS", "FAILED", "TIMEOUT"}:
         return status
-    if status.startswith("FAIL_") or status in {"FAIL", "FAILURE", "ERROR"}:
+    if status == "FAILED_TIMEOUT":
+        return "TIMEOUT"
+    if status.startswith("FAIL") or status in {"FAILURE", "ERROR", "CANCELLED", "CANCELED"}:
         return "FAILED"
     return normalize_shopaikey_video_status(status)
 
@@ -33636,8 +33638,12 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien"), InlineKeyboardButton("👤 Cú pháp /profile", callback_data="menu|hint_profile")])
     elif section == "admin" and is_admin:
         rows.append([InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
-        rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Combo", callback_data="pricing|combo")])
-        rows.append([InlineKeyboardButton("🔄 Video jobs", callback_data="menu|hint_video_status")])
+        rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="pricing|combo")])
+        rows.append([InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|hint_video_status")])
+    elif section == "system" and is_admin:
+        rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
+    elif section == "operator" and is_admin:
+        rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system")])
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{menu_parent_action(section)}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -33909,39 +33915,77 @@ def menu_text_operator(is_admin: bool) -> str:
         return "🔒 <b>Operator System</b>\n\nKhu vực điều phối AI/worker chỉ dành cho admin."
     return (
         "🧠 <b>Operator System — điều phối AI/worker</b>\n\n"
-        "<b>A. Điều khiển operator</b>\n• <code>/operator_menu</code>\n• <code>/operator_contract</code>\n• <code>/brain</code>\n\n"
-        "<b>B. Mission</b>\n• <code>/mission_add</code>\n• <code>/mission_run</code>\n• <code>/mission_workorders</code>\n\n"
-        "<b>C. Worker intake</b>\n• <code>/worker_intake</code>\n\n"
-        "<b>D. Autopilot</b>\n• <code>/autopilot</code>"
+        "Dùng để điều phối kế hoạch nội bộ, worker và luồng sản xuất nội dung. Không mở cho khách.\n\n"
+        "<b>A. Điều khiển operator</b>\n"
+        "• <code>/operator_menu</code> — mở bảng điều phối operator\n"
+        "• <code>/operator_contract</code> — xem nguyên tắc/giới hạn operator\n"
+        "• <code>/brain</code> — xem trạng thái bộ não/tác vụ nội bộ\n\n"
+        "<b>B. Mission</b>\n"
+        "• <code>/mission_add &lt;mục_tiêu&gt;</code> — tạo mission mới\n"
+        "• <code>/mission_run &lt;mission_id&gt;</code> — chạy mission đã tạo\n"
+        "• <code>/mission_workorders</code> — xem workorder đang chờ worker\n\n"
+        "<b>C. Worker intake</b>\n"
+        "• <code>/worker_intake claim=1</code> — worker nhận tác vụ thủ công\n\n"
+        "<b>D. Autopilot</b>\n"
+        "• <code>/autopilot</code> — xem trạng thái autopilot nội bộ trước khi bật bất kỳ tự động hóa nào"
     )
 
 def menu_text_admin() -> str:
     return (
         "📊 <b>Quản Trị</b>\n\n"
+        "Menu này gom các lệnh vận hành hằng ngày. User thường không thấy khu vực này.\n\n"
         "<b>A. User & Xu</b>\n"
-        "• <code>/add</code>\n• <code>/settier</code>\n• <code>/setvip</code>\n"
-        "• <code>/profile_user</code>\n• <code>/ledger_user</code>\n• <code>/member_user</code>\n\n"
+        "• <code>/add &lt;ID&gt; &lt;Xu&gt;</code> — cộng Xu trực tiếp khi cần hỗ trợ\n"
+        "• <code>/deduct &lt;ID&gt; &lt;Xu&gt;</code> — trừ Xu thủ công nếu xử lý sai lệch\n"
+        "• <code>/settier &lt;ID&gt; &lt;tier&gt;</code> — đặt hạng thành viên\n"
+        "• <code>/setvip &lt;ID&gt; &lt;tier&gt;</code> — legacy tier shortcut, không dùng cho gói tháng\n"
+        "• <code>/profile_user &lt;ID&gt;</code> — xem hồ sơ user\n"
+        "• <code>/ledger_user &lt;ID&gt;</code> — xem lịch sử Xu\n"
+        "• <code>/member_user &lt;ID&gt;</code> — xem hạng/quyền lợi\n\n"
         "<b>B. Bill / Nạp tiền</b>\n"
-        "• <code>/pending</code>\n• <code>/duyet</code>\n• <code>/tuchoi</code>\n"
-        "• <code>/payos_test_plan</code>\n• <code>/mark_payos_test</code>\n\n"
+        "• <code>/pending</code> — xem bill thủ công đang chờ\n"
+        "• <code>/duyet &lt;bill_id&gt; &lt;Xu&gt;</code> — chỉ duyệt sau khi đối soát tiền thật\n"
+        "• <code>/tuchoi &lt;bill_id&gt;</code> — từ chối bill nghi sai/fake\n"
+        "• <code>/payos_test_plan</code> — checklist test PayOS\n"
+        "• <code>/mark_payos_test &lt;order_code&gt;</code> — đánh dấu đơn test nếu cần\n\n"
         "<b>C. Gói / Combo</b>\n"
-        "• <code>/package_catalog</code>\n• <code>/grant_combo</code>\n• <code>/grant_monthly</code>\n"
-        "• <code>/user_packages</code>\n• <code>/adjust_package</code>\n• <code>/revoke_package</code>\n\n"
+        "• <code>/package_catalog</code> — xem combo/gói tháng hiện có\n"
+        "• <code>/grant_combo &lt;ID&gt; &lt;combo_code&gt;</code> — cấp combo admin, không cộng Xu\n"
+        "• <code>/grant_monthly &lt;ID&gt; &lt;plan_code&gt; &lt;days&gt;</code> — cấp gói tháng admin\n"
+        "• <code>/user_packages &lt;ID&gt;</code> — xem Gói của tôi/lượt còn lại\n"
+        "• <code>/adjust_package &lt;ID&gt; &lt;package_id&gt; &lt;item_type&gt; &lt;delta&gt;</code> — chỉnh lượt\n"
+        "• <code>/revoke_package &lt;ID&gt; &lt;package_id&gt;</code> — thu hồi combo/gói\n\n"
         "<b>D. Trạng thái hệ thống</b>\n"
-        "• <code>/runtime</code>\n• <code>/data_status</code>\n• <code>/providers</code>\n"
-        "• <code>/dashboard</code>\n• <code>/stats</code>\n• <code>/sales_ready</code>\n\n"
+        "• <code>/runtime</code> — build/runtime đang chạy trên Railway\n"
+        "• <code>/data_status</code> — DB path, backup, rủi ro mất dữ liệu\n"
+        "• <code>/providers</code> — provider/payment/local worker status tổng\n"
+        "• <code>/dashboard</code> — doanh thu/user nhanh\n"
+        "• <code>/stats</code> — thống kê sử dụng\n"
+        "• <code>/sales_ready</code> — checklist trước khi bán public\n\n"
         "<b>E. ShopAIKey / Provider</b>\n"
-        "• <code>/shopaikey_status</code>\n• <code>/shopaikey_usage</code>\n• <code>/shopaikey_video_job</code>\n"
-        "• <code>/tool_test_shopaikey</code>\n• <code>/tool_test_shopaikey_image</code>\n"
-        "• <code>/tool_test_shopaikey_video</code>\n• <code>/tool_test_shopaikey_tts</code>\n\n"
+        "• <code>/shopaikey_status</code> — status chat/TTS/image/video + public flags\n"
+        "• <code>/shopaikey_usage</code> — số dư masked, không lộ key\n"
+        "• <code>/shopaikey_video_job &lt;task_id&gt;</code> — kiểm tra job video admin/public\n"
+        "• <code>/tool_test_shopaikey</code> — smoke chat tiny prompt\n"
+        "• <code>/tool_test_shopaikey_image</code> — smoke image admin-only\n"
+        "• <code>/tool_test_shopaikey_video [model]</code> — submit video smoke, có fallback model\n"
+        "• <code>/tool_test_shopaikey_tts</code> — smoke TTS admin-only\n\n"
         "<b>F. Giá / Sẵn sàng bán</b>\n"
-        "• <code>/banggia</code>\n• <code>/costs</code>\n• <code>/sales_ready</code>\n• <code>/providers</code>\n\n"
+        "• <code>/banggia</code> — bảng giá khách hàng tập trung\n"
+        "• <code>/costs</code> — chi phí/provider nội bộ nếu có\n"
+        "• <code>/sales_ready</code> — kiểm tra public guard, billing, refund\n"
+        "• <code>/providers</code> — xác nhận provider không lộ secret\n\n"
         "<b>G. Maintenance / Freeze / Refund / Queue</b>\n"
-        "• <code>/freeze_status</code>\n• <code>/maintenance_status</code>\n• <code>/maintenance_on</code>\n• <code>/maintenance_off</code>\n"
-        "• <code>/freeze_video</code>\n• <code>/unfreeze_video</code>\n"
-        "• <code>/queue_status</code>\n• <code>/job_status</code>\n• <code>/refund_job</code>\n• <code>/clear_job_lock</code>\n"
-        "• <code>/freeze_tools</code>\n• <code>/unfreeze_tools</code>\n"
-        "• <code>/provider_freeze</code>\n• <code>/provider_unfreeze</code>\n\n"
+        "• <code>/freeze_status</code> — xem maintenance/provider freeze/job queue\n"
+        "• <code>/maintenance_status</code> — trạng thái bảo trì toàn hệ thống\n"
+        "• <code>/maintenance_on &lt;lý_do&gt;</code> / <code>/maintenance_off</code> — bật/tắt bảo trì\n"
+        "• <code>/freeze_video</code> / <code>/unfreeze_video</code> — khóa/mở video public\n"
+        "• <code>/queue_status</code> — số job queued/running/done/failed\n"
+        "• <code>/job_status &lt;job_id&gt;</code> — xem 1 job và refund state\n"
+        "• <code>/refund_job &lt;job_id&gt;</code> — hoàn Xu/lượt thủ công nếu guard chưa xử lý\n"
+        "• <code>/clear_job_lock &lt;user_id&gt;</code> — clear lock khi job kẹt\n"
+        "• <code>/freeze_tools</code> / <code>/unfreeze_tools</code> — khóa/mở tool public\n"
+        "• <code>/provider_freeze &lt;provider&gt;</code> / <code>/provider_unfreeze &lt;provider&gt;</code> — khóa/mở provider\n\n"
         "<b>H. Góp ý / Admin notes</b>\n• <code>/admin_gopy</code>"
     )
 
@@ -33950,9 +33994,17 @@ def menu_text_system() -> str:
         "⚙️ <b>Hệ Thống</b>\n\n"
         f"• Runtime build: <code>{APP_BUILD}</code>\n"
         f"• App version: <code>{html.escape(APP_VERSION)}</code>\n"
-        "• <code>/runtime</code>\n• <code>/telegram_takeover</code>\n• <code>/telegram_status</code>\n"
-        "• <code>/providers</code>\n• <code>/sales_ready</code>\n• <code>/costs</code>\n• <code>/payos_test_plan</code>\n• <code>/promo_seed_beta</code>\n• <code>/mark_payos_test</code>\n"
-        "• <code>/backup_db</code>\n• <code>/checkpayos &lt;mã_đơn&gt;</code>\n• API health: <code>GET /health</code>"
+        "• <code>/runtime</code> — kiểm tra build, git commit, startup warning\n"
+        "• <code>/data_status</code> — kiểm tra DB persistent volume và backup\n"
+        "• <code>/telegram_takeover</code> — hướng dẫn xử lý xung đột bot instance\n"
+        "• <code>/telegram_status</code> — trạng thái polling/webhook Telegram\n"
+        "• <code>/providers</code> — provider/payment/worker status tổng\n"
+        "• <code>/sales_ready</code> — checklist trước khi bán\n"
+        "• <code>/costs</code> — chi phí nội bộ nếu có\n"
+        "• <code>/payos_test_plan</code> — test PayOS không sửa logic thanh toán\n"
+        "• <code>/backup_db</code> — tạo backup SQLite thủ công\n"
+        "• <code>/checkpayos &lt;mã_đơn&gt;</code> — kiểm tra đơn PayOS\n"
+        "• API health: <code>GET /health</code>"
     )
 
 def menu_text_billing(is_admin: bool) -> str:
@@ -37653,6 +37705,8 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
             parse_mode="HTML",
             reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang),
         )
+    if len(raw_parts) >= 3 and raw_parts[1] == "retry":
+        return await handle_public_video_retry_callback(query, uid, raw_parts[2], lang)
     if len(raw_parts) >= 2 and raw_parts[1] == "status":
         if not is_admin_user(uid):
             status_detail_text = (
@@ -37698,6 +37752,7 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
             )
     result = await shopaikey_video_job_status(task_id)
     status = str(result.get("status") or "FAIL")
+    db_status = shopaikey_db_video_status(status)
     result_url = str(result.get("result_url") or "")
     output_sent = False
     already_sent = bool(int((db_job or {}).get("result_sent") or 0))
@@ -37705,11 +37760,19 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
         output_sent, output_file_id = await send_shopaikey_video_result(context.bot, query.message.chat_id, task_id, result_url)
         if output_sent and job_id:
             update_shopaikey_job(job_id=job_id, task_id=task_id, output_file_id=output_file_id, result_sent=1)
+    previous_db_status = shopaikey_db_video_status((db_job or {}).get("status") or "")
+    if db_status in {"FAILED", "TIMEOUT"} and previous_db_status not in {"FAILED", "TIMEOUT"}:
+        record_provider_error(
+            "shopaikey",
+            "video",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("fail_reason") or result.get("detail") or status),
+            result.get("fail_reason") or result.get("detail") or status,
+        )
     if job_id:
         update_shopaikey_job(
             job_id=job_id,
             task_id=task_id,
-            status=shopaikey_db_video_status(status),
+            status=db_status,
             result_url=result_url,
             result_sent=1 if (output_sent or already_sent) else 0,
             error_class=result.get("error_class") or "",
@@ -37717,44 +37780,27 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
             provider_message=result.get("detail") or "",
             fail_reason=result.get("fail_reason") or "",
             poll_count=int((db_job or {}).get("poll_count") or 0) + 1,
-            finished_at=now_text() if shopaikey_db_video_status(status) in {"SUCCESS", "FAILED", "TIMEOUT"} else "",
+            finished_at=now_text() if db_status in {"SUCCESS", "FAILED", "TIMEOUT"} else "",
         )
     if not is_admin_user(uid):
-        if normalize_user_language(lang) == "zh":
-            sent_note = "已发送" if (already_sent or output_sent) else "尚未"
-            public_text = (
-                "🎞 <b>TOAN AAS 视频状态</b>\n\n"
-                f"• 状态: <code>{html.escape(status)}</code>\n"
-                f"• 进度: <code>{html.escape(str(result.get('progress') or '-'))}</code>\n"
-                f"• 视频已发送: <code>{html.escape(sent_note)}</code>\n\n"
-                "视频完成后将在几分钟内自动发送。\n"
-                "请不要重复发送命令或连续创建多个任务。"
-            )
-        elif normalize_user_language(lang) != "vi":
-            sent_note = "sent" if (already_sent or output_sent) else "not yet"
-            public_text = (
-                "🎞 <b>TOAN AAS Video Status</b>\n\n"
-                f"• Status: <code>{html.escape(status)}</code>\n"
-                f"• Progress: <code>{html.escape(str(result.get('progress') or '-'))}</code>\n"
-                f"• Video sent: <code>{html.escape(sent_note)}</code>\n\n"
-                "The video will be sent automatically in a few minutes when it is ready.\n"
-                "Please do not send the command again or create multiple jobs."
-            )
-        else:
-            sent_note = "đã gửi" if (already_sent or output_sent) else "chưa"
-            public_text = (
-                "🎞 <b>Trạng thái video TOAN AAS</b>\n\n"
-                f"• Trạng thái: <code>{html.escape(status)}</code>\n"
-                f"• Tiến độ: <code>{html.escape(str(result.get('progress') or '-'))}</code>\n"
-                f"• Video đã gửi: <code>{html.escape(sent_note)}</code>\n\n"
-                "Video sẽ được gửi tự động trong vài phút khi hoàn tất.\n"
-                "Vui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần."
-            )
+        latest_job = shopaikey_job_by_id(job_id) if job_id else db_job
+        fail_summary = {}
+        if db_status in {"FAILED", "TIMEOUT"}:
+            fail_summary = finalize_public_video_terminal_failure(latest_job or db_job or {}, result, db_status)
+            latest_job = shopaikey_job_by_id(job_id) if job_id else latest_job
+        public_text = public_video_status_message(
+            status,
+            progress=str(result.get("progress") or "-"),
+            output_sent=bool(already_sent or output_sent),
+            job=latest_job or db_job or {},
+            fail_summary=fail_summary,
+            lang=lang,
+        )
         return await safe_edit_or_send(
             query,
             public_text,
             parse_mode="HTML",
-            reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, public_user=True),
+            reply_markup=public_video_status_keyboard(task_id, latest_job or db_job or {}, db_status, lang, output_sent=bool(already_sent or output_sent)),
         )
     result_line = f"• Result: <a href=\"{html.escape(result_url, quote=True)}\">open</a>\n" if result_url else ""
     sent_note = "already sent" if already_sent else ("yes" if output_sent else "no")
@@ -49940,6 +49986,267 @@ def public_video_provider_fail_message(amount_xu: int = 0, refund_done: bool = F
     if refund_done:
         return ui_text(lang, "video.fail.refunded", amount=amount)
     return ui_text(lang, "video.fail.refund_failed")
+
+def public_video_job_tier(job: dict | None = None) -> str:
+    job = job or {}
+    package_type = normalize_package_item_type(job.get("package_item_type") or "")
+    for tier in VIDEO_TIER_ORDER:
+        if package_type and package_type == package_item_type_for_video_tier(tier):
+            return tier
+    planned = int(job.get("xu_cost_planned") or 0)
+    if planned > 0:
+        for tier in VIDEO_TIER_ORDER:
+            if int(video_tier_payload(tier).get("cost") or 0) == planned:
+                return tier
+    return normalize_video_tier(SHOPAIKEY_VIDEO_DEFAULT_TIER)
+
+def public_video_terminal_failure_text(lang: str = "vi", package_refunded: bool = False, xu_refunded: bool = False, no_charge: bool = False) -> str:
+    lang_norm = normalize_user_language(lang)
+    if lang_norm == "zh":
+        refund_line = "TOAN AAS 没有扣 Xu，或已退回已扣的 Xu/套餐次数。"
+        if package_refunded:
+            refund_line = "套餐次数已退回。TOAN AAS 没有额外扣 Xu。"
+        elif xu_refunded:
+            refund_line = "已自动退回本次扣除的 Xu。"
+        elif no_charge:
+            refund_line = "TOAN AAS 未扣 Xu。"
+        return (
+            "❌ <b>视频生成失败</b>\n\n"
+            "原因：AI 模型繁忙、provider 错误或临时过载。\n"
+            f"{refund_line}\n\n"
+            "你可以稍后重试，或选择其他视频套餐。"
+        )
+    if lang_norm != "vi":
+        refund_line = "TOAN AAS did not charge Xu, or has returned the charged Xu/package slot."
+        if package_refunded:
+            refund_line = "The package slot has been returned. No extra Xu was charged."
+        elif xu_refunded:
+            refund_line = "The charged Xu has been refunded automatically."
+        elif no_charge:
+            refund_line = "TOAN AAS did not charge Xu."
+        return (
+            "❌ <b>Video creation failed</b>\n\n"
+            "Reason: the AI model is busy, the provider failed, or the provider is overloaded.\n"
+            f"{refund_line}\n\n"
+            "You can retry in a few minutes or choose another video tier."
+        )
+    refund_line = "TOAN AAS không trừ Xu hoặc đã hoàn lại lượt/Xu nếu có trừ."
+    if package_refunded:
+        refund_line = "TOAN AAS đã hoàn lại 1 lượt trong gói/combo của bạn."
+    elif xu_refunded:
+        refund_line = "TOAN AAS đã hoàn lại Xu đã trừ cho tác vụ này."
+    elif no_charge:
+        refund_line = "TOAN AAS chưa trừ Xu cho tác vụ này."
+    return (
+        "❌ <b>Video tạo thất bại</b>\n\n"
+        "Lý do: Model AI đang bận, provider lỗi hoặc quá tải.\n"
+        f"{refund_line}\n\n"
+        "Bạn có thể thử lại sau vài phút hoặc chọn gói khác."
+    )
+
+def public_video_status_message(status: str, progress: str = "-", output_sent: bool = False, job: dict | None = None, fail_summary: dict | None = None, lang: str = "vi") -> str:
+    db_status = shopaikey_db_video_status(status)
+    lang_norm = normalize_user_language(lang)
+    if db_status in {"FAILED", "TIMEOUT"}:
+        summary = fail_summary or {}
+        return public_video_terminal_failure_text(
+            lang,
+            package_refunded=bool(summary.get("package_refunded")),
+            xu_refunded=bool(summary.get("xu_refunded")),
+            no_charge=bool(summary.get("not_charged")),
+        )
+    if db_status == "SUCCESS":
+        if lang_norm == "zh":
+            sent_note = "已发送" if output_sent else "尚未发送"
+            return (
+                "✅ <b>视频已完成</b>\n\n"
+                f"• 状态: <code>{html.escape(str(status or 'SUCCESS'))}</code>\n"
+                f"• 视频已发送: <code>{html.escape(sent_note)}</code>\n\n"
+                "如果还没有看到视频，请点击检查状态，或联系 admin。"
+            )
+        if lang_norm != "vi":
+            sent_note = "sent" if output_sent else "not sent yet"
+            return (
+                "✅ <b>Video completed</b>\n\n"
+                f"• Status: <code>{html.escape(str(status or 'SUCCESS'))}</code>\n"
+                f"• Video sent: <code>{html.escape(sent_note)}</code>\n\n"
+                "If you do not see the video, check the status again or contact admin."
+            )
+        sent_note = "đã gửi" if output_sent else "chưa gửi"
+        return (
+            "✅ <b>Video đã hoàn tất</b>\n\n"
+            f"• Trạng thái: <code>{html.escape(str(status or 'SUCCESS'))}</code>\n"
+            f"• Video đã gửi: <code>{html.escape(sent_note)}</code>\n\n"
+            "Nếu bạn chưa thấy video, hãy bấm kiểm tra trạng thái hoặc liên hệ admin."
+        )
+    if lang_norm == "zh":
+        sent_note = "已发送" if output_sent else "尚未"
+        return (
+            "🎞 <b>TOAN AAS 视频状态</b>\n\n"
+            f"• 状态: <code>{html.escape(str(status or '-'))}</code>\n"
+            f"• 进度: <code>{html.escape(str(progress or '-'))}</code>\n"
+            f"• 视频已发送: <code>{html.escape(sent_note)}</code>\n\n"
+            "视频完成后将在几分钟内自动发送。\n"
+            "请不要重复发送命令或连续创建多个任务。"
+        )
+    if lang_norm != "vi":
+        sent_note = "sent" if output_sent else "not yet"
+        return (
+            "🎞 <b>TOAN AAS Video Status</b>\n\n"
+            f"• Status: <code>{html.escape(str(status or '-'))}</code>\n"
+            f"• Progress: <code>{html.escape(str(progress or '-'))}</code>\n"
+            f"• Video sent: <code>{html.escape(sent_note)}</code>\n\n"
+            "The video will be sent automatically in a few minutes when it is ready.\n"
+            "Please do not send the command again or create multiple jobs."
+        )
+    sent_note = "đã gửi" if output_sent else "chưa"
+    return (
+        "🎞 <b>Trạng thái video TOAN AAS</b>\n\n"
+        f"• Trạng thái: <code>{html.escape(str(status or '-'))}</code>\n"
+        f"• Tiến độ: <code>{html.escape(str(progress or '-'))}</code>\n"
+        f"• Video đã gửi: <code>{html.escape(sent_note)}</code>\n\n"
+        "Video sẽ được gửi tự động trong vài phút khi hoàn tất.\n"
+        "Vui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần."
+    )
+
+def public_video_failed_keyboard(job_id: int = 0, lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    retry_callback = f"shopai_video_job|retry|{int(job_id or 0)}"
+    if int(job_id or 0) > 0 and len(retry_callback.encode("utf-8")) <= 64:
+        rows.append([InlineKeyboardButton("🔁 Thử tạo lại" if normalize_user_language(lang) == "vi" else "🔁 Retry", callback_data=retry_callback)])
+    rows.append([InlineKeyboardButton("🎬 Chọn gói video khác" if normalize_user_language(lang) == "vi" else "🎬 Choose another video tier", callback_data="create_media|quick_video")])
+    rows.append([InlineKeyboardButton("👨‍💼 Liên hệ admin" if normalize_user_language(lang) == "vi" else "👨‍💼 Contact admin", callback_data="menu|support")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")])
+    return InlineKeyboardMarkup(rows)
+
+def public_video_status_keyboard(task_id: str, job: dict | None = None, status: str = "", lang: str = "vi", output_sent: bool = False) -> InlineKeyboardMarkup | None:
+    db_status = shopaikey_db_video_status(status)
+    job = job or {}
+    if db_status in {"FAILED", "TIMEOUT"}:
+        return public_video_failed_keyboard(int(job.get("id") or 0), lang)
+    if db_status == "SUCCESS" and output_sent:
+        return public_video_success_keyboard(public_video_job_tier(job), lang)
+    return shopaikey_video_job_check_keyboard(task_id, lang, public_user=True)
+
+def finalize_public_video_terminal_failure(job: dict | None, result: dict | None = None, status: str = "FAILED") -> dict:
+    current = dict(job or {})
+    job_id = int(current.get("id") or 0)
+    if job_id:
+        current = shopaikey_job_by_id(job_id) or current
+    if not current:
+        return {"not_charged": True}
+    result = result or {}
+    user_id = current.get("user_id") or ""
+    task_id = str(current.get("task_id") or result.get("task_id") or "").strip()
+    db_status = "TIMEOUT" if shopaikey_db_video_status(status or result.get("status")) == "TIMEOUT" else "FAILED"
+    provider_reason = (
+        result.get("fail_reason")
+        or result.get("detail")
+        or result.get("provider_error_code")
+        or result.get("error_class")
+        or status
+        or "video_terminal_failed"
+    )
+    reason = sanitize_provider_error(provider_reason)
+    deducted_amount = int(current.get("xu_deducted") or 0)
+    package_used = bool(int(current.get("package_item_id") or 0) and int(current.get("package_units_used") or 0))
+    package_already_refunded = str(current.get("package_refund_status") or "").lower() == "refunded" or str(current.get("billing_status") or "").lower() == "package_refunded"
+    package_refunded = package_already_refunded or (refund_package_item_for_job(user_id, job_id, reason) if package_used else False)
+    xu_already_refunded = str(current.get("refund_status") or "").lower() == "refunded" or str(current.get("billing_status") or "").lower() == "refunded"
+    xu_refunded = xu_already_refunded or (refund_shopaikey_job_if_needed(user_id, job_id, task_id, reason) if deducted_amount > 0 else False)
+    refund_status = "refunded" if xu_refunded else ("refund_failed" if deducted_amount > 0 else "not_charged")
+    billing_status = (
+        "package_refunded" if package_refunded
+        else ("refunded" if xu_refunded else ("refund_failed" if deducted_amount > 0 else "failed_not_charged"))
+    )
+    update_shopaikey_job(
+        job_id=job_id,
+        task_id=task_id,
+        status="FAILED_TIMEOUT" if db_status == "TIMEOUT" else "FAILED",
+        error_class=result.get("error_class") or db_status,
+        provider_error_code=result.get("provider_error_code") or "",
+        provider_message=reason,
+        fail_reason=reason,
+        refund_status=refund_status,
+        refund_amount=deducted_amount if xu_refunded else 0,
+        refund_reason=reason,
+        billing_status=billing_status,
+        package_refund_status="refunded" if package_refunded else ("refund_failed" if package_used else ""),
+        finished_at=now_text(),
+    )
+    return {
+        "job_id": job_id,
+        "package_refunded": bool(package_refunded),
+        "xu_refunded": bool(xu_refunded),
+        "not_charged": bool(deducted_amount <= 0 and not package_used),
+        "refund_failed": bool(deducted_amount > 0 and not xu_refunded and not package_refunded),
+    }
+
+async def handle_public_video_retry_callback(query, user_id, job_id_text: str, lang: str = "vi"):
+    try:
+        job_id = int(job_id_text or 0)
+    except Exception:
+        job_id = 0
+    job = shopaikey_job_by_id(job_id) if job_id else None
+    if not job or str(job.get("user_id") or "") != str(user_id or "") or bool(int(job.get("admin_only") or 0)):
+        return await safe_edit_or_send(
+            query,
+            "⚠️ Không tìm thấy video job của bạn hoặc job đã hết hạn. Bot chưa gọi API mới và chưa trừ thêm Xu.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")]]),
+        )
+    if shopaikey_db_video_status(job.get("status") or "") not in {"FAILED", "TIMEOUT"}:
+        return await safe_edit_or_send(
+            query,
+            "⏳ Job này chưa thất bại. Vui lòng bấm kiểm tra trạng thái, không cần tạo lại.",
+            reply_markup=shopaikey_video_job_check_keyboard(job.get("task_id") or "", lang, public_user=True),
+        )
+    enabled, message = shopaikey_public_generation_guard("video")
+    if not enabled:
+        return await safe_edit_or_send(query, f"{message}\nBot chưa gọi API và chưa trừ Xu.")
+    active_job = shopaikey_active_job_for_user(user_id, "video")
+    if active_job and int(active_job.get("id") or 0) != job_id:
+        return await safe_edit_or_send(
+            query,
+            public_video_active_job_text(lang),
+            reply_markup=public_video_active_job_keyboard(active_job, lang),
+        )
+    tier = public_video_job_tier(job)
+    payload = video_tier_payload(tier)
+    if tier == "premium" or payload.get("admin_only"):
+        return await safe_edit_or_send(query, ui_text(lang, "video.premium_message"))
+    if not payload.get("enabled"):
+        return await safe_edit_or_send(query, ui_text(lang, "video.tier_disabled_message"))
+    prompt = str(job.get("prompt_preview") or "").strip() or "Tạo video quảng cáo TOAN AAS ngắn, sạch, rõ chủ thể."
+    source_job_id = str(job.get("source_job_id") or "").strip()
+    if source_job_id and not shopaikey_paid_image_source_available(user_id, source_job_id):
+        return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
+    credits, _, _ = get_user(user_id, getattr(query.from_user, "first_name", "") or getattr(query.from_user, "username", "") or "Video user")
+    base_cost = int(payload.get("cost") or 0)
+    package_item_type = normalize_package_item_type(job.get("package_item_type") or package_item_type_for_video_tier(tier))
+    package_item = active_package_item_for_user(user_id, package_item_type)
+    final_preview_cost = shopaikey_preview_final_cost(user_id, base_cost, "shopaikey_video")
+    if int(credits or 0) < final_preview_cost and not is_admin_user(user_id) and not package_item:
+        return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, user_id)
+    pending_payload = {
+        "job_type": "video",
+        "prompt": video_tier_prompt_for_generation(prompt, tier),
+        "original_prompt": prompt,
+        "base_cost": base_cost,
+        "from_image": bool(source_job_id),
+        "source_job_id": source_job_id,
+        "video_tier": tier,
+        "tier_label": payload.get("label") or tier,
+        "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+        "package_item_type": package_item_type,
+    }
+    token = set_shopaikey_pending_confirmation(user_id, pending_payload)
+    record_shopaikey_billing_event(user_id, 0, "video_retry_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"retry_from_job={job_id}; tier={tier}")
+    confirm_text = public_video_confirm_text(tier, prompt, int(credits or 0), lang)
+    confirm_markup = shopaikey_confirm_keyboard("video", token, tier, lang)
+    if package_item:
+        confirm_text = package_offer_text(package_item, confirm_text, lang)
+        confirm_markup = package_use_choice_keyboard("video", token, tier, lang)
+    return await safe_edit_or_send(query, confirm_text, parse_mode="HTML", reply_markup=confirm_markup)
 
 def public_video_success_keyboard(tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     tier_norm = normalize_video_tier(tier)
