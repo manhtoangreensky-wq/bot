@@ -2099,6 +2099,73 @@ def test_frame_video_helper_defaults_and_state():
         bot.clear_frame_video_state(uid)
 
 
+def test_shopaikey_chat_fallback_sequence_excludes_gpt5_and_retries(monkeypatch):
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
+    monkeypatch.setattr(bot, "SHOPAIKEY_BASE_URL", "https://example.test/v1")
+    monkeypatch.setattr(bot, "SHOPAIKEY_CHAT_MODEL", "gpt-5-mini")
+    monkeypatch.setattr(bot, "SHOPAIKEY_CHAT_FALLBACK_MODELS", "gpt-4o-mini,gpt-4.1-mini,qwen-plus,gpt-5-mini")
+    sequence = bot.shopaikey_chat_model_sequence()
+    assert "gpt-5-mini" not in sequence
+    assert sequence[:3] == ["gpt-4o-mini", "gpt-4.1-mini", "qwen-plus"]
+
+    calls = []
+
+    async def fake_single_model(system_prompt, user_text, model, max_tokens=1200):
+        calls.append(model)
+        if model == "gpt-4o-mini":
+            return {
+                "status": "FAIL_CONTENT_EMPTY",
+                "provider": "shopaikey",
+                "model": model,
+                "text": "",
+                "http_status": 200,
+                "latency_ms": 1,
+                "error_class": "FAIL_CONTENT_EMPTY",
+            }
+        return {
+            "status": "PASS",
+            "provider": "shopaikey",
+            "model": model,
+            "text": "Xin chào TOAN AAS",
+            "http_status": 200,
+            "latency_ms": 2,
+            "error_class": "",
+        }
+
+    monkeypatch.setattr(bot, "shopaikey_chat_completion_single_model", fake_single_model)
+    monkeypatch.setattr(bot, "save_tool_test_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "save_shopaikey_chat_snapshot", lambda *args, **kwargs: None)
+    result = asyncio.run(bot.shopaikey_chat_completion("system", "alo", "user-chat-test", max_tokens=80))
+    assert result["ok"] is True
+    assert result["provider"] == "shopaikey"
+    assert result["model"] == "gpt-4.1-mini"
+    assert calls == ["gpt-4o-mini", "gpt-4.1-mini"]
+
+
+def test_public_ai_chat_router_uses_shopaikey_when_primary_missing(monkeypatch):
+    monkeypatch.setattr(bot, "gemini_client", None)
+    monkeypatch.setattr(bot, "openai_client", None)
+    monkeypatch.setattr(bot, "shopaikey_public_chat_fallback_enabled", lambda: True)
+
+    async def fake_shopaikey_chat(system_prompt, user_text, user_id, max_tokens=1200):
+        return {
+            "ok": True,
+            "provider": "shopaikey",
+            "model": "gpt-4o-mini",
+            "text": "Xin chào, tôi có thể hỗ trợ bạn.",
+            "attempts": [{"model": "gpt-4o-mini", "status": "PASS"}],
+            "status": "PASS",
+        }
+
+    monkeypatch.setattr(bot, "shopaikey_chat_completion", fake_shopaikey_chat)
+    monkeypatch.setattr(bot, "record_api_debug", lambda *args, **kwargs: None)
+    result = asyncio.run(bot.call_ai_chat_with_fallback("system", "alo", "user-chat-router-test", max_tokens=80))
+    assert result["ok"] is True
+    assert result["provider"] == "shopaikey"
+    assert "Xin chào" in result["text"]
+
+
 def test_feedback_schema_migration_handles_legacy_table(monkeypatch, tmp_path):
     db_path = tmp_path / "legacy_feedback.db"
     conn = sqlite3.connect(db_path)
@@ -3121,6 +3188,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "provider_matrix": "cmd_provider_matrix",
         "tool_test_openrouter": "cmd_tool_test_openrouter",
         "tool_test_shopaikey": "cmd_tool_test_shopaikey",
+        "tool_test_shopaikey_chat": "cmd_tool_test_shopaikey_chat",
         "tool_test_shopaikey_tts": "cmd_tool_test_shopaikey_tts",
         "tool_test_shopaikey_image": "cmd_tool_test_shopaikey_image",
         "tool_test_workflow_image": "cmd_tool_test_workflow_image",

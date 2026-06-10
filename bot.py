@@ -28659,6 +28659,36 @@ def shopaikey_is_configured() -> bool:
 def shopaikey_chat_fallback_models() -> list[str]:
     return [m.strip() for m in str(SHOPAIKEY_CHAT_FALLBACK_MODELS or "").split(",") if m.strip()]
 
+def shopaikey_public_chat_fallback_enabled() -> bool:
+    return bool(SHOPAIKEY_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_BASE_URL)
+
+def shopaikey_chat_model_sequence(model_override: str = "") -> list[str]:
+    raw_models = []
+    override = str(model_override or "").strip()
+    if override:
+        raw_models.append(override)
+    else:
+        raw_models.append(SHOPAIKEY_CHAT_MODEL or SHOPAIKEY_DEFAULT_MODEL or "gpt-4o-mini")
+        raw_models.extend(shopaikey_chat_fallback_models())
+    models = []
+    seen = set()
+    blocked = {"gpt-5-mini"}
+    for model in raw_models:
+        value = str(model or "").strip()
+        if not value:
+            continue
+        marker = value.lower()
+        if marker in blocked or marker in seen:
+            continue
+        seen.add(marker)
+        models.append(value)
+    for required in ("gpt-4o-mini", "gpt-4.1-mini", "qwen-plus"):
+        marker = required.lower()
+        if marker not in seen:
+            seen.add(marker)
+            models.append(required)
+    return models or ["gpt-4o-mini", "gpt-4.1-mini", "qwen-plus"]
+
 def shopaikey_video_fallback_models() -> list[str]:
     return [m.strip() for m in str(SHOPAIKEY_VIDEO_FALLBACK_MODELS or "").split(",") if m.strip()]
 
@@ -30388,7 +30418,7 @@ def shopaikey_chat_status_snapshot() -> dict:
     return shopaikey_component_status_snapshot(
         "chat",
         ["shopaikey_chat", "shopaikey"],
-        ["tool_test_shopaikey", "chat_smoke", "shopaikey_chat"],
+        ["tool_test_shopaikey_chat", "tool_test_shopaikey", "chat_smoke", "shopaikey_chat", "ai_chat_public_fallback"],
     )
 
 def shopaikey_tts_status_snapshot() -> dict:
@@ -30524,13 +30554,7 @@ def shopaikey_classify_video_error(http_status: int = 0, detail: str = "") -> st
     return shopaikey_classify_error(status, detail)
 
 async def shopaikey_chat_smoke_test() -> dict:
-    models = []
-    primary = SHOPAIKEY_CHAT_MODEL or SHOPAIKEY_DEFAULT_MODEL
-    if primary:
-        models.append(primary)
-    for item in shopaikey_chat_fallback_models():
-        if item not in models:
-            models.append(item)
+    models = shopaikey_chat_model_sequence()
     attempts = []
     for model in models:
         result = await openai_compatible_tiny_smoke(
@@ -30545,10 +30569,135 @@ async def shopaikey_chat_smoke_test() -> dict:
             required_text="TEST_OK",
         )
         attempts.append({"model": model, **result})
+        save_shopaikey_chat_model_snapshot(model, result, "smoke")
         if result.get("status") == "PASS":
             return {"status": "PASS", "model": model, "attempts": attempts, **result}
     last = attempts[-1] if attempts else {"status": "MISSING", "error_class": "no_models"}
     return {"status": last.get("status") or "FAIL", "model": last.get("model") or "", "attempts": attempts, **last}
+
+def shopaikey_chat_model_setting_key(model: str, suffix: str) -> str:
+    safe_model = re.sub(r"[^a-zA-Z0-9_]+", "_", str(model or "").strip().lower()).strip("_") or "unknown"
+    return f"shopaikey_chat_model_{safe_model}_{suffix}"
+
+def save_shopaikey_chat_model_snapshot(model: str, result: dict, updated_by="") -> None:
+    model = str(model or "").strip()
+    if not model:
+        return
+    status = str((result or {}).get("status") or "UNKNOWN").upper()
+    detail = (
+        f"model={model}; http={(result or {}).get('http_status') or 0}; "
+        f"latency_ms={(result or {}).get('latency_ms') or 0}; "
+        f"error_class={(result or {}).get('error_class') or '-'}"
+    )[:500]
+    set_system_setting(shopaikey_chat_model_setting_key(model, "status"), status, detail, updated_by)
+    set_system_setting(shopaikey_chat_model_setting_key(model, "http"), str((result or {}).get("http_status") or 0), detail, updated_by)
+    set_system_setting(shopaikey_chat_model_setting_key(model, "latency_ms"), str((result or {}).get("latency_ms") or 0), detail, updated_by)
+    set_system_setting(shopaikey_chat_model_setting_key(model, "error_class"), str((result or {}).get("error_class") or ""), detail, updated_by)
+    set_system_setting(shopaikey_chat_model_setting_key(model, "at"), now_text(), detail, updated_by)
+
+def shopaikey_chat_model_status_summary() -> str:
+    parts = []
+    for model in shopaikey_chat_model_sequence():
+        status = get_system_setting(shopaikey_chat_model_setting_key(model, "status"), "NOT_TESTED") or "NOT_TESTED"
+        parts.append(f"{model} {str(status).upper()}")
+    return "; ".join(parts)
+
+async def shopaikey_chat_completion_single_model(system_prompt: str, user_text: str, model: str, max_tokens: int = 1200) -> dict:
+    if not shopaikey_public_chat_fallback_enabled():
+        return {"status": "MISSING", "provider": "shopaikey", "model": model, "text": "", "http_status": 0, "latency_ms": 0, "error_class": "missing_or_disabled"}
+    endpoint = (SHOPAIKEY_BASE_URL or "").rstrip("/") + "/chat/completions"
+    started = time.perf_counter()
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": str(system_prompt or "")[:3000]},
+            {"role": "user", "content": str(user_text or "")[:6000]},
+        ],
+        "max_tokens": min(max(1, int(max_tokens or 1200)), 4096),
+        "temperature": 0.3,
+    }
+    headers = {
+        "Authorization": f"Bearer {SHOPAIKEY_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=float(SHOPAIKEY_CHAT_TIMEOUT_SECONDS or 30)) as client:
+            res = await client.post(endpoint, headers=headers, json=payload)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        content = ""
+        provider_message = ""
+        try:
+            data = res.json()
+            content = str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+            provider_message = str((data.get("error") or {}).get("message") or data.get("message") or "")[:240]
+        except Exception:
+            provider_message = str(getattr(res, "text", "") or "")[:240]
+        if res.status_code >= 400:
+            error_class = shopaikey_classify_error(int(res.status_code), provider_message or f"HTTP {res.status_code}")
+            result = {
+                "status": "FAIL",
+                "provider": "shopaikey",
+                "model": model,
+                "text": "",
+                "http_status": int(res.status_code),
+                "latency_ms": latency_ms,
+                "error_class": error_class,
+                "detail": shopaikey_sanitize_error(provider_message),
+            }
+        elif not content:
+            result = {
+                "status": "FAIL_CONTENT_EMPTY",
+                "provider": "shopaikey",
+                "model": model,
+                "text": "",
+                "http_status": int(res.status_code),
+                "latency_ms": latency_ms,
+                "error_class": "FAIL_CONTENT_EMPTY",
+                "detail": "content_empty",
+            }
+        else:
+            result = {
+                "status": "PASS",
+                "provider": "shopaikey",
+                "model": model,
+                "text": content,
+                "http_status": int(res.status_code),
+                "latency_ms": latency_ms,
+                "error_class": "",
+                "detail": "",
+            }
+        record_api_debug("shopaikey", "ai_chat_public_fallback", result["status"], int(result.get("http_status") or 0), f"model={model}; latency_ms={latency_ms}; error_class={result.get('error_class') or '-'}")
+        save_shopaikey_chat_model_snapshot(model, result, "public_chat")
+        return result
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        result = {
+            "status": "FAIL",
+            "provider": "shopaikey",
+            "model": model,
+            "text": "",
+            "http_status": 0,
+            "latency_ms": latency_ms,
+            "error_class": type(e).__name__,
+            "detail": shopaikey_sanitize_error(str(e)),
+        }
+        record_api_debug("shopaikey", "ai_chat_public_fallback", "FAIL", 0, f"model={model}; latency_ms={latency_ms}; error_class={type(e).__name__}")
+        save_shopaikey_chat_model_snapshot(model, result, "public_chat")
+        return result
+
+async def shopaikey_chat_completion(system_prompt: str, user_text: str, user_id, max_tokens: int = 1200, model_override: str = "") -> dict:
+    attempts = []
+    for model in shopaikey_chat_model_sequence(model_override):
+        result = await shopaikey_chat_completion_single_model(system_prompt, user_text, model, max_tokens=max_tokens)
+        attempts.append({"model": model, "status": result.get("status"), "http_status": result.get("http_status"), "error_class": result.get("error_class"), "latency_ms": result.get("latency_ms")})
+        if result.get("status") == "PASS" and str(result.get("text") or "").strip():
+            detail = f"model={model}; http={result.get('http_status') or 0}; latency_ms={result.get('latency_ms') or 0}; attempts=" + ",".join(f"{a['model']}={a['status']}" for a in attempts)
+            save_tool_test_result("shopaikey_chat", "PASS", detail, user_id)
+            save_shopaikey_chat_snapshot({"status": "PASS", "model": model, "http_status": result.get("http_status"), "latency_ms": result.get("latency_ms")}, detail, user_id)
+            return {"ok": True, "provider": "shopaikey", "model": model, "text": result.get("text") or "", "attempts": attempts, "status": "PASS"}
+    last = attempts[-1] if attempts else {"status": "MISSING", "error_class": "no_models"}
+    return {"ok": False, "provider": "shopaikey", "model": str(last.get("model") or ""), "text": "", "attempts": attempts, "status": str(last.get("status") or "FAIL"), "error_class": str(last.get("error_class") or "")}
 
 async def shopaikey_tts_smoke_test() -> tuple[str, bytes, str, int]:
     if not SHOPAIKEY_API_KEY:
@@ -33294,7 +33443,7 @@ TOOL_FREEZE_COMMANDS = {
     "orchestrator_status", "provider_matrix", "tool_test_openrouter",
     "tool_test_kling_status", "tool_test_replicate_status",
     "tool_test_elevenlabs_status", "tool_test_deepgram_status",
-    "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_tts",
+    "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_chat", "tool_test_shopaikey_tts",
     "tool_test_shopaikey_image", "tool_test_wf_i2v",
     "tool_test_shopaikey_video", "shopaikey_video_job", "trial_bonus_status",
     "local_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
@@ -34180,6 +34329,7 @@ def menu_text_admin() -> str:
         "• <code>/shopaikey_usage</code> — số dư masked, không lộ key\n"
         "• <code>/shopaikey_video_job &lt;task_id&gt;</code> — kiểm tra job video admin/public\n"
         "• <code>/tool_test_shopaikey</code> — smoke chat tiny prompt\n"
+        "• <code>/tool_test_shopaikey_chat [model]</code> — smoke chat từng model fallback\n"
         "• <code>/tool_test_shopaikey_image</code> — smoke image admin-only\n"
         "• <code>/tool_test_shopaikey_video [model]</code> — submit video smoke, có fallback model\n"
         "• <code>/tool_test_shopaikey_tts</code> — smoke TTS admin-only\n\n"
@@ -36248,11 +36398,14 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>AI</b>",
         f"• Gemini: <code>{provider_runtime_status_text(providers['ai']['gemini'], 'ai_gemini', 'ai_chat', 'ai')}</code>",
         f"• OpenAI fallback: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_openai', 'ai_chat', 'ai')}</code>",
+        f"• ShopAIKey chat fallback: <code>{'ON' if shopaikey_public_chat_fallback_enabled() else 'OFF'}</code>",
+        f"• ShopAIKey chat models: <code>{html.escape(', '.join(shopaikey_chat_model_sequence()))}</code>",
+        f"• Public chat fallback: <code>{'ON' if shopaikey_public_chat_fallback_enabled() else 'OFF'}</code>",
         "• Claude Sonnet/Opus: <code>planned/missing</code>",
         "• Grok cao cấp: <code>planned/missing</code>",
-        f"• Router normal/pro/deep: <code>{'configured' if providers['ai']['ready'] else 'missing'}</code>",
+        f"• Router normal/pro/deep: <code>{'configured' if (providers['ai']['ready'] or shopaikey_public_chat_fallback_enabled()) else 'missing'}</code>",
         f"• AI tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
-        "• AI quota guide: <code>Gemini quota exhausted/OpenAI 429/rate limit → đổi key, nạp billing, tăng quota hoặc tạm dùng fallback provider.</code>",
+        "• AI quota guide: <code>Gemini/OpenAI quota/rate limit → fallback ShopAIKey; nếu tất cả fail thì không trừ Xu.</code>",
         "",
         "<b>ShopAIKey / Unified AI Proxy</b>",
         f"• API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}</code>",
@@ -36295,6 +36448,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Usage: <code>{html.escape(shopaikey_usage_summary_text(shopaikey_usage))}</code>",
         f"• Group: <code>{html.escape(str(shopaikey_usage.get('group_name') or '-'))}</code>",
         f"• Chat tested: <code>{html.escape(shopaikey_chat_status_text())}</code>",
+        f"• Chat model tests: <code>{html.escape(shopaikey_chat_model_status_summary())}</code>",
         f"• Chat manual baseline: <code>gpt-4o-mini PASS; gpt-4.1-mini PASS; qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY</code>",
         f"• TTS tested: <code>{html.escape(shopaikey_tts_status_text())}</code>",
         "• TTS manual baseline: <code>/v1/audio/speech tts-1 PASS</code>",
@@ -36313,7 +36467,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         f"• Frame video / ffmpeg slideshow: <code>{'public ON' if frame_video.get('public_enabled') else 'public OFF'}</code> | basic/effect/music <code>{int(frame_video.get('basic_price_xu') or 0)}/{int(frame_video.get('effect_price_xu') or 0)}/{int(frame_video.get('music_price_xu') or 0)} Xu</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
+        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -36837,7 +36991,7 @@ async def cmd_orchestrator_status(update: Update, context: ContextTypes.DEFAULT_
         "• <code>/tool_test_replicate_status</code>",
         "• <code>/tool_test_elevenlabs_status</code>",
         "• <code>/tool_test_deepgram_status</code>",
-        "• <code>/shopaikey_status</code> | <code>/tool_test_shopaikey</code>",
+        "• <code>/shopaikey_status</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code>",
     ])
     await reply_html_lines(update, lines)
 
@@ -36989,7 +37143,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Base URL: <code>{html.escape(SHOPAIKEY_BASE_URL or '-')}</code>",
         f"• Default model: <code>{html.escape(SHOPAIKEY_DEFAULT_MODEL or '-')}</code>",
         f"• Chat model: <code>{html.escape(SHOPAIKEY_CHAT_MODEL or '-')}</code>",
-        f"• Chat fallbacks: <code>{html.escape(', '.join(shopaikey_chat_fallback_models()) or '-')}</code>",
+        f"• Chat fallbacks: <code>{html.escape(', '.join(shopaikey_chat_model_sequence()) or '-')}</code>",
+        f"• Public chat fallback: <code>{'ON' if shopaikey_public_chat_fallback_enabled() else 'OFF'}</code>",
         f"• TTS: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code> / <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>",
         f"• Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
         f"• Price table source: <code>{html.escape(pricing['price_table_source'])}</code>",
@@ -37036,6 +37191,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Low credit warn/freeze: <code>{int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
         f"• Error threshold: <code>{int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)} / {int(SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES or 0)} min</code>",
         f"• Chat test: <code>{html.escape(shopaikey_chat_status_text())}</code>",
+        f"• Chat model tests: <code>{html.escape(shopaikey_chat_model_status_summary())}</code>",
         f"• TTS test: <code>{html.escape(shopaikey_tts_status_text())}</code>",
         f"• Public voice: <code>{html.escape(public_voice_runtime_status_text())}</code>",
         f"• Image test: <code>{html.escape(shopaikey_image_status_text())}</code>",
@@ -37488,6 +37644,63 @@ async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_
         f"• Latency: <code>{html.escape(str(result.get('latency_ms') or 0))}ms</code>\n"
         f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n\n"
         "Tiny prompt only. Không log prompt/response/key. Không trừ Xu. Không ảnh hưởng provider khác.",
+        parse_mode="HTML",
+    )
+    finish_generation_pending_job(uid, tool_type, normalized_prompt, result.get("status") or "done")
+
+async def cmd_tool_test_shopaikey_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    model_override = " ".join(context.args or []).strip()
+    if model_override and model_override.lower() == "gpt-5-mini":
+        return await update.message.reply_text("⚠️ gpt-5-mini đang bị loại khỏi fallback vì đã biết lỗi FAIL_CONTENT_EMPTY. Bot chưa gọi API và chưa trừ Xu.")
+    if model_override and model_override not in set(shopaikey_chat_model_sequence(model_override)):
+        return await update.message.reply_text("⚠️ Model không hợp lệ. Ví dụ: /tool_test_shopaikey_chat gpt-4o-mini")
+    if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
+        save_tool_test_result("shopaikey_chat", "MISSING", "SHOPAIKEY_ENABLED/API_KEY missing; no call", uid)
+        return await update.message.reply_text("🧪 <b>ShopAIKey Chat Smoke</b>\n\n• Status: <code>MISSING</code>\n• Không gọi API và không trừ Xu.", parse_mode="HTML")
+    tool_type = "shopaikey_chat"
+    normalized_prompt = normalize_generation_prompt(f"shopaikey chat smoke {model_override or 'all'}")
+    if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
+        return await update.message.reply_text("⏳ Yêu cầu trước của bạn vẫn đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
+    start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_shopaikey_chat")
+    waiting_message = await send_waiting_message(update, context, "ai")
+    if model_override:
+        result = await openai_compatible_tiny_smoke(
+            "shopaikey",
+            SHOPAIKEY_BASE_URL,
+            SHOPAIKEY_API_KEY,
+            model_override,
+            timeout_seconds=float(SHOPAIKEY_CHAT_TIMEOUT_SECONDS or 30),
+            user_prompt="Trả lời đúng một câu tiếng Việt có chữ TEST_OK.",
+            max_tokens=80,
+            temperature=0.2,
+            required_text="TEST_OK",
+        )
+        result = {"model": model_override, "attempts": [{"model": model_override, **result}], **result}
+        save_shopaikey_chat_model_snapshot(model_override, result, uid)
+    else:
+        result = await shopaikey_chat_smoke_test()
+    attempts = result.get("attempts") or []
+    attempt_text = ", ".join(f"{item.get('model')}={item.get('status')}" for item in attempts) or "-"
+    detail = (
+        f"model={result.get('model') or SHOPAIKEY_CHAT_MODEL}; http={result.get('http_status')}; "
+        f"latency_ms={result.get('latency_ms')}; error_class={result.get('error_class') or '-'}; attempts={attempt_text}"
+    )
+    save_tool_test_result("shopaikey_chat", result.get("status") or "FAIL", detail, uid)
+    save_shopaikey_chat_snapshot(result, detail, uid)
+    record_api_debug("shopaikey", "tool_test_shopaikey_chat", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    await update_waiting_message(waiting_message, "✅ ShopAIKey chat smoke đã xử lý xong. Không trừ Xu.")
+    await update.message.reply_text(
+        "🧪 <b>ShopAIKey Chat Smoke</b>\n\n"
+        f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
+        f"• Model used: <code>{html.escape(str(result.get('model') or '-'))}</code>\n"
+        f"• Attempts: <code>{html.escape(attempt_text)}</code>\n"
+        f"• Latency: <code>{html.escape(str(result.get('latency_ms') or 0))}ms</code>\n"
+        f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n\n"
+        "Tiny prompt only. Không log prompt/response/key. Không trừ Xu. Public fallback không dùng gpt-5-mini.",
         parse_mode="HTML",
     )
     finish_generation_pending_job(uid, tool_type, normalized_prompt, result.get("status") or "done")
@@ -57313,19 +57526,20 @@ def chat_mode_instruction(mode: str) -> str:
 
 def ai_failure_user_text(statuses: dict, errors: dict) -> str:
     return (
-        "❌ AI đang tạm hết quota hoặc quá tải.\n"
+        "⚠️ AI chat đang bận hoặc hết quota tạm thời.\n"
         "Bot chưa trừ Xu. Vui lòng thử lại sau."
     )
 
 def ai_failure_detail(statuses: dict, errors: dict) -> str:
     gemini = f"Gemini={str((statuses or {}).get('gemini') or 'MISSING').upper()}"
     openai = f"OpenAI={str((statuses or {}).get('openai') or 'MISSING').upper()}"
+    shopaikey = f"ShopAIKey={str((statuses or {}).get('shopaikey') or 'MISSING').upper()}"
     details = []
-    for key in ("gemini", "openai"):
+    for key in ("gemini", "openai", "shopaikey"):
         err = str((errors or {}).get(key) or "").strip()
         if err:
             details.append(f"{key}:{err[:180]}")
-    return "; ".join([gemini, openai, *details])[:900]
+    return "; ".join([gemini, openai, shopaikey, *details])[:900]
 
 def is_ai_failure_text(value: str) -> bool:
     text = str(value or "").strip().lower()
@@ -57335,10 +57549,12 @@ def is_ai_failure_text(value: str) -> bool:
         "lỗi cả gemini lẫn openai",
         "không có ai provider",
         "chưa cấu hình ai provider",
+        "ai đang tạm hết quota",
+        "ai chat đang bận",
     ))
 
 async def call_ai_chat_with_fallback(system_prompt: str, user_text: str, user_id, max_tokens: int = 1200) -> dict:
-    statuses = {"gemini": "MISSING", "openai": "MISSING"}
+    statuses = {"gemini": "MISSING", "openai": "MISSING", "shopaikey": "MISSING"}
     errors = {}
     uid_key = user_id
 
@@ -57406,6 +57622,26 @@ async def call_ai_chat_with_fallback(system_prompt: str, user_text: str, user_id
             errors["openai"] = provider_error_summary(e)
             record_api_debug("openai", "ai_chat", "FAIL", 0, errors["openai"])
             logger.warning(f"AI chat OpenAI error: {errors['openai']}")
+
+    if shopaikey_public_chat_fallback_enabled():
+        statuses["shopaikey"] = "TRYING"
+        try:
+            result = await shopaikey_chat_completion(system_prompt, user_text, user_id, max_tokens=max_tokens)
+            attempts = result.get("attempts") or []
+            if result.get("ok") and str(result.get("text") or "").strip():
+                output = str(result.get("text") or "").strip()
+                statuses["shopaikey"] = "PASS"
+                model = str(result.get("model") or "")
+                record_api_debug("shopaikey", "ai_chat", "PASS", 0, f"model={model}; chars={len(output)}; attempts=" + ",".join(f"{a.get('model')}={a.get('status')}" for a in attempts))
+                return {"ok": True, "provider": "shopaikey", "model": model, "text": output, "statuses": statuses, "errors": errors}
+            statuses["shopaikey"] = str(result.get("status") or "FAIL").upper()
+            errors["shopaikey"] = "; ".join(f"{a.get('model')}={a.get('status') or 'FAIL'}:{a.get('error_class') or '-'}" for a in attempts)[:300] or str(result.get("error_class") or result.get("status") or "FAIL")
+            record_api_debug("shopaikey", "ai_chat", "FAIL", 0, errors["shopaikey"])
+        except Exception as e:
+            statuses["shopaikey"] = "FAIL"
+            errors["shopaikey"] = provider_error_summary(e)
+            record_api_debug("shopaikey", "ai_chat", "FAIL", 0, errors["shopaikey"])
+            logger.warning(f"AI chat ShopAIKey error: {errors['shopaikey']}")
 
     return {
         "ok": False,
@@ -72333,16 +72569,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if detected_video_url:
         route = {"action": "download", "data": detected_video_url}
     else:
-        if not gemini_client and not openai_client:
-            return await update.message.reply_text("❌ Hệ thống AI chưa sẵn sàng (thiếu GEMINI_API_KEY và OPENAI_API_KEY).")
-        try:
-            route_raw = AgentGemini.chat(
-                "Phân loại: 'voice' (đọc văn bản), 'download' (URL video), 'general' (còn lại). Trả về JSON.",
-                text, uid, is_json=True
-            )
-            route = json.loads(route_raw)
-        except Exception:
+        if not gemini_client and not openai_client and not shopaikey_public_chat_fallback_enabled():
+            return await update.message.reply_text("⚠️ AI chat đang bận hoặc hết quota tạm thời.\nBot chưa trừ Xu. Vui lòng thử lại sau.")
+        if not gemini_client and not openai_client and shopaikey_public_chat_fallback_enabled():
             route = {"action": "general", "data": text}
+        else:
+            try:
+                route_raw = AgentGemini.chat(
+                    "Phân loại: 'voice' (đọc văn bản), 'download' (URL video), 'general' (còn lại). Trả về JSON.",
+                    text, uid, is_json=True
+                )
+                route = json.loads(route_raw)
+            except Exception:
+                route = {"action": "general", "data": text}
 
     act  = route.get("action", "general")
     data = route.get("data", text)
@@ -72666,6 +72905,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_ai", cmd_tool_test_ai))
     tg_app.add_handler(CommandHandler("tool_test_openrouter", cmd_tool_test_openrouter))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey", cmd_tool_test_shopaikey))
+    tg_app.add_handler(CommandHandler("tool_test_shopaikey_chat", cmd_tool_test_shopaikey_chat))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_tts", cmd_tool_test_shopaikey_tts))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_image", cmd_tool_test_shopaikey_image))
     tg_app.add_handler(CommandHandler("tool_test_workflow_image", cmd_tool_test_workflow_image))
