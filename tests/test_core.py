@@ -2768,12 +2768,15 @@ def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
 def test_shopaikey_tts_smoke_suppresses_generic_error_after_audio_sent():
     source = bot_source_text()
     tts_source = source_between(source, "async def cmd_tool_test_shopaikey_tts", "async def cmd_tool_test_shopaikey_image")
+    assert "final_report_sent = False" in tts_source
+    assert "async def send_tts_smoke_final_report" in tts_source
     assert "output_sent = False" in tts_source
-    assert "output_sent = True" in tts_source
+    assert "output_sent, send_error, send_attempts = await send_shopaikey_tts_audio_with_retry" in tts_source
     assert "provider_ok = False" in tts_source
     assert "audio_exists = False" in tts_source
     assert "FAIL_SEND_AUDIO" in tts_source
     assert "TTS đã tạo audio nhưng Telegram gửi file thất bại" in tts_source
+    assert "send_shopaikey_tts_audio_with_retry" in tts_source
     assert "✅ TTS đã tạo xong. Không trừ Xu." in tts_source
     assert "USER_TTS_PROVIDER_BUSY_MESSAGE" in tts_source
     assert "Có lỗi khi xử lý lệnh" not in tts_source
@@ -2813,20 +2816,25 @@ def test_shopaikey_tts_smoke_uses_one_final_status(monkeypatch):
             return SimpleNamespace(text=text, kwargs=kwargs)
 
     class FakeBot:
-        def __init__(self, fail_send=False):
+        def __init__(self, fail_send=False, fail_once_timeout=False):
             self.fail_send = fail_send
+            self.fail_once_timeout = fail_once_timeout
             self.audio_calls = []
+            self.send_attempts = 0
 
         async def send_audio(self, **kwargs):
+            self.send_attempts += 1
+            if self.fail_once_timeout and self.send_attempts == 1:
+                raise TimeoutError("telegram send timed out")
             if self.fail_send:
                 raise RuntimeError("telegram send failed")
             self.audio_calls.append(kwargs)
             return SimpleNamespace()
 
-    async def run_case(provider_result, fail_send=False):
+    async def run_case(provider_result, fail_send=False, fail_once_timeout=False):
         bot.GENERATION_PENDING_JOBS.clear()
         message = FakeMessage()
-        telegram_bot = FakeBot(fail_send=fail_send)
+        telegram_bot = FakeBot(fail_send=fail_send, fail_once_timeout=fail_once_timeout)
         update = SimpleNamespace(
             effective_user=SimpleNamespace(id=777),
             effective_chat=SimpleNamespace(id=888),
@@ -2839,29 +2847,42 @@ def test_shopaikey_tts_smoke_uses_one_final_status(monkeypatch):
 
         monkeypatch.setattr(bot, "shopaikey_tts_smoke_test", fake_smoke_test)
         await bot.cmd_tool_test_shopaikey_tts(update, context)
-        return message.replies, telegram_bot.audio_calls, bot.shopaikey_tts_status_snapshot()
+        return message.replies, telegram_bot.audio_calls, telegram_bot.send_attempts, bot.shopaikey_tts_status_snapshot()
 
     try:
         bot.init_db()
-        replies, audio_calls, snapshot = asyncio.run(run_case(("FAIL_PROVIDER_ERROR", b"x" * 2048, "provider parsed fail but returned audio", 200)))
+        replies, audio_calls, send_attempts, snapshot = asyncio.run(run_case(("FAIL_PROVIDER_ERROR", b"x" * 2048, "provider parsed fail but returned audio", 200)))
         assert len(audio_calls) == 1
-        assert "ShopAIKey TTS Smoke Test — PASS" in audio_calls[0]["caption"]
+        assert send_attempts == 1
+        assert "ShopAIKey TTS audio test" in audio_calls[0]["caption"]
         assert not any("FAIL_PROVIDER_ERROR" in reply for reply in replies)
+        assert len(replies) == 1
+        assert "ShopAIKey TTS Smoke Test — PASS" in replies[0]
         assert snapshot["status"] == "PASS"
 
-        replies, audio_calls, snapshot = asyncio.run(run_case(("FAIL_PROVIDER_ERROR", b"", "provider busy", 503)))
+        replies, audio_calls, send_attempts, snapshot = asyncio.run(run_case(("FAIL_PROVIDER_ERROR", b"", "provider busy", 503)))
         assert audio_calls == []
+        assert send_attempts == 0
         assert len(replies) == 1
         assert "FAIL_PROVIDER_ERROR" in replies[0]
         assert "PASS" not in replies[0]
         assert snapshot["status"] == "FAIL_PROVIDER_ERROR"
 
-        replies, audio_calls, snapshot = asyncio.run(run_case(("PASS", b"x" * 2048, "http=200", 200), fail_send=True))
+        replies, audio_calls, send_attempts, snapshot = asyncio.run(run_case(("PASS", b"x" * 2048, "http=200", 200), fail_send=True))
         assert audio_calls == []
+        assert send_attempts == 1
         assert len(replies) == 1
         assert "FAIL_SEND_AUDIO" in replies[0]
         assert "PASS" not in replies[0]
         assert snapshot["status"] == "FAIL_SEND_AUDIO"
+
+        replies, audio_calls, send_attempts, snapshot = asyncio.run(run_case(("PASS", b"x" * 2048, "http=200", 200), fail_once_timeout=True))
+        assert len(audio_calls) == 1
+        assert send_attempts == 2
+        assert len(replies) == 1
+        assert "ShopAIKey TTS Smoke Test — PASS" in replies[0]
+        assert "FAIL_SEND_AUDIO" not in replies[0]
+        assert snapshot["status"] == "PASS"
     finally:
         bot.GENERATION_PENDING_JOBS.clear()
         if os.path.exists(db_path):

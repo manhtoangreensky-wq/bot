@@ -334,6 +334,8 @@ SHOPAIKEY_CHAT_TIMEOUT_SECONDS = env_int("SHOPAIKEY_CHAT_TIMEOUT_SECONDS", 30)
 SHOPAIKEY_TTS_MODEL = _env("SHOPAIKEY_TTS_MODEL", "tts-1")
 SHOPAIKEY_TTS_VOICE = _env("SHOPAIKEY_TTS_VOICE", "alloy")
 SHOPAIKEY_TTS_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TIMEOUT_SECONDS", 60)
+SHOPAIKEY_TTS_TELEGRAM_SEND_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TELEGRAM_SEND_TIMEOUT_SECONDS", 60)
+SHOPAIKEY_TTS_TELEGRAM_RETRY_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TELEGRAM_RETRY_TIMEOUT_SECONDS", 90)
 SHOPAIKEY_IMAGE_URL = _env("SHOPAIKEY_IMAGE_URL", "https://api.shopaikey.com/images/google/generations")
 SHOPAIKEY_IMAGE_MODEL = _env("SHOPAIKEY_IMAGE_MODEL", "nano-banana")
 SHOPAIKEY_IMAGE_STATUS = _env("SHOPAIKEY_IMAGE_STATUS", "not_ready/fail_group_no_channel")
@@ -37284,6 +37286,39 @@ async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_
     )
     finish_generation_pending_job(uid, tool_type, normalized_prompt, result.get("status") or "done")
 
+def is_timeout_exception(exc: Exception) -> bool:
+    text = f"{type(exc).__name__} {str(exc)}".lower()
+    return "timeout" in text or "timedout" in text or "timed out" in text
+
+async def send_shopaikey_tts_audio_with_retry(context: ContextTypes.DEFAULT_TYPE, chat_id: int, audio_bytes: bytes) -> tuple[bool, str, int]:
+    attempts = [
+        max(30, int(SHOPAIKEY_TTS_TELEGRAM_SEND_TIMEOUT_SECONDS or 60)),
+        max(45, int(SHOPAIKEY_TTS_TELEGRAM_RETRY_TIMEOUT_SECONDS or 90)),
+    ]
+    last_error = ""
+    for index, timeout_seconds in enumerate(attempts, start=1):
+        audio = io.BytesIO(audio_bytes or b"")
+        audio.name = "toan_aas_shopaikey_tts_test.mp3"
+        try:
+            await context.bot.send_audio(
+                chat_id=chat_id,
+                audio=audio,
+                caption="🔊 ShopAIKey TTS audio test\nKhông trừ Xu.",
+                read_timeout=timeout_seconds,
+                write_timeout=timeout_seconds,
+                connect_timeout=min(20, timeout_seconds),
+                pool_timeout=min(20, timeout_seconds),
+            )
+            return True, "", index
+        except Exception as e:
+            last_error = sanitize_provider_error(e)
+            if index == 1 and is_timeout_exception(e):
+                logger.warning("Telegram send_audio timeout, retrying once.")
+                await asyncio.sleep(1)
+                continue
+            return False, last_error, index
+    return False, last_error, len(attempts)
+
 async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -37321,6 +37356,44 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
     audio_exists = False
     output_sent = False
     send_error = ""
+    send_attempts = 0
+    audio_bytes_len = 0
+    error_class = "-"
+    final_report_sent = False
+    friendly_message = ""
+
+    async def send_tts_smoke_final_report() -> None:
+        nonlocal final_report_sent
+        if final_report_sent:
+            return
+        final_report_sent = True
+        if final_status == "PASS":
+            await update.message.reply_text(
+                "🔊 <b>ShopAIKey TTS Smoke Test — PASS</b>\n\n"
+                f"HTTP: <code>{html.escape(str(http_status or 0))}</code>\n"
+                f"Model: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code>\n"
+                f"Voice: <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>\n"
+                f"Bytes: <code>{audio_bytes_len}</code>\n"
+                "Output sent: <code>yes</code>\n"
+                f"Send attempts: <code>{send_attempts}</code>\n"
+                "Không trừ Xu.",
+                parse_mode="HTML",
+            )
+            return
+        await update.message.reply_text(
+            "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
+            f"• Status: <code>{html.escape(final_status)}</code>\n"
+            f"• HTTP: <code>{html.escape(str(http_status or 0))}</code>\n"
+            f"• Model: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code>\n"
+            f"• Voice: <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>\n"
+            "• Output sent: <code>no</code>\n"
+            f"• Bytes: <code>{audio_bytes_len}</code>\n"
+            f"• Error class: <code>{html.escape(str(error_class or '-'))}</code>\n"
+            f"• Friendly message: <b>{html.escape(friendly_message)}</b>\n\n"
+            "Không log prompt/response/key. Không trừ Xu.",
+            parse_mode="HTML",
+        )
+
     try:
         waiting_message = await send_waiting_message(update, context, "tts")
         try:
@@ -37332,37 +37405,19 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
             http_status = 0
             provider_ok = False
         audio_exists = bool(audio_bytes)
+        audio_bytes_len = len(audio_bytes or b"")
         if audio_exists:
-            audio = io.BytesIO(audio_bytes)
-            audio.name = "toan_aas_shopaikey_tts_test.mp3"
-            try:
-                await context.bot.send_audio(
-                    chat_id=update.effective_chat.id,
-                    audio=audio,
-                    caption=(
-                        "🔊 ShopAIKey TTS Smoke Test — PASS\n"
-                        f"HTTP: {int(http_status or 0)}\n"
-                        f"Model: {SHOPAIKEY_TTS_MODEL or '-'}\n"
-                        f"Voice: {SHOPAIKEY_TTS_VOICE or '-'}\n"
-                        f"Bytes: {len(audio_bytes or b'')}\n"
-                        "Output sent: yes\n"
-                        "Không trừ Xu."
-                    ),
-                )
-                output_sent = True
-            except Exception as e:
-                send_error = sanitize_provider_error(e)
-                output_sent = False
+            output_sent, send_error, send_attempts = await send_shopaikey_tts_audio_with_retry(context, update.effective_chat.id, audio_bytes)
         if output_sent:
             final_status = "PASS"
         elif audio_exists or provider_ok:
             final_status = "FAIL_SEND_AUDIO"
         else:
             final_status = provider_status or "FAIL_PROVIDER_ERROR"
-        error_class = "-" if final_status == "PASS" else classify_provider_error(http_status or 0, final_status, send_error or detail)
+        error_class = "-" if final_status == "PASS" else ("TELEGRAM_SEND_FAILED" if final_status == "FAIL_SEND_AUDIO" else classify_provider_error(http_status or 0, final_status, send_error or detail))
         final_detail = (
             f"provider_status={provider_status}; output_sent={'yes' if output_sent else 'no'}; "
-            f"bytes={len(audio_bytes or b'')}; error_class={error_class}; "
+            f"bytes={audio_bytes_len}; error_class={error_class}; send_attempts={send_attempts}; "
             f"detail={sanitize_log_text(str(send_error or detail or '-'))[:220]}"
         )
         tts_snapshot = {
@@ -37394,45 +37449,35 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
                 if final_status == "FAIL_SEND_AUDIO"
                 else USER_TTS_PROVIDER_BUSY_MESSAGE
             )
-            await update.message.reply_text(
-                "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
-                f"• Status: <code>{html.escape(final_status)}</code>\n"
-                f"• HTTP: <code>{html.escape(str(http_status or 0))}</code>\n"
-                f"• Model: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code>\n"
-                f"• Voice: <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>\n"
-                f"• Output sent: <code>no</code>\n"
-                f"• Bytes: <code>{len(audio_bytes or b'')}</code>\n"
-                f"• Error class: <code>{html.escape(str(error_class or '-'))}</code>\n"
-                f"• Friendly message: <b>{html.escape(friendly_message)}</b>\n\n"
-                "Không log prompt/response/key. Không trừ Xu.",
-                parse_mode="HTML",
-            )
+            await send_tts_smoke_final_report()
             finish_generation_pending_job(uid, tool_type, normalized_prompt, final_status)
             return
+        await send_tts_smoke_final_report()
         finish_generation_pending_job(uid, tool_type, normalized_prompt, final_status)
         return
     except Exception as e:
         safe_error = sanitize_provider_error(e)
         logger.warning("shopaikey tts smoke handler safe failure | output_sent=%s | %s", output_sent, safe_error)
         if output_sent:
+            final_status = "PASS"
+            error_class = "-"
             finish_generation_pending_job(uid, tool_type, normalized_prompt, "PASS")
             try:
                 await update_waiting_message(waiting_message, "✅ TTS đã tạo xong. Không trừ Xu.")
             except Exception:
                 pass
+            try:
+                await send_tts_smoke_final_report()
+            except Exception as report_error:
+                logger.warning("shopaikey tts final PASS report skipped after audio send | %s", sanitize_log_text(str(report_error))[:220])
             return
+        friendly_message = USER_TTS_PROVIDER_BUSY_MESSAGE
+        error_class = classify_provider_error(http_status or 0, "FAIL_PROVIDER_ERROR", safe_error)
         finish_generation_pending_job(uid, tool_type, normalized_prompt, "FAIL_PROVIDER_ERROR")
         save_tool_test_result("shopaikey_tts", "FAIL_PROVIDER_ERROR", safe_error, uid)
         save_shopaikey_component_snapshot("tts", {"status": "FAIL_PROVIDER_ERROR", "model": f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}", "http_status": int(http_status or 0), "latency_ms": 0}, safe_error, uid)
         record_api_debug("shopaikey", "tool_test_shopaikey_tts", "FAIL_PROVIDER_ERROR", int(http_status or 0), safe_error)
-        await update.message.reply_text(
-            "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
-            "• Status: <code>FAIL_PROVIDER_ERROR</code>\n"
-            "• Output sent: <code>no</code>\n"
-            f"• Friendly message: <b>{html.escape(USER_TTS_PROVIDER_BUSY_MESSAGE)}</b>\n\n"
-            "Không log prompt/response/key. Không trừ Xu.",
-            parse_mode="HTML",
-        )
+        await send_tts_smoke_final_report()
         return
 
 async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
