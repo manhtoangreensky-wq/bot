@@ -387,6 +387,8 @@ SHOPAIKEY_VIDEO_FREEZE_COOLDOWN_LONG_MINUTES = env_int("SHOPAIKEY_VIDEO_FREEZE_C
 USER_BUSY_MESSAGE = _env("USER_BUSY_MESSAGE", "⏳ Tác vụ của bạn đang được xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
 USER_PROVIDER_BUSY_MESSAGE = _env("USER_PROVIDER_BUSY_MESSAGE", "⚙️ Hệ thống AI đang bận. TOAN AAS đã ghi nhận, vui lòng thử lại sau ít phút.")
 USER_PROVIDER_MAINTENANCE_MESSAGE = _env("USER_PROVIDER_MAINTENANCE_MESSAGE", "🛠 Tính năng này đang được bảo trì ngắn để đảm bảo chất lượng. Vui lòng quay lại sau.")
+USER_VIDEO_PROVIDER_FROZEN_MESSAGE = _env("USER_VIDEO_PROVIDER_FROZEN_MESSAGE", "🎬 Video AI đang bận do provider quá tải. TOAN AAS tạm khóa tạo video để tránh lỗi trừ Xu/lượt. Vui lòng thử lại sau ít phút.")
+USER_TTS_PROVIDER_BUSY_MESSAGE = _env("USER_TTS_PROVIDER_BUSY_MESSAGE", "⚙️ Model tạo giọng đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu. Vui lòng thử lại sau.")
 USER_WAIT_IMAGE_MESSAGE = _env("USER_WAIT_IMAGE_MESSAGE", "🖼 TOAN AAS đang tạo ảnh cho bạn.\nQuá trình này thường mất một lúc ngắn.\nVui lòng chờ, không cần gửi lại lệnh.")
 USER_WAIT_VIDEO_MESSAGE = _env("USER_WAIT_VIDEO_MESSAGE", "🎞 Đang tạo video cho bạn. Quá trình này có thể mất 1–5 phút. Bot sẽ tự gửi kết quả khi hoàn tất.")
 USER_JOB_LOCK_MESSAGE = _env("USER_JOB_LOCK_MESSAGE", "⏳ Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.")
@@ -31179,6 +31181,15 @@ def provider_freeze_runtime_on(provider: str = "shopaikey") -> bool:
     display = provider_freeze_display(provider)
     return bool(state.get("provider_freeze") or PROVIDER_FREEZE_ENABLED or display.get("frozen"))
 
+def public_video_runtime_status_text() -> str:
+    video_freeze = provider_freeze_display("shopaikey_video")
+    if video_freeze.get("frozen"):
+        return "FROZEN"
+    return "ON" if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else "OFF"
+
+def public_voice_runtime_status_text() -> str:
+    return "admin-only"
+
 def shopaikey_generation_unavailable_message(status: str = "", detail: str = "") -> str:
     error_class = classify_provider_error(0, status, detail)
     return user_friendly_error(error_class, "shopaikey")
@@ -31188,10 +31199,7 @@ def shopaikey_public_generation_guard(job_type: str) -> tuple[bool, str]:
     freeze = is_tool_frozen(job, "shopaikey")
     if freeze.get("frozen"):
         if job == "video":
-            reason = str(freeze.get("reason") or "").upper()
-            if reason == "CREDIT_LOW_OR_EMPTY":
-                return False, "🎬 Tạo video đang tạm bảo trì do nhà cung cấp sắp hết credit. Vui lòng thử lại sau."
-            return False, "🎬 Tạo video đang tạm bảo trì do nhà cung cấp bận. Vui lòng thử lại sau."
+            return False, USER_VIDEO_PROVIDER_FROZEN_MESSAGE
         return False, freeze.get("message") or USER_PROVIDER_BUSY_MESSAGE
     if job == "image" and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
         return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
@@ -36059,8 +36067,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Video combos: <code>{len(pricing.get('video_combos') or [])}</code> | rank/top-up points <code>excluded</code>",
         f"• Package wallet: <code>{'ON' if package_wallet.get('wallet_enabled') else 'OFF'}</code> | admin grant combo <code>{'ON' if package_wallet.get('admin_grant_combo') else 'OFF'}</code> | monthly <code>{'ON' if package_wallet.get('admin_grant_monthly') else 'OFF'}</code>",
         f"• Package refund guard: <code>{'ON' if package_wallet.get('refund_guard') else 'OFF'}</code> | rank/top-up points excluded <code>{'ON' if package_wallet.get('rank_points_excluded') else 'OFF'}</code>",
-        f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
-        f"• Public user can generate real video: <code>{'YES' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'NO'}</code>",
+        f"• Public video generation: <code>{html.escape(public_video_runtime_status_text())}</code>",
+        f"• Public user can generate real video: <code>{'YES' if public_video_runtime_status_text() == 'ON' else 'NO'}</code>",
         f"• Admin video smoke tests: <code>{'available/admin-only' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'disabled'}</code>",
         f"• Video premium: <code>{'admin-only' if VIDEO_PREMIUM_ADMIN_ONLY else ('ON' if VIDEO_TIER_PREMIUM_ENABLED else 'OFF')}</code>",
         "• Video pricing source: <code>tiered_media_pricing</code>",
@@ -36073,6 +36081,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Freeze message: <code>{html.escape(str(shopaikey_freeze.get('message') or '-'))}</code>",
         f"• Unfreeze after: <code>{html.escape(str(shopaikey_freeze.get('unfreeze_after') or '-'))}</code>",
         f"• Video freeze: <code>{'ON' if shopaikey_video_freeze.get('frozen') else 'OFF'}</code> | reason <code>{html.escape(str(shopaikey_video_freeze.get('reason') or '-'))}</code> | unfreeze <code>{html.escape(str(shopaikey_video_freeze.get('unfreeze_after') or '-'))}</code>",
+        f"• Video provider note: <code>{'provider unstable/frozen' if shopaikey_video_freeze.get('frozen') else 'admin smoke only; VEO may be unstable'}</code>",
         f"• Video error windows: <code>{html.escape(shopaikey_video_error_window_text())}</code>",
         f"• Auto freeze: <code>{'enabled' if SHOPAIKEY_AUTO_FREEZE_ENABLED else 'disabled'}</code>",
         f"• Low credit threshold: <code>warn {int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / freeze {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
@@ -36083,13 +36092,14 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Chat manual baseline: <code>gpt-4o-mini PASS; gpt-4.1-mini PASS; qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY</code>",
         f"• TTS tested: <code>{html.escape(shopaikey_tts_status_text())}</code>",
         "• TTS manual baseline: <code>/v1/audio/speech tts-1 PASS</code>",
+        f"• Public voice: <code>{html.escape(public_voice_runtime_status_text())}</code>",
         f"• Image tested: <code>{html.escape(shopaikey_image_status_text())}</code>",
         f"• Public image generation: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         "• Admin smoke image tests: <code>admin-only / no Xu</code>",
         "• Image endpoint note: <code>custom Google image endpoint; OpenAI /v1 images group no channel</code>",
         f"• Video tested: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Video reason: <code>{html.escape(shopaikey_video_reason or '-')}</code>",
-        f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
+        f"• Public video generation: <code>{html.escape(public_video_runtime_status_text())}</code>",
         "• Admin smoke video tests: <code>admin-only / no Xu</code>",
         f"• Trend video workflow: <code>{html.escape(trend_video_workflow_status_text())}</code> | public <code>{'ON' if TREND_WORKFLOW_PUBLIC_ENABLED else 'OFF'}</code> | content-only <code>{'ON' if pricing['trend_workflow_content_only'] else 'OFF'}</code> | billing <code>{'ON' if pricing['trend_workflow_billing_enabled'] else 'OFF'}</code> | confirm <code>{'ON' if pricing['trend_workflow_require_confirm'] else 'OFF'}</code>",
         f"• Trend workflow content cost: <code>{pricing['workflow_content_total_cost']} Xu</code> | image/video generation priced by tier, separate from content workflow",
@@ -36788,8 +36798,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Video combos: <code>{len(pricing.get('video_combos') or [])}</code> | rank/top-up points <code>excluded</code>",
         f"• Package wallet: <code>{'ON' if package_wallet.get('wallet_enabled') else 'OFF'}</code> | admin grant combo <code>{'ON' if package_wallet.get('admin_grant_combo') else 'OFF'}</code> | monthly <code>{'ON' if package_wallet.get('admin_grant_monthly') else 'OFF'}</code>",
         f"• Package refund guard: <code>{'ON' if package_wallet.get('refund_guard') else 'OFF'}</code> | combo rank/top-up excluded <code>{'ON' if package_wallet.get('rank_points_excluded') else 'OFF'}</code>",
-        f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
-        f"• Public user can generate real video: <code>{'YES' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'NO'}</code>",
+        f"• Public video generation: <code>{html.escape(public_video_runtime_status_text())}</code>",
+        f"• Public user can generate real video: <code>{'YES' if public_video_runtime_status_text() == 'ON' else 'NO'}</code>",
         f"• Admin video smoke tests: <code>{'available/admin-only' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'disabled'}</code>",
         f"• Video premium: <code>{'admin-only' if VIDEO_PREMIUM_ADMIN_ONLY else ('ON' if VIDEO_TIER_PREMIUM_ENABLED else 'OFF')}</code>",
         "• Video pricing source: <code>tiered_media_pricing</code>",
@@ -36812,12 +36822,14 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Unfreeze after: <code>{html.escape(str(provider_freeze.get('unfreeze_after') or '-'))}</code>",
         f"• Video freeze: <code>{'ON' if video_freeze.get('frozen') else 'OFF'}</code> | reason <code>{html.escape(str(video_freeze.get('reason') or '-'))}</code> | unfreeze <code>{html.escape(str(video_freeze.get('unfreeze_after') or '-'))}</code>",
         f"• Video freeze message: <code>{html.escape(str(video_freeze.get('message') or '-'))}</code>",
+        f"• Video provider note: <code>{'provider unstable/frozen' if video_freeze.get('frozen') else 'admin smoke only; VEO may be unstable'}</code>",
         f"• Recent provider errors: <code>{int(provider_freeze.get('error_count') or 0)}</code>",
         f"• Video error windows: <code>{html.escape(shopaikey_video_error_window_text())}</code>",
         f"• Low credit warn/freeze: <code>{int(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 0)}% / {int(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 0)}%</code>",
         f"• Error threshold: <code>{int(SHOPAIKEY_ERROR_FREEZE_THRESHOLD or 0)} / {int(SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES or 0)} min</code>",
         f"• Chat test: <code>{html.escape(shopaikey_chat_status_text())}</code>",
         f"• TTS test: <code>{html.escape(shopaikey_tts_status_text())}</code>",
+        f"• Public voice: <code>{html.escape(public_voice_runtime_status_text())}</code>",
         f"• Image test: <code>{html.escape(shopaikey_image_status_text())}</code>",
         f"• Video test: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Video reason: <code>{html.escape(video_reason or '-')}</code>",
@@ -37299,49 +37311,101 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
     if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
         return await update.message.reply_text("⏳ Yêu cầu trước của bạn vẫn đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
     start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_shopaikey_tts")
-    waiting_message = await send_waiting_message(update, context, "tts")
-    status, audio_bytes, detail, http_status = await shopaikey_tts_smoke_test()
+    waiting_message = None
+    status = "FAIL_PROVIDER_ERROR"
+    audio_bytes = b""
+    detail = ""
+    http_status = 0
     output_sent = False
-    if status == "PASS" and audio_bytes:
-        audio = io.BytesIO(audio_bytes)
-        audio.name = "toan_aas_shopaikey_tts_test.mp3"
-        await context.bot.send_audio(
-            chat_id=update.effective_chat.id,
-            audio=audio,
-            caption="🔊 ShopAIKey TTS Smoke Test — PASS\nKhông trừ Xu.",
+    try:
+        waiting_message = await send_waiting_message(update, context, "tts")
+        status, audio_bytes, detail, http_status = await shopaikey_tts_smoke_test()
+        if status == "PASS" and audio_bytes:
+            audio = io.BytesIO(audio_bytes)
+            audio.name = "toan_aas_shopaikey_tts_test.mp3"
+            await context.bot.send_audio(
+                chat_id=update.effective_chat.id,
+                audio=audio,
+                caption="🔊 ShopAIKey TTS Smoke Test — PASS\nKhông trừ Xu.",
+            )
+            output_sent = True
+        final_detail = f"{detail}; output_sent={'yes' if output_sent else 'no'}"
+        tts_snapshot = {
+            "status": status,
+            "model": f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}",
+            "http_status": int(http_status or 0),
+            "latency_ms": 0,
+        }
+        save_tool_test_result("shopaikey_tts", status, final_detail, uid)
+        save_shopaikey_component_snapshot("tts", tts_snapshot, final_detail, uid)
+        record_api_debug("shopaikey", "tool_test_shopaikey_tts", status, int(http_status or 0), final_detail)
+        if status != "PASS":
+            record_provider_error(
+                "shopaikey",
+                "tts",
+                classify_provider_error(http_status or 0, status, final_detail),
+                final_detail,
+            )
+        try:
+            await update_waiting_message(
+                waiting_message,
+                "✅ ShopAIKey TTS smoke test đã xử lý xong. Không trừ Xu." if status == "PASS" else USER_TTS_PROVIDER_BUSY_MESSAGE,
+            )
+        except Exception as e:
+            logger.warning("shopaikey tts waiting message update skipped | output_sent=%s | %s", output_sent, sanitize_log_text(str(e))[:220])
+        if status != "PASS":
+            await update.message.reply_text(
+                "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
+                f"• Status: <code>{html.escape(status)}</code>\n"
+                f"• HTTP: <code>{html.escape(str(http_status or 0))}</code>\n"
+                f"• Output sent: <code>no</code>\n"
+                f"• Message: <b>{html.escape(USER_TTS_PROVIDER_BUSY_MESSAGE)}</b>\n\n"
+                "Không log prompt/response/key. Không trừ Xu.",
+                parse_mode="HTML",
+            )
+            finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
+            return
+        try:
+            await update.message.reply_text(
+                "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
+                f"• Provider freeze: <code>{html.escape(shopaikey_admin_freeze_warning_text())}</code>\n"
+                f"• Status: <code>{html.escape(status)}</code>\n"
+                f"• HTTP: <code>{html.escape(str(http_status or 0))}</code>\n"
+                f"• Model: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code>\n"
+                f"• Voice: <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>\n"
+                f"• Detail: <code>{html.escape(str(final_detail or '-')[:220])}</code>\n"
+                f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n\n"
+                "Không log prompt/response/key. Không trừ Xu.",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning("shopaikey tts PASS report skipped after audio send | output_sent=%s | %s", output_sent, sanitize_log_text(str(e))[:220])
+            if not output_sent:
+                raise
+        finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
+        return
+    except Exception as e:
+        safe_error = sanitize_provider_error(e)
+        logger.warning("shopaikey tts smoke handler safe failure | output_sent=%s | %s", output_sent, safe_error)
+        finish_generation_pending_job(uid, tool_type, normalized_prompt, "PASS" if output_sent else "FAIL_PROVIDER_ERROR")
+        if output_sent:
+            try:
+                await update_waiting_message(waiting_message, "✅ TTS đã tạo xong. Không trừ Xu.")
+            except Exception:
+                pass
+            return
+        save_tool_test_result("shopaikey_tts", "FAIL_PROVIDER_ERROR", safe_error, uid)
+        save_shopaikey_component_snapshot("tts", {"status": "FAIL_PROVIDER_ERROR", "model": f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}", "http_status": int(http_status or 0), "latency_ms": 0}, safe_error, uid)
+        record_api_debug("shopaikey", "tool_test_shopaikey_tts", "FAIL_PROVIDER_ERROR", int(http_status or 0), safe_error)
+        await update.message.reply_text(
+            "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
+            "• Status: <code>FAIL_PROVIDER_ERROR</code>\n"
+            "• Output sent: <code>no</code>\n"
+            f"• Message: <b>{html.escape(USER_TTS_PROVIDER_BUSY_MESSAGE)}</b>\n\n"
+            "Không log prompt/response/key. Không trừ Xu.",
+            parse_mode="HTML",
         )
-        output_sent = True
-    final_detail = f"{detail}; output_sent={'yes' if output_sent else 'no'}"
-    tts_snapshot = {
-        "status": status,
-        "model": f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}",
-        "http_status": int(http_status or 0),
-        "latency_ms": 0,
-    }
-    save_tool_test_result("shopaikey_tts", status, final_detail, uid)
-    save_shopaikey_component_snapshot("tts", tts_snapshot, final_detail, uid)
-    record_api_debug("shopaikey", "tool_test_shopaikey_tts", status, int(http_status or 0), final_detail)
-    if status != "PASS":
-        record_provider_error(
-            "shopaikey",
-            "tts",
-            classify_provider_error(http_status or 0, status, final_detail),
-            final_detail,
-        )
-    await update_waiting_message(waiting_message, "✅ ShopAIKey TTS smoke test đã xử lý xong. Không trừ Xu.")
-    await update.message.reply_text(
-        "🔊 <b>ShopAIKey TTS Smoke Test</b>\n\n"
-        f"• Provider freeze: <code>{html.escape(shopaikey_admin_freeze_warning_text())}</code>\n"
-        f"• Status: <code>{html.escape(status)}</code>\n"
-        f"• HTTP: <code>{html.escape(str(http_status or 0))}</code>\n"
-        f"• Model: <code>{html.escape(SHOPAIKEY_TTS_MODEL or '-')}</code>\n"
-        f"• Voice: <code>{html.escape(SHOPAIKEY_TTS_VOICE or '-')}</code>\n"
-        f"• Detail: <code>{html.escape(str(final_detail or '-')[:220])}</code>\n"
-        f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n\n"
-        "Không log prompt/response/key. Không trừ Xu.",
-        parse_mode="HTML",
-    )
-    finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
+        return
 
 async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -39569,7 +39633,10 @@ async def cmd_tool_test_heygen_avatar(update: Update, context: ContextTypes.DEFA
 
 async def cmd_voiceover(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text(admin_first_guard_message("Voiceover/TTS", "/film <chủ đề>"), parse_mode="HTML")
+        return await update.message.reply_text(
+            "🎙 Voice/TTS đang trong giai đoạn thử nghiệm, vui lòng liên hệ admin.\nBot chưa trừ Xu.",
+            parse_mode="HTML",
+        )
     return await cmd_tool_test_tts(update, context)
 
 async def cmd_public_admin_first_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE, label: str, fallback: str = "/film <chủ đề>"):

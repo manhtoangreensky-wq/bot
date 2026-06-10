@@ -598,7 +598,10 @@ def test_video_provider_freeze_does_not_block_public_image(monkeypatch):
         bot.record_provider_error("shopaikey", "video", "NO_CHANNEL", "video no channel two")
         assert int(bot.provider_freeze_row("shopaikey_video").get("is_frozen") or 0) == 1
         assert int(bot.provider_freeze_row("shopaikey").get("is_frozen") or 0) == 0
-        assert bot.shopaikey_public_generation_guard("video")[0] is False
+        ok_video, video_message = bot.shopaikey_public_generation_guard("video")
+        assert ok_video is False
+        assert video_message == bot.USER_VIDEO_PROVIDER_FROZEN_MESSAGE
+        assert bot.public_video_runtime_status_text() == "FROZEN"
         assert bot.shopaikey_public_generation_guard("image")[0] is True
     finally:
         if os.path.exists(db_path):
@@ -640,7 +643,8 @@ def test_video_maintenance_guard_low_credit_lock_refund_and_stale(monkeypatch):
         assert int(bot.provider_freeze_row("shopaikey").get("is_frozen") or 0) == 0
         ok_video, video_message = bot.shopaikey_public_generation_guard("video")
         assert ok_video is False
-        assert "sắp hết credit" in video_message
+        assert video_message == bot.USER_VIDEO_PROVIDER_FROZEN_MESSAGE
+        assert bot.public_video_runtime_status_text() == "FROZEN"
         assert bot.shopaikey_public_generation_guard("image")[0] is True
 
         bot.set_provider_freeze_state("shopaikey_video", False, "manual_unfreeze", "ok", "test")
@@ -2758,6 +2762,22 @@ def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
+
+
+def test_shopaikey_tts_smoke_suppresses_generic_error_after_audio_sent():
+    source = bot_source_text()
+    tts_source = source_between(source, "async def cmd_tool_test_shopaikey_tts", "async def cmd_tool_test_shopaikey_image")
+    assert "output_sent = False" in tts_source
+    assert "output_sent = True" in tts_source
+    assert "PASS report skipped after audio send" in tts_source
+    assert "if output_sent:" in tts_source
+    assert "✅ TTS đã tạo xong. Không trừ Xu." in tts_source
+    assert "USER_TTS_PROVIDER_BUSY_MESSAGE" in tts_source
+    assert "Có lỗi khi xử lý lệnh" not in tts_source
+    voice_source = source_between(source, "async def cmd_voiceover", "async def cmd_public_admin_first_placeholder")
+    assert "Voice/TTS đang trong giai đoạn thử nghiệm" in voice_source
+    assert "Bot chưa trừ Xu" in voice_source
+    assert bot.public_voice_runtime_status_text() == "admin-only"
 
 
 def test_generation_waiting_duplicate_and_guidance_helpers():
