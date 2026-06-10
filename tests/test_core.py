@@ -1526,12 +1526,17 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     source = bot_source_text()
     helper_source = source_between(source, "def create_media_public_off_message", "def shopaikey_preview_final_cost")
     quick_source = source_between(source, "async def cmd_create_media", "async def cmd_tool_test_workflow_image")
+    quick_smoke_source = source_between(source, "async def run_quick_image_admin_smoke", "async def handle_quick_media_pending_text")
+    frame_video_source = source_between(source, "async def cmd_frame_video_status", "async def run_quick_image_admin_smoke")
     message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
 
     assert 'CommandHandler("create_media", cmd_create_media)' in source
     assert 'CommandHandler("quick_image_test", cmd_quick_image_test)' in source
     assert 'CommandHandler("quick_video_test", cmd_quick_video_test)' in source
+    assert 'CommandHandler("frame_video_status", cmd_frame_video_status)' in source
+    assert 'CommandHandler("tool_test_frame_video", cmd_tool_test_frame_video)' in source
     assert 'CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\\|")' in source
+    assert 'CallbackQueryHandler(handle_frame_video_callback, pattern=r"^framevideo\\|")' in source
     assert "def public_image_tier_selection_text" in source
     assert "def public_image_tier_keyboard" in source
     assert "def public_image_success_keyboard" in source
@@ -1563,6 +1568,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'ui_text(lang, "video.quick_admin_public")' in video_keyboard_source
     assert 'ui_text(lang, "video.trend_short")' in video_keyboard_source
     assert 'callback_data="trendg|start"' in video_keyboard_source
+    assert 'callback_data="framevideo|start"' in video_keyboard_source
     assert 'ui_text(lang, "video.motion_short")' in video_keyboard_source
     assert 'ui_text(lang, "video.concept_short")' in video_keyboard_source or "Concept quảng cáo" in video_keyboard_source
     assert "create_media_open_text(query.from_user.id)" in source
@@ -1572,6 +1578,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "create_media|quick_video",
         "create_media|main",
         "create_media|cancel",
+        "framevideo|start",
+        "framevideo|done",
+        "framevideo|confirm",
+        "framevideo|cancel",
     ]:
         assert callback_data in source
         assert 'image_tier_choice_rows(lambda tier: f"create_media|image_tier_{tier}", lang)' in source
@@ -1587,6 +1597,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'MEDIA_PRICE_MULTIPLIER = env_int("MEDIA_PRICE_MULTIPLIER", 2)' in source
     assert 'IMAGE_LOW_COST_XU = env_int("IMAGE_LOW_COST_XU"' in source
     assert 'VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", 200)' in source
+    assert 'FRAME_VIDEO_PRICE_XU = env_int("FRAME_VIDEO_PRICE_XU", 50)' in source
+    assert 'FRAME_VIDEO_PUBLIC_ENABLED = env_flag("FRAME_VIDEO_PUBLIC_ENABLED", "true")' in source
     assert 'WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)' in source
     assert 'WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)' in source
     assert 'WORKFLOW_PROMPT_PACK_COST_XU = env_int("WORKFLOW_PROMPT_PACK_COST_XU", 20)' in source
@@ -1611,6 +1623,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "handle_public_video_prompt_pending_text(update, context)" in message_source
     assert "handle_creative_motion_pending_text(update, context)" in message_source
     assert "handle_cinematic_ad_pending_text(update, context)" in message_source
+    photo_handler_source = source_between(source, "async def handle_photo", "async def handle_document_cache_only")
+    assert "handle_frame_video_photo(update, context)" in photo_handler_source
+    assert photo_handler_source.index("handle_frame_video_photo(update, context)") < photo_handler_source.index("remember_last_user_file(update)")
     assert message_source.index("handle_feedback_pending_text(update, context)") < message_source.index("handle_trend_video_flow_pending_text(update, context)")
     assert message_source.index("handle_public_image_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_public_video_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
@@ -1625,9 +1640,13 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "run_quick_video_admin_smoke" in quick_source
     assert "shopaikey_image_generate(prompt)" in quick_source
     assert "shopaikey_video_create_smoke_test(model, prompt)" in quick_source
-    assert "spend_fixed_credit_info" not in quick_source
-    assert "deduct_dynamic_credit" not in quick_source
-    assert "add_credit(" not in quick_source
+    assert "render_frame_video_paths" in frame_video_source
+    assert "shopaikey_video_create_smoke_test" not in frame_video_source
+    assert "SHOPAIKEY_VIDEO_URL" not in frame_video_source
+    assert "spend_fixed_credit_info" not in quick_smoke_source
+    assert "deduct_dynamic_credit" not in quick_smoke_source
+    assert "add_credit(" not in quick_smoke_source
+
     assert "PAYOS" not in quick_source.upper()
     assert 'ui_text(lang, "media.job_lock")' in quick_source
     assert "/quick_image_test" in quick_source and "/quick_video_test" in quick_source
@@ -1919,6 +1938,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert video_labels == [
         "🎬 Tạo video nhanh",
         "🖼➡️🎬 Tạo video từ ảnh",
+        "🎞 Ghép ảnh thành video",
         "🔥 Video theo trend",
         "🧠 Concept quảng cáo",
         "🎥 Gợi ý chuyển động / prompt video",
@@ -2028,6 +2048,27 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.get_creative_motion_pending("u9") is None
     assert bot.get_cinematic_ad_pending("u9") is None
     assert bot.get_trend_video_flow_pending("u9") is None
+
+
+def test_frame_video_helper_defaults_and_state():
+    assert bot.frame_video_ratio_payload("9x16")["width"] == 720
+    assert bot.frame_video_ratio_payload("16x9")["height"] == 720
+    assert bot.frame_video_ratio_payload("4x5")["height"] == 900
+    assert bot.frame_video_duration_payload("standard")["seconds"] == 2.5
+    assert bot.frame_video_effect_payload("fade")["token"] == "fade"
+    status = bot.frame_video_status_payload()
+    assert int(status["price_xu"]) == int(bot.FRAME_VIDEO_PRICE_XU)
+    assert int(status["max_images"]) == int(bot.FRAME_VIDEO_MAX_IMAGES)
+    uid = "frame_video_unit"
+    try:
+        bot.clear_frame_video_state(uid)
+        state = bot.set_frame_video_state(uid, {"step": "collect", "photos": [{"file_id": "a"}, {"file_id": "b"}]})
+        assert state["type"] == "frame_video"
+        assert bot.get_frame_video_state(uid)["step"] == "collect"
+        assert bot.clear_frame_video_state(uid) is True
+        assert bot.get_frame_video_state(uid) == {}
+    finally:
+        bot.clear_frame_video_state(uid)
 
 
 def test_feedback_schema_migration_handles_legacy_table(monkeypatch, tmp_path):
@@ -2989,6 +3030,8 @@ def test_critical_sales_ready_commands_remain_registered():
         "create_media": "cmd_create_media",
         "quick_image_test": "cmd_quick_image_test",
         "quick_video_test": "cmd_quick_video_test",
+        "frame_video_status": "cmd_frame_video_status",
+        "tool_test_frame_video": "cmd_tool_test_frame_video",
         "shopaikey_status": "cmd_shopaikey_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
         "package_catalog": "cmd_package_catalog",
