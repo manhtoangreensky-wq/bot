@@ -1559,6 +1559,41 @@ def telegram_handler_count(application) -> int:
     except Exception:
         return 0
 
+def _safe_sql_identifier(identifier: str) -> str:
+    name = str(identifier or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        raise ValueError(f"Unsafe SQL identifier: {name!r}")
+    return name
+
+def _table_columns(cursor, table_name):
+    safe_table = _safe_sql_identifier(table_name)
+    cursor.execute(f"PRAGMA table_info({safe_table})")
+    return {row[1] for row in cursor.fetchall()}
+
+def _add_column_if_missing(cursor, table_name, column_name, column_sql, existing_columns=None):
+    safe_table = _safe_sql_identifier(table_name)
+    safe_column = _safe_sql_identifier(column_name)
+    columns = existing_columns if existing_columns is not None else _table_columns(cursor, safe_table)
+    if safe_column not in columns:
+        cursor.execute(f"ALTER TABLE {safe_table} ADD COLUMN {column_sql}")
+        if existing_columns is not None:
+            existing_columns.add(safe_column)
+
+def migrate_feedback_schema(cursor) -> None:
+    columns = _table_columns(cursor, "feedback")
+    for column_name, column_sql in [
+        ("user_id", "user_id TEXT"),
+        ("username", "username TEXT"),
+        ("category", "category TEXT DEFAULT ''"),
+        ("content", "content TEXT"),
+        ("context", "context TEXT DEFAULT ''"),
+        ("status", "status TEXT DEFAULT 'new'"),
+        ("reviewed_at", "reviewed_at TEXT DEFAULT ''"),
+        ("resolved_at", "resolved_at TEXT DEFAULT ''"),
+        ("timestamp", "timestamp DATETIME"),
+    ]:
+        _add_column_if_missing(cursor, "feedback", column_name, column_sql, columns)
+
 def init_db():
     evaluate_data_persistence_startup_state()
     ensure_startup_sqlite_backup_once()
@@ -1610,6 +1645,7 @@ def init_db():
         resolved_at TEXT DEFAULT '',
         timestamp DATETIME
     )""")
+    migrate_feedback_schema(c)
     c.execute("""CREATE TABLE IF NOT EXISTS pending_deposits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT, username TEXT, file_id TEXT,
@@ -2537,17 +2573,8 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_workflow_image_assets_user ON workflow_image_assets(user_id, created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_category ON feedback(category)")
-    for col, col_type in [
-        ("category", "TEXT DEFAULT ''"),
-        ("context", "TEXT DEFAULT ''"),
-        ("status", "TEXT DEFAULT 'new'"),
-        ("reviewed_at", "TEXT DEFAULT ''"),
-        ("resolved_at", "TEXT DEFAULT ''"),
-    ]:
-        try:
-            c.execute(f"ALTER TABLE feedback ADD COLUMN {col} {col_type}")
-        except Exception:
-            pass
+    c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON feedback(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_timestamp ON feedback(timestamp)")
     for col, col_type in [
         ("refund_status", "TEXT DEFAULT ''"),
         ("refund_amount", "INTEGER DEFAULT 0"),

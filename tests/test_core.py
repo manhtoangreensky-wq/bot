@@ -1873,6 +1873,50 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.get_trend_video_flow_pending("u9") is None
 
 
+def test_feedback_schema_migration_handles_legacy_table(monkeypatch, tmp_path):
+    db_path = tmp_path / "legacy_feedback.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """CREATE TABLE feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                username TEXT,
+                content TEXT,
+                timestamp DATETIME
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO feedback (user_id, username, content, timestamp) VALUES (?, ?, ?, ?)",
+            ("legacy-user", "legacy", "old feedback stays", "2026-06-01 00:00:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+    bot.init_db()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(feedback)").fetchall()}
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(feedback)").fetchall()}
+        row = conn.execute(
+            "SELECT user_id, username, content, status, category, context FROM feedback WHERE user_id=?",
+            ("legacy-user",),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert {"status", "category", "context", "reviewed_at", "resolved_at"}.issubset(columns)
+    assert "idx_feedback_status" in indexes
+    assert "idx_feedback_category" in indexes
+    assert "idx_feedback_user_id" in indexes
+    assert row == ("legacy-user", "legacy", "old feedback stays", "new", "", "")
+
+
 def test_customer_feedback_loop_state_and_storage(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
