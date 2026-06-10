@@ -1767,6 +1767,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     public_callback_source = source_between(bot_source_text(), "async def handle_shopaikey_public_callback", "class TranslationProviderError")
     assert "image_aspect_ratio" in public_callback_source
     assert "shopaikey_image_generate(prompt, model, aspect_ratio=image_aspect_ratio, tier=image_tier)" in public_callback_source
+    assert "send_generated_image_result" in public_callback_source
     warranty_retry_source = source_between(bot_source_text(), "async def execute_image_warranty_retry", "def public_image_tier_selection_text")
     assert "retry_aspect_ratio = infer_image_aspect_ratio_from_prompt" in warranty_retry_source
     assert "shopaikey_image_generate(retry_prompt, model, aspect_ratio=retry_aspect_ratio)" in warranty_retry_source
@@ -2079,13 +2080,20 @@ def test_frame_video_helper_defaults_and_state():
     assert bot.frame_video_ratio_payload("9x16")["width"] == 720
     assert bot.frame_video_ratio_payload("16x9")["height"] == 720
     assert bot.frame_video_ratio_payload("4x5")["height"] == 900
-    assert bot.frame_video_duration_payload("standard")["seconds"] == 2.5
+    assert bot.frame_video_duration_payload("standard")["seconds"] == 3.0
     assert bot.frame_video_effect_payload("fade")["token"] == "fade"
     assert bot.frame_video_effect_payload("pan")["token"] == "pan"
     assert bot.frame_video_effect_payload("slide")["token"] == "slide"
     assert bot.frame_video_effect_payload("random")["token"] == "random"
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 50
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "standard", "effect": "fade"}) == 70
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 140
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 170
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "standard", "effect": "random"}) == 190
     status = bot.frame_video_status_payload()
-    assert int(status["price_xu"]) == int(bot.FRAME_VIDEO_PRICE_XU)
+    assert int(status["price_xu"]) == int(bot.FRAME_VIDEO_BASE_2_5_XU)
+    assert int(status["base_6_10_xu"]) == int(bot.FRAME_VIDEO_BASE_6_10_XU)
+    assert int(status["motion_effect_extra_xu"]) == int(bot.FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU)
     assert int(status["max_images"]) == int(bot.FRAME_VIDEO_MAX_IMAGES)
     uid = "frame_video_unit"
     try:
@@ -2093,6 +2101,10 @@ def test_frame_video_helper_defaults_and_state():
         state = bot.set_frame_video_state(uid, {"step": "collect", "photos": [{"file_id": "a"}, {"file_id": "b"}]})
         assert state["type"] == "frame_video"
         assert bot.get_frame_video_state(uid)["step"] == "collect"
+        job_id = bot.create_frame_video_job(uid, "chat", state, 70, "queued")
+        assert bot.frame_video_job_for_user(job_id, uid)["status"] == "queued"
+        bot.update_frame_video_job(job_id, status="success")
+        assert "success" in bot.frame_video_job_status_text(bot.frame_video_job_for_user(job_id, uid))
         assert bot.clear_frame_video_state(uid) is True
         assert bot.get_frame_video_state(uid) == {}
     finally:
@@ -3113,39 +3125,50 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     assert len(scenes4) == 4
     assert "Prompt ảnh" in bot.storyboard_text(scenes3)
 
-    tier_labels = [button.text for row in bot.storyboard_image_tier_keyboard().inline_keyboard for button in row]
-    assert any("Ảnh tiết kiệm" in label and "50 Xu/ảnh" in label for label in tier_labels)
-    assert any("Ảnh tiêu chuẩn" in label and "200 Xu/ảnh" in label for label in tier_labels)
-    assert any("Ảnh chất lượng cao" in label and "400 Xu/ảnh" in label for label in tier_labels)
+    tier_text_7 = bot.storyboard_image_tier_selection_text(7)
+    assert "Bạn đang tạo 7 ảnh storyboard" in tier_text_7
+    assert "Tiết kiệm: 40 Xu/ảnh" in tier_text_7
+    assert "Tiêu chuẩn: 190 Xu/ảnh" in tier_text_7
+    assert "Chất lượng cao: 380 Xu/ảnh" in tier_text_7
+    assert "flow kịch bản/storyboard" in tier_text_7
+    tier_labels = [button.text for row in bot.storyboard_image_tier_keyboard(7).inline_keyboard for button in row]
+    assert "🟢 Tiết kiệm" in tier_labels
+    assert "🔵 Tiêu chuẩn" in tier_labels
+    assert "🟣 Chất lượng cao" in tier_labels
+    assert "🛡 Thêm bảo hành" in tier_labels
+    assert bot.storyboard_image_unit_cost("low", 5) == 45
+    assert bot.storyboard_image_unit_cost("low", 7) == 40
+    assert bot.storyboard_image_unit_cost("low", 15) == 35
+    assert bot.storyboard_image_unit_cost("low", 25) == 30
     monkeypatch.setattr(bot, "shopaikey_preview_final_cost", lambda _user_id, base_cost, _event_type: int(base_cost or 0))
     state = {"scenes": scenes5, "image_tier": "standard"}
     confirm_text = bot.storyboard_image_confirm_text(state, "not_admin_user")
     assert "5" in confirm_text
-    assert "200 Xu/ảnh" in confirm_text
-    assert "1.000 Xu" in confirm_text or "1000 Xu" in confirm_text
+    assert "195 Xu/ảnh" in confirm_text
+    assert "975 Xu" in confirm_text
+    assert "Giá storyboard bulk" in confirm_text
     warranty_buttons = [button.text for row in bot.storyboard_image_confirm_keyboard("standard").inline_keyboard for button in row]
     assert any("Thêm bảo hành" in label and "250 Xu/ảnh" in label for label in warranty_buttons)
 
-    assert bot.frame_video_price_for_state({"effect": "none"}) == bot.FRAME_VIDEO_BASIC_PRICE_XU
-    assert bot.frame_video_price_for_state({"effect": "fade"}) == bot.FRAME_VIDEO_BASIC_PRICE_XU
-    assert bot.frame_video_price_for_state({"effect": "zoom"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
-    assert bot.frame_video_price_for_state({"effect": "pan"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
-    assert bot.frame_video_price_for_state({"effect": "slide"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
-    assert bot.frame_video_price_for_state({"effect": "random"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
-    assert bot.frame_video_price_for_state({"effect": "zoom", "music_choice": "music", "music_merge_enabled": True}) == bot.FRAME_VIDEO_MUSIC_PRICE_XU
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "none"}) == 50
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 50
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 140
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 170
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "standard", "effect": "random"}) == 190
     status = bot.frame_video_status_payload()
-    assert status["basic_price_xu"] == bot.FRAME_VIDEO_BASIC_PRICE_XU
-    assert status["effect_price_xu"] == bot.FRAME_VIDEO_EFFECT_PRICE_XU
-    assert status["music_price_xu"] == bot.FRAME_VIDEO_MUSIC_PRICE_XU
+    assert status["base_2_5_xu"] == bot.FRAME_VIDEO_BASE_2_5_XU
+    assert status["base_6_10_xu"] == bot.FRAME_VIDEO_BASE_6_10_XU
+    assert status["motion_effect_extra_xu"] == bot.FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU
     effect_labels = str(bot.frame_video_effect_keyboard().inline_keyboard)
     assert "Pan trái/phải" in effect_labels
     assert "Slide ngang" in effect_labels
     assert "Random nhẹ" in effect_labels
-    assert "Gợi ý nhạc" in str(bot.frame_video_music_keyboard().inline_keyboard)
-    assert "Thêm voice" in str(bot.frame_video_music_keyboard().inline_keyboard)
+    assert "Chọn nhạc có sẵn" in str(bot.frame_video_music_keyboard().inline_keyboard)
+    assert "Thêm voice/TTS" in str(bot.frame_video_music_keyboard().inline_keyboard)
     mode_labels = str(bot.storyboard_after_images_keyboard(123).inline_keyboard)
-    assert "Ghép ảnh thành video" in mode_labels
+    assert "Ghép các ảnh này thành video" in mode_labels
     assert "Biến ảnh thành video AI" in mode_labels
+    assert "Tạo lại cảnh chưa ưng" in mode_labels
     assert "Thêm nhạc / voice" in mode_labels
     assert "Bạn muốn tạo video theo kiểu nào" in bot.storyboard_video_mode_text(123)
     assert "Video AI đang bận" in bot.storyboard_ai_video_busy_text()
