@@ -2092,6 +2092,8 @@ def test_frame_video_helper_defaults_and_state():
     assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "standard", "effect": "random"}) == 190
     status = bot.frame_video_status_payload()
     assert int(status["price_xu"]) == int(bot.FRAME_VIDEO_BASE_2_5_XU)
+    assert status["direct_render_enabled"] == bot.FRAME_VIDEO_DIRECT_RENDER_ENABLED
+    assert status["require_local_worker"] == bot.FRAME_VIDEO_REQUIRE_LOCAL_WORKER
     assert int(status["base_6_10_xu"]) == int(bot.FRAME_VIDEO_BASE_6_10_XU)
     assert int(status["motion_effect_extra_xu"]) == int(bot.FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU)
     assert int(status["max_images"]) == int(bot.FRAME_VIDEO_MAX_IMAGES)
@@ -2109,6 +2111,44 @@ def test_frame_video_helper_defaults_and_state():
         assert bot.get_frame_video_state(uid) == {}
     finally:
         bot.clear_frame_video_state(uid)
+
+
+def test_frame_video_oom_guard_blocks_unsafe_render(monkeypatch):
+    state = {
+        "photos": [{"file_id": "a", "file_size": 1024}, {"file_id": "b", "file_size": 1024}],
+        "duration": "fast",
+        "effect": "fade",
+    }
+    monkeypatch.setattr(bot, "FRAME_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_DIRECT_RENDER_ENABLED", False)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_REQUIRE_LOCAL_WORKER", True)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_MAX_INPUT_MB", 50)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_MAX_OUTPUT_SECONDS", 60)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_MAX_CONCURRENT_JOBS", 999)
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {
+        "enabled": True,
+        "poll_enabled": True,
+        "token_configured": True,
+        "connected": False,
+    })
+    guard = bot.frame_video_runtime_guard(state, 987654321)
+    assert guard["ok"] is False
+    assert guard["reason"] == "worker_unavailable"
+    assert "chưa trừ Xu" in guard["message"]
+
+    monkeypatch.setattr(bot, "FRAME_VIDEO_DIRECT_RENDER_ENABLED", True)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_REQUIRE_LOCAL_WORKER", False)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_MAX_INPUT_MB", 1)
+    too_large = dict(state)
+    too_large["photos"] = [{"file_id": "a", "file_size": 2 * 1024 * 1024}, {"file_id": "b", "file_size": 1}]
+    guard = bot.frame_video_runtime_guard(too_large, 987654321)
+    assert guard["reason"] == "input_too_large"
+
+    monkeypatch.setattr(bot, "FRAME_VIDEO_MAX_INPUT_MB", 50)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_MAX_OUTPUT_SECONDS", 2)
+    guard = bot.frame_video_runtime_guard(state, 987654321)
+    assert guard["reason"] == "output_too_long"
 
 
 def test_shopaikey_chat_fallback_sequence_excludes_gpt5_and_retries(monkeypatch):
@@ -3159,6 +3199,8 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     assert status["base_2_5_xu"] == bot.FRAME_VIDEO_BASE_2_5_XU
     assert status["base_6_10_xu"] == bot.FRAME_VIDEO_BASE_6_10_XU
     assert status["motion_effect_extra_xu"] == bot.FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU
+    assert status["direct_render_enabled"] == bot.FRAME_VIDEO_DIRECT_RENDER_ENABLED
+    assert status["max_concurrent_jobs"] == bot.FRAME_VIDEO_MAX_CONCURRENT_JOBS
     effect_labels = str(bot.frame_video_effect_keyboard().inline_keyboard)
     assert "Pan trái/phải" in effect_labels
     assert "Slide ngang" in effect_labels

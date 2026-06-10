@@ -916,8 +916,15 @@ FRAME_VIDEO_EXTRA_IMAGE_XU = env_int("FRAME_VIDEO_EXTRA_IMAGE_XU", 5)
 FRAME_VIDEO_DURATION_STANDARD_EXTRA_XU = env_int("FRAME_VIDEO_DURATION_STANDARD_EXTRA_XU", 20)
 FRAME_VIDEO_DURATION_SLOW_EXTRA_XU = env_int("FRAME_VIDEO_DURATION_SLOW_EXTRA_XU", 40)
 FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU", 50)
+FRAME_VIDEO_ENABLED = env_flag("FRAME_VIDEO_ENABLED", "true")
+FRAME_VIDEO_DIRECT_RENDER_ENABLED = env_flag("FRAME_VIDEO_DIRECT_RENDER_ENABLED", "false")
+FRAME_VIDEO_REQUIRE_LOCAL_WORKER = env_flag("FRAME_VIDEO_REQUIRE_LOCAL_WORKER", "true")
 FRAME_VIDEO_MAX_IMAGES = max(2, min(100, env_int("FRAME_VIDEO_MAX_IMAGES", 20)))
-FRAME_VIDEO_RENDER_TIMEOUT_SECONDS = max(30, env_int("FRAME_VIDEO_RENDER_TIMEOUT_SECONDS", 180))
+FRAME_VIDEO_MAX_OUTPUT_SECONDS = max(5, env_int("FRAME_VIDEO_MAX_OUTPUT_SECONDS", 60))
+FRAME_VIDEO_MAX_INPUT_MB = max(1, env_int("FRAME_VIDEO_MAX_INPUT_MB", 50))
+FRAME_VIDEO_MAX_RENDER_SECONDS = max(30, env_int("FRAME_VIDEO_MAX_RENDER_SECONDS", env_int("FRAME_VIDEO_RENDER_TIMEOUT_SECONDS", 180)))
+FRAME_VIDEO_RENDER_TIMEOUT_SECONDS = FRAME_VIDEO_MAX_RENDER_SECONDS
+FRAME_VIDEO_MAX_CONCURRENT_JOBS = max(1, env_int("FRAME_VIDEO_MAX_CONCURRENT_JOBS", 1))
 MEDIA_FACTORY_PACK_COST = 500
 AUDIO_BASE_COST    = 30
 AUDIO_COST_PER_MB  = 20
@@ -25920,6 +25927,7 @@ LAST_TREND_VIDEO_WORKFLOWS: dict[str, dict] = {}
 LAST_WORKFLOW_IMAGES: dict[str, dict] = {}
 FRAME_VIDEO_JOBS: dict[str, dict] = {}
 FRAME_VIDEO_JOB_SEQ = 0
+FRAME_VIDEO_LAST_ERROR = ""
 MANUAL_BILL_STATE_TTL_SECONDS = 10 * 60
 LAST_USER_FILE_TTL_SECONDS = 10 * 60
 GENERATION_PENDING_TTL_SECONDS = 10 * 60
@@ -28332,6 +28340,7 @@ LOCAL_WORKER_JOB_TYPES = {
     "worker_ping",
     "ffmpeg_health",
     "ffmpeg_probe",
+    "frame_video_render",
     "add_music_to_video_planned",
     "add_voice_to_video_planned",
     "image_to_music_video_planned",
@@ -36565,7 +36574,9 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Local Worker: <code>{'connected' if providers['local_worker'].get('connected') else 'planned/not_connected'}</code>",
         f"• Local Worker enabled: <code>{'ON' if providers['local_worker'].get('enabled') else 'OFF'}</code> | poll <code>{'ON' if providers['local_worker'].get('poll_enabled') else 'OFF'}</code> | token <code>{'configured' if providers['local_worker'].get('token_configured') else 'missing'}</code>",
         f"• Local ffmpeg: <code>{'configured' if providers['local_worker'].get('ffmpeg_path_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('ffmpeg_local'))}</code>",
-        f"• Frame video renderer: <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | public <code>{'ON' if frame_video.get('public_enabled') else 'OFF'}</code> | base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | motion +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code>",
+        f"• Frame video renderer: <code>{'ON' if frame_video.get('enabled') else 'OFF'}</code> | public <code>{'ON' if frame_video.get('public_enabled') else 'OFF'}</code> | direct render <code>{'ON' if frame_video.get('direct_render_enabled') else 'OFF'}</code> | require worker <code>{'ON' if frame_video.get('require_local_worker') else 'OFF'}</code>",
+        f"• Frame video guard: worker <code>{'connected' if frame_video.get('local_worker_connected') else 'not_connected'}</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | max images <code>{int(frame_video.get('max_images') or 0)}</code> | max concurrent <code>{int(frame_video.get('max_concurrent_jobs') or 0)}</code> | last error <code>{html.escape(str(frame_video.get('last_error') or '-'))}</code>",
+        f"• Frame video pricing: base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | motion +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code>",
         f"• Local ComfyUI: <code>{html.escape(providers['local_worker'].get('comfy_status') or 'planned/not_ready')}</code>",
         f"• ComfyUI render: <code>{html.escape(providers['local_worker'].get('comfy_render') or 'admin-only/planned')}</code>",
         f"• Render queue: <code>{html.escape(providers['local_worker'].get('render_queue') or 'admin-only')}</code> | queued <code>{providers['local_worker'].get('job_counts', {}).get('queued', 0)}</code> | running <code>{providers['local_worker'].get('job_counts', {}).get('running', 0)}</code>",
@@ -42731,7 +42742,10 @@ def frame_video_status_payload() -> dict:
     worker = local_worker_status_payload()
     ffmpeg_path = frame_video_ffmpeg_path()
     return {
+        "enabled": bool(FRAME_VIDEO_ENABLED),
         "public_enabled": bool(FRAME_VIDEO_PUBLIC_ENABLED),
+        "direct_render_enabled": bool(FRAME_VIDEO_DIRECT_RENDER_ENABLED),
+        "require_local_worker": bool(FRAME_VIDEO_REQUIRE_LOCAL_WORKER),
         "price_xu": int(FRAME_VIDEO_BASE_2_5_XU or 0),
         "basic_price_xu": int(FRAME_VIDEO_BASIC_PRICE_XU or 0),
         "effect_price_xu": int(FRAME_VIDEO_EFFECT_PRICE_XU or 0),
@@ -42744,11 +42758,20 @@ def frame_video_status_payload() -> dict:
         "duration_slow_extra_xu": int(FRAME_VIDEO_DURATION_SLOW_EXTRA_XU or 0),
         "motion_effect_extra_xu": int(FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU or 0),
         "max_images": int(FRAME_VIDEO_MAX_IMAGES or 20),
+        "max_output_seconds": int(FRAME_VIDEO_MAX_OUTPUT_SECONDS or 60),
+        "max_input_mb": int(FRAME_VIDEO_MAX_INPUT_MB or 50),
+        "max_render_seconds": int(FRAME_VIDEO_MAX_RENDER_SECONDS or 180),
+        "max_concurrent_jobs": int(FRAME_VIDEO_MAX_CONCURRENT_JOBS or 1),
+        "active_jobs": int(frame_video_active_jobs_count()),
         "ttl_seconds": int(FRAME_VIDEO_STATE_TTL_SECONDS or 600),
         "ffmpeg_configured": bool(ffmpeg_path),
         "ffmpeg_path_source": "PATH" if shutil.which("ffmpeg") else ("LOCAL_FFMPEG_PATH" if ffmpeg_path else "missing"),
+        "railway_runtime": bool(is_railway_runtime()),
         "local_worker_enabled": bool(worker.get("enabled")),
+        "local_worker_poll_enabled": bool(worker.get("poll_enabled")),
         "local_worker_connected": bool(worker.get("connected")),
+        "local_worker_ffmpeg_path": str(worker.get("ffmpeg_path") or ""),
+        "last_error": get_frame_video_last_error(),
     }
 
 def frame_video_render_type(state: dict) -> str:
@@ -42766,6 +42789,108 @@ def frame_video_render_type(state: dict) -> str:
 
 def frame_video_price_for_state(state: dict) -> int:
     return int(frame_video_price_breakdown(state).get("total") or 0)
+
+def set_frame_video_last_error(detail: str = "") -> None:
+    global FRAME_VIDEO_LAST_ERROR
+    FRAME_VIDEO_LAST_ERROR = sanitize_log_text(str(detail or ""))[:300]
+    if FRAME_VIDEO_LAST_ERROR:
+        try:
+            set_system_setting("frame_video_last_error", FRAME_VIDEO_LAST_ERROR, note="Frame video guard/runtime error")
+        except Exception:
+            pass
+
+def get_frame_video_last_error() -> str:
+    try:
+        stored = get_system_setting("frame_video_last_error", "")
+        if stored:
+            return str(stored or "")[:300]
+    except Exception:
+        pass
+    return str(FRAME_VIDEO_LAST_ERROR or "")[:300]
+
+def frame_video_active_jobs_count() -> int:
+    active_statuses = {"queued", "waiting_worker", "rendering"}
+    return sum(1 for job in FRAME_VIDEO_JOBS.values() if str(job.get("status") or "").lower() in active_statuses)
+
+def frame_video_total_input_mb(state: dict) -> float:
+    total_bytes = 0
+    for photo in (state or {}).get("photos") or []:
+        try:
+            total_bytes += int(photo.get("file_size") or 0)
+        except Exception:
+            continue
+    return round(total_bytes / (1024 * 1024), 2)
+
+def frame_video_estimated_output_seconds(state: dict) -> float:
+    duration = frame_video_duration_payload((state or {}).get("duration") or "standard")
+    count = len((state or {}).get("photos") or [])
+    return round(float(duration.get("seconds") or 0) * max(0, int(count or 0)), 2)
+
+def frame_video_worker_connected() -> bool:
+    try:
+        worker = local_worker_status_payload()
+        return bool(worker.get("enabled") and worker.get("poll_enabled") and worker.get("token_configured") and worker.get("connected"))
+    except Exception:
+        return False
+
+def frame_video_maintenance_text() -> str:
+    return "🎞 Công cụ ghép ảnh thành video đang bảo trì hoặc cần worker xử lý. TOAN AAS chưa trừ Xu. Vui lòng thử lại sau."
+
+def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
+    photos = list((state or {}).get("photos") or [])
+    image_count = len(photos)
+    total_input_mb = frame_video_total_input_mb(state)
+    output_seconds = frame_video_estimated_output_seconds(state)
+    worker_connected = frame_video_worker_connected()
+    active_jobs = frame_video_active_jobs_count()
+
+    if not FRAME_VIDEO_ENABLED:
+        return {"ok": False, "action": "blocked", "reason": "disabled", "message": frame_video_maintenance_text(), "worker_connected": worker_connected}
+    if not FRAME_VIDEO_PUBLIC_ENABLED and not is_admin_user(user_id):
+        return {"ok": False, "action": "blocked", "reason": "public_off", "message": frame_video_maintenance_text(), "worker_connected": worker_connected}
+    if image_count < 2:
+        return {"ok": False, "action": "blocked", "reason": "not_enough_images", "message": "⚠️ Cần ít nhất 2 ảnh để ghép thành video. Bot chưa trừ Xu.", "worker_connected": worker_connected}
+    if image_count > int(FRAME_VIDEO_MAX_IMAGES or 20):
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": "too_many_images",
+            "message": f"⚠️ Số ảnh vượt giới hạn {int(FRAME_VIDEO_MAX_IMAGES or 20)} ảnh. Bot chưa trừ Xu.",
+            "worker_connected": worker_connected,
+        }
+    if total_input_mb and total_input_mb > float(FRAME_VIDEO_MAX_INPUT_MB or 50):
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": "input_too_large",
+            "message": f"⚠️ Bộ ảnh quá lớn ({total_input_mb} MB). Giới hạn hiện tại là {int(FRAME_VIDEO_MAX_INPUT_MB or 50)} MB. Bot chưa trừ Xu.",
+            "worker_connected": worker_connected,
+        }
+    if output_seconds > float(FRAME_VIDEO_MAX_OUTPUT_SECONDS or 60):
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": "output_too_long",
+            "message": f"⚠️ Video dự kiến dài {output_seconds}s, vượt giới hạn {int(FRAME_VIDEO_MAX_OUTPUT_SECONDS or 60)}s. Bot chưa trừ Xu.",
+            "worker_connected": worker_connected,
+        }
+    if active_jobs >= int(FRAME_VIDEO_MAX_CONCURRENT_JOBS or 1):
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": "concurrency_limit",
+            "message": "Bạn đang có tác vụ ghép video đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.",
+            "worker_connected": worker_connected,
+        }
+    if FRAME_VIDEO_REQUIRE_LOCAL_WORKER and not worker_connected:
+        return {"ok": False, "action": "blocked", "reason": "worker_unavailable", "message": frame_video_maintenance_text(), "worker_connected": worker_connected}
+    if not FRAME_VIDEO_DIRECT_RENDER_ENABLED:
+        if worker_connected:
+            return {"ok": False, "action": "worker_queue", "reason": "direct_render_disabled", "message": "", "worker_connected": worker_connected}
+        return {"ok": False, "action": "blocked", "reason": "direct_render_disabled", "message": frame_video_maintenance_text(), "worker_connected": worker_connected}
+    if is_railway_runtime() and not FRAME_VIDEO_DIRECT_RENDER_ENABLED:
+        return {"ok": False, "action": "blocked", "reason": "railway_direct_render_disabled", "message": frame_video_maintenance_text(), "worker_connected": worker_connected}
+    return {"ok": True, "action": "direct_render", "reason": "ok", "message": "", "worker_connected": worker_connected}
 
 def create_frame_video_job(user_id, chat_id, state: dict, charged_amount: int = 0, status: str = "queued") -> str:
     global FRAME_VIDEO_JOB_SEQ
@@ -42822,7 +42947,7 @@ def frame_video_job_status_text(job: dict) -> str:
         f"• Tỷ lệ: <code>{html.escape(str(ratio.get('label') or '-'))}</code>",
         f"• Thời lượng: <code>{html.escape(str(duration.get('label') or '-'))}</code>",
         f"• Hiệu ứng: <code>{html.escape(str(effect.get('label') or '-'))}</code>",
-        f"• Đã trừ: <code>{int(job.get('charged_amount') or 0)} Xu</code>",
+        f"• Xu: <code>{str(int(job.get('charged_amount') or 0)) + ' Xu đã trừ' if int(job.get('charged_amount') or 0) > 0 else 'chưa trừ'}</code>",
         f"• Cập nhật: <code>{html.escape(str(job.get('updated_at') or '-'))}</code>",
     ]
     if detail:
@@ -43018,7 +43143,7 @@ def storyboard_start_text() -> str:
     return (
         "🧩 <b>Kịch bản → Ảnh → Video TOAN AAS</b>\n\n"
         "Bạn muốn bắt đầu bằng cách nào?\n\n"
-        "V1 không dùng ShopAIKey VEO/video AI provider. Video cuối được ghép từ ảnh bằng ffmpeg/local worker, nên vẫn dùng được khi VEO đang freeze."
+        "V1 không dùng ShopAIKey VEO/video AI provider. Video cuối được ghép từ ảnh bằng worker/ffmpeg khi hệ thống render an toàn."
     )
 
 def storyboard_start_keyboard() -> InlineKeyboardMarkup:
@@ -54143,17 +54268,25 @@ async def cmd_frame_video_status(update: Update, context: ContextTypes.DEFAULT_T
     lines = [
         "🎞 <b>Frame Video / Ghép ảnh thành video</b>",
         "",
+        f"• Enabled: <code>{'ON' if status.get('enabled') else 'OFF'}</code>",
         f"• Public: <code>{'ON' if status.get('public_enabled') else 'OFF'}</code>",
+        f"• Direct render: <code>{'ON' if status.get('direct_render_enabled') else 'OFF'}</code>",
+        f"• Require Local Worker: <code>{'ON' if status.get('require_local_worker') else 'OFF'}</code>",
+        f"• Railway runtime: <code>{'yes' if status.get('railway_runtime') else 'no'}</code>",
         f"• Base 2-5/6-10/11-20: <code>{int(status.get('base_2_5_xu') or 0)}/{int(status.get('base_6_10_xu') or 0)}/{int(status.get('base_11_20_xu') or 0)} Xu</code>",
         f"• Duration standard/slow extra: <code>{int(status.get('duration_standard_extra_xu') or 0)}/{int(status.get('duration_slow_extra_xu') or 0)} Xu</code>",
         f"• Motion effect extra: <code>{int(status.get('motion_effect_extra_xu') or 0)} Xu</code>",
         f"• Music/voice merge price if ready: <code>{int(status.get('music_price_xu') or 0)} Xu</code>",
         f"• Max images: <code>{int(status.get('max_images') or 0)}</code>",
+        f"• Max output/input/render: <code>{int(status.get('max_output_seconds') or 0)}s / {int(status.get('max_input_mb') or 0)}MB / {int(status.get('max_render_seconds') or 0)}s</code>",
+        f"• Max concurrent jobs: <code>{int(status.get('max_concurrent_jobs') or 0)}</code> | active <code>{int(status.get('active_jobs') or 0)}</code>",
         f"• State TTL: <code>{int(status.get('ttl_seconds') or 0)}s</code>",
         f"• ffmpeg: <code>{'configured' if status.get('ffmpeg_configured') else 'missing'}</code>",
         f"• ffmpeg source: <code>{html.escape(str(status.get('ffmpeg_path_source') or '-'))}</code>",
         f"• Local Worker: <code>{'connected' if status.get('local_worker_connected') else 'planned/not_connected'}</code>",
-        f"• Local Worker enabled: <code>{'ON' if status.get('local_worker_enabled') else 'OFF'}</code>",
+        f"• Local Worker enabled: <code>{'ON' if status.get('local_worker_enabled') else 'OFF'}</code> | poll <code>{'ON' if status.get('local_worker_poll_enabled') else 'OFF'}</code>",
+        f"• Local ffmpeg path: <code>{'configured' if status.get('local_worker_ffmpeg_path') else 'missing'}</code>",
+        f"• Last error: <code>{html.escape(str(status.get('last_error') or '-'))}</code>",
         f"• Tested: <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
         "",
         "User status: <code>/frame_video_status &lt;job_id&gt;</code>",
@@ -54166,6 +54299,16 @@ async def cmd_tool_test_frame_video(update: Update, context: ContextTypes.DEFAUL
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not FRAME_VIDEO_ENABLED:
+        save_tool_test_result("frame_video", "DISABLED", "FRAME_VIDEO_ENABLED=false; no render", uid)
+        return await update.message.reply_text("🎞 Frame video đang tắt bằng ENV. Bot chưa trừ Xu.")
+    if not FRAME_VIDEO_DIRECT_RENDER_ENABLED:
+        save_tool_test_result("frame_video", "GUARDED", "FRAME_VIDEO_DIRECT_RENDER_ENABLED=false; Railway direct render blocked", uid)
+        return await update.message.reply_text(
+            "🎞 Frame video direct render đang bị khóa để tránh Railway OOM.\n"
+            "Bot chưa gọi ffmpeg và chưa trừ Xu.\n"
+            "Muốn test render trực tiếp, admin phải bật FRAME_VIDEO_DIRECT_RENDER_ENABLED=true rõ ràng."
+        )
     ffmpeg = frame_video_ffmpeg_path()
     if not ffmpeg:
         save_tool_test_result("frame_video", "MISSING", "ffmpeg missing; no render", uid)
@@ -54252,6 +54395,17 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         existing = get_frame_video_state(uid)
         if existing.get("step") == "rendering":
             return await safe_edit_or_send(query, "Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.", parse_mode=None)
+        if not FRAME_VIDEO_ENABLED:
+            set_frame_video_last_error("frame_video_disabled")
+            return await safe_edit_or_send(query, frame_video_maintenance_text(), parse_mode=None)
+        if frame_video_active_jobs_count() >= int(FRAME_VIDEO_MAX_CONCURRENT_JOBS or 1):
+            return await safe_edit_or_send(query, "Bạn đang có tác vụ ghép video đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.", parse_mode=None)
+        if FRAME_VIDEO_REQUIRE_LOCAL_WORKER and not frame_video_worker_connected():
+            set_frame_video_last_error("worker_unavailable_direct_render_disabled")
+            return await safe_edit_or_send(query, frame_video_maintenance_text(), parse_mode=None)
+        if not FRAME_VIDEO_DIRECT_RENDER_ENABLED:
+            set_frame_video_last_error("direct_render_disabled")
+            return await safe_edit_or_send(query, frame_video_maintenance_text(), parse_mode=None)
         if not FRAME_VIDEO_PUBLIC_ENABLED and not is_admin_user(uid):
             return await safe_edit_or_send(query, "Công cụ ghép video đang bảo trì, vui lòng thử lại sau. Bot chưa trừ Xu.", parse_mode=None)
         clear_media_creator_pending_states(uid)
@@ -54405,13 +54559,32 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
     if action == "confirm":
         if len(state.get("photos") or []) < 2:
             return await safe_edit_or_send(query, "⚠️ Cần ít nhất 2 ảnh để ghép thành video. Bot chưa trừ Xu.", reply_markup=frame_video_collect_keyboard(), parse_mode=None)
-        if not FRAME_VIDEO_PUBLIC_ENABLED and not is_admin_user(uid):
+        guard = frame_video_runtime_guard(state, uid)
+        if not guard.get("ok"):
+            reason = str(guard.get("reason") or "blocked")
+            set_frame_video_last_error(reason)
+            blocked_status = "failed_worker_unavailable" if reason in {"worker_unavailable", "direct_render_disabled"} else "failed"
+            job_id = create_frame_video_job(uid, query.message.chat_id, state, 0, blocked_status)
+            update_frame_video_job(job_id, status=blocked_status, detail=reason)
             clear_frame_video_state(uid)
-            return await safe_edit_or_send(query, "Công cụ ghép video đang bảo trì, vui lòng thử lại sau. Bot chưa trừ Xu.", parse_mode=None)
+            return await safe_edit_or_send(
+                query,
+                f"{guard.get('message') or frame_video_maintenance_text()}\n\nJob: {job_id}\nStatus: {blocked_status}",
+                parse_mode=None,
+                reply_markup=frame_video_job_status_keyboard(job_id),
+            )
         ffmpeg = frame_video_ffmpeg_path()
         if not ffmpeg:
+            set_frame_video_last_error("ffmpeg_missing")
+            job_id = create_frame_video_job(uid, query.message.chat_id, state, 0, "failed")
+            update_frame_video_job(job_id, status="failed", detail="ffmpeg_missing")
             clear_frame_video_state(uid)
-            return await safe_edit_or_send(query, "Công cụ ghép ảnh thành video đang bảo trì hoặc thiếu ffmpeg. Bot chưa trừ Xu.", parse_mode=None)
+            return await safe_edit_or_send(
+                query,
+                f"{frame_video_maintenance_text()}\n\nJob: {job_id}\nStatus: failed",
+                parse_mode=None,
+                reply_markup=frame_video_job_status_keyboard(job_id),
+            )
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Frame video user")
         render_type = frame_video_render_type(state)
         base_cost = frame_video_price_for_state(state)
@@ -54447,6 +54620,7 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             ok, detail = await render_frame_video_from_state(context, state, out_path, tmpdir)
             if not ok or not os.path.exists(out_path):
                 refunded = refund_charged_credit(uid, charged_amount, "frame_video_refund", "", "Hoàn Xu ghép ảnh thành video do render lỗi", charged_amount > 0)
+                set_frame_video_last_error(f"render_fail:{sanitize_log_text(str(detail))[:220]}")
                 update_frame_video_job(job_id, status="failed", detail=sanitize_log_text(str(detail))[:240])
                 clear_frame_video_state(uid)
                 save_tool_test_result("frame_video", "FAIL", f"render:{sanitize_log_text(str(detail))[:300]}", uid)
@@ -54461,7 +54635,7 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
                     detail=sanitize_log_text(str(detail))[:300],
                 )
                 fail_text = (
-                    "⚠️ Ghép video lỗi tạm thời. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ.\n\n"
+                    "⚠️ Ghép video lỗi do tài nguyên xử lý không đủ. TOAN AAS đã hoàn Xu nếu có trừ. Vui lòng thử lại với ít ảnh hơn hoặc chờ worker.\n\n"
                     f"Job: {job_id}\n"
                     "Status: failed"
                 )
@@ -54515,11 +54689,12 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
                 return
             except Exception as e:
                 detail = sanitize_log_text(str(e))[:300]
+                set_frame_video_last_error(f"telegram_send:{detail}")
                 refund_charged_credit(uid, charged_amount, "frame_video_refund", "", "Hoàn Xu ghép ảnh thành video do Telegram gửi lỗi", charged_amount > 0)
                 update_frame_video_job(job_id, status="failed", detail=f"telegram_send:{detail}")
                 clear_frame_video_state(uid)
                 save_tool_test_result("frame_video", "FAIL_SEND", detail, uid)
-                return await safe_edit_or_send(query, "⚠️ Ghép video lỗi tạm thời. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ.", parse_mode=None)
+                return await safe_edit_or_send(query, "⚠️ Ghép video lỗi do tài nguyên xử lý không đủ. TOAN AAS đã hoàn Xu nếu có trừ. Vui lòng thử lại với ít ảnh hơn hoặc chờ worker.", parse_mode=None)
 
     return await safe_edit_or_send(query, frame_video_collect_text(len(state.get("photos") or [])), reply_markup=frame_video_collect_keyboard(), parse_mode=None)
 

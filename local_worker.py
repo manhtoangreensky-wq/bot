@@ -175,6 +175,9 @@ def process_job(job: dict) -> None:
     if job_type == "ffmpeg_health":
         run_ffmpeg_health(job)
         return
+    if job_type == "frame_video_render":
+        update_job(job_id, "failed", "Frame video render handoff is guarded/not_ready in Local Worker Phase 1.")
+        return
     if job_type.startswith("comfy_"):
         update_job(job_id, "failed", "ComfyUI Phase 1 planned/not_ready.")
         return
