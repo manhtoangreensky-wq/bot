@@ -349,6 +349,8 @@ IMAGE_TIER_STANDARD_ENABLED = env_flag("IMAGE_TIER_STANDARD_ENABLED", "true")
 IMAGE_TIER_HIGH_ENABLED = env_flag("IMAGE_TIER_HIGH_ENABLED", "true")
 SHOPAIKEY_IMAGE_DEFAULT_TIER = _env("SHOPAIKEY_IMAGE_DEFAULT_TIER", "low")
 VIDEO_TIER_LOW_ENABLED = env_flag("VIDEO_TIER_LOW_ENABLED", "true")
+VIDEO_TIER_BASIC_ENABLED = env_flag("VIDEO_TIER_BASIC_ENABLED", "true")
+VIDEO_TIER_COMMON_ENABLED = env_flag("VIDEO_TIER_COMMON_ENABLED", "true")
 VIDEO_TIER_STANDARD_ENABLED = env_flag("VIDEO_TIER_STANDARD_ENABLED", "true")
 VIDEO_TIER_HIGH_ENABLED = env_flag("VIDEO_TIER_HIGH_ENABLED", "true")
 VIDEO_TIER_PREMIUM_ENABLED = env_flag("VIDEO_TIER_PREMIUM_ENABLED", "false")
@@ -875,6 +877,8 @@ IMAGE_LOW_PROVIDER_COST_XU = env_int("IMAGE_LOW_PROVIDER_COST_XU", 25)
 IMAGE_STANDARD_PROVIDER_COST_XU = env_int("IMAGE_STANDARD_PROVIDER_COST_XU", 150)
 IMAGE_HIGH_PROVIDER_COST_XU = env_int("IMAGE_HIGH_PROVIDER_COST_XU", 250)
 VIDEO_LOW_PROVIDER_COST_XU = env_int("VIDEO_LOW_PROVIDER_COST_XU", 150)
+VIDEO_BASIC_PROVIDER_COST_XU = env_int("VIDEO_BASIC_PROVIDER_COST_XU", 150)
+VIDEO_COMMON_PROVIDER_COST_XU = env_int("VIDEO_COMMON_PROVIDER_COST_XU", 200)
 VIDEO_STANDARD_PROVIDER_COST_XU = env_int("VIDEO_STANDARD_PROVIDER_COST_XU", 300)
 VIDEO_HIGH_PROVIDER_COST_XU = env_int("VIDEO_HIGH_PROVIDER_COST_XU", 600)
 VIDEO_PREMIUM_PROVIDER_COST_XU = env_int("VIDEO_PREMIUM_PROVIDER_COST_XU", 1000)
@@ -884,6 +888,8 @@ IMAGE_STANDARD_WARRANTY_COST_XU = env_int("IMAGE_STANDARD_WARRANTY_COST_XU", 250
 IMAGE_HIGH_COST_XU = env_int("IMAGE_HIGH_COST_XU", 400)
 IMAGE_HIGH_WARRANTY_COST_XU = env_int("IMAGE_HIGH_WARRANTY_COST_XU", 500)
 VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", 200)
+VIDEO_BASIC_COST_XU = env_int("VIDEO_BASIC_COST_XU", 300)
+VIDEO_COMMON_COST_XU = env_int("VIDEO_COMMON_COST_XU", 400)
 VIDEO_STANDARD_COST_XU = env_int("VIDEO_STANDARD_COST_XU", VIDEO_STANDARD_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 VIDEO_HIGH_COST_XU = env_int("VIDEO_HIGH_COST_XU", VIDEO_HIGH_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 VIDEO_PREMIUM_COST_XU = env_int("VIDEO_PREMIUM_COST_XU", VIDEO_PREMIUM_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
@@ -3279,7 +3285,7 @@ UI_TEXT = {
         "account.ref_link_title": "🎁 <b>Link giới thiệu TOAN AAS của bạn:</b>",
         "account.ref_link_body": "Bạn có thể gửi link này cho bạn bè/khách hàng. Khi họ đăng ký hoặc nạp Xu hợp lệ, hệ thống sẽ ghi nhận theo chính sách giới thiệu hiện hành.\n\nGhi nhận giới thiệu trước, chính sách thưởng có thể cấu hình sau.",
         "pricing.xu": "💰 Bảng giá Xu",
-        "pricing.video_low": "Video tiết kiệm",
+        "pricing.video_low": "Video Trải Nghiệm",
         "pricing.plans": "📦 Gói tháng",
         "pricing.vip": "⭐ Dịch vụ VIP",
         "pricing.member": "🪪 Thành viên",
@@ -3333,9 +3339,11 @@ UI_TEXT = {
         "video.image_to_video": "🖼➡️🎞 Tạo video từ ảnh",
         "video.prompt_button": "✍️ Tạo prompt video",
         "video.hook_script": "📝 Viết hook/script/caption",
-        "video.tier.low": "Video tiết kiệm",
-        "video.tier.standard": "Video tiêu chuẩn",
-        "video.tier.high": "Video chất lượng cao",
+        "video.tier.low": "Video Trải Nghiệm",
+        "video.tier.basic": "Video Cơ Bản",
+        "video.tier.common": "Video Phổ Thông",
+        "video.tier.standard": "Video Tiêu Chuẩn",
+        "video.tier.high": "Video Cao Cấp",
         "video.tier.premium": "Video premium/admin-only",
         "video.waiting": "🎞 TOAN AAS đang tạo video cho bạn. Quá trình này có thể mất vài phút. Không cần gửi lại lệnh.",
         "video.tier_disabled_message": "🧪 Tier video này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.",
@@ -3529,7 +3537,7 @@ UI_TEXT = {
         "account.ref_link_title": "🎁 <b>Your TOAN AAS referral link:</b>",
         "account.ref_link_body": "You can share this link with friends or customers. When they register or complete a valid Xu top-up, the system records it under the current referral policy.\n\nReferral tracking is recorded first; reward policy can be configured later.",
         "pricing.xu": "💰 Xu pricing",
-        "pricing.video_low": "Budget video",
+        "pricing.video_low": "Experience video",
         "pricing.plans": "📦 Monthly plans",
         "pricing.vip": "⭐ VIP services",
         "pricing.member": "🪪 Membership",
@@ -3583,9 +3591,11 @@ UI_TEXT = {
         "video.image_to_video": "🖼➡️🎞 Image to video",
         "video.prompt_button": "✍️ Video prompt",
         "video.hook_script": "📝 Hook/script/caption",
-        "video.tier.low": "Budget video",
+        "video.tier.low": "Experience video",
+        "video.tier.basic": "Basic video",
+        "video.tier.common": "Regular video",
         "video.tier.standard": "Standard video",
-        "video.tier.high": "High-quality video",
+        "video.tier.high": "Premium video",
         "video.tier.premium": "Premium/admin-only video",
         "video.waiting": "🎞 TOAN AAS is creating your video. This may take a few minutes. No need to send the command again.",
         "video.tier_disabled_message": "🧪 This video tier is currently disabled. The bot has not called any API and has not charged Xu.",
@@ -3779,7 +3789,7 @@ UI_TEXT = {
         "account.ref_link_title": "🎁 <b>你的 TOAN AAS 邀请链接:</b>",
         "account.ref_link_body": "你可以把此链接发送给朋友或客户。当他们注册或完成有效 Xu 充值时，系统会按当前邀请政策记录。\n\n先记录邀请关系，奖励政策可后续配置。",
         "pricing.xu": "💰 Xu 价格",
-        "pricing.video_low": "经济视频",
+        "pricing.video_low": "体验视频",
         "pricing.plans": "📦 月度套餐",
         "pricing.vip": "⭐ VIP 服务",
         "pricing.member": "🪪 会员",
@@ -3833,9 +3843,11 @@ UI_TEXT = {
         "video.image_to_video": "🖼➡️🎞 图片生成视频",
         "video.prompt_button": "✍️ 视频 prompt",
         "video.hook_script": "📝 Hook/script/caption",
-        "video.tier.low": "经济视频",
+        "video.tier.low": "体验视频",
+        "video.tier.basic": "基础视频",
+        "video.tier.common": "常规视频",
         "video.tier.standard": "标准视频",
-        "video.tier.high": "高质量视频",
+        "video.tier.high": "高级视频",
         "video.tier.premium": "Premium/admin-only 视频",
         "video.waiting": "🎞 TOAN AAS 正在为你生成视频，可能需要几分钟。请不要重复发送命令。",
         "video.tier_disabled_message": "🧪 此视频档位当前已关闭。Bot 未调用 API，也未扣除 Xu。",
@@ -28525,14 +28537,39 @@ def image_tier_public_status_text() -> str:
     enabled_map = image_tier_enabled_map()
     return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in IMAGE_TIER_ORDER)
 
-def image_tier_prompt_for_generation(prompt: str, tier: str = "") -> str:
+MEDIA_VIDEO_ASPECT_RATIOS = ("9:16", "16:9", "1:1", "4:5", "3:4")
+MEDIA_IMAGE_ASPECT_RATIOS = ("9:16", "16:9", "1:1", "4:5", "3:4", "3:2", "4:3")
+
+def media_aspect_ratio_options(kind: str = "video") -> tuple[str, ...]:
+    return MEDIA_IMAGE_ASPECT_RATIOS if str(kind or "").lower() == "image" else MEDIA_VIDEO_ASPECT_RATIOS
+
+def normalize_media_aspect_ratio(value: str = "", default: str = "9:16", kind: str = "video") -> str:
+    raw = str(value or "").strip().lower().replace("x", ":").replace(" ", "")
+    allowed = set(media_aspect_ratio_options(kind))
+    if raw in allowed:
+        return raw
+    fallback = str(default or "").strip().lower().replace("x", ":").replace(" ", "")
+    return fallback if fallback in allowed else media_aspect_ratio_options(kind)[0]
+
+def media_aspect_ratio_token(aspect_ratio: str = "") -> str:
+    return str(aspect_ratio or "").strip().replace(":", "x")
+
+def media_aspect_ratio_from_token(token: str = "", kind: str = "video") -> str:
+    return normalize_media_aspect_ratio(token, "9:16", kind)
+
+def media_aspect_instruction(aspect_ratio: str = "", kind: str = "video") -> str:
+    aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", kind)
+    return f"Aspect ratio {aspect}."
+
+def image_tier_prompt_for_generation(prompt: str, tier: str = "", aspect_ratio: str = "") -> str:
     prompt = re.sub(r"\s+", " ", str(prompt or "").strip())[:1200]
     tier_norm = normalize_image_tier(tier)
+    aspect_note = media_aspect_instruction(aspect_ratio, "image") if aspect_ratio else ""
     if tier_norm in {"standard", "standard_warranty"}:
-        return f"{prompt}. High quality, clean composition, professional lighting, detailed but natural, no watermark, no extra text."
+        return f"{prompt}. {aspect_note} High quality, clean composition, professional lighting, detailed but natural, no watermark, no extra text.".replace(".  ", ". ")
     if tier_norm in {"high", "high_warranty"}:
-        return f"{prompt}. Premium commercial quality, refined composition, sharp details, professional studio lighting, polished brand-safe look, no watermark, no extra text."
-    return f"{prompt}. Clean simple composition, fast draft quality, clear subject, no watermark, no extra text."
+        return f"{prompt}. {aspect_note} Premium commercial quality, refined composition, sharp details, professional studio lighting, polished brand-safe look, no watermark, no extra text.".replace(".  ", ". ")
+    return f"{prompt}. {aspect_note} Clean simple composition, fast draft quality, clear subject, no watermark, no extra text.".replace(".  ", ". ")
 
 def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool = True) -> str:
     tier_norm = normalize_image_tier(tier)
@@ -28546,24 +28583,48 @@ def image_tier_choice_rows(callback_builder, lang: str = "vi") -> list[list[Inli
         for tier in IMAGE_TIER_ORDER
     ]
 
+VIDEO_TIER_ORDER = ("low", "basic", "common", "standard", "high", "premium")
+VIDEO_TIER_ICONS = {
+    "low": "🟢",
+    "basic": "🔹",
+    "common": "🔵",
+    "standard": "🟣",
+    "high": "⭐",
+    "premium": "👑",
+}
+
 def video_tier_pricing_payload() -> dict:
     return {
         "low": {
-            "label": "Video tiết kiệm",
+            "label": "Video Trải Nghiệm",
             "cost": media_tier_price(VIDEO_LOW_COST_XU, VIDEO_LOW_PROVIDER_COST_XU, VIDEO_BASE_COST_XU),
             "provider_cost": int(VIDEO_LOW_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Video ngắn/nháp, public vẫn phụ thuộc ENV.",
+            "note": "Gói mồi/test nhanh, không phải gói tốt nhất. Public vẫn phụ thuộc ENV.",
+        },
+        "basic": {
+            "label": "Video Cơ Bản",
+            "cost": media_tier_price(VIDEO_BASIC_COST_XU, VIDEO_BASIC_PROVIDER_COST_XU, VIDEO_BASE_COST_XU),
+            "provider_cost": int(VIDEO_BASIC_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+            "note": "Video ngắn cơ bản, phù hợp test sản phẩm/nội dung đơn giản.",
+        },
+        "common": {
+            "label": "Video Phổ Thông",
+            "cost": media_tier_price(VIDEO_COMMON_COST_XU, VIDEO_COMMON_PROVIDER_COST_XU, VIDEO_BASE_COST_XU),
+            "provider_cost": int(VIDEO_COMMON_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+            "note": "Gói phổ thông cho TikTok/Reels, cân bằng chi phí và chất lượng.",
         },
         "standard": {
-            "label": "Video tiêu chuẩn",
+            "label": "Video Tiêu Chuẩn",
             "cost": media_tier_price(VIDEO_STANDARD_COST_XU, VIDEO_STANDARD_PROVIDER_COST_XU, VIDEO_FROM_IMAGE_PRO_COST),
             "provider_cost": int(VIDEO_STANDARD_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
             "note": "Dùng cho video ngắn ổn định hơn.",
         },
         "high": {
-            "label": "Video chất lượng cao",
+            "label": "Video Cao Cấp",
             "cost": media_tier_price(VIDEO_HIGH_COST_XU, VIDEO_HIGH_PROVIDER_COST_XU, VIDEO_SERIES_COST),
             "provider_cost": int(VIDEO_HIGH_PROVIDER_COST_XU or 0),
             "model": "veo/grok fallback",
@@ -28581,6 +28642,8 @@ def video_tier_pricing_payload() -> dict:
 def video_tier_enabled_map() -> dict:
     return {
         "low": bool(VIDEO_TIER_LOW_ENABLED),
+        "basic": bool(VIDEO_TIER_BASIC_ENABLED),
+        "common": bool(VIDEO_TIER_COMMON_ENABLED),
         "standard": bool(VIDEO_TIER_STANDARD_ENABLED),
         "high": bool(VIDEO_TIER_HIGH_ENABLED),
         "premium": bool(VIDEO_TIER_PREMIUM_ENABLED) and not bool(VIDEO_PREMIUM_ADMIN_ONLY),
@@ -28588,16 +28651,22 @@ def video_tier_enabled_map() -> dict:
 
 def normalize_video_tier(value: str = "") -> str:
     tier = str(value or "").strip().lower()
-    if tier in {"standard", "std", "normal", "medium"}:
+    tier = tier.replace("-", "_").replace(" ", "_")
+    if tier in {"standard", "std", "normal", "medium", "tieu_chuan"}:
         return "standard"
     if tier in {"high", "pro"}:
         return "high"
     if tier in {"premium", "vip", "admin"}:
         return "premium"
-    if tier in {"low", "basic", "cheap", "eco", "economy"}:
+    if tier in {"common", "regular", "popular", "pho_thong", "phothong"}:
+        return "common"
+    if tier in {"basic", "starter", "co_ban", "coban"}:
+        return "basic"
+    if tier in {"low", "experience", "cheap", "eco", "economy", "trial", "trai_nghiem", "trainghiem"}:
         return "low"
     fallback = str(SHOPAIKEY_VIDEO_DEFAULT_TIER or "low").strip().lower()
-    return fallback if fallback in {"low", "standard", "high", "premium"} else "low"
+    fallback = fallback.replace("-", "_").replace(" ", "_")
+    return fallback if fallback in set(VIDEO_TIER_ORDER) else "low"
 
 def video_tier_payload(tier: str = "") -> dict:
     tier_norm = normalize_video_tier(tier)
@@ -28617,11 +28686,12 @@ def video_tier_cost_xu(tier: str = "") -> int:
 
 def video_tier_public_status_text() -> str:
     enabled_map = video_tier_enabled_map()
-    return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in ["low", "standard", "high", "premium"])
+    return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in VIDEO_TIER_ORDER)
 
-def video_tier_prompt_for_generation(prompt: str, tier: str = "") -> str:
+def video_tier_prompt_for_generation(prompt: str, tier: str = "", aspect_ratio: str = "") -> str:
     prompt = re.sub(r"\s+", " ", str(prompt or "").strip())[:1200]
     tier_norm = normalize_video_tier(tier)
+    aspect = normalize_media_aspect_ratio(aspect_ratio, "16:9")
     safety = (
         "Use realistic motion, stable subject, physically correct perspective, no morphing, "
         "no distorted hands or faces, no fake UI. Negative prompt: no text, no caption, no watermark, "
@@ -28630,16 +28700,60 @@ def video_tier_prompt_for_generation(prompt: str, tier: str = "") -> str:
         "clean or slightly blurred with no readable UI text."
     )
     if tier_norm == "standard":
-        return f"{prompt}. Short clean video, stable motion, professional lighting, 16:9. {safety}"
+        return f"{prompt}. Short clean video, stable motion, professional lighting, aspect ratio {aspect}. {safety}"
     if tier_norm == "high":
-        return f"{prompt}. High-quality short commercial video, polished camera movement, stable subject, professional lighting, 16:9. {safety}"
-    return f"{prompt}. Short simple video, clean motion, clear subject, 16:9. {safety}"
+        return f"{prompt}. High-quality short commercial video, polished camera movement, stable subject, professional lighting, aspect ratio {aspect}. {safety}"
+    return f"{prompt}. Short simple video, clean motion, clear subject, aspect ratio {aspect}. {safety}"
 
 def image_base_cost_xu() -> int:
     return int(image_tier_pricing_payload()["low"]["cost"])
 
 def video_base_cost_xu() -> int:
     return int(video_tier_pricing_payload()["low"]["cost"])
+
+def video_combo_pricing_payload() -> list[dict]:
+    return [
+        {
+            "code": "tiktok_99k",
+            "label": "Combo TikTok 99k",
+            "price_vnd": 99000,
+            "summary": "3 video Phổ Thông, khuyến nghị 9:16.",
+            "recommended_aspect": "9:16",
+            "rank_points": False,
+        },
+        {
+            "code": "basic_199k",
+            "label": "Combo Cơ Bản 199k",
+            "price_vnd": 199000,
+            "summary": "Gói thử nội dung/video ngắn cơ bản.",
+            "recommended_aspect": "9:16",
+            "rank_points": False,
+        },
+        {
+            "code": "standard_299k",
+            "label": "Combo Tiêu Chuẩn 299k",
+            "price_vnd": 299000,
+            "summary": "Gói đều hơn cho nội dung bán hàng/review.",
+            "recommended_aspect": "9:16",
+            "rank_points": False,
+        },
+        {
+            "code": "steady_499k",
+            "label": "Combo Đăng Đều 499k",
+            "price_vnd": 499000,
+            "summary": "Phù hợp lịch đăng nhiều nội dung trong tuần.",
+            "recommended_aspect": "9:16",
+            "rank_points": False,
+        },
+        {
+            "code": "product_ads_699k",
+            "label": "Combo Quảng Cáo Sản Phẩm 699k",
+            "price_vnd": 699000,
+            "summary": "Ưu tiên concept/storyboard/prompt/video cho sản phẩm.",
+            "recommended_aspect": "9:16",
+            "rank_points": False,
+        },
+    ]
 
 def workflow_trend_analysis_cost_xu() -> int:
     return max(0, int(WORKFLOW_TREND_ANALYSIS_COST_XU or 0))
@@ -28693,6 +28807,7 @@ def media_workflow_pricing_payload() -> dict:
         "workflow_script_storyboard_cost": trend_breakdown["script_storyboard"],
         "workflow_prompt_pack_cost": trend_breakdown["prompt_pack"],
         "workflow_content_total_cost": trend_breakdown["total"],
+        "video_combos": video_combo_pricing_payload(),
         "trend_workflow_billing_enabled": bool(TREND_WORKFLOW_BILLING_ENABLED),
         "trend_workflow_require_confirm": bool(TREND_WORKFLOW_REQUIRE_CONFIRM),
         "trend_workflow_content_only": bool(TREND_WORKFLOW_CONTENT_ONLY),
@@ -28853,13 +28968,14 @@ def clear_media_creator_pending_states(user_id) -> bool:
     quick_cleared = clear_quick_media_pending(user_id)
     public_image_cleared = clear_public_image_prompt_pending(user_id)
     public_video_cleared = clear_public_video_prompt_pending(user_id)
+    media_aspect_cleared = clear_media_aspect_pending(user_id)
     public_video_context_cleared = clear_public_video_package_context(user_id)
     creative_motion_cleared = clear_creative_motion_pending(user_id)
     cinematic_ad_cleared = clear_cinematic_ad_pending(user_id)
     trend_cleared = clear_trend_video_flow_pending(user_id)
     trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
     feedback_cleared = clear_feedback_pending(user_id)
-    return bool(quick_cleared or public_image_cleared or public_video_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared)
+    return bool(quick_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -31139,6 +31255,10 @@ def sales_readiness_payload() -> dict:
         video_queue = shopaikey_video_queue_counts()
     except Exception:
         video_queue = {"queued": 0, "running": 0, "success": 0, "failed": 0, "total": 0}
+    try:
+        media_pricing = media_workflow_pricing_payload()
+    except Exception:
+        media_pricing = {}
     return {
         "status": status,
         "db_ok": db_status["ok"],
@@ -31157,6 +31277,12 @@ def sales_readiness_payload() -> dict:
         "video_queue": video_queue,
         "public_image_enabled": bool(SHOPAIKEY_PUBLIC_IMAGE_ENABLED),
         "public_video_enabled": bool(SHOPAIKEY_PUBLIC_VIDEO_ENABLED),
+        "media_pricing": media_pricing,
+        "video_tier_names": list((media_pricing.get("video_tiers") or {}).keys()),
+        "image_aspect_ratios": list(media_aspect_ratio_options("image")),
+        "video_aspect_ratios": list(media_aspect_ratio_options("video")),
+        "video_combos": media_pricing.get("video_combos") or [],
+        "combo_rank_points_excluded": True,
         "refund_guard": bool(SHOPAIKEY_REFUND_ON_PROVIDER_FAIL),
         "job_lock": bool(SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED),
         "blockers": blockers,
@@ -31378,9 +31504,11 @@ CUSTOMER_GUIDE_SECTIONS = [
             "6. Trong lúc chờ, không gửi lại nhiều lần để tránh job trùng.\n"
             "7. Sau video, bạn có thể chọn thêm nhạc hoặc hoàn tất không nhạc.\n\n"
             "<b>Gói video:</b>\n"
-            "• Video tiết kiệm: 200 Xu.\n"
-            "• Video tiêu chuẩn: 600 Xu.\n"
-            "• Video chất lượng cao: 1200 Xu.\n"
+            "• Video Trải Nghiệm: 200 Xu.\n"
+            "• Video Cơ Bản: 300 Xu.\n"
+            "• Video Phổ Thông: 400 Xu.\n"
+            "• Video Tiêu Chuẩn: 600 Xu.\n"
+            "• Video Cao Cấp: 1200 Xu.\n"
             "• Video premium: admin-only / liên hệ admin.\n\n"
             "Nếu Public video OFF, bot chỉ tạo prompt/hướng dẫn, không gọi API video và không trừ Xu."
         ),
@@ -34842,8 +34970,11 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Quick media menu: <code>enabled/guarded</code>",
         f"• Image tiers: <code>{'/'.join(pricing['image_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         f"• Image tier public: <code>{html.escape(image_tier_public_status_text())}</code>",
+        f"• Image aspect ratios: <code>{html.escape('/'.join(media_aspect_ratio_options('image')))}</code>",
         "• Image pricing source: <code>tiered_media_pricing</code>",
         f"• Video tier config: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | enabled/configured <code>{html.escape(video_tier_public_status_text())}</code>",
+        f"• Video aspect ratios: <code>{html.escape('/'.join(media_aspect_ratio_options('video')))}</code>",
+        f"• Video combos: <code>{len(pricing.get('video_combos') or [])}</code> | rank/top-up points <code>excluded</code>",
         f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         f"• Public user can generate real video: <code>{'YES' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'NO'}</code>",
         f"• Admin video smoke tests: <code>{'available/admin-only' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'disabled'}</code>",
@@ -35563,10 +35694,13 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         "• Quick media menu: <code>enabled/guarded</code>",
         f"• Image tiers: <code>{'/'.join(pricing['image_tiers'].keys())}</code> | public <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         f"• Image tier public: <code>{html.escape(image_tier_public_status_text())}</code>",
+        f"• Image aspect ratios: <code>{html.escape('/'.join(media_aspect_ratio_options('image')))}</code>",
         "• Image pricing source: <code>tiered_media_pricing</code>",
         f"• Image provider cost: low <code>{pricing['image_tiers']['low']['provider_cost']} Xu</code> / standard <code>{pricing['image_tiers']['standard']['provider_cost']} Xu</code> / high <code>{pricing['image_tiers']['high']['provider_cost']} Xu</code>",
         f"• Image model mapping: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
         f"• Video tier config: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | enabled/configured <code>{html.escape(video_tier_public_status_text())}</code>",
+        f"• Video aspect ratios: <code>{html.escape('/'.join(media_aspect_ratio_options('video')))}</code>",
+        f"• Video combos: <code>{len(pricing.get('video_combos') or [])}</code> | rank/top-up points <code>excluded</code>",
         f"• Public video generation: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         f"• Public user can generate real video: <code>{'YES' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'NO'}</code>",
         f"• Admin video smoke tests: <code>{'available/admin-only' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'disabled'}</code>",
@@ -36638,30 +36772,12 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
     if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
         record_shopaikey_billing_event(uid, 0, "insufficient_balance", 0, int(credits or 0), int(credits or 0), f"shopaikey_image; tier={tier}; required={final_preview_cost}")
         return await reply_insufficient_credits(update, int(credits or 0), final_preview_cost)
-    token = set_shopaikey_pending_confirmation(uid, {
-        "job_type": "image",
-        "prompt": image_tier_prompt_for_generation(prompt, tier),
-        "original_prompt": prompt,
-        "base_cost": base_cost,
-        "from_image": False,
-        "image_tier": tier,
-        "tier_label": tier_payload.get("label") or "Ảnh tiết kiệm",
-        "model": tier_payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
-        "retry_warranty_count": int(tier_payload.get("retry_warranty_count") or 0),
-    })
+    lang = user_ui_lang(uid)
+    set_media_aspect_pending(uid, "image", tier, prompt)
     await update.message.reply_text(
-        "🖼 <b>Xác nhận tạo ảnh ShopAIKey</b>\n\n"
-        f"• Tier: <b>{html.escape(tier_payload.get('label') or tier)}</b>\n"
-        f"• Chi phí dự kiến: <b>{base_cost} Xu</b>\n"
-        f"• Số Xu sẽ trừ: <b>{final_preview_cost} Xu</b>\n"
-        f"• Số dư hiện tại: <b>{int(credits or 0)} Xu</b>\n"
-        f"• Prompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\n"
-        "Bot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn Xu theo chính sách.",
+        public_media_aspect_ratio_text("image", tier, prompt, lang),
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"✅ Tạo ảnh -{final_preview_cost} Xu", callback_data=f"shopai|confirm|{token}")],
-            [InlineKeyboardButton("❌ Huỷ", callback_data=f"shopai|cancel|{token}")],
-        ]),
+        reply_markup=public_media_aspect_ratio_keyboard("image", lang),
     )
 
 async def start_public_image_prompt_from_tier_message(message, user_id, tier: str) -> None:
@@ -36700,26 +36816,11 @@ async def handle_public_image_prompt_pending_text(update: Update, context: Conte
     if shopaikey_active_job_for_user(uid, "image"):
         await update.message.reply_text(ui_text(lang, "media.job_lock"))
         return True
-    credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Image user")
-    base_cost = int(payload.get("cost") or 0)
-    token = set_shopaikey_pending_confirmation(uid, {
-        "job_type": "image",
-        "prompt": image_tier_prompt_for_generation(prompt, tier),
-        "original_prompt": prompt,
-        "base_cost": base_cost,
-        "from_image": False,
-        "image_tier": tier,
-        "tier_label": payload.get("label") or tier,
-        "model": payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
-        "retry_warranty_count": int(payload.get("retry_warranty_count") or 0),
-    })
+    set_media_aspect_pending(uid, "image", tier, prompt)
     await update.message.reply_text(
-        public_image_confirm_text(tier, prompt, int(credits or 0), lang),
+        public_media_aspect_ratio_text("image", tier, prompt, lang),
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=f"shopai|confirm|{token}")],
-            [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=f"shopai|cancel|{token}")],
-        ]),
+        reply_markup=public_media_aspect_ratio_keyboard("image", lang),
     )
     return True
 
@@ -36768,27 +36869,11 @@ async def handle_public_video_prompt_pending_text(update: Update, context: Conte
             reply_markup=public_video_active_job_keyboard(active_video_job, lang),
         )
         return True
-    credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Video user")
-    base_cost = int(payload.get("cost") or 0)
-    token = set_shopaikey_pending_confirmation(uid, {
-        "job_type": "video",
-        "prompt": video_tier_prompt_for_generation(prompt, tier),
-        "original_prompt": prompt,
-        "base_cost": base_cost,
-        "from_image": False,
-        "video_tier": tier,
-        "tier_label": payload.get("label") or tier,
-        "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-    })
-    record_shopaikey_billing_event(uid, 0, "video_prompt_received", 0, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}")
-    record_shopaikey_billing_event(uid, 0, "video_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}")
+    set_media_aspect_pending(uid, "video", tier, prompt)
     await update.message.reply_text(
-        public_video_confirm_text(tier, prompt, int(credits or 0), lang),
+        public_media_aspect_ratio_text("video", tier, prompt, lang),
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=f"shopai|confirm|{token}")],
-            [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=f"shopai|cancel|{token}")],
-        ]),
+        reply_markup=public_media_aspect_ratio_keyboard("video", lang),
     )
     return True
 
@@ -36815,37 +36900,21 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
     final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video")
     if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
         return await reply_insufficient_credits(update, int(credits or 0), final_preview_cost)
-    token = set_shopaikey_pending_confirmation(uid, {
-        "job_type": "video",
-        "prompt": video_tier_prompt_for_generation(prompt, tier),
-        "original_prompt": prompt,
-        "base_cost": base_cost,
-        "from_image": from_image,
-        "source_job_id": str(source_job.get("id") or "") if source_job else "",
-        "video_tier": tier,
-        "tier_label": tier_payload.get("label") or "Video tiết kiệm",
-        "model": tier_payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-    })
+    lang = user_ui_lang(uid)
+    package = {}
     if from_image and source_job:
-        note = f"Video từ ảnh job #{source_job.get('id')}: ảnh và video là 2 bước riêng, video tính theo tier hiện tại."
-    elif from_image:
-        note = "Chưa tìm thấy ảnh ShopAIKey hợp lệ; tính như video độc lập."
-    else:
-        note = "Video độc lập."
+        package = {
+            "source": "image_to_video",
+            "source_job_id": str(source_job.get("id") or ""),
+            "image_url": str(source_job.get("result_url") or ""),
+            "telegram_file_id": str(source_job.get("output_file_id") or ""),
+            "video_prompt": prompt,
+        }
+    set_media_aspect_pending(uid, "video", tier, prompt, package)
     await update.message.reply_text(
-        "🎞 <b>Xác nhận tạo video ShopAIKey</b>\n\n"
-        f"• Tier: <b>{html.escape(tier_payload.get('label') or tier)}</b>\n"
-        f"• Chi phí dự kiến: <b>{base_cost} Xu</b>\n"
-        f"• Số Xu sẽ trừ: <b>{final_preview_cost} Xu</b>\n"
-        f"• Số dư hiện tại: <b>{int(credits or 0)} Xu</b>\n"
-        f"• Ghi chú: <code>{html.escape(note)}</code>\n"
-        f"• Prompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\n"
-        "Bot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn phần Xu đã trừ.",
+        public_media_aspect_ratio_text("video", tier, prompt, lang),
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"✅ Tạo video -{final_preview_cost} Xu", callback_data=f"shopai|confirm|{token}")],
-            [InlineKeyboardButton("❌ Huỷ", callback_data=f"shopai|cancel|{token}")],
-        ]),
+        reply_markup=public_media_aspect_ratio_keyboard("video", lang),
     )
 
 async def cmd_shopaikey_video_from_image_public(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -42058,6 +42127,11 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     shopaikey_usage = data.get("shopaikey_usage") or {}
     video_freeze = data.get("video_freeze") or {}
     video_queue = data.get("video_queue") or {}
+    media_pricing = data.get("media_pricing") or {}
+    video_tier_names = data.get("video_tier_names") or []
+    image_aspects = data.get("image_aspect_ratios") or []
+    video_aspects = data.get("video_aspect_ratios") or []
+    video_combos = data.get("video_combos") or []
     blockers = data["blockers"] or []
     lines = [
         "🚀 <b>TOAN AAS Sales Readiness</b>",
@@ -42101,6 +42175,11 @@ async def cmd_sales_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Creative Tools</b>",
         f"• Public image generation: <code>{'ON' if data.get('public_image_enabled') else 'OFF'}</code>",
         f"• Public video generation: <code>{'ON' if data.get('public_video_enabled') else 'OFF'}</code>",
+        f"• Media pricing mode: <code>{html.escape(str(media_pricing.get('billing_mode') or '-'))}</code>",
+        f"• Video tier names: <code>{html.escape('/'.join(video_tier_names) or '-')}</code>",
+        f"• Image aspect ratios: <code>{html.escape('/'.join(image_aspects) or '-')}</code>",
+        f"• Video aspect ratios: <code>{html.escape('/'.join(video_aspects) or '-')}</code>",
+        f"• Video combo packages: <code>{len(video_combos)}</code> | rank/top-up points excluded <code>{'YES' if data.get('combo_rank_points_excluded') else 'NO'}</code>",
         "• Trend AI: <code>READY/content-only</code>",
         f"• Trend Live: <code>{html.escape(providers['media_factory'].get('trend_live_stage') or 'DISABLED')}</code> | SerpAPI <code>{provider_status_text(providers['search']['serpapi'])}</code>",
         "• Image Prompt: <code>READY/prompt-only</code>",
@@ -48164,10 +48243,88 @@ def public_image_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def public_image_prompt_request_text(tier: str, lang: str = "vi") -> str:
     return ui_text(lang, "image.prompt.ask", label=html.escape(localized_image_tier_label(tier, lang)))
 
-def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi") -> str:
+def media_aspect_pending_key(user_id) -> str:
+    return f"media_aspect:{user_id}"
+
+def set_media_aspect_pending(user_id, job_type: str, tier: str, prompt: str, package: dict | None = None) -> None:
+    normalized_job_type = "image" if str(job_type or "").lower() == "image" else "video"
+    USER_PENDING[media_aspect_pending_key(user_id)] = {
+        "pending_action": "media_aspect",
+        "job_type": normalized_job_type,
+        "tier": normalize_image_tier(tier) if normalized_job_type == "image" else normalize_video_tier(tier),
+        "prompt": re.sub(r"\s+", " ", str(prompt or "").strip())[:1400],
+        "package": package or {},
+        "created_at_ts": time.time(),
+    }
+
+def get_media_aspect_pending(user_id, job_type: str = "") -> dict | None:
+    key = media_aspect_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "media_aspect":
+        return None
+    wanted = str(job_type or "").strip().lower()
+    if wanted and pending.get("job_type") != wanted:
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_media_aspect_pending(user_id) -> bool:
+    return USER_PENDING.pop(media_aspect_pending_key(user_id), None) is not None
+
+def public_media_aspect_ratio_text(kind: str, tier: str, prompt: str = "", lang: str = "vi") -> str:
+    kind_norm = "image" if str(kind or "").lower() == "image" else "video"
+    label = localized_image_tier_label(tier, lang) if kind_norm == "image" else localized_video_tier_label(tier, lang)
+    if normalize_user_language(lang) == "zh":
+        return f"📐 <b>选择画面比例</b>\n\n套餐：<b>{html.escape(label)}</b>\nPrompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\n请选择比例。Bot 尚未调用 API，也未扣除 Xu。"
+    if normalize_user_language(lang) != "vi":
+        return f"📐 <b>Choose aspect ratio</b>\n\nTier: <b>{html.escape(label)}</b>\nPrompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\nChoose an aspect ratio. The bot has not called any API and has not charged Xu."
+    return f"📐 <b>Chọn tỉ lệ khung hình</b>\n\nGói: <b>{html.escape(label)}</b>\nPrompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\nBạn muốn tạo theo tỉ lệ nào? Bot chưa gọi API và chưa trừ Xu."
+
+def public_media_aspect_ratio_keyboard(kind: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    kind_norm = "image" if str(kind or "").lower() == "image" else "video"
+    rows = []
+    options = media_aspect_ratio_options(kind_norm)
+    for idx in range(0, len(options), 2):
+        row = []
+        for aspect in options[idx:idx + 2]:
+            label = f"📐 {aspect}" + (" TikTok/Reels" if aspect == "9:16" and normalize_user_language(lang) == "vi" else "")
+            row.append(InlineKeyboardButton(label, callback_data=f"create_media|{kind_norm}_aspect_{media_aspect_ratio_token(aspect)}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|quick_image" if kind_norm == "image" else "create_media|quick_video")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def with_aspect_line(text: str, aspect_ratio: str = "", lang: str = "vi") -> str:
+    aspect = str(aspect_ratio or "").strip()
+    if not aspect:
+        return text
+    if normalize_user_language(lang) == "zh":
+        line = f"• 画面比例: <b>{html.escape(aspect)}</b>"
+    elif normalize_user_language(lang) != "vi":
+        line = f"• Aspect ratio: <b>{html.escape(aspect)}</b>"
+    else:
+        line = f"• Tỉ lệ khung hình: <b>{html.escape(aspect)}</b>"
+    return text.replace("• Prompt:", f"{line}\n• Prompt:", 1)
+
+def shopaikey_confirm_keyboard(job_type: str, token: str, tier: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    kind = "image" if str(job_type or "").lower() == "image" else "video"
+    tier_norm = normalize_image_tier(tier) if kind == "image" else normalize_video_tier(tier)
+    rows = [
+        [InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=f"shopai|confirm|{token}")],
+        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=f"shopai|cancel|{token}")],
+        [InlineKeyboardButton("📐 Đổi tỉ lệ" if normalize_user_language(lang) == "vi" else "📐 Change ratio", callback_data=f"create_media|{'ia' if kind == 'image' else 'va'}_{token}")],
+        [InlineKeyboardButton("🔁 Chọn gói khác" if normalize_user_language(lang) == "vi" else "🔁 Choose another tier", callback_data="create_media|quick_image" if kind == "image" else "create_media|quick_video")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi", aspect_ratio: str = "") -> str:
     payload = image_tier_payload(tier)
     cost = int(payload.get("cost") or 0)
-    return ui_text(
+    return with_aspect_line(ui_text(
         lang,
         "image.confirm.cost",
         label=html.escape(localized_image_tier_label(tier, lang)),
@@ -48175,7 +48332,7 @@ def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         credits=int(current_credits or 0),
         warranty_note=html.escape(image_tier_warranty_note(tier, lang)),
         prompt=html.escape(shopaikey_safe_prompt_preview(prompt)),
-    )
+    ), aspect_ratio, lang)
 
 def public_image_success_billing_note(deducted: int = 0, lang: str = "vi", admin_internal_free: bool = False) -> str:
     amount = int(deducted or 0)
@@ -48489,12 +48646,8 @@ def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     pricing = video_tier_pricing_payload()
     enabled_map = video_tier_enabled_map()
     rows = []
-    tier_meta = [
-        ("low", "🟢"),
-        ("standard", "🔵"),
-        ("high", "🟣"),
-    ]
-    for tier, icon in tier_meta:
+    for tier in [name for name in VIDEO_TIER_ORDER if name != "premium"]:
+        icon = VIDEO_TIER_ICONS.get(tier, "🎞")
         payload = pricing[tier]
         state = "" if enabled_map.get(tier) else ui_text(lang, "image.tier_disabled")
         rows.append([InlineKeyboardButton(
@@ -48509,7 +48662,7 @@ def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def public_video_prompt_request_text(tier: str, lang: str = "vi") -> str:
     return ui_text(lang, "video.prompt.ask", label=html.escape(localized_video_tier_label(tier, lang)))
 
-def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi", music_label: str = "") -> str:
+def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi", music_label: str = "", aspect_ratio: str = "") -> str:
     payload = video_tier_payload(tier)
     cost = int(payload.get("cost") or 0)
     text = ui_text(
@@ -48530,19 +48683,20 @@ def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
             extra = f"\n• Nhạc: <code>{html.escape(music)}</code>\n• Public video: <code>ON</code>"
         marker = "\n\nVideo AI" if "Video AI" in text else ("\n\nAI video" if "AI video" in text else "")
         text = text.replace(marker, extra + marker, 1) if marker else text + extra
-    return text
+    return with_aspect_line(text, aspect_ratio, lang)
 
-def public_video_pending_payload_from_package(tier: str, package: dict) -> dict:
+def public_video_pending_payload_from_package(tier: str, package: dict, aspect_ratio: str = "") -> dict:
     tier_norm = normalize_video_tier(tier)
     payload = video_tier_payload(tier_norm)
     raw_prompt = video_package_prompt(package)
     music_label = video_package_music_label(package)
+    aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", "video") if aspect_ratio else ""
     generation_prompt = raw_prompt
     if music_label and music_label not in {"không", "no", "无"}:
         generation_prompt = f"{raw_prompt}. Visual pacing should fit this music/mood: {music_label}. Do not generate audio; soundtrack/captions are handled separately."
     return {
         "job_type": "video",
-        "prompt": video_tier_prompt_for_generation(generation_prompt, tier_norm),
+        "prompt": video_tier_prompt_for_generation(generation_prompt, tier_norm, aspect),
         "original_prompt": raw_prompt,
         "base_cost": int(payload.get("cost") or 0),
         "from_image": str((package or {}).get("source") or "") == "image_to_video",
@@ -48555,6 +48709,7 @@ def public_video_pending_payload_from_package(tier: str, package: dict) -> dict:
         "package_id": str((package or {}).get("package_id") or "")[:80],
         "source": str((package or {}).get("source") or "")[:80],
         "music_label": music_label,
+        "aspect_ratio": aspect,
     }
 
 def public_video_provider_fail_message(amount_xu: int = 0, refund_done: bool = False, lang: str = "vi") -> str:
@@ -51099,6 +51254,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
         clear_public_video_prompt_pending(uid)
+        clear_media_aspect_pending(uid)
         clear_public_video_package_context(uid)
         if shopaikey_active_job_for_user(uid, "image"):
             return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
@@ -51111,10 +51267,132 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=public_image_tier_keyboard(lang),
         )
+    if action.startswith("ia_") or action.startswith("va_"):
+        token = action.split("_", 1)[1]
+        pending_confirm = pop_shopaikey_pending_confirmation(token, uid) or {}
+        if not pending_confirm:
+            return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+        job_type = "image" if str(pending_confirm.get("job_type") or "").lower() == "image" else "video"
+        tier = normalize_image_tier(pending_confirm.get("image_tier") or "") if job_type == "image" else normalize_video_tier(pending_confirm.get("video_tier") or "")
+        prompt = str(pending_confirm.get("original_prompt") or "").strip() or str(pending_confirm.get("prompt") or "").strip()
+        package = {}
+        if job_type == "video":
+            package = {
+                "source": str(pending_confirm.get("source") or "")[:80],
+                "source_job_id": str(pending_confirm.get("source_job_id") or "")[:80],
+                "image_url": str(pending_confirm.get("image_url") or "")[:1000],
+                "telegram_file_id": str(pending_confirm.get("telegram_file_id") or "")[:220],
+                "video_prompt": prompt,
+                "music_choice": {"label": str(pending_confirm.get("music_label") or "").strip()},
+                "package_id": str(pending_confirm.get("package_id") or "")[:80],
+            }
+        set_media_aspect_pending(uid, job_type, tier, prompt, package)
+        return await safe_edit_or_send(
+            query,
+            public_media_aspect_ratio_text(job_type, tier, prompt, lang),
+            parse_mode="HTML",
+            reply_markup=public_media_aspect_ratio_keyboard(job_type, lang),
+        )
+    if action.startswith("image_aspect_"):
+        aspect = media_aspect_ratio_from_token(action.replace("image_aspect_", "", 1), "image")
+        pending_aspect = get_media_aspect_pending(uid, "image") or {}
+        if not pending_aspect:
+            return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+        clear_media_aspect_pending(uid)
+        tier = normalize_image_tier(pending_aspect.get("tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
+        prompt = str(pending_aspect.get("prompt") or "").strip()
+        payload = image_tier_payload(tier)
+        if not payload.get("enabled"):
+            return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
+        enabled, message = shopaikey_public_generation_guard("image")
+        if not enabled:
+            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
+        if shopaikey_active_job_for_user(uid, "image"):
+            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
+        credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Image user")
+        base_cost = int(payload.get("cost") or 0)
+        final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
+        if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+            return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
+        token = set_shopaikey_pending_confirmation(uid, {
+            "job_type": "image",
+            "prompt": image_tier_prompt_for_generation(prompt, tier, aspect),
+            "original_prompt": prompt,
+            "base_cost": base_cost,
+            "from_image": False,
+            "image_tier": tier,
+            "tier_label": payload.get("label") or tier,
+            "model": payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            "retry_warranty_count": int(payload.get("retry_warranty_count") or 0),
+            "aspect_ratio": aspect,
+        })
+        return await safe_edit_or_send(
+            query,
+            public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect),
+            parse_mode="HTML",
+            reply_markup=shopaikey_confirm_keyboard("image", token, tier, lang),
+        )
+    if action.startswith("video_aspect_"):
+        aspect = media_aspect_ratio_from_token(action.replace("video_aspect_", "", 1), "video")
+        pending_aspect = get_media_aspect_pending(uid, "video") or {}
+        if not pending_aspect:
+            return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+        clear_media_aspect_pending(uid)
+        tier = normalize_video_tier(pending_aspect.get("tier") or SHOPAIKEY_VIDEO_DEFAULT_TIER)
+        prompt = str(pending_aspect.get("prompt") or "").strip()
+        payload = video_tier_payload(tier)
+        if tier == "premium" or payload.get("admin_only"):
+            return await safe_edit_or_send(query, ui_text(lang, "video.premium_message"))
+        if not payload.get("enabled"):
+            return await safe_edit_or_send(query, ui_text(lang, "video.tier_disabled_message"))
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+            return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
+        active_video_job = shopaikey_active_job_for_user(uid, "video")
+        if active_video_job:
+            return await safe_edit_or_send(
+                query,
+                public_video_active_job_text(lang),
+                reply_markup=public_video_active_job_keyboard(active_video_job, lang),
+            )
+        package = pending_aspect.get("package") or {}
+        credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Video user")
+        if package:
+            pending_payload = public_video_pending_payload_from_package(tier, package, aspect)
+            raw_prompt = str(pending_payload.get("original_prompt") or prompt)
+        else:
+            pending_payload = {
+                "job_type": "video",
+                "prompt": video_tier_prompt_for_generation(prompt, tier, aspect),
+                "original_prompt": prompt,
+                "base_cost": int(payload.get("cost") or 0),
+                "from_image": False,
+                "video_tier": tier,
+                "tier_label": payload.get("label") or tier,
+                "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+                "aspect_ratio": aspect,
+            }
+            raw_prompt = prompt
+        source_job_id = str(pending_payload.get("source_job_id") or "").strip()
+        if source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
+            return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
+        base_cost = int(pending_payload.get("base_cost") or 0)
+        final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video")
+        if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
+            return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
+        token = set_shopaikey_pending_confirmation(uid, pending_payload)
+        record_shopaikey_billing_event(uid, 0, "video_prompt_received", 0, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
+        record_shopaikey_billing_event(uid, 0, "video_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
+        return await safe_edit_or_send(
+            query,
+            public_video_confirm_text(tier, raw_prompt, int(credits or 0), lang, pending_payload.get("music_label") or "", aspect),
+            parse_mode="HTML",
+            reply_markup=shopaikey_confirm_keyboard("video", token, tier, lang),
+        )
     if action.startswith("image_tier_"):
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
         clear_public_video_prompt_pending(uid)
+        clear_media_aspect_pending(uid)
         clear_public_video_package_context(uid)
         tier = normalize_image_tier(action.replace("image_tier_", "", 1))
         payload = image_tier_payload(tier)
@@ -51132,6 +51410,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
         clear_public_video_prompt_pending(uid)
+        clear_media_aspect_pending(uid)
         clear_public_video_package_context(uid)
         active_video_job = shopaikey_active_job_for_user(uid, "video")
         if active_video_job:
@@ -51159,6 +51438,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
+        clear_media_aspect_pending(uid)
         tier = normalize_video_tier(action.replace("video_tier_", "", 1))
         payload = video_tier_payload(tier)
         if tier == "premium" or payload.get("admin_only"):
@@ -51188,23 +51468,12 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             source_job_id = str(package.get("source_job_id") or "").strip()
             if source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
                 return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
-            credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Video user")
-            pending_payload = public_video_pending_payload_from_package(tier, package)
-            base_cost = int(pending_payload.get("base_cost") or 0)
-            final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video")
-            if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
-                return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
-            token = set_shopaikey_pending_confirmation(uid, pending_payload)
-            record_shopaikey_billing_event(uid, 0, "video_package_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; source={pending_payload.get('source') or '-'}; package={pending_payload.get('package_id') or '-'}")
+            set_media_aspect_pending(uid, "video", tier, raw_prompt, package)
             return await safe_edit_or_send(
                 query,
-                public_video_confirm_text(tier, raw_prompt, int(credits or 0), lang, pending_payload.get("music_label") or ""),
+                public_media_aspect_ratio_text("video", tier, raw_prompt, lang),
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=f"shopai|confirm|{token}")],
-                    [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=f"shopai|cancel|{token}")],
-                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                ]),
+                reply_markup=public_media_aspect_ratio_keyboard("video", lang),
             )
         set_public_video_prompt_pending(uid, tier)
         return await safe_edit_or_send(query, public_video_prompt_request_text(tier, lang), parse_mode="HTML")
@@ -52514,6 +52783,18 @@ def pricing_main_lines() -> list[str]:
         f"• {payload['label']}: <b>{payload['cost']} Xu</b> — {html.escape(payload['note'])}"
         for _tier, payload in image_tiers.items()
     ]
+    video_items = [
+        (
+            f"• {payload['label']}: <b>{payload['cost']} Xu</b> — {html.escape(payload['note'])}"
+            if tier != "premium" else
+            f"• {payload['label']}: <b>admin-only / liên hệ admin</b> — {html.escape(payload['note'])}"
+        )
+        for tier, payload in video_tiers.items()
+    ]
+    combo_items = [
+        f"• {item['label']}: <b>{int(item['price_vnd']):,}đ</b> — {html.escape(item['summary'])}".replace(",", ".")
+        for item in video_combo_pricing_payload()
+    ]
     doc_items = [
         f"• Ảnh sang PDF: <b>{DOC_COSTS.get('image_to_pdf', 0)} Xu</b>",
         f"• PDF sang ảnh: <b>{DOC_COSTS.get('pdf_to_images', 0)} Xu</b>",
@@ -52546,13 +52827,15 @@ def pricing_main_lines() -> list[str]:
         f"• Trạng thái public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         "",
         "<b>D. Video AI</b>",
-        f"• {video_tiers['low']['label']}: <b>{video_tiers['low']['cost']} Xu</b> — {html.escape(video_tiers['low']['note'])}",
-        f"• {video_tiers['standard']['label']}: <b>{video_tiers['standard']['cost']} Xu</b> — {html.escape(video_tiers['standard']['note'])}",
-        f"• {video_tiers['high']['label']}: <b>{video_tiers['high']['cost']} Xu</b> — {html.escape(video_tiers['high']['note'])}",
-        f"• {video_tiers['premium']['label']}: <b>admin-only / liên hệ admin</b> — {html.escape(video_tiers['premium']['note'])}",
+        *video_items,
+        "• Tỉ lệ khung hình: 9:16, 16:9, 1:1, 4:5, 3:4. Combo TikTok khuyến nghị 9:16 nhưng không khóa cứng.",
         f"• Trạng thái public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
-        "<b>E. Workflow nội dung theo trend</b>",
+        "<b>E. Combo video</b>",
+        *combo_items,
+        "• Combo không tính điểm nâng hạng/thưởng nạp và không làm thay đổi gói nạp Xu thường.",
+        "",
+        "<b>F. Workflow nội dung theo trend</b>",
         f"• Gói nội dung theo trend: <b>{pricing['workflow_content_total_cost']} Xu</b>",
         f"• Phân tích trend: <b>{pricing['workflow_trend_analysis_cost']} Xu</b>",
         f"• Hook/script/storyboard: <b>{pricing['workflow_script_storyboard_cost']} Xu</b>",
@@ -52561,7 +52844,7 @@ def pricing_main_lines() -> list[str]:
         f"• Gợi ý chuyển động video: <b>{int(CREATIVE_MOTION_GUIDE_COST_XU or 0)} Xu</b> — đang miễn phí giai đoạn thử nghiệm." if int(CREATIVE_MOTION_GUIDE_COST_XU or 0) <= 0 else f"• Gợi ý chuyển động video: <b>{int(CREATIVE_MOTION_GUIDE_COST_XU)} Xu</b>",
         "• Gói này chưa bao gồm tạo ảnh/video thật. Ảnh/video tính riêng theo bảng giá Hình ảnh AI / Video AI.",
         "",
-        "<b>F. Dịch thuật</b>",
+        "<b>G. Dịch thuật</b>",
         "• Dịch văn bản ngắn: từ <b>5 Xu</b> / lượt thành công.",
         "• Dịch văn bản dài: từ <b>20 Xu</b>, tùy độ dài.",
         "• Dịch file: từ <b>100 Xu</b> / file.",
@@ -52571,7 +52854,7 @@ def pricing_main_lines() -> list[str]:
         "• Dịch/lồng tiếng video: từ <b>800 Xu</b> / video, admin test trước.",
         "• Giá có thể thay đổi theo độ dài, dung lượng và provider.",
         "",
-        "<b>G. Voice / TTS / STT</b>",
+        "<b>H. Voice / TTS / STT</b>",
         f"• TTS/voice ngắn: từ <b>{VOICE_BASE_COST} Xu</b>.",
         "• TTS/voice dài: từ <b>80–150 Xu</b>, tùy số ký tự/thời lượng.",
         f"• STT/bóc băng audio ngắn: từ <b>{AUDIO_MIN_COST} Xu</b>.",
@@ -52579,7 +52862,7 @@ def pricing_main_lines() -> list[str]:
         "• Thêm voice vào video: từ <b>150 Xu</b>.",
         "• Dịch voice/audio: xem nhóm Dịch thuật.",
         "",
-        "<b>H. Nhạc / SFX / Audio</b>",
+        "<b>I. Nhạc / SFX / Audio</b>",
         "• Tìm nhạc/SFX library: miễn phí hoặc không trừ Xu khi chỉ tìm/nghe thử.",
         "• Tạo prompt nhạc: miễn phí hoặc <b>5 Xu</b> nếu sau này bật tính phí.",
         "• Thêm nhạc nền vào video: từ <b>120 Xu</b>.",
@@ -52590,21 +52873,21 @@ def pricing_main_lines() -> list[str]:
         "• Tạo nhạc AI thật: từ <b>300–1.000 Xu</b>, chỉ mở khi provider/giá đã xác nhận.",
         "• Suno/Musicful/MiniMax music: admin-only/planned nếu chưa public.",
         "",
-        "<b>I. Tài liệu / PDF</b>",
+        "<b>J. Tài liệu / PDF</b>",
         *doc_items,
         "",
-        "<b>J. Gói tháng</b>",
+        "<b>K. Gói tháng</b>",
         "• Free / Starter / Creator / Pro / Business.",
         "• Gói tháng gồm hạn mức/quyền lợi + Xu xử lý/tháng.",
         "• Không phải unlimited tác vụ nặng.",
         "• Tác vụ phát sinh hoặc vượt hạn mức xem tại Bảng giá tổng này.",
         "",
-        "<b>K. Thành viên</b>",
+        "<b>L. Thành viên</b>",
         "• Hạng thành viên không làm tăng Xu gói nạp.",
         "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ đủ điều kiện.",
         "• Rank-up/top-up bonus nếu có thì chỉ theo chính sách hiện hành.",
         "",
-        "<b>L. Điều khoản Xu</b>",
+        "<b>M. Điều khoản Xu</b>",
         "• Xu là đơn vị nội bộ trong TOAN AAS.",
         "• Không rút tiền, không chuyển nhượng.",
         "• Provider lỗi/quota/timeout thì không trừ Xu hoặc hoàn Xu nếu đã trừ.",
@@ -52817,6 +53100,14 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
         f"• {localized_image_tier_label(tier, lang)}: <b>{payload['cost']} Xu</b>"
         for tier, payload in image.items()
     ]
+    video_items = [
+        (
+            f"• {localized_video_tier_label(tier, lang)}: <b>{payload['cost']} Xu</b>"
+            if tier != "premium" else
+            "• Premium: admin-only / contact admin"
+        )
+        for tier, payload in video.items()
+    ]
     if lang == "zh":
         return [
             "💳 <b>TOAN AAS 价格</b>",
@@ -52834,13 +53125,15 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
             f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
             "",
             "<b>D. AI 视频</b>",
-            f"• {video['low']['label']}: <b>{video['low']['cost']} Xu</b>",
-            f"• {video['standard']['label']}: <b>{video['standard']['cost']} Xu</b>",
-            f"• {video['high']['label']}: <b>{video['high']['cost']} Xu</b>",
-            "• Premium: admin-only / contact admin",
+            *video_items,
+            "• Aspect ratios: 9:16, 16:9, 1:1, 4:5, 3:4.",
             f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
             "",
-            "<b>E. Trend workflow / Prompt</b>",
+            "<b>E. Video combos</b>",
+            "• Combo TikTok 99k: 3 regular videos, recommended 9:16.",
+            "• Combos do not count membership rank/top-up points.",
+            "",
+            "<b>F. Trend workflow / Prompt</b>",
             f"• Content-only workflow: <b>{pricing['workflow_content_total_cost']} Xu</b>",
             f"• Video motion guide: <b>{int(CREATIVE_MOTION_GUIDE_COST_XU or 0)} Xu</b>",
             "• 真实图片/视频生成另按 AI 图片 / AI 视频价格计算。",
@@ -52864,13 +53157,15 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
         f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         "",
         "<b>D. AI Video</b>",
-        f"• {video['low']['label']}: <b>{video['low']['cost']} Xu</b>",
-        f"• {video['standard']['label']}: <b>{video['standard']['cost']} Xu</b>",
-        f"• {video['high']['label']}: <b>{video['high']['cost']} Xu</b>",
-        "• Premium: admin-only / contact admin",
+        *video_items,
+        "• Aspect ratios: 9:16, 16:9, 1:1, 4:5, 3:4.",
         f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
-        "<b>E. Trend workflow / Prompt</b>",
+        "<b>E. Video combos</b>",
+        "• Combo TikTok 99k: 3 regular videos, recommended 9:16.",
+        "• Combos do not count membership rank/top-up points.",
+        "",
+        "<b>F. Trend workflow / Prompt</b>",
         f"• Content-only workflow: <b>{pricing['workflow_content_total_cost']} Xu</b>",
         f"• Video motion guide: <b>{int(CREATIVE_MOTION_GUIDE_COST_XU or 0)} Xu</b>",
         "• Real image/video generation is charged separately by the AI Image / AI Video tables.",

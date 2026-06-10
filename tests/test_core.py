@@ -370,6 +370,8 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "IMAGE_TIER_HIGH_ENABLED=true" in env_example
     assert "SHOPAIKEY_IMAGE_DEFAULT_TIER=low" in env_example
     assert "VIDEO_TIER_LOW_ENABLED=true" in env_example
+    assert "VIDEO_TIER_BASIC_ENABLED=true" in env_example
+    assert "VIDEO_TIER_COMMON_ENABLED=true" in env_example
     assert "VIDEO_TIER_STANDARD_ENABLED=true" in env_example
     assert "VIDEO_TIER_HIGH_ENABLED=true" in env_example
     assert "VIDEO_TIER_PREMIUM_ENABLED=false" in env_example
@@ -385,6 +387,8 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "IMAGE_HIGH_COST_XU=400" in env_example
     assert "IMAGE_HIGH_WARRANTY_COST_XU=500" in env_example
     assert "VIDEO_LOW_COST_XU=200" in env_example
+    assert "VIDEO_BASIC_COST_XU=300" in env_example
+    assert "VIDEO_COMMON_COST_XU=400" in env_example
     assert "VIDEO_STANDARD_COST_XU=600" in env_example
     assert "VIDEO_HIGH_COST_XU=1200" in env_example
     assert "VIDEO_PREMIUM_COST_XU=2000" in env_example
@@ -716,11 +720,14 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     callback_source = source_between(source, "async def handle_shopaikey_public_callback", "class TranslationProviderError")
     assert "shopaikey_public_generation_guard" in image_source
     assert "shopaikey_public_generation_guard" in video_source
-    assert "set_shopaikey_pending_confirmation" in image_source
-    assert "set_shopaikey_pending_confirmation" in video_source
+    assert "set_media_aspect_pending" in image_source
+    assert "set_media_aspect_pending" in video_source
+    assert "public_media_aspect_ratio_keyboard" in image_source
+    assert "public_media_aspect_ratio_keyboard" in video_source
     assert "spend_fixed_credit_info" not in image_source
     assert "spend_fixed_credit_info" not in video_source
     assert "spend_fixed_credit_info" in callback_source
+    assert "set_shopaikey_pending_confirmation" in source_between(source, "async def handle_create_media_callback", "async def cmd_tool_test_workflow_image")
     assert "refund_shopaikey_job_if_needed" in callback_source
     assert "record_shopaikey_billing_event" in callback_source
     assert "SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT" in source
@@ -1444,11 +1451,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_LOW_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_TIER_BASIC_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_TIER_COMMON_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_STANDARD_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_HIGH_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_PREMIUM_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_PREMIUM_ADMIN_ONLY", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_DEFAULT_TIER", "low")
+    monkeypatch.setattr(bot, "VIDEO_BASIC_COST_XU", 765)
+    monkeypatch.setattr(bot, "VIDEO_COMMON_COST_XU", 876)
     monkeypatch.setattr(bot, "VIDEO_STANDARD_COST_XU", 999)
     monkeypatch.setattr(bot, "VIDEO_HIGH_COST_XU", 1111)
     monkeypatch.setattr(bot, "VIDEO_PREMIUM_COST_XU", 2222)
@@ -1465,6 +1476,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert pricing["image_tiers"]["high_warranty"]["cost"] == 999
     assert pricing["image_tiers"]["high_warranty"]["retry_warranty_count"] == 1
     assert pricing["video_tiers"]["low"]["cost"] == 654
+    assert pricing["video_tiers"]["basic"]["cost"] == 765
+    assert pricing["video_tiers"]["common"]["cost"] == 876
     assert pricing["video_tiers"]["standard"]["cost"] == 999
     assert pricing["video_tiers"]["high"]["cost"] == 1111
     assert pricing["video_tiers"]["premium"]["cost"] == 2222
@@ -1480,12 +1493,16 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.image_tier_payload("pro")["tier"] == "high"
     assert bot.image_tier_public_status_text() == "low:ON / standard:ON / standard_warranty:ON / high:ON / high_warranty:ON"
     assert bot.video_tier_cost_xu("low") == 654
+    assert bot.video_tier_cost_xu("basic") == 765
+    assert bot.video_tier_cost_xu("common") == 876
     assert bot.video_tier_cost_xu("standard") == 999
     assert bot.video_tier_cost_xu("high") == 1111
+    assert bot.video_tier_payload("starter")["tier"] == "basic"
+    assert bot.video_tier_payload("regular")["tier"] == "common"
     assert bot.video_tier_payload("vip")["tier"] == "premium"
     assert bot.video_tier_payload("premium")["admin_only"] is True
     assert bot.video_tier_payload("premium")["enabled"] is False
-    assert bot.video_tier_public_status_text() == "low:ON / standard:ON / high:ON / premium:OFF"
+    assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / standard:ON / high:ON / premium:OFF"
     tier_text = bot.public_image_tier_selection_text()
     assert "Bạn muốn tạo ảnh chất lượng nào" in tier_text
     tier_buttons = [button for row in bot.public_image_tier_keyboard().inline_keyboard for button in row]
@@ -1545,15 +1562,28 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Bạn muốn tạo video chất lượng nào" in video_tier_text
     video_tier_buttons = [button for row in bot.public_video_tier_keyboard().inline_keyboard for button in row]
     assert any(button.callback_data == "create_media|video_tier_low" for button in video_tier_buttons)
+    assert any(button.callback_data == "create_media|video_tier_basic" for button in video_tier_buttons)
+    assert any(button.callback_data == "create_media|video_tier_common" for button in video_tier_buttons)
     assert any(button.callback_data == "create_media|video_tier_standard" for button in video_tier_buttons)
     assert any(button.callback_data == "create_media|video_tier_high" for button in video_tier_buttons)
     assert any(button.callback_data == "create_media|video_tier_premium" for button in video_tier_buttons)
-    assert any("Video tiết kiệm" in button.text and "654 Xu" in button.text for button in video_tier_buttons)
+    assert any("Video Trải Nghiệm" in button.text and "654 Xu" in button.text for button in video_tier_buttons)
+    assert any("Video Cơ Bản" in button.text and "765 Xu" in button.text for button in video_tier_buttons)
+    assert any("Video Phổ Thông" in button.text and "876 Xu" in button.text for button in video_tier_buttons)
     assert any("Video premium" in button.text and "liên hệ admin" in button.text for button in video_tier_buttons)
     assert "Gửi mô tả video bạn muốn tạo" in bot.public_video_prompt_request_text("standard")
-    assert "999 Xu" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500)
-    assert "Public video" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500, music_label="piano cinematic")
-    guarded_prompt = bot.video_tier_prompt_for_generation("phone screen product demo", "low")
+    assert "999 Xu" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500, aspect_ratio="9:16")
+    assert "Tỉ lệ khung hình: <b>9:16</b>" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500, aspect_ratio="9:16")
+    assert "Public video" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500, music_label="piano cinematic", aspect_ratio="4:5")
+    assert bot.media_aspect_ratio_options("video") == ("9:16", "16:9", "1:1", "4:5", "3:4")
+    assert "3:2" in bot.media_aspect_ratio_options("image")
+    aspect_buttons = [button.callback_data for row in bot.public_media_aspect_ratio_keyboard("video").inline_keyboard for button in row]
+    assert "create_media|video_aspect_9x16" in aspect_buttons
+    assert "create_media|video_aspect_4x5" in aspect_buttons
+    image_aspect_buttons = [button.callback_data for row in bot.public_media_aspect_ratio_keyboard("image").inline_keyboard for button in row]
+    assert "create_media|image_aspect_3x2" in image_aspect_buttons
+    guarded_prompt = bot.video_tier_prompt_for_generation("phone screen product demo", "low", "9:16")
+    assert "aspect ratio 9:16" in guarded_prompt
     assert "no text" in guarded_prompt.lower()
     assert "no caption" in guarded_prompt.lower()
     assert "no watermark" in guarded_prompt.lower()
@@ -1564,29 +1594,37 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "music_choice": {"type": "library", "label": "piano cinematic"},
     })
     assert bot.get_public_video_package_context("u_video")["video_prompt"] == "cinematic product demo"
-    pending_payload = bot.public_video_pending_payload_from_package("low", package)
+    pending_payload = bot.public_video_pending_payload_from_package("low", package, "4:5")
     assert pending_payload["job_type"] == "video"
     assert pending_payload["video_tier"] == "low"
     assert pending_payload["base_cost"] == bot.video_tier_cost_xu("low")
+    assert pending_payload["aspect_ratio"] == "4:5"
     assert "piano cinematic" in pending_payload["prompt"]
+    assert "aspect ratio 4:5" in pending_payload["prompt"]
     assert bot.clear_public_video_package_context("u_video") is True
     assert "321 Xu" not in bot.create_media_pricing_text()
     assert "654 Xu" not in bot.create_media_pricing_text()
     pricing_text = "\n".join(bot.pricing_main_lines())
     assert "C. Hình ảnh AI" in pricing_text
     assert "D. Video AI" in pricing_text
-    assert "E. Workflow nội dung theo trend" in pricing_text
-    assert "F. Dịch thuật" in pricing_text
-    assert "G. Voice / TTS / STT" in pricing_text
-    assert "H. Nhạc / SFX / Audio" in pricing_text
-    assert "I. Tài liệu / PDF" in pricing_text
-    assert "J. Gói tháng" in pricing_text
-    assert "K. Thành viên" in pricing_text
-    assert "L. Điều khoản Xu" in pricing_text
+    assert "E. Combo video" in pricing_text
+    assert "F. Workflow nội dung theo trend" in pricing_text
+    assert "G. Dịch thuật" in pricing_text
+    assert "H. Voice / TTS / STT" in pricing_text
+    assert "I. Nhạc / SFX / Audio" in pricing_text
+    assert "J. Tài liệu / PDF" in pricing_text
+    assert "K. Gói tháng" in pricing_text
+    assert "L. Thành viên" in pricing_text
+    assert "M. Điều khoản Xu" in pricing_text
     assert "Ảnh tiết kiệm: <b>321 Xu</b>" in pricing_text
     assert "Ảnh tiêu chuẩn: <b>777 Xu</b>" in pricing_text
-    assert "Video tiết kiệm: <b>654 Xu</b>" in pricing_text
+    assert "Video Trải Nghiệm: <b>654 Xu</b>" in pricing_text
+    assert "Video Cơ Bản: <b>765 Xu</b>" in pricing_text
+    assert "Video Phổ Thông: <b>876 Xu</b>" in pricing_text
     assert "Video premium/admin-only: <b>admin-only / liên hệ admin</b>" in pricing_text
+    assert "Combo TikTok 99k" in pricing_text
+    assert "khuyến nghị 9:16" in pricing_text
+    assert "không tính điểm nâng hạng/thưởng nạp" in pricing_text
     assert "Gợi ý chuyển động video" in pricing_text
     assert "đang miễn phí giai đoạn thử nghiệm" in pricing_text
     assert "Gói nội dung theo trend: <b>24 Xu</b>" in pricing_text
@@ -2637,9 +2675,11 @@ def test_customer_guide_is_public_and_policy_aligned():
     assert "Ảnh tiêu chuẩn" in guide_image
     assert "bảo hành" in guide_image.lower()
     assert "không gọi api video và không trừ xu" in guide_video.lower()
-    assert "Video tiết kiệm: 200 Xu" in guide_video
-    assert "Video tiêu chuẩn: 600 Xu" in guide_video
-    assert "Video chất lượng cao: 1200 Xu" in guide_video
+    assert "Video Trải Nghiệm: 200 Xu" in guide_video
+    assert "Video Cơ Bản: 300 Xu" in guide_video
+    assert "Video Phổ Thông: 400 Xu" in guide_video
+    assert "Video Tiêu Chuẩn: 600 Xu" in guide_video
+    assert "Video Cao Cấp: 1200 Xu" in guide_video
     assert "3 gợi ý" in guide_step.lower()
     assert "chọn cách lấy trend" in guide_step.lower()
     assert "nhạc là tùy chọn" in guide_music.lower()
@@ -2669,6 +2709,12 @@ def test_customer_guide_is_public_and_policy_aligned():
     assert any(button.text == "🚀 Bắt đầu nhanh" for row in vi_guide_keyboard.inline_keyboard for button in row)
     sales_payload = bot.sales_readiness_payload()
     assert sales_payload["commands"]["guide_menu"] is True
+    assert "basic" in sales_payload["video_tier_names"]
+    assert "common" in sales_payload["video_tier_names"]
+    assert "9:16" in sales_payload["video_aspect_ratios"]
+    assert "3:2" in sales_payload["image_aspect_ratios"]
+    assert len(sales_payload["video_combos"]) >= 5
+    assert sales_payload["combo_rank_points_excluded"] is True
     assert "Guide menu: <code>{'ON' if commands.get('guide_menu') else 'OFF'}</code>" in bot_source_text()
     assert bot.package_launch_bonus_xu(50000) == 30
     assert bot.package_launch_bonus_xu(100000) == 50
