@@ -1440,14 +1440,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Có lỗi nhỏ khi cập nhật màn hình" not in safe_edit_source
     assert "message.reply_text" in safe_edit_source
     assert 'InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
-    assert 'InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")' in source
-    assert 'InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image")' in source
+    assert 'InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")' in source
+    assert 'InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image")' in source
     assert 'InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")' in source
     assert 'InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start")' in source
     assert 'InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")' in source
     assert 'InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
     video_keyboard_source = source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
-    assert 'ui_text(lang, "image.quick_button")' in source
+    assert 'InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")' in source
     assert 'ui_text(lang, "video.guided_flow")' not in video_keyboard_source
     assert 'ui_text(lang, "video.quick_admin_public")' in video_keyboard_source
     assert 'ui_text(lang, "video.trend_short")' in video_keyboard_source
@@ -1674,10 +1674,19 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.media_aspect_ratio_options("video") == ("9:16", "16:9", "1:1", "4:5", "3:4")
     assert "3:2" in bot.media_aspect_ratio_options("image")
     aspect_buttons = [button.callback_data for row in bot.public_media_aspect_ratio_keyboard("video").inline_keyboard for button in row]
+    aspect_labels = [button.text for row in bot.public_media_aspect_ratio_keyboard("video").inline_keyboard for button in row]
     assert "create_media|video_aspect_9x16" in aspect_buttons
     assert "create_media|video_aspect_4x5" in aspect_buttons
+    assert "📱 9:16 — TikTok/Reels/Shorts" in aspect_labels
+    assert "📺 16:9 — YouTube ngang" in aspect_labels
+    assert "⬛ 1:1 — Instagram/Facebook post" in aspect_labels
+    assert "🖼 4:5 — Ads/Feed dọc" in aspect_labels
+    assert "📷 3:4 — Chân dung/Sản phẩm" in aspect_labels
     image_aspect_buttons = [button.callback_data for row in bot.public_media_aspect_ratio_keyboard("image").inline_keyboard for button in row]
+    image_aspect_labels = [button.text for row in bot.public_media_aspect_ratio_keyboard("image").inline_keyboard for button in row]
     assert "create_media|image_aspect_3x2" in image_aspect_buttons
+    assert "🧾 3:2 — Ảnh ngang sản phẩm" in image_aspect_labels
+    assert "🖥 4:3 — Slide/Màn hình cũ" in image_aspect_labels
     guarded_prompt = bot.video_tier_prompt_for_generation("phone screen product demo", "low", "9:16")
     assert "aspect ratio 9:16" in guarded_prompt
     assert "no text" in guarded_prompt.lower()
@@ -1729,7 +1738,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Video Cơ Bản: <b>765 Xu</b>" in video_price_text
     assert "Video Phổ Thông: <b>876 Xu</b>" in video_price_text
     assert "Video premium/admin-only: <b>admin-only / liên hệ admin</b>" in video_price_text
-    assert "Combo TikTok 99k" in combo_price_text
+    assert "Combo Ưu Đãi TikTok" in combo_price_text
     assert "khuyến nghị 9:16" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
     xu_text = "\n".join(bot.pricing_xu_lines())
@@ -1746,9 +1755,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🎨 Media Creator" not in start_labels
     assert "🖼 Tạo ảnh AI" in start_labels
     assert "🎬 Tạo video AI" in start_labels
-    assert "🔥 Video theo trend" in start_labels
+    assert "🔥 Video theo trend" not in start_labels
+    assert "📝 Ghi chú / Ý tưởng" in start_labels
+    assert "🎙 Voice / Nhạc" in start_labels
     assert "🎞 Video" not in start_labels
-    assert "👨‍💼 Liên hệ admin" in start_labels
+    assert "👨‍💼 Hỗ trợ" in start_labels
     assert "💰 Nạp Xu / Bảng giá" in start_labels
     assert "💬 Góp ý / Báo lỗi" in start_labels
     for keyboard in [
@@ -1757,28 +1768,28 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         bot.localized_main_menu_keyboard(False, "en"),
         bot.localized_main_menu_keyboard(False, "zh"),
     ]:
-        voice_rows = [row for row in keyboard.inline_keyboard if any(button.callback_data == "menu|main_audio" for button in row)]
-        assert not voice_rows
+        voice_rows = [row for row in keyboard.inline_keyboard if any(button.callback_data == "menu|main_music" for button in row)]
+        assert voice_rows
     image_labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
-    assert "🖼 Tạo ảnh AI nhanh" in image_labels
+    assert "🖼 Tạo ảnh nhanh" in image_labels
     assert "💳 Xem bảng giá" not in image_labels
     assert "💰 Xem giá" not in image_labels
     assert "📞 Liên hệ admin" not in image_labels
     video_buttons = [button for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
-    assert any(button.text == "🎞 Tạo video nhanh" and button.callback_data == "create_media|quick_video" for button in video_buttons)
+    assert any(button.text == "🎬 Tạo video nhanh" and button.callback_data == "create_media|quick_video" for button in video_buttons)
     assert not any(button.text == "✨ Làm theo từng bước" for button in video_buttons)
     assert any(button.text == "🔥 Video theo trend" and button.callback_data == "trendg|start" for button in video_buttons)
     video_labels = [button.text for button in video_buttons]
     assert video_labels == [
-        "🎞 Tạo video nhanh",
-        "🖼➡️🎞 Tạo video từ ảnh",
+        "🎬 Tạo video nhanh",
+        "🖼➡️🎬 Tạo video từ ảnh",
         "🔥 Video theo trend",
         "🧠 Concept quảng cáo",
         "🎥 Gợi ý chuyển động / prompt video",
         "🔙 Quay lại",
         "🏠 Menu chính",
     ]
-    assert "🖼➡️🎞 Tạo video từ ảnh" in video_labels
+    assert "🖼➡️🎬 Tạo video từ ảnh" in video_labels
     assert "✍️ Tạo prompt video" not in video_labels
     assert "💳 Xem bảng giá" not in video_labels
     assert "💰 Xem giá" not in video_labels
@@ -2109,11 +2120,11 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     profile_text_source = source_between(source, "def menu_text_main_profile", "def main_profile_keyboard")
     assert "🎁 <b>Link giới thiệu của bạn</b>" not in profile_text_source
     assert "referral_link_for_user(user_id" not in profile_text_source
-    assert "account.ref_hint" in profile_text_source
+    assert "Bấm nút bên dưới để xem link giới thiệu, quyền lợi và lịch sử" in profile_text_source
     assert "https://t.me/" not in profile_text_source
     profile_buttons = [button.text for row in bot.main_profile_keyboard("vi").inline_keyboard for button in row]
-    assert "🎁 Link giới thiệu của tôi" in profile_buttons
-    assert "📋 Cách nhận thưởng giới thiệu" in profile_buttons
+    assert "🎁 Link giới thiệu" in profile_buttons
+    assert "📋 Cách nhận thưởng" in profile_buttons
     assert "👥 Người đã giới thiệu" in profile_buttons
     assert "Ghi nhận giới thiệu trước" in bot.referral_account_link_text("123456", "toanaasbot")
     assert "https://t.me/toanaasbot?start=ref_123456" in bot.referral_account_link_text("123456", "toanaasbot")

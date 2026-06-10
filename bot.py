@@ -28762,6 +28762,29 @@ def media_aspect_ratio_token(aspect_ratio: str = "") -> str:
 def media_aspect_ratio_from_token(token: str = "", kind: str = "video") -> str:
     return normalize_media_aspect_ratio(token, "9:16", kind)
 
+def media_aspect_ratio_label(aspect_ratio: str = "", kind: str = "video", lang: str = "vi") -> str:
+    aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", kind)
+    is_vi = normalize_user_language(lang) == "vi"
+    labels_vi = {
+        "9:16": "📱 9:16 — TikTok/Reels/Shorts",
+        "16:9": "📺 16:9 — YouTube ngang",
+        "1:1": "⬛ 1:1 — Instagram/Facebook post",
+        "4:5": "🖼 4:5 — Ads/Feed dọc",
+        "3:4": "📷 3:4 — Chân dung/Sản phẩm",
+        "3:2": "🧾 3:2 — Ảnh ngang sản phẩm",
+        "4:3": "🖥 4:3 — Slide/Màn hình cũ",
+    }
+    labels_en = {
+        "9:16": "📱 9:16 — TikTok/Reels/Shorts",
+        "16:9": "📺 16:9 — YouTube landscape",
+        "1:1": "⬛ 1:1 — Instagram/Facebook post",
+        "4:5": "🖼 4:5 — Ads/vertical feed",
+        "3:4": "📷 3:4 — Portrait/product",
+        "3:2": "🧾 3:2 — Product landscape",
+        "4:3": "🖥 4:3 — Slide/classic screen",
+    }
+    return (labels_vi if is_vi else labels_en).get(aspect, f"📐 {aspect}")
+
 def media_aspect_instruction(aspect_ratio: str = "", kind: str = "video") -> str:
     aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", kind)
     return f"Aspect ratio {aspect}."
@@ -28920,7 +28943,8 @@ def video_combo_pricing_payload() -> list[dict]:
     return [
         {
             "code": "tiktok_99k",
-            "label": "Combo TikTok 99k",
+            "label": "🎁 Combo Ưu Đãi TikTok",
+            "display_price": "99k",
             "price_vnd": 99000,
             "summary": "3 video Phổ Thông, khuyến nghị 9:16.",
             "recommended_aspect": "9:16",
@@ -28928,7 +28952,8 @@ def video_combo_pricing_payload() -> list[dict]:
         },
         {
             "code": "basic_199k",
-            "label": "Combo Cơ Bản 199k",
+            "label": "📦 Combo Cơ Bản",
+            "display_price": "199k",
             "price_vnd": 199000,
             "summary": "Gói thử nội dung/video ngắn cơ bản.",
             "recommended_aspect": "9:16",
@@ -28936,7 +28961,8 @@ def video_combo_pricing_payload() -> list[dict]:
         },
         {
             "code": "standard_299k",
-            "label": "Combo Tiêu Chuẩn 299k",
+            "label": "⭐ Combo Tiêu Chuẩn",
+            "display_price": "299k",
             "price_vnd": 299000,
             "summary": "Gói đều hơn cho nội dung bán hàng/review.",
             "recommended_aspect": "9:16",
@@ -28944,7 +28970,8 @@ def video_combo_pricing_payload() -> list[dict]:
         },
         {
             "code": "steady_499k",
-            "label": "Combo Đăng Đều 499k",
+            "label": "📅 Combo Đăng Đều",
+            "display_price": "499k",
             "price_vnd": 499000,
             "summary": "Phù hợp lịch đăng nhiều nội dung trong tuần.",
             "recommended_aspect": "9:16",
@@ -28952,7 +28979,8 @@ def video_combo_pricing_payload() -> list[dict]:
         },
         {
             "code": "product_ads_699k",
-            "label": "Combo Quảng Cáo Sản Phẩm 699k",
+            "label": "🚀 Combo Quảng Cáo Sản Phẩm",
+            "display_price": "699k",
             "price_vnd": 699000,
             "summary": "Ưu tiên concept/storyboard/prompt/video cho sản phẩm.",
             "recommended_aspect": "9:16",
@@ -33033,15 +33061,16 @@ def admin_internal_command(handler):
 
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("🎵 Nhạc / âm thanh", callback_data="menu|main_music")],
+        [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
+        [InlineKeyboardButton("📝 Ghi chú / Ý tưởng", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
         [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
-        [InlineKeyboardButton("👤 Tài khoản của tôi", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
+        [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
         [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
+        rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
+    else:
+        rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
     return InlineKeyboardMarkup(rows)
 
 def language_choice_text() -> str:
@@ -33078,38 +33107,41 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         rows = [
-            [InlineKeyboardButton("🖼 AI 图片", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
-            [InlineKeyboardButton("🔥 Trend 视频", callback_data="trendg|start"), InlineKeyboardButton("🎵 音乐 / 音效", callback_data="menu|main_music")],
+            [InlineKeyboardButton("🖼 AI 图片", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
+            [InlineKeyboardButton("📝 笔记 / 点子", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 语音 / 音乐", callback_data="menu|main_music")],
             [InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
             [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")],
         ]
         if is_admin:
-            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
+            rows.append([InlineKeyboardButton("🌍 切换语言", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
+        else:
+            rows.append([InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")])
         return InlineKeyboardMarkup(rows)
     if lang == "vi":
         rows = [
-            [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-            [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("🎵 Nhạc / âm thanh", callback_data="menu|main_music")],
+            [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
+            [InlineKeyboardButton("📝 Ghi chú / Ý tưởng", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
             [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
-            [InlineKeyboardButton("👤 Tài khoản của tôi", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
+            [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
             [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
         ]
         if is_admin:
-            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
+            rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
+        else:
+            rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
         return InlineKeyboardMarkup(rows)
     rows = [
-        [InlineKeyboardButton("🖼 AI Image", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🔥 Trend Video", callback_data="trendg|start"), InlineKeyboardButton("🎵 Music / Sound", callback_data="menu|main_music")],
+        [InlineKeyboardButton("🖼 AI Image", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton("📝 Notes / Ideas", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Music", callback_data="menu|main_music")],
         [InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
         [InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
         [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
+        rows.append([InlineKeyboardButton("🌍 Change language", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
+    else:
+        rows.append([InlineKeyboardButton("🌍 Change language", callback_data="back_lang")])
     return InlineKeyboardMarkup(rows)
 
 def localized_start_menu_text(user_id, lang: str) -> str:
@@ -33254,6 +33286,16 @@ def menu_parent_action(section: str = "main") -> str:
 
 def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
+    if lang == "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎬 Tạo video nhanh", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🖼➡️🎬 Tạo video từ ảnh", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start")],
+            [InlineKeyboardButton("🧠 Concept quảng cáo", callback_data="adconcept|start")],
+            [InlineKeyboardButton("🎥 Gợi ý chuyển động / prompt video", callback_data="motion|start")],
+            [InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main")],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(ui_text(lang, "video.quick_admin_public"), callback_data="create_media|quick_video")],
         [InlineKeyboardButton(ui_text(lang, "video.image_to_video"), callback_data="menu|hint_image_to_video_pack")],
@@ -33303,12 +33345,24 @@ def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
+    if lang != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Quick image", callback_data="create_media|quick_image")],
+            [InlineKeyboardButton("✍️ Image prompt", callback_data="menu|hint_image_tools")],
+            [InlineKeyboardButton("🧩 Edit image", callback_data="menu|hint_image_tools")],
+            [InlineKeyboardButton("📐 Upscale / resize", callback_data="menu|hint_image_tools")],
+            [InlineKeyboardButton("🎬 Image to video", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("🔙 Back", callback_data="menu|main")],
+            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "image.quick_button"), callback_data="create_media|quick_image")],
-        [InlineKeyboardButton(ui_text(lang, "image.prompt_button"), callback_data="menu|hint_image_tools")],
-        [InlineKeyboardButton(ui_text(lang, "image.edit_button"), callback_data="menu|hint_image_tools")],
-        [InlineKeyboardButton(ui_text(lang, "image.upscale_button"), callback_data="menu|hint_image_tools")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
+        [InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")],
+        [InlineKeyboardButton("✍️ Tạo prompt ảnh", callback_data="menu|hint_image_tools")],
+        [InlineKeyboardButton("🧩 Sửa ảnh / edit ảnh", callback_data="menu|hint_image_tools")],
+        [InlineKeyboardButton("📐 Nâng cấp / đổi kích thước", callback_data="menu|hint_image_tools")],
+        [InlineKeyboardButton("🎬 Tạo video từ ảnh", callback_data="menu|hint_image_to_video_pack")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def main_audio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -33850,18 +33904,8 @@ def menu_text_main_docs() -> str:
 def menu_text_main_image() -> str:
     return (
         "🖼 <b>Hình ảnh TOAN AAS</b>\n\n"
-        "Bạn muốn làm gì?\n\n"
-        "• Tạo ảnh AI nhanh nếu admin đã mở public hoặc chạy smoke test nội bộ.\n"
-        "• Tạo prompt ảnh, sửa ảnh, tách nền, nâng cấp/đổi kích thước ảnh nếu công cụ đã bật.\n"
-        "• Chuẩn bị ảnh cho video hoặc nội dung đăng bài.\n\n"
-        "Public image hiện vẫn được kiểm soát bằng cấu hình an toàn. Nếu chưa mở, bot không gọi API và không trừ Xu.\n\n"
-        "<b>Lệnh nhanh:</b>\n"
-        "• <code>/image_tools</code> — mở công cụ ảnh\n"
-        "• <code>/image_prompt</code> — tạo prompt ảnh\n"
-        "• <code>/image_to_video_pack</code> — tạo prompt video từ ý tưởng ảnh\n"
-        "• <code>/ai_image</code> — tạo ảnh AI nếu admin đã bật\n"
-        "• <code>/ai_image_edit</code> — sửa ảnh AI nếu admin đã bật\n\n"
-        "Lưu ý: công cụ tốn chi phí vẫn admin-first nếu chưa public. Không trừ Xu nếu công cụ lỗi."
+        "Chọn tác vụ bằng nút bên dưới.\n"
+        "Các bước tạo thật đều có guard, xác nhận trước khi trừ Xu và hoàn Xu nếu provider lỗi theo policy."
     )
 
 def menu_text_main_audio() -> str:
@@ -33899,34 +33943,12 @@ def menu_text_main_audio() -> str:
 
 def menu_text_main_music() -> str:
     return (
-        "🎵 <b>NHẠC AI / KHO NHẠC TOAN AAS</b>\n\n"
-        "Dùng để tìm nhạc nền, hiệu ứng âm thanh, tạo prompt nhạc và chuẩn bị âm thanh cho video.\n\n"
-        "<b>Bạn có thể làm gì?</b>\n\n"
-        "🎼 <b>1. Tạo prompt nhạc nền</b>\n"
-        "<code>/music_prompt &lt;mô tả video&gt;</code>\n"
-        "Ví dụ: <code>/music_prompt video review máy xay sinh tố mini vui tươi 30 giây</code>\n\n"
-        "🎧 <b>2. Tìm nhạc nền</b>\n"
-        "<code>/music_library &lt;từ khóa&gt;</code>\n"
-        "Ví dụ: <code>/music_library upbeat product review</code>\n\n"
-        "🔊 <b>3. Tìm hiệu ứng âm thanh</b>\n"
-        "<code>/sfx_library &lt;từ khóa&gt;</code>\n"
-        "Ví dụ: <code>/sfx_library whoosh transition</code>\n\n"
-        "🖼 <b>4. Tìm ảnh/video public</b>\n"
-        "<code>/media_library &lt;từ khóa&gt;</code>\n"
-        "Ví dụ: <code>/media_library modern kitchen blender</code>\n\n"
-        "▶️ <b>5. Nghe thử</b>\n"
-        "<code>/play_music 1</code>\n"
-        "<code>/play_sfx 1</code>\n\n"
-        "✅ <b>6. Chọn nhạc/SFX</b>\n"
-        "<code>/select_music 1</code>\n"
-        "<code>/select_sfx 1</code>\n\n"
-        "🎬 <b>7. Ghép nhạc/voice vào video</b>\n"
-        "<code>/add_music</code> — admin test\n"
-        "<code>/add_voice_to_video</code> — admin test\n"
-        "<code>/image_to_music_video</code> — admin test\n\n"
-        "📜 <b>8. Chính sách bản quyền</b>\n"
-        "<code>/music_policy</code>\n\n"
-        "Lưu ý: nhạc/kho public có license riêng. Kiểm tra quyền thương mại trước khi đăng quảng cáo/kiếm tiền."
+        "🎙 <b>VOICE / NHẠC TOAN AAS</b>\n\n"
+        "<b>A. Voice / TTS / STT</b>\n"
+        "Tạo voice từ văn bản, chọn giọng, bóc băng audio và chuẩn bị voice cho video.\n\n"
+        "<b>B. Music / SFX / Media</b>\n"
+        "Tạo prompt nhạc, tìm nhạc nền, SFX, media public và ghép nhạc vào video.\n\n"
+        "Chọn tác vụ bằng nút bên dưới. Tác vụ admin-test sẽ báo rõ trạng thái và không trừ Xu nếu chưa mở public."
     )
 
 def menu_text_translate(other: bool = False) -> str:
@@ -33991,12 +34013,15 @@ def menu_text_main_quick() -> str:
 
 def menu_text_main_topup() -> str:
     return (
-        "💳 <b>NẠP XU DỊCH VỤ</b>\n\n"
-        "Chọn mệnh giá bên dưới. Bot sẽ mở QR PayOS động nếu cổng tự động hoạt động, "
-        "hoặc hướng dẫn nạp thủ công khi cần.\n\n"
-        "Mệnh giá nạp Xu tách riêng với combo/gói tháng. Combo không cộng điểm nâng hạng/thưởng nạp "
-        "và không quy đổi toàn bộ thành Xu tự do.\n\n"
-        "Không cần gửi mật khẩu, không cần gửi thông tin thẻ. Xu được quản lý theo ID Telegram."
+        "💳 <b>Nạp Xu</b>\n\n"
+        "Chọn số tiền muốn nạp. Bot sẽ tạo QR thanh toán tự động nếu PayOS hoạt động.\n\n"
+        "Quy đổi:\n"
+        "10.000đ = 100 Xu\n"
+        "20.000đ = 200 Xu\n"
+        "50.000đ = 500 Xu\n"
+        "100.000đ = 1.000 Xu\n"
+        "200.000đ = 2.000 Xu\n"
+        "500.000đ = 5.000 Xu"
     )
 
 def menu_text_main_profile(user_id) -> str:
@@ -34007,22 +34032,29 @@ def menu_text_main_profile(user_id) -> str:
     return (
         "👤 <b>TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{html.escape(str(user_id))}</code>\n"
-        f"• 🪪 Hạng: <b>{html.escape(get_role_badge(user_id))}</b>\n"
+        f"• Hạng: <b>{html.escape(get_role_badge(user_id))}</b>\n"
         f"• Số dư: <b>{html.escape(balance)}</b>\n"
-        f"• {user_package_account_short_text(user_id)}\n\n"
-        f"{ui_text('vi', 'account.ref_hint')}\n"
-        "Dùng các nút bên dưới để nạp Xu, xem combo/gói, xem bảng giá, xem link giới thiệu hoặc liên hệ hỗ trợ."
+        f"• Combo/gói: <b>{html.escape(user_package_account_short_text(user_id).replace('🎁 Gói/combo: ', ''))}</b>\n\n"
+        "Bấm nút bên dưới để xem link giới thiệu, quyền lợi và lịch sử."
     )
 
 def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Nạp Xu" if normalize_user_language(lang) == "vi" else "💰 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("💳 Bảng giá" if normalize_user_language(lang) == "vi" else "💳 Pricing", callback_data="pricing|main")],
-        [InlineKeyboardButton("🎁 Combo của tôi" if normalize_user_language(lang) == "vi" else "🎁 My packages", callback_data="menu|profile_packages")],
-        [InlineKeyboardButton("📚 Hướng dẫn Xu" if normalize_user_language(lang) == "vi" else "📚 Xu guide", callback_data="menu|guide_credits"), InlineKeyboardButton("👨‍💼 Hỗ trợ" if normalize_user_language(lang) == "vi" else "👨‍💼 Support", callback_data="menu|support")],
-        [InlineKeyboardButton(ui_text(lang, "account.ref_link_button"), callback_data="menu|profile_ref_link")],
-        [InlineKeyboardButton(ui_text(lang, "account.ref_policy_button"), callback_data="menu|profile_ref_policy")],
-        [InlineKeyboardButton(ui_text(lang, "account.ref_stats_button"), callback_data="menu|profile_ref_stats")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
+        [InlineKeyboardButton("💰 Nạp Xu" if is_vi else "💰 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("💳 Bảng giá" if is_vi else "💳 Pricing", callback_data="pricing|main")],
+        [InlineKeyboardButton("🎁 Combo của tôi" if is_vi else "🎁 My packages", callback_data="menu|profile_packages"), InlineKeyboardButton("👑 Thành viên" if is_vi else "👑 Membership", callback_data="pricing|member")],
+        [InlineKeyboardButton("📚 Hướng dẫn Xu" if is_vi else "📚 Xu guide", callback_data="menu|guide_credits"), InlineKeyboardButton("👨‍💼 Hỗ trợ" if is_vi else "👨‍💼 Support", callback_data="menu|support")],
+        [InlineKeyboardButton("🎁 Link giới thiệu" if is_vi else ui_text(lang, "account.ref_link_button"), callback_data="menu|profile_ref_link"), InlineKeyboardButton("👥 Người đã giới thiệu" if is_vi else ui_text(lang, "account.ref_stats_button"), callback_data="menu|profile_ref_stats")],
+        [InlineKeyboardButton("📋 Cách nhận thưởng" if is_vi else ui_text(lang, "account.ref_policy_button"), callback_data="menu|profile_ref_policy"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def profile_child_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔙 Quay lại Tài khoản" if is_vi else "🔙 Back to account", callback_data="menu|main_profile"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ]
     ])
 
 def referral_account_link_text(user_id, bot_username: str = "", lang: str = "vi") -> str:
@@ -34354,13 +34386,13 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "main_profile":
         return menu_text_main_profile_i18n(user_id or "__customer__", lang), main_profile_keyboard(lang)
     if action == "profile_packages":
-        return user_package_summary_text(user_id or "__customer__"), main_profile_keyboard(lang)
+        return user_package_summary_text(user_id or "__customer__"), profile_child_keyboard(lang)
     if action == "profile_ref_link":
-        return referral_account_link_text(user_id or "__customer__", BOT_USERNAME, lang), main_profile_keyboard(lang)
+        return referral_account_link_text(user_id or "__customer__", BOT_USERNAME, lang), profile_child_keyboard(lang)
     if action == "profile_ref_policy":
-        return referral_account_policy_text(user_id or "__customer__"), main_profile_keyboard(lang)
+        return referral_account_policy_text(user_id or "__customer__"), profile_child_keyboard(lang)
     if action == "profile_ref_stats":
-        return referral_account_stats_text(user_id or "__customer__"), main_profile_keyboard(lang)
+        return referral_account_stats_text(user_id or "__customer__"), profile_child_keyboard(lang)
     if action == "main_guide":
         return menu_text_main_guide_i18n(lang), main_guide_keyboard(lang)
     if action == "guide":
@@ -39481,32 +39513,58 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = music_ui_lang(lang=lang)
     if lang == "zh":
         labels = {
+            "voice": "🎙 生成语音",
+            "voice_pick": "🗣 选择声音",
+            "stt": "🎧 转文字/STT",
+            "voice_video": "🎬 添加语音",
             "prompt": "🎼 音乐提示词",
             "music": "🎧 音乐库",
             "sfx": "🔊 音效",
             "media": "🖼 媒体库",
+            "add_music": "🎬 添加音乐",
             "policy": "📜 音乐政策",
+            "back": "🔙 返回",
             "main": "🏠 主菜单",
         }
     elif lang == "en":
         labels = {
+            "voice": "🎙 Create voice",
+            "voice_pick": "🗣 Choose voice",
+            "stt": "🎧 STT / Transcribe",
+            "voice_video": "🎬 Add voice",
             "prompt": "🎼 Music prompt",
             "music": "🎧 Music library",
             "sfx": "🔊 SFX",
             "media": "🖼 Media library",
+            "add_music": "🎬 Add music",
             "policy": "📜 Music policy",
+            "back": "🔙 Back",
             "main": "🏠 Main menu",
         }
     else:
         labels = {
+            "voice": "🎙 Tạo voice",
+            "voice_pick": "🗣 Chọn giọng",
+            "stt": "🎧 STT / Bóc băng",
+            "voice_video": "🎬 Ghép voice",
             "prompt": "🎼 Tạo prompt nhạc",
             "music": "🎧 Kho nhạc",
             "sfx": "🔊 SFX",
             "media": "🖼 Kho media",
-            "policy": "📜 Chính sách nhạc",
+            "add_music": "🎬 Ghép nhạc",
+            "policy": "📜 Chính sách",
+            "back": "🔙 Quay lại",
             "main": "🏠 Menu chính",
         }
     return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(labels["voice"], callback_data="music_quick|voice"),
+            InlineKeyboardButton(labels["voice_pick"], callback_data="music_quick|voice_pick"),
+        ],
+        [
+            InlineKeyboardButton(labels["stt"], callback_data="music_quick|stt"),
+            InlineKeyboardButton(labels["voice_video"], callback_data="music_quick|voice_video"),
+        ],
         [
             InlineKeyboardButton(labels["prompt"], callback_data="music_quick|prompt"),
             InlineKeyboardButton(labels["music"], callback_data="music_quick|music"),
@@ -39516,7 +39574,11 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(labels["media"], callback_data="music_quick|media"),
         ],
         [
+            InlineKeyboardButton(labels["add_music"], callback_data="music_quick|add_music"),
             InlineKeyboardButton(labels["policy"], callback_data="music_quick|policy"),
+        ],
+        [
+            InlineKeyboardButton(labels["back"], callback_data="menu|main"),
             InlineKeyboardButton(labels["main"], callback_data="menu|main"),
         ],
     ])
@@ -39752,6 +39814,43 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "prompt":
         await query.answer()
         return await query.message.reply_text(music_prompt_guide_text(lang), parse_mode="HTML")
+    if action == "voice":
+        await query.answer()
+        text = (
+            "🎙 <b>Tạo voice từ văn bản</b>\n\n"
+            "Tính năng voice/TTS đang được kiểm soát theo provider và quota. Nếu chưa mở public, bot sẽ báo admin test và không trừ Xu.\n\n"
+            "Bạn có thể nhập nội dung cần đọc vào chat; nếu bot phân loại là voice, hệ thống sẽ hiển thị lựa chọn provider."
+            if lang == "vi" else
+            "🎙 <b>Create voice from text</b>\n\nTTS is guarded by provider/quota status. If it is not public, the bot reports admin-test and does not charge Xu."
+        )
+        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
+    if action == "voice_pick":
+        await query.answer()
+        text = (
+            "🗣 <b>Chọn giọng đọc</b>\n\n"
+            "Giọng đọc khả dụng phụ thuộc provider đang bật. Admin có thể kiểm tra TTS trong /providers hoặc ShopAIKey status. Khách sẽ thấy trạng thái thử nghiệm nếu chưa public."
+            if lang == "vi" else
+            "🗣 <b>Choose voice</b>\n\nAvailable voices depend on enabled providers. Public users see a guarded/admin-test state when it is not open."
+        )
+        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
+    if action == "stt":
+        await query.answer()
+        text = (
+            "🎧 <b>STT / Bóc băng audio</b>\n\n"
+            "Gửi voice/audio/video ngắn vào chat, sau đó dùng nút bóc băng trong quick guide hoặc chạy bóc băng. Nếu provider timeout/lỗi, bot báo gọn và không trừ Xu sai."
+            if lang == "vi" else
+            "🎧 <b>STT / Transcribe</b>\n\nSend a short voice/audio/video. The bot will show transcription actions when audio is received."
+        )
+        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
+    if action == "voice_video":
+        await query.answer()
+        text = (
+            "🎬 <b>Ghép voice vào video</b>\n\n"
+            "Tính năng này đang admin test/planned theo trạng thái ffmpeg/provider. Bot chưa gọi API mới và chưa trừ Xu khi chỉ mở menu."
+            if lang == "vi" else
+            "🎬 <b>Add voice to video</b>\n\nThis is admin-test/planned depending on ffmpeg/provider status. Opening this menu does not charge Xu."
+        )
+        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
     if action == "music":
         await query.answer()
         return await query.message.reply_text(music_library_guide_text(lang), parse_mode="HTML", reply_markup=music_library_quick_keyboard(lang))
@@ -39761,6 +39860,15 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "media":
         await query.answer()
         return await query.message.reply_text(media_library_guide_text(lang), parse_mode="HTML", reply_markup=media_library_quick_keyboard(lang))
+    if action == "add_music":
+        await query.answer()
+        text = (
+            "🎬 <b>Ghép nhạc vào video</b>\n\n"
+            "Tính năng ghép nhạc đang admin test/planned theo trạng thái xử lý video. Bot chưa gọi API mới và chưa trừ Xu khi chỉ mở menu."
+            if lang == "vi" else
+            "🎬 <b>Add music to video</b>\n\nThis is admin-test/planned depending on video processing status. Opening this menu does not charge Xu."
+        )
+        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
     if action == "policy":
         await query.answer()
         return await query.message.reply_text(
@@ -49186,6 +49294,7 @@ def public_image_tier_selection_text(lang: str = "vi") -> str:
 def public_image_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     rows = image_tier_choice_rows(lambda tier: f"create_media|image_tier_{tier}", lang)
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_image")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="create_media|cancel")])
     return InlineKeyboardMarkup(rows)
 
@@ -49239,7 +49348,7 @@ def public_media_aspect_ratio_keyboard(kind: str, lang: str = "vi") -> InlineKey
     for idx in range(0, len(options), 2):
         row = []
         for aspect in options[idx:idx + 2]:
-            label = f"📐 {aspect}" + (" TikTok/Reels" if aspect == "9:16" and normalize_user_language(lang) == "vi" else "")
+            label = media_aspect_ratio_label(aspect, kind_norm, lang)
             row.append(InlineKeyboardButton(label, callback_data=f"create_media|{kind_norm}_aspect_{media_aspect_ratio_token(aspect)}"))
         rows.append(row)
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|quick_image" if kind_norm == "image" else "create_media|quick_video")])
@@ -49266,6 +49375,7 @@ def shopaikey_confirm_keyboard(job_type: str, token: str, tier: str, lang: str =
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=f"shopai|cancel|{token}")],
         [InlineKeyboardButton("📐 Đổi tỉ lệ" if normalize_user_language(lang) == "vi" else "📐 Change ratio", callback_data=f"create_media|{'ia' if kind == 'image' else 'va'}_{token}")],
         [InlineKeyboardButton("🔁 Chọn gói khác" if normalize_user_language(lang) == "vi" else "🔁 Choose another tier", callback_data="create_media|quick_image" if kind == "image" else "create_media|quick_video")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|quick_image" if kind == "image" else "create_media|quick_video")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ]
     return InlineKeyboardMarkup(rows)
@@ -49605,6 +49715,7 @@ def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         )])
     rows.append([InlineKeyboardButton(ui_text(lang, "video.premium_admin"), callback_data="create_media|video_tier_premium")])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_video")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="create_media|cancel")])
     return InlineKeyboardMarkup(rows)
 
@@ -53798,10 +53909,12 @@ def pricing_main_lines() -> list[str]:
         )
         for tier, payload in video_tiers.items()
     ]
-    combo_items = [
-        f"• {item['label']}: <b>{int(item['price_vnd']):,}đ</b> — {html.escape(item['summary'])}".replace(",", ".")
-        for item in video_combo_pricing_payload()
-    ]
+    combo_items = []
+    for item in video_combo_pricing_payload():
+        price_text = str(item.get("display_price") or f"{int(item.get('price_vnd') or 0):,}đ")
+        combo_items.append(
+            f"• {html.escape(str(item.get('label') or 'Combo'))} — <b>{html.escape(price_text)}</b> — {html.escape(str(item.get('summary') or ''))}".replace(",", ".")
+        )
     doc_items = [
         f"• Ảnh sang PDF: <b>{DOC_COSTS.get('image_to_pdf', 0)} Xu</b>",
         f"• PDF sang ảnh: <b>{DOC_COSTS.get('pdf_to_images', 0)} Xu</b>",
@@ -53813,7 +53926,7 @@ def pricing_main_lines() -> list[str]:
     return [
         "💳 <b>BẢNG GIÁ TOAN AAS</b>",
         "",
-        "<b>A. Gói Xu / Nạp Xu</b>",
+        "<b>A. Nạp Xu / Mệnh giá</b>",
         "• 10.000đ → <b>100 Xu</b>",
         "• 50.000đ → <b>500 Xu</b>",
         "• 100.000đ → <b>1.000 Xu</b>",
@@ -53959,9 +54072,9 @@ def pricing_combo_lines() -> list[str]:
     ]
     for item in combos:
         label = str(item.get("label") or "")
-        price = int(item.get("price_vnd") or 0)
+        price = str(item.get("display_price") or f"{int(item.get('price_vnd') or 0):,}đ")
         summary = html.escape(str(item.get("summary") or ""))
-        rows.append(f"• {html.escape(label)} — <b>{price:,}đ</b> — {summary}".replace(",", "."))
+        rows.append(f"• {html.escape(label)} — <b>{html.escape(price)}</b> — {summary}".replace(",", "."))
     rows.extend([
         "",
         "Nếu combo checkout chưa bật, hãy liên hệ admin để mua combo hoặc nạp Xu theo mệnh giá.",
