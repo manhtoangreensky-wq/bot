@@ -2086,16 +2086,21 @@ def test_frame_video_helper_defaults_and_state():
     assert bot.frame_video_effect_payload("slide")["token"] == "slide"
     assert bot.frame_video_effect_payload("random")["token"] == "random"
     assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 50
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(7)], "duration": "fast", "effect": "fade"}) == 100
     assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "standard", "effect": "fade"}) == 70
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 140
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 170
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "standard", "effect": "random"}) == 190
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "standard", "effect": "zoom"}) == 120
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 110
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 140
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "slow", "effect": "random"}) == 190
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(20)], "duration": "fast", "effect": "pan"}) == 290
     status = bot.frame_video_status_payload()
     assert int(status["price_xu"]) == int(bot.FRAME_VIDEO_BASE_2_5_XU)
     assert status["direct_render_enabled"] == bot.FRAME_VIDEO_DIRECT_RENDER_ENABLED
     assert status["require_local_worker"] == bot.FRAME_VIDEO_REQUIRE_LOCAL_WORKER
     assert int(status["base_6_10_xu"]) == int(bot.FRAME_VIDEO_BASE_6_10_XU)
     assert int(status["motion_effect_extra_xu"]) == int(bot.FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU)
+    assert int(status["random_effect_extra_xu"]) == int(bot.FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU)
+    assert int(status["fast_extra_per_image_after_5_xu"]) == int(bot.FRAME_VIDEO_FAST_EXTRA_PER_IMAGE_AFTER_5_XU)
     assert int(status["max_images"]) == int(bot.FRAME_VIDEO_MAX_IMAGES)
     uid = "frame_video_unit"
     try:
@@ -2136,6 +2141,19 @@ def test_frame_video_oom_guard_blocks_unsafe_render(monkeypatch):
     assert guard["ok"] is False
     assert guard["reason"] == "worker_unavailable"
     assert "chưa trừ Xu" in guard["message"]
+
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {
+        "enabled": True,
+        "poll_enabled": True,
+        "token_configured": True,
+        "connected": True,
+    })
+    guard = bot.frame_video_runtime_guard(state, 987654321)
+    assert guard["action"] == "worker_queue"
+    payload = json.loads(bot.frame_video_worker_payload("fv_test", 987654321, "chat", state, 50))
+    assert payload["frame_job_id"] == "fv_test"
+    assert payload["charged_amount"] == 50
+    assert len(payload["photos"]) == 2
 
     monkeypatch.setattr(bot, "FRAME_VIDEO_DIRECT_RENDER_ENABLED", True)
     monkeypatch.setattr(bot, "FRAME_VIDEO_REQUIRE_LOCAL_WORKER", False)
@@ -3192,13 +3210,17 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
 
     assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "none"}) == 50
     assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 50
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 140
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 170
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "standard", "effect": "random"}) == 190
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(7)], "duration": "fast", "effect": "fade"}) == 100
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "standard", "effect": "zoom"}) == 120
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 110
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 140
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "slow", "effect": "random"}) == 190
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(20)], "duration": "fast", "effect": "pan"}) == 290
     status = bot.frame_video_status_payload()
     assert status["base_2_5_xu"] == bot.FRAME_VIDEO_BASE_2_5_XU
     assert status["base_6_10_xu"] == bot.FRAME_VIDEO_BASE_6_10_XU
     assert status["motion_effect_extra_xu"] == bot.FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU
+    assert status["random_effect_extra_xu"] == bot.FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU
     assert status["direct_render_enabled"] == bot.FRAME_VIDEO_DIRECT_RENDER_ENABLED
     assert status["max_concurrent_jobs"] == bot.FRAME_VIDEO_MAX_CONCURRENT_JOBS
     effect_labels = str(bot.frame_video_effect_keyboard().inline_keyboard)

@@ -913,14 +913,16 @@ FRAME_VIDEO_BASE_2_5_XU = env_int("FRAME_VIDEO_BASE_2_5_XU", 50)
 FRAME_VIDEO_BASE_6_10_XU = env_int("FRAME_VIDEO_BASE_6_10_XU", 80)
 FRAME_VIDEO_BASE_11_20_XU = env_int("FRAME_VIDEO_BASE_11_20_XU", 120)
 FRAME_VIDEO_EXTRA_IMAGE_XU = env_int("FRAME_VIDEO_EXTRA_IMAGE_XU", 5)
+FRAME_VIDEO_FAST_EXTRA_PER_IMAGE_AFTER_5_XU = env_int("FRAME_VIDEO_FAST_EXTRA_PER_IMAGE_AFTER_5_XU", 10)
 FRAME_VIDEO_DURATION_STANDARD_EXTRA_XU = env_int("FRAME_VIDEO_DURATION_STANDARD_EXTRA_XU", 20)
 FRAME_VIDEO_DURATION_SLOW_EXTRA_XU = env_int("FRAME_VIDEO_DURATION_SLOW_EXTRA_XU", 40)
-FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU", 50)
+FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU", 20)
+FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU", 30)
 FRAME_VIDEO_ENABLED = env_flag("FRAME_VIDEO_ENABLED", "true")
 FRAME_VIDEO_DIRECT_RENDER_ENABLED = env_flag("FRAME_VIDEO_DIRECT_RENDER_ENABLED", "false")
 FRAME_VIDEO_REQUIRE_LOCAL_WORKER = env_flag("FRAME_VIDEO_REQUIRE_LOCAL_WORKER", "true")
 FRAME_VIDEO_MAX_IMAGES = max(2, min(100, env_int("FRAME_VIDEO_MAX_IMAGES", 20)))
-FRAME_VIDEO_MAX_OUTPUT_SECONDS = max(5, env_int("FRAME_VIDEO_MAX_OUTPUT_SECONDS", 60))
+FRAME_VIDEO_MAX_OUTPUT_SECONDS = max(5, env_int("FRAME_VIDEO_MAX_OUTPUT_SECONDS", 90))
 FRAME_VIDEO_MAX_INPUT_MB = max(1, env_int("FRAME_VIDEO_MAX_INPUT_MB", 50))
 FRAME_VIDEO_MAX_RENDER_SECONDS = max(30, env_int("FRAME_VIDEO_MAX_RENDER_SECONDS", env_int("FRAME_VIDEO_RENDER_TIMEOUT_SECONDS", 180)))
 FRAME_VIDEO_RENDER_TIMEOUT_SECONDS = FRAME_VIDEO_MAX_RENDER_SECONDS
@@ -28518,6 +28520,36 @@ def update_local_worker_job(job_id, status: str, worker_id: str = "", error_shor
         )
     return updated
 
+def handle_frame_video_worker_job_update(previous_job: dict, updated_job: dict) -> None:
+    if not updated_job or str(updated_job.get("job_type") or "") != "frame_video_render":
+        return
+    previous_status = str((previous_job or {}).get("status") or "").lower()
+    status = str(updated_job.get("status") or "").lower()
+    if previous_status in {"succeeded", "failed", "cancelled"}:
+        return
+    payload = {}
+    try:
+        raw = str(updated_job.get("input_file_id") or "")
+        payload = json.loads(raw) if raw else {}
+    except Exception:
+        payload = {}
+    frame_job_id = str(payload.get("frame_job_id") or "")
+    user_id = str(payload.get("user_id") or updated_job.get("user_id") or "")
+    charged_amount = int(payload.get("charged_amount") or updated_job.get("xu_cost") or 0)
+    if status == "succeeded":
+        if frame_job_id:
+            update_frame_video_job(frame_job_id, status="success", detail=f"local_worker_job:{updated_job.get('id')} sent")
+        save_tool_test_result("frame_video", "PASS", f"local worker render job {updated_job.get('id')} succeeded", user_id)
+        return
+    if status == "failed":
+        reason = sanitize_log_text(str(updated_job.get("error_short") or "worker_failed"))[:240]
+        if charged_amount > 0 and user_id:
+            refund_charged_credit(user_id, charged_amount, "frame_video_refund", "", "Hoàn Xu ghép ảnh thành video do worker lỗi", True)
+        if frame_job_id:
+            update_frame_video_job(frame_job_id, status="failed", detail=f"worker_failed:{reason}")
+        set_frame_video_last_error(f"worker_failed:{reason}")
+        save_tool_test_result("frame_video", "FAIL", f"local worker render failed:{reason}", user_id)
+
 def local_worker_status_payload() -> dict:
     heartbeat = local_worker_last_heartbeat()
     counts = count_local_worker_jobs()
@@ -36576,7 +36608,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Local ffmpeg: <code>{'configured' if providers['local_worker'].get('ffmpeg_path_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('ffmpeg_local'))}</code>",
         f"• Frame video renderer: <code>{'ON' if frame_video.get('enabled') else 'OFF'}</code> | public <code>{'ON' if frame_video.get('public_enabled') else 'OFF'}</code> | direct render <code>{'ON' if frame_video.get('direct_render_enabled') else 'OFF'}</code> | require worker <code>{'ON' if frame_video.get('require_local_worker') else 'OFF'}</code>",
         f"• Frame video guard: worker <code>{'connected' if frame_video.get('local_worker_connected') else 'not_connected'}</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | max images <code>{int(frame_video.get('max_images') or 0)}</code> | max concurrent <code>{int(frame_video.get('max_concurrent_jobs') or 0)}</code> | last error <code>{html.escape(str(frame_video.get('last_error') or '-'))}</code>",
-        f"• Frame video pricing: base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | motion +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code>",
+        f"• Frame video pricing: base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | fast >5 +<code>{int(frame_video.get('fast_extra_per_image_after_5_xu') or 0)} Xu/ảnh</code> | zoom/pan/slide +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code> | random +<code>{int(frame_video.get('random_effect_extra_xu') or 0)} Xu</code>",
         f"• Local ComfyUI: <code>{html.escape(providers['local_worker'].get('comfy_status') or 'planned/not_ready')}</code>",
         f"• ComfyUI render: <code>{html.escape(providers['local_worker'].get('comfy_render') or 'admin-only/planned')}</code>",
         f"• Render queue: <code>{html.escape(providers['local_worker'].get('render_queue') or 'admin-only')}</code> | queued <code>{providers['local_worker'].get('job_counts', {}).get('queued', 0)}</code> | running <code>{providers['local_worker'].get('job_counts', {}).get('running', 0)}</code>",
@@ -42705,6 +42737,9 @@ def frame_video_base_price_for_count(count: int = 0) -> int:
 
 def frame_video_duration_extra_for_state(state: dict) -> int:
     token = str((state or {}).get("duration") or "standard").strip().lower()
+    count = len((state or {}).get("photos") or [])
+    if token == "fast":
+        return max(0, int(count or 0) - 5) * int(FRAME_VIDEO_FAST_EXTRA_PER_IMAGE_AFTER_5_XU or 0)
     if token == "slow":
         return int(FRAME_VIDEO_DURATION_SLOW_EXTRA_XU or 0)
     if token == "standard":
@@ -42712,7 +42747,12 @@ def frame_video_duration_extra_for_state(state: dict) -> int:
     return 0
 
 def frame_video_effect_extra_for_state(state: dict) -> int:
-    return int(FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU or 0) if frame_video_effect_is_motion((state or {}).get("effect") or "fade") else 0
+    effect = frame_video_effect_payload((state or {}).get("effect") or "fade").get("token") or "fade"
+    if effect == "random":
+        return int(FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU or 0)
+    if effect in {"zoom", "pan", "slide"}:
+        return int(FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU or 0)
+    return 0
 
 def frame_video_audio_extra_for_state(state: dict) -> int:
     music_choice = str((state or {}).get("music_choice") or "").strip().lower()
@@ -42754,11 +42794,13 @@ def frame_video_status_payload() -> dict:
         "base_6_10_xu": int(FRAME_VIDEO_BASE_6_10_XU or 0),
         "base_11_20_xu": int(FRAME_VIDEO_BASE_11_20_XU or 0),
         "extra_image_xu": int(FRAME_VIDEO_EXTRA_IMAGE_XU or 0),
+        "fast_extra_per_image_after_5_xu": int(FRAME_VIDEO_FAST_EXTRA_PER_IMAGE_AFTER_5_XU or 0),
         "duration_standard_extra_xu": int(FRAME_VIDEO_DURATION_STANDARD_EXTRA_XU or 0),
         "duration_slow_extra_xu": int(FRAME_VIDEO_DURATION_SLOW_EXTRA_XU or 0),
         "motion_effect_extra_xu": int(FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU or 0),
+        "random_effect_extra_xu": int(FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU or 0),
         "max_images": int(FRAME_VIDEO_MAX_IMAGES or 20),
-        "max_output_seconds": int(FRAME_VIDEO_MAX_OUTPUT_SECONDS or 60),
+        "max_output_seconds": int(FRAME_VIDEO_MAX_OUTPUT_SECONDS or 90),
         "max_input_mb": int(FRAME_VIDEO_MAX_INPUT_MB or 50),
         "max_render_seconds": int(FRAME_VIDEO_MAX_RENDER_SECONDS or 180),
         "max_concurrent_jobs": int(FRAME_VIDEO_MAX_CONCURRENT_JOBS or 1),
@@ -42866,12 +42908,12 @@ def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
             "message": f"⚠️ Bộ ảnh quá lớn ({total_input_mb} MB). Giới hạn hiện tại là {int(FRAME_VIDEO_MAX_INPUT_MB or 50)} MB. Bot chưa trừ Xu.",
             "worker_connected": worker_connected,
         }
-    if output_seconds > float(FRAME_VIDEO_MAX_OUTPUT_SECONDS or 60):
+    if output_seconds > float(FRAME_VIDEO_MAX_OUTPUT_SECONDS or 90):
         return {
             "ok": False,
             "action": "blocked",
             "reason": "output_too_long",
-            "message": f"⚠️ Video dự kiến dài {output_seconds}s, vượt giới hạn {int(FRAME_VIDEO_MAX_OUTPUT_SECONDS or 60)}s. Bot chưa trừ Xu.",
+            "message": f"⚠️ Video dự kiến dài {output_seconds}s, vượt giới hạn {int(FRAME_VIDEO_MAX_OUTPUT_SECONDS or 90)}s. Bot chưa trừ Xu.",
             "worker_connected": worker_connected,
         }
     if active_jobs >= int(FRAME_VIDEO_MAX_CONCURRENT_JOBS or 1):
@@ -42891,6 +42933,38 @@ def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
     if is_railway_runtime() and not FRAME_VIDEO_DIRECT_RENDER_ENABLED:
         return {"ok": False, "action": "blocked", "reason": "railway_direct_render_disabled", "message": frame_video_maintenance_text(), "worker_connected": worker_connected}
     return {"ok": True, "action": "direct_render", "reason": "ok", "message": "", "worker_connected": worker_connected}
+
+def frame_video_worker_payload(frame_job_id: str, user_id, chat_id, state: dict, charged_amount: int = 0) -> str:
+    ratio = frame_video_ratio_payload((state or {}).get("ratio") or "9x16")
+    duration = frame_video_duration_payload((state or {}).get("duration") or "standard")
+    effect = frame_video_effect_payload((state or {}).get("effect") or "fade")
+    photos = []
+    for item in list((state or {}).get("photos") or [])[:FRAME_VIDEO_MAX_IMAGES]:
+        photos.append({
+            "file_id": str(item.get("file_id") or ""),
+            "file_size": int(item.get("file_size") or 0),
+        })
+    payload = {
+        "frame_job_id": str(frame_job_id or ""),
+        "user_id": str(user_id or ""),
+        "chat_id": str(chat_id or ""),
+        "charged_amount": int(charged_amount or 0),
+        "photos": photos,
+        "ratio": str((state or {}).get("ratio") or "9x16"),
+        "width": int(ratio.get("width") or 720),
+        "height": int(ratio.get("height") or 1280),
+        "duration": str((state or {}).get("duration") or "standard"),
+        "seconds_per_image": float(duration.get("seconds") or 1.5),
+        "effect": str(effect.get("token") or "fade"),
+        "max_render_seconds": int(FRAME_VIDEO_MAX_RENDER_SECONDS or 180),
+        "caption": (
+            "✅ Đã ghép ảnh thành video.\n"
+            f"Job: {str(frame_job_id or '')}\n"
+            f"Đã trừ: {int(charged_amount or 0)} Xu.\n"
+            "Video được render bằng Local Worker."
+        ),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 def create_frame_video_job(user_id, chat_id, state: dict, charged_amount: int = 0, status: str = "queued") -> str:
     global FRAME_VIDEO_JOB_SEQ
@@ -54274,8 +54348,9 @@ async def cmd_frame_video_status(update: Update, context: ContextTypes.DEFAULT_T
         f"• Require Local Worker: <code>{'ON' if status.get('require_local_worker') else 'OFF'}</code>",
         f"• Railway runtime: <code>{'yes' if status.get('railway_runtime') else 'no'}</code>",
         f"• Base 2-5/6-10/11-20: <code>{int(status.get('base_2_5_xu') or 0)}/{int(status.get('base_6_10_xu') or 0)}/{int(status.get('base_11_20_xu') or 0)} Xu</code>",
+        f"• Fast >5 extra: <code>{int(status.get('fast_extra_per_image_after_5_xu') or 0)} Xu/ảnh từ ảnh thứ 6</code>",
         f"• Duration standard/slow extra: <code>{int(status.get('duration_standard_extra_xu') or 0)}/{int(status.get('duration_slow_extra_xu') or 0)} Xu</code>",
-        f"• Motion effect extra: <code>{int(status.get('motion_effect_extra_xu') or 0)} Xu</code>",
+        f"• Effect zoom/pan/slide/random: <code>{int(status.get('motion_effect_extra_xu') or 0)}/{int(status.get('random_effect_extra_xu') or 0)} Xu</code>",
         f"• Music/voice merge price if ready: <code>{int(status.get('music_price_xu') or 0)} Xu</code>",
         f"• Max images: <code>{int(status.get('max_images') or 0)}</code>",
         f"• Max output/input/render: <code>{int(status.get('max_output_seconds') or 0)}s / {int(status.get('max_input_mb') or 0)}MB / {int(status.get('max_render_seconds') or 0)}s</code>",
@@ -54403,7 +54478,7 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         if FRAME_VIDEO_REQUIRE_LOCAL_WORKER and not frame_video_worker_connected():
             set_frame_video_last_error("worker_unavailable_direct_render_disabled")
             return await safe_edit_or_send(query, frame_video_maintenance_text(), parse_mode=None)
-        if not FRAME_VIDEO_DIRECT_RENDER_ENABLED:
+        if not FRAME_VIDEO_DIRECT_RENDER_ENABLED and not frame_video_worker_connected():
             set_frame_video_last_error("direct_render_disabled")
             return await safe_edit_or_send(query, frame_video_maintenance_text(), parse_mode=None)
         if not FRAME_VIDEO_PUBLIC_ENABLED and not is_admin_user(uid):
@@ -54560,6 +54635,64 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         if len(state.get("photos") or []) < 2:
             return await safe_edit_or_send(query, "⚠️ Cần ít nhất 2 ảnh để ghép thành video. Bot chưa trừ Xu.", reply_markup=frame_video_collect_keyboard(), parse_mode=None)
         guard = frame_video_runtime_guard(state, uid)
+        if guard.get("action") == "worker_queue":
+            credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Frame video user")
+            render_type = frame_video_render_type(state)
+            base_cost = frame_video_price_for_state(state)
+            preview_cost = shopaikey_preview_final_cost(uid, int(base_cost or 0), f"frame_video_{render_type}")
+            if int(credits or 0) < preview_cost and not is_admin_user(uid):
+                return await edit_insufficient_credits(query, int(credits or 0), preview_cost, uid)
+            charge = spend_fixed_credit_info(uid, int(base_cost or 0), f"spend_frame_video_{render_type}", "Ghép ảnh thành video")
+            if not charge.get("ok"):
+                credits_now, _, _ = get_user(uid)
+                return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or preview_cost), uid)
+            charged_amount = int(charge.get("final_cost") or 0)
+            job_id = create_frame_video_job(uid, query.message.chat_id, state, charged_amount, "waiting_worker")
+            payload = frame_video_worker_payload(job_id, uid, query.message.chat_id, state, charged_amount)
+            try:
+                local_job_id = create_local_worker_job(
+                    user_id=str(uid),
+                    command="frame_video",
+                    job_type="frame_video_render",
+                    provider="local_ffmpeg",
+                    input_file_id=payload,
+                    xu_cost=charged_amount,
+                    admin_only=is_admin_user(uid),
+                )
+            except Exception as e:
+                detail = sanitize_log_text(str(e))[:240]
+                refund_charged_credit(uid, charged_amount, "frame_video_refund", "", "Hoàn Xu ghép ảnh thành video do worker queue lỗi", charged_amount > 0)
+                update_frame_video_job(job_id, status="failed", detail=f"worker_queue:{detail}")
+                set_frame_video_last_error(f"worker_queue:{detail}")
+                clear_frame_video_state(uid)
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Ghép video lỗi do tài nguyên xử lý không đủ. TOAN AAS đã hoàn Xu nếu có trừ. Vui lòng thử lại với ít ảnh hơn hoặc chờ worker.\n\n"
+                    f"Job: {job_id}\nStatus: failed",
+                    parse_mode=None,
+                    reply_markup=frame_video_job_status_keyboard(job_id),
+                )
+            update_frame_video_job(job_id, status="waiting_worker", detail=f"local_worker_job:{local_job_id}")
+            state["step"] = "waiting_worker"
+            state["charged_amount"] = charged_amount
+            state["frame_video_job_id"] = job_id
+            state["local_worker_job_id"] = local_job_id
+            set_frame_video_state(uid, state)
+            clear_frame_video_state(uid)
+            price = frame_video_price_breakdown(state)
+            return await safe_edit_or_send(
+                query,
+                "🎞 TOAN AAS đang ghép ảnh thành video cho bạn.\n"
+                "Quá trình này có thể mất vài phút.\n"
+                "Không cần gửi lại lệnh.\n\n"
+                f"Job: {job_id}\n"
+                f"Worker job: {local_job_id}\n"
+                "Auto poll: ON\n"
+                f"Số ảnh: {int(price.get('image_count') or 0)}\n"
+                "Status: waiting_worker",
+                parse_mode=None,
+                reply_markup=frame_video_job_status_keyboard(job_id),
+            )
         if not guard.get("ok"):
             reason = str(guard.get("reason") or "blocked")
             set_frame_video_last_error(reason)
@@ -74127,6 +74260,7 @@ async def internal_worker_job_update(request: Request):
         raise HTTPException(status_code=400, detail="job_id required")
     status = str(payload.get("status") or "").strip().lower()
     worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")
+    previous_job = get_local_worker_job(job_id)
     try:
         job = update_local_worker_job(
             job_id,
@@ -74138,6 +74272,7 @@ async def internal_worker_job_update(request: Request):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    handle_frame_video_worker_job_update(previous_job, job)
     return {"ok": True, "job": job}
 
 @fastapi_app.post("/internal/worker/upload_result")

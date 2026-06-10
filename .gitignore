@@ -10,6 +10,9 @@ __pycache__/
 toandaas_system.db
 operator_uploads/
 pytest_tmp/
+pytest_tmp*/
+pytest_tmp_run*/
+pytest_tmp_cache*/
 backups/
 *.sqlite
 *.sqlite3
