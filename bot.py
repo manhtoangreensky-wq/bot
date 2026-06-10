@@ -42419,6 +42419,9 @@ def frame_video_effect_payload(token: str) -> dict:
         "none": {"label": "Không hiệu ứng", "token": "none"},
         "fade": {"label": "Fade nhẹ", "token": "fade"},
         "zoom": {"label": "Zoom nhẹ", "token": "zoom"},
+        "pan": {"label": "Pan trái/phải", "token": "pan"},
+        "slide": {"label": "Slide ngang", "token": "slide"},
+        "random": {"label": "Random nhẹ", "token": "random"},
     }
     return effects.get(str(token or "").lower(), effects["fade"])
 
@@ -42451,9 +42454,13 @@ def frame_video_status_payload() -> dict:
 def frame_video_render_type(state: dict) -> str:
     effect = frame_video_effect_payload((state or {}).get("effect") or "fade").get("token") or "fade"
     music_choice = str((state or {}).get("music_choice") or "").strip().lower()
-    if music_choice and music_choice not in {"skip", "none"} and bool((state or {}).get("music_merge_enabled")):
+    voice_choice = str((state or {}).get("voice_choice") or "").strip().lower()
+    if (
+        (music_choice and music_choice not in {"skip", "none"} and bool((state or {}).get("music_merge_enabled")))
+        or (voice_choice and voice_choice not in {"skip", "none"} and bool((state or {}).get("voice_merge_enabled")))
+    ):
         return "music"
-    if effect and effect != "none":
+    if effect in {"zoom", "pan", "slide", "random"}:
         return "effect"
     return "basic"
 
@@ -42547,6 +42554,9 @@ def frame_video_effect_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("Không hiệu ứng", callback_data="framevideo|effect|none")],
         [InlineKeyboardButton("Fade nhẹ", callback_data="framevideo|effect|fade")],
         [InlineKeyboardButton("Zoom nhẹ", callback_data="framevideo|effect|zoom")],
+        [InlineKeyboardButton("Pan trái/phải", callback_data="framevideo|effect|pan")],
+        [InlineKeyboardButton("Slide ngang", callback_data="framevideo|effect|slide")],
+        [InlineKeyboardButton("Random nhẹ", callback_data="framevideo|effect|random")],
         [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|duration")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
@@ -42554,15 +42564,16 @@ def frame_video_effect_keyboard() -> InlineKeyboardMarkup:
 def frame_video_music_text(state: dict) -> str:
     effect = frame_video_effect_payload(state.get("effect") or "fade")
     return (
-        "🎵 <b>Bạn có muốn thêm nhạc nền không?</b>\n\n"
+        "🎵 <b>Bạn có muốn thêm nhạc/voice không?</b>\n\n"
         f"• Hiệu ứng đã chọn: <b>{html.escape(effect['label'])}</b>\n\n"
-        "V1 có thể lưu lựa chọn/gợi ý nhạc. Nếu ghép nhạc chưa mở ổn định, bot sẽ render video im lặng và gợi ý thêm nhạc sau."
+        "V1 có thể lưu lựa chọn/gợi ý nhạc. Nếu chưa có nguồn audio sẵn, bot sẽ render video im lặng và gợi ý thêm nhạc/voice sau."
     )
 
 def frame_video_music_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎵 Gợi ý nhạc", callback_data="framevideo|music|suggest")],
         [InlineKeyboardButton("🎧 Chọn từ kho nhạc", callback_data="framevideo|music|library")],
+        [InlineKeyboardButton("🎙 Thêm voice", callback_data="framevideo|music|voice")],
         [InlineKeyboardButton("⏭ Bỏ qua nhạc", callback_data="framevideo|music|skip")],
         [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|effect")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
@@ -42827,12 +42838,83 @@ def storyboard_image_confirm_keyboard(tier: str = "") -> InlineKeyboardMarkup:
 
 def storyboard_after_images_keyboard(project_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎞 Ghép các ảnh này thành video", callback_data=f"storyboard|render|{int(project_id or 0)}")],
-        [InlineKeyboardButton("🔁 Tạo lại cảnh chưa ưng", callback_data="storyboard|edit_scene")],
-        [InlineKeyboardButton("✏️ Sửa prompt cảnh", callback_data="storyboard|edit_scene")],
-        [InlineKeyboardButton("💾 Lưu bộ ảnh/storyboard", callback_data="storyboard|save")],
+        [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data=f"storyboard|mode_frame|{int(project_id or 0)}")],
+        [InlineKeyboardButton("✨ Biến ảnh thành video AI", callback_data=f"storyboard|mode_ai|{int(project_id or 0)}")],
+        [InlineKeyboardButton("🎵 Thêm nhạc / voice", callback_data=f"storyboard|mode_audio|{int(project_id or 0)}")],
+        [InlineKeyboardButton("💾 Lưu bộ ảnh", callback_data="storyboard|save")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
+
+def storyboard_video_mode_text(project_id: int = 0) -> str:
+    return (
+        "Bạn muốn tạo video theo kiểu nào?\n\n"
+        "🎞 Ghép ảnh thành video: rẻ, nhanh, ổn định. Ảnh sẽ có chuyển động camera giả như zoom/pan/fade.\n\n"
+        "✨ Biến ảnh thành video AI: đẹp hơn, ảnh có chuyển động thật nhưng tốn hơn và phụ thuộc nhà cung cấp video AI."
+    )
+
+def storyboard_ai_video_busy_text() -> str:
+    return (
+        "✨ Video AI đang bận do provider quá tải. Bạn vẫn có thể dùng 🎞 Ghép ảnh thành video "
+        "để tạo video rẻ và ổn định hơn."
+    )
+
+def storyboard_ai_scene_keyboard(project_id: int) -> InlineKeyboardMarkup:
+    rows = []
+    for row in storyboard_scenes_for_project(project_id)[:FRAME_VIDEO_MAX_IMAGES]:
+        scene_index = int(row.get("scene_index") or 0)
+        if scene_index and (str(row.get("image_file_id") or "") or str(row.get("image_url") or "")):
+            rows.append([InlineKeyboardButton(f"Ảnh {scene_index}", callback_data=f"storyboard|ai_scene|{int(project_id or 0)}|{scene_index}")])
+    rows.extend([
+        [InlineKeyboardButton("🔙 Quay lại", callback_data=f"storyboard|mode_back|{int(project_id or 0)}")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+def storyboard_ai_motion_keyboard(project_id: int, scene_index: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1️⃣ Camera zoom nhẹ vào sản phẩm", callback_data=f"storyboard|ai_motion|{int(project_id or 0)}|{int(scene_index or 0)}|1")],
+        [InlineKeyboardButton("2️⃣ Sản phẩm nổi bật/chuyển động nhẹ", callback_data=f"storyboard|ai_motion|{int(project_id or 0)}|{int(scene_index or 0)}|2")],
+        [InlineKeyboardButton("3️⃣ Lifestyle motion tự nhiên", callback_data=f"storyboard|ai_motion|{int(project_id or 0)}|{int(scene_index or 0)}|3")],
+        [InlineKeyboardButton("🔙 Chọn ảnh khác", callback_data=f"storyboard|mode_ai|{int(project_id or 0)}")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def storyboard_ai_motion_prompt(scene: dict, motion_index: int = 1) -> str:
+    title = str((scene or {}).get("scene_title") or f"Cảnh {int((scene or {}).get('scene_index') or 1)}").strip()
+    description = str((scene or {}).get("scene_description") or "").strip()
+    image_prompt = str((scene or {}).get("image_prompt") or "").strip()
+    motions = {
+        1: "Camera zoom nhẹ vào sản phẩm, slow push-in, parallax tinh tế, ánh sáng sạch, chuyển động ổn định.",
+        2: "Sản phẩm nổi bật/chuyển động nhẹ, background sống động vừa phải, cảm giác quảng cáo chuyên nghiệp.",
+        3: "Lifestyle motion tự nhiên, chuyển động đời thường, camera mềm, cảm xúc thân thiện, thương mại nhẹ.",
+    }
+    motion = motions.get(int(motion_index or 1), motions[1])
+    return re.sub(
+        r"\s+",
+        " ",
+        f"{title}. {description}. {image_prompt}. {motion} No watermark, no extra text, no distorted subject.",
+    ).strip()[:1200]
+
+def storyboard_video_package_from_scene(user_id, project_id: int, scene_index: int, motion_index: int = 1, lang: str = "vi") -> dict:
+    rows = storyboard_scenes_for_project(project_id)
+    scene = next((row for row in rows if int(row.get("scene_index") or 0) == int(scene_index or 0)), rows[0] if rows else {})
+    source_job_id = str(scene.get("image_job_id") or "").strip()
+    return {
+        "source": "storyboard_image_to_video",
+        "source_job_id": source_job_id,
+        "image_job_id": source_job_id,
+        "telegram_file_id": str(scene.get("image_file_id") or "")[:220],
+        "generated_image_url": str(scene.get("image_url") or "")[:1000],
+        "image_url": str(scene.get("image_url") or "")[:1000],
+        "image_prompt": str(scene.get("image_prompt") or "")[:1200],
+        "source_flow": "storyboard",
+        "project_id": str(int(project_id or 0)),
+        "scene_index": str(int(scene_index or 0)),
+        "video_prompt": storyboard_ai_motion_prompt(scene, motion_index),
+        "video_prompt_choice": max(1, min(3, int(motion_index or 1))),
+        "music_choice": {"type": "not_selected", "label": "music_not_selected"},
+        "no_music": False,
+    }
 
 def create_storyboard_project(user_id, source_type: str, title: str, selected_script: str, scenes: list[dict]) -> int:
     now = now_text()
@@ -42909,6 +42991,28 @@ def frame_video_main_menu_text(uid, lang: str = "vi") -> str:
     notice = clear_pending_start_notice(uid)
     return (notice or "") + localized_start_menu_text(uid, lang)
 
+def frame_video_mode_select_text() -> str:
+    return (
+        "Bạn muốn tạo video theo kiểu nào?\n\n"
+        "🎞 Ghép ảnh thành video: rẻ, nhanh, ổn định. Ảnh sẽ có chuyển động camera giả như zoom/pan/fade.\n\n"
+        "✨ Biến ảnh thành video AI: đẹp hơn, ảnh có chuyển động thật nhưng tốn hơn và phụ thuộc nhà cung cấp video AI."
+    )
+
+def frame_video_mode_select_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data="framevideo|mode_frame")],
+        [InlineKeyboardButton("✨ Biến ảnh thành video AI", callback_data="framevideo|mode_ai")],
+        [InlineKeyboardButton("🎵 Thêm nhạc / voice", callback_data="framevideo|mode_audio")],
+        [InlineKeyboardButton("💾 Lưu bộ ảnh", callback_data="framevideo|save")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+    ])
+
+def frame_video_audio_not_ready_text() -> str:
+    return (
+        "🎵 Ghép nhạc/voice trực tiếp sẽ mở khi có nguồn audio đã chọn ổn định.\n\n"
+        "Bot chưa gọi API, chưa render và chưa trừ Xu. Bạn có thể bỏ qua nhạc để render video trước."
+    )
+
 def frame_video_ffmpeg_filter(width: int, height: int, seconds_per_image: float, effect: str) -> str:
     base = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1"
     effect = frame_video_effect_payload(effect).get("token") or "none"
@@ -42923,6 +43027,22 @@ def frame_video_ffmpeg_filter(width: int, height: int, seconds_per_image: float,
             f"scale={zoom_w}:{zoom_h}:force_original_aspect_ratio=increase,crop={zoom_w}:{zoom_h},"
             f"zoompan=z='min(zoom+0.0015,1.08)':d={frames}:"
             f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps=30,"
+            "setsar=1,format=yuv420p"
+        )
+    if effect == "pan":
+        frames = max(1, int(float(seconds_per_image or 0) * 30))
+        pan_w = max(width + 2, int(width * 1.12))
+        return (
+            f"scale={pan_w}:{height}:force_original_aspect_ratio=increase,crop={pan_w}:{height},"
+            f"zoompan=z=1:d={frames}:x='(iw-ow)*on/{max(frames - 1, 1)}':y='(ih-oh)/2':s={width}x{height}:fps=30,"
+            "setsar=1,format=yuv420p"
+        )
+    if effect == "slide":
+        frames = max(1, int(float(seconds_per_image or 0) * 30))
+        slide_w = max(width + 2, int(width * 1.18))
+        return (
+            f"scale={slide_w}:{height}:force_original_aspect_ratio=increase,crop={slide_w}:{height},"
+            f"zoompan=z=1:d={frames}:x='(iw-ow)*(1-on/{max(frames - 1, 1)})':y='(ih-oh)/2':s={width}x{height}:fps=30,"
             "setsar=1,format=yuv420p"
         )
     return f"{base},format=yuv420p"
@@ -42946,9 +43066,12 @@ async def render_frame_video_paths(
         return False, "not_enough_images"
     clips: list[str] = []
     directory = os.path.dirname(output_path) or tempfile.gettempdir()
-    vf = frame_video_ffmpeg_filter(width, height, seconds_per_image, effect)
+    effect_token = frame_video_effect_payload(effect).get("token") or "fade"
+    random_cycle = ["fade", "zoom", "pan", "slide"]
     for idx, image_path in enumerate(image_paths[:FRAME_VIDEO_MAX_IMAGES], start=1):
         clip_path = os.path.join(directory, f"frame_video_clip_{idx}.mp4")
+        clip_effect = random_cycle[(idx - 1) % len(random_cycle)] if effect_token == "random" else effect_token
+        vf = frame_video_ffmpeg_filter(width, height, seconds_per_image, clip_effect)
         cmd = [
             ffmpeg, "-y",
             "-loop", "1",
@@ -53698,6 +53821,46 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
     if state.get("step") == "rendering" and action != "confirm":
         return await safe_edit_or_send(query, "Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.", parse_mode=None)
 
+    if action == "mode_frame":
+        photos = list(state.get("photos") or [])
+        if len(photos) < 2:
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Cần ít nhất 2 ảnh để ghép thành video. Bot chưa trừ Xu.",
+                reply_markup=frame_video_collect_keyboard(),
+                parse_mode=None,
+            )
+        state["step"] = "ratio"
+        state["motion_mode"] = "frame"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(query, frame_video_ratio_text(state), parse_mode="HTML", reply_markup=frame_video_ratio_keyboard())
+
+    if action == "mode_ai":
+        enabled, message = shopaikey_public_generation_guard("video")
+        return await safe_edit_or_send(
+            query,
+            storyboard_ai_video_busy_text() if not enabled else "✨ Video AI từ ảnh có sẵn sẽ dùng flow chọn ảnh đã tạo trong TOAN AAS. Với ảnh upload trực tiếp, V1 ưu tiên 🎞 Ghép ảnh thành video. Bot chưa trừ Xu.",
+            parse_mode=None,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data="framevideo|mode_frame")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+            ]),
+        )
+
+    if action == "mode_audio":
+        return await safe_edit_or_send(
+            query,
+            frame_video_audio_not_ready_text(),
+            parse_mode=None,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data="framevideo|mode_frame")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+            ]),
+        )
+
+    if action == "save":
+        return await safe_edit_or_send(query, "💾 Bộ ảnh đã được giữ trong phiên hiện tại. Bot chưa gọi API, chưa render và chưa trừ Xu.", parse_mode=None)
+
     if action == "done":
         photos = list(state.get("photos") or [])
         if len(photos) < 2:
@@ -53707,6 +53870,10 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
                 reply_markup=frame_video_collect_keyboard(),
                 parse_mode=None,
             )
+        if str(state.get("source") or "") == "storyboard_user_images":
+            state["step"] = "mode_select"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(query, frame_video_mode_select_text(), parse_mode=None, reply_markup=frame_video_mode_select_keyboard())
         state["step"] = "ratio"
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, frame_video_ratio_text(state), parse_mode="HTML", reply_markup=frame_video_ratio_keyboard())
@@ -53758,11 +53925,38 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             state["music_choice"] = "Vui tươi / năng động, sang trọng / nhẹ nhàng, hoặc công nghệ / hiện đại"
             state["music_merge_enabled"] = False
         elif choice == "library":
-            state["music_choice"] = "Chọn từ kho nhạc ở bước sau (/music_library)"
+            state["music_choice"] = "library_not_ready"
             state["music_merge_enabled"] = False
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                frame_video_audio_not_ready_text(),
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⏭ Bỏ qua nhạc", callback_data="framevideo|music|skip")],
+                    [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|effect")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+                ]),
+            )
+        elif choice == "voice":
+            state["voice_choice"] = "voice_not_ready"
+            state["voice_merge_enabled"] = False
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                frame_video_audio_not_ready_text(),
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⏭ Bỏ qua nhạc/voice", callback_data="framevideo|music|skip")],
+                    [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|effect")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+                ]),
+            )
         else:
             state["music_choice"] = "skip"
             state["music_merge_enabled"] = False
+            state["voice_choice"] = "skip"
+            state["voice_merge_enabled"] = False
         state["step"] = "confirm"
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, frame_video_confirm_text(state, uid), parse_mode="HTML", reply_markup=frame_video_confirm_keyboard())
@@ -54002,7 +54196,7 @@ async def storyboard_generate_images_for_query(query, context: ContextTypes.DEFA
     set_storyboard_state(uid, state)
     await context.bot.send_message(
         chat_id=query.message.chat_id,
-        text="✅ Đã tạo xong bộ ảnh storyboard.",
+        text="✅ Đã tạo xong bộ ảnh storyboard.\n\n" + storyboard_video_mode_text(project_id),
         reply_markup=storyboard_after_images_keyboard(project_id),
     )
 
@@ -54086,15 +54280,99 @@ async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAU
         return await safe_edit_or_send(query, storyboard_image_confirm_text(state, uid), parse_mode="HTML", reply_markup=storyboard_image_confirm_keyboard(state["image_tier"]))
     if action == "confirm_images":
         return await storyboard_generate_images_for_query(query, context, uid, state)
-    if action == "render" and len(parts) > 2:
+    if action in {"mode_back", "mode_select"} and len(parts) > 2:
+        project_id = int(parts[2] or 0)
+        return await safe_edit_or_send(query, storyboard_video_mode_text(project_id), parse_mode=None, reply_markup=storyboard_after_images_keyboard(project_id))
+    if action in {"mode_frame", "render"} and len(parts) > 2:
         project_id = int(parts[2] or 0)
         rows = storyboard_scenes_for_project(project_id)
         photos = [{"file_id": str(row.get("image_file_id") or "")} for row in rows if str(row.get("image_file_id") or "")]
         if len(photos) < 2:
             return await safe_edit_or_send(query, "⚠️ Chưa đủ ảnh có file_id để ghép video. Hãy tạo đủ ảnh hoặc dùng nhánh gửi ảnh có sẵn.", parse_mode=None, reply_markup=storyboard_after_images_keyboard(project_id))
-        set_frame_video_state(uid, {"step": "ratio", "photos": photos[:FRAME_VIDEO_MAX_IMAGES], "source": "storyboard_project", "project_id": project_id})
+        set_frame_video_state(uid, {"step": "ratio", "photos": photos[:FRAME_VIDEO_MAX_IMAGES], "source": "storyboard_project", "project_id": project_id, "motion_mode": "frame"})
         create_storyboard_video_record(project_id, "handoff_to_frame_video", frame_video_price_for_state({"effect": "fade"}))
         return await safe_edit_or_send(query, frame_video_ratio_text(get_frame_video_state(uid)), parse_mode="HTML", reply_markup=frame_video_ratio_keyboard())
+    if action == "mode_ai" and len(parts) > 2:
+        project_id = int(parts[2] or 0)
+        enabled, message = shopaikey_public_generation_guard("video")
+        if not enabled:
+            return await safe_edit_or_send(
+                query,
+                storyboard_ai_video_busy_text(),
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data=f"storyboard|mode_frame|{project_id}")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                ]),
+            )
+        return await safe_edit_or_send(
+            query,
+            "✨ Chọn ảnh/cảnh muốn animate bằng video AI.\n\nBot chưa trừ Xu. Sau bước này bạn sẽ chọn tier video theo bảng giá hiện tại.",
+            parse_mode=None,
+            reply_markup=storyboard_ai_scene_keyboard(project_id),
+        )
+    if action == "ai_scene" and len(parts) > 3:
+        project_id = int(parts[2] or 0)
+        scene_index = int(parts[3] or 1)
+        enabled, message = shopaikey_public_generation_guard("video")
+        if not enabled:
+            return await safe_edit_or_send(
+                query,
+                storyboard_ai_video_busy_text(),
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data=f"storyboard|mode_frame|{project_id}")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                ]),
+            )
+        return await safe_edit_or_send(
+            query,
+            f"✨ Chọn chuyển động AI cho ảnh {scene_index}:\n\n"
+            "1️⃣ Camera zoom nhẹ vào sản phẩm.\n"
+            "2️⃣ Sản phẩm nổi bật/chuyển động nhẹ.\n"
+            "3️⃣ Lifestyle motion tự nhiên.",
+            parse_mode=None,
+            reply_markup=storyboard_ai_motion_keyboard(project_id, scene_index),
+        )
+    if action == "ai_motion" and len(parts) > 4:
+        project_id = int(parts[2] or 0)
+        scene_index = int(parts[3] or 1)
+        motion_index = int(parts[4] or 1)
+        enabled, message = shopaikey_public_generation_guard("video")
+        if not enabled:
+            return await safe_edit_or_send(
+                query,
+                storyboard_ai_video_busy_text(),
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data=f"storyboard|mode_frame|{project_id}")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                ]),
+            )
+        package = storyboard_video_package_from_scene(uid, project_id, scene_index, motion_index, get_user_language(uid) or "vi")
+        if not package.get("source_job_id"):
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Cảnh này chưa có ảnh đã tạo bằng TOAN AAS để dùng cho video AI. Bạn vẫn có thể dùng 🎞 Ghép ảnh thành video. Bot chưa trừ Xu.",
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data=f"storyboard|mode_frame|{project_id}")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                ]),
+            )
+        set_public_video_package_context(uid, package)
+        return await safe_edit_or_send(query, public_video_tier_selection_text(get_user_language(uid) or "vi"), parse_mode="HTML", reply_markup=public_video_tier_keyboard(get_user_language(uid) or "vi"))
+    if action == "mode_audio" and len(parts) > 2:
+        project_id = int(parts[2] or 0)
+        return await safe_edit_or_send(
+            query,
+            frame_video_audio_not_ready_text(),
+            parse_mode=None,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data=f"storyboard|mode_frame|{project_id}")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
     if action == "save":
         return await safe_edit_or_send(query, "💾 Storyboard/bộ ảnh đã được lưu trong project hiện tại. Bạn có thể quay lại ghép video từ bộ ảnh này.", parse_mode=None)
     return await safe_edit_or_send(query, storyboard_start_text(), parse_mode="HTML", reply_markup=storyboard_start_keyboard())

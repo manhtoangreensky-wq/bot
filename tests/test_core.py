@@ -2081,6 +2081,9 @@ def test_frame_video_helper_defaults_and_state():
     assert bot.frame_video_ratio_payload("4x5")["height"] == 900
     assert bot.frame_video_duration_payload("standard")["seconds"] == 2.5
     assert bot.frame_video_effect_payload("fade")["token"] == "fade"
+    assert bot.frame_video_effect_payload("pan")["token"] == "pan"
+    assert bot.frame_video_effect_payload("slide")["token"] == "slide"
+    assert bot.frame_video_effect_payload("random")["token"] == "random"
     status = bot.frame_video_status_payload()
     assert int(status["price_xu"]) == int(bot.FRAME_VIDEO_PRICE_XU)
     assert int(status["max_images"]) == int(bot.FRAME_VIDEO_MAX_IMAGES)
@@ -3057,12 +3060,28 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     assert any("Thêm bảo hành" in label and "250 Xu/ảnh" in label for label in warranty_buttons)
 
     assert bot.frame_video_price_for_state({"effect": "none"}) == bot.FRAME_VIDEO_BASIC_PRICE_XU
-    assert bot.frame_video_price_for_state({"effect": "fade"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
+    assert bot.frame_video_price_for_state({"effect": "fade"}) == bot.FRAME_VIDEO_BASIC_PRICE_XU
+    assert bot.frame_video_price_for_state({"effect": "zoom"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
+    assert bot.frame_video_price_for_state({"effect": "pan"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
+    assert bot.frame_video_price_for_state({"effect": "slide"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
+    assert bot.frame_video_price_for_state({"effect": "random"}) == bot.FRAME_VIDEO_EFFECT_PRICE_XU
+    assert bot.frame_video_price_for_state({"effect": "zoom", "music_choice": "music", "music_merge_enabled": True}) == bot.FRAME_VIDEO_MUSIC_PRICE_XU
     status = bot.frame_video_status_payload()
     assert status["basic_price_xu"] == bot.FRAME_VIDEO_BASIC_PRICE_XU
     assert status["effect_price_xu"] == bot.FRAME_VIDEO_EFFECT_PRICE_XU
     assert status["music_price_xu"] == bot.FRAME_VIDEO_MUSIC_PRICE_XU
+    effect_labels = str(bot.frame_video_effect_keyboard().inline_keyboard)
+    assert "Pan trái/phải" in effect_labels
+    assert "Slide ngang" in effect_labels
+    assert "Random nhẹ" in effect_labels
     assert "Gợi ý nhạc" in str(bot.frame_video_music_keyboard().inline_keyboard)
+    assert "Thêm voice" in str(bot.frame_video_music_keyboard().inline_keyboard)
+    mode_labels = str(bot.storyboard_after_images_keyboard(123).inline_keyboard)
+    assert "Ghép ảnh thành video" in mode_labels
+    assert "Biến ảnh thành video AI" in mode_labels
+    assert "Thêm nhạc / voice" in mode_labels
+    assert "Bạn muốn tạo video theo kiểu nào" in bot.storyboard_video_mode_text(123)
+    assert "Video AI đang bận" in bot.storyboard_ai_video_busy_text()
     assert "shopaikey_video_create_smoke_test" not in source_between(source, "async def handle_storyboard_callback", "async def handle_storyboard_pending_text")
 
 
