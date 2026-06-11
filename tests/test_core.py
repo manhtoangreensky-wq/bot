@@ -2113,15 +2113,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     video_labels = [button.text for button in video_buttons]
     assert video_labels == [
         "🔥 Video theo trend",
-        "🧩 Kịch bản → Ảnh → Video",
         "🎬 Video AI thật",
-            "🎞 Ghép ảnh thành video",
-            "🎥 Tự quay & đổi cảnh AI",
-            "📺 Kịch bản video dài",
-            "🧠 Ý tưởng video",
-            "🎥 Prompt / Chuyển động",
-            "🔙 Quay lại",
-            "🏠 Menu chính",
+        "🧩 Kịch bản → Ảnh → Video",
+        "🎞 Ghép ảnh thành video",
+        "🎥 Tự quay & đổi cảnh AI",
+        "📺 Kịch bản video dài",
+        "🧠 Ý tưởng video",
+        "🎥 Prompt / Chuyển động",
+        "🔙 Quay lại",
+        "🏠 Menu chính",
     ]
     assert "🎬 Tạo video nhanh" not in video_labels
     assert "🖼➡️🎬 Tạo video AI từ ảnh" not in video_labels
@@ -2131,6 +2131,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "📞 Liên hệ admin" not in video_labels
     video_ai_labels = [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
     assert video_ai_labels == ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "📊 Trạng thái video", "🔙 Quay lại Video", "🏠 Menu chính"]
+    video_ai_callbacks = [button.callback_data for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
+    assert "promptvideo|start" in video_ai_callbacks
+    assert "imagevideo|start" in video_ai_callbacks
+    assert "create_media|quick_video" not in video_ai_callbacks
+    assert "menu|hint_image_to_video_pack" not in video_ai_callbacks
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
     assert "Video AI thật hiện đang được bảo trì" in bot.video_ai_true_text("vi")
     frame_intro_labels = [button.text for row in bot.video_frame_intro_keyboard("vi").inline_keyboard for button in row]
@@ -4536,10 +4541,13 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
     assert "🧠 Ý tưởng video" in video_menu_buttons
     assert "📢 Concept quảng cáo" not in video_menu_buttons
     assert "📢 Ý tưởng quảng cáo" in idea_buttons
-    assert "🔥 Ý tưởng theo xu hướng" in idea_buttons
+    assert "🔥 Ý tưởng theo xu hướng" not in idea_buttons
     assert "🎬 Ý tưởng điện ảnh / kể chuyện" in idea_buttons
     assert "videoidea|kind|ad" in idea_callbacks
+    assert "videoidea|kind|trend" not in idea_callbacks
     assert 'CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\\|")' in source
+    assert 'CallbackQueryHandler(handle_prompt_video_callback, pattern=r"^promptvideo\\|")' in source
+    assert 'CallbackQueryHandler(handle_image_video_callback, pattern=r"^imagevideo\\|")' in source
     idea_result = bot.video_idea_result_text(
         {"selected_topic": "app AI", "goal": "bán hàng", "context": "TikTok/Reels"},
         1,
@@ -4549,13 +4557,23 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
         "Hook 3 giây đầu",
         "Kịch bản voice",
         "Storyboard 6 cảnh",
+        "Danh sách cảnh quay",
         "Prompt ảnh từng cảnh",
         "Prompt video từng cảnh",
+        "Gợi ý chuyển động",
         "Gợi ý nhạc/SFX",
-        "Caption / CTA / hashtag",
+        "Caption",
+        "CTA",
+        "Hashtag",
         "chưa trừ Xu",
     ]:
         assert expected in idea_result
+    ad_product_buttons = [button.callback_data for row in bot.video_idea_product_type_keyboard("vi").inline_keyboard for button in row]
+    assert {"videoidea|product_type|physical", "videoidea|product_type|service", "videoidea|product_type|affiliate"}.issubset(set(ad_product_buttons))
+    assert "Nhà bếp hiện đại" in "\n".join(bot.video_idea_context_options("physical", "vi"))
+    idea_followup = bot.video_idea_followup_text("video_prompts", {"selected_topic": "app AI", "context": "TikTok/Reels"}, "vi")
+    assert "Prompt video từng cảnh" in idea_followup
+    assert "Match cut before/after" in idea_followup or "before/after" in idea_followup
 
     structure_callbacks = [
         button.callback_data
@@ -4587,6 +4605,47 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
         "CTA/caption",
     ]:
         assert expected in long_plan
+    long_storyboard = bot.long_video_followup_text("storyboard", {
+        "selected_topic": "affiliate AI cho người mới",
+        "duration": "10 phút",
+        "selected_style": "viral",
+        "structure": "10 đoạn x 60 giây",
+    }, "vi")
+    assert "Storyboard video dài theo từng cảnh" in long_storyboard
+    assert "Cảnh 10" in long_storyboard
+    long_image_prompts = bot.long_video_followup_text("image_prompts", {
+        "selected_topic": "affiliate AI cho người mới",
+        "duration": "10 phút",
+        "selected_style": "viral",
+        "structure": "10 đoạn x 60 giây",
+    }, "vi")
+    assert "Prompt ảnh từng cảnh" in long_image_prompts
+    assert "Negative prompt" in long_image_prompts
+    long_video_prompts = bot.long_video_followup_text("video_prompts", {
+        "selected_topic": "affiliate AI cho người mới",
+        "duration": "10 phút",
+        "selected_style": "viral",
+        "structure": "10 đoạn x 60 giây",
+    }, "vi")
+    assert "Prompt video từng cảnh" in long_video_prompts
+    assert "Thời lượng gợi ý" in long_video_prompts
+    prompt_video_callbacks = [button.callback_data for row in bot.prompt_video_start_keyboard("vi").inline_keyboard for button in row]
+    assert "promptvideo|kind|ad" in prompt_video_callbacks
+    prompt_choices = bot.prompt_video_choices_text({"selected_topic": "máy xay mini", "prompt_kind": "ad"}, "vi")
+    assert "3 prompt video gợi ý" in prompt_choices
+    assert "Prompt A" in prompt_choices
+    prompt_motion_callbacks = [button.callback_data for row in bot.guided_video_motion_keyboard("promptvideo", "vi").inline_keyboard for button in row]
+    assert "promptvideo|back_choices" in prompt_motion_callbacks
+    prompt_result = bot.guided_video_plan_text({"prompt_kind": "ad", "selected_prompt": "demo video", "selected_motion": "pushin", "selected_music": "none"}, "vi")
+    assert "Prompt video đã sẵn sàng" in prompt_result
+    assert "chưa gọi API video" in prompt_result
+    image_start_callbacks = [button.callback_data for row in bot.image_video_start_keyboard("vi").inline_keyboard for button in row]
+    assert "imagevideo|await_image" in image_start_callbacks
+    image_style_callbacks = [button.callback_data for row in bot.image_video_style_keyboard("vi").inline_keyboard for button in row]
+    assert "imagevideo|style|ad" in image_style_callbacks
+    image_result = bot.guided_video_plan_text({"prompt_kind": "ad", "selected_prompt": "animate image", "selected_motion": "orbit", "selected_music": "tech"}, "vi", from_image=True)
+    assert "Prompt video từ ảnh đã sẵn sàng" in image_result
+    assert "/image_to_video_pack" not in bot.menu_hint_text("hint_image_to_video_pack")[1]
 
     music_text = bot.select_music_no_context_text("vi")
     music_buttons = [

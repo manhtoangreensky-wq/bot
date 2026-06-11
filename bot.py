@@ -35491,39 +35491,27 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start")],
-            [InlineKeyboardButton("🧩 Kịch bản → Ảnh → Video", callback_data="storyboard|start")],
-            [InlineKeyboardButton("🎬 Video AI thật", callback_data="menu|video_ai_true")],
-            [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data="menu|video_frame_intro")],
-            [InlineKeyboardButton("🎥 Tự quay & đổi cảnh AI", callback_data="selfscene|start")],
-            [InlineKeyboardButton("📺 Kịch bản video dài", callback_data="longvideo|start")],
-            [InlineKeyboardButton("🧠 Ý tưởng video", callback_data="videoidea|start")],
-            [InlineKeyboardButton("🎥 Prompt / Chuyển động", callback_data="motion|start")],
+            [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("🎬 Video AI thật", callback_data="menu|video_ai_true")],
+            [InlineKeyboardButton("🧩 Kịch bản → Ảnh → Video", callback_data="storyboard|start"), InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data="menu|video_frame_intro")],
+            [InlineKeyboardButton("🎥 Tự quay & đổi cảnh AI", callback_data="selfscene|start"), InlineKeyboardButton("📺 Kịch bản video dài", callback_data="longvideo|start")],
+            [InlineKeyboardButton("🧠 Ý tưởng video", callback_data="videoidea|start"), InlineKeyboardButton("🎥 Prompt / Chuyển động", callback_data="motion|start")],
             [InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main")],
             [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
     if lang == "zh":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔥 Trend 视频", callback_data="trendg|start")],
-            [InlineKeyboardButton("🧩 脚本 → 图片 → 视频", callback_data="storyboard|start")],
-            [InlineKeyboardButton("🎬 真实 AI 视频", callback_data="menu|video_ai_true")],
-            [InlineKeyboardButton("🎞 图片合成视频", callback_data="menu|video_frame_intro")],
-            [InlineKeyboardButton("🎥 自拍换场景 AI", callback_data="selfscene|start")],
-            [InlineKeyboardButton("📺 长视频脚本", callback_data="longvideo|start")],
-            [InlineKeyboardButton("🧠 视频创意", callback_data="videoidea|start")],
-            [InlineKeyboardButton("🎥 Prompt / 镜头运动", callback_data="motion|start")],
+            [InlineKeyboardButton("🔥 Trend 视频", callback_data="trendg|start"), InlineKeyboardButton("🎬 真实 AI 视频", callback_data="menu|video_ai_true")],
+            [InlineKeyboardButton("🧩 脚本 → 图片 → 视频", callback_data="storyboard|start"), InlineKeyboardButton("🎞 图片合成视频", callback_data="menu|video_frame_intro")],
+            [InlineKeyboardButton("🎥 自拍换场景 AI", callback_data="selfscene|start"), InlineKeyboardButton("📺 长视频脚本", callback_data="longvideo|start")],
+            [InlineKeyboardButton("🧠 视频创意", callback_data="videoidea|start"), InlineKeyboardButton("🎥 Prompt / 镜头运动", callback_data="motion|start")],
             [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main")],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start")],
-        [InlineKeyboardButton("🧩 Script → Images → Video", callback_data="storyboard|start")],
-        [InlineKeyboardButton("🎬 Real AI Video", callback_data="menu|video_ai_true")],
-        [InlineKeyboardButton("🎞 Image slideshow video", callback_data="menu|video_frame_intro")],
-        [InlineKeyboardButton("🎥 Self-shot scene AI", callback_data="selfscene|start")],
-        [InlineKeyboardButton("📺 Long-form video script", callback_data="longvideo|start")],
-        [InlineKeyboardButton("🧠 Video ideas", callback_data="videoidea|start")],
-        [InlineKeyboardButton("🎥 Prompt / Motion", callback_data="motion|start")],
+        [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start"), InlineKeyboardButton("🎬 Real AI Video", callback_data="menu|video_ai_true")],
+        [InlineKeyboardButton("🧩 Script → Images → Video", callback_data="storyboard|start"), InlineKeyboardButton("🎞 Image slideshow video", callback_data="menu|video_frame_intro")],
+        [InlineKeyboardButton("🎥 Self-shot scene AI", callback_data="selfscene|start"), InlineKeyboardButton("📺 Long-form video script", callback_data="longvideo|start")],
+        [InlineKeyboardButton("🧠 Video ideas", callback_data="videoidea|start"), InlineKeyboardButton("🎥 Prompt / Motion", callback_data="motion|start")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
@@ -35531,23 +35519,20 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) == "zh":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📝 Prompt → AI 视频", callback_data="create_media|quick_video")],
-            [InlineKeyboardButton("🖼 图片 → AI 视频", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("📝 Prompt → AI 视频", callback_data="promptvideo|start"), InlineKeyboardButton("🖼 图片 → AI 视频", callback_data="imagevideo|start")],
             [InlineKeyboardButton("📊 视频状态", callback_data="menu|hint_video_status")],
             [InlineKeyboardButton("🔙 返回视频菜单", callback_data="menu|main_video")],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📝 Prompt → AI Video", callback_data="create_media|quick_video")],
-            [InlineKeyboardButton("🖼 Image → AI Video", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("📝 Prompt → AI Video", callback_data="promptvideo|start"), InlineKeyboardButton("🖼 Image → AI Video", callback_data="imagevideo|start")],
             [InlineKeyboardButton("📊 Video status", callback_data="menu|hint_video_status")],
             [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video")],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Prompt → Video AI", callback_data="create_media|quick_video")],
-        [InlineKeyboardButton("🖼 Ảnh → Video AI", callback_data="menu|hint_image_to_video_pack")],
+        [InlineKeyboardButton("📝 Prompt → Video AI", callback_data="promptvideo|start"), InlineKeyboardButton("🖼 Ảnh → Video AI", callback_data="imagevideo|start")],
         [InlineKeyboardButton("📊 Trạng thái video", callback_data="menu|hint_video_status")],
         [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
@@ -36349,7 +36334,7 @@ def video_long_script_text(lang: str = "vi", selected: str = "") -> str:
         f"{selected_line}"
     )
 
-DEVELOPING_VIDEO_FLOWS = {"selfscene", "longvideo", "videoidea"}
+DEVELOPING_VIDEO_FLOWS = {"selfscene", "longvideo", "videoidea", "promptvideo", "imagevideo"}
 
 def developing_video_pending_key(user_id) -> str:
     return f"developing_video:{user_id}"
@@ -36385,7 +36370,8 @@ def set_developing_video_pending(user_id, flow: str, step: str, **fields) -> Non
             "selected_motion", "selected_prompt", "selected_music", "selected_output_plan",
             "duration", "structure", "goal", "topic_key", "direction",
             "idea_kind", "product", "message", "context", "platform", "trend_type",
-            "genre", "scene_context", "idea_choice",
+            "genre", "scene_context", "idea_choice", "product_type", "source_file_id",
+            "source_file_name", "source_mime_type", "prompt_kind", "custom_prompt",
         }:
             payload[key] = _short_pending_text(value)
     USER_PENDING[developing_video_pending_key(user_id)] = payload
@@ -36406,6 +36392,20 @@ def get_developing_video_pending(user_id) -> dict | None:
 
 def clear_developing_video_pending(user_id) -> bool:
     return USER_PENDING.pop(developing_video_pending_key(user_id), None) is not None
+
+def restore_developing_video_pending(user_id, flow: str, state: dict | None, step: str) -> dict:
+    flow = normalize_developing_video_flow(flow)
+    if not flow:
+        return {}
+    payload = dict(state or {})
+    payload.update({
+        "pending_action": "developing_video_flow",
+        "flow": flow,
+        "step": str(step or "")[:80],
+        "created_at_ts": time.time(),
+    })
+    USER_PENDING[developing_video_pending_key(user_id)] = payload
+    return payload
 
 def save_developing_video_plan(user_id, flow: str, state: dict) -> dict:
     flow = normalize_developing_video_flow(flow)
@@ -36430,6 +36430,217 @@ def get_latest_developing_video_plan(user_id, flow: str) -> dict | None:
         LAST_DEVELOPING_VIDEO_PLANS.pop(key, None)
         return None
     return plan
+
+def prompt_video_start_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎬 <b>Prompt → AI Video</b>\n\n"
+            "What kind of video do you want to plan?\n\n"
+            "TOAN AAS will create three prompt options, then guide camera motion and music/voice before showing any real-generation price.\n"
+            "This planning step does not call a provider and does not charge Xu."
+        )
+    return (
+        "🎬 <b>Prompt → Video AI</b>\n\n"
+        "Bạn muốn tạo video AI theo hướng nào?\n\n"
+        "TOAN AAS sẽ tạo 3 prompt gợi ý, sau đó hỏi chuyển động và nhạc/voice trước khi hiển thị tier tạo video thật.\n"
+        "Bước lập kế hoạch chưa gọi provider và chưa trừ Xu."
+    )
+
+def prompt_video_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("1️⃣ Product ad", callback_data="promptvideo|kind|ad"), InlineKeyboardButton("2️⃣ Cinematic/story", callback_data="promptvideo|kind|cinema")],
+            [InlineKeyboardButton("3️⃣ TikTok/Reels", callback_data="promptvideo|kind|viral"), InlineKeyboardButton("✍️ Custom prompt", callback_data="promptvideo|kind|custom")],
+            [InlineKeyboardButton("🔙 Back to Real AI Video", callback_data="menu|video_ai_true"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1️⃣ Quảng cáo sản phẩm", callback_data="promptvideo|kind|ad"), InlineKeyboardButton("2️⃣ Điện ảnh/kể chuyện", callback_data="promptvideo|kind|cinema")],
+        [InlineKeyboardButton("3️⃣ TikTok/Reels", callback_data="promptvideo|kind|viral"), InlineKeyboardButton("✍️ Nhập prompt riêng", callback_data="promptvideo|kind|custom")],
+        [InlineKeyboardButton("🔙 Quay lại Video AI thật", callback_data="menu|video_ai_true"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def prompt_video_kind_label(kind: str, lang: str = "vi") -> str:
+    labels_vi = {"ad": "quảng cáo sản phẩm", "cinema": "điện ảnh/kể chuyện", "viral": "TikTok/Reels", "custom": "prompt riêng"}
+    labels_en = {"ad": "product advertising", "cinema": "cinematic/storytelling", "viral": "TikTok/Reels", "custom": "custom prompt"}
+    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(kind or ""), "video")
+
+def prompt_video_description_text(state: dict | None = None, lang: str = "vi") -> str:
+    kind = prompt_video_kind_label((state or {}).get("prompt_kind"), lang)
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"✍️ <b>Describe the video topic</b>\n\nDirection: <code>{html.escape(kind)}</code>\n"
+            "Example: a turquoise mini blender in a modern kitchen, aimed at busy office workers."
+        )
+    return (
+        f"✍️ <b>Hãy mô tả chủ đề video</b>\n\nHướng đã chọn: <code>{html.escape(kind)}</code>\n"
+        "Ví dụ: máy xay sinh tố mini màu xanh ngọc trong căn bếp hiện đại, dành cho người bận rộn."
+    )
+
+def prompt_video_description_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_start"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def prompt_video_suggestions(state: dict | None = None, lang: str = "vi") -> list[str]:
+    topic = _short_pending_text((state or {}).get("selected_topic"), 260) or ("your subject" if normalize_user_language(lang) != "vi" else "chủ đề của bạn")
+    kind = str((state or {}).get("prompt_kind") or "ad")
+    if normalize_user_language(lang) != "vi":
+        return [
+            f"Product-first commercial for {topic}: clean hero reveal, slow push-in, practical demo, visible result, premium lighting, stable subject, no extra text.",
+            f"Cinematic story for {topic}: establish the problem, emotional turning point, soft orbit camera, natural light transition, polished ending.",
+            f"Short viral video for {topic}: immediate visual hook, fast before/after cut, energetic camera movement, clear proof and concise CTA ending.",
+        ]
+    return [
+        f"Quảng cáo rõ sản phẩm cho {topic}: hero reveal sạch, camera tiến chậm, demo công dụng, kết quả nhìn thấy rõ, ánh sáng cao cấp, giữ chủ thể ổn định, không thêm chữ thừa.",
+        f"Điện ảnh/kể chuyện về {topic}: mở bối cảnh vấn đề, khoảnh khắc chuyển biến cảm xúc, orbit nhẹ, ánh sáng chuyển tự nhiên, kết cảnh tinh tế.",
+        f"Video viral ngắn về {topic}: hook hình ảnh ngay 2 giây đầu, chuyển cảnh before/after nhanh, camera năng động, có bằng chứng và CTA ngắn.",
+    ]
+
+def prompt_video_choices_text(state: dict | None = None, lang: str = "vi") -> str:
+    prompts = prompt_video_suggestions(state, lang)
+    title = "🎬 <b>3 prompt video gợi ý</b>" if normalize_user_language(lang) == "vi" else "🎬 <b>Three suggested video prompts</b>"
+    lines = [title, ""]
+    for idx, prompt in enumerate(prompts, 1):
+        lines.extend([f"<b>{idx}. Prompt {'ABC'[idx - 1]}</b>", html.escape(prompt), ""])
+    lines.append("Chọn một prompt để tiếp tục." if normalize_user_language(lang) == "vi" else "Choose one prompt to continue.")
+    return "\n".join(lines)
+
+def prompt_video_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1️⃣ Chọn A" if normalize_user_language(lang) == "vi" else "1️⃣ Choose A", callback_data="promptvideo|choose|1"), InlineKeyboardButton("2️⃣ Chọn B" if normalize_user_language(lang) == "vi" else "2️⃣ Choose B", callback_data="promptvideo|choose|2")],
+        [InlineKeyboardButton("3️⃣ Chọn C" if normalize_user_language(lang) == "vi" else "3️⃣ Choose C", callback_data="promptvideo|choose|3"), InlineKeyboardButton("✍️ Nhập prompt riêng" if normalize_user_language(lang) == "vi" else "✍️ Custom prompt", callback_data="promptvideo|custom_prompt")],
+        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_description"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def guided_video_motion_text(state: dict | None = None, lang: str = "vi", from_image: bool = False) -> str:
+    prompt = _short_pending_text((state or {}).get("selected_prompt"), 240)
+    title = "Bạn muốn ảnh chuyển động như thế nào?" if from_image else "Bạn muốn chuyển động video như thế nào?"
+    if normalize_user_language(lang) != "vi":
+        title = "How should the image move?" if from_image else "How should the video move?"
+    return f"🎥 <b>{title}</b>\n\nPrompt: <code>{html.escape(prompt)}</code>"
+
+def guided_video_motion_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        labels = ("1️⃣ Slow push-in", "2️⃣ Gentle orbit/parallax", "3️⃣ Fast before/after", "✍️ Custom motion")
+    else:
+        labels = ("1️⃣ Tiến chậm vào chủ thể", "2️⃣ Xoay nhẹ / parallax", "3️⃣ Before/after nhanh", "✍️ Nhập chuyển động riêng")
+    back_action = "back_choices" if prefix == "promptvideo" else "back_style"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels[0], callback_data=f"{prefix}|motion|pushin"), InlineKeyboardButton(labels[1], callback_data=f"{prefix}|motion|orbit")],
+        [InlineKeyboardButton(labels[2], callback_data=f"{prefix}|motion|fastcut"), InlineKeyboardButton(labels[3], callback_data=f"{prefix}|motion_custom")],
+        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data=f"{prefix}|{back_action}"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def guided_video_music_text(state: dict | None = None, lang: str = "vi") -> str:
+    motion = self_scene_style_label((state or {}).get("selected_motion"), lang)
+    if normalize_user_language(lang) != "vi":
+        return f"🎵 <b>Choose music/voice direction</b>\n\nMotion: <code>{html.escape(motion)}</code>\nThis step only plans the soundtrack."
+    return f"🎵 <b>Bạn muốn nhạc/voice theo phong cách nào?</b>\n\nChuyển động: <code>{html.escape(motion)}</code>\nBước này chỉ lập kế hoạch âm thanh."
+
+def guided_video_music_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        labels = ("1️⃣ Powerful cinematic", "2️⃣ Technology/future", "3️⃣ Fast viral", "⏭ No music", "✍️ Custom")
+    else:
+        labels = ("1️⃣ Điện ảnh mạnh mẽ", "2️⃣ Công nghệ/tương lai", "3️⃣ Viral TikTok nhanh", "⏭ Không nhạc", "✍️ Nhập riêng")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels[0], callback_data=f"{prefix}|music|cinematic"), InlineKeyboardButton(labels[1], callback_data=f"{prefix}|music|tech")],
+        [InlineKeyboardButton(labels[2], callback_data=f"{prefix}|music|viral"), InlineKeyboardButton(labels[3], callback_data=f"{prefix}|music|none")],
+        [InlineKeyboardButton(labels[4], callback_data=f"{prefix}|music_custom")],
+        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data=f"{prefix}|back_motion"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def guided_video_plan_text(state: dict | None = None, lang: str = "vi", from_image: bool = False) -> str:
+    state = state or {}
+    prompt = _short_pending_text(state.get("selected_prompt"), 900)
+    motion = self_scene_style_label(state.get("selected_motion"), lang)
+    music = self_scene_music_label(state.get("selected_music"), lang)
+    if normalize_user_language(lang) != "vi":
+        source = "Image received: <b>yes</b>\n" if from_image else ""
+        return (
+            f"🎬 <b>{'Image-to-video' if from_image else 'Prompt-to-video'} plan ready</b>\n\n"
+            f"{source}Style: <b>{html.escape(prompt_video_kind_label(state.get('prompt_kind'), lang))}</b>\n"
+            f"Motion: <b>{html.escape(motion)}</b>\nMusic/voice: <b>{html.escape(music)}</b>\n\n"
+            f"<b>Video prompt</b>\n<code>{html.escape(prompt)}</code>\n\n"
+            "No video provider was called and no Xu was charged."
+        )
+    source = "Ảnh: <b>đã nhận</b>\n" if from_image else ""
+    return (
+        f"🎬 <b>Prompt video {'từ ảnh ' if from_image else ''}đã sẵn sàng</b>\n\n"
+        f"{source}Kiểu video: <b>{html.escape(prompt_video_kind_label(state.get('prompt_kind'), lang))}</b>\n"
+        f"Chuyển động: <b>{html.escape(motion)}</b>\nNhạc/voice: <b>{html.escape(music)}</b>\n\n"
+        f"<b>Prompt video</b>\n<code>{html.escape(prompt)}</code>\n\n"
+        "TOAN AAS chưa gọi API video và chưa trừ Xu."
+    )
+
+def guided_video_result_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 Tạo video AI nếu công cụ mở" if normalize_user_language(lang) == "vi" else "🎬 Generate AI video if available", callback_data=f"{prefix}|generate"), InlineKeyboardButton("💾 Lưu kế hoạch" if normalize_user_language(lang) == "vi" else "💾 Save plan", callback_data=f"{prefix}|save")],
+        [InlineKeyboardButton("✍️ Sửa prompt" if normalize_user_language(lang) == "vi" else "✍️ Edit prompt", callback_data=f"{prefix}|edit_prompt"), InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data=f"{prefix}|back_music")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def image_video_start_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🖼 <b>Image → AI Video</b>\n\n"
+            "Send or reply to the image you want to animate. TOAN AAS will ask for style, camera motion and music before any real generation.\n"
+            "No video provider call and no Xu charged yet."
+        )
+    return (
+        "🖼 <b>Ảnh → Video AI</b>\n\n"
+        "Bạn hãy gửi hoặc reply ảnh muốn biến thành video.\n"
+        "Bot sẽ hỏi kiểu video, chuyển động và nhạc trước khi tạo.\n"
+        "TOAN AAS chưa gọi API video và chưa trừ Xu."
+    )
+
+def image_video_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📷 Gửi ảnh" if normalize_user_language(lang) == "vi" else "📷 Send image", callback_data="imagevideo|await_image")],
+        [InlineKeyboardButton("🔙 Quay lại Video AI thật" if normalize_user_language(lang) == "vi" else "🔙 Back to Real AI Video", callback_data="menu|video_ai_true"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def image_video_style_text(lang: str = "vi") -> str:
+    return (
+        "🎨 <b>Bạn muốn biến ảnh này thành video kiểu nào?</b>"
+        if normalize_user_language(lang) == "vi"
+        else "🎨 <b>What style should this image-to-video use?</b>"
+    )
+
+def image_video_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        labels = ("1️⃣ Product ad", "2️⃣ Cinematic/emotional", "3️⃣ Viral/TikTok", "✍️ Custom style")
+    else:
+        labels = ("1️⃣ Quảng cáo sản phẩm", "2️⃣ Điện ảnh/cảm xúc", "3️⃣ Viral/TikTok", "✍️ Nhập kiểu riêng")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels[0], callback_data="imagevideo|style|ad"), InlineKeyboardButton(labels[1], callback_data="imagevideo|style|cinema")],
+        [InlineKeyboardButton(labels[2], callback_data="imagevideo|style|viral"), InlineKeyboardButton(labels[3], callback_data="imagevideo|style_custom")],
+        [InlineKeyboardButton("🔙 Quay lại gửi ảnh" if normalize_user_language(lang) == "vi" else "🔙 Back to image upload", callback_data="imagevideo|back_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def image_video_prompt_from_state(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    style = prompt_video_kind_label(state.get("prompt_kind"), lang)
+    motion = self_scene_style_label(state.get("selected_motion"), lang)
+    music = self_scene_music_label(state.get("selected_music"), lang)
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"Animate the provided image as a {style} short video. Use {motion}, preserve the original subject, face, product geometry, logo and colors, "
+            f"natural depth and lighting, stable composition, soundtrack direction: {music}, no watermark, no extra text."
+        )
+    return (
+        f"Biến ảnh đã gửi thành video ngắn phong cách {style}; dùng chuyển động {motion}; giữ nguyên chủ thể, khuôn mặt, hình dáng sản phẩm, logo và màu chính; "
+        f"tạo chiều sâu và ánh sáng tự nhiên; nhạc/voice theo hướng {music}; không watermark, không thêm chữ thừa."
+    )
+
+def guided_video_public_guard_text(lang: str = "vi", from_image: bool = False) -> str:
+    if normalize_user_language(lang) != "vi":
+        extra = " The uploaded-image provider bridge is not opened yet." if from_image else ""
+        return f"🎬 Real AI Video is under maintenance or not public yet.{extra}\nTOAN AAS has not charged Xu. You can save this plan first."
+    extra = "\nCầu nối gửi ảnh Telegram sang provider video chưa mở an toàn." if from_image else ""
+    return (
+        "🎬 Video AI thật hiện đang được bảo trì hoặc chưa mở công khai."
+        f"{extra}\nTOAN AAS chưa trừ Xu.\nBạn có thể lưu prompt/kế hoạch trước."
+    )
 
 def self_scene_input_label(input_type: str, lang: str = "vi") -> str:
     code = str(input_type or "").strip().lower()
@@ -36615,14 +36826,14 @@ def self_scene_object_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("📦 Product / logo / packaging", callback_data="selfscene|object|product")],
             [InlineKeyboardButton("🐶 Pet / object / scene", callback_data="selfscene|object|pet")],
             [InlineKeyboardButton("✍️ Custom subject", callback_data="selfscene|object|custom")],
-            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|start"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|back_object"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👤 Người thật", callback_data="selfscene|object|person")],
         [InlineKeyboardButton("📦 Sản phẩm", callback_data="selfscene|object|product")],
         [InlineKeyboardButton("🐶 Thú cưng/vật phẩm", callback_data="selfscene|object|pet")],
         [InlineKeyboardButton("✍️ Nhập riêng", callback_data="selfscene|object|custom")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|back_object"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def self_scene_describe_text(input_type: str, lang: str = "vi") -> str:
@@ -36662,14 +36873,14 @@ def self_scene_context_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("2️⃣ Choose context 2", callback_data="selfscene|context|2")],
             [InlineKeyboardButton("3️⃣ Choose context 3", callback_data="selfscene|context|3")],
             [InlineKeyboardButton("✍️ Enter another context", callback_data="selfscene|context_custom")],
-            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|start"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|back_context"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("1️⃣ Chọn ngữ cảnh 1", callback_data="selfscene|context|1")],
         [InlineKeyboardButton("2️⃣ Chọn ngữ cảnh 2", callback_data="selfscene|context|2")],
         [InlineKeyboardButton("3️⃣ Chọn ngữ cảnh 3", callback_data="selfscene|context|3")],
         [InlineKeyboardButton("✍️ Nhập ngữ cảnh riêng", callback_data="selfscene|context_custom")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|back_context"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def self_scene_context_custom_text(lang: str = "vi") -> str:
@@ -36696,14 +36907,14 @@ def self_scene_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("2️⃣ Gentle orbit", callback_data="selfscene|style|orbit")],
             [InlineKeyboardButton("3️⃣ Fast viral cuts", callback_data="selfscene|style|fastcut")],
             [InlineKeyboardButton("✍️ Custom motion", callback_data="selfscene|style_custom")],
-            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|start"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|back_style"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("1️⃣ Tiến chậm", callback_data="selfscene|style|pushin")],
         [InlineKeyboardButton("2️⃣ Xoay nhẹ", callback_data="selfscene|style|orbit")],
         [InlineKeyboardButton("3️⃣ Chuyển cảnh nhanh", callback_data="selfscene|style|fastcut")],
         [InlineKeyboardButton("✍️ Nhập chuyển động riêng", callback_data="selfscene|style_custom")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|back_style"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def self_scene_style_custom_text(lang: str = "vi") -> str:
@@ -36733,7 +36944,7 @@ def self_scene_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("3️⃣ Viral/TikTok", callback_data="selfscene|music|viral")],
             [InlineKeyboardButton("⏭ No music", callback_data="selfscene|music|none")],
             [InlineKeyboardButton("✍️ Custom music", callback_data="selfscene|music_custom")],
-            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|start"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("1️⃣ Điện ảnh", callback_data="selfscene|music|cinematic")],
@@ -36741,7 +36952,7 @@ def self_scene_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("3️⃣ Viral/TikTok", callback_data="selfscene|music|viral")],
         [InlineKeyboardButton("⏭ Không nhạc", callback_data="selfscene|music|none")],
         [InlineKeyboardButton("✍️ Nhập riêng", callback_data="selfscene|music_custom")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|back_music"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def self_scene_music_custom_text(lang: str = "vi") -> str:
@@ -37112,26 +37323,120 @@ def long_video_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -> str:
-    topic = _short_pending_text((plan or {}).get("selected_topic"), 180) or ("topic" if normalize_user_language(lang) != "vi" else "chủ đề")
+    plan = plan or {}
+    topic = _short_pending_text(plan.get("selected_topic"), 180) or ("topic" if normalize_user_language(lang) != "vi" else "chủ đề")
+    duration = _short_pending_text(plan.get("duration"), 80) or ("10 minutes" if normalize_user_language(lang) != "vi" else "10 phút")
+    structure = _short_pending_text(plan.get("structure"), 120) or long_video_structure_suggestions(duration, lang)[0]
+    style = long_video_style_label(plan.get("selected_style") or "professional", lang)
+    match = re.search(r"\d+", structure)
+    scene_count = max(3, min(12, int(match.group(0)) if match else 6))
+    if action == "save":
+        return (
+            "💾 Roadmap saved in this session. No provider call and no Xu charged."
+            if normalize_user_language(lang) != "vi"
+            else "💾 TOAN AAS đã lưu lộ trình trong phiên hiện tại. Bot chưa gọi provider và chưa trừ Xu."
+        )
     if normalize_user_language(lang) != "vi":
-        if action == "storyboard":
-            return f"🧩 <b>Storyboard draft</b>\n\n1. Hook scene.\n2. Problem/context scene.\n3. Main demo/teaching scenes.\n4. Proof/recap scene.\n5. CTA scene.\n\nTopic: <code>{html.escape(topic)}</code>\n\nNo provider call and no Xu charged."
-        if action == "image_prompts":
-            return f"🖼 <b>Image prompt pack</b>\n\n1. Hero key visual for {html.escape(topic)}.\n2. Problem/contrast scene.\n3. Demo/proof scene.\n4. CTA closing scene.\n\nNo image API call and no Xu charged."
-        if action == "video_prompts":
-            return f"🎬 <b>Video prompt pack</b>\n\nUse slow push-in, demo cutaways, before/after transition, clean CTA ending for {html.escape(topic)}.\n\nNo video API call and no Xu charged."
         if action == "music":
-            return "🎵 <b>Music/voice suggestions</b>\n\nVoice: clear teacher/host narration.\nMusic: light corporate bed, cinematic pulse for hooks, low volume under voice.\n\nNo provider call and no Xu charged."
-        return "💾 Roadmap saved in this session. No provider call and no Xu charged."
-    if action == "storyboard":
-        return f"🧩 <b>Storyboard nháp</b>\n\n1. Cảnh hook.\n2. Cảnh vấn đề/ngữ cảnh.\n3. Các cảnh demo/hướng dẫn chính.\n4. Cảnh proof/recap.\n5. Cảnh CTA.\n\nChủ đề: <code>{html.escape(topic)}</code>\n\nBot chưa gọi provider và chưa trừ Xu."
-    if action == "image_prompts":
-        return f"🖼 <b>Prompt ảnh từng cảnh</b>\n\n1. Key visual mở đầu cho {html.escape(topic)}.\n2. Cảnh vấn đề/contrast.\n3. Cảnh demo/bằng chứng.\n4. Cảnh CTA kết.\n\nBot chưa gọi API ảnh và chưa trừ Xu."
-    if action == "video_prompts":
-        return f"🎬 <b>Prompt video từng cảnh</b>\n\nDùng slow push-in, cutaway demo, before/after transition, CTA rõ cho {html.escape(topic)}.\n\nBot chưa gọi API video và chưa trừ Xu."
+            return (
+                "🎵 <b>Music/voice for the long-form video</b>\n\n"
+                "1. Voice: confident host/teacher, medium pace, brief pauses after key points.\n"
+                "2. Music: light corporate/cinematic bed, 15–20% under narration.\n"
+                "3. SFX: subtle whoosh for chapter changes, click/pop for proof and captions.\n"
+                "4. Editing rhythm: faster opening, stable middle chapters, slower recap/CTA.\n"
+                "5. By section: cinematic pulse for hook; ambient bed for explanation; brighter lift for proof; soft resolve for CTA.\n\n"
+                "No provider call and no Xu charged."
+            )
+        lines = [
+            "🧩 <b>Long-form storyboard by scene</b>" if action == "storyboard" else (
+                "🖼 <b>Image prompts by scene</b>" if action == "image_prompts" else "🎬 <b>Video prompts by scene</b>"
+            ),
+            "",
+            f"Topic: <code>{html.escape(topic)}</code>",
+            f"Length: <b>{html.escape(duration)}</b> | Structure: <b>{html.escape(structure)}</b>",
+            "",
+        ]
+        for idx in range(1, scene_count + 1):
+            phase = "hook" if idx == 1 else ("recap and CTA" if idx == scene_count else f"chapter point {idx}")
+            if action == "storyboard":
+                lines.extend([
+                    f"<b>Scene {idx}</b>",
+                    f"• Goal: {phase} for {html.escape(topic)}.",
+                    f"• Visual: consistent subject in a {html.escape(style)} composition.",
+                    "• Voice: one clear claim, explanation/example, then a transition.",
+                    "• Motion: slow push-in or relevant demo cutaway.",
+                    "• Text: one short chapter label or proof point.",
+                    "",
+                ])
+            elif action == "image_prompts":
+                lines.extend([
+                    f"<b>Scene {idx}</b>",
+                    f"Prompt: <code>{html.escape(topic)}, {phase}, {style}, consistent subject, clean composition, realistic lighting, high detail, no watermark</code>",
+                    "Negative: <code>distorted face, broken hands, changed logo, duplicate object, unreadable text</code>",
+                    "Suggested ratio: <code>16:9</code>",
+                    "",
+                ])
+            else:
+                lines.extend([
+                    f"<b>Scene {idx}</b>",
+                    f"Prompt: <code>{html.escape(topic)}, {phase}, stable subject, natural motion, clear visual transition to the next chapter</code>",
+                    "Camera: slow push-in / gentle orbit / demo cutaway.",
+                    "Duration: 5–8 seconds as a reusable segment.",
+                    "Audio: low music bed, subtle transition SFX.",
+                    "",
+                ])
+        lines.append("No image/video provider call and no Xu charged.")
+        return "\n".join(lines)
     if action == "music":
-        return "🎵 <b>Gợi ý nhạc/voice</b>\n\nVoice: giọng host/giáo viên rõ ràng.\nNhạc: corporate nhẹ, cinematic pulse ở hook, volume thấp dưới voice.\n\nBot chưa gọi provider và chưa trừ Xu."
-    return "💾 TOAN AAS đã lưu lộ trình trong phiên hiện tại. Bot chưa gọi provider và chưa trừ Xu."
+        return (
+            "🎵 <b>Gợi ý nhạc/voice cho video dài</b>\n\n"
+            "1. <b>Phong cách voice:</b> host/giáo viên tự tin, tốc độ vừa, nghỉ ngắn sau ý quan trọng.\n"
+            "2. <b>Nhạc nền:</b> corporate/cinematic nhẹ, âm lượng 15–20% dưới lời đọc.\n"
+            "3. <b>SFX:</b> whoosh nhẹ khi đổi chương, click/pop ở bằng chứng và caption.\n"
+            "4. <b>Nhịp dựng:</b> mở nhanh, phần thân ổn định, recap/CTA chậm hơn.\n"
+            "5. <b>Theo từng đoạn:</b> cinematic pulse ở hook; ambient ở giải thích; nhạc nâng nhẹ ở proof; kết mềm ở CTA.\n\n"
+            "Bot chưa gọi provider và chưa trừ Xu."
+        )
+    lines = [
+        "🧩 <b>Storyboard video dài theo từng cảnh</b>" if action == "storyboard" else (
+            "🖼 <b>Prompt ảnh từng cảnh</b>" if action == "image_prompts" else "🎬 <b>Prompt video từng cảnh</b>"
+        ),
+        "",
+        f"Chủ đề: <code>{html.escape(topic)}</code>",
+        f"Độ dài: <b>{html.escape(duration)}</b> | Cấu trúc: <b>{html.escape(structure)}</b>",
+        "",
+    ]
+    for idx in range(1, scene_count + 1):
+        phase = "hook mở đầu" if idx == 1 else ("recap và CTA" if idx == scene_count else f"ý chính của chương {idx}")
+        if action == "storyboard":
+            lines.extend([
+                f"<b>Cảnh {idx}</b>",
+                f"• Mục tiêu: {phase} cho {html.escape(topic)}.",
+                f"• Hình ảnh: chủ thể nhất quán, bố cục {html.escape(style)}.",
+                "• Voice: một luận điểm rõ, giải thích/ví dụ, câu nối sang cảnh sau.",
+                "• Chuyển động: slow push-in hoặc cutaway demo phù hợp.",
+                "• Text/caption: một nhãn chương hoặc điểm bằng chứng ngắn.",
+                "",
+            ])
+        elif action == "image_prompts":
+            lines.extend([
+                f"<b>Cảnh {idx}</b>",
+                f"Prompt ảnh: <code>{html.escape(topic)}, {phase}, phong cách {style}, chủ thể nhất quán, bố cục sạch, ánh sáng thực tế, chi tiết cao, không watermark</code>",
+                "Negative prompt: <code>méo mặt, lỗi tay, đổi logo, vật thể trùng, chữ khó đọc</code>",
+                "Tỉ lệ gợi ý: <code>16:9</code>",
+                "",
+            ])
+        else:
+            lines.extend([
+                f"<b>Cảnh {idx}</b>",
+                f"Prompt video: <code>{html.escape(topic)}, {phase}, giữ chủ thể ổn định, chuyển động tự nhiên, kết cảnh rõ để nối chương tiếp theo</code>",
+                "Chuyển động camera: slow push-in / orbit nhẹ / cutaway demo.",
+                "Thời lượng gợi ý: 5–8 giây cho một đoạn tái sử dụng.",
+                "Âm thanh/nhạc: nhạc nền thấp, SFX chuyển cảnh tinh tế.",
+                "",
+            ])
+    lines.append("Bot chưa gọi API ảnh/video và chưa trừ Xu.")
+    return "\n".join(lines)
 
 def video_idea_menu_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -37144,73 +37449,124 @@ def video_idea_menu_text(lang: str = "vi") -> str:
         "🧠 <b>Ý tưởng video</b>\n\n"
         "Bạn muốn tạo ý tưởng theo hướng nào?\n\n"
         "1. 📢 Ý tưởng quảng cáo\n"
-        "2. 🔥 Ý tưởng theo xu hướng\n"
-        "3. 🎬 Ý tưởng điện ảnh / kể chuyện\n\n"
+        "Tạo concept bán hàng, hook, storyboard, caption và CTA.\n\n"
+        "2. 🎬 Ý tưởng điện ảnh / kể chuyện\n"
+        "Tạo concept cinematic, bối cảnh, mạch cảm xúc và prompt ảnh/video.\n\n"
         "Bước này chỉ tạo ý tưởng, kịch bản và prompt. Bot chưa gọi nhà cung cấp AI và chưa trừ Xu."
     )
 
 def video_idea_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Advertising idea", callback_data="videoidea|kind|ad")],
-            [InlineKeyboardButton("🔥 Trend idea", callback_data="videoidea|kind|trend")],
-            [InlineKeyboardButton("🎬 Cinematic / story idea", callback_data="videoidea|kind|cinema")],
-            [InlineKeyboardButton("✍️ Custom idea", callback_data="videoidea|kind|custom")],
-            [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton("📢 Advertising idea", callback_data="videoidea|kind|ad"), InlineKeyboardButton("🎬 Cinematic / story idea", callback_data="videoidea|kind|cinema")],
+            [InlineKeyboardButton("✍️ Custom idea", callback_data="videoidea|kind|custom"), InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Ý tưởng quảng cáo", callback_data="videoidea|kind|ad")],
-        [InlineKeyboardButton("🔥 Ý tưởng theo xu hướng", callback_data="videoidea|kind|trend")],
-        [InlineKeyboardButton("🎬 Ý tưởng điện ảnh / kể chuyện", callback_data="videoidea|kind|cinema")],
-        [InlineKeyboardButton("✍️ Nhập ý tưởng riêng", callback_data="videoidea|kind|custom")],
-        [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📢 Ý tưởng quảng cáo", callback_data="videoidea|kind|ad"), InlineKeyboardButton("🎬 Ý tưởng điện ảnh / kể chuyện", callback_data="videoidea|kind|cinema")],
+        [InlineKeyboardButton("✍️ Nhập ý tưởng riêng", callback_data="videoidea|kind|custom"), InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def video_idea_product_type_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "📢 <b>What kind of product or service do you want to advertise?</b>"
+    return (
+        "📢 <b>Bạn muốn làm quảng cáo cho loại sản phẩm/dịch vụ nào?</b>\n\n"
+        "Chọn nhóm gần nhất. TOAN AAS sẽ dùng nhóm này để gợi ý bối cảnh phù hợp."
+    )
+
+def video_idea_product_type_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        labels = ("1️⃣ Physical product", "2️⃣ Service / app", "3️⃣ Affiliate / digital", "✍️ Custom type")
+    else:
+        labels = ("1️⃣ Sản phẩm vật lý", "2️⃣ Dịch vụ / app", "3️⃣ Affiliate / nội dung số", "✍️ Nhập riêng")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels[0], callback_data="videoidea|product_type|physical"), InlineKeyboardButton(labels[1], callback_data="videoidea|product_type|service")],
+        [InlineKeyboardButton(labels[2], callback_data="videoidea|product_type|affiliate"), InlineKeyboardButton(labels[3], callback_data="videoidea|product_type|custom")],
+        [InlineKeyboardButton("🔙 Quay lại Ý tưởng video" if normalize_user_language(lang) == "vi" else "🔙 Back to video ideas", callback_data="videoidea|start"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def video_idea_product_description_text(product_type: str = "", lang: str = "vi") -> str:
+    labels_vi = {"physical": "sản phẩm vật lý", "service": "dịch vụ/app", "affiliate": "affiliate/nội dung số", "custom": "nhóm riêng"}
+    labels_en = {"physical": "physical product", "service": "service/app", "affiliate": "affiliate/digital content", "custom": "custom category"}
+    label = (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(product_type or ""), product_type or "product")
+    if normalize_user_language(lang) != "vi":
+        return f"✍️ Send the product/service name or a short description.\n\nCategory: <code>{html.escape(label)}</code>\nExample: a mini blender for busy people."
+    return f"✍️ Bạn hãy gửi tên sản phẩm/dịch vụ hoặc mô tả ngắn.\n\nLoại: <code>{html.escape(label)}</code>\nVí dụ: máy xay sinh tố mini cho người bận rộn."
+
+def video_idea_product_description_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="videoidea|back_product_type"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def video_idea_goal_text(lang: str = "vi") -> str:
+    return "🎯 <b>Mục tiêu quảng cáo của bạn là gì?</b>" if normalize_user_language(lang) == "vi" else "🎯 <b>What is the advertising goal?</b>"
+
+def video_idea_context_options(product_type: str = "", lang: str = "vi") -> list[str]:
+    code = str(product_type or "")
+    if normalize_user_language(lang) != "vi":
+        catalog = {
+            "physical": ["Modern clean kitchen", "Busy family lifestyle", "Cafe / everyday lifestyle"],
+            "service": ["Technology office", "Work-from-home setup", "Future city / digital world"],
+            "affiliate": ["Life transformation story", "Online work routine", "New opportunity hook"],
+        }
+        return catalog.get(code, ["Everyday/UGC", "Studio/product", "Cinematic/emotional"])
+    catalog = {
+        "physical": ["Nhà bếp hiện đại / sạch đẹp", "Gia đình bận rộn", "Quán cafe / lifestyle"],
+        "service": ["Văn phòng công nghệ", "Người làm việc tại nhà", "Thành phố tương lai"],
+        "affiliate": ["Câu chuyện thay đổi cuộc sống", "Làm việc online", "Hook cơ hội mới"],
+    }
+    return catalog.get(code, ["Đời thường/UGC", "Studio/sản phẩm", "Điện ảnh/cảm xúc"])
+
+def video_idea_context_text(state: dict | None = None, lang: str = "vi") -> str:
+    options = video_idea_context_options((state or {}).get("product_type"), lang)
+    lines = ["🌍 <b>Bạn muốn quảng cáo theo ngữ cảnh nào?</b>" if normalize_user_language(lang) == "vi" else "🌍 <b>Which advertising context do you want?</b>", ""]
+    for idx, item in enumerate(options, 1):
+        lines.append(f"{idx}. {html.escape(item)}")
+    return "\n".join(lines)
+
+def video_idea_context_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    labels = ("1️⃣ Ngữ cảnh 1", "2️⃣ Ngữ cảnh 2", "3️⃣ Ngữ cảnh 3", "✍️ Nhập ngữ cảnh riêng") if normalize_user_language(lang) == "vi" else ("1️⃣ Context 1", "2️⃣ Context 2", "3️⃣ Context 3", "✍️ Custom context")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels[0], callback_data="videoidea|context|1"), InlineKeyboardButton(labels[1], callback_data="videoidea|context|2")],
+        [InlineKeyboardButton(labels[2], callback_data="videoidea|context|3"), InlineKeyboardButton(labels[3], callback_data="videoidea|context_custom")],
+        [InlineKeyboardButton("🔙 Quay lại mục tiêu" if normalize_user_language(lang) == "vi" else "🔙 Back to goal", callback_data="videoidea|back_goal"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def video_idea_goal_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    labels = (
+        ("1️⃣ Bán hàng", "2️⃣ Thương hiệu", "3️⃣ Viral/TikTok", "✍️ Nhập mục tiêu riêng")
+        if normalize_user_language(lang) == "vi"
+        else ("1️⃣ Direct sales", "2️⃣ Brand awareness", "3️⃣ Viral/TikTok", "✍️ Custom goal")
+    )
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels[0], callback_data="videoidea|goal|sales"), InlineKeyboardButton(labels[1], callback_data="videoidea|goal|brand")],
+        [InlineKeyboardButton(labels[2], callback_data="videoidea|goal|viral"), InlineKeyboardButton(labels[3], callback_data="videoidea|goal_custom")],
+        [InlineKeyboardButton("🔙 Quay lại mô tả" if normalize_user_language(lang) == "vi" else "🔙 Back to description", callback_data="videoidea|back_description"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def video_idea_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1️⃣ Chọn ý tưởng A" if normalize_user_language(lang) == "vi" else "1️⃣ Choose idea A", callback_data="videoidea|choose|1"), InlineKeyboardButton("2️⃣ Chọn ý tưởng B" if normalize_user_language(lang) == "vi" else "2️⃣ Choose idea B", callback_data="videoidea|choose|2")],
+        [InlineKeyboardButton("3️⃣ Chọn ý tưởng C" if normalize_user_language(lang) == "vi" else "3️⃣ Choose idea C", callback_data="videoidea|choose|3"), InlineKeyboardButton("✍️ Nhập ý tưởng riêng" if normalize_user_language(lang) == "vi" else "✍️ Custom idea", callback_data="videoidea|choice_custom")],
+        [InlineKeyboardButton("🔙 Quay lại ngữ cảnh" if normalize_user_language(lang) == "vi" else "🔙 Back to context", callback_data="videoidea|back_context"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def video_idea_topic_text(kind: str, lang: str = "vi") -> str:
     kind = str(kind or "custom")
     if normalize_user_language(lang) != "vi":
         prompts = {
-            "ad": "📢 What product/service do you want to advertise?",
-            "trend": "🔥 What topic/product should the trend idea focus on?",
             "cinema": "🎬 What subject should the cinematic/story idea explore?",
             "custom": "✍️ Describe your video idea, goal and platform.",
         }
         return prompts.get(kind, prompts["custom"]) + "\n\nNo provider call and no Xu deducted."
     prompts = {
-        "ad": "📢 Bạn muốn làm quảng cáo cho sản phẩm/dịch vụ gì?",
-        "trend": "🔥 Bạn muốn tạo ý tưởng theo xu hướng cho chủ đề/sản phẩm gì?",
         "cinema": "🎬 Bạn muốn kể câu chuyện điện ảnh về chủ đề nào?",
         "custom": "✍️ Bạn hãy mô tả ý tưởng video, mục tiêu và nền tảng mong muốn.",
     }
     return prompts.get(kind, prompts["custom"]) + "\n\nBot chưa gọi nhà cung cấp AI và chưa trừ Xu."
 
-def video_idea_goal_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    labels = (
-        ("1️⃣ Bán hàng/chuyển đổi", "2️⃣ Nhận diện thương hiệu", "3️⃣ Kể chuyện/cảm xúc", "✍️ Nhập mục tiêu riêng")
-        if normalize_user_language(lang) == "vi"
-        else ("1️⃣ Sales/conversion", "2️⃣ Brand awareness", "3️⃣ Story/emotion", "✍️ Custom goal")
-    )
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels[0], callback_data="videoidea|goal|sales")],
-        [InlineKeyboardButton(labels[1], callback_data="videoidea|goal|brand")],
-        [InlineKeyboardButton(labels[2], callback_data="videoidea|goal|story")],
-        [InlineKeyboardButton(labels[3], callback_data="videoidea|goal_custom")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
-
-def video_idea_context_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    labels = (
-        ("1️⃣ Đời thường/UGC", "2️⃣ Studio/sản phẩm", "3️⃣ Điện ảnh/cảm xúc", "✍️ Nhập ngữ cảnh riêng")
-        if normalize_user_language(lang) == "vi"
-        else ("1️⃣ Everyday/UGC", "2️⃣ Studio/product", "3️⃣ Cinematic/emotional", "✍️ Custom context")
-    )
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels[0], callback_data="videoidea|context|ugc")],
-        [InlineKeyboardButton(labels[1], callback_data="videoidea|context|studio")],
-        [InlineKeyboardButton(labels[2], callback_data="videoidea|context|cinematic")],
-        [InlineKeyboardButton(labels[3], callback_data="videoidea|context_custom")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
 
 def video_idea_platform_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -37252,29 +37608,27 @@ def video_idea_choices_text(state: dict, lang: str = "vi") -> str:
     kind = str(state.get("idea_kind") or "custom")
     if normalize_user_language(lang) != "vi":
         return (
-            f"🧠 <b>Three video ideas for {html.escape(topic)}</b>\n\n"
-            "1. Fast hook + problem/solution reveal.\n"
-            "2. POV story + emotional/product turning point.\n"
-            "3. Before/after or cinematic transformation.\n\n"
+            f"📢 <b>Three advertising ideas for {html.escape(topic)}</b>\n\n"
+            "A. Problem/solution reveal — direct benefit hook and practical demo.\n"
+            "B. Everyday POV story — relatable conflict and emotional turning point.\n"
+            "C. Premium transformation — before/after match cut and polished product reveal.\n\n"
             "Choose one idea to build the full package."
         )
-    kind_label = {"ad": "quảng cáo", "trend": "theo xu hướng", "cinema": "điện ảnh/kể chuyện", "custom": "riêng"}.get(kind, kind)
+    kind_label = {"ad": "quảng cáo", "cinema": "điện ảnh/kể chuyện", "custom": "riêng"}.get(kind, kind)
     return (
         f"🧠 <b>3 ý tưởng video {html.escape(kind_label)}</b>\n\n"
         f"Chủ đề: <code>{html.escape(topic)}</code>\n\n"
-        "1️⃣ Hook nhanh + vấn đề/giải pháp, sản phẩm xuất hiện như bước chuyển.\n\n"
-        "2️⃣ POV/kể chuyện đời thường, có mâu thuẫn ngắn và khoảnh khắc thay đổi.\n\n"
-        "3️⃣ Before/after hoặc chuyển cảnh điện ảnh, nhấn cảm xúc và kết quả.\n\n"
+        "<b>A. Vấn đề → giải pháp</b>\nHook thẳng lợi ích, demo ngắn, sản phẩm xuất hiện như bước chuyển rõ ràng.\n\n"
+        "<b>B. POV đời thường</b>\nTình huống quen thuộc, mâu thuẫn ngắn, khoảnh khắc thay đổi có cảm xúc.\n\n"
+        "<b>C. Chuyển đổi cao cấp</b>\nBefore/after, match cut điện ảnh, product reveal và kết quả nổi bật.\n\n"
         "Chọn một ý tưởng để TOAN AAS dựng gói chi tiết."
     )
 
 def video_idea_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn ý tưởng 1" if normalize_user_language(lang) == "vi" else "1️⃣ Choose idea 1", callback_data="videoidea|choose|1")],
-        [InlineKeyboardButton("2️⃣ Chọn ý tưởng 2" if normalize_user_language(lang) == "vi" else "2️⃣ Choose idea 2", callback_data="videoidea|choose|2")],
-        [InlineKeyboardButton("3️⃣ Chọn ý tưởng 3" if normalize_user_language(lang) == "vi" else "3️⃣ Choose idea 3", callback_data="videoidea|choose|3")],
-        [InlineKeyboardButton("🔁 Chọn hướng khác" if normalize_user_language(lang) == "vi" else "🔁 Choose another direction", callback_data="videoidea|start")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("1️⃣ Chọn ý tưởng A" if normalize_user_language(lang) == "vi" else "1️⃣ Choose idea A", callback_data="videoidea|choose|1"), InlineKeyboardButton("2️⃣ Chọn ý tưởng B" if normalize_user_language(lang) == "vi" else "2️⃣ Choose idea B", callback_data="videoidea|choose|2")],
+        [InlineKeyboardButton("3️⃣ Chọn ý tưởng C" if normalize_user_language(lang) == "vi" else "3️⃣ Choose idea C", callback_data="videoidea|choose|3"), InlineKeyboardButton("✍️ Nhập ý tưởng riêng" if normalize_user_language(lang) == "vi" else "✍️ Custom idea", callback_data="videoidea|choice_custom")],
+        [InlineKeyboardButton("🔙 Quay lại ngữ cảnh" if normalize_user_language(lang) == "vi" else "🔙 Back to context", callback_data="videoidea|back_context"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def video_idea_result_text(state: dict, choice: int = 1, lang: str = "vi") -> str:
@@ -37297,39 +37651,119 @@ def video_idea_result_text(state: dict, choice: int = 1, lang: str = "vi") -> st
             "No provider call and no Xu deducted."
         )
     return (
-        f"🧠 <b>Gói ý tưởng video #{choice}</b>\n\n"
+        f"📢 <b>Ý tưởng quảng cáo hoàn chỉnh #{choice}</b>\n\n"
         f"Chủ đề: <code>{html.escape(topic)}</code>\n"
         f"Mục tiêu: <code>{html.escape(goal)}</code>\n"
         f"Ngữ cảnh/nền tảng: <code>{html.escape(context_text)}</code>\n\n"
-        "<b>Ý tưởng chính</b>\n"
+        "<b>1. Ý tưởng chính</b>\n"
         "Mở bằng một mâu thuẫn dễ hiểu, đưa chủ thể/sản phẩm vào như bước chuyển, kết bằng kết quả nhìn thấy rõ.\n\n"
-        "<b>Hook 3 giây đầu</b>\n"
+        "<b>2. Hook 3 giây đầu</b>\n"
         "“Điều gì thay đổi khi vấn đề này được giải quyết chỉ bằng một bước đơn giản?”\n\n"
-        "<b>Kịch bản voice</b>\n"
+        "<b>3. Kịch bản voice</b>\n"
         "Hook → vấn đề → phát hiện/demo → bằng chứng/kết quả → CTA nhẹ.\n\n"
-        "<b>Storyboard 6 cảnh</b>\n"
+        "<b>4. Storyboard 6 cảnh</b>\n"
         "1. Cận cảnh hook.\n2. Bối cảnh/vấn đề.\n3. Khoảnh khắc phát hiện.\n4. Demo/chuyển đổi.\n5. Kết quả/before-after.\n6. CTA.\n\n"
-        "<b>Danh sách cảnh quay</b>\n"
+        "<b>5. Danh sách cảnh quay</b>\n"
         "Close-up, wide shot bối cảnh, over-the-shoulder/demo, slow push-in, match cut before/after.\n\n"
-        "<b>Prompt ảnh từng cảnh</b>\n"
+        "<b>6. Prompt ảnh từng cảnh</b>\n"
         f"<code>{html.escape(topic)}, {html.escape(context_text)}, chủ thể nhất quán, bố cục sạch, ánh sáng phù hợp, chất lượng cao.</code>\n\n"
-        "<b>Prompt video từng cảnh</b>\n"
+        "<b>7. Prompt video từng cảnh</b>\n"
         f"<code>Chuyển động tự nhiên cho {html.escape(topic)}, slow push-in, giữ nhận diện/sản phẩm ổn định, reveal kết quả rõ, không thêm chữ thừa.</code>\n\n"
-        "<b>Gợi ý nhạc/SFX</b>\n"
+        "<b>8. Gợi ý chuyển động</b>\n"
+        "Slow push-in ở hook, handheld nhẹ ở vấn đề, orbit khi reveal, match cut ở before/after.\n\n"
+        "<b>9. Gợi ý nhạc/SFX</b>\n"
         "Nhạc điện ảnh nhẹ hoặc electronic hiện đại; whoosh tinh tế ở chuyển cảnh.\n\n"
-        "<b>Caption / CTA / hashtag</b>\n"
-        "Nêu lợi ích chính, mời người xem tìm hiểu thêm, CTA không quá bán hàng. Hashtag theo chủ đề + nền tảng.\n\n"
+        "<b>10. Caption</b>\n"
+        "Nêu vấn đề quen thuộc, chốt một lợi ích nhìn thấy được và giữ câu ngắn để đọc nhanh.\n\n"
+        "<b>11. CTA</b>\n"
+        "Mời người xem xem thêm, lưu video hoặc tìm hiểu sản phẩm; không ép mua quá mạnh.\n\n"
+        "<b>12. Hashtag</b>\n"
+        "#toanaas #videoquangcao #contentcreator + hashtag theo sản phẩm và nền tảng.\n\n"
         "TOAN AAS chưa gọi API ảnh/video và chưa trừ Xu."
     )
 
 def video_idea_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("📢 Mở trình dựng quảng cáo chi tiết" if normalize_user_language(lang) == "vi" else "📢 Open detailed ad builder", callback_data="adconcept|start")],
-        [InlineKeyboardButton("🎥 Gợi ý chuyển động" if normalize_user_language(lang) == "vi" else "🎥 Motion guide", callback_data="motion|start")],
-        [InlineKeyboardButton("💾 Lưu ý tưởng" if normalize_user_language(lang) == "vi" else "💾 Save idea", callback_data="videoidea|save")],
-        [InlineKeyboardButton("🔙 Quay lại Ý tưởng video" if normalize_user_language(lang) == "vi" else "🔙 Back to video ideas", callback_data="videoidea|start"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("🧩 Tạo storyboard" if normalize_user_language(lang) == "vi" else "🧩 Storyboard", callback_data="videoidea|storyboard"), InlineKeyboardButton("🖼 Prompt ảnh từng cảnh" if normalize_user_language(lang) == "vi" else "🖼 Image prompts", callback_data="videoidea|image_prompts")],
+        [InlineKeyboardButton("🎬 Prompt video từng cảnh" if normalize_user_language(lang) == "vi" else "🎬 Video prompts", callback_data="videoidea|video_prompts"), InlineKeyboardButton("🎵 Gợi ý nhạc/voice" if normalize_user_language(lang) == "vi" else "🎵 Music/voice", callback_data="videoidea|music")],
+        [InlineKeyboardButton("💾 Lưu kế hoạch" if normalize_user_language(lang) == "vi" else "💾 Save plan", callback_data="videoidea|save"), InlineKeyboardButton("🔙 Quay lại 3 ý tưởng" if normalize_user_language(lang) == "vi" else "🔙 Back to ideas", callback_data="videoidea|back_choices")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ]
     return InlineKeyboardMarkup(rows)
+
+def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -> str:
+    plan = plan or {}
+    topic = _short_pending_text(plan.get("selected_topic") or plan.get("product"), 200) or ("product" if normalize_user_language(lang) != "vi" else "sản phẩm")
+    context_text = _short_pending_text(plan.get("context"), 160) or ("selected context" if normalize_user_language(lang) != "vi" else "bối cảnh đã chọn")
+    if normalize_user_language(lang) != "vi":
+        if action == "storyboard":
+            return (
+                f"🧩 <b>Advertising storyboard — {html.escape(topic)}</b>\n\n"
+                "1. 0–2s: close-up conflict/hook, short overlay.\n"
+                "2. 2–5s: wide context and the current problem.\n"
+                "3. 5–8s: product discovery/reveal.\n"
+                "4. 8–12s: over-the-shoulder demo and proof.\n"
+                "5. 12–15s: before/after result.\n"
+                "6. Final: clean product shot and soft CTA.\n\n"
+                "No provider call and no Xu charged."
+            )
+        if action == "image_prompts":
+            return (
+                f"🖼 <b>Image prompts by scene</b>\n\n"
+                f"1. <code>{html.escape(topic)}, conflict hook, {html.escape(context_text)}, close-up, high contrast, consistent subject</code>\n"
+                f"2. <code>{html.escape(topic)}, everyday problem context, wide shot, realistic light</code>\n"
+                f"3. <code>{html.escape(topic)}, premium product reveal, clean commercial lighting</code>\n"
+                f"4. <code>{html.escape(topic)}, practical demo, hands/product accurate, no distorted logo</code>\n"
+                f"5. <code>{html.escape(topic)}, visible before/after result, matching composition</code>\n"
+                f"6. <code>{html.escape(topic)}, final hero shot, CTA space, no extra text</code>\n\n"
+                "No image API call and no Xu charged."
+            )
+        if action == "video_prompts":
+            return (
+                f"🎬 <b>Video prompts by scene</b>\n\n"
+                "1. Slow push-in on the hook, 2 seconds.\n"
+                "2. Handheld context movement, 3 seconds.\n"
+                "3. Gentle orbit product reveal, 3 seconds.\n"
+                "4. Stable demo cutaways, 4 seconds.\n"
+                "5. Before/after match cut, 3 seconds.\n"
+                "6. Clean hero ending and soft CTA, 2 seconds.\n\n"
+                "No video API call and no Xu charged."
+            )
+        return "🎵 <b>Music/voice</b>\n\nVoice: confident, conversational, concise.\nMusic: modern cinematic/electronic bed.\nSFX: subtle whoosh, click and reveal hit.\n\nNo provider call and no Xu charged."
+    if action == "storyboard":
+        return (
+            f"🧩 <b>Storyboard quảng cáo — {html.escape(topic)}</b>\n\n"
+            "1. 0–2s: cận cảnh mâu thuẫn/hook, text ngắn.\n"
+            "2. 2–5s: toàn cảnh bối cảnh và vấn đề hiện tại.\n"
+            "3. 5–8s: khoảnh khắc phát hiện/reveal sản phẩm.\n"
+            "4. 8–12s: over-the-shoulder demo và bằng chứng.\n"
+            "5. 12–15s: kết quả before/after.\n"
+            "6. Kết: hero shot sạch và CTA nhẹ.\n\n"
+            "Bot chưa gọi provider và chưa trừ Xu."
+        )
+    if action == "image_prompts":
+        return (
+            "🖼 <b>Prompt ảnh từng cảnh</b>\n\n"
+            f"1. <code>{html.escape(topic)}, hook mâu thuẫn, {html.escape(context_text)}, close-up, tương phản mạnh, chủ thể nhất quán</code>\n"
+            f"2. <code>{html.escape(topic)}, bối cảnh vấn đề đời thường, wide shot, ánh sáng thực tế</code>\n"
+            f"3. <code>{html.escape(topic)}, product reveal cao cấp, ánh sáng quảng cáo sạch</code>\n"
+            f"4. <code>{html.escape(topic)}, demo thực tế, bàn tay/sản phẩm chính xác, không méo logo</code>\n"
+            f"5. <code>{html.escape(topic)}, kết quả before/after rõ, bố cục tương ứng</code>\n"
+            f"6. <code>{html.escape(topic)}, hero shot kết, chừa vùng CTA, không chữ thừa</code>\n\n"
+            "Bot chưa gọi API ảnh và chưa trừ Xu."
+        )
+    if action == "video_prompts":
+        return (
+            "🎬 <b>Prompt video từng cảnh</b>\n\n"
+            "1. Slow push-in vào hook, 2 giây.\n"
+            "2. Handheld nhẹ để giới thiệu bối cảnh, 3 giây.\n"
+            "3. Orbit nhẹ khi reveal sản phẩm, 3 giây.\n"
+            "4. Cutaway demo ổn định, 4 giây.\n"
+            "5. Match cut before/after, 3 giây.\n"
+            "6. Hero ending sạch và CTA nhẹ, 2 giây.\n\n"
+            "Bot chưa gọi API video và chưa trừ Xu."
+        )
+    return "🎵 <b>Gợi ý nhạc/voice</b>\n\nVoice: tự tin, gần gũi, câu ngắn.\nNhạc: cinematic/electronic hiện đại.\nSFX: whoosh, click và reveal hit nhẹ.\n\nBot chưa gọi provider và chưa trừ Xu."
 
 async def handle_developing_video_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text or not update.effective_user:
@@ -37344,6 +37778,59 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
         return True
     flow = normalize_developing_video_flow(pending.get("flow"))
     step = str(pending.get("step") or "")
+    if flow == "promptvideo":
+        if step in {"describe", "edit_prompt"}:
+            set_developing_video_pending(uid, "promptvideo", "choose", selected_topic=text)
+            state = get_developing_video_pending(uid) or {}
+            await update.message.reply_text(prompt_video_choices_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_choices_keyboard(lang))
+            return True
+        if step == "custom_prompt":
+            set_developing_video_pending(uid, "promptvideo", "motion", selected_prompt=text, custom_prompt=text)
+            state = get_developing_video_pending(uid) or {}
+            await update.message.reply_text(guided_video_motion_text(state, lang), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("promptvideo", lang))
+            return True
+        if step == "motion_custom":
+            set_developing_video_pending(uid, "promptvideo", "music", selected_motion=text)
+            state = get_developing_video_pending(uid) or {}
+            await update.message.reply_text(guided_video_music_text(state, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("promptvideo", lang))
+            return True
+        if step == "music_custom":
+            state = dict(pending)
+            state["selected_music"] = text
+            clear_developing_video_pending(uid)
+            plan = save_developing_video_plan(uid, "promptvideo", state)
+            await update.message.reply_text(guided_video_plan_text(plan, lang), parse_mode="HTML", reply_markup=guided_video_result_keyboard("promptvideo", lang))
+            return True
+        return True
+    if flow == "imagevideo":
+        if step == "style_custom":
+            set_developing_video_pending(uid, "imagevideo", "motion", prompt_kind=text)
+            state = get_developing_video_pending(uid) or {}
+            state["selected_prompt"] = image_video_prompt_from_state(state, lang)
+            set_developing_video_pending(uid, "imagevideo", "motion", selected_prompt=state["selected_prompt"])
+            await update.message.reply_text(guided_video_motion_text(state, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("imagevideo", lang))
+            return True
+        if step == "motion_custom":
+            set_developing_video_pending(uid, "imagevideo", "music", selected_motion=text)
+            state = get_developing_video_pending(uid) or {}
+            await update.message.reply_text(guided_video_music_text(state, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("imagevideo", lang))
+            return True
+        if step == "music_custom":
+            state = dict(pending)
+            state["selected_music"] = text
+            state["selected_prompt"] = image_video_prompt_from_state(state, lang)
+            clear_developing_video_pending(uid)
+            plan = save_developing_video_plan(uid, "imagevideo", state)
+            await update.message.reply_text(guided_video_plan_text(plan, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_result_keyboard("imagevideo", lang))
+            return True
+        if step == "edit_prompt":
+            state = dict(pending)
+            state["selected_prompt"] = text
+            clear_developing_video_pending(uid)
+            plan = save_developing_video_plan(uid, "imagevideo", state)
+            await update.message.reply_text(guided_video_plan_text(plan, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_result_keyboard("imagevideo", lang))
+            return True
+        return True
     if flow == "selfscene":
         if step == "direction_custom":
             set_developing_video_pending(uid, "selfscene", "object", direction=text)
@@ -37398,19 +37885,17 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
         return True
     if flow == "videoidea":
         kind = str(pending.get("idea_kind") or "custom")
+        if step == "product_type_custom":
+            set_developing_video_pending(uid, "videoidea", "topic", idea_kind="ad", product_type=text)
+            await update.message.reply_text(video_idea_product_description_text(text, lang), parse_mode="HTML", reply_markup=video_idea_product_description_keyboard(lang))
+            return True
         if step == "topic":
             if kind == "ad":
                 set_developing_video_pending(uid, "videoidea", "goal", idea_kind=kind, product=text, selected_topic=text)
                 await update.message.reply_text(
-                    "🎯 Bạn muốn quảng cáo này đạt mục tiêu gì?" if normalize_user_language(lang) == "vi" else "🎯 What is the advertising goal?",
+                    video_idea_goal_text(lang),
+                    parse_mode="HTML",
                     reply_markup=video_idea_goal_keyboard(lang),
-                )
-                return True
-            if kind == "trend":
-                set_developing_video_pending(uid, "videoidea", "platform", idea_kind=kind, selected_topic=text)
-                await update.message.reply_text(
-                    "📱 Bạn muốn làm ý tưởng cho nền tảng nào?" if normalize_user_language(lang) == "vi" else "📱 Which platform is this idea for?",
-                    reply_markup=video_idea_platform_keyboard(lang),
                 )
                 return True
             if kind == "cinema":
@@ -37429,8 +37914,10 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             return True
         if step == "goal_custom":
             set_developing_video_pending(uid, "videoidea", "context", goal=text)
+            state = get_developing_video_pending(uid) or {}
             await update.message.reply_text(
-                "🌍 Chọn ngữ cảnh quảng cáo." if normalize_user_language(lang) == "vi" else "🌍 Choose the advertising context.",
+                video_idea_context_text(state, lang),
+                parse_mode="HTML",
                 reply_markup=video_idea_context_keyboard(lang),
             )
             return True
@@ -37441,15 +37928,218 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             plan = save_developing_video_plan(uid, "videoidea", state)
             await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
             return True
-        if step == "platform_custom":
-            set_developing_video_pending(uid, "videoidea", "trend_type", platform=text)
-            await update.message.reply_text(
-                "🔥 Chọn kiểu xu hướng." if normalize_user_language(lang) == "vi" else "🔥 Choose a trend format.",
-                reply_markup=video_idea_trend_type_keyboard(lang),
-            )
+        if step == "choice_custom":
+            state = dict(pending)
+            state["idea_choice"] = "custom"
+            state["selected_output_plan"] = text
+            clear_developing_video_pending(uid)
+            plan = save_developing_video_plan(uid, "videoidea", state)
+            await safe_reply_long_html(update.message, video_idea_result_text(plan, 1, lang), reply_markup=video_idea_result_keyboard(lang))
             return True
         return True
     return False
+
+async def handle_developing_video_pending_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_developing_video_pending(uid)
+    if not pending or pending.get("flow") != "imagevideo" or pending.get("step") != "await_image":
+        return False
+    info = classify_user_file_from_message(update.message)
+    if not info or info.get("file_type") not in {"photo", "image"}:
+        return False
+    remember_last_user_file(update)
+    cache_recent_media_state(update)
+    set_developing_video_pending(
+        uid,
+        "imagevideo",
+        "style",
+        source_file_id=info.get("file_id") or "",
+        source_file_name=info.get("file_name") or "telegram_photo.jpg",
+        source_mime_type=info.get("mime_type") or "image/jpeg",
+    )
+    lang = get_user_language(uid) or "vi"
+    await update.message.reply_text(image_video_style_text(lang), parse_mode="HTML", reply_markup=image_video_style_keyboard(lang))
+    return True
+
+async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "start"
+    value = parts[2] if len(parts) > 2 else ""
+    if action in {"start", "back_start"}:
+        clear_developing_video_pending(uid)
+        return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+    if action == "kind":
+        kind = value if value in {"ad", "cinema", "viral", "custom"} else "custom"
+        set_developing_video_pending(uid, "promptvideo", "describe", prompt_kind=kind)
+        return await safe_edit_or_send(query, prompt_video_description_text({"prompt_kind": kind}, lang), parse_mode="HTML", reply_markup=prompt_video_description_keyboard(lang))
+    pending = get_developing_video_pending(uid)
+    plan = get_latest_developing_video_plan(uid, "promptvideo")
+    state = pending or plan or {}
+    if action == "back_description":
+        restore_developing_video_pending(uid, "promptvideo", state, "describe")
+        return await safe_edit_or_send(query, prompt_video_description_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_description_keyboard(lang))
+    if action == "back_choices":
+        if not state.get("selected_topic"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        restore_developing_video_pending(uid, "promptvideo", state, "choose")
+        return await safe_edit_or_send(query, prompt_video_choices_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_choices_keyboard(lang))
+    if action == "choose":
+        if not state.get("selected_topic"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        prompts = prompt_video_suggestions(state, lang)
+        try:
+            idx = max(1, min(3, int(value or "1")))
+        except Exception:
+            idx = 1
+        set_developing_video_pending(uid, "promptvideo", "motion", selected_prompt=prompts[idx - 1])
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, guided_video_motion_text(current, lang), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("promptvideo", lang))
+    if action == "custom_prompt":
+        restore_developing_video_pending(uid, "promptvideo", state, "custom_prompt")
+        text = "✍️ Hãy gửi prompt video bạn muốn dùng." if normalize_user_language(lang) == "vi" else "✍️ Send the video prompt you want to use."
+        return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_choices"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ]))
+    if action == "motion_custom":
+        restore_developing_video_pending(uid, "promptvideo", state, "motion_custom")
+        text = "✍️ Hãy mô tả chuyển động camera mong muốn." if normalize_user_language(lang) == "vi" else "✍️ Describe the camera motion you want."
+        return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_motion"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ]))
+    if action == "motion":
+        if not state.get("selected_prompt"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        set_developing_video_pending(uid, "promptvideo", "music", selected_motion=value or "pushin")
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("promptvideo", lang))
+    if action == "back_motion":
+        restore_developing_video_pending(uid, "promptvideo", state, "motion")
+        return await safe_edit_or_send(query, guided_video_motion_text(state, lang), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("promptvideo", lang))
+    if action == "music_custom":
+        restore_developing_video_pending(uid, "promptvideo", state, "music_custom")
+        text = "✍️ Hãy nhập phong cách nhạc/voice." if normalize_user_language(lang) == "vi" else "✍️ Enter the music/voice direction."
+        return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ]))
+    if action == "music":
+        if not state.get("selected_prompt"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        state = dict(state)
+        state["selected_music"] = value or "none"
+        clear_developing_video_pending(uid)
+        plan = save_developing_video_plan(uid, "promptvideo", state)
+        return await safe_edit_or_send(query, guided_video_plan_text(plan, lang), parse_mode="HTML", reply_markup=guided_video_result_keyboard("promptvideo", lang))
+    if action == "back_music":
+        restore_developing_video_pending(uid, "promptvideo", state, "music")
+        return await safe_edit_or_send(query, guided_video_music_text(state, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("promptvideo", lang))
+    if action == "edit_prompt":
+        restore_developing_video_pending(uid, "promptvideo", state, "edit_prompt")
+        text = "✍️ Hãy gửi mô tả mới để TOAN AAS tạo lại 3 prompt." if normalize_user_language(lang) == "vi" else "✍️ Send a new description to rebuild the three prompts."
+        return await safe_edit_or_send(query, text, reply_markup=prompt_video_description_keyboard(lang))
+    if action == "save":
+        text = "💾 TOAN AAS đã lưu kế hoạch trong phiên hiện tại. Bot chưa gọi API và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "💾 Plan saved in this session. No API call and no Xu charged."
+        return await safe_edit_or_send(query, text, reply_markup=guided_video_result_keyboard("promptvideo", lang))
+    if action == "generate":
+        if shopaikey_active_job_for_user(uid, "video"):
+            return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(shopaikey_active_job_for_user(uid, "video"), lang))
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+            return await safe_edit_or_send(query, guided_video_public_guard_text(lang), reply_markup=guided_video_result_keyboard("promptvideo", lang))
+        package = {
+            "source": "prompt_to_video",
+            "concept_text": state.get("selected_topic") or "",
+            "video_prompt": state.get("selected_prompt") or "",
+            "music_choice": {"label": self_scene_music_label(state.get("selected_music"), lang)},
+        }
+        set_public_video_package_context(uid, package)
+        return await safe_edit_or_send(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
+    return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+
+async def handle_image_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "start"
+    value = parts[2] if len(parts) > 2 else ""
+    if action in {"start", "await_image", "back_image"}:
+        clear_developing_video_pending(uid)
+        set_developing_video_pending(uid, "imagevideo", "await_image")
+        return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
+    pending = get_developing_video_pending(uid)
+    plan = get_latest_developing_video_plan(uid, "imagevideo")
+    state = pending or plan or {}
+    if action == "style_custom":
+        restore_developing_video_pending(uid, "imagevideo", state, "style_custom")
+        text = "✍️ Hãy nhập kiểu video bạn muốn." if normalize_user_language(lang) == "vi" else "✍️ Enter the video style you want."
+        return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_style"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ]))
+    if action == "style":
+        if not state.get("source_file_id"):
+            return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
+        restore_developing_video_pending(uid, "imagevideo", state, "motion")
+        set_developing_video_pending(uid, "imagevideo", "motion", prompt_kind=value or "ad")
+        current = get_developing_video_pending(uid) or {}
+        current_prompt = image_video_prompt_from_state(current, lang)
+        set_developing_video_pending(uid, "imagevideo", "motion", selected_prompt=current_prompt)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, guided_video_motion_text(current, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("imagevideo", lang))
+    if action == "back_style":
+        restore_developing_video_pending(uid, "imagevideo", state, "style")
+        return await safe_edit_or_send(query, image_video_style_text(lang), parse_mode="HTML", reply_markup=image_video_style_keyboard(lang))
+    if action == "motion_custom":
+        restore_developing_video_pending(uid, "imagevideo", state, "motion_custom")
+        text = "✍️ Hãy mô tả chuyển động camera mong muốn." if normalize_user_language(lang) == "vi" else "✍️ Describe the camera motion you want."
+        return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_motion"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ]))
+    if action == "motion":
+        if not state.get("source_file_id"):
+            return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
+        set_developing_video_pending(uid, "imagevideo", "music", selected_motion=value or "pushin")
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("imagevideo", lang))
+    if action == "back_motion":
+        restore_developing_video_pending(uid, "imagevideo", state, "motion")
+        return await safe_edit_or_send(query, guided_video_motion_text(state, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("imagevideo", lang))
+    if action == "music_custom":
+        restore_developing_video_pending(uid, "imagevideo", state, "music_custom")
+        text = "✍️ Hãy nhập phong cách nhạc/voice." if normalize_user_language(lang) == "vi" else "✍️ Enter the music/voice direction."
+        return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ]))
+    if action == "music":
+        state = dict(state)
+        state["selected_music"] = value or "none"
+        state["selected_prompt"] = image_video_prompt_from_state(state, lang)
+        clear_developing_video_pending(uid)
+        plan = save_developing_video_plan(uid, "imagevideo", state)
+        return await safe_edit_or_send(query, guided_video_plan_text(plan, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_result_keyboard("imagevideo", lang))
+    if action == "back_music":
+        restore_developing_video_pending(uid, "imagevideo", state, "music")
+        return await safe_edit_or_send(query, guided_video_music_text(state, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("imagevideo", lang))
+    if action == "edit_prompt":
+        restore_developing_video_pending(uid, "imagevideo", state, "edit_prompt")
+        text = "✍️ Hãy gửi prompt video mới cho ảnh này." if normalize_user_language(lang) == "vi" else "✍️ Send a new video prompt for this image."
+        return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ]))
+    if action == "save":
+        text = "💾 TOAN AAS đã lưu kế hoạch ảnh → video trong phiên hiện tại. Bot chưa gọi API và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "💾 Image-to-video plan saved in this session. No API call and no Xu charged."
+        return await safe_edit_or_send(query, text, reply_markup=guided_video_result_keyboard("imagevideo", lang))
+    if action == "generate":
+        active = shopaikey_active_job_for_user(uid, "video")
+        if active:
+            return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(active, lang))
+        return await safe_edit_or_send(query, guided_video_public_guard_text(lang, from_image=True), reply_markup=guided_video_result_keyboard("imagevideo", lang))
+    return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
 
 async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -37485,6 +38175,22 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
     pending = get_developing_video_pending(uid)
+    if action == "back_object":
+        if not pending:
+            return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+        return await safe_edit_query_message(query, self_scene_object_text(pending, lang), reply_markup=self_scene_object_keyboard(lang))
+    if action == "back_context":
+        if not pending:
+            return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+        return await safe_edit_query_message(query, self_scene_context_text(pending, lang), reply_markup=self_scene_context_keyboard(lang))
+    if action == "back_style":
+        if not pending:
+            return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+        return await safe_edit_query_message(query, self_scene_style_text(pending, lang), reply_markup=self_scene_style_keyboard(lang))
+    if action == "back_music":
+        if not pending:
+            return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+        return await safe_edit_query_message(query, self_scene_music_text(pending, lang), reply_markup=self_scene_music_keyboard(lang))
     if action == "context_custom":
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
@@ -37620,7 +38326,7 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
         plan = get_latest_developing_video_plan(uid, "longvideo")
         if not plan:
             return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
-        return await safe_edit_query_message(query, long_video_followup_text(action, plan, lang), reply_markup=long_video_result_keyboard(lang))
+        return await safe_edit_or_send_long_html(query, long_video_followup_text(action, plan, lang), reply_markup=long_video_result_keyboard(lang))
     return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
 
 async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -37635,68 +38341,88 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
         clear_developing_video_pending(uid)
         return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
     if action == "kind":
-        kind = value if value in {"ad", "trend", "cinema", "custom"} else "custom"
+        kind = value if value in {"ad", "cinema", "custom"} else "custom"
+        if kind == "ad":
+            set_developing_video_pending(uid, "videoidea", "product_type", idea_kind=kind)
+            return await safe_edit_or_send(query, video_idea_product_type_text(lang), parse_mode="HTML", reply_markup=video_idea_product_type_keyboard(lang))
         set_developing_video_pending(uid, "videoidea", "topic", idea_kind=kind)
         return await safe_edit_or_send(query, video_idea_topic_text(kind, lang), reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Quay lại Ý tưởng video" if normalize_user_language(lang) == "vi" else "🔙 Back to video ideas", callback_data="videoidea|start")],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
     pending = get_developing_video_pending(uid)
+    plan = get_latest_developing_video_plan(uid, "videoidea")
+    state = pending or plan or {}
+    if action == "product_type":
+        if value == "custom":
+            set_developing_video_pending(uid, "videoidea", "product_type_custom", idea_kind="ad")
+            return await safe_edit_or_send(
+                query,
+                "✍️ Hãy nhập loại sản phẩm/dịch vụ." if normalize_user_language(lang) == "vi" else "✍️ Enter the product/service category.",
+                reply_markup=video_idea_product_description_keyboard(lang),
+            )
+        set_developing_video_pending(uid, "videoidea", "topic", idea_kind="ad", product_type=value)
+        return await safe_edit_or_send(query, video_idea_product_description_text(value, lang), parse_mode="HTML", reply_markup=video_idea_product_description_keyboard(lang))
+    if action == "back_product_type":
+        restore_developing_video_pending(uid, "videoidea", state, "product_type")
+        return await safe_edit_or_send(query, video_idea_product_type_text(lang), parse_mode="HTML", reply_markup=video_idea_product_type_keyboard(lang))
+    if action == "back_description":
+        restore_developing_video_pending(uid, "videoidea", state, "topic")
+        return await safe_edit_or_send(query, video_idea_product_description_text(state.get("product_type"), lang), parse_mode="HTML", reply_markup=video_idea_product_description_keyboard(lang))
+    if action == "back_goal":
+        restore_developing_video_pending(uid, "videoidea", state, "goal")
+        return await safe_edit_or_send(query, video_idea_goal_text(lang), parse_mode="HTML", reply_markup=video_idea_goal_keyboard(lang))
+    if action == "back_context":
+        restore_developing_video_pending(uid, "videoidea", state, "context")
+        return await safe_edit_or_send(query, video_idea_context_text(state, lang), parse_mode="HTML", reply_markup=video_idea_context_keyboard(lang))
+    if action == "back_choices":
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
     if action == "goal_custom":
         if not pending:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
         set_developing_video_pending(uid, "videoidea", "goal_custom")
-        return await safe_edit_or_send(query, "✍️ Nhập mục tiêu quảng cáo của bạn." if normalize_user_language(lang) == "vi" else "✍️ Enter your advertising goal.")
+        return await safe_edit_or_send(
+            query,
+            "✍️ Nhập mục tiêu quảng cáo của bạn." if normalize_user_language(lang) == "vi" else "✍️ Enter your advertising goal.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="videoidea|back_goal"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
     if action == "goal":
         if not pending:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
         goal_labels = {
-            "sales": "bán hàng/chuyển đổi",
+            "sales": "bán hàng trực tiếp",
             "brand": "nhận diện thương hiệu",
-            "story": "kể chuyện/cảm xúc",
+            "viral": "viral TikTok/Reels",
         }
         set_developing_video_pending(uid, "videoidea", "context", goal=goal_labels.get(value, value))
+        current = get_developing_video_pending(uid) or {}
         return await safe_edit_or_send(
             query,
-            "🌍 Chọn ngữ cảnh quảng cáo." if normalize_user_language(lang) == "vi" else "🌍 Choose the advertising context.",
+            video_idea_context_text(current, lang),
+            parse_mode="HTML",
             reply_markup=video_idea_context_keyboard(lang),
         )
     if action == "context_custom":
         if not pending:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
         set_developing_video_pending(uid, "videoidea", "context_custom")
-        return await safe_edit_or_send(query, "✍️ Nhập ngữ cảnh/bối cảnh quảng cáo." if normalize_user_language(lang) == "vi" else "✍️ Enter the advertising context.")
+        return await safe_edit_or_send(
+            query,
+            "✍️ Nhập ngữ cảnh/bối cảnh quảng cáo." if normalize_user_language(lang) == "vi" else "✍️ Enter the advertising context.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="videoidea|back_context"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
     if action == "context":
         if not pending:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
-        context_labels = {"ugc": "đời thường/UGC", "studio": "studio/sản phẩm", "cinematic": "điện ảnh/cảm xúc"}
+        options = video_idea_context_options(pending.get("product_type"), lang)
+        try:
+            idx = max(1, min(3, int(value or "1")))
+        except Exception:
+            idx = 1
         state = dict(pending)
-        state["context"] = context_labels.get(value, value)
-        clear_developing_video_pending(uid)
-        plan = save_developing_video_plan(uid, "videoidea", state)
-        return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), reply_markup=video_idea_choice_keyboard(lang))
-    if action == "platform_custom":
-        if not pending:
-            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
-        set_developing_video_pending(uid, "videoidea", "platform_custom")
-        return await safe_edit_or_send(query, "✍️ Nhập nền tảng bạn muốn đăng." if normalize_user_language(lang) == "vi" else "✍️ Enter the target platform.")
-    if action == "platform":
-        if not pending:
-            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
-        platform_labels = {"tiktok": "TikTok/Reels", "youtube": "YouTube Shorts", "facebook": "Facebook/ads"}
-        set_developing_video_pending(uid, "videoidea", "trend_type", platform=platform_labels.get(value, value))
-        return await safe_edit_or_send(
-            query,
-            "🔥 Chọn kiểu xu hướng." if normalize_user_language(lang) == "vi" else "🔥 Choose a trend format.",
-            reply_markup=video_idea_trend_type_keyboard(lang),
-        )
-    if action == "trend_type":
-        if not pending:
-            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
-        trend_labels = {"before_after": "trước/sau", "problem_solution": "vấn đề/giải pháp", "pov": "POV/kể chuyện"}
-        state = dict(pending)
-        state["goal"] = trend_labels.get(value, value)
-        state["context"] = state.get("platform") or ""
+        state["context"] = options[idx - 1]
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "videoidea", state)
         return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), reply_markup=video_idea_choice_keyboard(lang))
@@ -37711,7 +38437,6 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
             reply_markup=video_idea_context_keyboard(lang),
         )
     if action == "choose":
-        plan = get_latest_developing_video_plan(uid, "videoidea")
         if not plan:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
         try:
@@ -37721,6 +38446,19 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
         plan["idea_choice"] = str(choice)
         plan = save_developing_video_plan(uid, "videoidea", plan)
         return await safe_edit_or_send_long_html(query, video_idea_result_text(plan, choice, lang), reply_markup=video_idea_result_keyboard(lang))
+    if action == "choice_custom":
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        restore_developing_video_pending(uid, "videoidea", plan, "choice_custom")
+        return await safe_edit_or_send(
+            query,
+            "✍️ Hãy nhập ý tưởng quảng cáo riêng của bạn." if normalize_user_language(lang) == "vi" else "✍️ Enter your custom advertising idea.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Quay lại 3 ý tưởng" if normalize_user_language(lang) == "vi" else "🔙 Back to ideas", callback_data="videoidea|back_choices"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
+    if action in {"storyboard", "image_prompts", "video_prompts", "music"}:
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        return await safe_edit_or_send_long_html(query, video_idea_followup_text(action, plan, lang), reply_markup=video_idea_result_keyboard(lang))
     if action == "save":
         return await safe_edit_or_send(
             query,
@@ -38019,7 +38757,7 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_doc_merge_pdf": ("main_memory", "📄 Công cụ gộp PDF đang bảo trì hoặc chưa bật. TOAN AAS chưa trừ Xu."),
         "hint_pricing": ("main_topup", "💰 <b>Bảng giá</b>\n\nĐang mở bảng giá TOAN AAS."),
         "hint_image_tools": ("main_image", "🖼 <b>Hình ảnh TOAN AAS</b>\n\nChọn đúng tác vụ bằng nút trong menu ảnh. Bot chưa gọi API và chưa trừ Xu khi chỉ mở menu."),
-        "hint_image_to_video_pack": ("main_video", "🎬 <b>Ảnh sang video prompt</b>\n\nCopy lệnh:\n<code>/image_to_video_pack chủ đề hoặc mô tả ảnh</code>"),
+        "hint_image_to_video_pack": ("main_video", "🎬 <b>Ảnh → Video AI</b>\n\nVui lòng mở <b>🎬 Video AI thật</b> rồi chọn <b>🖼 Ảnh → Video AI</b>. Bot sẽ hướng dẫn gửi ảnh, chọn phong cách, chuyển động và nhạc trước khi tạo video thật.\n\nTOAN AAS chưa gọi API và chưa trừ Xu."),
         "hint_media_factory": ("main_audio", "🎤 <b>Trung tâm Video & Media</b>\n\nCopy lệnh:\n<code>/media_factory</code>\n\nTạo voice, bóc băng và video/content pack tùy công cụ đã bật."),
         "hint_video_status": ("main_guide", "🔄 <b>Kiểm tra trạng thái video</b>\n\nKhi video được gửi vào queue, bot sẽ gửi kèm nút <b>Kiểm tra trạng thái video</b> trong chính tin nhắn job.\n\nNếu bạn không còn tin nhắn đó, hãy gửi admin ID Telegram và job/task gần nhất để TOAN AAS kiểm tra. Không cần bấm tạo lại nhiều lần khi job đang xử lý."),
         "hint_film_blueprint": ("video_workflow", "🚀 <b>Film Blueprint</b>\n\nCopy lệnh:\n<code>/film_blueprint</code>"),
@@ -38050,7 +38788,7 @@ def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
         "hint_doc_merge_pdf": ("main_memory", "🧩 <b>Merge PDF</b>\n\nCopy:\n<code>/merge_pdf</code>\n\nIf the workflow is not public yet, TOAN AAS will not charge Xu."),
         "hint_pricing": ("main_topup", "💰 <b>Pricing</b>\n\nOpening TOAN AAS pricing."),
         "hint_image_tools": ("main_image", "🖼 <b>Image tools</b>\n\nChoose the exact image task using the image menu buttons. Opening the menu does not call APIs and does not charge Xu."),
-        "hint_image_to_video_pack": ("main_video", "🎬 <b>Image-to-video prompt pack</b>\n\nCopy:\n<code>/image_to_video_pack topic or image description</code>"),
+        "hint_image_to_video_pack": ("main_video", "🎬 <b>Image → AI Video</b>\n\nOpen <b>Real AI Video</b> and choose <b>Image → AI Video</b>. The bot will guide image upload, style, camera motion and music before any real generation.\n\nNo API call and no Xu charged."),
         "hint_media_factory": ("main_audio", "🎤 <b>Media tools</b>\n\nCopy:\n<code>/media_factory</code>\n\nVoice, transcription and media/content packs depending on enabled tools."),
         "hint_video_status": ("main_guide", "🔄 <b>Video status</b>\n\nWhen a video is queued, the bot adds a status button to that job message. If you no longer have it, contact support with your Telegram ID and latest job/task. Do not create duplicate jobs while one is processing."),
         "hint_naptien": ("billing", "💳 <b>Top up Xu</b>\n\nCopy:\n<code>/naptien</code>"),
@@ -78195,6 +78933,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if await handle_developing_video_pending_image(update, context):
+        return
+
     if await handle_image_menu_pending_photo(update, context):
         return
 
@@ -78217,6 +78958,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_developing_video_pending_image(update, context):
+        return
+
     if await handle_image_menu_pending_document(update, context):
         return
     remember_last_user_file(update)
@@ -79320,6 +80064,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_creative_motion_callback, pattern=r"^motion\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_cinematic_ad_callback, pattern=r"^adconcept\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_prompt_video_callback, pattern=r"^promptvideo\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_image_video_callback, pattern=r"^imagevideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_self_scene_ai_callback, pattern=r"^selfscene\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_long_video_callback, pattern=r"^longvideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\|"))
