@@ -30396,6 +30396,9 @@ def clear_feedback_pending(user_id) -> bool:
 
 IMAGE_MENU_PENDING_ACTIONS = {
     "image_prompt_only",
+    "image_prompt_wait_image",
+    "image_prompt_wait_purpose",
+    "image_prompt_manual_description",
     "image_prompt_goal_custom",
     "image_prompt_subject",
     "image_prompt_style_custom",
@@ -30435,6 +30438,7 @@ def set_image_menu_pending(user_id, action: str, **fields) -> None:
                 "edit_type", "edit_request", "resize_task", "resize_ratio", "resize_method",
                 "pixel_size", "source_name", "prompt", "current_prompt", "short_prompt",
                 "detail_prompt", "negative_prompt", "selected_variant", "ratio_change",
+                "prompt_source", "back_to", "last_step",
                 "image_prompt_current_prompt", "image_prompt_short_prompt",
                 "image_prompt_detail_prompt", "image_prompt_negative_prompt",
                 "image_prompt_selected_ratio", "image_prompt_selected_purpose",
@@ -30469,38 +30473,82 @@ def image_menu_child_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def image_prompt_menu_start_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "✍️ <b>Image prompt</b>\n\n"
-            "What do you want the image prompt for?\n\n"
-            "This tool creates prompt text only. It does not call the image provider and does not charge Xu."
+            "✍️ <b>Create prompt from image</b>\n\n"
+            "Send or reply to the image you want to turn into a prompt.\n"
+            "TOAN AAS will create prompt text for a similar image, ad visual, or video key visual.\n\n"
+            "This step creates text only. No image provider call and no Xu charge."
         )
     return (
-        "✍️ <b>Tạo prompt ảnh</b>\n\n"
-        "Bạn muốn tạo prompt ảnh cho mục đích nào?\n\n"
-        "Công cụ này chỉ tạo prompt/text. Bot chưa gọi provider ảnh và chưa trừ Xu."
+        "✍️ <b>Tạo prompt từ ảnh</b>\n\n"
+        "Bạn hãy gửi hoặc reply ảnh muốn tạo prompt.\n"
+        "Bot sẽ phân tích ảnh và viết prompt để bạn dùng tạo ảnh tương tự, ảnh quảng cáo hoặc key visual cho video.\n\n"
+        "Bước này chỉ tạo prompt/text. TOAN AAS chưa gọi provider tạo ảnh và chưa trừ Xu."
     )
+
+def image_prompt_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📷 Send image", callback_data="imgtool|prompt_need_image"), InlineKeyboardButton("✍️ Manual description", callback_data="imgtool|prompt_manual")],
+            [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📷 Gửi ảnh", callback_data="imgtool|prompt_need_image"), InlineKeyboardButton("✍️ Nhập mô tả thủ công", callback_data="imgtool|prompt_manual")],
+        [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def image_prompt_received_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✅ <b>Image received.</b>\n\n"
+            "Which direction should the prompt follow?\n\n"
+            "No provider call and no Xu charged."
+        )
+    return (
+        "✅ <b>Đã nhận ảnh.</b>\n\n"
+        "Bạn muốn bot viết prompt theo hướng nào?\n\n"
+        "Bot chưa gọi provider và chưa trừ Xu."
+    )
+
+def image_prompt_send_image_hint_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "Send the image directly in this chat, or reply to the image you want to turn into a prompt."
+    return "Bạn gửi ảnh trực tiếp vào khung chat hoặc reply ảnh cần tạo prompt nhé."
 
 def image_edit_menu_start_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🧩 <b>Edit image</b>\n\n"
             "Send or reply to the image you want to edit.\n\n"
-            "TOAN AAS will ask what to edit before any provider call or Xu charge. Public AI image edit remains guarded if the provider is not ready."
+            "TOAN AAS will then let you choose local edits or guarded AI edits. It will ask before any provider call or Xu charge."
         )
     return (
-        "🧩 <b>Sửa ảnh / edit ảnh</b>\n\n"
+        "🧩 <b>Chỉnh sửa ảnh</b>\n\n"
         "Bạn hãy gửi hoặc reply vào ảnh cần sửa.\n\n"
-        "TOAN AAS sẽ hỏi kiểu sửa trước khi gọi API và trước khi trừ Xu. Nếu provider sửa ảnh chưa sẵn sàng, bot sẽ tạo prompt sửa ảnh/friendly guard và không trừ Xu."
+        "Sau đó TOAN AAS sẽ cho bạn chọn cách xử lý:\n\n"
+        "• Chỉnh sửa local/thủ công: đổi tỉ lệ, resize, crop, thêm nền, nền mờ.\n"
+        "• Chỉnh sửa AI: đổi nền, xóa/thêm vật thể, đổi phong cách, nâng chất lượng nếu công cụ mở.\n\n"
+        "TOAN AAS sẽ hỏi rõ trước khi gọi API hoặc trừ Xu."
     )
 
 def image_edit_instruction_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "✅ Image received.\n\n"
-            "Choose how you want to edit it. The bot has not called any provider and has not charged Xu."
+            "Choose how you want to process it.\n\n"
+            "• Local ratio change: free, quick, crop/pad/blur.\n"
+            "• Pixel resize: free local processing.\n"
+            "• Manual edit: simple local edits when available.\n"
+            "• AI edit/upscale: only runs when providers are ready.\n\n"
+            "No provider call and no Xu charged."
         )
     return (
         "✅ Đã nhận ảnh.\n\n"
-        "Bạn muốn sửa ảnh theo hướng nào? Bot chưa gọi provider và chưa trừ Xu."
+        "Bạn muốn chỉnh ảnh theo cách nào?\n\n"
+        "1. Đổi tỉ lệ local: miễn phí, nhanh, có thể thêm nền/nền mờ/crop.\n"
+        "2. Resize pixel: đổi kích thước cụ thể như 1920x1080.\n"
+        "3. Chỉnh sửa thủ công: thêm chữ, vẽ/đánh dấu, crop/căn chỉnh nếu hệ thống hỗ trợ.\n"
+        "4. Chỉnh sửa AI: đổi nền, xóa/thêm vật thể, đổi phong cách. Chỉ chạy khi nhà cung cấp ổn định.\n\n"
+        "Bot chưa gọi provider và chưa trừ Xu."
     )
 
 def image_upscale_menu_start_text(lang: str = "vi") -> str:
@@ -30530,18 +30578,16 @@ def image_menu_v5_text(lang: str = "vi") -> str:
             "🖼 <b>TOAN AAS Image Tools</b>\n\n"
             "Choose a task below.\n\n"
             "• Quick image: enter a description and generate a real image.\n"
-            "• Image prompt: create strong prompts only, no provider call, no Xu charged.\n"
-            "• Edit image: send/reply an image and choose edit direction.\n"
-            "• Upscale/resize: resize/crop/pad images for social/video.\n\n"
+            "• Prompt from image: send an image so the bot writes a matching prompt.\n"
+            "• Edit image: resize, crop/pad/blur, or guarded AI edit when available.\n\n"
             "Any real image generation step will ask for confirmation before charging Xu."
         )
     return (
         "🖼 <b>Hình ảnh TOAN AAS</b>\n\n"
-        "Chọn tác vụ bên dưới.\n\n"
+        "Chọn tác vụ bên dưới:\n\n"
         "• 🖼 <b>Tạo ảnh nhanh</b>: nhập mô tả và tạo ảnh thật.\n"
-        "• ✍️ <b>Tạo prompt ảnh</b>: bot giúp viết prompt đẹp, chưa gọi API, chưa trừ Xu.\n"
-        "• 🧩 <b>Sửa ảnh / edit ảnh</b>: gửi hoặc reply ảnh để chỉnh sửa.\n"
-        "• 📐 <b>Nâng cấp / đổi kích thước</b>: đổi tỷ lệ, resize, chuẩn bị ảnh cho video/social.\n\n"
+        "• ✍️ <b>Tạo prompt từ ảnh</b>: gửi ảnh để bot viết prompt giống/phù hợp ảnh đó.\n"
+        "• 🧩 <b>Chỉnh sửa ảnh</b>: resize, đổi tỉ lệ, crop/thêm nền, chỉnh sửa AI nếu công cụ mở.\n\n"
         "Các bước tạo ảnh thật đều có xác nhận trước khi trừ Xu và hoàn Xu nếu provider lỗi theo policy."
     )
 
@@ -30564,6 +30610,23 @@ def get_image_tool_result(user_id, tool: str) -> dict | None:
         LAST_IMAGE_TOOL_RESULTS.pop(key, None)
         return None
     return result
+
+def recent_image_file_state(user_id) -> dict:
+    recent = get_recent_media_state(LAST_USER_IMAGE, safe_int(user_id, 0))
+    if recent.get("file_id"):
+        return {
+            "file_id": str(recent.get("file_id") or "")[:240],
+            "file_unique_id": str(recent.get("file_unique_id") or "")[:240],
+            "source_name": str(recent.get("file_name") or "telegram_photo.jpg")[:180],
+        }
+    last_file = get_last_user_file(user_id)
+    if str(last_file.get("kind") or "").lower() in {"photo", "document"} and str(last_file.get("mime_type") or "").lower().startswith("image/"):
+        return {
+            "file_id": str(last_file.get("file_id") or "")[:240],
+            "file_unique_id": str(last_file.get("file_unique_id") or "")[:240],
+            "source_name": str(last_file.get("file_name") or last_file.get("filename") or "uploaded_image")[:180],
+        }
+    return {}
 
 def image_action_lock_key(user_id, action: str, source_id: str = "") -> str:
     return f"{user_id}:{str(action or '').strip().lower()}:{str(source_id or '').strip()[:240]}"
@@ -30619,19 +30682,15 @@ def image_prompt_goal_label(goal_code: str = "", custom: str = "", lang: str = "
 def image_prompt_goal_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📦 Product image", callback_data="imgtool|prompt_goal|product")],
-            [InlineKeyboardButton("📢 Advertising image", callback_data="imgtool|prompt_goal|ad")],
-            [InlineKeyboardButton("🎬 Cinematic/video image", callback_data="imgtool|prompt_goal|cinematic")],
-            [InlineKeyboardButton("✍️ Custom purpose", callback_data="imgtool|prompt_goal_custom")],
-            [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image")],
+            [InlineKeyboardButton("📦 Product image", callback_data="imgtool|prompt_goal|product"), InlineKeyboardButton("📢 Advertising image", callback_data="imgtool|prompt_goal|ad")],
+            [InlineKeyboardButton("🎬 Cinematic/video image", callback_data="imgtool|prompt_goal|cinematic"), InlineKeyboardButton("✍️ Custom purpose", callback_data="imgtool|prompt_goal_custom")],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|prompt_back_wait_image"), InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image")],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Ảnh sản phẩm", callback_data="imgtool|prompt_goal|product")],
-        [InlineKeyboardButton("📢 Ảnh quảng cáo", callback_data="imgtool|prompt_goal|ad")],
-        [InlineKeyboardButton("🎬 Ảnh cinematic/video", callback_data="imgtool|prompt_goal|cinematic")],
-        [InlineKeyboardButton("✍️ Nhập mục đích riêng", callback_data="imgtool|prompt_goal_custom")],
-        [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image")],
+        [InlineKeyboardButton("📦 Ảnh sản phẩm", callback_data="imgtool|prompt_goal|product"), InlineKeyboardButton("📢 Ảnh quảng cáo", callback_data="imgtool|prompt_goal|ad")],
+        [InlineKeyboardButton("🎬 Ảnh cinematic/video", callback_data="imgtool|prompt_goal|cinematic"), InlineKeyboardButton("✍️ Nhập mục đích riêng", callback_data="imgtool|prompt_goal_custom")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|prompt_back_wait_image"), InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -30677,18 +30736,14 @@ def image_prompt_style_text(state: dict, lang: str = "vi") -> str:
 def image_prompt_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("1️⃣ Suggestion 1", callback_data="imgtool|prompt_style|1")],
-            [InlineKeyboardButton("2️⃣ Suggestion 2", callback_data="imgtool|prompt_style|2")],
-            [InlineKeyboardButton("3️⃣ Suggestion 3", callback_data="imgtool|prompt_style|3")],
-            [InlineKeyboardButton("✍️ Custom style", callback_data="imgtool|prompt_style_custom")],
-            [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton("1️⃣ Suggestion 1", callback_data="imgtool|prompt_style|1"), InlineKeyboardButton("2️⃣ Suggestion 2", callback_data="imgtool|prompt_style|2")],
+            [InlineKeyboardButton("3️⃣ Suggestion 3", callback_data="imgtool|prompt_style|3"), InlineKeyboardButton("✍️ Custom style", callback_data="imgtool|prompt_style_custom")],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|prompt_back_goal"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Gợi ý 1", callback_data="imgtool|prompt_style|1")],
-        [InlineKeyboardButton("2️⃣ Gợi ý 2", callback_data="imgtool|prompt_style|2")],
-        [InlineKeyboardButton("3️⃣ Gợi ý 3", callback_data="imgtool|prompt_style|3")],
-        [InlineKeyboardButton("✍️ Nhập phong cách riêng", callback_data="imgtool|prompt_style_custom")],
-        [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("1️⃣ Gợi ý 1", callback_data="imgtool|prompt_style|1"), InlineKeyboardButton("2️⃣ Gợi ý 2", callback_data="imgtool|prompt_style|2")],
+        [InlineKeyboardButton("3️⃣ Gợi ý 3", callback_data="imgtool|prompt_style|3"), InlineKeyboardButton("✍️ Nhập phong cách riêng", callback_data="imgtool|prompt_style_custom")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|prompt_back_goal"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 IMAGE_TOOL_VALID_RATIOS = ("1:1", "9:16", "16:9", "4:5", "3:4", "4:3", "3:2", "2:3", "21:9")
@@ -30734,16 +30789,16 @@ def image_prompt_ratio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(labels["1:1"], callback_data="imgtool|prompt_ratio|1x1"), InlineKeyboardButton(labels["9:16"], callback_data="imgtool|prompt_ratio|9x16")],
         [InlineKeyboardButton(labels["16:9"], callback_data="imgtool|prompt_ratio|16x9"), InlineKeyboardButton(labels["4:5"], callback_data="imgtool|prompt_ratio|4x5")],
-        [InlineKeyboardButton(labels["3:4"], callback_data="imgtool|prompt_ratio|3x4"), InlineKeyboardButton(labels["3:2"], callback_data="imgtool|prompt_ratio|3x2")],
-        [InlineKeyboardButton(labels["4:3"], callback_data="imgtool|prompt_ratio|4x3")],
+        [InlineKeyboardButton(labels["3:4"], callback_data="imgtool|prompt_ratio|3x4"), InlineKeyboardButton(labels["4:3"], callback_data="imgtool|prompt_ratio|4x3")],
         [InlineKeyboardButton("✍️ Custom ratio" if normalize_user_language(lang) != "vi" else "✍️ Nhập tỷ lệ khác", callback_data="imgtool|prompt_ratio_custom")],
-        [InlineKeyboardButton("⬅️ Back to image menu" if normalize_user_language(lang) != "vi" else "⬅️ Về menu ảnh", callback_data="menu|main_image")],
+        [InlineKeyboardButton("⬅️ Back" if normalize_user_language(lang) != "vi" else "⬅️ Quay lại", callback_data="imgtool|prompt_back_style")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def build_image_prompt_output(state: dict, lang: str = "vi") -> tuple[str, str]:
     goal = image_prompt_goal_label(state.get("goal_code"), state.get("goal"), lang)
-    subject = _short_pending_text(state.get("subject"), 260) or ("sản phẩm/chủ đề" if normalize_user_language(lang) == "vi" else "product/topic")
+    from_image = bool(state.get("file_id") or state.get("prompt_source") == "image")
+    subject = _short_pending_text(state.get("subject"), 260) or ("ảnh đã nhận" if from_image and normalize_user_language(lang) == "vi" else ("received image" if from_image else ("sản phẩm/chủ đề" if normalize_user_language(lang) == "vi" else "product/topic")))
     style = _short_pending_text(state.get("style"), 180) or image_prompt_style_suggestions(state.get("goal_code"), lang)[0]
     ratio = normalize_image_tool_ratio(state.get("ratio"), "1:1")
     short_prompt = str(state.get("short_prompt") or state.get("image_prompt_short_prompt") or "").strip() or f"{subject}, {style}, {ratio}, clean composition, high quality, professional lighting, no watermark"
@@ -30771,8 +30826,11 @@ def build_image_prompt_output(state: dict, lang: str = "vi") -> tuple[str, str]:
             else f"<b>Biến thể đang dùng:</b> {selected_variant}\n"
         )
     if normalize_user_language(lang) != "vi":
+        title = "Prompt from image created" if from_image else "Image prompt created"
+        image_line = "<b>Image:</b> received\n" if from_image else ""
         text = (
-            "✍️ <b>Image prompt created</b>\n\n"
+            f"✍️ <b>{title}</b>\n\n"
+            f"{image_line}"
             f"<b>Purpose:</b> {html.escape(goal)}\n"
             f"<b>Subject:</b> {html.escape(subject)}\n"
             f"<b>Style:</b> {html.escape(style)}\n"
@@ -30791,8 +30849,11 @@ def build_image_prompt_output(state: dict, lang: str = "vi") -> tuple[str, str]:
             "No image provider was called. No Xu deducted."
         )
     else:
+        title = "Prompt từ ảnh đã tạo" if from_image else "Prompt ảnh đã tạo"
+        image_line = "<b>Ảnh:</b> đã nhận\n" if from_image else ""
         text = (
-            "✍️ <b>Prompt ảnh đã tạo</b>\n\n"
+            f"✍️ <b>{title}</b>\n\n"
+            f"{image_line}"
             f"<b>Mục tiêu:</b> {html.escape(goal)}\n"
             f"<b>Chủ đề:</b> {html.escape(subject)}\n"
             f"<b>Phong cách:</b> {html.escape(style)}\n"
@@ -30845,6 +30906,10 @@ def image_prompt_result_payload(state: dict, current_prompt: str = "") -> dict:
         "image_prompt_subject": subject,
         "image_prompt_variants": list(state.get("variants") or [])[:3],
         "image_prompt_selected_variant": safe_int(state.get("selected_variant"), 0),
+        "file_id": str(state.get("file_id") or "")[:240],
+        "file_unique_id": str(state.get("file_unique_id") or "")[:240],
+        "source_name": _short_pending_text(state.get("source_name"), 180),
+        "prompt_source": _short_pending_text(state.get("prompt_source"), 80),
     }
 
 def image_prompt_state_with_ratio(state: dict, ratio: str) -> dict:
@@ -30872,19 +30937,15 @@ def image_prompt_state_with_ratio(state: dict, ratio: str) -> dict:
 def image_prompt_output_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Use this prompt to create image", callback_data="imgtool|prompt_use")],
-            [InlineKeyboardButton("📐 Change ratio", callback_data="imgtool|prompt_change_ratio")],
-            [InlineKeyboardButton("🔁 Create 3 prompt variants", callback_data="imgtool|prompt_variants")],
-            [InlineKeyboardButton("💾 Save prompt", callback_data="imgtool|prompt_save")],
-            [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image")],
+            [InlineKeyboardButton("🖼 Create image from this prompt", callback_data="imgtool|prompt_use"), InlineKeyboardButton("📐 Change ratio", callback_data="imgtool|prompt_change_ratio")],
+            [InlineKeyboardButton("🔁 Create 3 prompt variants", callback_data="imgtool|prompt_variants"), InlineKeyboardButton("💾 Save prompt", callback_data="imgtool|prompt_save")],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|prompt_back_ratio"), InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image")],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 Dùng prompt này để tạo ảnh", callback_data="imgtool|prompt_use")],
-        [InlineKeyboardButton("📐 Đổi tỉ lệ", callback_data="imgtool|prompt_change_ratio")],
-        [InlineKeyboardButton("🔁 Tạo 3 biến thể prompt", callback_data="imgtool|prompt_variants")],
-        [InlineKeyboardButton("💾 Lưu prompt", callback_data="imgtool|prompt_save")],
-        [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image")],
+        [InlineKeyboardButton("🖼 Tạo ảnh từ prompt này", callback_data="imgtool|prompt_use"), InlineKeyboardButton("📐 Đổi tỉ lệ", callback_data="imgtool|prompt_change_ratio")],
+        [InlineKeyboardButton("🔁 Tạo 3 biến thể prompt", callback_data="imgtool|prompt_variants"), InlineKeyboardButton("💾 Lưu prompt", callback_data="imgtool|prompt_save")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|prompt_back_ratio"), InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -30986,13 +31047,11 @@ def image_edit_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📷 Send image", callback_data="imgtool|edit_need_image")],
-            [InlineKeyboardButton("✍️ Prompt only", callback_data="imgtool|edit_prompt_only")],
             [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image")],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📷 Gửi ảnh", callback_data="imgtool|edit_need_image")],
-        [InlineKeyboardButton("✍️ Chỉ tạo prompt sửa ảnh", callback_data="imgtool|edit_prompt_only")],
         [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -31000,18 +31059,82 @@ def image_edit_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def image_edit_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🌄 Change background", callback_data="imgtool|edit_type|background")],
-            [InlineKeyboardButton("🧹 Remove object / cleanup", callback_data="imgtool|edit_type|cleanup")],
-            [InlineKeyboardButton("🎨 Change style / improve", callback_data="imgtool|edit_type|style")],
-            [InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton("📐 Local ratio change", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("🖼 Resize pixels", callback_data="imgtool|resize_task|pixels")],
+            [InlineKeyboardButton("🧩 Manual edit", callback_data="imgtool|edit_manual"), InlineKeyboardButton("✨ AI edit", callback_data="imgtool|edit_ai_menu")],
+            [InlineKeyboardButton("✨ AI enhance/upscale", callback_data="imgtool|resize_task|ai_upscale"), InlineKeyboardButton("🎬 Prepare for video", callback_data="imgtool|resize_task|video")],
             [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌄 Đổi nền / đổi bối cảnh", callback_data="imgtool|edit_type|background")],
-        [InlineKeyboardButton("🧹 Xóa vật thể / làm sạch", callback_data="imgtool|edit_type|cleanup")],
-        [InlineKeyboardButton("🎨 Đổi phong cách / nâng hình", callback_data="imgtool|edit_type|style")],
-        [InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
+        [InlineKeyboardButton("📐 Đổi tỉ lệ local", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("🖼 Resize pixel", callback_data="imgtool|resize_task|pixels")],
+        [InlineKeyboardButton("🧩 Chỉnh sửa thủ công", callback_data="imgtool|edit_manual"), InlineKeyboardButton("✨ Chỉnh sửa AI", callback_data="imgtool|edit_ai_menu")],
+        [InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|resize_task|ai_upscale"), InlineKeyboardButton("🎬 Chuẩn bị ảnh cho video", callback_data="imgtool|resize_task|video")],
         [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def image_edit_send_image_hint_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "Send the image directly in this chat or reply to the image you want to edit."
+    return "Bạn gửi ảnh trực tiếp vào khung chat hoặc reply ảnh muốn chỉnh nhé."
+
+def image_manual_edit_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🧩 <b>Manual edit</b>\n\n"
+            "Choose a simple local edit direction. If an item is not available yet, TOAN AAS will report that clearly and will not charge Xu."
+        )
+    return (
+        "🧩 <b>Chỉnh sửa thủ công</b>\n\n"
+        "Bạn muốn chỉnh thủ công theo hướng nào?\n\n"
+        "1. Thêm chữ / ghi chú lên ảnh\n"
+        "2. Cắt/căn chỉnh ảnh\n"
+        "3. Làm mờ/che một vùng đơn giản nếu hỗ trợ\n\n"
+        "Nếu tính năng chưa hoàn thiện, TOAN AAS sẽ báo rõ và chưa trừ Xu."
+    )
+
+def image_manual_edit_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("1️⃣ Add text", callback_data="imgtool|edit_manual_guard|text"), InlineKeyboardButton("2️⃣ Crop/align", callback_data="imgtool|edit_manual_guard|crop")],
+            [InlineKeyboardButton("3️⃣ Blur/cover area", callback_data="imgtool|edit_manual_guard|blur"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_manual_guard|custom")],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_back_choice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1️⃣ Thêm chữ", callback_data="imgtool|edit_manual_guard|text"), InlineKeyboardButton("2️⃣ Cắt/căn chỉnh", callback_data="imgtool|edit_manual_guard|crop")],
+        [InlineKeyboardButton("3️⃣ Che/làm mờ vùng", callback_data="imgtool|edit_manual_guard|blur"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_manual_guard|custom")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|edit_back_choice"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def image_manual_edit_guard_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "This manual edit tool is still being completed. TOAN AAS did not process the image and did not charge Xu."
+    return "Tính năng này đang được hoàn thiện. TOAN AAS chưa xử lý ảnh và chưa trừ Xu."
+
+def image_edit_ai_choice_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✨ <b>AI image edit</b>\n\n"
+            "Choose what AI should do. TOAN AAS will show a confirmation/guard before any provider call or Xu charge."
+        )
+    return (
+        "✨ <b>Chỉnh sửa AI</b>\n\n"
+        "Bạn muốn AI chỉnh ảnh theo hướng nào?\n\n"
+        "1. Đổi nền / đổi bối cảnh\n"
+        "2. Xóa vật thể / làm sạch ảnh\n"
+        "3. Thêm vật thể/chữ hoặc đổi phong cách\n\n"
+        "TOAN AAS sẽ xác nhận rõ trước khi gọi API hoặc trừ Xu."
+    )
+
+def image_edit_ai_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("1️⃣ Change background", callback_data="imgtool|edit_type|background"), InlineKeyboardButton("2️⃣ Remove object", callback_data="imgtool|edit_type|cleanup")],
+            [InlineKeyboardButton("3️⃣ Add/change style", callback_data="imgtool|edit_type|style"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_back_choice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1️⃣ Đổi nền", callback_data="imgtool|edit_type|background"), InlineKeyboardButton("2️⃣ Xóa vật thể", callback_data="imgtool|edit_type|cleanup")],
+        [InlineKeyboardButton("3️⃣ Thêm/đổi phong cách", callback_data="imgtool|edit_type|style"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|edit_back_choice"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def image_edit_suggestions(edit_type: str = "", lang: str = "vi") -> list[str]:
@@ -31043,18 +31166,14 @@ def image_edit_suggestion_text(edit_type: str = "", lang: str = "vi") -> str:
 def image_edit_suggestion_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("1️⃣ Suggestion 1", callback_data="imgtool|edit_request|1")],
-            [InlineKeyboardButton("2️⃣ Suggestion 2", callback_data="imgtool|edit_request|2")],
-            [InlineKeyboardButton("3️⃣ Suggestion 3", callback_data="imgtool|edit_request|3")],
-            [InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_request_custom")],
-            [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton("1️⃣ Suggestion 1", callback_data="imgtool|edit_request|1"), InlineKeyboardButton("2️⃣ Suggestion 2", callback_data="imgtool|edit_request|2")],
+            [InlineKeyboardButton("3️⃣ Suggestion 3", callback_data="imgtool|edit_request|3"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_request_custom")],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_ai_menu"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Gợi ý 1", callback_data="imgtool|edit_request|1")],
-        [InlineKeyboardButton("2️⃣ Gợi ý 2", callback_data="imgtool|edit_request|2")],
-        [InlineKeyboardButton("3️⃣ Gợi ý 3", callback_data="imgtool|edit_request|3")],
-        [InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_request_custom")],
-        [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("1️⃣ Gợi ý 1", callback_data="imgtool|edit_request|1"), InlineKeyboardButton("2️⃣ Gợi ý 2", callback_data="imgtool|edit_request|2")],
+        [InlineKeyboardButton("3️⃣ Gợi ý 3", callback_data="imgtool|edit_request|3"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_request_custom")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|edit_ai_menu"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def image_edit_prompt_value(state: dict, lang: str = "vi") -> str:
@@ -31071,22 +31190,19 @@ def image_edit_ready_text(state: dict, lang: str = "vi") -> str:
     cost = IMAGE_EDIT_BASIC_XU if edit_type in {"background", "cleanup"} else IMAGE_EDIT_STANDARD_XU
     if normalize_user_language(lang) != "vi":
         return (
-            "🧩 <b>Image edit request ready</b>\n\n"
+            "✨ <b>Confirm AI image edit</b>\n\n"
             f"Image: <b>{'received' if state.get('file_id') else 'described by text'}</b>\n"
             f"Request: <code>{html.escape(request)}</code>\n"
-            f"Estimated AI edit fee if enabled later: <b>{cost} Xu</b>\n\n"
-            "Choose whether to create an edit prompt, use guarded AI edit, or create a new image from this description. "
-            "No provider call and no Xu charged yet."
+            f"Estimated fee if enabled: <b>{cost} Xu</b>\n\n"
+            "TOAN AAS only charges after confirmation. If the provider is not ready, it will report a guard message and will not charge Xu."
         )
     return (
-        "🧩 <b>Yêu cầu sửa ảnh đã sẵn sàng</b>\n\n"
+        "✨ <b>Xác nhận chỉnh sửa AI</b>\n\n"
         f"Ảnh: <b>{'đã nhận' if state.get('file_id') else 'mô tả bằng text'}</b>\n"
         f"Yêu cầu: <code>{html.escape(request)}</code>\n"
-        f"Phí dự kiến nếu mở provider-heavy sau này: <b>{cost} Xu</b>\n\n"
-        "Bạn muốn làm gì tiếp?\n\n"
-        "1. ✍️ Chỉ tạo prompt sửa ảnh — không trừ Xu.\n"
-        "2. 🧩 Sửa ảnh bằng AI — chỉ mở khi nhà cung cấp ổn định.\n"
-        "3. 🖼 Tạo ảnh mới theo prompt — không đảm bảo giữ chính xác ảnh gốc."
+        f"Phí dự kiến: <b>{cost} Xu</b>\n\n"
+        "TOAN AAS chỉ trừ Xu sau khi bạn xác nhận.\n"
+        "Nếu nhà cung cấp lỗi hoặc chưa sẵn sàng, TOAN AAS sẽ không trừ hoặc hoàn Xu theo policy."
     )
 
 def image_edit_prompt_text(state: dict, lang: str = "vi") -> str:
@@ -31114,12 +31230,9 @@ def image_edit_prompt_text(state: dict, lang: str = "vi") -> str:
 def image_edit_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✍️ Chỉ tạo prompt sửa ảnh" if vi else "✍️ Prompt only", callback_data="imgtool|edit_prompt_output")],
-        [InlineKeyboardButton("🧩 Sửa ảnh bằng AI nếu công cụ mở" if vi else "🧩 AI edit if available", callback_data="imgtool|edit_ai")],
-        [InlineKeyboardButton("🖼 Tạo ảnh mới theo prompt" if vi else "🖼 Create new image from prompt", callback_data="imgtool|edit_create_new")],
-        [InlineKeyboardButton("💾 Lưu prompt sửa ảnh" if vi else "💾 Save edit prompt", callback_data="imgtool|edit_save")],
+        [InlineKeyboardButton("✅ Xác nhận chỉnh sửa AI" if vi else "✅ Confirm AI edit", callback_data="imgtool|edit_ai")],
         [InlineKeyboardButton("✍️ Sửa yêu cầu" if vi else "✍️ Edit request", callback_data="imgtool|edit_request_custom")],
-        [InlineKeyboardButton("⬅️ Về menu ảnh" if vi else "⬅️ Back to image menu", callback_data="menu|main_image")],
+        [InlineKeyboardButton("❌ Hủy" if vi else "❌ Cancel", callback_data="menu|main_image"), InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="imgtool|edit_ai_menu")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -31128,12 +31241,12 @@ def image_edit_ai_guard_text(lang: str = "vi") -> str:
         return (
             "🧩 AI image edit is still being verified with providers.\n"
             "TOAN AAS has not called an API and has not charged Xu.\n\n"
-            "You can save the edit prompt, create a new image from it, or change the request."
+            "You can use local ratio change / pixel resize first."
         )
     return (
-        "🧩 <b>Sửa ảnh bằng AI hiện đang được kiểm tra nhà cung cấp.</b>\n"
+        "✨ <b>Chỉnh sửa AI hiện đang được kiểm tra nhà cung cấp.</b>\n"
         "TOAN AAS chưa gọi API và chưa trừ Xu.\n\n"
-        "Bạn vẫn có thể lưu prompt sửa ảnh, dùng prompt này để tạo ảnh mới hoặc quay lại sửa yêu cầu."
+        "Bạn có thể dùng Đổi tỉ lệ local / Resize pixel trước."
     )
 
 def image_edit_create_new_text(state: dict, lang: str = "vi") -> str:
@@ -31169,41 +31282,37 @@ def image_resize_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def image_resize_choice_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "📐 <b>Image received.</b>\n\nHow do you want to process it?\n\n"
+            "✅ <b>Image received.</b>\n\nHow do you want to process it?\n\n"
             "• Local ratio change: free, crop/pad/blur.\n"
             "• Pixel resize: free local processing.\n"
-            "• AI aspect transform: provider-guarded."
+            "• Manual edit: simple local edits when available.\n"
+            "• AI edit/upscale: provider-guarded."
         )
     return (
-        "📐 <b>Đã nhận ảnh.</b>\n\nBạn muốn xử lý ảnh theo cách nào?\n\n"
+        "✅ <b>Đã nhận ảnh.</b>\n\nBạn muốn chỉnh ảnh theo cách nào?\n\n"
         "1. 📐 Đổi tỉ lệ local — miễn phí, có nền mờ/thêm nền/crop.\n"
         "2. 🖼 Resize pixel — đổi kích thước cụ thể.\n"
-        "3. ✨ Biến đổi tỉ lệ bằng AI — outpaint phần thiếu, hiện đang guard."
+        "3. 🧩 Chỉnh sửa thủ công — các thao tác đơn giản nếu hệ thống hỗ trợ.\n"
+        "4. ✨ Chỉnh sửa AI / nâng chất lượng — chỉ chạy khi nhà cung cấp ổn định."
     )
 
 def image_resize_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📐 Local ratio change", callback_data="imgtool|resize_task|ratio")],
-            [InlineKeyboardButton("🖼 Resize pixels", callback_data="imgtool|resize_task|pixels")],
-            [InlineKeyboardButton("✨ AI aspect transform", callback_data="imgtool|resize_task|ai_aspect")],
-            [InlineKeyboardButton("✨ AI enhance/upscale", callback_data="imgtool|resize_task|ai_upscale")],
-            [InlineKeyboardButton("🎬 Prepare for video", callback_data="imgtool|resize_task|video")],
-            [InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|resize_task_custom")],
+            [InlineKeyboardButton("📐 Local ratio change", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("🖼 Resize pixels", callback_data="imgtool|resize_task|pixels")],
+            [InlineKeyboardButton("🧩 Manual edit", callback_data="imgtool|edit_manual"), InlineKeyboardButton("✨ AI edit", callback_data="imgtool|edit_ai_menu")],
+            [InlineKeyboardButton("✨ AI enhance/upscale", callback_data="imgtool|resize_task|ai_upscale"), InlineKeyboardButton("🎬 Prepare for video", callback_data="imgtool|resize_task|video")],
             [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📐 Đổi tỉ lệ local", callback_data="imgtool|resize_task|ratio")],
-        [InlineKeyboardButton("🖼 Resize pixel", callback_data="imgtool|resize_task|pixels")],
-        [InlineKeyboardButton("✨ Biến đổi tỉ lệ bằng AI", callback_data="imgtool|resize_task|ai_aspect")],
-        [InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|resize_task|ai_upscale")],
-        [InlineKeyboardButton("🎬 Chuẩn bị ảnh cho video", callback_data="imgtool|resize_task|video")],
-        [InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|resize_task_custom")],
+        [InlineKeyboardButton("📐 Đổi tỉ lệ local", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("🖼 Resize pixel", callback_data="imgtool|resize_task|pixels")],
+        [InlineKeyboardButton("🧩 Chỉnh sửa thủ công", callback_data="imgtool|edit_manual"), InlineKeyboardButton("✨ Chỉnh sửa AI", callback_data="imgtool|edit_ai_menu")],
+        [InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|resize_task|ai_upscale"), InlineKeyboardButton("🎬 Chuẩn bị ảnh cho video", callback_data="imgtool|resize_task|video")],
         [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def image_resize_ratio_keyboard(video_only: bool = False, lang: str = "vi") -> InlineKeyboardMarkup:
-    ratios = ("16:9", "9:16", "1:1") if video_only else ("1:1", "9:16", "16:9", "4:5", "3:4", "3:2", "4:3")
+    ratios = ("16:9", "9:16", "1:1") if video_only else ("16:9", "9:16", "1:1", "4:5", "3:4", "4:3")
     labels_vi = {
         "1:1": "1:1 Vuông",
         "9:16": "9:16 Reels/TikTok",
@@ -31219,8 +31328,7 @@ def image_resize_ratio_keyboard(video_only: bool = False, lang: str = "vi") -> I
         for ratio in ratios[idx:idx + 2]:
             row.append(InlineKeyboardButton(labels_vi.get(ratio, ratio), callback_data=f"imgtool|resize_ratio|{ratio.replace(':', 'x')}"))
         rows.append(row)
-    rows.append([InlineKeyboardButton("✍️ Nhập tỷ lệ khác", callback_data="imgtool|resize_ratio_custom")])
-    rows.append([InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back", callback_data="imgtool|resize_back_choice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def image_resize_ratio_text(lang: str = "vi") -> str:
@@ -31231,26 +31339,22 @@ def image_resize_ratio_text(lang: str = "vi") -> str:
 def image_resize_method_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🌫 Blur background, preserve subject", callback_data="imgtool|resize_method|blur")],
-            [InlineKeyboardButton("⬜ Add border/background", callback_data="imgtool|resize_method|pad")],
-            [InlineKeyboardButton("✂️ Crop to frame", callback_data="imgtool|resize_method|crop")],
-            [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton("🌫 Blur background, preserve subject", callback_data="imgtool|resize_method|blur"), InlineKeyboardButton("⬜ Add border/background", callback_data="imgtool|resize_method|pad")],
+            [InlineKeyboardButton("✂️ Crop to frame", callback_data="imgtool|resize_method|crop"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|resize_back_ratio")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌫 Nền mờ, không cắt chủ thể", callback_data="imgtool|resize_method|blur")],
-        [InlineKeyboardButton("⬜ Thêm viền/nền", callback_data="imgtool|resize_method|pad")],
-        [InlineKeyboardButton("✂️ Cắt vừa khung", callback_data="imgtool|resize_method|crop")],
-        [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🌫 Nền mờ, không cắt chủ thể", callback_data="imgtool|resize_method|blur"), InlineKeyboardButton("⬜ Thêm nền/viền", callback_data="imgtool|resize_method|pad")],
+        [InlineKeyboardButton("✂️ Cắt vừa khung", callback_data="imgtool|resize_method|crop"), InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|resize_back_ratio")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def image_resize_pixels_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1024 x 1024", callback_data="imgtool|resize_pixels|1024x1024")],
-        [InlineKeyboardButton("1080 x 1920", callback_data="imgtool|resize_pixels|1080x1920")],
-        [InlineKeyboardButton("1920 x 1080", callback_data="imgtool|resize_pixels|1920x1080")],
-        [InlineKeyboardButton("1080 x 1350", callback_data="imgtool|resize_pixels|1080x1350")],
-        [InlineKeyboardButton("✍️ Nhập kích thước khác", callback_data="imgtool|resize_pixels_custom")],
-        [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("1024x1024", callback_data="imgtool|resize_pixels|1024x1024"), InlineKeyboardButton("1920x1080", callback_data="imgtool|resize_pixels|1920x1080")],
+        [InlineKeyboardButton("1080x1920", callback_data="imgtool|resize_pixels|1080x1920"), InlineKeyboardButton("1080x1350", callback_data="imgtool|resize_pixels|1080x1350")],
+        [InlineKeyboardButton("✍️ Nhập kích thước khác", callback_data="imgtool|resize_pixels_custom"), InlineKeyboardButton("⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back", callback_data="imgtool|resize_back_choice")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def image_resize_pixels_text(lang: str = "vi") -> str:
@@ -31366,9 +31470,40 @@ def image_resize_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎞 Dùng ảnh này để ghép thành video" if vi else "🎞 Use this image for slideshow video", callback_data="menu|video_frame_intro")],
         [InlineKeyboardButton("📐 Xử lý tiếp ảnh này" if vi else "📐 Process this image again", callback_data="imgtool|resize_continue")],
-        [InlineKeyboardButton("🖼 Tạo ảnh mới tương tự" if vi else "🖼 Create a similar new image", callback_data="create_media|quick_image")],
+        [InlineKeyboardButton("🧩 Chỉnh ảnh tiếp" if vi else "🧩 Edit this image again", callback_data="imgtool|resize_continue")],
         [InlineKeyboardButton("⬅️ Về menu ảnh" if vi else "⬅️ Back to image menu", callback_data="menu|main_image")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
+
+def image_upload_outside_flow_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✅ <b>TOAN AAS received your image.</b>\n\n"
+            "What would you like to do with it?\n\n"
+            "Opening this menu does not call a provider and does not charge Xu."
+        )
+    return (
+        "✅ <b>TOAN AAS đã nhận ảnh.</b>\n\n"
+        "Bạn muốn làm gì với ảnh này?\n\n"
+        "Bot chưa gọi API và chưa trừ Xu."
+    )
+
+def image_upload_outside_flow_keyboard(lang: str = "vi", admin: bool = False) -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        rows = [
+            [InlineKeyboardButton("🧩 Edit image", callback_data="imgtool|edit_from_last"), InlineKeyboardButton("✍️ Prompt from image", callback_data="imgtool|prompt_from_last")],
+            [InlineKeyboardButton("📄 Image to PDF", callback_data="menu|hint_doc_image_to_pdf"), InlineKeyboardButton("🎞 Use image for video", callback_data="imagevideo|start")],
+            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+        ]
+    else:
+        rows = [
+            [InlineKeyboardButton("🧩 Chỉnh sửa ảnh", callback_data="imgtool|edit_from_last"), InlineKeyboardButton("✍️ Tạo prompt từ ảnh", callback_data="imgtool|prompt_from_last")],
+            [InlineKeyboardButton("📄 Ảnh sang PDF", callback_data="menu|hint_doc_image_to_pdf"), InlineKeyboardButton("🎞 Dùng ảnh làm video", callback_data="imagevideo|start")],
+            [InlineKeyboardButton("⬅️ Menu chính", callback_data="menu|main")],
+        ]
+    if admin:
+        rows.append([InlineKeyboardButton("🔐 Công cụ admin", callback_data="menu|admin")])
+    return InlineKeyboardMarkup(rows)
 
 async def telegram_photo_file_bytes(context: ContextTypes.DEFAULT_TYPE, file_id: str) -> bytes:
     tg_file = await context.bot.get_file(file_id)
@@ -35640,19 +35775,13 @@ def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     if lang != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Quick image", callback_data="create_media|quick_image")],
-            [InlineKeyboardButton("✍️ Image prompt", callback_data="menu|image_prompt_start")],
-            [InlineKeyboardButton("🧩 Edit image", callback_data="menu|image_edit_start")],
-            [InlineKeyboardButton("📐 Upscale / resize", callback_data="menu|image_upscale_start")],
-            [InlineKeyboardButton("🔙 Back", callback_data="menu|main")],
+            [InlineKeyboardButton("🖼 Quick image", callback_data="create_media|quick_image"), InlineKeyboardButton("✍️ Prompt from image", callback_data="menu|image_prompt_start")],
+            [InlineKeyboardButton("🧩 Edit image", callback_data="menu|image_edit_start"), InlineKeyboardButton("🔙 Back", callback_data="menu|main")],
             [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")],
-        [InlineKeyboardButton("✍️ Tạo prompt ảnh", callback_data="menu|image_prompt_start")],
-        [InlineKeyboardButton("🧩 Sửa ảnh / edit ảnh", callback_data="menu|image_edit_start")],
-        [InlineKeyboardButton("📐 Nâng cấp / đổi kích thước", callback_data="menu|image_upscale_start")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main")],
+        [InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image"), InlineKeyboardButton("✍️ Tạo prompt từ ảnh", callback_data="menu|image_prompt_start")],
+        [InlineKeyboardButton("🧩 Chỉnh sửa ảnh", callback_data="menu|image_edit_start"), InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -40313,11 +40442,11 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=long_video_topic_keyboard(lang),
         )
     if action == "image_prompt_start":
-        clear_image_menu_pending(query.from_user.id)
+        set_image_menu_pending(query.from_user.id, "image_prompt_wait_image")
         return await safe_edit_query_message(
             query,
             image_prompt_menu_start_text(lang),
-            reply_markup=image_prompt_goal_keyboard(lang),
+            reply_markup=image_prompt_start_keyboard(lang),
         )
     if action == "image_edit_start":
         set_image_menu_pending(query.from_user.id, "image_edit_wait_image")
@@ -40327,11 +40456,11 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=image_edit_start_keyboard(lang),
         )
     if action == "image_upscale_start":
-        set_image_menu_pending(query.from_user.id, "image_upscale_wait_image")
+        set_image_menu_pending(query.from_user.id, "image_edit_wait_image")
         return await safe_edit_query_message(
             query,
-            image_upscale_menu_start_text(lang),
-            reply_markup=image_resize_start_keyboard(lang),
+            image_edit_menu_start_text(lang),
+            reply_markup=image_edit_start_keyboard(lang),
         )
     if action.startswith("translate_set_"):
         target = normalize_translate_target(action.replace("translate_set_", "", 1))
@@ -42775,13 +42904,51 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
     action = parts[1] if len(parts) > 1 else ""
     pending = get_image_menu_pending(uid) or {}
 
+    if action == "prompt_need_image":
+        set_image_menu_pending(uid, "image_prompt_wait_image")
+        return await safe_edit_query_message(query, image_prompt_send_image_hint_text(lang), parse_mode=None, reply_markup=image_prompt_start_keyboard(lang))
+    if action == "prompt_manual":
+        set_image_menu_pending(uid, "image_prompt_subject", goal_code="custom", goal="mô tả thủ công" if normalize_user_language(lang) == "vi" else "manual description")
+        return await safe_edit_query_message(query, image_prompt_subject_text("mô tả thủ công" if normalize_user_language(lang) == "vi" else "manual description", lang), reply_markup=image_menu_child_keyboard(lang))
+    if action == "prompt_from_last":
+        image_state = recent_image_file_state(uid)
+        if image_state.get("file_id"):
+            set_image_menu_pending(uid, "image_prompt_wait_purpose", **image_state, subject="ảnh đã nhận", prompt_source="image")
+            return await safe_edit_query_message(query, image_prompt_received_text(lang), reply_markup=image_prompt_goal_keyboard(lang))
+        set_image_menu_pending(uid, "image_prompt_wait_image")
+        return await safe_edit_query_message(query, image_prompt_menu_start_text(lang), reply_markup=image_prompt_start_keyboard(lang))
+    if action == "prompt_back_wait_image":
+        set_image_menu_pending(uid, "image_prompt_wait_image", **{k: v for k, v in pending.items() if k in {"file_id", "file_unique_id", "source_name"}})
+        return await safe_edit_query_message(query, image_prompt_menu_start_text(lang), reply_markup=image_prompt_start_keyboard(lang))
+    if action == "prompt_back_goal":
+        if pending.get("file_id"):
+            set_image_menu_pending(uid, "image_prompt_wait_purpose", **pending)
+            return await safe_edit_query_message(query, image_prompt_received_text(lang), reply_markup=image_prompt_goal_keyboard(lang))
+        return await safe_edit_query_message(query, image_prompt_menu_start_text(lang), reply_markup=image_prompt_start_keyboard(lang))
+    if action == "prompt_back_style":
+        if pending:
+            set_image_menu_pending(uid, "image_prompt_style_custom", **pending)
+            state = get_image_menu_pending(uid) or pending
+            return await safe_edit_query_message(query, image_prompt_style_text(state, lang), reply_markup=image_prompt_style_keyboard(lang))
+        return await safe_edit_query_message(query, image_prompt_menu_start_text(lang), reply_markup=image_prompt_start_keyboard(lang))
+    if action == "prompt_back_ratio":
+        result = get_image_tool_result(uid, "prompt")
+        if result:
+            set_image_menu_pending(uid, "image_prompt_ratio_change", **{**result, "ratio_change": "1"})
+            return await safe_edit_query_message(query, image_prompt_ratio_text(lang), reply_markup=image_prompt_ratio_keyboard(lang))
+        return await safe_edit_query_message(query, image_prompt_menu_start_text(lang), reply_markup=image_prompt_start_keyboard(lang))
     if action == "prompt_goal":
         goal_code = parts[2] if len(parts) > 2 else "product"
         goal = image_prompt_goal_label(goal_code, "", lang)
+        if pending.get("file_id") or str(pending.get("pending_action") or "") == "image_prompt_wait_purpose":
+            state = {**pending, "goal_code": goal_code, "goal": goal, "subject": pending.get("subject") or "ảnh đã nhận", "prompt_source": "image"}
+            set_image_menu_pending(uid, "image_prompt_style_custom", **state)
+            state = get_image_menu_pending(uid) or state
+            return await safe_edit_query_message(query, image_prompt_style_text(state, lang), reply_markup=image_prompt_style_keyboard(lang))
         set_image_menu_pending(uid, "image_prompt_subject", goal_code=goal_code, goal=goal)
         return await safe_edit_query_message(query, image_prompt_subject_text(goal, lang), reply_markup=image_menu_child_keyboard(lang))
     if action == "prompt_goal_custom":
-        set_image_menu_pending(uid, "image_prompt_goal_custom")
+        set_image_menu_pending(uid, "image_prompt_goal_custom", **pending)
         return await safe_edit_query_message(query, "✍️ Bạn hãy nhập mục đích ảnh muốn tạo prompt. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_menu_child_keyboard(lang))
     if action == "prompt_style":
         if not pending:
@@ -42944,16 +43111,44 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
 
     if action == "edit_need_image":
         set_image_menu_pending(uid, "image_edit_wait_image")
+        return await safe_edit_query_message(query, image_edit_send_image_hint_text(lang), parse_mode=None, reply_markup=image_edit_start_keyboard(lang))
+    if action == "edit_from_last":
+        image_state = recent_image_file_state(uid)
+        if image_state.get("file_id"):
+            set_image_menu_pending(uid, "image_resize_choice", **image_state)
+            return await safe_edit_query_message(query, image_edit_instruction_text(lang), reply_markup=image_edit_choice_keyboard(lang))
+        set_image_menu_pending(uid, "image_edit_wait_image")
         return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
+    if action == "edit_back_choice":
+        state = dict(pending or recent_image_file_state(uid) or {})
+        if state.get("file_id"):
+            set_image_menu_pending(uid, "image_resize_choice", **state)
+            return await safe_edit_query_message(query, image_edit_instruction_text(lang), reply_markup=image_edit_choice_keyboard(lang))
+        set_image_menu_pending(uid, "image_edit_wait_image")
+        return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
+    if action == "edit_manual":
+        if not pending or not pending.get("file_id"):
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_resize_choice", **pending)
+        return await safe_edit_query_message(query, image_manual_edit_text(lang), reply_markup=image_manual_edit_keyboard(lang))
+    if action == "edit_manual_guard":
+        return await safe_edit_query_message(query, image_manual_edit_guard_text(lang), parse_mode=None, reply_markup=image_manual_edit_keyboard(lang))
+    if action == "edit_ai_menu":
+        if not pending or not pending.get("file_id"):
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_edit_choice", **pending)
+        return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang))
     if action == "edit_prompt_only":
         set_image_menu_pending(uid, "image_edit_prompt_only")
         return await safe_edit_query_message(query, "✍️ Bạn hãy mô tả ảnh hiện có và yêu cầu sửa. Bot sẽ tạo prompt sửa ảnh, chưa gọi provider và chưa trừ Xu.", parse_mode=None, reply_markup=image_menu_child_keyboard(lang))
     if action == "edit_type":
         edit_type = parts[2] if len(parts) > 2 else "background"
         if not pending:
-            set_image_menu_pending(uid, "image_edit_prompt_only", edit_type=edit_type)
-        else:
-            set_image_menu_pending(uid, "image_edit_request_custom", **{**pending, "edit_type": edit_type})
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_edit_request_custom", **{**pending, "edit_type": edit_type})
         return await safe_edit_query_message(query, image_edit_suggestion_text(edit_type, lang), reply_markup=image_edit_suggestion_keyboard(lang))
     if action == "edit_type_custom" or action == "edit_request_custom":
         edit_state = dict(pending or get_image_tool_result(uid, "edit") or {})
@@ -42980,7 +43175,7 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
         state = dict(pending or get_image_tool_result(uid, "edit") or {})
         if state:
             set_image_menu_pending(uid, "image_edit_waiting_action", **state)
-        return await safe_edit_query_message(query, image_edit_ai_guard_text(lang), reply_markup=image_edit_result_keyboard(lang))
+        return await safe_edit_query_message(query, image_edit_ai_guard_text(lang), reply_markup=image_resize_choice_keyboard(lang))
     if action == "edit_create_new":
         state = dict(pending or get_image_tool_result(uid, "edit") or {})
         if not state:
@@ -43026,13 +43221,13 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
         return await safe_edit_query_message(query, message, parse_mode=None, reply_markup=image_edit_result_keyboard(lang))
 
     if action == "resize_need_image":
-        set_image_menu_pending(uid, "image_upscale_wait_image")
-        return await safe_edit_query_message(query, image_upscale_menu_start_text(lang), reply_markup=image_resize_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_edit_wait_image")
+        return await safe_edit_query_message(query, image_edit_send_image_hint_text(lang), parse_mode=None, reply_markup=image_edit_start_keyboard(lang))
     if action == "resize_task":
         resize_task = parts[2] if len(parts) > 2 else "ratio"
         if not pending or not pending.get("file_id"):
-            set_image_menu_pending(uid, "image_upscale_wait_image")
-            return await safe_edit_query_message(query, image_upscale_menu_start_text(lang), reply_markup=image_resize_start_keyboard(lang))
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
         if resize_task == "ai_upscale":
             return await safe_edit_query_message(query, image_upscale_ai_guard_text(lang), reply_markup=image_resize_choice_keyboard(lang))
         if resize_task == "ai_aspect":
@@ -43045,45 +43240,59 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
             return await safe_edit_query_message(query, image_resize_ratio_text(lang), reply_markup=image_resize_ratio_keyboard(video_only=True, lang=lang))
         set_image_menu_pending(uid, "image_resize_choice", **{**pending, "resize_task": "ratio"})
         return await safe_edit_query_message(query, image_resize_ratio_text(lang), reply_markup=image_resize_ratio_keyboard(False, lang))
+    if action == "resize_back_choice":
+        state = dict(pending or recent_image_file_state(uid) or {})
+        if state.get("file_id"):
+            set_image_menu_pending(uid, "image_resize_choice", **state)
+            return await safe_edit_query_message(query, image_edit_instruction_text(lang), reply_markup=image_edit_choice_keyboard(lang))
+        set_image_menu_pending(uid, "image_edit_wait_image")
+        return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
+    if action == "resize_back_ratio":
+        state = dict(pending or {})
+        if state.get("file_id"):
+            set_image_menu_pending(uid, "image_resize_choice", **{**state, "resize_task": "ratio"})
+            return await safe_edit_query_message(query, image_resize_ratio_text(lang), reply_markup=image_resize_ratio_keyboard(False, lang))
+        set_image_menu_pending(uid, "image_edit_wait_image")
+        return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
     if action == "resize_task_custom":
         return await safe_edit_query_message(query, "✍️ Yêu cầu riêng cho xử lý ảnh sẽ mở sau. Hiện bạn có thể dùng đổi tỷ lệ hoặc resize pixel local miễn phí. TOAN AAS chưa trừ Xu.", parse_mode=None, reply_markup=image_resize_choice_keyboard(lang))
     if action == "resize_ratio":
         if not pending or not pending.get("file_id"):
-            set_image_menu_pending(uid, "image_upscale_wait_image")
-            return await safe_edit_query_message(query, image_upscale_menu_start_text(lang), reply_markup=image_resize_start_keyboard(lang))
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
         ratio = normalize_image_tool_ratio(parts[2] if len(parts) > 2 else "1x1")
         set_image_menu_pending(uid, "image_resize_ratio_method", **{**pending, "resize_ratio": ratio})
         return await safe_edit_query_message(query, "Bạn muốn ảnh được đưa vào khung mới bằng cách nào?", parse_mode=None, reply_markup=image_resize_method_keyboard(lang))
     if action == "resize_ratio_custom":
         if not pending or not pending.get("file_id"):
-            set_image_menu_pending(uid, "image_upscale_wait_image")
-            return await safe_edit_query_message(query, image_upscale_menu_start_text(lang), reply_markup=image_resize_start_keyboard(lang))
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
         set_image_menu_pending(uid, "image_resize_ratio_custom", **pending)
         return await safe_edit_query_message(query, "✍️ Nhập tỷ lệ đầu ra, ví dụ: 3:4, 4:3, 21:9. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_menu_child_keyboard(lang))
     if action == "resize_method":
         if not pending or not pending.get("file_id"):
-            set_image_menu_pending(uid, "image_upscale_wait_image")
-            return await safe_edit_query_message(query, image_upscale_menu_start_text(lang), reply_markup=image_resize_start_keyboard(lang))
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
         method = parts[2] if len(parts) > 2 else "blur"
         return await send_local_resized_image(update, context, pending, pending.get("resize_ratio") or "1:1", method)
     if action == "resize_pixels":
         if not pending or not pending.get("file_id"):
-            set_image_menu_pending(uid, "image_upscale_wait_image")
-            return await safe_edit_query_message(query, image_upscale_menu_start_text(lang), reply_markup=image_resize_start_keyboard(lang))
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
         pixel_size = parts[2] if len(parts) > 2 else "1024x1024"
         return await send_local_resized_image(update, context, pending, method="pad", pixel_size=pixel_size)
     if action == "resize_pixels_custom":
         if not pending or not pending.get("file_id"):
-            set_image_menu_pending(uid, "image_upscale_wait_image")
-            return await safe_edit_query_message(query, image_upscale_menu_start_text(lang), reply_markup=image_resize_start_keyboard(lang))
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
         set_image_menu_pending(uid, "image_resize_pixels_custom", **pending)
         return await safe_edit_query_message(query, "✍️ Nhập kích thước pixel, ví dụ: 1920x1080 hoặc 1080x1920. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_menu_child_keyboard(lang))
     if action == "resize_continue":
         result = get_image_tool_result(uid, "resize") or {}
         file_id = str(result.get("file_id") or "")
         if not file_id:
-            set_image_menu_pending(uid, "image_upscale_wait_image")
-            return await safe_edit_query_message(query, image_upscale_menu_start_text(lang), reply_markup=image_resize_start_keyboard(lang))
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
         set_image_menu_pending(uid, "image_resize_choice", file_id=file_id, source_name="processed_image")
         return await safe_edit_query_message(query, image_resize_choice_text(lang), reply_markup=image_resize_choice_keyboard(lang))
 
@@ -43101,12 +43310,18 @@ async def handle_image_menu_pending_text(update: Update, context: ContextTypes.D
         return False
     lang = get_user_language(uid) or "vi"
     action = str(pending.get("pending_action") or "")
-    if action == "image_prompt_only":
-        set_image_menu_pending(uid, "image_prompt_subject", goal_code="custom", goal="prompt ảnh")
-        await update.message.reply_text(image_prompt_subject_text("prompt ảnh", lang), parse_mode="HTML", reply_markup=image_menu_child_keyboard(lang))
+    if action in {"image_prompt_only", "image_prompt_wait_image"}:
+        set_image_menu_pending(uid, "image_prompt_subject", goal_code="custom", goal="mô tả thủ công")
+        await update.message.reply_text(image_prompt_subject_text("mô tả thủ công", lang), parse_mode="HTML", reply_markup=image_menu_child_keyboard(lang))
         return True
     if action == "image_prompt_goal_custom":
         goal = _short_pending_text(text, 220)
+        if pending.get("file_id"):
+            state = {**pending, "goal_code": "custom", "goal": goal, "subject": pending.get("subject") or "ảnh đã nhận", "prompt_source": "image"}
+            set_image_menu_pending(uid, "image_prompt_style_custom", **state)
+            state = get_image_menu_pending(uid) or state
+            await update.message.reply_text(image_prompt_style_text(state, lang), parse_mode="HTML", reply_markup=image_prompt_style_keyboard(lang))
+            return True
         set_image_menu_pending(uid, "image_prompt_subject", goal_code="custom", goal=goal)
         await update.message.reply_text(image_prompt_subject_text(goal, lang), parse_mode="HTML", reply_markup=image_menu_child_keyboard(lang))
         return True
@@ -43135,7 +43350,7 @@ async def handle_image_menu_pending_text(update: Update, context: ContextTypes.D
         return True
     if action in {"image_edit_wait_image", "image_upscale_wait_image"}:
         await update.message.reply_text(
-            image_edit_menu_start_text(lang) if action == "image_edit_wait_image" else image_upscale_menu_start_text(lang),
+            image_edit_send_image_hint_text(lang) if action == "image_edit_wait_image" else image_upscale_menu_start_text(lang),
             parse_mode="HTML",
             reply_markup=image_edit_start_keyboard(lang) if action == "image_edit_wait_image" else image_resize_start_keyboard(lang),
         )
@@ -43195,11 +43410,24 @@ async def handle_image_menu_pending_photo(update: Update, context: ContextTypes.
         return False
     lang = get_user_language(uid) or "vi"
     action = str(pending.get("pending_action") or "")
-    if action == "image_prompt_only":
+    if action in {"image_prompt_only", "image_prompt_wait_image"}:
+        remember_last_user_file(update)
+        cache_recent_media_state(update)
+        file_id = update.message.photo[-1].file_id if update.message.photo else ""
+        file_unique_id = update.message.photo[-1].file_unique_id if update.message.photo else ""
+        set_image_menu_pending(
+            uid,
+            "image_prompt_wait_purpose",
+            file_id=file_id,
+            file_unique_id=file_unique_id,
+            source_name="telegram_photo.jpg",
+            subject="ảnh đã nhận",
+            prompt_source="image",
+        )
         await update.message.reply_text(
-            image_prompt_menu_start_text(lang),
+            image_prompt_received_text(lang),
             parse_mode="HTML",
-            reply_markup=image_menu_child_keyboard(lang),
+            reply_markup=image_prompt_goal_keyboard(lang),
         )
         return True
     if action == "image_edit_wait_image":
@@ -43241,12 +43469,28 @@ async def handle_image_menu_pending_document(update: Update, context: ContextTyp
     if not pending:
         return False
     action = str(pending.get("pending_action") or "")
-    if action not in {"image_edit_wait_image", "image_upscale_wait_image"}:
+    if action not in {"image_prompt_wait_image", "image_prompt_only", "image_edit_wait_image", "image_upscale_wait_image"}:
         return False
     remember_last_user_file(update)
     file_id = str(getattr(document, "file_id", "") or "")
     file_unique_id = str(getattr(document, "file_unique_id", "") or "")
     lang = get_user_language(uid) or "vi"
+    if action in {"image_prompt_wait_image", "image_prompt_only"}:
+        set_image_menu_pending(
+            uid,
+            "image_prompt_wait_purpose",
+            file_id=file_id,
+            file_unique_id=file_unique_id,
+            source_name=file_name,
+            subject="ảnh đã nhận",
+            prompt_source="image",
+        )
+        await update.message.reply_text(
+            image_prompt_received_text(lang),
+            parse_mode="HTML",
+            reply_markup=image_prompt_goal_keyboard(lang),
+        )
+        return True
     if action == "image_edit_wait_image":
         set_image_menu_pending(
             uid,
@@ -78945,16 +79189,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remember_last_user_file(update)
     cache_recent_media_state(update)
     await update.message.reply_text(
-        "✅ Đã nhận ảnh.\n\n"
-        "Bạn có thể dùng:\n"
-        "• /image_to_pdf — đổi ảnh sang PDF\n"
-        "• /image_to_music_video — tạo video ảnh tĩnh có nhạc, admin test\n"
-        "• /remove_bg — tách nền ảnh\n"
-        "• /ai_image_edit &lt;yêu cầu&gt; — reply ảnh để chỉnh sửa AI nếu công cụ đã bật\n\n"
-        "Nếu đây là ảnh bill nạp tiền: bot không tạo bill ngoài flow <code>/thucong</code>. "
-        "Hãy dùng <code>/naptien</code> hoặc <code>/thucong</code> nếu cần hỗ trợ nạp thủ công.\n\n"
-        "Ảnh đã được lưu tạm 10 phút để dùng cho lệnh tiếp theo.",
+        image_upload_outside_flow_text(get_user_language(update.effective_user.id) if update.effective_user else "vi"),
         parse_mode="HTML",
+        reply_markup=image_upload_outside_flow_keyboard(
+            get_user_language(update.effective_user.id) if update.effective_user else "vi",
+            admin=is_admin_user(update.effective_user.id) if update.effective_user else False,
+        ),
     )
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78963,6 +79203,18 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
 
     if await handle_image_menu_pending_document(update, context):
         return
+    if update.effective_user and getattr(update.message, "document", None):
+        document = update.message.document
+        mime_type = str(getattr(document, "mime_type", "") or "").lower()
+        file_name = str(getattr(document, "file_name", "") or "").lower()
+        if mime_type.startswith("image/") or file_name.endswith((".jpg", ".jpeg", ".png", ".webp")):
+            remember_last_user_file(update)
+            lang = get_user_language(update.effective_user.id) or "vi"
+            return await update.message.reply_text(
+                image_upload_outside_flow_text(lang),
+                parse_mode="HTML",
+                reply_markup=image_upload_outside_flow_keyboard(lang, admin=is_admin_user(update.effective_user.id)),
+            )
     remember_last_user_file(update)
     if update.effective_user:
         info, _source = doc_input_file_info(update)
