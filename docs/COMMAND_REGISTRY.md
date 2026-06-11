@@ -33,6 +33,13 @@ Registered callback groups: 9
 | `/ref` | `cmd_ref` | YES | Referral link and stats. |
 | `/invite` | `cmd_invite` | YES | Alias to referral flow. |
 | `/gopy` | `cmd_gopy` | YES | User feedback. |
+| `/doc_tools` | `cmd_doc_tools` | YES | Opens Document/PDF tools from the Notes/Documents menu. |
+| `/pdf_to_word` | `cmd_pdf_to_word` | YES | Reply to a PDF and convert text PDF to Word when local engine is available. |
+| `/image_to_pdf` | `cmd_image_to_pdf` | YES | Reply to an image and create PDF using local engine. |
+| `/pdf_to_images` | `cmd_pdf_to_images` | YES | Reply to a PDF and export pages to image(s) when PyMuPDF is available. |
+| `/compress_pdf` | `cmd_compress_pdf` | YES | Reply to a PDF and compress locally when engine is available. |
+| `/split_pdf` | `cmd_split_pdf` | YES | Reply to a PDF and split selected pages. |
+| `/merge_pdf` | `cmd_merge_pdf` | YES | Planned/admin-tested merge workflow; does not charge Xu while unavailable. |
 
 ## AI Tools
 
@@ -101,6 +108,7 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
 | `/runtime` | `cmd_runtime` | YES | YES | Runtime/webhook diagnostics. |
 | `/data_status` | `cmd_data_status` | YES | YES | Persistent DB/backup/volume status. |
+| `/local_worker_status` | `cmd_local_status` | YES | YES | Alias for Local Worker/Frame Video readiness; hides tokens/secrets. |
 | `/payos_test_plan` | `cmd_payos_test_plan` | YES | YES | Real PayOS 10k manual test checklist. |
 | `/promo_seed_policy` | `cmd_promo_seed_policy` | YES | YES | Seeds Promotion Policy V2.1 codes: FIRST30, SECOND15, WEEKLY10, MONTHLY20, DAILY5, BETA50. |
 | `/promo_seed_beta` | `cmd_promo_seed_beta` | YES | YES | Compatibility alias for `/promo_seed_policy`. |

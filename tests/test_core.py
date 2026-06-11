@@ -1937,7 +1937,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🖼 Tạo ảnh AI" in start_labels
     assert "🎬 Tạo video AI" in start_labels
     assert "🔥 Video theo trend" not in start_labels
-    assert "📝 Ghi chú / Ý tưởng" in start_labels
+    assert "📝 Ghi chú / Tài liệu" in start_labels
     assert "🎙 Voice / Nhạc" in start_labels
     assert "🎞 Video" not in start_labels
     assert "👨‍💼 Hỗ trợ" in start_labels
@@ -1991,6 +1991,19 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "shopaikey_video_create" not in from_image_off
     docs_labels = [button.text for row in bot.main_docs_keyboard("vi").inline_keyboard for button in row]
     assert "💰 Xem giá" not in docs_labels
+    assert "📄 PDF sang Word" in docs_labels
+    assert "🖼 Ảnh sang PDF" in docs_labels
+    memory_labels = [button.text for row in bot.main_memory_keyboard("vi").inline_keyboard for button in row]
+    assert "📄 Công cụ tài liệu" in memory_labels
+    assert "📄 PDF sang Word" in memory_labels
+    assert "🖼 Ảnh sang PDF" in memory_labels
+    assert "🗜 Nén PDF" in memory_labels
+    assert "✂️ Tách PDF" in memory_labels
+    memory_text = bot.menu_text_main_memory()
+    assert "TÀI LIỆU" in memory_text
+    assert "/doc_tools" in memory_text
+    assert "/pdf_to_word" in memory_text
+    assert "/image_to_pdf" in memory_text
     topup_labels = [button.text for row in bot.main_topup_keyboard("vi").inline_keyboard for button in row]
     assert "💰 Xem giá" not in topup_labels
     assert [[button.text for button in row] for row in bot.main_topup_keyboard("vi").inline_keyboard] == [
@@ -2098,6 +2111,11 @@ def test_frame_video_helper_defaults_and_state():
     assert int(status["price_xu"]) == int(bot.FRAME_VIDEO_BASE_2_5_XU)
     assert status["direct_render_enabled"] == bot.FRAME_VIDEO_DIRECT_RENDER_ENABLED
     assert status["require_local_worker"] == bot.FRAME_VIDEO_REQUIRE_LOCAL_WORKER
+    local_worker_lines = "\n".join(bot.local_worker_status_lines())
+    assert "Require Local Worker" in local_worker_lines
+    assert "Direct Render Enabled" in local_worker_lines
+    assert "Frame video render" in local_worker_lines
+    assert "Telegram Bot Token for worker" in local_worker_lines
     assert int(status["base_6_10_xu"]) == int(bot.FRAME_VIDEO_BASE_6_10_XU)
     assert int(status["motion_effect_extra_xu"]) == int(bot.FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU)
     assert int(status["random_effect_extra_xu"]) == int(bot.FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU)
@@ -3270,6 +3288,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "image_to_pdf": "cmd_image_to_pdf",
         "translate_voice": "cmd_translate_voice",
         "local_status": "cmd_local_status",
+        "local_worker_status": "cmd_local_status",
         "local_worker_ping": "cmd_local_worker_ping",
         "tool_test_ffmpeg_local": "cmd_tool_test_ffmpeg_local",
         "orchestrator_status": "cmd_orchestrator_status",

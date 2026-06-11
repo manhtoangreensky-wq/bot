@@ -33650,7 +33650,7 @@ TOOL_FREEZE_COMMANDS = {
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_chat", "tool_test_shopaikey_tts",
     "tool_test_shopaikey_image", "tool_test_wf_i2v",
     "tool_test_shopaikey_video", "shopaikey_video_job", "trial_bonus_status",
-    "local_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
+    "local_status", "local_worker_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
     "local_jobs", "local_job", "render_center",
     "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
     "memory", "note", "note_ai", "notes", "note_view", "search_note", "note_tags",
@@ -33787,7 +33787,7 @@ def admin_internal_command(handler):
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-        [InlineKeyboardButton("📝 Ghi chú / Ý tưởng", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
+        [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
         [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
         [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
@@ -33833,7 +33833,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     if lang == "zh":
         rows = [
             [InlineKeyboardButton("🖼 AI 图片", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
-            [InlineKeyboardButton("📝 笔记 / 点子", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 语音 / 音乐", callback_data="menu|main_music")],
+            [InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 语音 / 音乐", callback_data="menu|main_music")],
             [InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
             [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
@@ -33846,7 +33846,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     if lang == "vi":
         rows = [
             [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-            [InlineKeyboardButton("📝 Ghi chú / Ý tưởng", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
+            [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
             [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
             [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
@@ -33858,7 +33858,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         return InlineKeyboardMarkup(rows)
     rows = [
         [InlineKeyboardButton("🖼 AI Image", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton("📝 Notes / Ideas", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Music", callback_data="menu|main_music")],
+        [InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Music", callback_data="menu|main_music")],
         [InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
         [InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
         [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
@@ -33994,7 +33994,7 @@ def menu_parent_action(section: str = "main") -> str:
         "translate": "translate",
         "video_factory": "main_video",
         "video_workflow": "video_factory",
-        "doc_tools": "main_docs",
+        "doc_tools": "main_memory",
         "memory": "main_memory",
         "billing": "main_topup",
         "finance": "admin",
@@ -34053,23 +34053,31 @@ def main_memory_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📝 Save note", callback_data="menu|hint_note"), InlineKeyboardButton("🔎 Search notes", callback_data="menu|hint_search_note")],
-            [InlineKeyboardButton("⏰ Reminders", callback_data="menu|hint_remind")],
+            [InlineKeyboardButton("⏰ Reminders", callback_data="menu|hint_remind"), InlineKeyboardButton("📄 Document tools", callback_data="menu|doc_tools")],
+            [InlineKeyboardButton("📄 PDF to Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Image to PDF", callback_data="menu|hint_doc_image_to_pdf")],
+            [InlineKeyboardButton("🗜 Compress PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Split PDF", callback_data="menu|hint_doc_split_pdf")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 Lưu ghi chú", callback_data="menu|hint_note"), InlineKeyboardButton("🔎 Tìm ghi chú", callback_data="menu|hint_search_note")],
-        [InlineKeyboardButton("⏰ Nhắc việc", callback_data="menu|hint_remind")],
+        [InlineKeyboardButton("⏰ Nhắc việc", callback_data="menu|hint_remind"), InlineKeyboardButton("📄 Công cụ tài liệu", callback_data="menu|doc_tools")],
+        [InlineKeyboardButton("📄 PDF sang Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Ảnh sang PDF", callback_data="menu|hint_doc_image_to_pdf")],
+        [InlineKeyboardButton("🗜 Nén PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Tách PDF", callback_data="menu|hint_doc_split_pdf")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
 def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📄 Document tools", callback_data="menu|hint_doc_tools")],
+            [InlineKeyboardButton("📄 PDF to Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Image to PDF", callback_data="menu|hint_doc_image_to_pdf")],
+            [InlineKeyboardButton("🗜 Compress PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Split PDF", callback_data="menu|hint_doc_split_pdf")],
+            [InlineKeyboardButton("🧩 Merge PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("📄 All document tools", callback_data="menu|doc_tools")],
             [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📄 Mở công cụ tài liệu", callback_data="menu|hint_doc_tools")],
+        [InlineKeyboardButton("📄 PDF sang Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Ảnh sang PDF", callback_data="menu|hint_doc_image_to_pdf")],
+        [InlineKeyboardButton("🗜 Nén PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Tách PDF", callback_data="menu|hint_doc_split_pdf")],
+        [InlineKeyboardButton("🧩 Gộp PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("📄 Tất cả công cụ", callback_data="menu|doc_tools")],
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
@@ -34643,19 +34651,27 @@ def menu_text_main_ai() -> str:
     )
 
 def menu_text_main_memory() -> str:
-    if not (public_command_exists("memory") or public_command_exists("note")):
-        return "🧠 <b>KHO GHI NHỚ</b>\n\nKho ghi nhớ đang được admin kiểm tra, sẽ mở sau."
+    has_memory = public_command_exists("memory") or public_command_exists("note")
+    has_docs = public_command_exists("doc_tools") or public_command_exists("pdf_to_word")
+    if not (has_memory or has_docs):
+        return "📝 <b>GHI CHÚ / TÀI LIỆU</b>\n\nGhi chú và tài liệu đang được admin kiểm tra, sẽ mở sau."
     return (
-        "🧠 <b>KHO GHI NHỚ</b>\n\n"
-        "Dùng để lưu ghi chú, thông tin khách hàng, ý tưởng, việc cần làm và tìm lại khi cần.\n"
-        "Phù hợp cho người hay quên, làm việc với nhiều khách hoặc muốn lưu ý tưởng nhanh.\n\n"
-        "<b>Lệnh nhanh:</b>\n"
+        "📝 <b>GHI CHÚ / TÀI LIỆU</b>\n\n"
+        "Dùng để lưu ghi chú, ý tưởng, việc cần làm và xử lý nhanh tài liệu/PDF.\n\n"
+        "<b>Ghi chú:</b>\n"
         "• <code>/memory</code> — mở kho ghi nhớ\n"
         "• <code>/note &lt;nội dung&gt;</code> — lưu nhanh một ghi chú\n"
         "• <code>/notes</code> — xem ghi chú đã lưu\n"
         "• <code>/search_note &lt;từ khóa&gt;</code> — tìm lại ghi chú\n"
         "• <code>/remind 30m &lt;nội dung&gt;</code> — đặt nhắc việc\n"
         "• <code>/reminders</code> — xem các nhắc việc\n\n"
+        "<b>Tài liệu / PDF:</b>\n"
+        "• <code>/doc_tools</code> — mở công cụ tài liệu\n"
+        "• Reply PDF rồi dùng <code>/pdf_to_word</code> — PDF sang Word\n"
+        "• Reply ảnh rồi dùng <code>/image_to_pdf</code> — ảnh sang PDF\n"
+        "• Reply PDF rồi dùng <code>/compress_pdf</code> — nén PDF\n"
+        "• Reply PDF rồi dùng <code>/split_pdf 1</code> — tách PDF\n"
+        "• <code>/merge_pdf</code> — gộp PDF nếu công cụ đã hỗ trợ\n\n"
         "<b>Ví dụ:</b>\n"
         "• <code>/note khách A hỏi báo giá video 500k</code>\n"
         "• <code>/remind 2h gọi lại cho khách A</code>"
@@ -34906,7 +34922,12 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_note": ("main_memory", "📝 <b>Lưu ghi chú</b>\n\nCopy lệnh:\n<code>/note nội dung cần lưu</code>"),
         "hint_search_note": ("main_memory", "🔎 <b>Tìm ghi chú</b>\n\nCopy lệnh:\n<code>/search_note từ khóa</code>"),
         "hint_remind": ("main_memory", "⏰ <b>Đặt nhắc việc</b>\n\nCopy lệnh:\n<code>/remind 30m nội dung cần nhắc</code>"),
-        "hint_doc_tools": ("main_docs", "📄 <b>Công cụ tài liệu</b>\n\nCopy lệnh:\n<code>/doc_tools</code>"),
+        "hint_doc_tools": ("main_memory", "📄 <b>Công cụ tài liệu</b>\n\nCopy lệnh:\n<code>/doc_tools</code>"),
+        "hint_doc_pdf_to_word": ("main_memory", "📄 <b>PDF sang Word</b>\n\nGửi hoặc reply file PDF rồi gõ:\n<code>/pdf_to_word</code>\n\nNếu converter chưa mở public, TOAN AAS sẽ báo trước và không trừ Xu."),
+        "hint_doc_image_to_pdf": ("main_memory", "🖼 <b>Ảnh sang PDF</b>\n\nGửi hoặc reply ảnh rồi gõ:\n<code>/image_to_pdf</code>\n\nCông cụ này dùng local engine, không gọi tách nền/PayOS."),
+        "hint_doc_compress_pdf": ("main_memory", "🗜 <b>Nén PDF</b>\n\nGửi hoặc reply file PDF rồi gõ:\n<code>/compress_pdf</code>\n\nNếu thiếu engine local, TOAN AAS sẽ báo bảo trì và không trừ Xu."),
+        "hint_doc_split_pdf": ("main_memory", "✂️ <b>Tách PDF</b>\n\nGửi hoặc reply file PDF rồi gõ trang cần tách, ví dụ:\n<code>/split_pdf 1-3</code>"),
+        "hint_doc_merge_pdf": ("main_memory", "🧩 <b>Gộp PDF</b>\n\nCopy lệnh:\n<code>/merge_pdf</code>\n\nMVP hiện đang planned/admin test; bot không trừ Xu nếu chưa hỗ trợ workflow nhiều file."),
         "hint_pricing": ("main_topup", "💰 <b>Bảng giá</b>\n\nĐang mở bảng giá TOAN AAS."),
         "hint_image_tools": ("main_image", "🖼 <b>Công cụ ảnh</b>\n\nCopy lệnh:\n<code>/image_tools</code>"),
         "hint_image_to_video_pack": ("main_image", "🎬 <b>Ảnh sang video prompt</b>\n\nCopy lệnh:\n<code>/image_to_video_pack chủ đề hoặc mô tả ảnh</code>"),
@@ -34932,7 +34953,12 @@ def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
         "hint_note": ("main_memory", "📝 <b>Save a note</b>\n\nCopy:\n<code>/note what you want to save</code>"),
         "hint_search_note": ("main_memory", "🔎 <b>Search notes</b>\n\nCopy:\n<code>/search_note keyword</code>"),
         "hint_remind": ("main_memory", "⏰ <b>Create a reminder</b>\n\nCopy:\n<code>/remind 30m reminder text</code>"),
-        "hint_doc_tools": ("main_docs", "📄 <b>Document tools</b>\n\nCopy:\n<code>/doc_tools</code>"),
+        "hint_doc_tools": ("main_memory", "📄 <b>Document tools</b>\n\nCopy:\n<code>/doc_tools</code>"),
+        "hint_doc_pdf_to_word": ("main_memory", "📄 <b>PDF to Word</b>\n\nSend or reply to a PDF, then use:\n<code>/pdf_to_word</code>"),
+        "hint_doc_image_to_pdf": ("main_memory", "🖼 <b>Image to PDF</b>\n\nSend or reply to an image, then use:\n<code>/image_to_pdf</code>"),
+        "hint_doc_compress_pdf": ("main_memory", "🗜 <b>Compress PDF</b>\n\nSend or reply to a PDF, then use:\n<code>/compress_pdf</code>"),
+        "hint_doc_split_pdf": ("main_memory", "✂️ <b>Split PDF</b>\n\nSend or reply to a PDF, then use:\n<code>/split_pdf 1-3</code>"),
+        "hint_doc_merge_pdf": ("main_memory", "🧩 <b>Merge PDF</b>\n\nCopy:\n<code>/merge_pdf</code>\n\nIf the workflow is not public yet, TOAN AAS will not charge Xu."),
         "hint_pricing": ("main_topup", "💰 <b>Pricing</b>\n\nOpening TOAN AAS pricing."),
         "hint_image_tools": ("main_image", "🖼 <b>Image tools</b>\n\nCopy:\n<code>/image_tools</code>"),
         "hint_image_to_video_pack": ("main_image", "🎬 <b>Image-to-video prompt pack</b>\n\nCopy:\n<code>/image_to_video_pack topic or image description</code>"),
@@ -34984,15 +35010,21 @@ def menu_text_main_memory_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
         return menu_text_main_memory()
     return (
-        "🧠 <b>MEMORY / REMINDERS</b>\n\n"
-        "Save notes, ideas, customer details and reminders.\n\n"
-        "<b>Quick commands:</b>\n"
+        "📝 <b>NOTES / DOCUMENTS</b>\n\n"
+        "Save notes, ideas, customer details and reminders, or process PDF/document files.\n\n"
+        "<b>Notes:</b>\n"
         "• <code>/memory</code> — open memory\n"
         "• <code>/note &lt;text&gt;</code> — save a note\n"
         "• <code>/notes</code> — list notes\n"
         "• <code>/search_note &lt;keyword&gt;</code> — search notes\n"
         "• <code>/remind 30m &lt;text&gt;</code> — create a reminder\n"
-        "• <code>/reminders</code> — list reminders"
+        "• <code>/reminders</code> — list reminders\n\n"
+        "<b>Documents / PDF:</b>\n"
+        "• <code>/doc_tools</code> — open document tools\n"
+        "• Reply to a PDF and use <code>/pdf_to_word</code>\n"
+        "• Reply to an image and use <code>/image_to_pdf</code>\n"
+        "• Reply to a PDF and use <code>/compress_pdf</code> or <code>/split_pdf 1</code>\n"
+        "• <code>/merge_pdf</code> — merge PDF when the workflow is ready"
     )
 
 def menu_text_main_docs_i18n(lang: str) -> str:
@@ -36797,11 +36829,35 @@ LOCAL_RENDER_ADMIN_ONLY_MESSAGE = "⚠️ Công cụ local render đang admin te
 
 def local_worker_status_lines() -> list[str]:
     status = local_worker_status_payload()
+    frame_status = frame_video_status_payload()
     counts = status.get("job_counts") or {}
     heartbeat_age = status.get("heartbeat_age_seconds")
     heartbeat_text = status.get("last_heartbeat") or "chưa có"
     if heartbeat_age is not None:
         heartbeat_text += f" ({heartbeat_age}s trước)"
+    frame_ready = bool(
+        frame_status.get("enabled")
+        and (
+            (not frame_status.get("require_local_worker") and frame_status.get("direct_render_enabled"))
+            or (
+                frame_status.get("require_local_worker")
+                and status.get("enabled")
+                and status.get("poll_enabled")
+                and status.get("token_configured")
+                and status.get("connected")
+            )
+        )
+    )
+    if not frame_status.get("enabled"):
+        frame_reason = "FRAME_VIDEO_ENABLED=OFF"
+    elif frame_status.get("require_local_worker") and not status.get("connected"):
+        frame_reason = "local worker offline/no heartbeat"
+    elif frame_status.get("require_local_worker") and not status.get("token_configured"):
+        frame_reason = "LOCAL_WORKER_TOKEN missing"
+    elif not frame_status.get("require_local_worker") and not frame_status.get("direct_render_enabled"):
+        frame_reason = "direct render disabled"
+    else:
+        frame_reason = "ready"
     return [
         f"• Enabled: <code>{'ON' if status.get('enabled') else 'OFF'}</code>",
         f"• Poll enabled: <code>{'ON' if status.get('poll_enabled') else 'OFF'}</code>",
@@ -36809,10 +36865,17 @@ def local_worker_status_lines() -> list[str]:
         f"• Connected: <code>{'yes' if status.get('connected') else 'no'}</code>",
         f"• Worker ID: <code>{html.escape(status.get('worker_id') or '-')}</code>",
         f"• Last heartbeat: <code>{html.escape(heartbeat_text)}</code>",
+        f"• Require Local Worker: <code>{'true' if frame_status.get('require_local_worker') else 'false'}</code>",
+        f"• Direct Render Enabled: <code>{'true' if frame_status.get('direct_render_enabled') else 'false'}</code>",
+        f"• Frame video render: <code>{'ready' if frame_ready else 'not ready'}</code>",
+        f"• Reason if not ready: <code>{html.escape(frame_reason)}</code>",
         f"• Local ffmpeg: <code>{'configured' if status.get('ffmpeg_path_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('ffmpeg_local'))}</code>",
+        f"• FFmpeg Path: <code>{'configured' if status.get('ffmpeg_path_configured') else 'missing/unknown'}</code>",
+        f"• Telegram Bot Token for worker: <code>{'worker-side unknown; Railway token configured' if TELEGRAM_TOKEN else 'worker-side unknown; Railway token missing'}</code>",
         f"• Local ComfyUI: <code>{html.escape(status.get('comfy_status') or 'planned/not_ready')}</code>",
         f"• ComfyUI render: <code>{html.escape(status.get('comfy_render') or 'admin-only/planned')}</code>",
         f"• Queue: queued <code>{counts.get('queued', 0)}</code> | running <code>{counts.get('running', 0)}</code> | done <code>{counts.get('succeeded', 0)}</code> | failed <code>{counts.get('failed', 0)}</code>",
+        "• Note: <code>Bot chỉ xác minh được worker heartbeat; LOCAL_FFMPEG_PATH và BOT_TOKEN cần kiểm tra ở máy worker.</code>",
     ]
 
 async def cmd_local_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -36828,6 +36891,11 @@ async def cmd_local_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>/tool_test_ffmpeg_local</code>",
         "• <code>/tool_test_comfy_local</code>",
         "• <code>/local_jobs</code>",
+        "",
+        "Windows worker ENV cần có:",
+        "• <code>LOCAL_WORKER_TOKEN</code>",
+        "• <code>LOCAL_FFMPEG_PATH</code>",
+        "• <code>TELEGRAM_BOT_TOKEN</code> hoặc <code>BOT_TOKEN</code>",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -74391,6 +74459,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_stt_debug", cmd_tool_test_stt_debug))
     tg_app.add_handler(CommandHandler("tool_test_downloader", cmd_tool_test_downloader))
     tg_app.add_handler(CommandHandler("local_status", cmd_local_status))
+    tg_app.add_handler(CommandHandler("local_worker_status", cmd_local_status))
     tg_app.add_handler(CommandHandler("local_worker_ping", cmd_local_worker_ping))
     tg_app.add_handler(CommandHandler("tool_test_ffmpeg_local", cmd_tool_test_ffmpeg_local))
     tg_app.add_handler(CommandHandler("tool_test_comfy_local", cmd_tool_test_comfy_local))
