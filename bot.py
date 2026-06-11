@@ -30943,6 +30943,52 @@ def shopaikey_provider_error_from_payload(payload: dict) -> tuple[str, str]:
         return "", shopaikey_sanitize_error(str(error)[:260])
     return "", ""
 
+def shopaikey_image_output_from_payload(payload: dict) -> dict:
+    result = {"image_url": "", "b64_json": "", "size": ""}
+    if not isinstance(payload, dict):
+        return result
+
+    def take(value) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith(("http://", "https://")) and not result["image_url"]:
+                result["image_url"] = text
+                return True
+            if text and len(text) > 80 and not result["b64_json"]:
+                result["b64_json"] = text
+                return True
+            return False
+        if isinstance(value, dict):
+            for key in ("url", "image_url", "output_url", "result_url"):
+                if take(value.get(key)):
+                    return True
+            for key in ("b64_json", "base64", "image_base64"):
+                if take(value.get(key)):
+                    return True
+            nested = value.get("data") or value.get("output") or value.get("result")
+            if nested is not value and take(nested):
+                return True
+            return False
+        if isinstance(value, list):
+            for item in value:
+                if take(item):
+                    return True
+        return False
+
+    for key in ("url", "image_url", "output_url", "result_url", "b64_json", "base64", "image_base64"):
+        if take(payload.get(key)):
+            break
+    if not result["image_url"] and not result["b64_json"]:
+        for key in ("data", "output", "result", "images"):
+            if take(payload.get(key)):
+                break
+    data = payload.get("data")
+    first = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else {}
+    result["size"] = str(first.get("size") or payload.get("size") or "").strip()
+    return result
+
 async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: str = "", tier: str = "") -> dict:
     model_name = model or SHOPAIKEY_IMAGE_MODEL or "nano-banana"
     inferred_ratio = str(aspect_ratio or infer_image_aspect_ratio_from_prompt(prompt, "9:16") or "9:16").strip()
@@ -31011,11 +31057,11 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
         except Exception:
             data = {}
         if res.status_code < 400 and isinstance(data, dict):
-            items = data.get("data") or []
-            first = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else {}
-            image_url = str(first.get("url") or "").strip()
-            size = str(first.get("size") or payload["size"] or "").strip()
-            if image_url:
+            output = shopaikey_image_output_from_payload(data)
+            image_url = str(output.get("image_url") or "").strip()
+            b64_json = str(output.get("b64_json") or "").strip()
+            size = str(output.get("size") or payload["size"] or "").strip()
+            if image_url or b64_json:
                 return {
                     "status": "PASS",
                     "http_status": int(res.status_code),
@@ -31025,9 +31071,10 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
                     "aspect_ratio": size_info["ratio"],
                     "size_sent": payload["size"],
                     "image_url": image_url,
+                    "b64_json": b64_json,
                     "provider_error_code": "",
                     "error_class": "",
-                    "detail": f"model={payload['model']}; http={res.status_code}; latency_ms={latency_ms}; ratio={size_info['ratio']}; size_sent={payload['size']}; size={size}; output_url=yes",
+                    "detail": f"model={payload['model']}; http={res.status_code}; latency_ms={latency_ms}; ratio={size_info['ratio']}; size_sent={payload['size']}; size={size}; output_url={'yes' if image_url else 'no'}; output_b64={'yes' if b64_json else 'no'}",
                 }
             return {
                 "status": "FAIL_NO_IMAGE_URL",
@@ -31038,9 +31085,10 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
                 "aspect_ratio": size_info["ratio"],
                 "size_sent": payload["size"],
                 "image_url": "",
+                "b64_json": "",
                 "provider_error_code": "",
                 "error_class": "FAIL_NO_IMAGE_URL",
-                "detail": "response missing data[0].url",
+                "detail": "response missing supported image output fields",
             }
         provider_code, provider_message = shopaikey_provider_error_from_payload(data)
         detail = provider_message or shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}")
@@ -36218,6 +36266,12 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
             or callback_data.startswith("tr_")
         )
     )
+    shopaikey_image_error_already_notified = False
+    try:
+        notified_at = float((context.chat_data or {}).get("shopaikey_public_image_error_notified_at") or 0)
+        shopaikey_image_error_already_notified = callback_data.startswith("shopai|") and notified_at and (time.time() - notified_at) < 30
+    except Exception:
+        shopaikey_image_error_already_notified = False
     if error:
         logger.error(
             "Telegram handler error\n%s",
@@ -36225,6 +36279,9 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         logger.error("Telegram handler error | type=%s", error_name)
+
+    if shopaikey_image_error_already_notified:
+        return
 
     try:
         if isinstance(update, Update) and update.effective_chat:
@@ -36717,7 +36774,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         f"• Frame video / ffmpeg slideshow: <code>{'public ON' if frame_video.get('public_enabled') else 'public OFF'}</code> | base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | motion +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
+        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -37506,6 +37563,44 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_image_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    image_freeze = is_tool_frozen("image", "shopaikey")
+    provider_freeze = provider_freeze_display("shopaikey")
+    last_error = {}
+    for event in recent_system_events(20):
+        if str(event.get("provider") or "").lower() == "shopaikey" and str(event.get("tool") or "").lower() == "image":
+            last_error = event
+            break
+    last_debug = latest_api_debug_event("shopaikey", ["tool_test_shopaikey_image", "quick_image_test", "shopaikey_image"])
+    ratio_parts = []
+    for ratio in media_aspect_ratio_options("image"):
+        info = get_image_size_for_ratio(ratio, "low", "shopaikey")
+        ratio_parts.append(f"{ratio}->{info.get('size_string') or '-'}")
+    lines = [
+        "🖼 <b>Image Provider Status</b>",
+        "",
+        f"• Public image: <code>{'enabled' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'disabled'}</code>",
+        "• Provider: <code>ShopAIKey</code>",
+        f"• Image endpoint: <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
+        f"• Image model: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or 'nano-banana')}</code>",
+        f"• API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}</code>",
+        f"• Ratio mapping: <code>{html.escape('; '.join(ratio_parts))}</code>",
+        f"• Image tier public: <code>{html.escape(image_tier_public_status_text())}</code>",
+        f"• Freeze status: <code>{'ON' if image_freeze.get('frozen') else 'OFF'}</code>",
+        f"• Freeze reason: <code>{html.escape(str(image_freeze.get('reason') or '-'))}</code>",
+        f"• Provider freeze: <code>{'ON' if provider_freeze.get('frozen') else 'OFF'}</code>",
+        f"• Last image error type: <code>{html.escape(str(last_error.get('code') or '-'))}</code>",
+        f"• Last image error time: <code>{html.escape(str(last_error.get('created_at') or '-'))}</code>",
+        f"• Last provider status: <code>{html.escape(str((last_debug or {}).get('status') or '-'))}</code>",
+        f"• Last provider HTTP: <code>{html.escape(str((last_debug or {}).get('http_status') or '-'))}</code>",
+        f"• Image smoke status: <code>{html.escape(shopaikey_image_status_text())}</code>",
+        "",
+        "Không hiển thị API key/token/raw provider response. Public flow vẫn qua confirm/refund guard.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def cmd_maintenance_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -38240,8 +38335,9 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
     result = await shopaikey_image_smoke_test(aspect_ratio)
     status = str(result.get("status") or "FAIL")
     image_url = str(result.get("image_url") or "")
+    b64_json = str(result.get("b64_json") or "")
     output_sent = False
-    if status == "PASS" and image_url:
+    if status == "PASS" and (image_url or b64_json):
         caption = (
             "🖼 ShopAIKey Image Smoke Test — PASS\n"
             f"Model: {result.get('model') or SHOPAIKEY_IMAGE_MODEL}\n"
@@ -38250,21 +38346,15 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
             f"Size sent: {result.get('size_sent') or size_info.get('size_string') or '-'}\n"
             "Không trừ Xu."
         )
-        try:
-            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=image_url, caption=caption)
-            output_sent = True
-        except Exception:
-            try:
-                await update.message.reply_text(
-                    "🖼 <b>ShopAIKey Image Output</b>\n\n"
-                    "Telegram không gửi trực tiếp được ảnh từ URL, dùng link mở ảnh:\n"
-                    f"• <a href=\"{html.escape(image_url, quote=True)}\">Mở ảnh ShopAIKey</a>",
-                    parse_mode="HTML",
-                    disable_web_page_preview=False,
-                )
-                output_sent = True
-            except Exception:
-                output_sent = False
+        output_sent, _output_file_id = await send_generated_image_result(
+            context,
+            update.effective_chat.id,
+            image_url,
+            caption,
+            None,
+            get_user_language(uid) or "vi",
+            b64_json=b64_json,
+        )
     detail = (
         f"model={result.get('model') or SHOPAIKEY_IMAGE_MODEL}; http={result.get('http_status')}; "
         f"latency_ms={result.get('latency_ms')}; ratio={result.get('aspect_ratio') or aspect_ratio}; "
@@ -39026,26 +39116,9 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         result = await shopaikey_image_generate(prompt, model, aspect_ratio=image_aspect_ratio, tier=image_tier)
         status = str(result.get("status") or "FAIL")
         image_url = str(result.get("image_url") or "")
+        b64_json = str(result.get("b64_json") or "")
         output_sent = False
-        if status == "PASS" and image_url:
-            if workflow_id or trend_output_id:
-                update_trend_workflow_generated_image(
-                    output_id=trend_output_id,
-                    workflow_id=workflow_id,
-                    scene_index=scene_index,
-                    user_id=uid,
-                    image_url=image_url,
-                    job_id=job_id,
-                )
-                save_latest_workflow_image(
-                    uid,
-                    image_url,
-                    prompt=prompt,
-                    workflow_id=workflow_id,
-                    scene_index=scene_index,
-                    source="workflow_image_generation",
-                    job_id=job_id,
-                )
+        if status == "PASS" and (image_url or b64_json):
             update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, model=result.get("model") or model, attempts=1, finished_at=now_text())
             success_markup = trend_workflow_image_success_keyboard(job_id, scene_index, lang) if (workflow_id or trend_output_id) else public_image_success_keyboard(job_id, image_tier, lang)
             success_caption = ui_text(
@@ -39067,9 +39140,33 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 success_caption,
                 success_markup,
                 lang,
+                b64_json=b64_json,
             )
             if output_file_id:
                 update_shopaikey_job(job_id=job_id, output_file_id=output_file_id)
+            if output_sent and image_url and (workflow_id or trend_output_id):
+                update_trend_workflow_generated_image(
+                    output_id=trend_output_id,
+                    workflow_id=workflow_id,
+                    scene_index=scene_index,
+                    user_id=uid,
+                    image_url=image_url,
+                    job_id=job_id,
+                )
+                save_latest_workflow_image(
+                    uid,
+                    image_url,
+                    prompt=prompt,
+                    workflow_id=workflow_id,
+                    scene_index=scene_index,
+                    source="workflow_image_generation",
+                    job_id=job_id,
+                )
+            if not output_sent:
+                status = "FAIL_SEND_IMAGE"
+                result["status"] = status
+                result["error_class"] = "FAIL_SEND_IMAGE"
+                result["detail"] = "telegram_image_output_send_failed"
         if status != "PASS":
             provider_error_text = result.get("detail") or result.get("provider_error_code") or result.get("error_class") or status
             record_provider_error(
@@ -39096,6 +39193,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                     billing_status="package_refunded" if package_refunded else "package_refund_failed",
                     package_refund_status="refunded" if package_refunded else "refund_failed",
                 )
+                context.chat_data["shopaikey_public_image_error_notified_at"] = time.time()
                 return await context.bot.send_message(
                     chat_id=query.message.chat_id,
                     text=package_provider_fail_message(lang) if package_refunded else "⚠️ Provider lỗi. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra lượt gói nếu cần.",
@@ -39138,6 +39236,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                     provider_error_text,
                     refund_error,
                 )
+            context.chat_data["shopaikey_public_image_error_notified_at"] = time.time()
             return await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=public_image_provider_fail_message(deducted_amount, refunded, lang),
@@ -42806,33 +42905,88 @@ async def send_generated_image_result(
     caption: str,
     reply_markup=None,
     lang: str = "vi",
+    b64_json: str = "",
 ) -> tuple[bool, str]:
     output_file_id = ""
-    for attempt in range(2):
+
+    async def try_photo(photo_value, retries: int = 2):
+        nonlocal output_file_id
+        last_error = ""
+        for attempt in range(max(1, int(retries or 1))):
+            try:
+                sent = await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo_value() if callable(photo_value) else photo_value,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                )
+                photos = getattr(sent, "photo", None) or []
+                if photos:
+                    output_file_id = str(getattr(photos[-1], "file_id", "") or "")
+                return True, ""
+            except Exception as e:
+                last_error = sanitize_log_text(str(e))[:220]
+                if attempt == 0 and is_timeout_exception(e):
+                    await asyncio.sleep(0.8)
+                    continue
+                break
+        return False, last_error
+
+    async def try_document(document_value, filename: str = "toan_aas_image.png"):
         try:
-            sent = await context.bot.send_photo(
+            await context.bot.send_document(
                 chat_id=chat_id,
-                photo=image_url,
+                document=document_value() if callable(document_value) else document_value,
+                filename=filename,
                 caption=caption,
                 reply_markup=reply_markup,
             )
-            photos = getattr(sent, "photo", None) or []
-            if photos:
-                output_file_id = str(getattr(photos[-1], "file_id", "") or "")
+            return True
+        except Exception as e:
+            logger.warning("generated image document fallback failed | %s", sanitize_log_text(str(e))[:220])
+            return False
+
+    image_url = str(image_url or "").strip()
+    b64_json = str(b64_json or "").strip()
+    if image_url:
+        sent, error = await try_photo(image_url)
+        if sent:
+            return True, output_file_id
+        try:
+            sent_document = await try_document(image_url, "toan_aas_image.png")
+            if sent_document:
+                return True, output_file_id
+        except Exception:
+            pass
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=ui_text(lang, "image.success_link", url=html.escape(image_url, quote=True)),
+                parse_mode="HTML",
+                disable_web_page_preview=False,
+                reply_markup=reply_markup,
+            )
             return True, output_file_id
         except Exception as e:
-            if attempt == 0 and is_timeout_exception(e):
-                await asyncio.sleep(0.8)
-                continue
-            break
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=ui_text(lang, "image.success_link", url=html.escape(image_url, quote=True)),
-        parse_mode="HTML",
-        disable_web_page_preview=False,
-        reply_markup=reply_markup,
-    )
-    return True, output_file_id
+            logger.warning("generated image link fallback failed | photo_error=%s | %s", error, sanitize_log_text(str(e))[:220])
+
+    if b64_json:
+        try:
+            image_bytes = base64.b64decode(b64_json, validate=False)
+        except Exception as e:
+            logger.warning("generated image b64 decode failed | %s", sanitize_log_text(str(e))[:220])
+            image_bytes = b""
+        if image_bytes:
+            def make_photo():
+                photo = io.BytesIO(image_bytes)
+                photo.name = "toan_aas_image.png"
+                return photo
+            sent, _error = await try_photo(make_photo)
+            if sent:
+                return True, output_file_id
+            if await try_document(make_photo, "toan_aas_image.png"):
+                return True, output_file_id
+    return False, output_file_id
 
 async def resolve_video_source(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict:
     reply = update.message.reply_to_message if update.message else None
@@ -51879,10 +52033,9 @@ async def execute_image_warranty_retry(context: ContextTypes.DEFAULT_TYPE, chat_
     result = await shopaikey_image_generate(retry_prompt, model, aspect_ratio=retry_aspect_ratio)
     status = str(result.get("status") or "FAIL")
     image_url = str(result.get("image_url") or "")
-    if status == "PASS" and image_url:
-        parent_used = max(0, int(parent.get("retry_warranty_used") or 0)) + 1
-        update_shopaikey_job(job_id=parent_job_id, retry_warranty_used=parent_used)
-        update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, result_sent=1, model=result.get("model") or model, attempts=1, finished_at=now_text())
+    b64_json = str(result.get("b64_json") or "")
+    if status == "PASS" and (image_url or b64_json):
+        update_shopaikey_job(job_id=job_id, status="SUCCESS", result_url=image_url, result_sent=0, model=result.get("model") or model, attempts=1, finished_at=now_text())
         caption = ui_text(
             lang,
             "image.success",
@@ -51891,17 +52044,24 @@ async def execute_image_warranty_retry(context: ContextTypes.DEFAULT_TYPE, chat_
             billing_note=html.escape("Đã dùng 1 lần tạo lại bảo hành. Bot không trừ thêm Xu." if normalize_user_language(lang) == "vi" else "Used 1 warranty retry. The bot did not charge extra Xu."),
         )
         caption = f"{caption}\n{image_aspect_result_line(result.get('aspect_ratio') or retry_aspect_ratio, lang)}"
-        try:
-            sent_photo_message = await context.bot.send_photo(chat_id=chat_id, photo=image_url, caption=caption, reply_markup=public_image_success_keyboard(job_id, "standard", lang))
-            try:
-                photos = getattr(sent_photo_message, "photo", None) or []
-                if photos:
-                    update_shopaikey_job(job_id=job_id, output_file_id=str(getattr(photos[-1], "file_id", "") or ""))
-            except Exception:
-                pass
-        except Exception:
-            await context.bot.send_message(chat_id=chat_id, text=ui_text(lang, "image.success_link", url=html.escape(image_url, quote=True)), parse_mode="HTML")
-        return True
+        output_sent, output_file_id = await send_generated_image_result(
+            context,
+            chat_id,
+            image_url,
+            caption,
+            public_image_success_keyboard(job_id, "standard", lang),
+            lang,
+            b64_json=b64_json,
+        )
+        if output_sent:
+            parent_used = max(0, int(parent.get("retry_warranty_used") or 0)) + 1
+            update_shopaikey_job(job_id=parent_job_id, retry_warranty_used=parent_used)
+            update_shopaikey_job(job_id=job_id, result_sent=1, output_file_id=output_file_id)
+            return True
+        status = "FAIL_SEND_IMAGE"
+        result["status"] = status
+        result["error_class"] = "FAIL_SEND_IMAGE"
+        result["detail"] = "telegram_image_output_send_failed"
     provider_error_text = result.get("detail") or result.get("provider_error_code") or result.get("error_class") or status
     update_shopaikey_job(
         job_id=job_id,
@@ -74399,6 +74559,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("orchestrator_status", cmd_orchestrator_status))
     tg_app.add_handler(CommandHandler("provider_matrix", cmd_provider_matrix))
     tg_app.add_handler(CommandHandler("shopaikey_status", cmd_shopaikey_status))
+    tg_app.add_handler(CommandHandler("image_provider_status", cmd_image_provider_status))
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
     tg_app.add_handler(CommandHandler("maintenance_status", cmd_maintenance_status))
     tg_app.add_handler(CommandHandler("provider_freeze", cmd_provider_freeze))

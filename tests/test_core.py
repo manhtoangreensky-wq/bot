@@ -1761,6 +1761,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert '"size": "9:16"' not in image_generate_source
     assert '"size": size_info["size_string"]' in image_generate_source
     assert "get_image_size_for_ratio" in image_generate_source
+    assert "shopaikey_image_output_from_payload" in image_generate_source
     image_smoke_source = source_between(bot_source_text(), "async def cmd_tool_test_shopaikey_image", "async def cmd_tool_test_shopaikey_video")
     assert "context.args" in image_smoke_source
     assert "Ratio requested" in image_smoke_source
@@ -1769,9 +1770,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "image_aspect_ratio" in public_callback_source
     assert "shopaikey_image_generate(prompt, model, aspect_ratio=image_aspect_ratio, tier=image_tier)" in public_callback_source
     assert "send_generated_image_result" in public_callback_source
+    assert "FAIL_SEND_IMAGE" in public_callback_source
+    assert "shopaikey_public_image_error_notified_at" in public_callback_source
     warranty_retry_source = source_between(bot_source_text(), "async def execute_image_warranty_retry", "def public_image_tier_selection_text")
     assert "retry_aspect_ratio = infer_image_aspect_ratio_from_prompt" in warranty_retry_source
     assert "shopaikey_image_generate(retry_prompt, model, aspect_ratio=retry_aspect_ratio)" in warranty_retry_source
+    assert "send_generated_image_result" in warranty_retry_source
     success_buttons = [button for row in bot.public_image_success_keyboard(123, "low").inline_keyboard for button in row]
     assert any(button.callback_data == "tvflow|image_video_prompts_123" for button in success_buttons)
     assert any(button.callback_data == "create_media|image_tier_low" for button in success_buttons)
@@ -1827,6 +1831,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
+
     video_tier_text = bot.public_video_tier_selection_text()
     assert "Bạn muốn tạo video chất lượng nào" in video_tier_text
     video_tier_buttons = [button for row in bot.public_video_tier_keyboard().inline_keyboard for button in row]
@@ -2854,6 +2859,21 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
             os.unlink(db_path)
 
 
+def test_shopaikey_image_output_parser_and_send_helper_source():
+    assert bot.shopaikey_image_output_from_payload({"url": "https://cdn.example/a.png"})["image_url"] == "https://cdn.example/a.png"
+    assert bot.shopaikey_image_output_from_payload({"image_url": "https://cdn.example/b.png"})["image_url"] == "https://cdn.example/b.png"
+    parsed_data_url = bot.shopaikey_image_output_from_payload({"data": [{"url": "https://cdn.example/c.png", "size": "768x1344"}]})
+    assert parsed_data_url["image_url"] == "https://cdn.example/c.png"
+    assert parsed_data_url["size"] == "768x1344"
+    assert bot.shopaikey_image_output_from_payload({"data": [{"b64_json": "a" * 120}]})["b64_json"] == "a" * 120
+    assert bot.shopaikey_image_output_from_payload({"output": ["https://cdn.example/d.png"]})["image_url"] == "https://cdn.example/d.png"
+    helper_source = source_between(bot_source_text(), "async def send_generated_image_result", "async def resolve_video_source")
+    assert "send_photo" in helper_source
+    assert "send_document" in helper_source
+    assert "image.success_link" in helper_source
+    assert "return False, output_file_id" in helper_source
+
+
 def test_setvip_is_limited_to_five_member_tiers():
     source = bot_source_text()
     setvip_source = source_between(source, "async def cmd_setvip", "async def cmd_backup_db")
@@ -3319,6 +3339,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "frame_video_status": "cmd_frame_video_status",
         "tool_test_frame_video": "cmd_tool_test_frame_video",
         "shopaikey_status": "cmd_shopaikey_status",
+        "image_provider_status": "cmd_image_provider_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
         "package_catalog": "cmd_package_catalog",
         "grant_combo": "cmd_grant_combo",
