@@ -33,6 +33,11 @@ Registered callback groups: 9
 | `/ref` | `cmd_ref` | YES | Referral link and stats. |
 | `/invite` | `cmd_invite` | YES | Alias to referral flow. |
 | `/gopy` | `cmd_gopy` | YES | User feedback. |
+| `/memory` | `cmd_memory` | YES | Opens Notes/Documents storage policy and memory command guide. |
+| `/memory_plan` | `cmd_memory_plan` | YES | Shows 50MB free storage policy and +50MB/month add-on pricing. |
+| `/memory_status` | `cmd_memory_status` | YES | Shows user's text/file/total storage usage. |
+| `/note` | `cmd_note` | YES | Saves a text note when memory is public/admin-enabled and quota allows. |
+| `/remind` | `cmd_remind` | YES | Creates a reminder; text counts toward storage quota. |
 | `/doc_tools` | `cmd_doc_tools` | YES | Opens Document/PDF tools from the Notes/Documents menu. |
 | `/pdf_to_word` | `cmd_pdf_to_word` | YES | Reply to a PDF and convert text PDF to Word when local engine is available. |
 | `/image_to_pdf` | `cmd_image_to_pdf` | YES | Reply to an image and create PDF using local engine. |
@@ -108,6 +113,9 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
 | `/runtime` | `cmd_runtime` | YES | YES | Runtime/webhook diagnostics. |
 | `/data_status` | `cmd_data_status` | YES | YES | Persistent DB/backup/volume status. |
+| `/storage_status` | `cmd_storage_status` | YES | YES | Admin read-only storage policy and aggregate usage; no secrets. |
+| `/storage_user` | `cmd_storage_user` | YES | YES | Admin read-only storage usage for one user. |
+| `/cleanup_temp_files` | `cmd_cleanup_temp_files` | YES | YES | Admin cleanup policy/status placeholder; does not delete files directly. |
 | `/local_worker_status` | `cmd_local_status` | YES | YES | Alias for Local Worker/Frame Video readiness; hides tokens/secrets. |
 | `/payos_test_plan` | `cmd_payos_test_plan` | YES | YES | Real PayOS 10k manual test checklist. |
 | `/promo_seed_policy` | `cmd_promo_seed_policy` | YES | YES | Seeds Promotion Policy V2.1 codes: FIRST30, SECOND15, WEEKLY10, MONTHLY20, DAILY5, BETA50. |

@@ -996,30 +996,42 @@ MEMORY_CATEGORIES = [
     "Tài liệu",
     "Khác",
 ]
+NOTES_TEXT_FREE_MB = env_int("NOTES_TEXT_FREE_MB", 10)
+FILES_AUDIO_FREE_MB = env_int("FILES_AUDIO_FREE_MB", 40)
+TOTAL_FREE_STORAGE_MB = env_int("TOTAL_FREE_STORAGE_MB", 50)
+STORAGE_ADDON_BLOCK_MB = env_int("STORAGE_ADDON_BLOCK_MB", 50)
+STORAGE_ADDON_BLOCK_PRICE_VND = env_int("STORAGE_ADDON_BLOCK_PRICE_VND", 10000)
+STORAGE_NEAR_QUOTA_PERCENT = env_int("STORAGE_NEAR_QUOTA_PERCENT", 80)
+STORAGE_TEMP_FILE_TTL_DAYS_MIN = env_int("STORAGE_TEMP_FILE_TTL_DAYS_MIN", 7)
+STORAGE_TEMP_FILE_TTL_DAYS_MAX = env_int("STORAGE_TEMP_FILE_TTL_DAYS_MAX", 30)
+NOTES_TEXT_FREE_BYTES = NOTES_TEXT_FREE_MB * 1024 * 1024
+FILES_AUDIO_FREE_BYTES = FILES_AUDIO_FREE_MB * 1024 * 1024
+TOTAL_FREE_STORAGE_BYTES = TOTAL_FREE_STORAGE_MB * 1024 * 1024
+STORAGE_ADDON_BLOCK_BYTES = STORAGE_ADDON_BLOCK_MB * 1024 * 1024
 MEMORY_PLANS = {
     "free": {
         "note_limit": 30,
-        "storage_limit_mb": 5,
+        "storage_limit_mb": TOTAL_FREE_STORAGE_MB,
         "ai_classify_monthly_limit": 10,
         "price": "0đ",
     },
     "lite": {
         "note_limit": 300,
-        "storage_limit_mb": 100,
+        "storage_limit_mb": TOTAL_FREE_STORAGE_MB + STORAGE_ADDON_BLOCK_MB,
         "ai_classify_monthly_limit": 300,
-        "price": "19.000đ/tháng",
+        "price": f"+{STORAGE_ADDON_BLOCK_MB}MB/tháng {STORAGE_ADDON_BLOCK_PRICE_VND:,}đ".replace(",", "."),
     },
     "pro": {
         "note_limit": 2000,
-        "storage_limit_mb": 1024,
+        "storage_limit_mb": TOTAL_FREE_STORAGE_MB + 250,
         "ai_classify_monthly_limit": 2000,
-        "price": "49.000đ/tháng",
+        "price": "+250MB/tháng 50.000đ",
     },
     "vip": {
         "note_limit": 10000,
-        "storage_limit_mb": 5120,
+        "storage_limit_mb": TOTAL_FREE_STORAGE_MB + 500,
         "ai_classify_monthly_limit": 10000,
-        "price": "99.000đ/tháng",
+        "price": "+500MB/tháng 100.000đ",
     },
 }
 
@@ -2545,7 +2557,7 @@ def init_db():
         user_id TEXT PRIMARY KEY,
         plan TEXT DEFAULT 'free',
         note_limit INTEGER DEFAULT 30,
-        storage_limit_mb INTEGER DEFAULT 5,
+        storage_limit_mb INTEGER DEFAULT 50,
         ai_classify_monthly_limit INTEGER DEFAULT 10,
         ai_classify_used INTEGER DEFAULT 0,
         renew_at TEXT,
@@ -35745,18 +35757,24 @@ def main_ai_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def main_memory_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📝 Save note", callback_data="menu|hint_note"), InlineKeyboardButton("🔎 Search notes", callback_data="menu|hint_search_note")],
-            [InlineKeyboardButton("⏰ Reminders", callback_data="menu|hint_remind"), InlineKeyboardButton("📄 Document tools", callback_data="menu|doc_tools")],
+            [InlineKeyboardButton("📝 Create note", callback_data="menu|hint_note"), InlineKeyboardButton("⏰ Reminder", callback_data="menu|hint_remind")],
+            [InlineKeyboardButton("📄 Save document", callback_data="menu|doc_tools"), InlineKeyboardButton("💾 My storage", callback_data="menu|memory_storage_status")],
+            [InlineKeyboardButton("📦 Add storage", callback_data="menu|memory_storage_addon"), InlineKeyboardButton("🧹 Clean old files", callback_data="menu|memory_storage_cleanup")],
+            [InlineKeyboardButton("🔎 Search notes", callback_data="menu|hint_search_note"), InlineKeyboardButton("📄 Document tools", callback_data="menu|doc_tools")],
             [InlineKeyboardButton("📄 PDF to Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Image to PDF", callback_data="menu|hint_doc_image_to_pdf")],
             [InlineKeyboardButton("🗜 Compress PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Split PDF", callback_data="menu|hint_doc_split_pdf")],
             [InlineKeyboardButton("🧩 Merge PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Lưu ghi chú", callback_data="menu|hint_note"), InlineKeyboardButton("🔎 Tìm ghi chú", callback_data="menu|hint_search_note")],
-        [InlineKeyboardButton("⏰ Nhắc việc", callback_data="menu|hint_remind"), InlineKeyboardButton("📄 Công cụ tài liệu", callback_data="menu|doc_tools")],
+        [InlineKeyboardButton("📝 Tạo ghi chú", callback_data="menu|hint_note"), InlineKeyboardButton("⏰ Nhắc hẹn", callback_data="menu|hint_remind")],
+        [InlineKeyboardButton("📄 Lưu tài liệu", callback_data="menu|doc_tools"), InlineKeyboardButton("💾 Dung lượng của tôi", callback_data="menu|memory_storage_status")],
+        [InlineKeyboardButton("📦 Mua thêm dung lượng", callback_data="menu|memory_storage_addon"), InlineKeyboardButton("🧹 Dọn file cũ", callback_data="menu|memory_storage_cleanup")],
+        [InlineKeyboardButton("🔎 Tìm ghi chú", callback_data="menu|hint_search_note"), InlineKeyboardButton("📄 Công cụ tài liệu", callback_data="menu|doc_tools")],
         [InlineKeyboardButton("📄 PDF sang Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Ảnh sang PDF", callback_data="menu|hint_doc_image_to_pdf")],
         [InlineKeyboardButton("🗜 Nén PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Tách PDF", callback_data="menu|hint_doc_split_pdf")],
         [InlineKeyboardButton("🧩 Gộp PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -36238,6 +36256,9 @@ def menu_text_admin() -> str:
         "<b>D. Trạng thái hệ thống</b>\n"
         "• <code>/runtime</code> — build/runtime đang chạy trên Railway\n"
         "• <code>/data_status</code> — DB path, backup, rủi ro mất dữ liệu\n"
+        "• <code>/storage_status</code> — policy 50MB free + tổng usage ghi chú/tài liệu\n"
+        "• <code>/storage_user &lt;ID&gt;</code> — xem dung lượng của 1 user\n"
+        "• <code>/cleanup_temp_files</code> — trạng thái cleanup temp, không xóa trực tiếp\n"
         "• <code>/providers</code> — provider/payment/local worker status tổng\n"
         "• <code>/dashboard</code> — doanh thu/user nhanh\n"
         "• <code>/stats</code> — thống kê sử dụng\n"
@@ -36495,6 +36516,195 @@ def normalize_developing_video_flow(flow: str = "") -> str:
 def _short_pending_text(value: str, limit: int = 700) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())[:limit]
 
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+def video_v6_keyboard(items: list, lang: str = "vi", back: tuple[str, str] | None = None, main: bool = True) -> InlineKeyboardMarkup:
+    rows = []
+    current = []
+    for item in items:
+        if isinstance(item, InlineKeyboardButton):
+            button = item
+        else:
+            button = InlineKeyboardButton(str(item[0]), callback_data=str(item[1]))
+        current.append(button)
+        if len(current) == 2:
+            rows.append(current)
+            current = []
+    if current:
+        rows.append(current)
+    nav = []
+    if back:
+        nav.append(InlineKeyboardButton(back[0], callback_data=back[1]))
+    if main:
+        nav.append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"))
+    if nav:
+        rows.append(nav)
+    return InlineKeyboardMarkup(rows)
+
+def video_v6_rotating_items(items: list[str], offset: int = 0, limit: int = 3) -> list[str]:
+    clean = [str(item or "").strip() for item in items if str(item or "").strip()]
+    if not clean:
+        return []
+    start = _safe_int(offset, 0) % len(clean)
+    return [clean[(start + idx) % len(clean)] for idx in range(min(limit, len(clean)))]
+
+def video_v6_suggestion_bank(key: str, lang: str = "vi") -> list[str]:
+    if normalize_user_language(lang) != "vi":
+        bank = {
+            "prompt_ad": [
+                "Turquoise mini blender for busy office workers",
+                "AI content app for solo sellers",
+                "Skincare set for a clean morning routine",
+                "Coffee shop launch for nearby students",
+                "Affiliate course for beginners",
+                "Smart desk lamp for creators",
+                "Healthy meal prep box for parents",
+                "Travel backpack for weekend trips",
+                "Online language class for professionals",
+                "Minimal perfume brand for men",
+            ],
+            "prompt_cinema": [
+                "A small family shop becoming a modern brand",
+                "A person regaining confidence before a big day",
+                "A memory object connecting two generations",
+                "A tech tool saving one hour every morning",
+                "A luxury product reveal in a quiet city night",
+                "A founder working alone before first success",
+                "A before/after lifestyle transformation",
+                "A product that turns chaos into calm",
+                "A cinematic coffee ritual at sunrise",
+                "A future-city service launch",
+            ],
+            "prompt_viral": [
+                "Three quick mistakes beginners make",
+                "POV: you solve one annoying daily problem",
+                "Before/after in five seconds",
+                "Hidden feature most users miss",
+                "One tool I wish I knew earlier",
+                "Stop doing this if you sell online",
+                "Mini challenge with a satisfying reveal",
+                "Fast demo with no talking head",
+                "Expectation versus reality hook",
+                "Quick tip carousel as video",
+            ],
+        }
+        return bank.get(key, bank["prompt_ad"])
+    bank = {
+        "prompt_ad": [
+            "Máy xay sinh tố mini màu xanh ngọc cho dân văn phòng bận rộn",
+            "App AI tạo nội dung cho người bán hàng một mình",
+            "Bộ skincare sáng da cho routine buổi sáng",
+            "Quán cà phê mới mở gần trường đại học",
+            "Khóa học affiliate cho người mới bắt đầu",
+            "Đèn bàn thông minh cho creator quay video",
+            "Hộp meal prep healthy cho bố mẹ bận rộn",
+            "Balo du lịch cuối tuần chống nước",
+            "Lớp học ngoại ngữ online cho người đi làm",
+            "Nước hoa nam tối giản, sang và sạch",
+        ],
+        "prompt_cinema": [
+            "Một cửa hàng nhỏ chuyển mình thành thương hiệu hiện đại",
+            "Một người lấy lại tự tin trước ngày quan trọng",
+            "Một món đồ gợi ký ức nối hai thế hệ",
+            "Một công cụ công nghệ giúp tiết kiệm một giờ mỗi sáng",
+            "Product reveal luxury trong thành phố về đêm",
+            "Founder làm việc một mình trước thành công đầu tiên",
+            "Before/after thay đổi lối sống tích cực",
+            "Sản phẩm biến sự lộn xộn thành cảm giác bình yên",
+            "Nghi thức pha cà phê cinematic lúc bình minh",
+            "Ra mắt dịch vụ trong bối cảnh thành phố tương lai",
+        ],
+        "prompt_viral": [
+            "3 lỗi người mới hay mắc khi bán hàng online",
+            "POV: bạn xử lý một vấn đề hằng ngày chỉ trong 10 giây",
+            "Before/after cực nhanh trong 5 giây",
+            "Tính năng ẩn mà nhiều người bỏ qua",
+            "Một công cụ tôi ước biết sớm hơn",
+            "Đừng làm điều này nếu bạn bán hàng online",
+            "Mini challenge có màn reveal thỏa mãn",
+            "Demo nhanh không cần lộ mặt",
+            "Kỳ vọng vs thực tế với cú chuyển cảnh mạnh",
+            "Mẹo nhanh dạng carousel biến thành video",
+        ],
+        "long_sales": [
+            "Affiliate AI tool cho người mới",
+            "Lộ trình bán sản phẩm số đầu tiên",
+            "Case study tạo kênh TikTok Shop từ số 0",
+            "Review 5 công cụ giúp tiết kiệm thời gian bán hàng",
+            "Cách đóng gói offer dịch vụ cho freelancer",
+            "Checklist tăng chuyển đổi landing page",
+            "Bài học từ một chiến dịch quảng cáo thất bại",
+            "Hành trình biến kỹ năng nhỏ thành thu nhập phụ",
+            "So sánh ba cách kiếm tiền với AI",
+            "Chiến lược nội dung 30 ngày cho shop nhỏ",
+        ],
+        "long_education": [
+            "Hướng dẫn dùng AI tạo content cho người mới",
+            "Khóa học mini về prompt marketing",
+            "Lộ trình học affiliate trong 7 ngày",
+            "Giải thích automation kinh doanh không cần code",
+            "Cách lập kế hoạch video ngắn mỗi tuần",
+            "Hướng dẫn xây CRM cá nhân bằng ghi chú",
+            "Quy trình dịch và tái sử dụng nội dung",
+            "Tự học thiết kế hình ảnh bán hàng bằng AI",
+            "Tạo kịch bản video dài từ một ý tưởng nhỏ",
+            "Cách đọc chỉ số campaign cơ bản",
+        ],
+        "long_story": [
+            "Một người mới bắt đầu kênh nội dung đầu tiên",
+            "Câu chuyện quán nhỏ tìm được khách online",
+            "Before/after của một ngày làm việc có automation",
+            "Hành trình vượt trì hoãn để bán sản phẩm đầu tiên",
+            "Một founder học cách kể chuyện thương hiệu",
+            "Drama nhẹ về khách hàng khó tính và giải pháp",
+            "Câu chuyện gia đình mở tiệm cà phê",
+            "Một creator mất kênh cũ và xây lại từ đầu",
+            "Bài học sau 30 ngày đăng video đều đặn",
+            "Một sản phẩm bình thường trở thành món quà ý nghĩa",
+        ],
+        "idea_physical": [
+            "Máy xay sinh tố mini màu xanh ngọc",
+            "Đèn bàn thông minh cho góc làm việc",
+            "Balo du lịch chống nước",
+            "Bình giữ nhiệt tối giản",
+            "Nước hoa nam phong cách sạch",
+            "Bộ skincare sáng da",
+            "Tai nghe chống ồn giá tốt",
+            "Máy massage cổ cho dân văn phòng",
+            "Hộp cơm giữ nhiệt healthy",
+            "Giá đỡ điện thoại quay video",
+        ],
+        "idea_service": [
+            "App AI tạo caption bán hàng",
+            "Dịch vụ thiết kế menu cho quán cà phê",
+            "Khóa học tiếng Anh online",
+            "Dịch vụ làm landing page cho shop nhỏ",
+            "Tool quản lý lịch hẹn spa",
+            "Gói tư vấn xây kênh TikTok",
+            "Dịch vụ chỉnh ảnh sản phẩm",
+            "App ghi chú và nhắc việc",
+            "Dịch vụ automation báo cáo bán hàng",
+            "Gói dựng video ngắn theo tháng",
+        ],
+        "idea_affiliate": [
+            "Affiliate AI tool cho creator mới",
+            "Khóa học kiếm tiền online cho người mới",
+            "Gói template Notion bán hàng",
+            "Phần mềm email marketing giá rẻ",
+            "Công cụ tạo landing page không cần code",
+            "App chỉnh ảnh/video bằng AI",
+            "Khóa học chạy quảng cáo cơ bản",
+            "Sản phẩm số về prompt bán hàng",
+            "Tool quản lý affiliate link",
+            "Gói tài nguyên content cho TikTok",
+        ],
+    }
+    return bank.get(key, bank["prompt_ad"])
+
 def set_developing_video_pending(user_id, flow: str, step: str, **fields) -> None:
     flow = normalize_developing_video_flow(flow)
     if not flow:
@@ -36518,6 +36728,7 @@ def set_developing_video_pending(user_id, flow: str, step: str, **fields) -> Non
             "idea_kind", "product", "message", "context", "platform", "trend_type",
             "genre", "scene_context", "idea_choice", "product_type", "source_file_id",
             "source_file_name", "source_mime_type", "prompt_kind", "custom_prompt",
+            "suggest_offset", "prompt_variant_offset", "selected_suggestion_index",
         }:
             payload[key] = _short_pending_text(value)
     USER_PENDING[developing_video_pending_key(user_id)] = payload
@@ -36610,6 +36821,58 @@ def prompt_video_kind_label(kind: str, lang: str = "vi") -> str:
     labels_en = {"ad": "product advertising", "cinema": "cinematic/storytelling", "viral": "TikTok/Reels", "custom": "custom prompt"}
     return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(kind or ""), "video")
 
+def prompt_video_topic_bank_key(kind: str) -> str:
+    kind = str(kind or "ad").strip().lower()
+    if kind == "cinema":
+        return "prompt_cinema"
+    if kind == "viral":
+        return "prompt_viral"
+    return "prompt_ad"
+
+def prompt_video_topic_suggestions(kind: str = "ad", offset: int = 0, lang: str = "vi") -> list[str]:
+    return video_v6_rotating_items(video_v6_suggestion_bank(prompt_video_topic_bank_key(kind), lang), offset, 3)
+
+def prompt_video_topic_suggestions_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    kind = state.get("prompt_kind") or "ad"
+    suggestions = prompt_video_topic_suggestions(kind, _safe_int(state.get("suggest_offset"), 0), lang)
+    kind_label = prompt_video_kind_label(kind, lang)
+    if normalize_user_language(lang) != "vi":
+        lines = [
+            "🧠 <b>Prompt → AI Video suggestion bank</b>",
+            "",
+            f"Direction: <code>{html.escape(kind_label)}</code>",
+            "Choose a topic below, refresh suggestions, or enter your own topic.",
+            "",
+        ]
+    else:
+        lines = [
+            "🧠 <b>Kho gợi ý Prompt → Video AI</b>",
+            "",
+            f"Hướng đã chọn: <code>{html.escape(kind_label)}</code>",
+            "Chọn một chủ đề bên dưới, đổi gợi ý khác hoặc tự nhập chủ đề riêng.",
+            "",
+        ]
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(item)}")
+    lines.append("")
+    lines.append(ui_text(lang, "common.no_api_no_charge"))
+    return "\n".join(lines)
+
+def prompt_video_topic_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn chủ đề 1" if is_vi else "1️⃣ Choose topic 1", "promptvideo|topic_choice|1"),
+            ("2️⃣ Chọn chủ đề 2" if is_vi else "2️⃣ Choose topic 2", "promptvideo|topic_choice|2"),
+            ("3️⃣ Chọn chủ đề 3" if is_vi else "3️⃣ Choose topic 3", "promptvideo|topic_choice|3"),
+            ("✍️ Nhập chủ đề riêng" if is_vi else "✍️ Custom topic", "promptvideo|topic_custom"),
+            ("🔁 Đổi gợi ý khác" if is_vi else "🔁 More suggestions", "promptvideo|topic_refresh"),
+        ],
+        lang,
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "promptvideo|back_start"),
+    )
+
 def prompt_video_description_text(state: dict | None = None, lang: str = "vi") -> str:
     kind = prompt_video_kind_label((state or {}).get("prompt_kind"), lang)
     if normalize_user_language(lang) != "vi":
@@ -36630,17 +36893,57 @@ def prompt_video_description_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def prompt_video_suggestions(state: dict | None = None, lang: str = "vi") -> list[str]:
     topic = _short_pending_text((state or {}).get("selected_topic"), 260) or ("your subject" if normalize_user_language(lang) != "vi" else "chủ đề của bạn")
     kind = str((state or {}).get("prompt_kind") or "ad")
+    offset = _safe_int((state or {}).get("prompt_variant_offset"), 0)
     if normalize_user_language(lang) != "vi":
-        return [
-            f"Product-first commercial for {topic}: clean hero reveal, slow push-in, practical demo, visible result, premium lighting, stable subject, no extra text.",
-            f"Cinematic story for {topic}: establish the problem, emotional turning point, soft orbit camera, natural light transition, polished ending.",
-            f"Short viral video for {topic}: immediate visual hook, fast before/after cut, energetic camera movement, clear proof and concise CTA ending.",
-        ]
-    return [
-        f"Quảng cáo rõ sản phẩm cho {topic}: hero reveal sạch, camera tiến chậm, demo công dụng, kết quả nhìn thấy rõ, ánh sáng cao cấp, giữ chủ thể ổn định, không thêm chữ thừa.",
-        f"Điện ảnh/kể chuyện về {topic}: mở bối cảnh vấn đề, khoảnh khắc chuyển biến cảm xúc, orbit nhẹ, ánh sáng chuyển tự nhiên, kết cảnh tinh tế.",
-        f"Video viral ngắn về {topic}: hook hình ảnh ngay 2 giây đầu, chuyển cảnh before/after nhanh, camera năng động, có bằng chứng và CTA ngắn.",
-    ]
+        templates = {
+            "ad": [
+                "Product-first commercial for {topic}: clean hero reveal, slow push-in, practical demo, visible result, premium lighting, stable subject, no extra text.",
+                "Problem-solution ad for {topic}: show the pain point, quick demo, before/after proof, direct soft CTA.",
+                "Premium product reveal for {topic}: macro detail, orbit camera, elegant lighting, final packshot with clean CTA space.",
+                "UGC-style ad for {topic}: relatable opening, handheld demo, honest result, natural voiceover and concise CTA.",
+                "Fast marketplace ad for {topic}: price/value hook, top three benefits, quick proof shot and clear ending.",
+            ],
+            "cinema": [
+                "Cinematic story for {topic}: establish the problem, emotional turning point, soft orbit camera, natural light transition, polished ending.",
+                "Brand film for {topic}: memory-driven opening, symbolic object, slow push-in, emotional voiceover and quiet CTA.",
+                "Luxury cinematic concept for {topic}: dark-to-light reveal, product silhouette, controlled camera and premium sound mood.",
+                "Future-tech story for {topic}: clean white world, turquoise accents, smooth dolly, calm confident voiceover.",
+                "Before/after short film for {topic}: ordinary routine, moment of change, match cut and satisfying final result.",
+            ],
+            "viral": [
+                "Short viral video for {topic}: immediate visual hook, fast before/after cut, energetic camera movement, clear proof and concise CTA ending.",
+                "POV trend for {topic}: relatable situation, quick conflict, product appears as the simple fix, fast caption rhythm.",
+                "Three quick tips for {topic}: one tip per scene, punchy cuts, bold visual proof and save/share CTA.",
+                "Expectation vs reality for {topic}: funny contrast, snap transition, useful takeaway and soft ending.",
+                "Do not make this mistake with {topic}: strong warning hook, fast demo, final checklist.",
+            ],
+        }
+    else:
+        templates = {
+            "ad": [
+                "Quảng cáo rõ sản phẩm cho {topic}: hero reveal sạch, camera tiến chậm, demo công dụng, kết quả nhìn thấy rõ, ánh sáng cao cấp, giữ chủ thể ổn định, không thêm chữ thừa.",
+                "Quảng cáo vấn đề → giải pháp cho {topic}: nêu pain point, demo nhanh, before/after rõ, CTA mềm.",
+                "Product reveal cao cấp cho {topic}: macro chi tiết, orbit nhẹ, ánh sáng sang, kết bằng packshot sạch.",
+                "UGC đời thường cho {topic}: mở bằng tình huống quen, demo cầm tay, kết quả thật, voice gần gũi.",
+                "Quảng cáo marketplace cho {topic}: hook giá trị, 3 lợi ích chính, bằng chứng nhanh, kết rõ.",
+            ],
+            "cinema": [
+                "Điện ảnh/kể chuyện về {topic}: mở bối cảnh vấn đề, khoảnh khắc chuyển biến cảm xúc, orbit nhẹ, ánh sáng chuyển tự nhiên, kết cảnh tinh tế.",
+                "Brand film cho {topic}: mở bằng ký ức, một vật biểu tượng, camera tiến chậm, voice cảm xúc, CTA nhẹ.",
+                "Luxury cinematic cho {topic}: reveal từ tối sang sáng, silhouette sản phẩm, camera kiểm soát, mood nhạc sang.",
+                "Công nghệ/tương lai cho {topic}: không gian trắng sạch, điểm nhấn xanh ngọc, dolly mượt, voice tự tin.",
+                "Before/after điện ảnh cho {topic}: routine bình thường, khoảnh khắc thay đổi, match cut, kết quả thỏa mãn.",
+            ],
+            "viral": [
+                "Video viral ngắn về {topic}: hook hình ảnh ngay 2 giây đầu, chuyển cảnh before/after nhanh, camera năng động, có bằng chứng và CTA ngắn.",
+                "Trend POV cho {topic}: tình huống quen thuộc, mâu thuẫn nhanh, sản phẩm xuất hiện như cách xử lý đơn giản.",
+                "3 mẹo nhanh về {topic}: mỗi mẹo một cảnh, cut nhanh, bằng chứng rõ, CTA lưu/chia sẻ.",
+                "Kỳ vọng vs thực tế với {topic}: tương phản vui, snap transition, takeaway hữu ích.",
+                "Đừng mắc lỗi này với {topic}: hook cảnh báo mạnh, demo nhanh, checklist kết thúc.",
+            ],
+        }
+    selected = video_v6_rotating_items(templates.get(kind, templates.get("ad", [])), offset, 3)
+    return [item.format(topic=topic) for item in selected]
 
 def prompt_video_choices_text(state: dict | None = None, lang: str = "vi") -> str:
     prompts = prompt_video_suggestions(state, lang)
@@ -36652,11 +36955,18 @@ def prompt_video_choices_text(state: dict | None = None, lang: str = "vi") -> st
     return "\n".join(lines)
 
 def prompt_video_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn A" if normalize_user_language(lang) == "vi" else "1️⃣ Choose A", callback_data="promptvideo|choose|1"), InlineKeyboardButton("2️⃣ Chọn B" if normalize_user_language(lang) == "vi" else "2️⃣ Choose B", callback_data="promptvideo|choose|2")],
-        [InlineKeyboardButton("3️⃣ Chọn C" if normalize_user_language(lang) == "vi" else "3️⃣ Choose C", callback_data="promptvideo|choose|3"), InlineKeyboardButton("✍️ Nhập prompt riêng" if normalize_user_language(lang) == "vi" else "✍️ Custom prompt", callback_data="promptvideo|custom_prompt")],
-        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_description"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn A" if is_vi else "1️⃣ Choose A", "promptvideo|choose|1"),
+            ("2️⃣ Chọn B" if is_vi else "2️⃣ Choose B", "promptvideo|choose|2"),
+            ("3️⃣ Chọn C" if is_vi else "3️⃣ Choose C", "promptvideo|choose|3"),
+            ("✍️ Nhập prompt riêng" if is_vi else "✍️ Custom prompt", "promptvideo|custom_prompt"),
+            ("🔁 Đổi 3 prompt khác" if is_vi else "🔁 More prompts", "promptvideo|prompt_refresh"),
+        ],
+        lang,
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "promptvideo|back_description"),
+    )
 
 def guided_video_motion_text(state: dict | None = None, lang: str = "vi", from_image: bool = False) -> str:
     prompt = _short_pending_text((state or {}).get("selected_prompt"), 240)
@@ -36864,7 +37174,7 @@ def self_scene_music_label(music: str, lang: str = "vi") -> str:
     }
     return labels.get(code, str(music or "nhạc riêng"))
 
-def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str = "vi") -> list[str]:
+def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str = "vi", offset: int = 0) -> list[str]:
     topic = _short_pending_text(topic, 160) or ("subject" if normalize_user_language(lang) != "vi" else "đối tượng")
     code = str(input_type or "").strip().lower()
     if normalize_user_language(lang) != "vi":
@@ -36873,45 +37183,69 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
                 f"Futuristic technology city for {topic}",
                 f"Sci-fi planet battle scene with {topic} as the hero",
                 f"Cinematic space base scene for {topic}",
+                f"Luxury office launch scene for {topic}",
+                f"Clean studio portrait scene for {topic}",
+                f"Rainy city lifestyle scene for {topic}",
             ],
             "product": [
                 f"Luxury showroom product reveal for {topic}",
                 f"Modern clean kitchen/lifestyle setup for {topic}",
                 f"Cafe / lifestyle commercial scene for {topic}",
+                f"Bright e-commerce studio setup for {topic}",
+                f"Outdoor morning routine scene for {topic}",
+                f"Futuristic retail display for {topic}",
             ],
             "pet": [
                 f"Fantasy garden scene for {topic}",
                 f"Pet commercial studio with soft light for {topic}",
                 f"Cinematic park/lifestyle moment for {topic}",
+                f"Cozy home scene with warm daylight for {topic}",
+                f"Playful product commercial scene for {topic}",
+                f"Clean veterinary care scene for {topic}",
             ],
         }
-        return catalog.get(code, [
+        return video_v6_rotating_items(catalog.get(code, [
             f"Modern office scene for {topic}",
             f"Cyberpunk city scene for {topic}",
             f"Clean lifestyle scene for {topic}",
-        ])
+            f"Luxury studio scene for {topic}",
+            f"Outdoor creator scene for {topic}",
+            f"Minimal product demo scene for {topic}",
+        ]), offset, 3)
     catalog = {
         "person": [
             f"Thành phố công nghệ tương lai, nhân vật chính là {topic}",
             f"Chiến tranh hành tinh / sci-fi battle, giữ nhân vật {topic} ổn định",
             f"Căn cứ không gian điện ảnh, ánh sáng xanh ngọc, nhân vật {topic}",
+            f"Văn phòng luxury khi ra mắt dự án mới, nhân vật {topic}",
+            f"Studio chân dung sạch, ánh sáng mềm, nhân vật {topic}",
+            f"Thành phố mưa đêm lifestyle, giữ nhân vật {topic} tự nhiên",
         ],
         "product": [
             f"Luxury showroom, spotlight cao cấp cho {topic}",
             f"Nhà bếp hiện đại sạch đẹp, {topic} xuất hiện như giải pháp tiện lợi",
             f"Quán cafe / lifestyle, {topic} nằm trong bối cảnh đời thường dễ bán",
+            f"Studio e-commerce nền sáng, {topic} nổi rõ chi tiết",
+            f"Routine buổi sáng ngoài trời, {topic} xuất hiện tự nhiên",
+            f"Kệ trưng bày tương lai, ánh sáng xanh ngọc cho {topic}",
         ],
         "pet": [
             f"Khu vườn fantasy, ánh sáng mềm, giữ biểu cảm thú cưng {topic}",
             f"Studio quảng cáo pet commercial, nền sạch, {topic} nổi bật",
             f"Công viên cinematic/lifestyle, chuyển động nhẹ quanh {topic}",
+            f"Nhà ấm áp ánh sáng ban ngày, giữ biểu cảm {topic}",
+            f"Cảnh vui nhộn quảng cáo pet product với {topic}",
+            f"Phòng chăm sóc thú cưng sạch, cảm giác an toàn cho {topic}",
         ],
     }
-    return catalog.get(code, [
+    return video_v6_rotating_items(catalog.get(code, [
         f"Văn phòng hiện đại, ánh sáng sạch, chủ thể là {topic}",
         f"Thành phố cyberpunk, neon xanh ngọc, chủ thể là {topic}",
         f"Bối cảnh lifestyle tối giản, sạch, dễ dùng cho {topic}",
-    ])
+        f"Studio luxury nền tối, spotlight cho {topic}",
+        f"Bối cảnh creator quay video tại nhà cho {topic}",
+        f"Cảnh demo sản phẩm tối giản, dễ dựng quảng cáo cho {topic}",
+    ]), offset, 3)
 
 def self_scene_start_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -36929,23 +37263,17 @@ def self_scene_start_text(lang: str = "vi") -> str:
     )
 
 def self_scene_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("1️⃣ Change surrounding scene", callback_data="selfscene|direction|context")],
-            [InlineKeyboardButton("2️⃣ Cinematic style", callback_data="selfscene|direction|cinematic")],
-            [InlineKeyboardButton("3️⃣ Ad/TikTok video", callback_data="selfscene|direction|ad")],
-            [InlineKeyboardButton("✍️ Custom direction", callback_data="selfscene|direction_custom")],
-            [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Đổi bối cảnh", callback_data="selfscene|direction|context")],
-        [InlineKeyboardButton("2️⃣ Phong cách điện ảnh", callback_data="selfscene|direction|cinematic")],
-        [InlineKeyboardButton("3️⃣ Quảng cáo/TikTok", callback_data="selfscene|direction|ad")],
-        [InlineKeyboardButton("✍️ Nhập hướng riêng", callback_data="selfscene|direction_custom")],
-        [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Đổi bối cảnh" if is_vi else "1️⃣ Change surrounding scene", "selfscene|direction|context"),
+            ("2️⃣ Phong cách điện ảnh" if is_vi else "2️⃣ Cinematic style", "selfscene|direction|cinematic"),
+            ("3️⃣ Quảng cáo/TikTok" if is_vi else "3️⃣ Ad/TikTok video", "selfscene|direction|ad"),
+            ("✍️ Nhập hướng riêng" if is_vi else "✍️ Custom direction", "selfscene|direction_custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
+    )
 
 def self_scene_direction_custom_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -36966,21 +37294,17 @@ def self_scene_object_text(state: dict | None = None, lang: str = "vi") -> str:
     )
 
 def self_scene_object_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("👤 Real person / face", callback_data="selfscene|object|person")],
-            [InlineKeyboardButton("📦 Product / logo / packaging", callback_data="selfscene|object|product")],
-            [InlineKeyboardButton("🐶 Pet / object / scene", callback_data="selfscene|object|pet")],
-            [InlineKeyboardButton("✍️ Custom subject", callback_data="selfscene|object|custom")],
-            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|back_object"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👤 Người thật", callback_data="selfscene|object|person")],
-        [InlineKeyboardButton("📦 Sản phẩm", callback_data="selfscene|object|product")],
-        [InlineKeyboardButton("🐶 Thú cưng/vật phẩm", callback_data="selfscene|object|pet")],
-        [InlineKeyboardButton("✍️ Nhập riêng", callback_data="selfscene|object|custom")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|back_object"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("👤 Người thật" if is_vi else "👤 Real person / face", "selfscene|object|person"),
+            ("📦 Sản phẩm" if is_vi else "📦 Product / logo / packaging", "selfscene|object|product"),
+            ("🐶 Thú cưng/vật phẩm" if is_vi else "🐶 Pet / object / scene", "selfscene|object|pet"),
+            ("✍️ Nhập riêng" if is_vi else "✍️ Custom subject", "selfscene|object|custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_object"),
+    )
 
 def self_scene_describe_text(input_type: str, lang: str = "vi") -> str:
     label = self_scene_input_label(input_type, lang)
@@ -37001,7 +37325,7 @@ def self_scene_describe_text(input_type: str, lang: str = "vi") -> str:
     )
 
 def self_scene_context_text(state: dict, lang: str = "vi") -> str:
-    suggestions = self_scene_context_suggestions(state.get("input_type"), state.get("selected_topic"), lang)
+    suggestions = self_scene_context_suggestions(state.get("input_type"), state.get("selected_topic"), lang, _safe_int(state.get("suggest_offset"), 0))
     if normalize_user_language(lang) != "vi":
         lines = ["🌍 <b>Choose a new scene/context</b>", ""]
         for idx, item in enumerate(suggestions, 1):
@@ -37013,21 +37337,18 @@ def self_scene_context_text(state: dict, lang: str = "vi") -> str:
     return "\n".join(lines)
 
 def self_scene_context_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("1️⃣ Choose context 1", callback_data="selfscene|context|1")],
-            [InlineKeyboardButton("2️⃣ Choose context 2", callback_data="selfscene|context|2")],
-            [InlineKeyboardButton("3️⃣ Choose context 3", callback_data="selfscene|context|3")],
-            [InlineKeyboardButton("✍️ Enter another context", callback_data="selfscene|context_custom")],
-            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|back_context"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn ngữ cảnh 1", callback_data="selfscene|context|1")],
-        [InlineKeyboardButton("2️⃣ Chọn ngữ cảnh 2", callback_data="selfscene|context|2")],
-        [InlineKeyboardButton("3️⃣ Chọn ngữ cảnh 3", callback_data="selfscene|context|3")],
-        [InlineKeyboardButton("✍️ Nhập ngữ cảnh riêng", callback_data="selfscene|context_custom")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|back_context"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn ngữ cảnh 1" if is_vi else "1️⃣ Choose context 1", "selfscene|context|1"),
+            ("2️⃣ Chọn ngữ cảnh 2" if is_vi else "2️⃣ Choose context 2", "selfscene|context|2"),
+            ("3️⃣ Chọn ngữ cảnh 3" if is_vi else "3️⃣ Choose context 3", "selfscene|context|3"),
+            ("✍️ Nhập ngữ cảnh riêng" if is_vi else "✍️ Custom context", "selfscene|context_custom"),
+            ("🔁 Đổi gợi ý khác" if is_vi else "🔁 More suggestions", "selfscene|context_refresh"),
+        ],
+        lang,
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_context"),
+    )
 
 def self_scene_context_custom_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -37047,21 +37368,17 @@ def self_scene_style_text(state: dict, lang: str = "vi") -> str:
     )
 
 def self_scene_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("1️⃣ Slow push-in", callback_data="selfscene|style|pushin")],
-            [InlineKeyboardButton("2️⃣ Gentle orbit", callback_data="selfscene|style|orbit")],
-            [InlineKeyboardButton("3️⃣ Fast viral cuts", callback_data="selfscene|style|fastcut")],
-            [InlineKeyboardButton("✍️ Custom motion", callback_data="selfscene|style_custom")],
-            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|back_style"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Tiến chậm", callback_data="selfscene|style|pushin")],
-        [InlineKeyboardButton("2️⃣ Xoay nhẹ", callback_data="selfscene|style|orbit")],
-        [InlineKeyboardButton("3️⃣ Chuyển cảnh nhanh", callback_data="selfscene|style|fastcut")],
-        [InlineKeyboardButton("✍️ Nhập chuyển động riêng", callback_data="selfscene|style_custom")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|back_style"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Tiến chậm" if is_vi else "1️⃣ Slow push-in", "selfscene|style|pushin"),
+            ("2️⃣ Xoay nhẹ" if is_vi else "2️⃣ Gentle orbit", "selfscene|style|orbit"),
+            ("3️⃣ Chuyển cảnh nhanh" if is_vi else "3️⃣ Fast viral cuts", "selfscene|style|fastcut"),
+            ("✍️ Nhập chuyển động riêng" if is_vi else "✍️ Custom motion", "selfscene|style_custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_style"),
+    )
 
 def self_scene_style_custom_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -37083,23 +37400,18 @@ def self_scene_music_text(state: dict, lang: str = "vi") -> str:
     )
 
 def self_scene_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("1️⃣ Cinematic", callback_data="selfscene|music|cinematic")],
-            [InlineKeyboardButton("2️⃣ Technology / future", callback_data="selfscene|music|tech")],
-            [InlineKeyboardButton("3️⃣ Viral/TikTok", callback_data="selfscene|music|viral")],
-            [InlineKeyboardButton("⏭ No music", callback_data="selfscene|music|none")],
-            [InlineKeyboardButton("✍️ Custom music", callback_data="selfscene|music_custom")],
-            [InlineKeyboardButton("🔙 Back", callback_data="selfscene|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Điện ảnh", callback_data="selfscene|music|cinematic")],
-        [InlineKeyboardButton("2️⃣ Công nghệ", callback_data="selfscene|music|tech")],
-        [InlineKeyboardButton("3️⃣ Viral/TikTok", callback_data="selfscene|music|viral")],
-        [InlineKeyboardButton("⏭ Không nhạc", callback_data="selfscene|music|none")],
-        [InlineKeyboardButton("✍️ Nhập riêng", callback_data="selfscene|music_custom")],
-        [InlineKeyboardButton("🔙 Quay lại", callback_data="selfscene|back_music"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Điện ảnh" if is_vi else "1️⃣ Cinematic", "selfscene|music|cinematic"),
+            ("2️⃣ Công nghệ" if is_vi else "2️⃣ Technology / future", "selfscene|music|tech"),
+            ("3️⃣ Viral/TikTok" if is_vi else "3️⃣ Viral/TikTok", "selfscene|music|viral"),
+            ("⏭ Không nhạc" if is_vi else "⏭ No music", "selfscene|music|none"),
+            ("✍️ Nhập riêng" if is_vi else "✍️ Custom music", "selfscene|music_custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_music"),
+    )
 
 def self_scene_music_custom_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -37174,23 +37486,18 @@ def self_scene_plan_text(state: dict, lang: str = "vi") -> str:
     )
 
 def self_scene_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Keyframe image prompt", callback_data="selfscene|image_guard")],
-            [InlineKeyboardButton("🎬 AI video prompt", callback_data="selfscene|video_guard")],
-            [InlineKeyboardButton("🎞 Use image slideshow video", callback_data="selfscene|frame_hint")],
-            [InlineKeyboardButton("🎵 Music suggestions", callback_data="selfscene|music")],
-            [InlineKeyboardButton("💾 Save plan", callback_data="selfscene|save")],
-            [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 Tạo ảnh khung chính nếu công cụ ảnh mở", callback_data="selfscene|image_guard")],
-        [InlineKeyboardButton("🎬 Tạo video AI nếu video công khai mở", callback_data="selfscene|video_guard")],
-        [InlineKeyboardButton("🎞 Ghép ảnh thành video nếu có ảnh", callback_data="selfscene|frame_hint")],
-        [InlineKeyboardButton("🎵 Gợi ý nhạc", callback_data="selfscene|music")],
-        [InlineKeyboardButton("💾 Lưu kế hoạch", callback_data="selfscene|save")],
-        [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("🖼 Tạo ảnh khung chính nếu công cụ ảnh mở" if is_vi else "🖼 Keyframe image prompt", "selfscene|image_guard"),
+            ("🎬 Tạo video AI nếu video công khai mở" if is_vi else "🎬 AI video prompt", "selfscene|video_guard"),
+            ("🎞 Ghép ảnh thành video nếu có ảnh" if is_vi else "🎞 Use image slideshow video", "selfscene|frame_hint"),
+            ("🎵 Gợi ý nhạc" if is_vi else "🎵 Music suggestions", "selfscene|music"),
+            ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", "selfscene|save"),
+        ],
+        lang,
+        back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
+    )
 
 def self_scene_guard_text(action: str, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -37270,23 +37577,62 @@ def long_video_start_text(lang: str = "vi") -> str:
     )
 
 def long_video_topic_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Bán hàng / affiliate" if is_vi else "1️⃣ Sales / affiliate", "longvideo|topic|sales"),
+            ("2️⃣ Giáo dục / hướng dẫn" if is_vi else "2️⃣ Education / tutorial", "longvideo|topic|education"),
+            ("3️⃣ Kể chuyện / giải trí" if is_vi else "3️⃣ Storytelling / entertainment", "longvideo|topic|story"),
+            ("✍️ Nhập chủ đề riêng" if is_vi else "✍️ Custom topic", "longvideo|topic_custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
+    )
+
+def long_video_topic_suggestions(topic_key: str = "sales", offset: int = 0, lang: str = "vi") -> list[str]:
+    key = f"long_{str(topic_key or 'sales').strip().lower()}"
+    return video_v6_rotating_items(video_v6_suggestion_bank(key, lang), offset, 3)
+
+def long_video_topic_suggestions_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    topic_key = state.get("topic_key") or "sales"
+    topic_label = long_video_topic_label(topic_key, lang)
+    suggestions = long_video_topic_suggestions(topic_key, _safe_int(state.get("suggest_offset"), 0), lang)
     if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("1️⃣ Sales / affiliate", callback_data="longvideo|topic|sales")],
-            [InlineKeyboardButton("2️⃣ Education / tutorial", callback_data="longvideo|topic|education")],
-            [InlineKeyboardButton("3️⃣ Storytelling / entertainment", callback_data="longvideo|topic|story")],
-            [InlineKeyboardButton("✍️ Custom topic", callback_data="longvideo|topic_custom")],
-            [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Bán hàng / affiliate", callback_data="longvideo|topic|sales")],
-        [InlineKeyboardButton("2️⃣ Giáo dục / hướng dẫn", callback_data="longvideo|topic|education")],
-        [InlineKeyboardButton("3️⃣ Kể chuyện / giải trí", callback_data="longvideo|topic|story")],
-        [InlineKeyboardButton("✍️ Nhập chủ đề riêng", callback_data="longvideo|topic_custom")],
-        [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+        lines = [
+            "🧠 <b>Long-form topic suggestions</b>",
+            "",
+            f"Category: <code>{html.escape(topic_label)}</code>",
+            "Choose one topic, refresh suggestions, or enter your own.",
+            "",
+        ]
+    else:
+        lines = [
+            "🧠 <b>Kho gợi ý chủ đề video dài</b>",
+            "",
+            f"Nhóm đã chọn: <code>{html.escape(topic_label)}</code>",
+            "Chọn một chủ đề, đổi gợi ý khác hoặc tự nhập.",
+            "",
+        ]
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(item)}")
+    lines.append("")
+    lines.append(ui_text(lang, "common.no_api_no_charge"))
+    return "\n".join(lines)
+
+def long_video_topic_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn chủ đề 1" if is_vi else "1️⃣ Choose topic 1", "longvideo|topic_choice|1"),
+            ("2️⃣ Chọn chủ đề 2" if is_vi else "2️⃣ Choose topic 2", "longvideo|topic_choice|2"),
+            ("3️⃣ Chọn chủ đề 3" if is_vi else "3️⃣ Choose topic 3", "longvideo|topic_choice|3"),
+            ("✍️ Nhập chủ đề riêng" if is_vi else "✍️ Custom topic", "longvideo|topic_custom"),
+            ("🔁 Đổi gợi ý khác" if is_vi else "🔁 More suggestions", "longvideo|topic_refresh"),
+        ],
+        lang,
+        back=("🔙 Quay lại nhóm" if is_vi else "🔙 Back", "longvideo|start"),
+    )
 
 def long_video_topic_custom_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -37303,8 +37649,7 @@ def long_video_duration_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("3 phút" if normalize_user_language(lang) == "vi" else "3 min", callback_data="longvideo|duration|3 phút"), InlineKeyboardButton("5 phút" if normalize_user_language(lang) == "vi" else "5 min", callback_data="longvideo|duration|5 phút")],
         [InlineKeyboardButton("10 phút" if normalize_user_language(lang) == "vi" else "10 min", callback_data="longvideo|duration|10 phút"), InlineKeyboardButton("30 phút" if normalize_user_language(lang) == "vi" else "30 min", callback_data="longvideo|duration|30 phút")],
         [InlineKeyboardButton("60 phút" if normalize_user_language(lang) == "vi" else "60 min", callback_data="longvideo|duration|60 phút"), InlineKeyboardButton("✍️ Nhập độ dài khác" if normalize_user_language(lang) == "vi" else "✍️ Custom length", callback_data="longvideo|duration_custom")],
-        [InlineKeyboardButton("🔙 Quay lại Video" if normalize_user_language(lang) == "vi" else "🔙 Back to Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("🔙 Quay lại chủ đề" if normalize_user_language(lang) == "vi" else "🔙 Back to topics", callback_data="longvideo|back_topic_suggestions"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def long_video_duration_custom_text(lang: str = "vi") -> str:
@@ -37319,21 +37664,17 @@ def long_video_style_text(state: dict, lang: str = "vi") -> str:
     return f"🎨 <b>Chọn phong cách video</b>\n\nThời lượng: <code>{html.escape(duration)}</code>"
 
 def long_video_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("1️⃣ Professional", callback_data="longvideo|style|professional")],
-            [InlineKeyboardButton("2️⃣ Viral/TikTok", callback_data="longvideo|style|viral")],
-            [InlineKeyboardButton("3️⃣ Cinematic", callback_data="longvideo|style|cinematic")],
-            [InlineKeyboardButton("✍️ Custom style", callback_data="longvideo|style_custom")],
-            [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chuyên nghiệp", callback_data="longvideo|style|professional")],
-        [InlineKeyboardButton("2️⃣ Viral/TikTok", callback_data="longvideo|style|viral")],
-        [InlineKeyboardButton("3️⃣ Cinematic", callback_data="longvideo|style|cinematic")],
-        [InlineKeyboardButton("✍️ Nhập phong cách riêng", callback_data="longvideo|style_custom")],
-        [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chuyên nghiệp" if is_vi else "1️⃣ Professional", "longvideo|style|professional"),
+            ("2️⃣ Viral/TikTok" if is_vi else "2️⃣ Viral/TikTok", "longvideo|style|viral"),
+            ("3️⃣ Cinematic" if is_vi else "3️⃣ Cinematic", "longvideo|style|cinematic"),
+            ("✍️ Nhập phong cách riêng" if is_vi else "✍️ Custom style", "longvideo|style_custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại thời lượng" if is_vi else "🔙 Back to duration", "longvideo|back_duration"),
+    )
 
 def long_video_style_custom_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -37373,11 +37714,10 @@ def long_video_structure_text(state: dict, lang: str = "vi") -> str:
 
 def long_video_structure_keyboard(duration: str, lang: str = "vi") -> InlineKeyboardMarkup:
     options = long_video_structure_suggestions(duration, lang)
-    rows = [[InlineKeyboardButton(f"{idx}️⃣ {label}", callback_data=f"longvideo|structure|{idx}")]
-            for idx, label in enumerate(options[:3], 1)]
-    rows.append([InlineKeyboardButton("✍️ Nhập cấu trúc riêng" if normalize_user_language(lang) == "vi" else "✍️ Custom structure", callback_data="longvideo|structure_custom")])
-    rows.append([InlineKeyboardButton("🔙 Quay lại Video" if normalize_user_language(lang) == "vi" else "🔙 Back to Video", callback_data="menu|main_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-    return InlineKeyboardMarkup(rows)
+    is_vi = normalize_user_language(lang) == "vi"
+    items = [(f"{idx}️⃣ {label}", f"longvideo|structure|{idx}") for idx, label in enumerate(options[:3], 1)]
+    items.append(("✍️ Nhập cấu trúc riêng" if is_vi else "✍️ Custom structure", "longvideo|structure_custom"))
+    return video_v6_keyboard(items, lang, back=("🔙 Quay lại phong cách" if is_vi else "🔙 Back to style", "longvideo|back_style"))
 
 def long_video_structure_custom_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -37450,23 +37790,18 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
     )
 
 def long_video_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🧩 Create storyboard", callback_data="longvideo|storyboard")],
-            [InlineKeyboardButton("🖼 Image prompts by scene", callback_data="longvideo|image_prompts")],
-            [InlineKeyboardButton("🎬 Video prompts by scene", callback_data="longvideo|video_prompts")],
-            [InlineKeyboardButton("🎵 Music/voice suggestions", callback_data="longvideo|music")],
-            [InlineKeyboardButton("💾 Save roadmap", callback_data="longvideo|save")],
-            [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🧩 Tạo storyboard", callback_data="longvideo|storyboard")],
-        [InlineKeyboardButton("🖼 Tạo prompt ảnh từng cảnh", callback_data="longvideo|image_prompts")],
-        [InlineKeyboardButton("🎬 Tạo prompt video từng cảnh", callback_data="longvideo|video_prompts")],
-        [InlineKeyboardButton("🎵 Gợi ý nhạc/voice", callback_data="longvideo|music")],
-        [InlineKeyboardButton("💾 Lưu kế hoạch", callback_data="longvideo|save")],
-        [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("🧩 Tạo storyboard" if is_vi else "🧩 Create storyboard", "longvideo|storyboard"),
+            ("🖼 Tạo prompt ảnh từng cảnh" if is_vi else "🖼 Image prompts by scene", "longvideo|image_prompts"),
+            ("🎬 Tạo prompt video từng cảnh" if is_vi else "🎬 Video prompts by scene", "longvideo|video_prompts"),
+            ("🎵 Gợi ý nhạc/voice" if is_vi else "🎵 Music/voice suggestions", "longvideo|music"),
+            ("💾 Lưu kế hoạch" if is_vi else "💾 Save roadmap", "longvideo|save"),
+        ],
+        lang,
+        back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
+    )
 
 def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -> str:
     plan = plan or {}
@@ -37646,6 +37981,53 @@ def video_idea_product_description_keyboard(lang: str = "vi") -> InlineKeyboardM
         [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="videoidea|back_product_type"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
+def video_idea_product_suggestions(product_type: str = "physical", offset: int = 0, lang: str = "vi") -> list[str]:
+    key = f"idea_{str(product_type or 'physical').strip().lower()}"
+    return video_v6_rotating_items(video_v6_suggestion_bank(key, lang), offset, 3)
+
+def video_idea_product_suggestions_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    product_type = state.get("product_type") or "physical"
+    labels_vi = {"physical": "sản phẩm vật lý", "service": "dịch vụ/app", "affiliate": "affiliate/nội dung số", "custom": "nhóm riêng"}
+    labels_en = {"physical": "physical product", "service": "service/app", "affiliate": "affiliate/digital content", "custom": "custom category"}
+    label = (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(product_type or ""), product_type or "product")
+    suggestions = video_idea_product_suggestions(product_type, _safe_int(state.get("suggest_offset"), 0), lang)
+    if normalize_user_language(lang) != "vi":
+        lines = [
+            "🧠 <b>Product/service suggestion bank</b>",
+            "",
+            f"Category: <code>{html.escape(label)}</code>",
+            "Choose one suggestion, refresh, or enter your own product/service.",
+            "",
+        ]
+    else:
+        lines = [
+            "🧠 <b>Kho gợi ý sản phẩm/dịch vụ</b>",
+            "",
+            f"Loại: <code>{html.escape(label)}</code>",
+            "Chọn một gợi ý, đổi gợi ý khác hoặc nhập sản phẩm/dịch vụ riêng.",
+            "",
+        ]
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(item)}")
+    lines.append("")
+    lines.append(ui_text(lang, "common.no_api_no_charge"))
+    return "\n".join(lines)
+
+def video_idea_product_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn gợi ý 1" if is_vi else "1️⃣ Choose suggestion 1", "videoidea|product_choice|1"),
+            ("2️⃣ Chọn gợi ý 2" if is_vi else "2️⃣ Choose suggestion 2", "videoidea|product_choice|2"),
+            ("3️⃣ Chọn gợi ý 3" if is_vi else "3️⃣ Choose suggestion 3", "videoidea|product_choice|3"),
+            ("✍️ Nhập riêng" if is_vi else "✍️ Custom product", "videoidea|product_custom"),
+            ("🔁 Đổi gợi ý khác" if is_vi else "🔁 More suggestions", "videoidea|product_refresh"),
+        ],
+        lang,
+        back=("🔙 Quay lại loại" if is_vi else "🔙 Back", "videoidea|back_product_type"),
+    )
+
 def video_idea_goal_text(lang: str = "vi") -> str:
     return "🎯 <b>Mục tiêu quảng cáo của bạn là gì?</b>" if normalize_user_language(lang) == "vi" else "🎯 <b>What is the advertising goal?</b>"
 
@@ -37693,11 +38075,18 @@ def video_idea_goal_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def video_idea_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn ý tưởng A" if normalize_user_language(lang) == "vi" else "1️⃣ Choose idea A", callback_data="videoidea|choose|1"), InlineKeyboardButton("2️⃣ Chọn ý tưởng B" if normalize_user_language(lang) == "vi" else "2️⃣ Choose idea B", callback_data="videoidea|choose|2")],
-        [InlineKeyboardButton("3️⃣ Chọn ý tưởng C" if normalize_user_language(lang) == "vi" else "3️⃣ Choose idea C", callback_data="videoidea|choose|3"), InlineKeyboardButton("✍️ Nhập ý tưởng riêng" if normalize_user_language(lang) == "vi" else "✍️ Custom idea", callback_data="videoidea|choice_custom")],
-        [InlineKeyboardButton("🔙 Quay lại ngữ cảnh" if normalize_user_language(lang) == "vi" else "🔙 Back to context", callback_data="videoidea|back_context"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn ý tưởng A" if is_vi else "1️⃣ Choose idea A", "videoidea|choose|1"),
+            ("2️⃣ Chọn ý tưởng B" if is_vi else "2️⃣ Choose idea B", "videoidea|choose|2"),
+            ("3️⃣ Chọn ý tưởng C" if is_vi else "3️⃣ Choose idea C", "videoidea|choose|3"),
+            ("✍️ Nhập ý tưởng riêng" if is_vi else "✍️ Custom idea", "videoidea|choice_custom"),
+            ("🔁 Đổi 3 ý tưởng khác" if is_vi else "🔁 More ideas", "videoidea|idea_refresh"),
+        ],
+        lang,
+        back=("🔙 Quay lại ngữ cảnh" if is_vi else "🔙 Back to context", "videoidea|back_context"),
+    )
 
 def video_idea_topic_text(kind: str, lang: str = "vi") -> str:
     kind = str(kind or "custom")
@@ -37715,13 +38104,16 @@ def video_idea_topic_text(kind: str, lang: str = "vi") -> str:
 
 
 def video_idea_platform_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ TikTok/Reels", callback_data="videoidea|platform|tiktok")],
-        [InlineKeyboardButton("2️⃣ YouTube Shorts", callback_data="videoidea|platform|youtube")],
-        [InlineKeyboardButton("3️⃣ Facebook/ads", callback_data="videoidea|platform|facebook")],
-        [InlineKeyboardButton("✍️ Nhập nền tảng riêng" if normalize_user_language(lang) == "vi" else "✍️ Custom platform", callback_data="videoidea|platform_custom")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    return video_v6_keyboard(
+        [
+            ("1️⃣ TikTok/Reels", "videoidea|platform|tiktok"),
+            ("2️⃣ YouTube Shorts", "videoidea|platform|youtube"),
+            ("3️⃣ Facebook/ads", "videoidea|platform|facebook"),
+            ("✍️ Nhập nền tảng riêng" if normalize_user_language(lang) == "vi" else "✍️ Custom platform", "videoidea|platform_custom"),
+        ],
+        lang,
+        back=None,
+    )
 
 def video_idea_trend_type_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     labels = (
@@ -37729,12 +38121,15 @@ def video_idea_trend_type_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         if normalize_user_language(lang) == "vi"
         else ("1️⃣ Before/after", "2️⃣ Problem/solution", "3️⃣ POV/story")
     )
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels[0], callback_data="videoidea|trend_type|before_after")],
-        [InlineKeyboardButton(labels[1], callback_data="videoidea|trend_type|problem_solution")],
-        [InlineKeyboardButton(labels[2], callback_data="videoidea|trend_type|pov")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    return video_v6_keyboard(
+        [
+            (labels[0], "videoidea|trend_type|before_after"),
+            (labels[1], "videoidea|trend_type|problem_solution"),
+            (labels[2], "videoidea|trend_type|pov"),
+        ],
+        lang,
+        back=None,
+    )
 
 def video_idea_genre_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     labels = (
@@ -37742,40 +38137,104 @@ def video_idea_genre_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         if normalize_user_language(lang) == "vi"
         else ("1️⃣ Sci-fi/technology", "2️⃣ Fantasy/cinematic", "3️⃣ Drama/emotion")
     )
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels[0], callback_data="videoidea|genre|scifi")],
-        [InlineKeyboardButton(labels[1], callback_data="videoidea|genre|fantasy")],
-        [InlineKeyboardButton(labels[2], callback_data="videoidea|genre|drama")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    return video_v6_keyboard(
+        [
+            (labels[0], "videoidea|genre|scifi"),
+            (labels[1], "videoidea|genre|fantasy"),
+            (labels[2], "videoidea|genre|drama"),
+        ],
+        lang,
+        back=None,
+    )
 
 def video_idea_choices_text(state: dict, lang: str = "vi") -> str:
     topic = _short_pending_text(state.get("selected_topic") or state.get("product"), 200)
     kind = str(state.get("idea_kind") or "custom")
+    offset = _safe_int(state.get("prompt_variant_offset"), 0)
+    variants_vi = [
+        (
+            "A. Vấn đề → giải pháp",
+            "Hook thẳng lợi ích, demo ngắn, sản phẩm xuất hiện như bước chuyển rõ ràng.",
+            "B. POV đời thường",
+            "Tình huống quen thuộc, mâu thuẫn ngắn, khoảnh khắc thay đổi có cảm xúc.",
+            "C. Chuyển đổi cao cấp",
+            "Before/after, match cut điện ảnh, product reveal và kết quả nổi bật.",
+        ),
+        (
+            "A. Đừng mắc lỗi này",
+            "Mở bằng cảnh báo mạnh, chỉ ra sai lầm phổ biến rồi đưa sản phẩm/giải pháp vào.",
+            "B. 3 mẹo nhanh",
+            "Mỗi cảnh là một mẹo ngắn, nhịp nhanh, dễ lưu lại và chia sẻ.",
+            "C. Một ngày có/không có giải pháp",
+            "So sánh routine trước và sau, kết bằng lợi ích nhìn thấy rõ.",
+        ),
+        (
+            "A. Bí mật phía sau kết quả",
+            "Hook bằng kết quả cuối, tua lại các bước tạo ra kết quả đó.",
+            "B. Mini story khách hàng",
+            "Một nhân vật gặp vấn đề, thử giải pháp, nhận thay đổi nhỏ nhưng rõ.",
+            "C. Product reveal theo cảm xúc",
+            "Dùng ánh sáng, close-up và voice nhẹ để biến sản phẩm thành câu chuyện thương hiệu.",
+        ),
+    ]
+    variants_en = [
+        (
+            "A. Problem/solution reveal",
+            "Direct benefit hook and practical demo.",
+            "B. Everyday POV story",
+            "Relatable conflict and emotional turning point.",
+            "C. Premium transformation",
+            "Before/after match cut and polished product reveal.",
+        ),
+        (
+            "A. Do not make this mistake",
+            "Open with a strong warning, show a common mistake, then introduce the solution.",
+            "B. Three quick tips",
+            "One quick tip per scene, fast rhythm, easy to save/share.",
+            "C. A day with versus without it",
+            "Compare routine before and after, ending with a visible benefit.",
+        ),
+        (
+            "A. Behind the result",
+            "Open with the final result, then rewind through the steps that made it happen.",
+            "B. Customer mini story",
+            "One character faces a problem, tries the solution and gets a small clear change.",
+            "C. Emotional product reveal",
+            "Use lighting, close-up and soft voiceover to turn the product into a brand story.",
+        ),
+    ]
+    variant = (variants_vi if normalize_user_language(lang) == "vi" else variants_en)[(offset // 3) % 3]
     if normalize_user_language(lang) != "vi":
         return (
             f"📢 <b>Three advertising ideas for {html.escape(topic)}</b>\n\n"
-            "A. Problem/solution reveal — direct benefit hook and practical demo.\n"
-            "B. Everyday POV story — relatable conflict and emotional turning point.\n"
-            "C. Premium transformation — before/after match cut and polished product reveal.\n\n"
+            f"<b>{html.escape(variant[0])}</b> — {html.escape(variant[1])}\n"
+            f"<b>{html.escape(variant[2])}</b> — {html.escape(variant[3])}\n"
+            f"<b>{html.escape(variant[4])}</b> — {html.escape(variant[5])}\n\n"
             "Choose one idea to build the full package."
         )
     kind_label = {"ad": "quảng cáo", "cinema": "điện ảnh/kể chuyện", "custom": "riêng"}.get(kind, kind)
     return (
         f"🧠 <b>3 ý tưởng video {html.escape(kind_label)}</b>\n\n"
         f"Chủ đề: <code>{html.escape(topic)}</code>\n\n"
-        "<b>A. Vấn đề → giải pháp</b>\nHook thẳng lợi ích, demo ngắn, sản phẩm xuất hiện như bước chuyển rõ ràng.\n\n"
-        "<b>B. POV đời thường</b>\nTình huống quen thuộc, mâu thuẫn ngắn, khoảnh khắc thay đổi có cảm xúc.\n\n"
-        "<b>C. Chuyển đổi cao cấp</b>\nBefore/after, match cut điện ảnh, product reveal và kết quả nổi bật.\n\n"
+        f"<b>{html.escape(variant[0])}</b>\n{html.escape(variant[1])}\n\n"
+        f"<b>{html.escape(variant[2])}</b>\n{html.escape(variant[3])}\n\n"
+        f"<b>{html.escape(variant[4])}</b>\n{html.escape(variant[5])}\n\n"
         "Chọn một ý tưởng để TOAN AAS dựng gói chi tiết."
     )
 
 def video_idea_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn ý tưởng A" if normalize_user_language(lang) == "vi" else "1️⃣ Choose idea A", callback_data="videoidea|choose|1"), InlineKeyboardButton("2️⃣ Chọn ý tưởng B" if normalize_user_language(lang) == "vi" else "2️⃣ Choose idea B", callback_data="videoidea|choose|2")],
-        [InlineKeyboardButton("3️⃣ Chọn ý tưởng C" if normalize_user_language(lang) == "vi" else "3️⃣ Choose idea C", callback_data="videoidea|choose|3"), InlineKeyboardButton("✍️ Nhập ý tưởng riêng" if normalize_user_language(lang) == "vi" else "✍️ Custom idea", callback_data="videoidea|choice_custom")],
-        [InlineKeyboardButton("🔙 Quay lại ngữ cảnh" if normalize_user_language(lang) == "vi" else "🔙 Back to context", callback_data="videoidea|back_context"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn ý tưởng A" if is_vi else "1️⃣ Choose idea A", "videoidea|choose|1"),
+            ("2️⃣ Chọn ý tưởng B" if is_vi else "2️⃣ Choose idea B", "videoidea|choose|2"),
+            ("3️⃣ Chọn ý tưởng C" if is_vi else "3️⃣ Choose idea C", "videoidea|choose|3"),
+            ("✍️ Nhập ý tưởng riêng" if is_vi else "✍️ Custom idea", "videoidea|choice_custom"),
+            ("🔁 Đổi 3 ý tưởng khác" if is_vi else "🔁 More ideas", "videoidea|idea_refresh"),
+        ],
+        lang,
+        back=("🔙 Quay lại ngữ cảnh" if is_vi else "🔙 Back to context", "videoidea|back_context"),
+    )
 
 def video_idea_result_text(state: dict, choice: int = 1, lang: str = "vi") -> str:
     topic = _short_pending_text(state.get("selected_topic") or state.get("product"), 220) or "chủ đề"
@@ -37925,6 +38384,11 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
     flow = normalize_developing_video_flow(pending.get("flow"))
     step = str(pending.get("step") or "")
     if flow == "promptvideo":
+        if step == "topic_suggestions":
+            set_developing_video_pending(uid, "promptvideo", "choose", selected_topic=text)
+            state = get_developing_video_pending(uid) or {}
+            await update.message.reply_text(prompt_video_choices_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_choices_keyboard(lang))
+            return True
         if step in {"describe", "edit_prompt"}:
             set_developing_video_pending(uid, "promptvideo", "choose", selected_topic=text)
             state = get_developing_video_pending(uid) or {}
@@ -38007,6 +38471,10 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             return True
         return True
     if flow == "longvideo":
+        if step == "topic_suggestions":
+            set_developing_video_pending(uid, "longvideo", "duration", selected_topic=text, topic_key=pending.get("topic_key") or "custom")
+            await update.message.reply_text(long_video_duration_text(text, lang), parse_mode="HTML", reply_markup=long_video_duration_keyboard(lang))
+            return True
         if step == "topic_custom":
             set_developing_video_pending(uid, "longvideo", "duration", selected_topic=text, topic_key="custom")
             await update.message.reply_text(long_video_duration_text(text, lang), parse_mode="HTML", reply_markup=long_video_duration_keyboard(lang))
@@ -38034,6 +38502,14 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
         if step == "product_type_custom":
             set_developing_video_pending(uid, "videoidea", "topic", idea_kind="ad", product_type=text)
             await update.message.reply_text(video_idea_product_description_text(text, lang), parse_mode="HTML", reply_markup=video_idea_product_description_keyboard(lang))
+            return True
+        if step == "product_suggestions":
+            set_developing_video_pending(uid, "videoidea", "goal", idea_kind="ad", product=text, selected_topic=text)
+            await update.message.reply_text(
+                video_idea_goal_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_idea_goal_keyboard(lang),
+            )
             return True
         if step == "topic":
             if kind == "ad":
@@ -38122,12 +38598,44 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
     if action == "kind":
         kind = value if value in {"ad", "cinema", "viral", "custom"} else "custom"
-        set_developing_video_pending(uid, "promptvideo", "describe", prompt_kind=kind)
-        return await safe_edit_or_send(query, prompt_video_description_text({"prompt_kind": kind}, lang), parse_mode="HTML", reply_markup=prompt_video_description_keyboard(lang))
+        if kind == "custom":
+            set_developing_video_pending(uid, "promptvideo", "describe", prompt_kind=kind)
+            return await safe_edit_or_send(query, prompt_video_description_text({"prompt_kind": kind}, lang), parse_mode="HTML", reply_markup=prompt_video_description_keyboard(lang))
+        set_developing_video_pending(uid, "promptvideo", "topic_suggestions", prompt_kind=kind, suggest_offset=0, prompt_variant_offset=0)
+        state = get_developing_video_pending(uid) or {"prompt_kind": kind}
+        return await safe_edit_or_send(query, prompt_video_topic_suggestions_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_topic_suggestions_keyboard(lang))
     pending = get_developing_video_pending(uid)
     plan = get_latest_developing_video_plan(uid, "promptvideo")
     state = pending or plan or {}
+    if action == "topic_refresh":
+        if not state.get("prompt_kind"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        offset = _safe_int(state.get("suggest_offset"), 0) + 3
+        restore_developing_video_pending(uid, "promptvideo", state, "topic_suggestions")
+        set_developing_video_pending(uid, "promptvideo", "topic_suggestions", suggest_offset=offset)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, prompt_video_topic_suggestions_text(current, lang), parse_mode="HTML", reply_markup=prompt_video_topic_suggestions_keyboard(lang))
+    if action == "topic_custom":
+        if not state.get("prompt_kind"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        restore_developing_video_pending(uid, "promptvideo", state, "describe")
+        return await safe_edit_or_send(query, prompt_video_description_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_description_keyboard(lang))
+    if action == "topic_choice":
+        if not state.get("prompt_kind"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        try:
+            idx = max(1, min(3, int(value or "1")))
+        except Exception:
+            idx = 1
+        topics = prompt_video_topic_suggestions(state.get("prompt_kind"), _safe_int(state.get("suggest_offset"), 0), lang)
+        selected = topics[idx - 1] if idx <= len(topics) else (topics[0] if topics else "")
+        set_developing_video_pending(uid, "promptvideo", "choose", selected_topic=selected, selected_suggestion_index=idx)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, prompt_video_choices_text(current, lang), parse_mode="HTML", reply_markup=prompt_video_choices_keyboard(lang))
     if action == "back_description":
+        if state.get("prompt_kind") and state.get("prompt_kind") != "custom":
+            restore_developing_video_pending(uid, "promptvideo", state, "topic_suggestions")
+            return await safe_edit_or_send(query, prompt_video_topic_suggestions_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_topic_suggestions_keyboard(lang))
         restore_developing_video_pending(uid, "promptvideo", state, "describe")
         return await safe_edit_or_send(query, prompt_video_description_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_description_keyboard(lang))
     if action == "back_choices":
@@ -38135,6 +38643,14 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
         restore_developing_video_pending(uid, "promptvideo", state, "choose")
         return await safe_edit_or_send(query, prompt_video_choices_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_choices_keyboard(lang))
+    if action == "prompt_refresh":
+        if not state.get("selected_topic"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        offset = _safe_int(state.get("prompt_variant_offset"), 0) + 3
+        restore_developing_video_pending(uid, "promptvideo", state, "choose")
+        set_developing_video_pending(uid, "promptvideo", "choose", prompt_variant_offset=offset)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, prompt_video_choices_text(current, lang), parse_mode="HTML", reply_markup=prompt_video_choices_keyboard(lang))
     if action == "choose":
         if not state.get("selected_topic"):
             return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
@@ -38345,6 +38861,13 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="selfscene|start")],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
+    if action == "context_refresh":
+        if not pending:
+            return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+        offset = _safe_int(pending.get("suggest_offset"), 0) + 3
+        set_developing_video_pending(uid, "selfscene", "context", suggest_offset=offset)
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_query_message(query, self_scene_context_text(state, lang), reply_markup=self_scene_context_keyboard(lang))
     if action == "context":
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
@@ -38352,7 +38875,7 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             idx = max(1, min(3, int(parts[2] if len(parts) > 2 else "1")))
         except Exception:
             idx = 1
-        options = self_scene_context_suggestions(pending.get("input_type"), pending.get("selected_topic"), lang)
+        options = self_scene_context_suggestions(pending.get("input_type"), pending.get("selected_topic"), lang, _safe_int(pending.get("suggest_offset"), 0))
         selected = options[idx - 1] if idx <= len(options) else options[0]
         set_developing_video_pending(uid, "selfscene", "style", selected_context=selected)
         state = get_developing_video_pending(uid) or {}
@@ -38413,10 +38936,41 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
         ]))
     if action == "topic":
         topic_key = parts[2] if len(parts) > 2 else "sales"
-        topic = long_video_topic_label(topic_key, lang)
-        set_developing_video_pending(uid, "longvideo", "duration", topic_key=topic_key, selected_topic=topic)
-        return await safe_edit_query_message(query, long_video_duration_text(topic, lang), reply_markup=long_video_duration_keyboard(lang))
+        set_developing_video_pending(uid, "longvideo", "topic_suggestions", topic_key=topic_key, suggest_offset=0)
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_query_message(query, long_video_topic_suggestions_text(state, lang), reply_markup=long_video_topic_suggestions_keyboard(lang))
     pending = get_developing_video_pending(uid)
+    if action == "topic_refresh":
+        if not pending:
+            return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+        offset = _safe_int(pending.get("suggest_offset"), 0) + 3
+        set_developing_video_pending(uid, "longvideo", "topic_suggestions", suggest_offset=offset)
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_query_message(query, long_video_topic_suggestions_text(state, lang), reply_markup=long_video_topic_suggestions_keyboard(lang))
+    if action == "topic_choice":
+        if not pending:
+            return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+        try:
+            idx = max(1, min(3, int(parts[2] if len(parts) > 2 else "1")))
+        except Exception:
+            idx = 1
+        options = long_video_topic_suggestions(pending.get("topic_key"), _safe_int(pending.get("suggest_offset"), 0), lang)
+        topic = options[idx - 1] if idx <= len(options) else (options[0] if options else long_video_topic_label(pending.get("topic_key"), lang))
+        set_developing_video_pending(uid, "longvideo", "duration", selected_topic=topic)
+        return await safe_edit_query_message(query, long_video_duration_text(topic, lang), reply_markup=long_video_duration_keyboard(lang))
+    if action == "back_topic_suggestions":
+        if not pending:
+            return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+        restore_developing_video_pending(uid, "longvideo", pending, "topic_suggestions")
+        return await safe_edit_query_message(query, long_video_topic_suggestions_text(pending, lang), reply_markup=long_video_topic_suggestions_keyboard(lang))
+    if action == "back_duration":
+        if not pending:
+            return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+        return await safe_edit_query_message(query, long_video_duration_text(pending.get("selected_topic") or long_video_topic_label(pending.get("topic_key"), lang), lang), reply_markup=long_video_duration_keyboard(lang))
+    if action == "back_style":
+        if not pending:
+            return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+        return await safe_edit_query_message(query, long_video_style_text(pending, lang), reply_markup=long_video_style_keyboard(lang))
     if action == "duration_custom":
         if not pending:
             return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
@@ -38507,12 +39061,40 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
                 "✍️ Hãy nhập loại sản phẩm/dịch vụ." if normalize_user_language(lang) == "vi" else "✍️ Enter the product/service category.",
                 reply_markup=video_idea_product_description_keyboard(lang),
             )
-        set_developing_video_pending(uid, "videoidea", "topic", idea_kind="ad", product_type=value)
-        return await safe_edit_or_send(query, video_idea_product_description_text(value, lang), parse_mode="HTML", reply_markup=video_idea_product_description_keyboard(lang))
+        set_developing_video_pending(uid, "videoidea", "product_suggestions", idea_kind="ad", product_type=value, suggest_offset=0)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, video_idea_product_suggestions_text(current, lang), parse_mode="HTML", reply_markup=video_idea_product_suggestions_keyboard(lang))
+    if action == "product_refresh":
+        if not state.get("product_type"):
+            return await safe_edit_or_send(query, video_idea_product_type_text(lang), parse_mode="HTML", reply_markup=video_idea_product_type_keyboard(lang))
+        offset = _safe_int(state.get("suggest_offset"), 0) + 3
+        restore_developing_video_pending(uid, "videoidea", state, "product_suggestions")
+        set_developing_video_pending(uid, "videoidea", "product_suggestions", suggest_offset=offset)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, video_idea_product_suggestions_text(current, lang), parse_mode="HTML", reply_markup=video_idea_product_suggestions_keyboard(lang))
+    if action == "product_custom":
+        if not state.get("product_type"):
+            return await safe_edit_or_send(query, video_idea_product_type_text(lang), parse_mode="HTML", reply_markup=video_idea_product_type_keyboard(lang))
+        restore_developing_video_pending(uid, "videoidea", state, "topic")
+        return await safe_edit_or_send(query, video_idea_product_description_text(state.get("product_type"), lang), parse_mode="HTML", reply_markup=video_idea_product_description_keyboard(lang))
+    if action == "product_choice":
+        if not state.get("product_type"):
+            return await safe_edit_or_send(query, video_idea_product_type_text(lang), parse_mode="HTML", reply_markup=video_idea_product_type_keyboard(lang))
+        try:
+            idx = max(1, min(3, int(value or "1")))
+        except Exception:
+            idx = 1
+        options = video_idea_product_suggestions(state.get("product_type"), _safe_int(state.get("suggest_offset"), 0), lang)
+        product = options[idx - 1] if idx <= len(options) else (options[0] if options else "")
+        set_developing_video_pending(uid, "videoidea", "goal", idea_kind="ad", product=product, selected_topic=product)
+        return await safe_edit_or_send(query, video_idea_goal_text(lang), parse_mode="HTML", reply_markup=video_idea_goal_keyboard(lang))
     if action == "back_product_type":
         restore_developing_video_pending(uid, "videoidea", state, "product_type")
         return await safe_edit_or_send(query, video_idea_product_type_text(lang), parse_mode="HTML", reply_markup=video_idea_product_type_keyboard(lang))
     if action == "back_description":
+        if state.get("product_type"):
+            restore_developing_video_pending(uid, "videoidea", state, "product_suggestions")
+            return await safe_edit_or_send(query, video_idea_product_suggestions_text(state, lang), parse_mode="HTML", reply_markup=video_idea_product_suggestions_keyboard(lang))
         restore_developing_video_pending(uid, "videoidea", state, "topic")
         return await safe_edit_or_send(query, video_idea_product_description_text(state.get("product_type"), lang), parse_mode="HTML", reply_markup=video_idea_product_description_keyboard(lang))
     if action == "back_goal":
@@ -38525,6 +39107,13 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
         if not plan:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
         return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
+    if action == "idea_refresh":
+        base = dict(plan or state or {})
+        if not base.get("selected_topic") and not base.get("product"):
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        base["prompt_variant_offset"] = str(_safe_int(base.get("prompt_variant_offset"), 0) + 3)
+        refreshed = save_developing_video_plan(uid, "videoidea", base)
+        return await safe_edit_or_send(query, video_idea_choices_text(refreshed, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
     if action == "goal_custom":
         if not pending:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
@@ -38634,7 +39223,12 @@ def menu_text_main_memory() -> str:
         return "📝 <b>GHI CHÚ / TÀI LIỆU</b>\n\nGhi chú và tài liệu đang được admin kiểm tra, sẽ mở sau."
     return (
         "📝 <b>GHI CHÚ / TÀI LIỆU</b>\n\n"
-        "Dùng để lưu ghi chú, ý tưởng, việc cần làm và xử lý nhanh tài liệu/PDF.\n\n"
+        "Dùng để lưu ghi chú, ý tưởng, việc cần làm, nhắc hẹn và xử lý nhanh tài liệu/PDF.\n\n"
+        "<b>Dung lượng miễn phí:</b>\n"
+        + "\n".join(storage_policy_short_lines()) + "\n\n"
+        "<b>Gói mở rộng:</b>\n"
+        + "\n".join(storage_addon_lines()) + "\n\n"
+        "TOAN AAS đang trong giai đoạn đầu nên dung lượng miễn phí còn giới hạn. Khi hạ tầng lưu trữ lớn hơn, TOAN AAS sẽ tăng dung lượng miễn phí và tối ưu giá lưu trữ tốt hơn cho bạn.\n\n"
         "<b>Ghi chú:</b>\n"
         "• <code>/memory</code> — mở kho ghi nhớ\n"
         "• <code>/note &lt;nội dung&gt;</code> — lưu nhanh một ghi chú\n"
@@ -38649,6 +39243,10 @@ def menu_text_main_memory() -> str:
         "• Reply PDF rồi dùng <code>/compress_pdf</code> — nén PDF\n"
         "• Reply PDF rồi dùng <code>/split_pdf 1</code> — tách PDF\n"
         "• <code>/merge_pdf</code> — gộp PDF nếu công cụ đã hỗ trợ\n\n"
+        "<b>Quota:</b>\n"
+        "• Ghi chú text nhỏ vẫn tính dung lượng thật.\n"
+        "• File đính kèm tính đúng size file.\n"
+        "• File tạm không tính vào quota lâu dài nếu tự xóa theo TTL.\n\n"
         "<b>Ví dụ:</b>\n"
         "• <code>/note khách A hỏi báo giá video 500k</code>\n"
         "• <code>/remind 2h gọi lại cho khách A</code>"
@@ -38987,6 +39585,16 @@ def menu_text_main_memory_i18n(lang: str) -> str:
     return (
         "📝 <b>NOTES / DOCUMENTS</b>\n\n"
         "Save notes, ideas, customer details and reminders, or process PDF/document files.\n\n"
+        "<b>Free storage:</b>\n"
+        f"• {NOTES_TEXT_FREE_MB}MB for notes/text/reminders/checklists\n"
+        f"• {FILES_AUDIO_FREE_MB}MB for long-term files/images/audio\n"
+        f"• {TOTAL_FREE_STORAGE_MB}MB total free storage per account\n\n"
+        "<b>Add-on storage:</b>\n"
+        "• +50MB/month: 10.000đ\n"
+        "• +100MB/month: 20.000đ\n"
+        "• +250MB/month: 50.000đ\n"
+        "• +500MB/month: 100.000đ\n\n"
+        "TOAN AAS is still early-stage, so free storage is intentionally limited until larger storage infrastructure is ready.\n\n"
         "<b>Notes:</b>\n"
         "• <code>/memory</code> — open memory\n"
         "• <code>/note &lt;text&gt;</code> — save a note\n"
@@ -38999,7 +39607,8 @@ def menu_text_main_memory_i18n(lang: str) -> str:
         "• Reply to a PDF and use <code>/pdf_to_word</code>\n"
         "• Reply to an image and use <code>/image_to_pdf</code>\n"
         "• Reply to a PDF and use <code>/compress_pdf</code> or <code>/split_pdf 1</code>\n"
-        "• <code>/merge_pdf</code> — merge PDF when the workflow is ready"
+        "• <code>/merge_pdf</code> — merge PDF when the workflow is ready\n\n"
+        "Text notes count by real size. Attachments count by file size. Temporary files do not count as long-term quota when they are auto-cleaned."
     )
 
 def menu_text_main_docs_i18n(lang: str) -> str:
@@ -39158,6 +39767,12 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return menu_text_main_ai_i18n(lang), main_ai_keyboard(lang)
     if action == "main_memory":
         return menu_text_main_memory_i18n(lang), main_memory_keyboard(lang)
+    if action == "memory_storage_status":
+        return memory_status_text(user_id or "__customer__"), memory_storage_nav_keyboard(lang)
+    if action == "memory_storage_addon":
+        return memory_storage_addon_text(), memory_storage_nav_keyboard(lang)
+    if action == "memory_storage_cleanup":
+        return memory_storage_cleanup_text(), memory_storage_nav_keyboard(lang)
     if action == "main_docs":
         return menu_text_main_docs_i18n(lang), main_docs_keyboard(lang)
     if action == "main_image":
@@ -39207,6 +39822,12 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_main_ai(), main_ai_keyboard()
     if action == "main_memory":
         return menu_text_main_memory(), main_memory_keyboard()
+    if action == "memory_storage_status":
+        return memory_status_text("__customer__"), memory_storage_nav_keyboard()
+    if action == "memory_storage_addon":
+        return memory_storage_addon_text(), memory_storage_nav_keyboard()
+    if action == "memory_storage_cleanup":
+        return memory_storage_cleanup_text(), memory_storage_nav_keyboard()
     if action == "main_docs":
         return menu_text_main_docs(), main_docs_keyboard()
     if action == "main_image":
@@ -48401,6 +49022,32 @@ def storyboard_suggest_scripts(idea: str) -> list[dict]:
         },
     ]
 
+def storyboard_default_ideas(offset: int = 0) -> list[str]:
+    ideas = [
+        "Máy xay sinh tố mini màu xanh ngọc, bán cho dân văn phòng, video TikTok 15 giây.",
+        "App AI tạo nội dung cho người mới bán hàng online.",
+        "Khóa học affiliate cho người mới, mục tiêu bán hàng mềm.",
+        "Quán cà phê mới mở, phong cách lifestyle gần gũi.",
+        "Nước hoa nam tối giản, quảng cáo luxury cảm xúc.",
+        "Đèn bàn thông minh cho creator làm việc ban đêm.",
+        "Dịch vụ dựng video ngắn theo tháng cho shop nhỏ.",
+        "Balo du lịch chống nước cho chuyến đi cuối tuần.",
+        "Skincare routine sáng cho người bận rộn.",
+        "Tool automation báo cáo bán hàng cho chủ shop.",
+    ]
+    return video_v6_rotating_items(ideas, offset, 3)
+
+def storyboard_default_scripts(offset: int = 0) -> tuple[str, list[dict]]:
+    ideas = storyboard_default_ideas(offset)
+    idea_text = " / ".join(ideas)
+    scripts = []
+    for idea in ideas:
+        base = storyboard_suggest_scripts(idea)[0]
+        base = dict(base)
+        base["title"] = f"{base.get('title')}: {storyboard_safe_text(idea, 90)}"
+        scripts.append(base)
+    return idea_text, scripts[:3]
+
 def storyboard_scripts_text(idea: str, scripts: list[dict]) -> str:
     lines = ["✨ <b>TOAN AAS gợi ý 3 kịch bản ngắn</b>", "", f"Ý tưởng: <code>{html.escape(storyboard_safe_text(idea, 260))}</code>", ""]
     for idx, item in enumerate(scripts[:3], start=1):
@@ -48416,14 +49063,18 @@ def storyboard_scripts_text(idea: str, scripts: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 def storyboard_scripts_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Chọn kịch bản 1", callback_data="storyboard|select|1")],
-        [InlineKeyboardButton("✅ Chọn kịch bản 2", callback_data="storyboard|select|2")],
-        [InlineKeyboardButton("✅ Chọn kịch bản 3", callback_data="storyboard|select|3")],
-        [InlineKeyboardButton("📝 Gửi kịch bản khác", callback_data="storyboard|script")],
-        [InlineKeyboardButton("✏️ Sửa ý tưởng", callback_data="storyboard|suggest")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    return video_v6_keyboard(
+        [
+            ("✅ Chọn kịch bản 1", "storyboard|select|1"),
+            ("✅ Chọn kịch bản 2", "storyboard|select|2"),
+            ("✅ Chọn kịch bản 3", "storyboard|select|3"),
+            ("🔁 Đổi 3 kịch bản khác", "storyboard|script_refresh"),
+            ("📝 Gửi kịch bản khác", "storyboard|script"),
+            ("✏️ Nhập ý tưởng riêng", "storyboard|idea_custom"),
+        ],
+        "vi",
+        back=("🔙 Quay lại", "storyboard|start"),
+    )
 
 def storyboard_scene_count_text() -> str:
     return (
@@ -48433,13 +49084,16 @@ def storyboard_scene_count_text() -> str:
     )
 
 def storyboard_scene_count_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("3 cảnh — ngắn gọn", callback_data="storyboard|count|3")],
-        [InlineKeyboardButton("5 cảnh — cân bằng", callback_data="storyboard|count|5")],
-        [InlineKeyboardButton("7 cảnh — đầy đủ hơn", callback_data="storyboard|count|7")],
-        [InlineKeyboardButton("🔢 Số khác", callback_data="storyboard|count_custom")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    return video_v6_keyboard(
+        [
+            ("3 cảnh — ngắn gọn", "storyboard|count|3"),
+            ("5 cảnh — cân bằng", "storyboard|count|5"),
+            ("7 cảnh — đầy đủ hơn", "storyboard|count|7"),
+            ("🔢 Số khác", "storyboard|count_custom"),
+        ],
+        "vi",
+        back=("🔙 Quay lại kịch bản", "storyboard|back_scripts"),
+    )
 
 def storyboard_build_scenes(script: str, count: int) -> list[dict]:
     safe_script = storyboard_safe_text(script, 900)
@@ -48481,12 +49135,16 @@ def storyboard_text(scenes: list[dict], project_id: int = 0) -> str:
     return "\n".join(lines).strip()
 
 def storyboard_ready_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Dùng storyboard này", callback_data="storyboard|use")],
-        [InlineKeyboardButton("✏️ Sửa từng cảnh", callback_data="storyboard|edit_scene"), InlineKeyboardButton("🔄 Gợi ý lại", callback_data="storyboard|regen")],
-        [InlineKeyboardButton("🖼 Tôi dùng ảnh có sẵn", callback_data="storyboard|images")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    return video_v6_keyboard(
+        [
+            ("✅ Dùng storyboard này", "storyboard|use"),
+            ("✏️ Sửa từng cảnh", "storyboard|edit_scene"),
+            ("🔄 Gợi ý lại", "storyboard|regen"),
+            ("🖼 Tôi dùng ảnh có sẵn", "storyboard|images"),
+        ],
+        "vi",
+        back=("🔙 Quay lại số cảnh", "storyboard|back_count"),
+    )
 
 def storyboard_image_safe_floor(tier: str = "") -> int:
     payload = image_tier_payload(tier)
@@ -52580,6 +53238,33 @@ async def memory_require_access(update: Update) -> bool:
 def memory_plan_config(plan: str) -> dict:
     return dict(MEMORY_PLANS.get(str(plan or "").lower(), MEMORY_PLANS["free"]))
 
+def storage_mb_label(mb: int | float) -> str:
+    value = float(mb or 0)
+    if value.is_integer():
+        return f"{int(value)}MB"
+    return f"{value:.1f}MB"
+
+def storage_bytes_to_mb_text(value: int | float) -> str:
+    mb = float(value or 0) / (1024 * 1024)
+    if mb >= 10:
+        return f"{mb:.1f}MB"
+    return f"{mb:.2f}MB"
+
+def storage_addon_lines() -> list[str]:
+    return [
+        f"• +50MB/tháng: {STORAGE_ADDON_BLOCK_PRICE_VND:,}đ".replace(",", "."),
+        "• +100MB/tháng: 20.000đ",
+        "• +250MB/tháng: 50.000đ",
+        "• +500MB/tháng: 100.000đ",
+    ]
+
+def storage_policy_short_lines() -> list[str]:
+    return [
+        f"✅ {NOTES_TEXT_FREE_MB}MB cho ghi chú/text/nhắc hẹn",
+        f"✅ {FILES_AUDIO_FREE_MB}MB cho tệp/ảnh/âm thanh lưu lâu dài",
+        f"✅ Tổng {TOTAL_FREE_STORAGE_MB}MB miễn phí cho mỗi tài khoản",
+    ]
+
 def memory_current_period_key() -> str:
     return datetime.now(VN_TZ).strftime("%Y-%m")
 
@@ -52618,7 +53303,7 @@ def ensure_memory_plan(user_id) -> dict:
                 user_id TEXT PRIMARY KEY,
                 plan TEXT DEFAULT 'free',
                 note_limit INTEGER DEFAULT 30,
-                storage_limit_mb INTEGER DEFAULT 5,
+                storage_limit_mb INTEGER DEFAULT 50,
                 ai_classify_monthly_limit INTEGER DEFAULT 10,
                 ai_classify_used INTEGER DEFAULT 0,
                 renew_at TEXT,
@@ -52640,6 +53325,13 @@ def ensure_memory_plan(user_id) -> dict:
         plan, note_limit, storage_limit_mb, ai_limit, ai_used, renew_at = row
         plan = str(plan or "free").lower()
         cfg = memory_plan_config(plan)
+        if plan == "free" and int(storage_limit_mb or 0) < TOTAL_FREE_STORAGE_MB:
+            storage_limit_mb = TOTAL_FREE_STORAGE_MB
+            c.execute(
+                "UPDATE memory_plans SET storage_limit_mb=?, updated_at=? WHERE user_id=?",
+                (TOTAL_FREE_STORAGE_MB, now, uid),
+            )
+            conn.commit()
         if str(renew_at or "") != current_period:
             ai_used = 0
             c.execute(
@@ -52686,17 +53378,31 @@ def memory_note_count(user_id) -> int:
     finally:
         conn.close()
 
-def memory_storage_used_bytes(user_id) -> int:
+def memory_storage_used_breakdown(user_id) -> dict:
     conn = db_connect()
     try:
         row = conn.execute(
-            """SELECT COALESCE(SUM(LENGTH(COALESCE(content,'')) + LENGTH(COALESCE(summary,'')) + COALESCE(file_size,0)),0)
+            """SELECT
+                   COALESCE(SUM(LENGTH(CAST(COALESCE(content,'') AS BLOB)) + LENGTH(CAST(COALESCE(summary,'') AS BLOB))),0),
+                   COALESCE(SUM(COALESCE(file_size,0)),0)
             FROM memory_notes WHERE user_id=? AND is_archived=0""",
             (str(user_id),),
         ).fetchone()
-        return int(row[0] or 0) if row else 0
+        text_bytes = int(row[0] or 0) if row else 0
+        file_bytes = int(row[1] or 0) if row else 0
+        return {
+            "text_bytes": text_bytes,
+            "file_bytes": file_bytes,
+            "total_bytes": text_bytes + file_bytes,
+            "text_mb": text_bytes / (1024 * 1024),
+            "file_mb": file_bytes / (1024 * 1024),
+            "total_mb": (text_bytes + file_bytes) / (1024 * 1024),
+        }
     finally:
         conn.close()
+
+def memory_storage_used_bytes(user_id) -> int:
+    return int(memory_storage_used_breakdown(user_id).get("total_bytes") or 0)
 
 def memory_active_reminder_count(user_id) -> int:
     conn = db_connect()
@@ -52712,19 +53418,33 @@ def memory_active_reminder_count(user_id) -> int:
 def memory_status_payload(user_id) -> dict:
     plan = ensure_memory_plan(user_id)
     notes = memory_note_count(user_id)
-    storage_bytes = memory_storage_used_bytes(user_id)
+    storage = memory_storage_used_breakdown(user_id)
+    storage_bytes = int(storage["total_bytes"])
     ai_limit = int(plan["ai_classify_monthly_limit"])
     ai_used = int(plan["ai_classify_used"])
+    total_limit_mb = max(TOTAL_FREE_STORAGE_MB, int(plan["storage_limit_mb"]))
+    total_limit_bytes = total_limit_mb * 1024 * 1024
+    used_percent = (storage_bytes / total_limit_bytes * 100) if total_limit_bytes > 0 else 0
+    addon_mb = max(0, total_limit_mb - TOTAL_FREE_STORAGE_MB)
     return {
         "plan": plan,
         "notes": notes,
+        "text_bytes": int(storage["text_bytes"]),
+        "file_bytes": int(storage["file_bytes"]),
         "storage_bytes": storage_bytes,
-        "storage_mb": storage_bytes / (1024 * 1024),
+        "text_mb": storage["text_mb"],
+        "file_mb": storage["file_mb"],
+        "storage_mb": storage["total_mb"],
+        "total_limit_mb": total_limit_mb,
+        "total_limit_bytes": total_limit_bytes,
+        "used_percent": used_percent,
+        "addon_mb": addon_mb,
+        "near_quota": used_percent >= STORAGE_NEAR_QUOTA_PERCENT,
         "ai_remaining": max(0, ai_limit - ai_used),
         "active_reminders": memory_active_reminder_count(user_id),
     }
 
-def memory_quota_error(user_id, extra_bytes: int = 0) -> str:
+def memory_quota_error(user_id, extra_bytes: int = 0, extra_kind: str = "text") -> str:
     if is_admin_user(user_id):
         return ""
     status = memory_status_payload(user_id)
@@ -52734,15 +53454,33 @@ def memory_quota_error(user_id, extra_bytes: int = 0) -> str:
             "⚠️ Bạn đã dùng hết số lượng ghi chú của gói hiện tại.\n\n"
             f"• Gói: {plan['plan']}\n"
             f"• Giới hạn: {plan['note_limit']} ghi chú\n\n"
-            "Dùng /memory_plan để xem gói nâng cấp."
+            "Bạn có thể dọn ghi chú cũ hoặc liên hệ admin nếu cần tăng hạn mức."
         )
-    storage_limit = int(plan["storage_limit_mb"]) * 1024 * 1024
-    if status["storage_bytes"] + int(extra_bytes or 0) > storage_limit:
+    extra = max(0, int(extra_bytes or 0))
+    kind = str(extra_kind or "text").lower()
+    if kind in {"text", "note", "reminder", "checklist"} and status["addon_mb"] <= 0 and status["text_bytes"] + extra > NOTES_TEXT_FREE_BYTES:
         return (
-            "⚠️ Kho ghi nhớ đã vượt giới hạn dung lượng gói hiện tại.\n\n"
-            f"• Gói: {plan['plan']}\n"
-            f"• Giới hạn: {plan['storage_limit_mb']}MB\n\n"
-            "Dùng /memory_plan để xem gói nâng cấp."
+            "⚠️ Dung lượng ghi chú/text miễn phí đã đầy.\n\n"
+            f"• Text/ghi chú hiện có: {storage_bytes_to_mb_text(status['text_bytes'])} / {NOTES_TEXT_FREE_MB}MB\n"
+            f"• Nội dung mới: {storage_bytes_to_mb_text(extra)}\n\n"
+            "TOAN AAS chưa lưu nội dung này và chưa trừ Xu.\n"
+            "Bạn có thể dọn ghi chú cũ hoặc mua thêm dung lượng."
+        )
+    if kind in {"file", "image", "audio", "document"} and status["addon_mb"] <= 0 and status["file_bytes"] + extra > FILES_AUDIO_FREE_BYTES:
+        return (
+            "⚠️ Dung lượng tệp/ảnh/âm thanh miễn phí đã đầy.\n\n"
+            f"• Tệp/ảnh/âm thanh hiện có: {storage_bytes_to_mb_text(status['file_bytes'])} / {FILES_AUDIO_FREE_MB}MB\n"
+            f"• File mới: {storage_bytes_to_mb_text(extra)}\n\n"
+            "TOAN AAS chưa lưu file này để tránh vượt dung lượng.\n"
+            "Bạn có thể xóa bớt file cũ hoặc mua thêm dung lượng."
+        )
+    if status["storage_bytes"] + extra > status["total_limit_bytes"]:
+        return (
+            "⚠️ Dung lượng lưu trữ của bạn đã đầy.\n\n"
+            f"• Đã dùng: {storage_bytes_to_mb_text(status['storage_bytes'])} / {status['total_limit_mb']}MB\n"
+            f"• Dữ liệu mới: {storage_bytes_to_mb_text(extra)}\n\n"
+            "TOAN AAS chưa lưu dữ liệu này để tránh vượt dung lượng.\n"
+            "Bạn có thể xóa bớt file cũ hoặc mua thêm dung lượng."
         )
     return ""
 
@@ -52894,27 +53632,36 @@ def memory_list_notes(user_id, where_sql: str = "", params: tuple = (), limit: i
 
 def memory_plan_text() -> str:
     return (
-        "🧠 <b>GÓI KHO GHI NHỚ TOAN AAS</b>\n\n"
-        "<b>Free:</b>\n"
-        "• 30 ghi chú\n• 5MB storage\n• 10 lần AI phân loại/tháng\n• Nhắc nhở cơ bản\n\n"
-        "<b>Lite — 19.000đ/tháng:</b>\n"
-        "• 300 ghi chú\n• 100MB storage\n• 300 lần AI phân loại/tháng\n• Nhắc hằng ngày/hằng tuần\n\n"
-        "<b>Pro — 49.000đ/tháng:</b>\n"
-        "• 2.000 ghi chú\n• 1GB storage\n• 2.000 lần AI phân loại/tháng\n• Export DOCX/PDF sau\n• Nhắc hằng ngày/tuần/tháng\n\n"
-        "<b>Team/VIP — 99.000đ/tháng:</b>\n"
-        "• 10.000 ghi chú\n• 5GB storage\n• 10.000 lần AI phân loại/tháng\n• Tìm kiếm nâng cao/export sau\n• Nhắc hằng ngày/tuần/tháng/năm\n\n"
-        "<b>Xu phụ trợ:</b>\n"
-        "• Lưu note text thường: miễn phí trong quota gói\n"
+        "💾 <b>GHI CHÚ / TÀI LIỆU / LƯU TRỮ TOAN AAS</b>\n\n"
+        "<b>Miễn phí:</b>\n"
+        f"• {NOTES_TEXT_FREE_MB}MB cho ghi chú/text/nhắc hẹn/checklist\n"
+        f"• {FILES_AUDIO_FREE_MB}MB cho tệp/ảnh/âm thanh lưu lâu dài\n"
+        f"• Tổng {TOTAL_FREE_STORAGE_MB}MB miễn phí cho mỗi tài khoản\n\n"
+        "<b>Gói mở rộng:</b>\n"
+        + "\n".join(storage_addon_lines()) + "\n"
+        "• Dung lượng lớn hơn: liên hệ admin hoặc tính theo block +50MB.\n\n"
+        "<b>Lưu ý:</b>\n"
+        f"• File tạm tự xóa sau {STORAGE_TEMP_FILE_TTL_DAYS_MIN}–{STORAGE_TEMP_FILE_TTL_DAYS_MAX} ngày tùy cấu hình và không tính quota lâu dài.\n"
+        "• File/tài liệu user bấm lưu lâu dài mới tính dung lượng.\n"
+        "• TOAN AAS đang ở giai đoạn đầu nên dung lượng miễn phí còn giới hạn; khi hạ tầng lưu trữ lớn hơn, TOAN AAS sẽ tối ưu lại dung lượng và giá.\n\n"
+        "<b>AI phụ trợ:</b>\n"
         f"• AI phân loại/tóm tắt: dùng quota, sau quota {MEMORY_AI_CLASSIFY_COST} Xu/lần\n"
         "• OCR ảnh/audio/export/tìm kiếm AI nâng cao theo cấu hình khi mở.\n"
-        "• Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n\n"
+        "• Xem đầy đủ tại <code>/pricing</code> hoặc <code>/banggia</code>.\n\n"
         "Basic memory dùng được nếu hệ thống đã bật. AI memory nâng cao theo cấu hình/admin test."
     )
 
 def memory_menu_text() -> str:
     return (
-        "🧠 <b>TOAN AAS MEMORY — Kho ghi nhớ AI</b>\n\n"
-        "Lưu ghi chú, ý tưởng, khách hàng, công việc và đặt nhắc nhở tự động.\n\n"
+        "📝 <b>Ghi chú / Tài liệu</b>\n\n"
+        "Bạn có thể lưu ghi chú, checklist, nhắc hẹn và tài liệu quan trọng tại đây.\n\n"
+        "<b>Miễn phí:</b>\n"
+        + "\n".join(storage_policy_short_lines()) + "\n\n"
+        "<b>Gói mở rộng:</b>\n"
+        + "\n".join(storage_addon_lines()) + "\n\n"
+        "<b>Lưu ý nhỏ:</b>\n"
+        "Hiện TOAN AAS vẫn đang trong giai đoạn đầu, dung lượng hạ tầng chưa quá lớn nên phần lưu trữ miễn phí còn giới hạn. "
+        "Mong bạn thông cảm cho sự bất tiện này. Khi hệ thống được nâng cấp lên hạ tầng lưu trữ lớn hơn, TOAN AAS sẽ tăng dung lượng miễn phí và tối ưu giá lưu trữ tốt hơn cho bạn.\n\n"
         "<b>Lệnh nhanh:</b>\n"
         "• <code>/note &lt;nội dung&gt;</code> — lưu ghi chú nhanh\n"
         "• <code>/note_ai &lt;nội dung&gt;</code> — lưu + AI tóm tắt/phân loại\n"
@@ -52929,23 +53676,75 @@ def memory_menu_text() -> str:
         "• <code>/repeat_weekly t2 08:00 &lt;nội dung&gt;</code> — nhắc hằng tuần\n"
         "• <code>/repeat_monthly 1 09:00 &lt;nội dung&gt;</code> — nhắc hằng tháng\n"
         "• <code>/reminders</code> — xem nhắc nhở đang bật\n\n"
-        "Ghi chú thường miễn phí trong quota gói. AI phân loại/tóm tắt dùng quota hoặc Xu.\n"
+        "File tạm không tính vào quota lâu dài nếu tự xóa theo TTL. File user lưu lâu dài mới tính dung lượng.\n"
         "Basic memory dùng được nếu hệ thống đã bật. AI memory nâng cao theo cấu hình/admin test."
     )
 
 def memory_status_text(user_id) -> str:
+    if str(user_id or "") == "__customer__":
+        return (
+            "💾 <b>Dung lượng lưu trữ của bạn</b>\n\n"
+            "• Gói hiện tại: <b>Miễn phí</b>\n"
+            f"• Text/ghi chú: <b>0MB / {NOTES_TEXT_FREE_MB}MB</b>\n"
+            f"• Tệp/ảnh/âm thanh: <b>0MB / {FILES_AUDIO_FREE_MB}MB</b>\n"
+            f"• Tổng đã dùng: <b>0MB / {TOTAL_FREE_STORAGE_MB}MB</b>\n\n"
+            "<b>Gói mở rộng:</b>\n"
+            + "\n".join(storage_addon_lines()[:3])
+        )
     status = memory_status_payload(user_id)
     plan = status["plan"]
+    plan_label = "Miễn phí"
+    if status["addon_mb"] > 0:
+        plan_label = f"Miễn phí + {status['addon_mb']}MB mở rộng"
+    warning = ""
+    if status["near_quota"]:
+        warning = (
+            "\n\n⚠️ Bạn sắp dùng hết dung lượng lưu trữ.\n"
+            "Bạn vẫn có thể tiếp tục dùng ghi chú text nhẹ. Nếu cần lưu thêm tệp/ảnh/âm thanh, hãy mua thêm dung lượng hoặc dọn file cũ."
+        )
     return (
-        "🧠 <b>Memory Status</b>\n\n"
-        f"• Gói: <code>{html.escape(plan['plan'])}</code>\n"
+        "💾 <b>Dung lượng lưu trữ của bạn</b>\n\n"
+        f"• Gói hiện tại: <b>{html.escape(plan_label)}</b>\n"
         f"• Ghi chú: <b>{status['notes']}/{plan['note_limit']}</b>\n"
-        f"• Storage: <b>{status['storage_mb']:.2f}/{plan['storage_limit_mb']}MB</b>\n"
+        f"• Text/ghi chú: <b>{storage_bytes_to_mb_text(status['text_bytes'])} / {NOTES_TEXT_FREE_MB}MB</b>\n"
+        f"• Tệp/ảnh/âm thanh: <b>{storage_bytes_to_mb_text(status['file_bytes'])} / {FILES_AUDIO_FREE_MB}MB</b>\n"
+        f"• Tổng đã dùng: <b>{storage_bytes_to_mb_text(status['storage_bytes'])} / {status['total_limit_mb']}MB</b> ({status['used_percent']:.1f}%)\n"
         f"• AI classify còn lại: <b>{status['ai_remaining']}/{plan['ai_classify_monthly_limit']}</b>\n"
         f"• Reminder active: <b>{status['active_reminders']}</b>\n"
-        "• Basic memory: dùng được nếu hệ thống đã bật\n"
-        "• AI memory nâng cao: theo cấu hình/admin test"
+        "\n<b>Gói mở rộng:</b>\n"
+        + "\n".join(storage_addon_lines()[:3])
+        + warning
     )
+
+def memory_storage_addon_text() -> str:
+    return (
+        "📦 <b>Mua thêm dung lượng</b>\n\n"
+        "Gói mở rộng hiện có:\n"
+        + "\n".join(storage_addon_lines()) + "\n\n"
+        "Thanh toán sẽ dùng hệ thống nạp tiền/thanh toán hiện có của TOAN AAS khi được bật cho add-on lưu trữ.\n"
+        "Hiện tại nếu cần mở dung lượng ngay, vui lòng liên hệ admin. TOAN AAS chưa gọi PayOS và chưa trừ Xu ở màn này."
+    )
+
+def memory_storage_cleanup_text() -> str:
+    return (
+        "🧹 <b>Dọn file cũ</b>\n\n"
+        "Bạn có thể xem ghi chú bằng <code>/notes</code>, tìm lại bằng <code>/search_note</code> rồi xóa/lưu trữ ghi chú không còn cần dùng.\n\n"
+        "File tạm như PDF temp, preview output, cache tải về hoặc video/image temp sẽ không tính quota lâu dài nếu hệ thống tự xóa theo TTL.\n"
+        "TOAN AAS chưa xóa dữ liệu của bạn từ màn này và chưa trừ Xu."
+    )
+
+def memory_storage_nav_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📦 Add storage", callback_data="menu|memory_storage_addon"), InlineKeyboardButton("🧹 Clean old files", callback_data="menu|memory_storage_cleanup")],
+            [InlineKeyboardButton("💾 My storage", callback_data="menu|memory_storage_status"), InlineKeyboardButton("⬅️ Notes / Docs", callback_data="menu|main_memory")],
+            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 Mua thêm dung lượng", callback_data="menu|memory_storage_addon"), InlineKeyboardButton("🧹 Dọn file cũ", callback_data="menu|memory_storage_cleanup")],
+        [InlineKeyboardButton("💾 Dung lượng của tôi", callback_data="menu|memory_storage_status"), InlineKeyboardButton("⬅️ Ghi chú / Tài liệu", callback_data="menu|main_memory")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(memory_menu_text(), parse_mode="HTML")
@@ -52955,7 +53754,62 @@ async def cmd_memory_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_memory_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    await update.message.reply_text(memory_status_text(uid), parse_mode="HTML")
+    await update.message.reply_text(memory_status_text(uid), parse_mode="HTML", reply_markup=memory_storage_nav_keyboard(user_ui_lang(uid)))
+
+async def cmd_storage_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT
+                   COUNT(*),
+                   COALESCE(SUM(LENGTH(CAST(COALESCE(content,'') AS BLOB)) + LENGTH(CAST(COALESCE(summary,'') AS BLOB))),0),
+                   COALESCE(SUM(COALESCE(file_size,0)),0)
+               FROM memory_notes WHERE is_archived=0"""
+        ).fetchone()
+        user_row = conn.execute("SELECT COUNT(DISTINCT user_id) FROM memory_notes WHERE is_archived=0").fetchone()
+    finally:
+        conn.close()
+    note_count = int(row[0] or 0) if row else 0
+    text_bytes = int(row[1] or 0) if row else 0
+    file_bytes = int(row[2] or 0) if row else 0
+    user_count = int(user_row[0] or 0) if user_row else 0
+    text = (
+        "💾 <b>TOAN AAS Storage Status</b>\n\n"
+        "<b>Free quota:</b>\n"
+        f"• Text: <b>{NOTES_TEXT_FREE_MB}MB/user</b>\n"
+        f"• File/audio: <b>{FILES_AUDIO_FREE_MB}MB/user</b>\n"
+        f"• Total: <b>{TOTAL_FREE_STORAGE_MB}MB/user</b>\n\n"
+        "<b>Add-on:</b>\n"
+        f"• +{STORAGE_ADDON_BLOCK_MB}MB/month = <b>{STORAGE_ADDON_BLOCK_PRICE_VND:,}đ</b>\n".replace(",", ".")
+        + "\n<b>System:</b>\n"
+        f"• Users with notes: <b>{user_count}</b>\n"
+        f"• Permanent notes/files rows: <b>{note_count}</b>\n"
+        f"• Text used: <b>{storage_bytes_to_mb_text(text_bytes)}</b>\n"
+        f"• File/audio used: <b>{storage_bytes_to_mb_text(file_bytes)}</b>\n"
+        f"• Temp files: <code>not counted when auto-cleaned by TTL</code>\n"
+        "• No secret/key/token displayed."
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_storage_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    if not context.args:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/storage_user USER_ID</code>", parse_mode="HTML")
+    target_id = str(context.args[0]).strip()
+    await update.message.reply_text(memory_status_text(target_id), parse_mode="HTML")
+
+async def cmd_cleanup_temp_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(
+        "🧹 <b>Cleanup temp files</b>\n\n"
+        f"Policy: file tạm có TTL {STORAGE_TEMP_FILE_TTL_DAYS_MIN}–{STORAGE_TEMP_FILE_TTL_DAYS_MAX} ngày và không tính quota lâu dài nếu tự xóa.\n"
+        "Hotfix này không xóa file trực tiếp để tránh rủi ro dữ liệu. Hãy dùng job cleanup riêng khi đã kiểm tra đường dẫn temp.",
+        parse_mode="HTML",
+    )
 
 async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -53598,7 +54452,9 @@ async def cmd_memory_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• User: <code>{html.escape(target_id)}</code>\n"
         f"• Plan: <code>{html.escape(plan['plan'])}</code>\n"
         f"• Notes: <b>{status['notes']}/{plan['note_limit']}</b>\n"
-        f"• Storage: <b>{status['storage_mb']:.2f}/{plan['storage_limit_mb']}MB</b>\n"
+        f"• Text: <b>{storage_bytes_to_mb_text(status['text_bytes'])}/{NOTES_TEXT_FREE_MB}MB</b>\n"
+        f"• File/audio: <b>{storage_bytes_to_mb_text(status['file_bytes'])}/{FILES_AUDIO_FREE_MB}MB</b>\n"
+        f"• Total storage: <b>{storage_bytes_to_mb_text(status['storage_bytes'])}/{status['total_limit_mb']}MB</b>\n"
         f"• AI used: <b>{int(plan['ai_classify_used'])}/{plan['ai_classify_monthly_limit']}</b>\n"
         f"• Active reminders: <b>{status['active_reminders']}</b>\n\n"
         "Không hiển thị nội dung note để giữ riêng tư.",
@@ -60563,17 +61419,40 @@ async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAU
         return await safe_edit_or_send(query, storyboard_start_text(), parse_mode="HTML", reply_markup=storyboard_start_keyboard())
     if action == "suggest":
         clear_storyboard_state(uid)
+        idea, scripts = storyboard_default_scripts(0)
+        set_storyboard_state(uid, {"step": "script_options", "source_type": "ai_suggested", "idea": idea, "scripts": scripts, "suggest_offset": 0})
+        return await safe_edit_or_send(query, storyboard_scripts_text(idea, scripts), parse_mode="HTML", reply_markup=storyboard_scripts_keyboard())
+    if action == "idea_custom":
+        clear_storyboard_state(uid)
         set_storyboard_state(uid, {"step": "await_idea", "source_type": "ai_suggested"})
-        return await safe_edit_or_send(query, storyboard_idea_request_text(), parse_mode="HTML")
+        return await safe_edit_or_send(query, storyboard_idea_request_text(), parse_mode="HTML", reply_markup=video_v6_keyboard([], "vi", back=("🔙 Quay lại", "storyboard|start")))
     if action == "script":
         clear_storyboard_state(uid)
         set_storyboard_state(uid, {"step": "await_script", "source_type": "user_script"})
-        return await safe_edit_or_send(query, storyboard_script_request_text(), parse_mode="HTML")
+        return await safe_edit_or_send(query, storyboard_script_request_text(), parse_mode="HTML", reply_markup=video_v6_keyboard([], "vi", back=("🔙 Quay lại", "storyboard|start")))
     if action == "images":
         return await storyboard_start_user_images(query, uid)
     state = get_storyboard_state(uid)
     if not state:
         return await safe_edit_or_send(query, "⏰ Storyboard đã hết hạn hoặc đã xử lý. Bot chưa trừ Xu.", parse_mode=None)
+    if action == "script_refresh":
+        offset = _safe_int(state.get("suggest_offset"), 0) + 3
+        idea, scripts = storyboard_default_scripts(offset)
+        state.update({"step": "script_options", "idea": idea, "scripts": scripts, "source_type": "ai_suggested", "suggest_offset": offset})
+        set_storyboard_state(uid, state)
+        return await safe_edit_or_send(query, storyboard_scripts_text(idea, scripts), parse_mode="HTML", reply_markup=storyboard_scripts_keyboard())
+    if action == "back_scripts":
+        scripts = list(state.get("scripts") or [])
+        idea = state.get("idea") or "ý tưởng video"
+        if scripts:
+            state["step"] = "script_options"
+            set_storyboard_state(uid, state)
+            return await safe_edit_or_send(query, storyboard_scripts_text(idea, scripts), parse_mode="HTML", reply_markup=storyboard_scripts_keyboard())
+        return await safe_edit_or_send(query, storyboard_start_text(), parse_mode="HTML", reply_markup=storyboard_start_keyboard())
+    if action == "back_count":
+        state["step"] = "choose_count"
+        set_storyboard_state(uid, state)
+        return await safe_edit_or_send(query, storyboard_scene_count_text(), parse_mode="HTML", reply_markup=storyboard_scene_count_keyboard())
     if action == "select" and len(parts) > 2:
         scripts = list(state.get("scripts") or [])
         idx = max(1, min(3, int(parts[2] or 1))) - 1
@@ -62582,6 +63461,14 @@ def pricing_main_lines() -> list[str]:
         f"• Tách/gộp PDF: <b>{DOC_COSTS.get('split_pdf', 0)} / {DOC_COSTS.get('merge_pdf', 0)} Xu</b>",
         f"• OCR ảnh/PDF: <b>{DOC_COSTS.get('ocr_image', 0)} Xu</b> / <b>{DOC_COSTS.get('ocr_pdf_per_page', 0)} Xu/trang</b>",
     ]
+    storage_items = [
+        "• Ghi chú, checklist, nhắc hẹn dạng text: <b>miễn phí trong quota</b>",
+        f"• Text/ghi chú: <b>{NOTES_TEXT_FREE_MB}MB miễn phí</b>",
+        f"• Tệp/ảnh/âm thanh lưu lâu dài: <b>{FILES_AUDIO_FREE_MB}MB miễn phí</b>",
+        f"• Tổng free storage: <b>{TOTAL_FREE_STORAGE_MB}MB/tài khoản</b>",
+        *storage_addon_lines(),
+        "• File tạm tự xóa theo TTL không tính quota lâu dài. File user lưu lâu dài mới tính dung lượng.",
+    ]
     return [
         "💳 <b>BẢNG GIÁ TOAN AAS</b>",
         "",
@@ -62654,7 +63541,10 @@ def pricing_main_lines() -> list[str]:
         "• Tạo nhạc AI thật: từ <b>300–1.000 Xu</b>, chỉ mở khi provider/giá đã xác nhận.",
         "• Suno/Musicful/MiniMax music: admin-only/planned nếu chưa public.",
         "",
-        "<b>J. Tài liệu / PDF</b>",
+        "<b>J. Ghi chú / Tài liệu / Lưu trữ</b>",
+        *storage_items,
+        "",
+        "<b>Tài liệu / PDF</b>",
         *doc_items,
         "",
         "<b>K. Gói tháng</b>",
@@ -80309,6 +81199,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("memory", cmd_memory))
     tg_app.add_handler(CommandHandler("memory_plan", cmd_memory_plan))
     tg_app.add_handler(CommandHandler("memory_status", cmd_memory_status))
+    tg_app.add_handler(CommandHandler("storage_status", cmd_storage_status))
+    tg_app.add_handler(CommandHandler("storage_user", cmd_storage_user))
+    tg_app.add_handler(CommandHandler("cleanup_temp_files", cmd_cleanup_temp_files))
     tg_app.add_handler(CommandHandler("note", cmd_note))
     tg_app.add_handler(CommandHandler("note_ai", cmd_note_ai))
     tg_app.add_handler(CommandHandler("notes", cmd_notes))

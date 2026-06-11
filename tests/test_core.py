@@ -1986,6 +1986,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Video AI" in pricing_text
     assert "Combo dịch vụ" in pricing_text
     assert "Workflow nội dung theo trend" in pricing_text
+    assert "Ghi chú / Tài liệu / Lưu trữ" in pricing_text
+    assert "Text/ghi chú: <b>10MB miễn phí</b>" in pricing_text
+    assert "Tệp/ảnh/âm thanh lưu lâu dài: <b>40MB miễn phí</b>" in pricing_text
+    assert "Tổng free storage: <b>50MB/tài khoản</b>" in pricing_text
+    assert "+50MB/tháng: 10.000đ" in pricing_text
+    assert "Free 5MB" not in pricing_text
+    assert "Lite — 19.000" not in pricing_text
+    assert "500MB 29.000" not in pricing_text
+    assert "1GB 39.000" not in pricing_text
     assert "provider cost" not in pricing_text.lower()
     assert "tiered_media_pricing" in pricing_text
     price_keyboard_labels = [button.text for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
@@ -2236,6 +2245,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🖼 Ảnh sang PDF" in docs_labels
     memory_labels = [button.text for row in bot.main_memory_keyboard("vi").inline_keyboard for button in row]
     assert "📄 Công cụ tài liệu" in memory_labels
+    assert "📝 Tạo ghi chú" in memory_labels
+    assert "⏰ Nhắc hẹn" in memory_labels
+    assert "📄 Lưu tài liệu" in memory_labels
+    assert "💾 Dung lượng của tôi" in memory_labels
+    assert "📦 Mua thêm dung lượng" in memory_labels
+    assert "🧹 Dọn file cũ" in memory_labels
     assert "📄 PDF sang Word" in memory_labels
     assert "🖼 Ảnh sang PDF" in memory_labels
     assert "🗜 Nén PDF" in memory_labels
@@ -2268,16 +2283,33 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "/image_to_music_video" not in photo_handler_source
     assert "/remove_bg" not in photo_handler_source
     assert "/ai_image_edit" not in photo_handler_source
-    assert [button.text for button in bot.main_memory_keyboard("vi").inline_keyboard[-1]] == ["🧩 Gộp PDF", "⬅️ Về menu chính"]
+    assert ["🧩 Gộp PDF", "⬅️ Về menu chính"] in [
+        [button.text for button in row] for row in bot.main_memory_keyboard("vi").inline_keyboard
+    ]
     merge_section, merge_hint = bot.menu_hint_text("hint_doc_merge_pdf")
     assert merge_section == "main_memory"
     assert "Công cụ gộp PDF đang bảo trì hoặc chưa bật" in merge_hint
     assert "chưa trừ Xu" in merge_hint
     memory_text = bot.menu_text_main_memory()
     assert "TÀI LIỆU" in memory_text
+    assert "10MB cho ghi chú/text/nhắc hẹn" in memory_text
+    assert "40MB cho tệp/ảnh/âm thanh" in memory_text
+    assert "Tổng 50MB miễn phí" in memory_text
+    assert "+50MB/tháng: 10.000đ" in memory_text
+    assert "Ghi chú text nhỏ vẫn tính dung lượng thật" in memory_text
+    assert "File đính kèm tính đúng size file" in memory_text
+    assert "File tạm không tính vào quota lâu dài" in memory_text
     assert "/doc_tools" in memory_text
     assert "/pdf_to_word" in memory_text
     assert "/image_to_pdf" in memory_text
+    memory_plan_text = bot.memory_plan_text()
+    assert "Tổng 50MB miễn phí" in memory_plan_text
+    assert "+100MB/tháng: 20.000đ" in memory_plan_text
+    assert "Lite — 19.000" not in memory_plan_text
+    assert "5MB storage" not in memory_plan_text
+    assert bot.TOTAL_FREE_STORAGE_MB == 50
+    assert bot.NOTES_TEXT_FREE_MB == 10
+    assert bot.FILES_AUDIO_FREE_MB == 40
     topup_labels = [button.text for row in bot.main_topup_keyboard("vi").inline_keyboard for button in row]
     assert "💰 Xem giá" not in topup_labels
     assert [[button.text for button in row] for row in bot.main_topup_keyboard("vi").inline_keyboard] == [
