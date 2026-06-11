@@ -2060,6 +2060,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "máy xay sinh tố mini màu xanh ngọc" in prompt_value
     prompt_output_callbacks = [button.callback_data for row in bot.image_prompt_output_keyboard("vi").inline_keyboard for button in row]
     assert "imgtool|prompt_use" in prompt_output_callbacks
+    assert "imgtool|prompt_change_ratio" in prompt_output_callbacks
     assert "imgtool|prompt_variants" in prompt_output_callbacks
     assert "imgtool|prompt_save" in prompt_output_callbacks
     prompt_tier_callbacks = [button.callback_data for row in bot.image_prompt_tier_keyboard("vi").inline_keyboard for button in row]
@@ -2074,19 +2075,20 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.image_edit_suggestions("background") == ["Nền trắng studio sạch đẹp", "Luxury showroom", "Văn phòng/công nghệ tương lai"]
     edit_prompt = bot.image_edit_prompt_text({"edit_type": "background", "edit_request": "Luxury showroom"})
     assert "Prompt sửa ảnh đã sẵn sàng" in edit_prompt
-    assert "Sửa ảnh AI public" in edit_prompt
+    assert "prompt-only" in edit_prompt
     assert "chưa gọi provider" in edit_prompt and "chưa trừ Xu" in edit_prompt
     assert bot.IMAGE_EDIT_BASIC_XU == 50
     assert bot.IMAGE_EDIT_STANDARD_XU == 200
     resize_choice_labels = [button.text for row in bot.image_resize_choice_keyboard("vi").inline_keyboard for button in row]
-    assert "📐 Đổi tỷ lệ" in resize_choice_labels
+    assert "📐 Đổi tỉ lệ local" in resize_choice_labels
     assert "🖼 Resize pixel" in resize_choice_labels
+    assert "✨ Biến đổi tỉ lệ bằng AI" in resize_choice_labels
     assert "✨ Nâng chất lượng AI" in resize_choice_labels
     assert "🎬 Chuẩn bị ảnh cho video" in resize_choice_labels
     resize_method_labels = [button.text for row in bot.image_resize_method_keyboard("vi").inline_keyboard for button in row]
-    assert "✂️ Crop vừa khung" in resize_method_labels
+    assert resize_method_labels[0] == "🌫 Nền mờ, không cắt chủ thể"
+    assert "✂️ Cắt vừa khung" in resize_method_labels
     assert "⬜ Thêm viền/nền" in resize_method_labels
-    assert "🌫 Nền blur" in resize_method_labels
     assert bot.parse_image_pixel_size("1920x1080") == (1920, 1080)
     assert bot.normalize_image_tool_ratio("9x16") == "9:16"
     if bot.Image is not None:
@@ -4595,6 +4597,140 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
     assert "Bạn muốn tìm nhạc theo phong cách nào" in music_text
     assert "Không tìm thấy kết quả số này" not in music_text
     assert {"1️⃣ Điện ảnh", "2️⃣ Công nghệ", "3️⃣ Viral/TikTok", "4️⃣ Nhẹ nhàng"}.issubset(set(music_buttons))
+
+
+def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
+    source = bot_source_text()
+    callback_source = source_between(source, "async def handle_image_tools_callback", "async def handle_image_menu_pending_text")
+    pending_text_source = source_between(source, "async def handle_image_menu_pending_text", "async def handle_image_menu_pending_photo")
+    resize_source = source_between(source, "async def send_local_resized_image", "def image_upscale_ai_guard_text")
+    document_source = source_between(source, "async def handle_document_cache_only", "async def handle_media")
+
+    base_state = {
+        "goal_code": "product",
+        "subject": "chai nước hoa nam cao cấp",
+        "style": "Luxury showroom",
+        "ratio": "16:9",
+    }
+    prompt_text, prompt_value = bot.build_image_prompt_output(base_state)
+    payload = bot.image_prompt_result_payload(base_state, prompt_value)
+    assert payload["ratio"] == "16:9"
+    assert payload["current_prompt"] == prompt_value
+    assert payload["detail_prompt"] == prompt_value
+    assert payload["image_prompt_current_prompt"] == prompt_value
+    assert payload["image_prompt_selected_ratio"] == "16:9"
+    assert payload["image_prompt_subject"] == "chai nước hoa nam cao cấp"
+    assert "Tỷ lệ:</b> 16:9" in prompt_text
+    changed_ratio = bot.image_prompt_state_with_ratio(payload, "9:16")
+    assert changed_ratio["ratio"] == "9:16"
+    assert "9:16" in changed_ratio["current_prompt"]
+    assert "16:9" not in changed_ratio["current_prompt"]
+
+    prompt_callbacks = [
+        button.callback_data
+        for row in bot.image_prompt_output_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert "imgtool|prompt_use" in prompt_callbacks
+    assert "imgtool|prompt_change_ratio" in prompt_callbacks
+    ratio_callbacks = [
+        button.callback_data
+        for row in bot.image_prompt_ratio_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert "imgtool|prompt_ratio|3x4" in ratio_callbacks
+    assert "imgtool|prompt_ratio|3x2" in ratio_callbacks
+    assert "imgtool|prompt_ratio|4x3" in ratio_callbacks
+
+    variants = bot.image_prompt_variants(payload)
+    assert len(variants) == 3
+    assert all("chai nước hoa nam cao cấp" in item for item in variants)
+    variant_callbacks = [
+        button.callback_data
+        for row in bot.image_prompt_variants_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert variant_callbacks[:3] == [
+        "imgtool|prompt_variant_select|1",
+        "imgtool|prompt_variant_select|2",
+        "imgtool|prompt_variant_select|3",
+    ]
+    assert "selected_ratio" in callback_source
+    assert "show_image_prompt_confirmation(query, uid, tier, prompt, selected_ratio" in callback_source
+    assert "set_media_aspect_pending(uid, \"image\", tier, prompt)" in callback_source
+    assert "prompt_save_variant" in callback_source
+
+    edit_ready = bot.image_edit_ready_text({
+        "file_id": "photo-file",
+        "edit_type": "background",
+        "edit_request": "Nền trắng studio sạch đẹp",
+    })
+    assert "Yêu cầu sửa ảnh đã sẵn sàng" in edit_ready
+    assert "Chỉ tạo prompt sửa ảnh" in edit_ready
+    edit_callbacks = [
+        button.callback_data
+        for row in bot.image_edit_result_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert "imgtool|edit_prompt_output" in edit_callbacks
+    assert "imgtool|edit_ai" in edit_callbacks
+    assert "imgtool|edit_create_new" in edit_callbacks
+    assert "imgtool|edit_save" in edit_callbacks
+    assert "chưa gọi API và chưa trừ Xu" in bot.image_edit_ai_guard_text("vi")
+    assert "không phải sửa trực tiếp ảnh gốc" in bot.image_edit_create_new_text({}, "vi")
+    assert "image_edit_prompt_ready" in bot.IMAGE_MENU_PENDING_ACTIONS
+    assert "image_edit_waiting_action" in bot.IMAGE_MENU_PENDING_ACTIONS
+    assert 'action in {"image_edit_request_custom", "image_edit_prompt_ready", "image_edit_waiting_action"}' in pending_text_source
+    assert "shopaikey_image_generate(" not in callback_source
+
+    resize_labels = [
+        button.text
+        for row in bot.image_resize_choice_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert "📐 Đổi tỉ lệ local" in resize_labels
+    assert "🖼 Resize pixel" in resize_labels
+    assert "✨ Biến đổi tỉ lệ bằng AI" in resize_labels
+    method_labels = [
+        button.text
+        for row in bot.image_resize_method_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert method_labels[0] == "🌫 Nền mờ, không cắt chủ thể"
+    assert "chưa gọi API và chưa trừ Xu" in bot.image_aspect_ai_guard_text("vi")
+    assert "image_action_waiting_text" in resize_source
+    assert "acquire_image_action_lock" in resize_source
+    assert "release_image_action_lock" in resize_source
+    assert "handle_image_menu_pending_document(update, context)" in document_source
+
+    bot.IMAGE_ACTION_LOCKS.clear()
+    assert bot.acquire_image_action_lock("u-image", "resize_ratio", "file:16:9:blur") is True
+    assert bot.acquire_image_action_lock("u-image", "resize_ratio", "file:16:9:blur") is False
+    bot.release_image_action_lock("u-image", "resize_ratio", "file:16:9:blur")
+    assert bot.acquire_image_action_lock("u-image", "resize_ratio", "file:16:9:blur") is True
+    bot.release_image_action_lock("u-image", "resize_ratio", "file:16:9:blur")
+
+    if bot.Image is not None:
+        source_image = bot.Image.new("RGBA", (640, 480), (10, 120, 200, 180))
+        source_buffer = io.BytesIO()
+        source_image.save(source_buffer, format="WEBP")
+        for ratio, expected_size in {
+            "16:9": (1920, 1080),
+            "9:16": (1080, 1920),
+            "1:1": (1024, 1024),
+            "4:5": (1080, 1350),
+        }.items():
+            ok, output, size_text, method = bot.process_image_local_resize_bytes(
+                source_buffer.getvalue(),
+                ratio,
+                "blur",
+            )
+            assert ok is True
+            assert size_text == f"{expected_size[0]}x{expected_size[1]}"
+            assert method == "blur"
+            with bot.Image.open(io.BytesIO(output)) as rendered:
+                assert rendered.size == expected_size
+                assert rendered.mode == "RGB"
 
 
 def test_video_order_api_returns_machine_readable_handoff(monkeypatch):
