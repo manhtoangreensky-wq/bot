@@ -1770,8 +1770,31 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert size_16x9["width"] > size_16x9["height"]
     assert bot.get_image_size_for_ratio("9:16", "low", "shopaikey")["size_string"] == "768x1344"
     assert bot.get_image_size_for_ratio("16:9", "low", "gemini-2.5-flash-image")["size_string"] == "1344x768"
-    assert bot.get_image_size_for_ratio("2:1", "low", "shopaikey")["provider_supported"] is False
+    assert bot.get_image_size_for_ratio("2:1", "low", "shopaikey")["ratio"] == "1:1"
+    assert bot.normalize_image_aspect_ratio("square") == "1:1"
+    assert bot.normalize_image_aspect_ratio("portrait") == "9:16"
+    assert bot.normalize_image_aspect_ratio("vertical") == "9:16"
+    assert bot.normalize_image_aspect_ratio("landscape") == "16:9"
+    assert bot.normalize_image_aspect_ratio("horizontal") == "16:9"
+    assert bot.normalize_image_aspect_ratio("1024x1024") == "1:1"
+    assert bot.normalize_image_aspect_ratio("auto") == "1:1"
+    assert bot.normalize_image_aspect_ratio(None) == "1:1"
+    assert bot.normalize_image_aspect_ratio("1:1") == "1:1"
+    assert bot.normalize_image_aspect_ratio("9:16") == "9:16"
+    assert bot.normalize_image_aspect_ratio("16:9") == "16:9"
+    assert bot.normalize_image_aspect_ratio("4:5") == "4:5"
+    assert bot.normalize_image_aspect_ratio("invalid_value") == "1:1"
+    shopaikey_payload = bot.build_shopaikey_google_image_payload("p", "nano-banana", "16:9")
+    assert shopaikey_payload["size"] == "16:9"
+    assert "aspect_ratio" not in shopaikey_payload
+    assert "aspectRatio" not in shopaikey_payload
+    assert "1344x768" not in shopaikey_payload.values()
+    google_payload = bot.build_google_genai_image_payload("p", "gemini-image", "16:9")
+    assert google_payload["generationConfig"]["responseFormat"]["image"]["aspectRatio"] == "16:9"
+    assert google_payload["generationConfig"]["responseFormat"]["image"]["imageSize"] == "2K"
+    assert "size" not in google_payload
     assert bot.infer_image_aspect_ratio_from_prompt("Product scene. Aspect ratio 4:5. No watermark.") == "4:5"
+    assert bot.infer_image_aspect_ratio_from_prompt("Wide cinematic banner 21:9") == "21:9"
     assert bot.shopaikey_image_model_sequence("nano-banana", "gemini-2.5-flash-image,nano-banana,gemini-2.0-flash-preview-image-generation") == [
         "nano-banana",
         "gemini-2.5-flash-image",
@@ -1779,9 +1802,17 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     ]
     assert bot.shopaikey_image_model_invalid_error(429, "Model not found or invalid")
     assert bot.shopaikey_classify_error(429, "Model not found or invalid") == "FAIL_MODEL_INVALID"
+    shopaikey_builder_source = source_between(bot_source_text(), "def build_shopaikey_google_image_payload", "def build_google_genai_image_payload")
+    assert '"size": normalized_ratio' in shopaikey_builder_source
+    assert '"aspect_ratio"' not in shopaikey_builder_source
+    assert '"aspectRatio"' not in shopaikey_builder_source
+    assert 'size_info["size_string"]' not in shopaikey_builder_source
     image_generate_source = source_between(bot_source_text(), "async def shopaikey_image_generate", "async def shopaikey_image_smoke_test")
-    assert '"size": "9:16"' not in image_generate_source
-    assert '"size": size_info["size_string"]' in image_generate_source
+    assert "build_shopaikey_google_image_payload" in image_generate_source
+    assert '"aspect_ratio": provider_aspect_ratio' not in image_generate_source
+    assert '"aspectRatio": provider_aspect_ratio' not in image_generate_source
+    assert "payload_mode" in image_generate_source
+    assert "field_used" in image_generate_source
     assert "get_image_size_for_ratio" in image_generate_source
     assert "shopaikey_image_output_from_payload" in image_generate_source
     assert "models_tried" in image_generate_source
@@ -1790,6 +1821,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     image_smoke_source = source_between(bot_source_text(), "async def cmd_tool_test_shopaikey_image", "async def cmd_tool_test_shopaikey_video")
     assert "context.args" in image_smoke_source
     assert "Ratio requested" in image_smoke_source
+    assert "Payload mode" in image_smoke_source
+    assert "Field used" in image_smoke_source
+    assert "aspect_ratio sent" in image_smoke_source
+    assert "aspectRatio sent" in image_smoke_source
     assert "Size sent" in image_smoke_source
     assert "Models tried" in image_smoke_source
     assert "Final model" in image_smoke_source

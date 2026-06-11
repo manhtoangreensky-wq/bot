@@ -29130,15 +29130,61 @@ def image_tier_public_status_text() -> str:
 
 MEDIA_VIDEO_ASPECT_RATIOS = ("9:16", "16:9", "1:1", "4:5", "3:4")
 MEDIA_IMAGE_ASPECT_RATIOS = ("9:16", "16:9", "1:1", "4:5", "3:4", "3:2", "4:3")
+ALLOWED_NANO_BANANA_ASPECT_RATIOS = {
+    "1:1",
+    "1:4",
+    "1:8",
+    "2:3",
+    "3:2",
+    "3:4",
+    "4:1",
+    "4:3",
+    "4:5",
+    "5:4",
+    "8:1",
+    "9:16",
+    "16:9",
+    "21:9",
+}
+RATIO_ALIASES = {
+    "": "1:1",
+    "default": "1:1",
+    "auto": "1:1",
+    "none": "1:1",
+    "square": "1:1",
+    "1x1": "1:1",
+    "1024x1024": "1:1",
+    "1024:1024": "1:1",
+    "portrait": "9:16",
+    "vertical": "9:16",
+    "story": "9:16",
+    "reels": "9:16",
+    "tiktok": "9:16",
+    "landscape": "16:9",
+    "horizontal": "16:9",
+    "youtube": "16:9",
+    "post": "4:5",
+    "facebook": "4:5",
+    "instagram": "4:5",
+}
 IMAGE_RATIO_UNSUPPORTED_MESSAGE = "⚠️ Tỷ lệ ảnh này hiện chưa được provider hỗ trợ ổn định. Vui lòng chọn 9:16, 1:1 hoặc thử lại sau."
+SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE = "shopaikey_google_custom"
+GOOGLE_GENAI_IMAGE_PAYLOAD_MODE = "google_genai_direct"
 SHOPAIKEY_IMAGE_SIZE_BY_RATIO = {
     "9:16": (768, 1344),
     "16:9": (1344, 768),
     "1:1": (1024, 1024),
+    "1:4": (512, 2048),
+    "1:8": (256, 2048),
+    "2:3": (896, 1344),
     "4:5": (1024, 1280),
     "3:4": (960, 1280),
     "3:2": (1200, 800),
+    "4:1": (2048, 512),
     "4:3": (1024, 768),
+    "5:4": (1280, 1024),
+    "8:1": (2048, 256),
+    "21:9": (1536, 658),
 }
 
 def media_aspect_ratio_options(kind: str = "video") -> tuple[str, ...]:
@@ -29157,6 +29203,81 @@ def media_aspect_ratio_token(aspect_ratio: str = "") -> str:
 
 def media_aspect_ratio_from_token(token: str = "", kind: str = "video") -> str:
     return normalize_media_aspect_ratio(token, "9:16", kind)
+
+def nearest_nano_banana_aspect_ratio(width: int, height: int) -> str:
+    if width <= 0 or height <= 0:
+        return "1:1"
+    value = float(width) / float(height)
+    best = "1:1"
+    best_delta = 10**9
+    for ratio in ALLOWED_NANO_BANANA_ASPECT_RATIOS:
+        left, right = ratio.split(":", 1)
+        target = float(left) / float(right)
+        delta = abs(value - target)
+        if delta < best_delta:
+            best = ratio
+            best_delta = delta
+    return best
+
+def normalize_image_aspect_ratio(value: str | None) -> str:
+    if value is None:
+        return "1:1"
+    raw = str(value or "").strip().lower()
+    compact = raw.replace(" ", "").replace("×", "x")
+    if compact in RATIO_ALIASES:
+        return RATIO_ALIASES[compact]
+    ratio = compact.replace("x", ":")
+    if ratio in ALLOWED_NANO_BANANA_ASPECT_RATIOS:
+        return ratio
+    match = re.fullmatch(r"(\d{2,5})[:x](\d{2,5})", compact)
+    if match:
+        return nearest_nano_banana_aspect_ratio(int(match.group(1)), int(match.group(2)))
+    return "1:1"
+
+def build_shopaikey_google_image_payload(
+    prompt: str,
+    model: str,
+    ratio: str | None,
+    **kwargs,
+) -> dict:
+    """ShopAIKey /images/google/generations custom endpoint uses size as an aspect-ratio token."""
+    normalized_ratio = normalize_image_aspect_ratio(ratio)
+    return {
+        "model": str(model or SHOPAIKEY_IMAGE_MODEL_PRIMARY or SHOPAIKEY_IMAGE_MODEL or "nano-banana").strip(),
+        "prompt": str(prompt or "").strip(),
+        "size": normalized_ratio,
+        "format": str(kwargs.get("format") or "png"),
+        "response_format": str(kwargs.get("response_format") or "url"),
+        "image_urls": kwargs.get("image_urls") if isinstance(kwargs.get("image_urls"), list) else [],
+    }
+
+def build_google_genai_image_payload(
+    prompt: str,
+    model: str,
+    ratio: str | None,
+    image_size: str = "2K",
+    **_kwargs,
+) -> dict:
+    """Prepared for direct Google GenAI image calls; not used by ShopAIKey custom endpoint."""
+    normalized_ratio = normalize_image_aspect_ratio(ratio)
+    return {
+        "model": str(model or "").strip(),
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": str(prompt or "").strip()}],
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+            "responseFormat": {
+                "image": {
+                    "aspectRatio": normalized_ratio,
+                    "imageSize": str(image_size or "2K"),
+                }
+            },
+        },
+    }
 
 def media_aspect_ratio_label(aspect_ratio: str = "", kind: str = "video", lang: str = "vi") -> str:
     aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", kind)
@@ -29189,13 +29310,12 @@ def normalize_image_provider_key(provider: str = "") -> str:
 
 def get_image_size_for_ratio(ratio: str, tier: str = "", provider: str = "") -> dict:
     provider_key = normalize_image_provider_key(provider)
-    raw_ratio = str(ratio or "").strip().lower().replace("x", ":").replace(" ", "")
-    requested = raw_ratio if raw_ratio in set(MEDIA_IMAGE_ASPECT_RATIOS) else ("9:16" if not raw_ratio else raw_ratio)
+    requested = normalize_image_aspect_ratio(ratio) if provider_key == "shopaikey" else normalize_media_aspect_ratio(ratio, "1:1", "image")
     mapping = SHOPAIKEY_IMAGE_SIZE_BY_RATIO if provider_key == "shopaikey" else {}
-    provider_supported = requested in mapping
-    final_ratio = requested if provider_supported else "9:16"
-    width, height = mapping.get(final_ratio, SHOPAIKEY_IMAGE_SIZE_BY_RATIO["9:16"])
-    fallback_note = "" if provider_supported else IMAGE_RATIO_UNSUPPORTED_MESSAGE
+    provider_supported = requested in ALLOWED_NANO_BANANA_ASPECT_RATIOS if provider_key == "shopaikey" else requested in mapping
+    final_ratio = requested if provider_supported else "1:1"
+    width, height = mapping.get(final_ratio, SHOPAIKEY_IMAGE_SIZE_BY_RATIO["1:1"])
+    fallback_note = "" if provider_supported else "invalid aspect_ratio normalized to 1:1"
     return {
         "width": int(width),
         "height": int(height),
@@ -29212,11 +29332,11 @@ def infer_image_aspect_ratio_from_prompt(prompt: str = "", default: str = "9:16"
     text = str(prompt or "")
     match = re.search(r"\bAspect\s+ratio\s+([0-9]+\s*[:x]\s*[0-9]+)", text, flags=re.IGNORECASE)
     if match:
-        return normalize_media_aspect_ratio(match.group(1), default, "image")
-    for ratio in MEDIA_IMAGE_ASPECT_RATIOS:
+        return normalize_image_aspect_ratio(match.group(1))
+    for ratio in sorted(ALLOWED_NANO_BANANA_ASPECT_RATIOS, key=len, reverse=True):
         if re.search(rf"(?<!\d){re.escape(ratio)}(?!\d)", text):
-            return normalize_media_aspect_ratio(ratio, default, "image")
-    return normalize_media_aspect_ratio(default, "9:16", "image")
+            return normalize_image_aspect_ratio(ratio)
+    return normalize_image_aspect_ratio(default)
 
 def image_aspect_result_line(aspect_ratio: str = "", lang: str = "vi") -> str:
     label = media_aspect_ratio_label(aspect_ratio, "image", lang)
@@ -30376,6 +30496,24 @@ def public_image_provider_fail_message(amount_xu: int = 0, refund_done: bool = F
         return ui_text(lang, "image.fail.refunded", amount=amount)
     return ui_text(lang, "image.fail.refund_failed")
 
+def shopaikey_image_debug_detail(result: dict, requested_aspect_ratio: str = "") -> str:
+    result = result or {}
+    return (
+        f"model={result.get('model') or '-'}; final_model={result.get('final_model') or result.get('model') or '-'}; "
+        f"models_tried={','.join(result.get('models_tried') or []) or '-'}; fallback_used={'yes' if result.get('fallback_used') else 'no'}; "
+        f"http={int(result.get('http_status') or 0)}; status={result.get('status') or '-'}; "
+        f"payload_mode={result.get('payload_mode') or SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE}; "
+        f"field_used={result.get('field_used') or 'size'}; "
+        f"requested_aspect_ratio={requested_aspect_ratio or result.get('requested_aspect_ratio') or '-'}; "
+        f"normalized_aspect_ratio={result.get('normalized_aspect_ratio') or result.get('aspect_ratio') or '-'}; "
+        f"aspect_ratio_sent={result.get('aspect_ratio_sent') or 'none'}; "
+        f"aspectRatio_sent={result.get('aspectRatio_sent') or 'none'}; "
+        f"size_sent={result.get('size_sent') or '-'}; render_size={result.get('render_size') or '-'}; "
+        f"output_url={'yes' if result.get('image_url') else 'no'}; output_b64={'yes' if result.get('b64_json') else 'no'}; "
+        f"error_class={result.get('error_class') or '-'}; provider_error_code={result.get('provider_error_code') or '-'}; "
+        f"detail={shopaikey_sanitize_error(str(result.get('detail') or '-'))[:220]}"
+    )
+
 async def alert_public_image_refund_failure(
     context: ContextTypes.DEFAULT_TYPE,
     user_id,
@@ -31038,8 +31176,10 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
     model_name = model_sequence[0]
     models_tried: list[str] = []
     attempts: list[dict] = []
-    inferred_ratio = str(aspect_ratio or infer_image_aspect_ratio_from_prompt(prompt, "9:16") or "9:16").strip()
-    size_info = get_image_size_for_ratio(inferred_ratio, tier, "shopaikey")
+    requested_aspect_ratio = str(aspect_ratio if aspect_ratio is not None else "").strip()
+    inferred_ratio = str(aspect_ratio or infer_image_aspect_ratio_from_prompt(prompt, "1:1") or "1:1").strip()
+    provider_aspect_ratio = normalize_image_aspect_ratio(inferred_ratio)
+    size_info = get_image_size_for_ratio(provider_aspect_ratio, tier, "shopaikey")
     if not SHOPAIKEY_API_KEY:
         return {
             "status": "MISSING",
@@ -31052,7 +31192,14 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             "fallback_used": False,
             "size": size_info["size_string"],
             "aspect_ratio": size_info["ratio"],
-            "size_sent": size_info["size_string"],
+            "requested_aspect_ratio": requested_aspect_ratio or inferred_ratio,
+            "normalized_aspect_ratio": provider_aspect_ratio,
+            "payload_mode": SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE,
+            "field_used": "size",
+            "aspect_ratio_sent": "none",
+            "aspectRatio_sent": "none",
+            "size_sent": provider_aspect_ratio,
+            "render_size": size_info["size_string"],
             "error_class": "missing_api_key",
             "detail": "SHOPAIKEY_API_KEY missing",
         }
@@ -31069,7 +31216,14 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             "fallback_used": False,
             "size": size_info["size_string"],
             "aspect_ratio": size_info["ratio"],
-            "size_sent": size_info["size_string"],
+            "requested_aspect_ratio": requested_aspect_ratio or inferred_ratio,
+            "normalized_aspect_ratio": provider_aspect_ratio,
+            "payload_mode": SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE,
+            "field_used": "size",
+            "aspect_ratio_sent": "none",
+            "aspectRatio_sent": "none",
+            "size_sent": provider_aspect_ratio,
+            "render_size": size_info["size_string"],
             "image_url": "",
             "provider_error_code": "",
             "error_class": "empty_prompt",
@@ -31087,7 +31241,14 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             "fallback_used": False,
             "size": size_info["size_string"],
             "aspect_ratio": size_info["ratio"],
-            "size_sent": size_info["size_string"],
+            "requested_aspect_ratio": requested_aspect_ratio or inferred_ratio,
+            "normalized_aspect_ratio": provider_aspect_ratio,
+            "payload_mode": SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE,
+            "field_used": "size",
+            "aspect_ratio_sent": "none",
+            "aspectRatio_sent": "none",
+            "size_sent": provider_aspect_ratio,
+            "render_size": size_info["size_string"],
             "image_url": "",
             "provider_error_code": "UNSUPPORTED_ASPECT_RATIO",
             "error_class": "FAIL_UNSUPPORTED_ASPECT",
@@ -31100,14 +31261,7 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             continue
         models_tried.append(model_candidate)
         started = time.perf_counter()
-        payload = {
-            "model": model_candidate,
-            "prompt": safe_prompt,
-            "size": size_info["size_string"],
-            "format": "png",
-            "response_format": "url",
-            "image_urls": [],
-        }
+        payload = build_shopaikey_google_image_payload(safe_prompt, model_candidate, provider_aspect_ratio)
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 res = await client.post(
@@ -31138,12 +31292,19 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
                         "fallback_used": index > 0,
                         "size": size,
                         "aspect_ratio": size_info["ratio"],
+                        "requested_aspect_ratio": requested_aspect_ratio or inferred_ratio,
+                        "normalized_aspect_ratio": provider_aspect_ratio,
+                        "payload_mode": SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE,
+                        "field_used": "size",
+                        "aspect_ratio_sent": "none",
+                        "aspectRatio_sent": "none",
                         "size_sent": payload["size"],
+                        "render_size": size_info["size_string"],
                         "image_url": image_url,
                         "b64_json": b64_json,
                         "provider_error_code": "",
                         "error_class": "",
-                        "detail": f"model={payload['model']}; models_tried={','.join(models_tried)}; fallback_used={'yes' if index > 0 else 'no'}; http={res.status_code}; latency_ms={latency_ms}; ratio={size_info['ratio']}; size_sent={payload['size']}; size={size}; output_url={'yes' if image_url else 'no'}; output_b64={'yes' if b64_json else 'no'}",
+                        "detail": f"model={payload['model']}; models_tried={','.join(models_tried)}; fallback_used={'yes' if index > 0 else 'no'}; http={res.status_code}; latency_ms={latency_ms}; payload_mode={SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE}; field_used=size; requested_aspect_ratio={requested_aspect_ratio or inferred_ratio}; normalized_aspect_ratio={provider_aspect_ratio}; aspect_ratio_sent=none; aspectRatio_sent=none; size_sent={payload['size']}; render_size={size_info['size_string']}; size={size}; output_url={'yes' if image_url else 'no'}; output_b64={'yes' if b64_json else 'no'}",
                     }
                     return result
                 status = "FAIL_NO_IMAGE_URL"
@@ -31159,7 +31320,14 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
                     "fallback_used": index > 0,
                     "size": size,
                     "aspect_ratio": size_info["ratio"],
+                    "requested_aspect_ratio": requested_aspect_ratio or inferred_ratio,
+                    "normalized_aspect_ratio": provider_aspect_ratio,
+                    "payload_mode": SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE,
+                    "field_used": "size",
+                    "aspect_ratio_sent": "none",
+                    "aspectRatio_sent": "none",
                     "size_sent": payload["size"],
+                    "render_size": size_info["size_string"],
                     "image_url": "",
                     "b64_json": "",
                     "provider_error_code": "",
@@ -31183,7 +31351,14 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
                 "fallback_used": index > 0,
                 "size": payload["size"],
                 "aspect_ratio": size_info["ratio"],
+                "requested_aspect_ratio": requested_aspect_ratio or inferred_ratio,
+                "normalized_aspect_ratio": provider_aspect_ratio,
+                "payload_mode": SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE,
+                "field_used": "size",
+                "aspect_ratio_sent": "none",
+                "aspectRatio_sent": "none",
                 "size_sent": payload["size"],
+                "render_size": size_info["size_string"],
                 "image_url": "",
                 "b64_json": "",
                 "provider_error_code": provider_code,
@@ -31209,7 +31384,14 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
                 "fallback_used": index > 0,
                 "size": payload["size"],
                 "aspect_ratio": size_info["ratio"],
+                "requested_aspect_ratio": requested_aspect_ratio or inferred_ratio,
+                "normalized_aspect_ratio": provider_aspect_ratio,
+                "payload_mode": SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE,
+                "field_used": "size",
+                "aspect_ratio_sent": "none",
+                "aspectRatio_sent": "none",
                 "size_sent": payload["size"],
+                "render_size": size_info["size_string"],
                 "image_url": "",
                 "b64_json": "",
                 "provider_error_code": "",
@@ -31228,7 +31410,14 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             "final_model": model_name,
             "size": size_info["size_string"],
             "aspect_ratio": size_info["ratio"],
-            "size_sent": size_info["size_string"],
+            "requested_aspect_ratio": requested_aspect_ratio or inferred_ratio,
+            "normalized_aspect_ratio": provider_aspect_ratio,
+            "payload_mode": SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE,
+            "field_used": "size",
+            "aspect_ratio_sent": "none",
+            "aspectRatio_sent": "none",
+            "size_sent": provider_aspect_ratio,
+            "render_size": size_info["size_string"],
             "image_url": "",
             "b64_json": "",
             "provider_error_code": "NO_IMAGE_MODEL",
@@ -31239,9 +31428,22 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
     last_result["attempts"] = list(attempts)
     last_result["fallback_used"] = bool(last_result.get("fallback_used") or (len(models_tried) > 1 and str(last_result.get("model") or "") != str(model_sequence[0] or "")))
     last_result["final_model"] = last_result.get("model") or last_result.get("final_model") or model_name
+    last_result.setdefault("payload_mode", SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE)
+    last_result.setdefault("field_used", "size")
+    last_result.setdefault("aspect_ratio_sent", "none")
+    last_result.setdefault("aspectRatio_sent", "none")
+    last_result.setdefault("size_sent", provider_aspect_ratio)
+    last_result.setdefault("render_size", size_info["size_string"])
     detail = str(last_result.get("detail") or "")
     if "models_tried=" not in detail:
         last_result["detail"] = f"{detail}; models_tried={','.join(last_result['models_tried'])}; fallback_used={'yes' if last_result.get('fallback_used') else 'no'}".strip("; ")
+    if "aspect_ratio_sent=" not in str(last_result.get("detail") or ""):
+        last_result["detail"] = (
+            f"{last_result.get('detail') or ''}; requested_aspect_ratio={requested_aspect_ratio or inferred_ratio}; "
+            f"normalized_aspect_ratio={provider_aspect_ratio}; payload_mode={SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE}; "
+            f"field_used=size; aspect_ratio_sent=none; aspectRatio_sent=none; size_sent={provider_aspect_ratio}; "
+            f"render_size={size_info['size_string']}"
+        ).strip("; ")
     return last_result
 
 async def shopaikey_image_smoke_test(aspect_ratio: str = "9:16", model: str = "") -> dict:
@@ -37708,6 +37910,9 @@ async def cmd_image_provider_status(update: Update, context: ContextTypes.DEFAUL
             last_error = event
             break
     last_debug = latest_api_debug_event("shopaikey", ["tool_test_shopaikey_image", "quick_image_test", "shopaikey_image"])
+    detail_map = parse_key_value_detail(str((last_debug or {}).get("detail") or ""))
+    image_endpoint_path = "/images/google/generations" if "images/google/generations" in str(SHOPAIKEY_IMAGE_URL or "") else str(SHOPAIKEY_IMAGE_URL or "missing")
+    last_provider_message = detail_map.get("detail") or str(last_error.get("message") or "-")
     ratio_parts = []
     for ratio in media_aspect_ratio_options("image"):
         info = get_image_size_for_ratio(ratio, "low", "shopaikey")
@@ -37717,7 +37922,13 @@ async def cmd_image_provider_status(update: Update, context: ContextTypes.DEFAUL
         "",
         f"• Public image: <code>{'enabled' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'disabled'}</code>",
         "• Provider: <code>ShopAIKey</code>",
-        f"• Image endpoint: <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
+        f"• Endpoint: <code>{html.escape(image_endpoint_path)}</code>",
+        f"• Payload mode: <code>{html.escape(detail_map.get('payload_mode') or SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE)}</code>",
+        f"• Field used: <code>{html.escape(detail_map.get('field_used') or 'size')}</code>",
+        f"• Last size sent: <code>{html.escape(detail_map.get('size_sent') or '-')}</code>",
+        f"• aspect_ratio sent: <code>{html.escape(detail_map.get('aspect_ratio_sent') or 'none')}</code>",
+        f"• aspectRatio sent: <code>{html.escape(detail_map.get('aspectRatio_sent') or 'none')}</code>",
+        "• Google GenAI direct: <code>disabled/not_configured</code>",
         f"• Image model primary: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL_PRIMARY or 'nano-banana')}</code>",
         f"• Image model fallbacks: <code>{html.escape(', '.join(shopaikey_image_model_sequence()[1:]) or '-')}</code>",
         f"• API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}</code>",
@@ -37728,6 +37939,7 @@ async def cmd_image_provider_status(update: Update, context: ContextTypes.DEFAUL
         f"• Provider freeze: <code>{'ON' if provider_freeze.get('frozen') else 'OFF'}</code>",
         f"• Last image error type: <code>{html.escape(str(last_error.get('code') or '-'))}</code>",
         f"• Last image error time: <code>{html.escape(str(last_error.get('created_at') or '-'))}</code>",
+        f"• Last provider message summary: <code>{html.escape(str(last_provider_message or '-')[:180])}</code>",
         f"• Last provider status: <code>{html.escape(str((last_debug or {}).get('status') or '-'))}</code>",
         f"• Last provider HTTP: <code>{html.escape(str((last_debug or {}).get('http_status') or '-'))}</code>",
         f"• Image smoke status: <code>{html.escape(shopaikey_image_status_text())}</code>",
@@ -38477,12 +38689,19 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
     if status == "PASS" and (image_url or b64_json):
         caption = (
             "🖼 ShopAIKey Image Smoke Test — PASS\n"
+            "Provider: ShopAIKey\n"
+            "Endpoint: /images/google/generations\n"
+            f"Payload mode: {result.get('payload_mode') or SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE}\n"
+            f"Field used: {result.get('field_used') or 'size'}\n"
             f"Model: {result.get('model') or primary_model}\n"
             f"Models tried: {', '.join(result.get('models_tried') or []) or primary_model}\n"
             f"Fallback used: {'yes' if result.get('fallback_used') else 'no'}\n"
-            f"Ratio: {result.get('aspect_ratio') or aspect_ratio}\n"
+            f"Requested ratio: {ratio_arg}\n"
+            f"Normalized ratio: {result.get('normalized_aspect_ratio') or result.get('aspect_ratio') or aspect_ratio}\n"
+            f"Size sent: {result.get('size_sent') or aspect_ratio}\n"
+            f"aspect_ratio sent: {result.get('aspect_ratio_sent') or 'none'}\n"
+            f"aspectRatio sent: {result.get('aspectRatio_sent') or 'none'}\n"
             f"Size: {result.get('size') or '-'}\n"
-            f"Size sent: {result.get('size_sent') or size_info.get('size_string') or '-'}\n"
             "Không trừ Xu."
         )
         output_sent, _output_file_id = await send_generated_image_result(
@@ -38494,16 +38713,7 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
             get_user_language(uid) or "vi",
             b64_json=b64_json,
         )
-    detail = (
-        f"model={result.get('model') or primary_model}; final_model={result.get('final_model') or result.get('model') or primary_model}; "
-        f"models_tried={','.join(result.get('models_tried') or []) or primary_model}; fallback_used={'yes' if result.get('fallback_used') else 'no'}; "
-        f"http={result.get('http_status')}; "
-        f"latency_ms={result.get('latency_ms')}; ratio={result.get('aspect_ratio') or aspect_ratio}; "
-        f"size_sent={result.get('size_sent') or size_info.get('size_string') or '-'}; size={result.get('size') or '-'}; "
-        f"output_sent={'yes' if output_sent else 'no'}; "
-        f"provider_error_code={result.get('provider_error_code') or '-'}; "
-        f"error_class={result.get('error_class') or '-'}; detail={result.get('detail') or '-'}"
-    )
+    detail = shopaikey_image_debug_detail(result, ratio_arg) + f"; output_sent={'yes' if output_sent else 'no'}"
     save_tool_test_result("shopaikey_image", status, detail, uid)
     save_shopaikey_component_snapshot("image", result, detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey_image", status, int(result.get("http_status") or 0), detail)
@@ -38530,14 +38740,22 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
     await update.message.reply_text(
         "🖼 <b>ShopAIKey Image Smoke Test</b>\n\n"
         f"• Provider freeze: <code>{html.escape(shopaikey_admin_freeze_warning_text())}</code>\n"
+        "• Provider: <code>ShopAIKey</code>\n"
+        "• Endpoint: <code>/images/google/generations</code>\n"
+        f"• Payload mode: <code>{html.escape(str(result.get('payload_mode') or SHOPAIKEY_GOOGLE_IMAGE_PAYLOAD_MODE))}</code>\n"
+        f"• Field used: <code>{html.escape(str(result.get('field_used') or 'size'))}</code>\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
         f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
         f"• Model primary: <code>{html.escape(str(primary_model or '-'))}</code>\n"
         f"• Models tried: <code>{html.escape(', '.join(result.get('models_tried') or []) or primary_model or '-')}</code>\n"
         f"• Final model: <code>{html.escape(str(result.get('final_model') or result.get('model') or '-'))}</code>\n"
         f"• Fallback used: <code>{'yes' if result.get('fallback_used') else 'no'}</code>\n"
-        f"• Ratio requested: <code>{html.escape(str(aspect_ratio))}</code>\n"
-        f"• Size sent: <code>{html.escape(str(result.get('size_sent') or size_info.get('size_string') or '-'))}</code>\n"
+        f"• Ratio requested: <code>{html.escape(str(ratio_arg or aspect_ratio))}</code>\n"
+        f"• Normalized ratio: <code>{html.escape(str(result.get('normalized_aspect_ratio') or result.get('aspect_ratio') or '-'))}</code>\n"
+        f"• Size sent: <code>{html.escape(str(result.get('size_sent') or aspect_ratio or '-'))}</code>\n"
+        f"• aspect_ratio sent: <code>{html.escape(str(result.get('aspect_ratio_sent') or 'none'))}</code>\n"
+        f"• aspectRatio sent: <code>{html.escape(str(result.get('aspectRatio_sent') or 'none'))}</code>\n"
+        f"• Render size: <code>{html.escape(str(result.get('render_size') or size_info.get('size_string') or '-'))}</code>\n"
         f"• Size: <code>{html.escape(str(result.get('size') or '-'))}</code>\n"
         f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n"
         f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>\n"
@@ -39125,11 +39343,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     base_cost = int(pending.get("base_cost") or 0)
     image_tier = normalize_image_tier(pending.get("image_tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
     video_tier = normalize_video_tier(pending.get("video_tier") or SHOPAIKEY_VIDEO_DEFAULT_TIER)
-    image_aspect_ratio = normalize_media_aspect_ratio(
-        pending.get("aspect_ratio") or infer_image_aspect_ratio_from_prompt(prompt, "9:16"),
-        "9:16",
-        "image",
-    ) if job_type == "image" else ""
+    requested_image_aspect_ratio = str(pending.get("aspect_ratio") or infer_image_aspect_ratio_from_prompt(prompt, "1:1") or "1:1").strip() if job_type == "image" else ""
+    image_aspect_ratio = normalize_image_aspect_ratio(requested_image_aspect_ratio) if job_type == "image" else ""
     tier_label = localized_image_tier_label(image_tier, lang) if job_type == "image" else localized_video_tier_label(video_tier, lang)
     pending_model = str(pending.get("model") or "").strip()
     source_job_id = str(pending.get("source_job_id") or "").strip()
@@ -39259,6 +39474,13 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         await safe_edit_or_send(query, public_image_waiting_text(image_tier, lang), parse_mode=None)
         result = await shopaikey_image_generate(prompt, model, aspect_ratio=image_aspect_ratio, tier=image_tier)
         status = str(result.get("status") or "FAIL")
+        record_api_debug(
+            "shopaikey",
+            "shopaikey_image",
+            status,
+            int(result.get("http_status") or 0),
+            shopaikey_image_debug_detail(result, requested_image_aspect_ratio),
+        )
         image_url = str(result.get("image_url") or "")
         b64_json = str(result.get("b64_json") or "")
         output_sent = False
