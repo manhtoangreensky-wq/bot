@@ -272,8 +272,10 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "🧊 Freeze / Queue" in admin_nav_labels
     assert "📊 Báo cáo tổng" in admin_nav_labels
     assert "🧪 Smoke Test" in admin_nav_labels
+    assert "🤖 Provider" in admin_nav_labels
     admin_nav_rows = [[button.text for button in row] for row in bot.menu_nav_keyboard("admin", True).inline_keyboard]
     assert ["💰 Tài chính", "🧊 Freeze / Queue"] in admin_nav_rows
+    assert ["🤖 Provider", "⬅️ Quay lại"] in admin_nav_rows
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
     for label in ["📊 Tổng quan", "💵 Doanh thu", "📅 Doanh thu tháng", "📉 Chi phí tháng", "📈 Lãi / Lỗ", "📤 Xuất báo cáo", "➕ Thêm chi phí", "📚 Hướng dẫn lệnh"]:
         assert label in finance_labels
@@ -281,8 +283,29 @@ def test_admin_menu_contains_grouped_operator_and_system():
     for label in ["📊 Queue Status", "🧊 Freeze Status", "🖼 Freeze Image", "🎬 Freeze Video", "🎞 Freeze Frame", "🤖 Freeze Provider", "✅ Unfreeze Tool", "🧹 Clear Stale Jobs"]:
         assert label in freeze_labels
     assert "Tài chính nội bộ TOAN AAS" in bot.finance_menu_text()
+    assert "số liệu thuế chính thức cần đối chiếu chứng từ" in bot.finance_menu_text()
     assert "Mục này dùng để kiểm tra hàng đợi job" in bot.freeze_queue_menu_text()
+    assert "thao tác nguy hiểm luôn đi qua màn xác nhận" in bot.freeze_queue_menu_text()
     assert "Báo cáo tổng TOAN AAS" in bot.admin_overview_text()
+    smoke_labels = [button.text for row in bot.smoke_test_menu_keyboard().inline_keyboard for button in row]
+    for label in ["🤖 Test ShopAIKey", "🗣 Test TTS", "🖼 Test Image", "🎬 Test Video", "🎞 Test FFmpeg", "🧩 Test ComfyUI", "📊 Providers", "✅ Sales Ready"]:
+        assert label in smoke_labels
+    provider_labels = [button.text for row in bot.admin_provider_keyboard().inline_keyboard for button in row]
+    for label in ["📊 Provider Status", "🧪 Test Provider", "🟡 Freeze Provider", "🟢 Unfreeze Provider", "🧾 Provider Usage"]:
+        assert label in provider_labels
+    assert "Provider Management" in bot.admin_provider_menu_text()
+    assert "không tự gọi provider" in bot.admin_provider_menu_text()
+    queue_labels = [button.text for row in bot.queue_status_keyboard().inline_keyboard for button in row]
+    assert "🔄 Refresh Queue" in queue_labels
+    assert "🧹 Dọn job kẹt" in queue_labels
+    confirm_labels = [button.text for row in bot.admin_confirm_keyboard("freeze_video").inline_keyboard for button in row]
+    assert "✅ Xác nhận" in confirm_labels
+    assert "❌ Hủy" in confirm_labels
+    assert "⬅️ Quay lại" in confirm_labels
+    assert "/freeze_video" in bot.admin_confirm_text("freeze_video")
+    system_labels = [button.text for row in bot.menu_nav_keyboard("system", True).inline_keyboard for button in row]
+    assert "🧬 Runtime" in system_labels
+    assert "🗄 Data Status" in system_labels
     admin_menu = bot.menu_text_admin()
     for command in [
         "/add",

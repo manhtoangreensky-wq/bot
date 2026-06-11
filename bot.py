@@ -35610,6 +35610,9 @@ def menu_parent_action(section: str = "main") -> str:
         "billing": "main_topup",
         "finance": "admin",
         "freeze_queue": "admin",
+        "admin_provider": "admin",
+        "admin_packages": "admin",
+        "smoke_test": "admin",
         "support": "main_guide",
         "legal": "main_guide",
         "guide": "main_guide",
@@ -35895,15 +35898,21 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien"), InlineKeyboardButton("👤 Cú pháp /profile", callback_data="menu|hint_profile")])
     elif section == "admin" and is_admin:
         rows.append([InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
-        rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="pricing|combo")])
+        rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_packages")])
         rows.append([InlineKeyboardButton("💰 Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|freeze_queue")])
         rows.append([InlineKeyboardButton("📊 Báo cáo tổng", callback_data="menu|admin_overview"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")])
+        rows.append([InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider"), InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main")])
+        rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+        return InlineKeyboardMarkup(rows)
     elif section == "finance" and is_admin:
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing")])
     elif section == "freeze_queue" and is_admin:
         rows.append([InlineKeyboardButton("📊 Queue Status", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("🧊 Freeze Status", callback_data="menu|freeze_status")])
         rows.append([InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|freeze_queue_help"), InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin")])
     elif section == "system" and is_admin:
+        rows.append([InlineKeyboardButton("🧬 Runtime", callback_data="menu|system_runtime_help"), InlineKeyboardButton("🗄 Data Status", callback_data="menu|system_data_status_help")])
+        rows.append([InlineKeyboardButton("💾 Backup DB", callback_data="menu|system_backup_help"), InlineKeyboardButton("❤️ Health", callback_data="menu|system_health_help")])
+        rows.append([InlineKeyboardButton("📊 Providers", callback_data="menu|admin_provider_status"), InlineKeyboardButton("✅ Sales Ready", callback_data="menu|smoke_sales_ready")])
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
     elif section == "operator" and is_admin:
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system")])
@@ -36197,6 +36206,14 @@ def menu_text_admin() -> str:
     return (
         "📊 <b>Quản Trị</b>\n\n"
         "Menu này gom các lệnh vận hành hằng ngày. User thường không thấy khu vực này.\n\n"
+        "<b>Nhóm nhanh</b>\n"
+        "• ⚙️ Hệ thống: runtime, volume, backup, health.\n"
+        "• 🧠 Operator: mission/worker/autopilot nội bộ.\n"
+        "• 💳 Bill / Xu: bill thủ công, duyệt/từ chối, đối soát.\n"
+        "• 🎁 Gói / Combo: combo, gói tháng, lượt còn lại.\n"
+        "• 💰 Tài chính: doanh thu, chi phí, lãi/lỗ nội bộ.\n"
+        "• 🧊 Freeze / Queue: hàng đợi, khóa an toàn, refund/job lock.\n"
+        "• 🧪 Smoke Test / 🤖 Provider: test provider không lộ key, không trừ Xu.\n\n"
         "<b>A. User & Xu</b>\n"
         "• <code>/add &lt;ID&gt; &lt;Xu&gt;</code> — cộng Xu trực tiếp khi cần hỗ trợ\n"
         "• <code>/deduct &lt;ID&gt; &lt;Xu&gt;</code> — trừ Xu thủ công nếu xử lý sai lệch\n"
@@ -40374,8 +40391,17 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     user_is_admin = is_admin_user(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
     clear_media_creator_pending_states(query.from_user.id)
-    admin_only = {"affiliate", "operator", "admin", "system", "finance"}
-    admin_only_prefixes = ("finance_", "freeze_")
+    admin_only = {"affiliate", "operator", "admin", "system", "finance", "billing", "admin_packages", "admin_provider"}
+    admin_only_prefixes = (
+        "finance_",
+        "freeze_",
+        "admin_",
+        "system_",
+        "smoke_",
+        "provider_custom",
+        "clear_stale",
+        "unfreeze_",
+    )
     admin_only_pages = {"admin_overview", "freeze_queue", "freeze_status", "smoke_test"}
     public_hints = {
         "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
@@ -78161,7 +78187,8 @@ def finance_menu_text() -> str:
     return (
         "💰 <b>Tài chính nội bộ TOAN AAS</b>\n\n"
         "Mục này giúp admin xem nhanh doanh thu, chi phí, lãi/lỗ và xuất báo cáo nội bộ. "
-        "Các nút bên dưới chỉ đọc số liệu hoặc hướng dẫn lệnh hiện có, không tự cộng/trừ Xu và không chạm PayOS.\n\n"
+        "Các nút bên dưới chỉ đọc số liệu hoặc hướng dẫn lệnh hiện có, không tự cộng/trừ Xu và không chạm PayOS.\n"
+        "Số liệu phục vụ quản trị nội bộ; số liệu thuế chính thức cần đối chiếu chứng từ.\n\n"
         "Nếu mục nào chưa có dữ liệu, bot sẽ hiển thị <b>Chưa có dữ liệu</b>."
     )
 
@@ -78430,10 +78457,20 @@ def freeze_queue_keyboard() -> InlineKeyboardMarkup:
 def freeze_queue_menu_text() -> str:
     return (
         "🧊 <b>Freeze / Queue TOAN AAS</b>\n\n"
-        "Mục này dùng để kiểm tra hàng đợi job, trạng thái freeze và hướng dẫn thao tác an toàn.\n"
-        "Các nút freeze/unfreeze trong menu chỉ mở hướng dẫn, không tự khóa/mở để tránh bấm nhầm.\n\n"
-        "Dùng lệnh admin có chủ đích khi cần thao tác thật."
+        "Mục này dùng để kiểm tra hàng đợi job, trạng thái freeze và thao tác an toàn khi provider/tool lỗi.\n\n"
+        "• <b>Queue Status</b>: xem queued/running/done/failed, worker/frame video.\n"
+        "• <b>Freeze Status</b>: xem maintenance, tool freeze, provider freeze.\n"
+        "• <b>Freeze</b>: khóa tạm public image/video/frame/provider khi provider lỗi hoặc quá tải.\n"
+        "• <b>Unfreeze</b>: mở lại sau khi đã smoke test PASS.\n"
+        "• <b>Clear Stale Jobs</b>: chỉ dùng khi đã kiểm tra job kẹt và cần clear lock.\n\n"
+        "Các thao tác nguy hiểm luôn đi qua màn xác nhận. Menu này không lộ key/token và không tự trừ Xu."
     )
+
+def queue_status_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh Queue", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("🧹 Dọn job kẹt", callback_data="menu|admin_confirm_clear_stale_jobs")],
+        [InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
 
 def freeze_queue_status_text() -> str:
     queue = shopaikey_video_queue_counts_readonly()
@@ -78441,6 +78478,8 @@ def freeze_queue_status_text() -> str:
     worker = local_worker_status_payload()
     return "\n".join([
         "📊 <b>Queue Status</b>",
+        "",
+        "Đọc nhanh hàng đợi để biết job đang chờ, đang chạy, đã xong hoặc lỗi. Trang này chỉ đọc dữ liệu, không gọi provider và không trừ Xu.",
         "",
         "<b>ShopAIKey video queue</b>",
         f"• Queued: <code>{int(queue.get('queued') or 0)}</code>",
@@ -78457,7 +78496,21 @@ def freeze_queue_status_text() -> str:
         f"• Worker connected: <code>{'yes' if worker.get('connected') else 'no'}</code>",
         f"• Active frame jobs: <code>{int(frame.get('active_jobs') or 0)}</code>",
         "",
+        "<b>Ý nghĩa</b>",
+        "• Queued: job đang chờ provider/worker.",
+        "• Running/active: job đang xử lý, không nên tạo job trùng.",
+        "• Success: job đã hoàn tất.",
+        "• Failed/timeout: cần kiểm tra refund/job lock nếu user bị ảnh hưởng.",
+        "",
         "Không gọi provider. Không trừ Xu.",
+    ])
+
+def freeze_status_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh Freeze", callback_data="menu|freeze_status"), InlineKeyboardButton("✅ Unfreeze Tool", callback_data="menu|unfreeze_tool_help")],
+        [InlineKeyboardButton("🛠 Maintenance ON", callback_data="menu|admin_confirm_maintenance_on"), InlineKeyboardButton("✅ Maintenance OFF", callback_data="menu|admin_confirm_maintenance_off")],
+        [InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider"), InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def freeze_status_menu_text() -> str:
@@ -78466,6 +78519,8 @@ def freeze_status_menu_text() -> str:
     system_mode = current_system_mode()
     return "\n".join([
         "🧊 <b>Freeze Status</b>",
+        "",
+        "Trang này cho biết hệ thống đang khóa ở phạm vi nào. Chỉ mở lại sau khi smoke test hoặc provider check đã ổn.",
         "",
         f"• System mode: <code>{html.escape(str(system_mode.get('label') or 'NORMAL'))}</code>",
         f"• Maintenance: <code>{'ON' if system_mode.get('maintenance_mode') else 'OFF'}</code>",
@@ -78496,13 +78551,15 @@ def freeze_action_help_text(kind: str) -> str:
     texts = {
         "image": (
             "🖼 <b>Freeze Image</b>\n\n"
-            "Nếu cần khóa ảnh public/provider, dùng provider freeze có chủ đích:\n"
+            "Dùng khi provider ảnh lỗi, trả model invalid, rate limit hoặc ảnh public cần dừng tạm để bảo vệ Xu khách.\n\n"
+            "Thao tác thật:\n"
             "• <code>/provider_freeze shopaikey_image &lt;reason&gt;</code>\n"
             "• <code>/provider_unfreeze shopaikey_image</code>\n\n"
-            "Menu này không tự khóa image để tránh ảnh hưởng flow ảnh đang bán."
+            "Ảnh public chỉ nên mở lại sau khi /tool_test_shopaikey_image PASS."
         ),
         "video": (
             "🎬 <b>Freeze Video</b>\n\n"
+            "Dùng khi video provider lỗi/no channel/timeout hoặc cần dừng public video để tránh mất Xu/lượt.\n\n"
             "Thao tác thật:\n"
             "• <code>/freeze_video &lt;reason&gt;</code>\n"
             "• <code>/unfreeze_video</code>\n\n"
@@ -78510,11 +78567,12 @@ def freeze_action_help_text(kind: str) -> str:
         ),
         "frame": (
             "🎞 <b>Freeze Frame Video</b>\n\n"
-            "Frame video ưu tiên Local Worker. Không render trực tiếp trên Railway nếu guard chưa cho phép.\n"
+            "Frame video dùng Local Worker + ffmpeg. Nếu worker offline hoặc Railway có nguy cơ OOM, khóa luồng này và không render trực tiếp.\n\n"
             "Kiểm tra bằng <code>/providers</code>, <code>/local_status</code>, <code>/frame_video_status &lt;job_id&gt;</code> nếu có job."
         ),
         "provider": (
             "🤖 <b>Freeze Provider</b>\n\n"
+            "Dùng để khóa một provider hoặc một nhánh provider cụ thể. Ưu tiên khóa nhánh nhỏ như <code>shopaikey_video</code> thay vì khóa toàn bộ nếu chat/TTS/image vẫn ổn.\n\n"
             "Dùng:\n"
             "• <code>/provider_freeze &lt;provider&gt; &lt;reason&gt;</code>\n"
             "• <code>/provider_unfreeze &lt;provider&gt;</code>\n\n"
@@ -78522,6 +78580,7 @@ def freeze_action_help_text(kind: str) -> str:
         ),
         "unfreeze": (
             "✅ <b>Unfreeze Tool</b>\n\n"
+            "Chỉ mở lại khi smoke test/provider status đã ổn. Nếu mở nhầm, user có thể gặp lỗi provider hoặc refund nhiều hơn.\n\n"
             "Dùng lệnh mở khóa đúng phạm vi:\n"
             "• <code>/unfreeze_video</code>\n"
             "• <code>/provider_unfreeze &lt;provider&gt;</code>\n"
@@ -78529,7 +78588,7 @@ def freeze_action_help_text(kind: str) -> str:
         ),
         "clear": (
             "🧹 <b>Clear Stale Jobs</b>\n\n"
-            "Dùng khi job lock kẹt sau khi đã kiểm tra trạng thái:\n"
+            "Dùng khi job lock kẹt sau khi đã kiểm tra trạng thái và refund. Không clear hàng loạt nếu chưa rõ job nào đang xử lý.\n\n"
             "• <code>/queue_status</code>\n"
             "• <code>/job_status &lt;job_id&gt;</code>\n"
             "• <code>/clear_job_lock &lt;user_id&gt;</code>\n\n"
@@ -78538,10 +78597,165 @@ def freeze_action_help_text(kind: str) -> str:
     }
     return texts.get(kind, freeze_queue_help_text())
 
+ADMIN_CONFIRM_ACTIONS = {
+    "freeze_image": {
+        "title": "🖼 Xác nhận Freeze Image",
+        "command": "/provider_freeze shopaikey_image <reason>",
+        "impact": "Khách public image sẽ bị chặn mềm, không gọi provider và không trừ Xu.",
+        "back": "freeze_image_help",
+    },
+    "freeze_video": {
+        "title": "🎬 Xác nhận Freeze Video",
+        "command": "/freeze_video <reason>",
+        "impact": "Public video sẽ dừng tạm; job mới không được gửi provider, không trừ Xu/lượt.",
+        "back": "freeze_video_help",
+    },
+    "freeze_frame": {
+        "title": "🎞 Xác nhận Freeze Frame Video",
+        "command": "/provider_freeze frame_video <reason>",
+        "impact": "Ghép ảnh thành video sẽ báo bảo trì/worker chưa sẵn sàng, không render trên Railway.",
+        "back": "freeze_frame_help",
+    },
+    "provider_freeze_shopaikey": {
+        "title": "🟡 Xác nhận Freeze ShopAIKey",
+        "command": "/provider_freeze shopaikey <reason>",
+        "impact": "Khóa rộng ShopAIKey; cân nhắc khóa nhánh nhỏ hơn nếu chỉ video/image lỗi.",
+        "back": "freeze_provider_help",
+    },
+    "provider_unfreeze_shopaikey": {
+        "title": "🟢 Xác nhận Unfreeze ShopAIKey",
+        "command": "/provider_unfreeze shopaikey",
+        "impact": "Mở lại ShopAIKey sau khi smoke test PASS.",
+        "back": "freeze_provider_help",
+    },
+    "provider_freeze_video": {
+        "title": "🎬 Xác nhận Freeze ShopAIKey Video",
+        "command": "/provider_freeze shopaikey_video <reason>",
+        "impact": "Khóa riêng video provider; chat/TTS/image vẫn có thể hoạt động nếu không bị freeze riêng.",
+        "back": "freeze_provider_help",
+    },
+    "provider_freeze_image": {
+        "title": "🖼 Xác nhận Freeze ShopAIKey Image",
+        "command": "/provider_freeze shopaikey_image <reason>",
+        "impact": "Khóa riêng image provider để bảo vệ public image billing/refund.",
+        "back": "freeze_provider_help",
+    },
+    "unfreeze_video": {
+        "title": "✅ Xác nhận Unfreeze Video",
+        "command": "/unfreeze_video",
+        "impact": "Mở lại public video guard nếu ENV và provider cũng cho phép.",
+        "back": "unfreeze_tool_help",
+    },
+    "unfreeze_tool": {
+        "title": "✅ Xác nhận Unfreeze Tool",
+        "command": "/unfreeze_tools",
+        "impact": "Mở lại tool freeze chung; chỉ làm khi hệ thống đã ổn.",
+        "back": "unfreeze_tool_help",
+    },
+    "maintenance_on": {
+        "title": "🛠 Xác nhận Maintenance ON",
+        "command": "/maintenance_on <reason>",
+        "impact": "Khách sẽ thấy thông báo bảo trì, các flow nhạy cảm bị chặn mềm.",
+        "back": "freeze_status",
+    },
+    "maintenance_off": {
+        "title": "✅ Xác nhận Maintenance OFF",
+        "command": "/maintenance_off",
+        "impact": "Mở lại hệ thống sau bảo trì.",
+        "back": "freeze_status",
+    },
+    "clear_stale_jobs": {
+        "title": "🧹 Xác nhận Clear Stale Jobs",
+        "command": "/clear_job_lock <user_id>",
+        "impact": "Chỉ clear đúng user/job đã kiểm tra. Không dùng để xóa dữ liệu hay reset Xu.",
+        "back": "clear_stale_jobs_help",
+    },
+    "refund_job": {
+        "title": "↩️ Xác nhận Refund Job",
+        "command": "/refund_job <job_id>",
+        "impact": "Hoàn Xu/lượt thủ công cho job lỗi nếu guard chưa xử lý.",
+        "back": "freeze_queue_help",
+    },
+}
+
+def admin_confirm_text(action_key: str) -> str:
+    item = ADMIN_CONFIRM_ACTIONS.get(action_key) or ADMIN_CONFIRM_ACTIONS["clear_stale_jobs"]
+    return (
+        f"{item['title']}\n\n"
+        f"• Tác động: {html.escape(item['impact'])}\n"
+        f"• Lệnh thật cần chạy: <code>{html.escape(item['command'])}</code>\n\n"
+        "Màn này là lớp xác nhận UX để tránh bấm nhầm trong admin menu. "
+        "Nút xác nhận bên dưới chỉ nhắc lại lệnh cần chạy, không tự sửa DB, không trừ Xu, không gọi provider."
+    )
+
+def admin_confirm_ack_text(action_key: str) -> str:
+    item = ADMIN_CONFIRM_ACTIONS.get(action_key) or ADMIN_CONFIRM_ACTIONS["clear_stale_jobs"]
+    return (
+        "✅ <b>Đã xác nhận thao tác admin.</b>\n\n"
+        "Để thực thi thật, admin hãy gửi lệnh dưới đây bằng tay trong chat:\n"
+        f"<code>{html.escape(item['command'])}</code>\n\n"
+        "Cách này giữ thao tác nguy hiểm có chủ đích, không chạy nhầm từ callback menu."
+    )
+
+def admin_confirm_keyboard(action_key: str) -> InlineKeyboardMarkup:
+    item = ADMIN_CONFIRM_ACTIONS.get(action_key) or ADMIN_CONFIRM_ACTIONS["clear_stale_jobs"]
+    back = item.get("back") or "freeze_queue"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận", callback_data=f"menu|admin_confirm_ack_{action_key}"), InlineKeyboardButton("❌ Hủy", callback_data=f"menu|{back}")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{back}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_confirm_ack_keyboard(action_key: str) -> InlineKeyboardMarkup:
+    item = ADMIN_CONFIRM_ACTIONS.get(action_key) or ADMIN_CONFIRM_ACTIONS["clear_stale_jobs"]
+    back = item.get("back") or "freeze_queue"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{back}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def freeze_action_keyboard(kind: str) -> InlineKeyboardMarkup:
+    if kind == "image":
+        rows = [
+            [InlineKeyboardButton("⚠️ Xác nhận Freeze Image", callback_data="menu|admin_confirm_freeze_image"), InlineKeyboardButton("🧪 Test Image", callback_data="menu|smoke_image")],
+        ]
+    elif kind == "video":
+        rows = [
+            [InlineKeyboardButton("⚠️ Xác nhận Freeze Video", callback_data="menu|admin_confirm_freeze_video"), InlineKeyboardButton("✅ Unfreeze Video", callback_data="menu|admin_confirm_unfreeze_video")],
+            [InlineKeyboardButton("🧪 Test Video", callback_data="menu|smoke_video"), InlineKeyboardButton("📊 Queue Status", callback_data="menu|freeze_queue_status")],
+        ]
+    elif kind == "frame":
+        rows = [
+            [InlineKeyboardButton("⚠️ Xác nhận Freeze Frame", callback_data="menu|admin_confirm_freeze_frame"), InlineKeyboardButton("🎞 Test FFmpeg", callback_data="menu|smoke_ffmpeg")],
+        ]
+    elif kind == "provider":
+        rows = [
+            [InlineKeyboardButton("🟡 Freeze ShopAIKey", callback_data="menu|admin_confirm_provider_freeze_shopaikey"), InlineKeyboardButton("🟢 Unfreeze ShopAIKey", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")],
+            [InlineKeyboardButton("🎬 Freeze ShopAIKey Video", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("🖼 Freeze ShopAIKey Image", callback_data="menu|admin_confirm_provider_freeze_image")],
+            [InlineKeyboardButton("✍️ Nhập provider khác", callback_data="menu|provider_custom_help"), InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue")],
+        ]
+        rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+        return InlineKeyboardMarkup(rows)
+    elif kind == "unfreeze":
+        rows = [
+            [InlineKeyboardButton("✅ Unfreeze Video", callback_data="menu|admin_confirm_unfreeze_video"), InlineKeyboardButton("✅ Unfreeze Tool", callback_data="menu|admin_confirm_unfreeze_tool")],
+            [InlineKeyboardButton("✅ Maintenance OFF", callback_data="menu|admin_confirm_maintenance_off"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")],
+        ]
+    else:
+        rows = [
+            [InlineKeyboardButton("🧹 Xác nhận Clear Job Lock", callback_data="menu|admin_confirm_clear_stale_jobs"), InlineKeyboardButton("↩️ Refund Job", callback_data="menu|admin_confirm_refund_job")],
+            [InlineKeyboardButton("📊 Queue Status", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|freeze_queue_help")],
+        ]
+    rows.append([InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
 def smoke_test_menu_text() -> str:
     return (
         "🧪 <b>Smoke Test Tools</b>\n\n"
-        "Các lệnh test admin-only, không trừ Xu và không lộ key:\n"
+        "Các test này dùng để kiểm tra provider/worker trước khi mở bán. Admin-only, không trừ Xu và không lộ key.\n\n"
+        "<b>Nguyên tắc</b>\n"
+        "• Test chat/TTS/image/video có thể tốn credit provider thật.\n"
+        "• Không chạy video đắt nếu provider đang freeze hoặc chưa cần.\n"
+        "• Nếu test fail, xem Provider/Freeze để khóa đúng nhánh.\n\n"
+        "<b>Lệnh nhanh</b>\n"
         "• <code>/tool_test_shopaikey</code>\n"
         "• <code>/tool_test_shopaikey_tts</code>\n"
         "• <code>/tool_test_shopaikey_image</code>\n"
@@ -78554,13 +78768,229 @@ def smoke_test_menu_text() -> str:
 
 def smoke_test_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Provider", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|freeze_queue")],
+        [InlineKeyboardButton("🤖 Test ShopAIKey", callback_data="menu|smoke_shopaikey"), InlineKeyboardButton("🗣 Test TTS", callback_data="menu|smoke_tts")],
+        [InlineKeyboardButton("🖼 Test Image", callback_data="menu|smoke_image"), InlineKeyboardButton("🎬 Test Video", callback_data="menu|smoke_video")],
+        [InlineKeyboardButton("🎞 Test FFmpeg", callback_data="menu|smoke_ffmpeg"), InlineKeyboardButton("🧩 Test ComfyUI", callback_data="menu|smoke_comfy")],
+        [InlineKeyboardButton("📊 Providers", callback_data="menu|smoke_providers"), InlineKeyboardButton("✅ Sales Ready", callback_data="menu|smoke_sales_ready")],
+        [InlineKeyboardButton("⬅️ Operator", callback_data="menu|operator"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+SMOKE_TEST_ACTIONS = {
+    "shopaikey": ("🤖 Test ShopAIKey", "/tool_test_shopaikey", "Smoke chat tiny prompt. Không log prompt/response/key."),
+    "tts": ("🗣 Test TTS", "/tool_test_shopaikey_tts", "Kiểm tra TTS admin-only; provider có thể tốn credit thật."),
+    "image": ("🖼 Test Image", "/tool_test_shopaikey_image 9:16", "Kiểm tra image endpoint/model fallback; không mở public."),
+    "video": ("🎬 Test Video", "/tool_test_shopaikey_video", "Submit video smoke nhỏ; chỉ chạy khi admin chủ động và provider không freeze."),
+    "ffmpeg": ("🎞 Test FFmpeg", "/tool_test_ffmpeg_local", "Kiểm tra Local Worker/ffmpeg. Không render job lớn trên Railway."),
+    "comfy": ("🧩 Test ComfyUI", "/tool_test_comfy_local", "ComfyUI có thể planned/not_ready; không coi là lỗi production nếu chưa bật."),
+    "providers": ("📊 Providers", "/providers", "Xem provider/payment/worker/pricing/freeze status tổng, không lộ secret."),
+    "sales_ready": ("✅ Sales Ready", "/sales_ready", "Checklist guard trước khi bán public."),
+}
+
+def smoke_action_text(action_key: str) -> str:
+    title, command, note = SMOKE_TEST_ACTIONS.get(action_key, SMOKE_TEST_ACTIONS["providers"])
+    return (
+        f"{title}\n\n"
+        f"• Lệnh: <code>{html.escape(command)}</code>\n"
+        f"• Ghi chú: {html.escape(note)}\n\n"
+        "Trang này chỉ hướng dẫn thao tác. Admin gửi lệnh thủ công nếu muốn chạy test thật."
+    )
+
+def smoke_action_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Smoke Test", callback_data="menu|smoke_test"), InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_provider_menu_text() -> str:
+    return (
+        "🤖 <b>Provider Management</b>\n\n"
+        "Trang này giúp admin kiểm tra provider, usage, smoke test và freeze/unfreeze theo nhánh. "
+        "Không hiển thị API key/token/secret và không tự gọi provider nếu chỉ bấm xem menu.\n\n"
+        "Khuyến nghị vận hành:\n"
+        "• Provider lỗi video thì freeze <code>shopaikey_video</code>, không khóa toàn bộ nếu chat/TTS/image vẫn ổn.\n"
+        "• Provider lỗi image thì freeze <code>shopaikey_image</code> và smoke test model fallback.\n"
+        "• Mở lại provider sau khi /providers và smoke test liên quan PASS."
+    )
+
+def admin_provider_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status"), InlineKeyboardButton("🧪 Test Provider", callback_data="menu|admin_provider_test")],
+        [InlineKeyboardButton("🟡 Freeze Provider", callback_data="menu|freeze_provider_help"), InlineKeyboardButton("🟢 Unfreeze Provider", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")],
+        [InlineKeyboardButton("🧾 Provider Usage", callback_data="menu|admin_provider_usage"), InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_provider_status_text() -> str:
+    shopaikey = provider_freeze_display("shopaikey")
+    video = provider_freeze_display("shopaikey_video")
+    usage = shopaikey_last_usage_snapshot()
+    return "\n".join([
+        "📊 <b>Provider Status</b>",
+        "",
+        "Dùng <code>/providers</code> để xem đầy đủ provider/payment/worker/pricing/freeze status.",
+        "",
+        "<b>ShopAIKey quick status</b>",
+        f"• General freeze: <code>{'ON' if shopaikey.get('frozen') else 'OFF'}</code>",
+        f"• Video freeze: <code>{'ON' if video.get('frozen') else 'OFF'}</code>",
+        f"• Video reason: <code>{html.escape(str(video.get('reason') or '-'))}</code>",
+        f"• Usage known: <code>{'yes' if usage else 'no'}</code>",
+        "",
+        "Không gọi provider từ trang này. Không lộ secret.",
+    ])
+
+def admin_provider_test_text() -> str:
+    return (
+        "🧪 <b>Test Provider</b>\n\n"
+        "Chọn Smoke Test để mở danh sách test an toàn. Các test thật vẫn chạy bằng lệnh admin riêng để tránh bấm nhầm.\n\n"
+        "Lệnh thường dùng:\n"
+        "• <code>/tool_test_shopaikey</code>\n"
+        "• <code>/tool_test_shopaikey_tts</code>\n"
+        "• <code>/tool_test_shopaikey_image 9:16</code>\n"
+        "• <code>/tool_test_shopaikey_video [model]</code>"
+    )
+
+def admin_provider_usage_text() -> str:
+    usage = shopaikey_last_usage_snapshot()
+    if not usage:
+        usage_line = "• Last usage: <code>chưa có dữ liệu; chạy /shopaikey_usage nếu cần</code>"
+    else:
+        remaining = usage.get("remaining")
+        total = usage.get("total")
+        percent = usage.get("remaining_percent")
+        group = usage.get("group") or usage.get("group_name") or "-"
+        usage_line = (
+            f"• Remaining: <code>{html.escape(str(remaining))}</code> / total <code>{html.escape(str(total))}</code> "
+            f"(<code>{html.escape(str(percent))}%</code>)\n"
+            f"• Group: <code>{html.escape(str(group))}</code>"
+        )
+    return (
+        "🧾 <b>Provider Usage</b>\n\n"
+        "Dùng <code>/shopaikey_usage</code> để refresh số dư. Bot không in full usage URL vì URL có apiKey.\n\n"
+        f"{usage_line}\n\n"
+        "Không hiển thị token/key thật."
+    )
+
+def system_help_text(kind: str) -> str:
+    pages = {
+        "runtime": (
+            "🧬 <b>Runtime</b>\n\n"
+            "Dùng <code>/runtime</code> để kiểm tra build, commit, Railway runtime và startup warning. "
+            "Trang menu này chỉ hướng dẫn, không gọi healthcheck ngoài."
+        ),
+        "data_status": (
+            "🗄 <b>Data Status</b>\n\n"
+            "Dùng <code>/data_status</code> để kiểm tra DB path, volume /data, backup dir, writable và risk mất dữ liệu. "
+            "Không DROP/không reset Xu."
+        ),
+        "backup": (
+            "💾 <b>Backup DB</b>\n\n"
+            "Dùng <code>/backup_db</code> nếu cần tạo backup SQLite thủ công trước deploy/migration. "
+            "Backup không xóa DB hiện tại."
+        ),
+        "health": (
+            "❤️ <b>Health</b>\n\n"
+            "API health public là <code>GET /health</code>. Trong Telegram, dùng <code>/runtime</code>, <code>/data_status</code>, <code>/providers</code> để kiểm tra đầy đủ hơn."
+        ),
+    }
+    return pages.get(kind, pages["runtime"])
+
+def system_help_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("📊 Admin", callback_data="menu|admin")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_billing_text() -> str:
+    return (
+        "💳 <b>Bill / Xu</b>\n\n"
+        "Trang này dành cho đối soát bill thủ công, PayOS test và chỉnh Xu hỗ trợ. "
+        "Không tạo đơn PayOS, không duyệt bill tự động và không sửa webhook.\n\n"
+        "• <code>/pending</code> — xem bill chờ.\n"
+        "• <code>/duyet &lt;bill_id&gt; &lt;Xu&gt;</code> — duyệt sau khi đối soát tiền thật.\n"
+        "• <code>/tuchoi &lt;bill_id&gt;</code> — từ chối bill.\n"
+        "• <code>/add &lt;ID&gt; &lt;Xu&gt;</code> / <code>/deduct &lt;ID&gt; &lt;Xu&gt;</code> — chỉnh Xu thủ công khi cần."
+    )
+
+def admin_billing_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Pending", callback_data="menu|admin_billing_pending"), InlineKeyboardButton("✅ Duyệt bill", callback_data="menu|admin_billing_duyet")],
+        [InlineKeyboardButton("❌ Từ chối bill", callback_data="menu|admin_billing_tuchoi"), InlineKeyboardButton("🧪 PayOS Test", callback_data="menu|admin_billing_payos")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_billing_help_text(kind: str) -> str:
+    pages = {
+        "pending": "📋 <b>Pending bills</b>\n\nDùng <code>/pending</code> để xem bill thủ công đang chờ.",
+        "duyet": "✅ <b>Duyệt bill</b>\n\nSau khi đối soát tiền thật, dùng <code>/duyet &lt;bill_id&gt; &lt;Xu&gt;</code>. Không duyệt từ callback menu.",
+        "tuchoi": "❌ <b>Từ chối bill</b>\n\nDùng <code>/tuchoi &lt;bill_id&gt;</code> khi không xác nhận được giao dịch.",
+        "payos": "🧪 <b>PayOS test</b>\n\nDùng <code>/payos_test_plan</code> và <code>/mark_payos_test &lt;order_code&gt;</code>. Không chạm webhook từ menu này.",
+    }
+    return pages.get(kind, admin_billing_text())
+
+def admin_packages_text() -> str:
+    return (
+        "🎁 <b>Gói / Combo</b>\n\n"
+        "Quản trị combo, gói tháng và lượt trong <b>Gói của tôi</b>. "
+        "Không trộn combo với Nạp Xu, không gọi đây là gói nạp.\n\n"
+        "• <code>/package_catalog</code> — xem catalog.\n"
+        "• <code>/grant_combo &lt;ID&gt; &lt;combo_code&gt;</code> — cấp combo admin.\n"
+        "• <code>/grant_monthly &lt;ID&gt; &lt;plan_code&gt; &lt;days&gt;</code> — cấp gói tháng.\n"
+        "• <code>/user_packages &lt;ID&gt;</code> — xem lượt còn lại.\n"
+        "• <code>/adjust_package ...</code> / <code>/revoke_package ...</code> — chỉnh/thu hồi có chủ đích."
+    )
+
+def admin_packages_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 Catalog", callback_data="menu|admin_packages_catalog"), InlineKeyboardButton("🎁 Grant Combo", callback_data="menu|admin_packages_grant_combo")],
+        [InlineKeyboardButton("📅 Grant Monthly", callback_data="menu|admin_packages_grant_monthly"), InlineKeyboardButton("📦 User Packages", callback_data="menu|admin_packages_user")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_packages_help_text(kind: str) -> str:
+    pages = {
+        "catalog": "📦 <b>Package catalog</b>\n\nDùng <code>/package_catalog</code> để xem combo/gói tháng đang cấu hình.",
+        "grant_combo": "🎁 <b>Grant combo</b>\n\nDùng <code>/grant_combo &lt;ID&gt; &lt;combo_code&gt;</code>. Không cộng Xu trực tiếp.",
+        "grant_monthly": "📅 <b>Grant monthly</b>\n\nDùng <code>/grant_monthly &lt;ID&gt; &lt;plan_code&gt; &lt;days&gt;</code>. Gói tháng không phải hạng thành viên.",
+        "user": "📦 <b>User packages</b>\n\nDùng <code>/user_packages &lt;ID&gt;</code> để xem Gói của tôi/lượt còn lại.",
+    }
+    return pages.get(kind, admin_packages_text())
+
+def admin_child_keyboard(back_action: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{back_action}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 ADMIN_MENU_PAGE_HANDLERS = {
     "admin_overview": lambda: (admin_overview_text(), finance_admin_keyboard()),
     "smoke_test": lambda: (smoke_test_menu_text(), smoke_test_menu_keyboard()),
+    "billing": lambda: (admin_billing_text(), admin_billing_keyboard()),
+    "admin_billing_pending": lambda: (admin_billing_help_text("pending"), admin_child_keyboard("billing")),
+    "admin_billing_duyet": lambda: (admin_billing_help_text("duyet"), admin_child_keyboard("billing")),
+    "admin_billing_tuchoi": lambda: (admin_billing_help_text("tuchoi"), admin_child_keyboard("billing")),
+    "admin_billing_payos": lambda: (admin_billing_help_text("payos"), admin_child_keyboard("billing")),
+    "admin_packages": lambda: (admin_packages_text(), admin_packages_keyboard()),
+    "admin_packages_catalog": lambda: (admin_packages_help_text("catalog"), admin_child_keyboard("admin_packages")),
+    "admin_packages_grant_combo": lambda: (admin_packages_help_text("grant_combo"), admin_child_keyboard("admin_packages")),
+    "admin_packages_grant_monthly": lambda: (admin_packages_help_text("grant_monthly"), admin_child_keyboard("admin_packages")),
+    "admin_packages_user": lambda: (admin_packages_help_text("user"), admin_child_keyboard("admin_packages")),
+    "admin_provider": lambda: (admin_provider_menu_text(), admin_provider_keyboard()),
+    "admin_provider_status": lambda: (admin_provider_status_text(), admin_provider_keyboard()),
+    "admin_provider_test": lambda: (admin_provider_test_text(), smoke_test_menu_keyboard()),
+    "admin_provider_usage": lambda: (admin_provider_usage_text(), admin_provider_keyboard()),
+    "provider_custom_help": lambda: (freeze_action_help_text("provider"), freeze_action_keyboard("provider")),
+    "system_runtime_help": lambda: (system_help_text("runtime"), system_help_keyboard()),
+    "system_data_status_help": lambda: (system_help_text("data_status"), system_help_keyboard()),
+    "system_backup_help": lambda: (system_help_text("backup"), system_help_keyboard()),
+    "system_health_help": lambda: (system_help_text("health"), system_help_keyboard()),
+    "smoke_shopaikey": lambda: (smoke_action_text("shopaikey"), smoke_action_keyboard()),
+    "smoke_tts": lambda: (smoke_action_text("tts"), smoke_action_keyboard()),
+    "smoke_image": lambda: (smoke_action_text("image"), smoke_action_keyboard()),
+    "smoke_video": lambda: (smoke_action_text("video"), smoke_action_keyboard()),
+    "smoke_ffmpeg": lambda: (smoke_action_text("ffmpeg"), smoke_action_keyboard()),
+    "smoke_comfy": lambda: (smoke_action_text("comfy"), smoke_action_keyboard()),
+    "smoke_providers": lambda: (smoke_action_text("providers"), smoke_action_keyboard()),
+    "smoke_sales_ready": lambda: (smoke_action_text("sales_ready"), smoke_action_keyboard()),
     "finance_overview": lambda: (finance_overview_text(), finance_admin_keyboard()),
     "finance_revenue": lambda: (finance_revenue_text(), finance_period_keyboard("revenue")),
     "finance_revenue_month": lambda: (finance_revenue_month_menu_text(), finance_period_keyboard("revenue")),
@@ -78582,16 +79012,24 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "finance_add_expense": lambda: (finance_add_expense_help_text(), finance_admin_keyboard()),
     "finance_help": lambda: (finance_command_help_text(), finance_admin_keyboard()),
     "freeze_queue": lambda: (freeze_queue_menu_text(), freeze_queue_keyboard()),
-    "freeze_queue_status": lambda: (freeze_queue_status_text(), freeze_queue_keyboard()),
-    "freeze_status": lambda: (freeze_status_menu_text(), freeze_queue_keyboard()),
+    "freeze_queue_status": lambda: (freeze_queue_status_text(), queue_status_keyboard()),
+    "freeze_status": lambda: (freeze_status_menu_text(), freeze_status_keyboard()),
     "freeze_queue_help": lambda: (freeze_queue_help_text(), freeze_queue_keyboard()),
-    "freeze_image_help": lambda: (freeze_action_help_text("image"), freeze_queue_keyboard()),
-    "freeze_video_help": lambda: (freeze_action_help_text("video"), freeze_queue_keyboard()),
-    "freeze_frame_help": lambda: (freeze_action_help_text("frame"), freeze_queue_keyboard()),
-    "freeze_provider_help": lambda: (freeze_action_help_text("provider"), freeze_queue_keyboard()),
-    "unfreeze_tool_help": lambda: (freeze_action_help_text("unfreeze"), freeze_queue_keyboard()),
-    "clear_stale_jobs_help": lambda: (freeze_action_help_text("clear"), freeze_queue_keyboard()),
+    "freeze_image_help": lambda: (freeze_action_help_text("image"), freeze_action_keyboard("image")),
+    "freeze_video_help": lambda: (freeze_action_help_text("video"), freeze_action_keyboard("video")),
+    "freeze_frame_help": lambda: (freeze_action_help_text("frame"), freeze_action_keyboard("frame")),
+    "freeze_provider_help": lambda: (freeze_action_help_text("provider"), freeze_action_keyboard("provider")),
+    "unfreeze_tool_help": lambda: (freeze_action_help_text("unfreeze"), freeze_action_keyboard("unfreeze")),
+    "clear_stale_jobs_help": lambda: (freeze_action_help_text("clear"), freeze_action_keyboard("clear")),
 }
+
+for _admin_confirm_key in tuple(ADMIN_CONFIRM_ACTIONS.keys()):
+    ADMIN_MENU_PAGE_HANDLERS[f"admin_confirm_{_admin_confirm_key}"] = (
+        lambda key=_admin_confirm_key: (admin_confirm_text(key), admin_confirm_keyboard(key))
+    )
+    ADMIN_MENU_PAGE_HANDLERS[f"admin_confirm_ack_{_admin_confirm_key}"] = (
+        lambda key=_admin_confirm_key: (admin_confirm_ack_text(key), admin_confirm_ack_keyboard(key))
+    )
 
 async def cmd_finance_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
