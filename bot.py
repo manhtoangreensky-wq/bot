@@ -34046,6 +34046,7 @@ def menu_parent_action(section: str = "main") -> str:
         "memory": "main_memory",
         "billing": "main_topup",
         "finance": "admin",
+        "freeze_queue": "admin",
         "support": "main_guide",
         "legal": "main_guide",
         "guide": "main_guide",
@@ -34262,10 +34263,13 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
     elif section == "admin" and is_admin:
         rows.append([InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
         rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="pricing|combo")])
-        rows.append([InlineKeyboardButton("💰 Tài chính", callback_data="menu|finance")])
-        rows.append([InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|hint_video_status")])
+        rows.append([InlineKeyboardButton("💰 Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|freeze_queue")])
+        rows.append([InlineKeyboardButton("📊 Báo cáo tổng", callback_data="menu|admin_overview"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")])
     elif section == "finance" and is_admin:
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing")])
+    elif section == "freeze_queue" and is_admin:
+        rows.append([InlineKeyboardButton("📊 Queue Status", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("🧊 Freeze Status", callback_data="menu|freeze_status")])
+        rows.append([InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|freeze_queue_help"), InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin")])
     elif section == "system" and is_admin:
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
     elif section == "operator" and is_admin:
@@ -35272,6 +35276,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action.startswith("guide_"):
         section = action.replace("guide_", "", 1)
         return guide_section_text_i18n(section, lang), guide_keyboard(section, lang)
+    if action in ADMIN_MENU_PAGE_HANDLERS:
+        return ADMIN_MENU_PAGE_HANDLERS[action]()
     if action.startswith("hint_"):
         section, hint = menu_hint_text_i18n(action, lang)
         return hint, menu_nav_keyboard_i18n(section, is_admin, lang)
@@ -35325,7 +35331,9 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
     if action == "admin":
         return menu_text_admin(), menu_nav_keyboard("admin", is_admin)
     if action == "finance":
-        return finance_menu_text(), menu_nav_keyboard("finance", is_admin)
+        return finance_menu_text(), finance_admin_keyboard()
+    if action in ADMIN_MENU_PAGE_HANDLERS:
+        return ADMIN_MENU_PAGE_HANDLERS[action]()
     if action == "system":
         return menu_text_system(), menu_nav_keyboard("system", is_admin)
     if action == "billing":
@@ -36469,12 +36477,14 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     lang = get_user_language(query.from_user.id) or "vi"
     clear_media_creator_pending_states(query.from_user.id)
     admin_only = {"affiliate", "operator", "admin", "system", "finance"}
+    admin_only_prefixes = ("finance_", "freeze_")
+    admin_only_pages = {"admin_overview", "freeze_queue", "freeze_status", "smoke_test"}
     public_hints = {
         "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
         "hint_note", "hint_search_note", "hint_remind", "hint_doc_tools", "hint_pricing",
         "hint_image_tools", "hint_image_to_video_pack", "hint_media_factory", "hint_video_status",
     }
-    if action in admin_only and not user_is_admin:
+    if (action in admin_only or action in admin_only_pages or action.startswith(admin_only_prefixes)) and not user_is_admin:
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
@@ -73457,29 +73467,448 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def finance_admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📈 Doanh thu tháng", callback_data="menu|finance"), InlineKeyboardButton("📉 Lãi/lỗ", callback_data="menu|finance")],
-        [InlineKeyboardButton("💸 Chi phí tháng", callback_data="menu|finance"), InlineKeyboardButton("📤 Export CSV", callback_data="menu|finance")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📊 Tổng quan", callback_data="menu|finance_overview"), InlineKeyboardButton("💵 Doanh thu", callback_data="menu|finance_revenue")],
+        [InlineKeyboardButton("📅 Doanh thu tháng", callback_data="menu|finance_revenue_month"), InlineKeyboardButton("📉 Chi phí tháng", callback_data="menu|finance_expense_month")],
+        [InlineKeyboardButton("📈 Lãi / Lỗ", callback_data="menu|finance_profit"), InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|finance_export")],
+        [InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense"), InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|finance_help")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def finance_menu_text() -> str:
     return (
         "💰 <b>Tài chính nội bộ TOAN AAS</b>\n\n"
-        "<b>Lệnh nhanh</b>\n"
-        "• <code>/finance_dashboard</code> — tổng quan hôm nay/tháng/năm\n"
-        "• <code>/revenue_report</code> hoặc <code>/revenue_report 2026-06</code> / <code>/revenue_report 2026</code>\n"
-        "• <code>/expense_report</code> hoặc <code>/expense_report 2026-06</code> / <code>/expense_report 2026</code>\n"
-        "• <code>/profit_report</code> hoặc <code>/profit_report 2026-06</code> / <code>/profit_report 2026</code>\n"
-        "• <code>/expense_add &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n"
-        "• <code>/expense_add_pre &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n"
-        "• <code>/expense_edit &lt;expense_id&gt; &lt;field&gt; &lt;value&gt;</code>\n"
-        "• <code>/expense_delete &lt;expense_id&gt; &lt;reason&gt;</code>\n"
-        "• <code>/finance_export 2026-06</code> hoặc <code>/finance_export 2026</code>\n\n"
-        "<b>Category gợi ý</b>\n"
-        "<code>provider_ai</code>, <code>railway_hosting</code>, <code>domain_hosting</code>, "
-        "<code>software_subscription</code>, <code>marketing_ads</code>, <code>bank_payment_fee</code>, <code>other</code>\n\n"
-        "Ghi chú: báo cáo này phục vụ quản trị nội bộ; số liệu thuế chính thức cần đối chiếu chứng từ."
+        "Mục này giúp admin xem nhanh doanh thu, chi phí, lãi/lỗ và xuất báo cáo nội bộ. "
+        "Các nút bên dưới chỉ đọc số liệu hoặc hướng dẫn lệnh hiện có, không tự cộng/trừ Xu và không chạm PayOS.\n\n"
+        "Nếu mục nào chưa có dữ liệu, bot sẽ hiển thị <b>Chưa có dữ liệu</b>."
     )
+
+def admin_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]
+    ])
+
+def finance_period_keyboard(kind: str) -> InlineKeyboardMarkup:
+    if kind == "revenue":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Tháng này", callback_data="menu|finance_revenue_this_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|finance_revenue_last_month")],
+            [InlineKeyboardButton("📆 Năm nay", callback_data="menu|finance_revenue_year"), InlineKeyboardButton("✍️ Nhập tháng khác", callback_data="menu|finance_revenue_custom_help")],
+            [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
+    if kind == "expense":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Tháng này", callback_data="menu|finance_expense_this_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|finance_expense_last_month")],
+            [InlineKeyboardButton("📆 Năm nay", callback_data="menu|finance_expense_year"), InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense")],
+            [InlineKeyboardButton("🏷 Categories", callback_data="menu|finance_expense_categories"), InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance")],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
+    if kind == "profit":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Tháng này", callback_data="menu|finance_profit_this_month"), InlineKeyboardButton("📆 Năm nay", callback_data="menu|finance_profit_year")],
+            [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📤 Xuất tháng này", callback_data="menu|finance_export_month"), InlineKeyboardButton("📤 Xuất năm nay", callback_data="menu|finance_export_year")],
+        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_payload_has_data(payload: dict) -> bool:
+    return any(int(payload.get(key) or 0) != 0 for key in (
+        "revenue_success", "revenue_count", "xu_credited", "expenses_after",
+        "expenses_pre_period", "expense_count", "xu_spent", "xu_refunded",
+        "provider_cost_estimate", "tax_reserve",
+    ))
+
+def finance_money_or_no_data(payload: dict, key: str) -> str:
+    if not finance_payload_has_data(payload):
+        return "Chưa có dữ liệu"
+    return vnd_text(payload.get(key))
+
+def finance_xu_or_no_data(payload: dict, key: str) -> str:
+    if not finance_payload_has_data(payload):
+        return "Chưa có dữ liệu"
+    return xu_text(payload.get(key))
+
+def finance_period_payload(raw: str = "", default_period: str = "month") -> dict:
+    start_at, end_at, label, kind = finance_period_bounds(raw, default_period)
+    payload = finance_summary_payload(start_at, end_at, label)
+    payload["period_kind"] = kind
+    return payload
+
+def previous_month_arg() -> str:
+    now = datetime.now()
+    first_this_month = datetime(now.year, now.month, 1)
+    previous = first_this_month - timedelta(days=1)
+    return f"{previous.year:04d}-{previous.month:02d}"
+
+def finance_brief_report_text(payload: dict, title: str) -> str:
+    has_data = finance_payload_has_data(payload)
+    no_data = "Chưa có dữ liệu"
+    lines = [
+        f"{title}",
+        f"• Kỳ: <code>{html.escape(str(payload.get('label') or ''))}</code>",
+        "",
+        "<b>Doanh thu</b>",
+        f"• Tiền thật: <b>{vnd_text(payload.get('revenue_success')) if has_data else no_data}</b>",
+        f"• Giao dịch: <b>{int(payload.get('revenue_count') or 0) if has_data else no_data}</b>",
+        f"• Xu phát hành: <b>{finance_xu_or_no_data(payload, 'xu_credited')}</b>",
+        "",
+        "<b>Chi phí</b>",
+        f"• Chi phí vận hành: <b>{finance_money_or_no_data(payload, 'expenses_after')}</b>",
+        f"• Chi phí trước thành lập trong kỳ: <b>{finance_money_or_no_data(payload, 'expenses_pre_period')}</b>",
+        f"• Provider cost ước tính: <b>{finance_money_or_no_data(payload, 'provider_cost_estimate')}</b>",
+        "",
+        "<b>Lãi / Lỗ</b>",
+        f"• Thuế dự phòng: <b>{finance_money_or_no_data(payload, 'tax_reserve')}</b>",
+        f"• Lãi/lỗ vận hành: <b>{finance_money_or_no_data(payload, 'profit_operating')}</b>",
+        f"• Lãi/lỗ quản trị: <b>{finance_money_or_no_data(payload, 'profit_management')}</b>",
+    ]
+    return "\n".join(lines)
+
+def admin_pending_bill_count() -> int:
+    conn = db_connect()
+    try:
+        return int(sql_scalar(conn, "SELECT COUNT(*) FROM pending_deposits WHERE status='pending'", default=0) or 0)
+    finally:
+        conn.close()
+
+def shopaikey_video_queue_counts_readonly() -> dict:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT UPPER(COALESCE(status, 'UNKNOWN')), COUNT(*)
+            FROM shopaikey_jobs
+            WHERE job_type='video'
+            GROUP BY UPPER(COALESCE(status, 'UNKNOWN'))"""
+        ).fetchall()
+        counts = {str(status or "UNKNOWN"): int(count or 0) for status, count in rows}
+    except Exception:
+        counts = {}
+    finally:
+        conn.close()
+    active = sum(counts.get(status, 0) for status in SHOPAIKEY_ACTIVE_JOB_STATUSES)
+    return {
+        "queued": counts.get("QUEUED", 0),
+        "running": active,
+        "success": counts.get("SUCCESS", 0),
+        "failed": counts.get("FAILED", 0) + counts.get("FAILED_TIMEOUT", 0) + counts.get("TIMEOUT", 0),
+        "total": sum(counts.values()),
+        "raw": counts,
+    }
+
+def admin_overview_text() -> str:
+    today = finance_period_payload("today", "day")
+    month = finance_period_payload("", "month")
+    year = finance_period_payload("", "year")
+    queue = shopaikey_video_queue_counts_readonly()
+    worker = local_worker_status_payload()
+    frame = frame_video_status_payload()
+    system_mode = current_system_mode()
+    return "\n".join([
+        "📊 <b>Báo cáo tổng TOAN AAS</b>",
+        "",
+        "<b>Doanh thu</b>",
+        f"• Hôm nay: <b>{finance_money_or_no_data(today, 'revenue_success')}</b>",
+        f"• Tháng này: <b>{finance_money_or_no_data(month, 'revenue_success')}</b>",
+        f"• Năm nay: <b>{finance_money_or_no_data(year, 'revenue_success')}</b>",
+        "",
+        "<b>Chi phí / Lãi lỗ</b>",
+        f"• Chi phí tháng: <b>{finance_money_or_no_data(month, 'expenses_after')}</b>",
+        f"• Chi phí năm: <b>{finance_money_or_no_data(year, 'expenses_after')}</b>",
+        f"• Lãi/lỗ tháng: <b>{finance_money_or_no_data(month, 'profit_management')}</b>",
+        f"• Lãi/lỗ năm: <b>{finance_money_or_no_data(year, 'profit_management')}</b>",
+        "",
+        "<b>Xu / vận hành</b>",
+        f"• Xu phát hành tháng: <b>{finance_xu_or_no_data(month, 'xu_credited')}</b>",
+        f"• Xu khách dùng tháng: <b>{finance_xu_or_no_data(month, 'xu_spent')}</b>",
+        f"• Bill thủ công chờ: <code>{admin_pending_bill_count()}</code>",
+        "",
+        "<b>Job / Provider / Worker</b>",
+        f"• System mode: <code>{html.escape(str(system_mode.get('label') or 'NORMAL'))}</code>",
+        f"• Video queue: queued <code>{int(queue.get('queued') or 0)}</code> / running <code>{int(queue.get('running') or 0)}</code> / failed <code>{int(queue.get('failed') or 0)}</code>",
+        f"• Local worker connected: <code>{'yes' if worker.get('connected') else 'no'}</code>",
+        f"• Frame video direct render: <code>{'ON' if frame.get('direct_render_enabled') else 'OFF'}</code>",
+        "",
+        "Không hiển thị key/token/secret. Mục này chỉ đọc trạng thái, không trừ Xu.",
+    ])
+
+def finance_overview_text() -> str:
+    return finance_brief_report_text(finance_period_payload("", "month"), "📊 <b>Tổng quan tài chính tháng này</b>")
+
+def finance_revenue_text() -> str:
+    payload = finance_period_payload("", "month")
+    source_lines = [
+        f"• {html.escape(str(source or 'unknown'))}: <b>{vnd_text(amount)}</b> ({int(count or 0)} giao dịch, {xu_text(xu)})"
+        for source, count, amount, xu in payload.get("revenue_by_source", [])[:8]
+    ] or ["• Chưa có dữ liệu"]
+    return "\n".join([
+        "💵 <b>Doanh thu TOAN AAS</b>",
+        f"• Kỳ: <code>{html.escape(str(payload.get('label') or ''))}</code>",
+        f"• Tiền thật: <b>{finance_money_or_no_data(payload, 'revenue_success')}</b>",
+        f"• Số giao dịch: <b>{int(payload.get('revenue_count') or 0) if finance_payload_has_data(payload) else 'Chưa có dữ liệu'}</b>",
+        f"• Xu phát hành: <b>{finance_xu_or_no_data(payload, 'xu_credited')}</b>",
+        "",
+        "<b>Theo nguồn</b>",
+        *source_lines,
+    ])
+
+def finance_revenue_month_menu_text() -> str:
+    return (
+        "📅 <b>Doanh thu tháng</b>\n\n"
+        "Chọn kỳ muốn xem. Nếu cần tháng khác, dùng lệnh:\n"
+        "• <code>/revenue_report 2026-06</code>\n"
+        "• <code>/revenue_report 2026</code>"
+    )
+
+def finance_expense_month_menu_text() -> str:
+    return (
+        "📉 <b>Chi phí tháng</b>\n\n"
+        "Chọn kỳ muốn xem hoặc dùng <b>Thêm chi phí</b> để xem cú pháp ghi nhận chi phí."
+    )
+
+def finance_profit_menu_text() -> str:
+    return "📈 <b>Lãi / Lỗ</b>\n\nChọn kỳ muốn xem. Số liệu phục vụ quản trị nội bộ, chưa thay thế báo cáo thuế chính thức."
+
+def finance_export_menu_text() -> str:
+    return (
+        "📤 <b>Xuất báo cáo tài chính</b>\n\n"
+        "Telegram callback chỉ hiển thị hướng dẫn để tránh gửi nhầm file. Dùng lệnh:\n"
+        "• <code>/finance_export 2026-06</code> — xuất tháng\n"
+        "• <code>/finance_export 2026</code> — xuất năm"
+    )
+
+def finance_add_expense_help_text() -> str:
+    return (
+        "➕ <b>Thêm chi phí nội bộ</b>\n\n"
+        "Cú pháp:\n"
+        "• <code>/expense_add &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n"
+        "• <code>/expense_add_pre &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n\n"
+        "Ví dụ:\n"
+        "• <code>/expense_add 32500 provider_ai ShopAIKey nap api credit</code>\n\n"
+        "Không tự động ghi chi phí từ nút này."
+    )
+
+def finance_command_help_text() -> str:
+    return (
+        "📚 <b>Hướng dẫn lệnh tài chính</b>\n\n"
+        "• <code>/finance_dashboard</code> — tổng quan hôm nay/tháng/năm\n"
+        "• <code>/revenue_report [YYYY-MM|YYYY]</code> — doanh thu\n"
+        "• <code>/expense_report [YYYY-MM|YYYY]</code> — chi phí\n"
+        "• <code>/profit_report [YYYY-MM|YYYY]</code> — lãi/lỗ\n"
+        "• <code>/finance_export YYYY-MM</code> hoặc <code>/finance_export YYYY</code> — xuất CSV\n"
+        "• <code>/expense_add ...</code> — thêm chi phí vận hành\n"
+        "• <code>/expense_add_pre ...</code> — thêm chi phí trước thành lập\n\n"
+        "Category gợi ý: <code>provider_ai</code>, <code>railway_hosting</code>, <code>domain_hosting</code>, "
+        "<code>software_subscription</code>, <code>marketing_ads</code>, <code>bank_payment_fee</code>, <code>other</code>."
+    )
+
+def finance_expense_categories_text() -> str:
+    return (
+        "🏷 <b>Category chi phí</b>\n\n"
+        + "\n".join(f"• <code>{html.escape(category)}</code>" for category in sorted(FINANCE_EXPENSE_CATEGORIES))
+    )
+
+def finance_revenue_period_text(raw: str, title: str, default_period: str = "month") -> str:
+    return finance_brief_report_text(finance_period_payload(raw, default_period), title)
+
+def finance_expense_period_text(raw: str, title: str, default_period: str = "month") -> str:
+    payload = finance_period_payload(raw, default_period)
+    rows = payload.get("expenses_by_category") or []
+    expense_lines = [
+        f"• {html.escape(str(category or 'other'))}: <b>{vnd_text(amount)}</b> ({int(count or 0)} khoản)"
+        for category, count, amount in rows[:10]
+    ] or ["• Chưa có dữ liệu"]
+    return "\n".join([
+        finance_brief_report_text(payload, title),
+        "",
+        "<b>Theo category</b>",
+        *expense_lines,
+    ])
+
+def finance_profit_period_text(raw: str, title: str, default_period: str = "month") -> str:
+    return finance_brief_report_text(finance_period_payload(raw, default_period), title)
+
+def finance_export_instruction_text(period: str) -> str:
+    if period == "year":
+        year = datetime.now().strftime("%Y")
+        return f"📤 <b>Xuất báo cáo năm</b>\n\nDùng lệnh: <code>/finance_export {year}</code>"
+    month = datetime.now().strftime("%Y-%m")
+    return f"📤 <b>Xuất báo cáo tháng</b>\n\nDùng lệnh: <code>/finance_export {month}</code>"
+
+def freeze_queue_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Queue Status", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("🧊 Freeze Status", callback_data="menu|freeze_status")],
+        [InlineKeyboardButton("🖼 Freeze Image", callback_data="menu|freeze_image_help"), InlineKeyboardButton("🎬 Freeze Video", callback_data="menu|freeze_video_help")],
+        [InlineKeyboardButton("🎞 Freeze Frame", callback_data="menu|freeze_frame_help"), InlineKeyboardButton("🤖 Freeze Provider", callback_data="menu|freeze_provider_help")],
+        [InlineKeyboardButton("✅ Unfreeze Tool", callback_data="menu|unfreeze_tool_help"), InlineKeyboardButton("🧹 Clear Stale Jobs", callback_data="menu|clear_stale_jobs_help")],
+        [InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|freeze_queue_help"), InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def freeze_queue_menu_text() -> str:
+    return (
+        "🧊 <b>Freeze / Queue TOAN AAS</b>\n\n"
+        "Mục này dùng để kiểm tra hàng đợi job, trạng thái freeze và hướng dẫn thao tác an toàn.\n"
+        "Các nút freeze/unfreeze trong menu chỉ mở hướng dẫn, không tự khóa/mở để tránh bấm nhầm.\n\n"
+        "Dùng lệnh admin có chủ đích khi cần thao tác thật."
+    )
+
+def freeze_queue_status_text() -> str:
+    queue = shopaikey_video_queue_counts_readonly()
+    frame = frame_video_status_payload()
+    worker = local_worker_status_payload()
+    return "\n".join([
+        "📊 <b>Queue Status</b>",
+        "",
+        "<b>ShopAIKey video queue</b>",
+        f"• Queued: <code>{int(queue.get('queued') or 0)}</code>",
+        f"• Running/active: <code>{int(queue.get('running') or 0)}</code>",
+        f"• Success: <code>{int(queue.get('success') or 0)}</code>",
+        f"• Failed/timeout: <code>{int(queue.get('failed') or 0)}</code>",
+        f"• Total: <code>{int(queue.get('total') or 0)}</code>",
+        "• Stale fixed now: <code>không chạy từ menu</code>",
+        "",
+        "<b>Frame video / Local worker</b>",
+        f"• Frame video enabled: <code>{'ON' if frame.get('enabled') else 'OFF'}</code>",
+        f"• Direct render: <code>{'ON' if frame.get('direct_render_enabled') else 'OFF'}</code>",
+        f"• Require local worker: <code>{'ON' if frame.get('require_local_worker') else 'OFF'}</code>",
+        f"• Worker connected: <code>{'yes' if worker.get('connected') else 'no'}</code>",
+        f"• Active frame jobs: <code>{int(frame.get('active_jobs') or 0)}</code>",
+        "",
+        "Không gọi provider. Không trừ Xu.",
+    ])
+
+def freeze_status_menu_text() -> str:
+    shopaikey = provider_freeze_display("shopaikey")
+    video = provider_freeze_display("shopaikey_video")
+    system_mode = current_system_mode()
+    return "\n".join([
+        "🧊 <b>Freeze Status</b>",
+        "",
+        f"• System mode: <code>{html.escape(str(system_mode.get('label') or 'NORMAL'))}</code>",
+        f"• Maintenance: <code>{'ON' if system_mode.get('maintenance_mode') else 'OFF'}</code>",
+        f"• Tool freeze: <code>{'ON' if system_mode.get('tool_freeze') else 'OFF'}</code>",
+        f"• Provider freeze: <code>{'ON' if system_mode.get('provider_freeze') else 'OFF'}</code>",
+        "",
+        "<b>ShopAIKey</b>",
+        f"• General freeze: <code>{'ON' if shopaikey.get('frozen') else 'OFF'}</code>",
+        f"• Video freeze: <code>{'ON' if video.get('frozen') else 'OFF'}</code>",
+        f"• Video reason: <code>{html.escape(str(video.get('reason') or '-'))}</code>",
+        f"• Error windows: <code>{html.escape(shopaikey_video_error_window_text())}</code>",
+    ])
+
+def freeze_queue_help_text() -> str:
+    return (
+        "📚 <b>Hướng dẫn Freeze / Queue</b>\n\n"
+        "• <code>/freeze_status</code> — xem maintenance/provider freeze/job queue\n"
+        "• <code>/queue_status</code> — số job queued/running/done/failed\n"
+        "• <code>/job_status &lt;job_id&gt;</code> — xem 1 job và refund state\n"
+        "• <code>/refund_job &lt;job_id&gt;</code> — hoàn Xu/lượt thủ công nếu guard chưa xử lý\n"
+        "• <code>/clear_job_lock &lt;user_id&gt;</code> — clear lock khi job kẹt\n"
+        "• <code>/freeze_video &lt;reason&gt;</code> / <code>/unfreeze_video</code> — khóa/mở public video\n"
+        "• <code>/provider_freeze &lt;provider&gt; &lt;reason&gt;</code> / <code>/provider_unfreeze &lt;provider&gt;</code>\n\n"
+        "Không thao tác trực tiếp từ nút này để tránh bấm nhầm."
+    )
+
+def freeze_action_help_text(kind: str) -> str:
+    texts = {
+        "image": (
+            "🖼 <b>Freeze Image</b>\n\n"
+            "Nếu cần khóa ảnh public/provider, dùng provider freeze có chủ đích:\n"
+            "• <code>/provider_freeze shopaikey_image &lt;reason&gt;</code>\n"
+            "• <code>/provider_unfreeze shopaikey_image</code>\n\n"
+            "Menu này không tự khóa image để tránh ảnh hưởng flow ảnh đang bán."
+        ),
+        "video": (
+            "🎬 <b>Freeze Video</b>\n\n"
+            "Thao tác thật:\n"
+            "• <code>/freeze_video &lt;reason&gt;</code>\n"
+            "• <code>/unfreeze_video</code>\n\n"
+            "Public video còn phụ thuộc ENV, billing guard, job lock và provider availability."
+        ),
+        "frame": (
+            "🎞 <b>Freeze Frame Video</b>\n\n"
+            "Frame video ưu tiên Local Worker. Không render trực tiếp trên Railway nếu guard chưa cho phép.\n"
+            "Kiểm tra bằng <code>/providers</code>, <code>/local_status</code>, <code>/frame_video_status &lt;job_id&gt;</code> nếu có job."
+        ),
+        "provider": (
+            "🤖 <b>Freeze Provider</b>\n\n"
+            "Dùng:\n"
+            "• <code>/provider_freeze &lt;provider&gt; &lt;reason&gt;</code>\n"
+            "• <code>/provider_unfreeze &lt;provider&gt;</code>\n\n"
+            "Ví dụ provider: <code>shopaikey</code>, <code>shopaikey_video</code>."
+        ),
+        "unfreeze": (
+            "✅ <b>Unfreeze Tool</b>\n\n"
+            "Dùng lệnh mở khóa đúng phạm vi:\n"
+            "• <code>/unfreeze_video</code>\n"
+            "• <code>/provider_unfreeze &lt;provider&gt;</code>\n"
+            "• <code>/maintenance_off</code> nếu đang bật bảo trì toàn hệ thống."
+        ),
+        "clear": (
+            "🧹 <b>Clear Stale Jobs</b>\n\n"
+            "Dùng khi job lock kẹt sau khi đã kiểm tra trạng thái:\n"
+            "• <code>/queue_status</code>\n"
+            "• <code>/job_status &lt;job_id&gt;</code>\n"
+            "• <code>/clear_job_lock &lt;user_id&gt;</code>\n\n"
+            "Không clear hàng loạt từ nút menu."
+        ),
+    }
+    return texts.get(kind, freeze_queue_help_text())
+
+def smoke_test_menu_text() -> str:
+    return (
+        "🧪 <b>Smoke Test Tools</b>\n\n"
+        "Các lệnh test admin-only, không trừ Xu và không lộ key:\n"
+        "• <code>/tool_test_shopaikey</code>\n"
+        "• <code>/tool_test_shopaikey_tts</code>\n"
+        "• <code>/tool_test_shopaikey_image</code>\n"
+        "• <code>/tool_test_shopaikey_video [model]</code>\n"
+        "• <code>/tool_test_ffmpeg_local</code>\n"
+        "• <code>/tool_test_comfy_local</code>\n"
+        "• <code>/providers</code>\n"
+        "• <code>/sales_ready</code>"
+    )
+
+def smoke_test_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 Provider", callback_data="menu|freeze_queue_status"), InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|freeze_queue")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+ADMIN_MENU_PAGE_HANDLERS = {
+    "admin_overview": lambda: (admin_overview_text(), finance_admin_keyboard()),
+    "smoke_test": lambda: (smoke_test_menu_text(), smoke_test_menu_keyboard()),
+    "finance_overview": lambda: (finance_overview_text(), finance_admin_keyboard()),
+    "finance_revenue": lambda: (finance_revenue_text(), finance_period_keyboard("revenue")),
+    "finance_revenue_month": lambda: (finance_revenue_month_menu_text(), finance_period_keyboard("revenue")),
+    "finance_revenue_this_month": lambda: (finance_revenue_period_text("", "📅 <b>Doanh thu tháng này</b>"), finance_period_keyboard("revenue")),
+    "finance_revenue_last_month": lambda: (finance_revenue_period_text(previous_month_arg(), "↩️ <b>Doanh thu tháng trước</b>"), finance_period_keyboard("revenue")),
+    "finance_revenue_year": lambda: (finance_revenue_period_text("", "📆 <b>Doanh thu năm nay</b>", "year"), finance_period_keyboard("revenue")),
+    "finance_revenue_custom_help": lambda: (finance_revenue_month_menu_text(), finance_period_keyboard("revenue")),
+    "finance_expense_month": lambda: (finance_expense_month_menu_text(), finance_period_keyboard("expense")),
+    "finance_expense_this_month": lambda: (finance_expense_period_text("", "📉 <b>Chi phí tháng này</b>"), finance_period_keyboard("expense")),
+    "finance_expense_last_month": lambda: (finance_expense_period_text(previous_month_arg(), "↩️ <b>Chi phí tháng trước</b>"), finance_period_keyboard("expense")),
+    "finance_expense_year": lambda: (finance_expense_period_text("", "📆 <b>Chi phí năm nay</b>", "year"), finance_period_keyboard("expense")),
+    "finance_expense_categories": lambda: (finance_expense_categories_text(), finance_period_keyboard("expense")),
+    "finance_profit": lambda: (finance_profit_menu_text(), finance_period_keyboard("profit")),
+    "finance_profit_this_month": lambda: (finance_profit_period_text("", "📈 <b>Lãi / Lỗ tháng này</b>"), finance_period_keyboard("profit")),
+    "finance_profit_year": lambda: (finance_profit_period_text("", "📆 <b>Lãi / Lỗ năm nay</b>", "year"), finance_period_keyboard("profit")),
+    "finance_export": lambda: (finance_export_menu_text(), finance_period_keyboard("export")),
+    "finance_export_month": lambda: (finance_export_instruction_text("month"), finance_period_keyboard("export")),
+    "finance_export_year": lambda: (finance_export_instruction_text("year"), finance_period_keyboard("export")),
+    "finance_add_expense": lambda: (finance_add_expense_help_text(), finance_admin_keyboard()),
+    "finance_help": lambda: (finance_command_help_text(), finance_admin_keyboard()),
+    "freeze_queue": lambda: (freeze_queue_menu_text(), freeze_queue_keyboard()),
+    "freeze_queue_status": lambda: (freeze_queue_status_text(), freeze_queue_keyboard()),
+    "freeze_status": lambda: (freeze_status_menu_text(), freeze_queue_keyboard()),
+    "freeze_queue_help": lambda: (freeze_queue_help_text(), freeze_queue_keyboard()),
+    "freeze_image_help": lambda: (freeze_action_help_text("image"), freeze_queue_keyboard()),
+    "freeze_video_help": lambda: (freeze_action_help_text("video"), freeze_queue_keyboard()),
+    "freeze_frame_help": lambda: (freeze_action_help_text("frame"), freeze_queue_keyboard()),
+    "freeze_provider_help": lambda: (freeze_action_help_text("provider"), freeze_queue_keyboard()),
+    "unfreeze_tool_help": lambda: (freeze_action_help_text("unfreeze"), freeze_queue_keyboard()),
+    "clear_stale_jobs_help": lambda: (freeze_action_help_text("clear"), freeze_queue_keyboard()),
+}
 
 async def cmd_finance_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):

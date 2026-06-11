@@ -269,6 +269,19 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "⚙️ Hệ thống" in admin_nav_labels
     assert "🎁 Gói / Combo" in admin_nav_labels
     assert "🧊 Freeze / Queue" in admin_nav_labels
+    assert "📊 Báo cáo tổng" in admin_nav_labels
+    assert "🧪 Smoke Test" in admin_nav_labels
+    admin_nav_rows = [[button.text for button in row] for row in bot.menu_nav_keyboard("admin", True).inline_keyboard]
+    assert ["💰 Tài chính", "🧊 Freeze / Queue"] in admin_nav_rows
+    finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
+    for label in ["📊 Tổng quan", "💵 Doanh thu", "📅 Doanh thu tháng", "📉 Chi phí tháng", "📈 Lãi / Lỗ", "📤 Xuất báo cáo", "➕ Thêm chi phí", "📚 Hướng dẫn lệnh"]:
+        assert label in finance_labels
+    freeze_labels = [button.text for row in bot.freeze_queue_keyboard().inline_keyboard for button in row]
+    for label in ["📊 Queue Status", "🧊 Freeze Status", "🖼 Freeze Image", "🎬 Freeze Video", "🎞 Freeze Frame", "🤖 Freeze Provider", "✅ Unfreeze Tool", "🧹 Clear Stale Jobs"]:
+        assert label in freeze_labels
+    assert "Tài chính nội bộ TOAN AAS" in bot.finance_menu_text()
+    assert "Mục này dùng để kiểm tra hàng đợi job" in bot.freeze_queue_menu_text()
+    assert "Báo cáo tổng TOAN AAS" in bot.admin_overview_text()
     admin_menu = bot.menu_text_admin()
     for command in [
         "/add",
