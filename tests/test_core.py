@@ -1,6 +1,7 @@
 import asyncio
 import hmac
 import hashlib
+import io
 import json
 import os
 import re
@@ -2034,6 +2035,69 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert image_callback_by_label["✍️ Tạo prompt ảnh"] == "menu|image_prompt_start"
     assert image_callback_by_label["🧩 Sửa ảnh / edit ảnh"] == "menu|image_edit_start"
     assert image_callback_by_label["📐 Nâng cấp / đổi kích thước"] == "menu|image_upscale_start"
+    image_menu_text = bot.menu_text_main_image()
+    assert "Tạo ảnh nhanh" in image_menu_text
+    assert "Tạo prompt ảnh" in image_menu_text
+    assert "Sửa ảnh / edit ảnh" in image_menu_text
+    assert "Nâng cấp / đổi kích thước" in image_menu_text
+    prompt_goal_labels = [button.text for row in bot.image_prompt_goal_keyboard("vi").inline_keyboard for button in row]
+    assert "📦 Ảnh sản phẩm" in prompt_goal_labels
+    assert "📢 Ảnh quảng cáo" in prompt_goal_labels
+    assert "🎬 Ảnh cinematic/video" in prompt_goal_labels
+    assert bot.image_prompt_style_suggestions("product") == ["Studio sạch đẹp", "Luxury showroom", "Lifestyle đời thường"]
+    prompt_text, prompt_value = bot.build_image_prompt_output({
+        "goal_code": "product",
+        "subject": "máy xay sinh tố mini màu xanh ngọc",
+        "style": "Luxury showroom",
+        "ratio": "16:9",
+    })
+    assert "Prompt ảnh đã tạo" in prompt_text
+    assert "Prompt ngắn" in prompt_text
+    assert "Prompt chi tiết" in prompt_text
+    assert "Negative prompt" in prompt_text
+    assert "Bot chưa gọi provider ảnh và chưa trừ Xu" in prompt_text
+    assert "máy xay sinh tố mini màu xanh ngọc" in prompt_value
+    prompt_output_callbacks = [button.callback_data for row in bot.image_prompt_output_keyboard("vi").inline_keyboard for button in row]
+    assert "imgtool|prompt_use" in prompt_output_callbacks
+    assert "imgtool|prompt_variants" in prompt_output_callbacks
+    assert "imgtool|prompt_save" in prompt_output_callbacks
+    prompt_tier_callbacks = [button.callback_data for row in bot.image_prompt_tier_keyboard("vi").inline_keyboard for button in row]
+    assert any(callback.startswith("imgtool|prompt_tier|") for callback in prompt_tier_callbacks)
+    edit_start_labels = [button.text for row in bot.image_edit_start_keyboard("vi").inline_keyboard for button in row]
+    assert "📷 Gửi ảnh" in edit_start_labels
+    assert "✍️ Chỉ tạo prompt sửa ảnh" in edit_start_labels
+    edit_choice_labels = [button.text for row in bot.image_edit_choice_keyboard("vi").inline_keyboard for button in row]
+    assert "🌄 Đổi nền / đổi bối cảnh" in edit_choice_labels
+    assert "🧹 Xóa vật thể / làm sạch" in edit_choice_labels
+    assert "🎨 Đổi phong cách / nâng hình" in edit_choice_labels
+    assert bot.image_edit_suggestions("background") == ["Nền trắng studio sạch đẹp", "Luxury showroom", "Văn phòng/công nghệ tương lai"]
+    edit_prompt = bot.image_edit_prompt_text({"edit_type": "background", "edit_request": "Luxury showroom"})
+    assert "Prompt sửa ảnh đã sẵn sàng" in edit_prompt
+    assert "Sửa ảnh AI public" in edit_prompt
+    assert "chưa gọi provider" in edit_prompt and "chưa trừ Xu" in edit_prompt
+    assert bot.IMAGE_EDIT_BASIC_XU == 50
+    assert bot.IMAGE_EDIT_STANDARD_XU == 200
+    resize_choice_labels = [button.text for row in bot.image_resize_choice_keyboard("vi").inline_keyboard for button in row]
+    assert "📐 Đổi tỷ lệ" in resize_choice_labels
+    assert "🖼 Resize pixel" in resize_choice_labels
+    assert "✨ Nâng chất lượng AI" in resize_choice_labels
+    assert "🎬 Chuẩn bị ảnh cho video" in resize_choice_labels
+    resize_method_labels = [button.text for row in bot.image_resize_method_keyboard("vi").inline_keyboard for button in row]
+    assert "✂️ Crop vừa khung" in resize_method_labels
+    assert "⬜ Thêm viền/nền" in resize_method_labels
+    assert "🌫 Nền blur" in resize_method_labels
+    assert bot.parse_image_pixel_size("1920x1080") == (1920, 1080)
+    assert bot.normalize_image_tool_ratio("9x16") == "9:16"
+    if bot.Image is not None:
+        src = bot.Image.new("RGB", (320, 180), (10, 120, 200))
+        src_buf = io.BytesIO()
+        src.save(src_buf, format="PNG")
+        ok, out_bytes, size_text, method = bot.process_image_local_resize_bytes(src_buf.getvalue(), "9:16", "pad")
+        assert ok
+        assert size_text == "1080x1920"
+        assert method == "pad"
+        assert out_bytes.startswith(b"\x89PNG")
+    assert 'CallbackQueryHandler(handle_image_tools_callback, pattern=r"^imgtool\\|")' in source
     assert "menu|hint_image_to_video_pack" not in [button.callback_data for button in image_buttons]
     assert "menu|hint_image_tools" not in [button.callback_data for button in image_buttons]
     assert "💳 Xem bảng giá" not in image_labels
