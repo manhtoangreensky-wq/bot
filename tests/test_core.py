@@ -401,7 +401,8 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_USAGE_URL=https://api.shopaikey.com/usage" in env_example
     assert "SHOPAIKEY_USAGE_ALERT_PERCENT=10" in env_example
     assert "SHOPAIKEY_IMAGE_URL=https://api.shopaikey.com/images/google/generations" in env_example
-    assert "SHOPAIKEY_IMAGE_MODEL=nano-banana" in env_example
+    assert "SHOPAIKEY_IMAGE_MODEL_PRIMARY=nano-banana" in env_example
+    assert "SHOPAIKEY_IMAGE_MODEL_FALLBACKS=gemini-2.5-flash-image,gemini-2.0-flash-preview-image-generation" in env_example
     assert "SHOPAIKEY_VIDEO_URL=https://api.shopaikey.com/v1/video/generations" in env_example
     assert "SHOPAIKEY_VIDEO_MODEL=veo3.1-fast" in env_example
     assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
@@ -809,8 +810,8 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert "Public video generation:" in source
     assert "Admin smoke image tests:" in source
     assert "Image: <code>admin-only custom Google image endpoint; public OFF" not in source
-    assert bot.public_image_provider_fail_message(0, False) == "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau."
-    assert bot.public_image_provider_fail_message(50, True) == "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại 50 Xu cho bạn. Vui lòng thử lại sau."
+    assert bot.public_image_provider_fail_message(0, False) == "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau."
+    assert bot.public_image_provider_fail_message(50, True) == "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau."
     assert "Admin đã được ghi nhận" in bot.public_image_provider_fail_message(50, False)
     assert bot.public_video_provider_fail_message(0, False) == "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau."
     assert bot.public_video_provider_fail_message(300, True) == "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại 300 Xu cho bạn. Vui lòng thử lại sau."
@@ -1768,17 +1769,31 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert size_16x9["size_string"] == "1344x768"
     assert size_16x9["width"] > size_16x9["height"]
     assert bot.get_image_size_for_ratio("9:16", "low", "shopaikey")["size_string"] == "768x1344"
+    assert bot.get_image_size_for_ratio("16:9", "low", "gemini-2.5-flash-image")["size_string"] == "1344x768"
     assert bot.get_image_size_for_ratio("2:1", "low", "shopaikey")["provider_supported"] is False
     assert bot.infer_image_aspect_ratio_from_prompt("Product scene. Aspect ratio 4:5. No watermark.") == "4:5"
+    assert bot.shopaikey_image_model_sequence("nano-banana", "gemini-2.5-flash-image,nano-banana,gemini-2.0-flash-preview-image-generation") == [
+        "nano-banana",
+        "gemini-2.5-flash-image",
+        "gemini-2.0-flash-preview-image-generation",
+    ]
+    assert bot.shopaikey_image_model_invalid_error(429, "Model not found or invalid")
+    assert bot.shopaikey_classify_error(429, "Model not found or invalid") == "FAIL_MODEL_INVALID"
     image_generate_source = source_between(bot_source_text(), "async def shopaikey_image_generate", "async def shopaikey_image_smoke_test")
     assert '"size": "9:16"' not in image_generate_source
     assert '"size": size_info["size_string"]' in image_generate_source
     assert "get_image_size_for_ratio" in image_generate_source
     assert "shopaikey_image_output_from_payload" in image_generate_source
+    assert "models_tried" in image_generate_source
+    assert "fallback_used" in image_generate_source
+    assert "shopaikey_image_model_invalid_error" in image_generate_source
     image_smoke_source = source_between(bot_source_text(), "async def cmd_tool_test_shopaikey_image", "async def cmd_tool_test_shopaikey_video")
     assert "context.args" in image_smoke_source
     assert "Ratio requested" in image_smoke_source
     assert "Size sent" in image_smoke_source
+    assert "Models tried" in image_smoke_source
+    assert "Final model" in image_smoke_source
+    assert "Fallback used" in image_smoke_source
     public_callback_source = source_between(bot_source_text(), "async def handle_shopaikey_public_callback", "class TranslationProviderError")
     assert "image_aspect_ratio" in public_callback_source
     assert "shopaikey_image_generate(prompt, model, aspect_ratio=image_aspect_ratio, tier=image_tier)" in public_callback_source

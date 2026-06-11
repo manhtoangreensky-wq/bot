@@ -343,7 +343,9 @@ SHOPAIKEY_TTS_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TIMEOUT_SECONDS", 60)
 SHOPAIKEY_TTS_TELEGRAM_SEND_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TELEGRAM_SEND_TIMEOUT_SECONDS", 60)
 SHOPAIKEY_TTS_TELEGRAM_RETRY_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TELEGRAM_RETRY_TIMEOUT_SECONDS", 90)
 SHOPAIKEY_IMAGE_URL = _env("SHOPAIKEY_IMAGE_URL", "https://api.shopaikey.com/images/google/generations")
-SHOPAIKEY_IMAGE_MODEL = _env("SHOPAIKEY_IMAGE_MODEL", "nano-banana")
+SHOPAIKEY_IMAGE_MODEL_PRIMARY = _env("SHOPAIKEY_IMAGE_MODEL_PRIMARY", _env("SHOPAIKEY_IMAGE_MODEL", "nano-banana"))
+SHOPAIKEY_IMAGE_MODEL = SHOPAIKEY_IMAGE_MODEL_PRIMARY
+SHOPAIKEY_IMAGE_MODEL_FALLBACKS = _env("SHOPAIKEY_IMAGE_MODEL_FALLBACKS", "gemini-2.5-flash-image,gemini-2.0-flash-preview-image-generation")
 SHOPAIKEY_IMAGE_STATUS = _env("SHOPAIKEY_IMAGE_STATUS", "not_ready/fail_group_no_channel")
 SHOPAIKEY_VIDEO_URL = _env("SHOPAIKEY_VIDEO_URL", "https://api.shopaikey.com/v1/video/generations")
 SHOPAIKEY_VIDEO_ENABLED = env_flag("SHOPAIKEY_VIDEO_ENABLED", "false")
@@ -3594,8 +3596,8 @@ UI_TEXT = {
         "image.tier_disabled_message": "🧪 Tier ảnh này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.",
         "image.success": "✅ Ảnh {label} đã tạo xong.\nJob #{job_id}\n{billing_note}\n\nBạn muốn làm gì tiếp?\n\n• Chốt ảnh này nếu đã hài lòng\n• Tạo prompt video từ ảnh\n• Sửa prompt hoặc tạo lại ảnh",
         "image.success_link": "✅ Ảnh ShopAIKey đã tạo xong nhưng Telegram không gửi trực tiếp được.\n<a href=\"{url}\">Mở ảnh</a>",
-        "image.fail.not_charged": "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau.",
-        "image.fail.refunded": "⚙️ Model tạo ảnh đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau.",
+        "image.fail.not_charged": "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau.",
+        "image.fail.refunded": "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau.",
         "image.fail.refund_failed": "⚠️ Tác vụ tạo ảnh lỗi sau khi đã trừ Xu. Bot chưa hoàn tự động được. Admin đã được ghi nhận để kiểm tra và hoàn Xu thủ công nếu hợp lệ.",
         "image.prompt.ask": "🖼 <b>{label}</b>\n\nGửi mô tả ảnh bạn muốn tạo.\n\nVí dụ: logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản.\n\nTimeout: 10 phút. Gõ /cancel để hủy.\nBot chưa gọi API và chưa trừ Xu.",
         "image.confirm.cost": "🖼 <b>Tạo ảnh {label} sẽ tốn {cost} Xu.</b>\n\n• Số dư hiện tại: <b>{credits} Xu</b>\n• Bảo hành: {warranty_note}\n• Prompt: <code>{prompt}</code>\n\nBạn có muốn tiếp tục không?\nBot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn Xu theo chính sách.",
@@ -29181,7 +29183,7 @@ def media_aspect_ratio_label(aspect_ratio: str = "", kind: str = "video", lang: 
 
 def normalize_image_provider_key(provider: str = "") -> str:
     value = str(provider or "").strip().lower()
-    if "shopaikey" in value or "nano" in value or "banana" in value or not value:
+    if "shopaikey" in value or "nano" in value or "banana" in value or "gemini" in value or "flash-image" in value or not value:
         return "shopaikey"
     return value
 
@@ -30732,6 +30734,8 @@ async def maybe_alert_shopaikey_low_quota(bot_client, usage: dict, updated_by="m
 
 def shopaikey_classify_error(http_status: int = 0, detail: str = "") -> str:
     value = str(detail or "").lower()
+    if shopaikey_image_model_invalid_error(http_status, value):
+        return "FAIL_MODEL_INVALID"
     if "no available channel" in value:
         return "FAIL_NO_AVAILABLE_CHANNEL"
     if "quota" in value or "balance" in value:
@@ -30756,6 +30760,46 @@ def shopaikey_classify_video_error(http_status: int = 0, detail: str = "") -> st
     if "timeout" in value or "timed out" in value:
         return "FAIL_TIMEOUT"
     return shopaikey_classify_error(status, detail)
+
+def split_env_csv(value: str = "") -> list[str]:
+    result = []
+    for item in str(value or "").split(","):
+        clean = item.strip()
+        if clean and clean not in result:
+            result.append(clean)
+    return result
+
+def shopaikey_image_model_sequence(primary: str = "", fallbacks: str | list[str] | None = None) -> list[str]:
+    sequence = []
+    candidates = [str(primary or SHOPAIKEY_IMAGE_MODEL_PRIMARY or SHOPAIKEY_IMAGE_MODEL or "nano-banana").strip()]
+    if fallbacks is None:
+        candidates.extend(split_env_csv(SHOPAIKEY_IMAGE_MODEL_FALLBACKS))
+    elif isinstance(fallbacks, str):
+        candidates.extend(split_env_csv(fallbacks))
+    else:
+        candidates.extend(str(item or "").strip() for item in fallbacks)
+    for model in candidates:
+        if model and model not in sequence:
+            sequence.append(model)
+    return sequence or ["nano-banana"]
+
+def shopaikey_image_model_invalid_error(http_status: int = 0, detail: str = "") -> bool:
+    value = str(detail or "").lower()
+    status = int(http_status or 0)
+    invalid_markers = (
+        "model not found",
+        "not found or invalid",
+        "invalid model",
+        "model invalid",
+        "invalid_model",
+        "model_invalid",
+        "unknown model",
+    )
+    if any(marker in value for marker in invalid_markers):
+        return True
+    if status in {400, 404, 429} and "model" in value and ("invalid" in value or "not found" in value or "unknown" in value):
+        return True
+    return False
 
 async def shopaikey_chat_smoke_test() -> dict:
     models = shopaikey_chat_model_sequence()
@@ -30989,8 +31033,11 @@ def shopaikey_image_output_from_payload(payload: dict) -> dict:
     result["size"] = str(first.get("size") or payload.get("size") or "").strip()
     return result
 
-async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: str = "", tier: str = "") -> dict:
-    model_name = model or SHOPAIKEY_IMAGE_MODEL or "nano-banana"
+async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: str = "", tier: str = "", fallback_models: str | list[str] | None = None) -> dict:
+    model_sequence = shopaikey_image_model_sequence(model or SHOPAIKEY_IMAGE_MODEL_PRIMARY or SHOPAIKEY_IMAGE_MODEL, fallback_models)
+    model_name = model_sequence[0]
+    models_tried: list[str] = []
+    attempts: list[dict] = []
     inferred_ratio = str(aspect_ratio or infer_image_aspect_ratio_from_prompt(prompt, "9:16") or "9:16").strip()
     size_info = get_image_size_for_ratio(inferred_ratio, tier, "shopaikey")
     if not SHOPAIKEY_API_KEY:
@@ -30999,6 +31046,10 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             "http_status": 0,
             "latency_ms": 0,
             "model": model_name,
+            "models_tried": model_sequence,
+            "attempts": attempts,
+            "final_model": model_name,
+            "fallback_used": False,
             "size": size_info["size_string"],
             "aspect_ratio": size_info["ratio"],
             "size_sent": size_info["size_string"],
@@ -31012,6 +31063,10 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             "http_status": 0,
             "latency_ms": 0,
             "model": model_name,
+            "models_tried": model_sequence,
+            "attempts": attempts,
+            "final_model": model_name,
+            "fallback_used": False,
             "size": size_info["size_string"],
             "aspect_ratio": size_info["ratio"],
             "size_sent": size_info["size_string"],
@@ -31026,6 +31081,10 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             "http_status": 0,
             "latency_ms": 0,
             "model": model_name,
+            "models_tried": model_sequence,
+            "attempts": attempts,
+            "final_model": model_name,
+            "fallback_used": False,
             "size": size_info["size_string"],
             "aspect_ratio": size_info["ratio"],
             "size_sent": size_info["size_string"],
@@ -31034,101 +31093,165 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             "error_class": "FAIL_UNSUPPORTED_ASPECT",
             "detail": size_info.get("fallback_note") or IMAGE_RATIO_UNSUPPORTED_MESSAGE,
         }
-    started = time.perf_counter()
-    payload = {
-        "model": model_name,
-        "prompt": safe_prompt,
-        "size": size_info["size_string"],
-        "format": "png",
-        "response_format": "url",
-        "image_urls": [],
-    }
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            res = await client.post(
-                SHOPAIKEY_IMAGE_URL,
-                headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
-                json=payload,
-            )
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        data = {}
+    last_result: dict = {}
+    for index, model_candidate in enumerate(model_sequence):
+        model_candidate = str(model_candidate or "").strip()
+        if not model_candidate:
+            continue
+        models_tried.append(model_candidate)
+        started = time.perf_counter()
+        payload = {
+            "model": model_candidate,
+            "prompt": safe_prompt,
+            "size": size_info["size_string"],
+            "format": "png",
+            "response_format": "url",
+            "image_urls": [],
+        }
         try:
-            data = res.json()
-        except Exception:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                res = await client.post(
+                    SHOPAIKEY_IMAGE_URL,
+                    headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
+                    json=payload,
+                )
+            latency_ms = int((time.perf_counter() - started) * 1000)
             data = {}
-        if res.status_code < 400 and isinstance(data, dict):
-            output = shopaikey_image_output_from_payload(data)
-            image_url = str(output.get("image_url") or "").strip()
-            b64_json = str(output.get("b64_json") or "").strip()
-            size = str(output.get("size") or payload["size"] or "").strip()
-            if image_url or b64_json:
-                return {
-                    "status": "PASS",
+            try:
+                data = res.json()
+            except Exception:
+                data = {}
+            if res.status_code < 400 and isinstance(data, dict):
+                output = shopaikey_image_output_from_payload(data)
+                image_url = str(output.get("image_url") or "").strip()
+                b64_json = str(output.get("b64_json") or "").strip()
+                size = str(output.get("size") or payload["size"] or "").strip()
+                if image_url or b64_json:
+                    result = {
+                        "status": "PASS",
+                        "http_status": int(res.status_code),
+                        "latency_ms": latency_ms,
+                        "model": payload["model"],
+                        "final_model": payload["model"],
+                        "models_tried": list(models_tried),
+                        "attempts": list(attempts) + [{"model": payload["model"], "status": "PASS", "http_status": int(res.status_code), "error_class": ""}],
+                        "fallback_used": index > 0,
+                        "size": size,
+                        "aspect_ratio": size_info["ratio"],
+                        "size_sent": payload["size"],
+                        "image_url": image_url,
+                        "b64_json": b64_json,
+                        "provider_error_code": "",
+                        "error_class": "",
+                        "detail": f"model={payload['model']}; models_tried={','.join(models_tried)}; fallback_used={'yes' if index > 0 else 'no'}; http={res.status_code}; latency_ms={latency_ms}; ratio={size_info['ratio']}; size_sent={payload['size']}; size={size}; output_url={'yes' if image_url else 'no'}; output_b64={'yes' if b64_json else 'no'}",
+                    }
+                    return result
+                status = "FAIL_NO_IMAGE_URL"
+                detail = "response missing supported image output fields"
+                result = {
+                    "status": status,
                     "http_status": int(res.status_code),
                     "latency_ms": latency_ms,
                     "model": payload["model"],
+                    "final_model": payload["model"],
+                    "models_tried": list(models_tried),
+                    "attempts": list(attempts),
+                    "fallback_used": index > 0,
                     "size": size,
                     "aspect_ratio": size_info["ratio"],
                     "size_sent": payload["size"],
-                    "image_url": image_url,
-                    "b64_json": b64_json,
+                    "image_url": "",
+                    "b64_json": "",
                     "provider_error_code": "",
-                    "error_class": "",
-                    "detail": f"model={payload['model']}; http={res.status_code}; latency_ms={latency_ms}; ratio={size_info['ratio']}; size_sent={payload['size']}; size={size}; output_url={'yes' if image_url else 'no'}; output_b64={'yes' if b64_json else 'no'}",
+                    "error_class": status,
+                    "detail": detail,
                 }
-            return {
-                "status": "FAIL_NO_IMAGE_URL",
+                attempts.append({"model": payload["model"], "status": status, "http_status": int(res.status_code), "error_class": status, "message": detail})
+                last_result = result
+                break
+            provider_code, provider_message = shopaikey_provider_error_from_payload(data)
+            detail = provider_message or shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+            error_class = shopaikey_classify_error(res.status_code, detail)
+            result = {
+                "status": error_class,
                 "http_status": int(res.status_code),
                 "latency_ms": latency_ms,
                 "model": payload["model"],
-                "size": size,
+                "final_model": payload["model"],
+                "models_tried": list(models_tried),
+                "attempts": list(attempts),
+                "fallback_used": index > 0,
+                "size": payload["size"],
+                "aspect_ratio": size_info["ratio"],
+                "size_sent": payload["size"],
+                "image_url": "",
+                "b64_json": "",
+                "provider_error_code": provider_code,
+                "error_class": error_class,
+                "detail": detail,
+            }
+            attempts.append({"model": payload["model"], "status": error_class, "http_status": int(res.status_code), "error_class": error_class, "provider_error_code": provider_code, "message": detail[:180]})
+            last_result = result
+            if not shopaikey_image_model_invalid_error(res.status_code, f"{provider_code} {detail}") or index >= len(model_sequence) - 1:
+                break
+        except Exception as e:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            error_class = "FAIL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "FAIL_PROVIDER_ERROR"
+            detail = shopaikey_sanitize_error(str(e))
+            result = {
+                "status": error_class,
+                "http_status": 0,
+                "latency_ms": latency_ms,
+                "model": payload["model"],
+                "final_model": payload["model"],
+                "models_tried": list(models_tried),
+                "attempts": list(attempts),
+                "fallback_used": index > 0,
+                "size": payload["size"],
                 "aspect_ratio": size_info["ratio"],
                 "size_sent": payload["size"],
                 "image_url": "",
                 "b64_json": "",
                 "provider_error_code": "",
-                "error_class": "FAIL_NO_IMAGE_URL",
-                "detail": "response missing supported image output fields",
+                "error_class": error_class,
+                "detail": detail,
             }
-        provider_code, provider_message = shopaikey_provider_error_from_payload(data)
-        detail = provider_message or shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}")
-        return {
-            "status": shopaikey_classify_video_error(res.status_code, detail),
-            "http_status": int(res.status_code),
-            "latency_ms": latency_ms,
-            "model": payload["model"],
-            "size": payload["size"],
-            "aspect_ratio": size_info["ratio"],
-            "size_sent": payload["size"],
-            "image_url": "",
-            "provider_error_code": provider_code,
-            "error_class": shopaikey_classify_video_error(res.status_code, detail),
-            "detail": detail,
-        }
-    except Exception as e:
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        error_class = "FAIL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "FAIL_PROVIDER_ERROR"
-        return {
-            "status": error_class,
+            attempts.append({"model": payload["model"], "status": error_class, "http_status": 0, "error_class": error_class, "message": detail[:180]})
+            last_result = result
+            break
+    if not last_result:
+        last_result = {
+            "status": "FAIL_MODEL_INVALID",
             "http_status": 0,
-            "latency_ms": latency_ms,
-            "model": payload["model"],
-            "size": payload["size"],
+            "latency_ms": 0,
+            "model": model_name,
+            "final_model": model_name,
+            "size": size_info["size_string"],
             "aspect_ratio": size_info["ratio"],
-            "size_sent": payload["size"],
+            "size_sent": size_info["size_string"],
             "image_url": "",
-            "provider_error_code": "",
-            "error_class": error_class,
-            "detail": shopaikey_sanitize_error(str(e)),
+            "b64_json": "",
+            "provider_error_code": "NO_IMAGE_MODEL",
+            "error_class": "FAIL_MODEL_INVALID",
+            "detail": "no image model configured",
         }
+    last_result["models_tried"] = list(models_tried or model_sequence)
+    last_result["attempts"] = list(attempts)
+    last_result["fallback_used"] = bool(last_result.get("fallback_used") or (len(models_tried) > 1 and str(last_result.get("model") or "") != str(model_sequence[0] or "")))
+    last_result["final_model"] = last_result.get("model") or last_result.get("final_model") or model_name
+    detail = str(last_result.get("detail") or "")
+    if "models_tried=" not in detail:
+        last_result["detail"] = f"{detail}; models_tried={','.join(last_result['models_tried'])}; fallback_used={'yes' if last_result.get('fallback_used') else 'no'}".strip("; ")
+    return last_result
 
-async def shopaikey_image_smoke_test(aspect_ratio: str = "9:16") -> dict:
+async def shopaikey_image_smoke_test(aspect_ratio: str = "9:16", model: str = "") -> dict:
     prompt = image_tier_prompt_for_generation(
         "TOAN AAS image smoke test: simple turquoise AI automation logo, clean white background, no extra text",
         "low",
         aspect_ratio,
     )
-    return await shopaikey_image_generate(prompt, aspect_ratio=aspect_ratio, tier="low")
+    fallback_models = [] if model else None
+    return await shopaikey_image_generate(prompt, model=model, aspect_ratio=aspect_ratio, tier="low", fallback_models=fallback_models)
 
 def shopaikey_video_payload_data(payload: dict) -> dict:
     if not isinstance(payload, dict):
@@ -37510,7 +37633,8 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Image aspect ratios: <code>{html.escape('/'.join(media_aspect_ratio_options('image')))}</code>",
         "• Image pricing source: <code>tiered_media_pricing</code>",
         f"• Image provider cost: low <code>{pricing['image_tiers']['low']['provider_cost']} Xu</code> / standard <code>{pricing['image_tiers']['standard']['provider_cost']} Xu</code> / high <code>{pricing['image_tiers']['high']['provider_cost']} Xu</code>",
-        f"• Image model mapping: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
+        f"• Image model primary: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL_PRIMARY or '-')}</code> | endpoint <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
+        f"• Image model fallbacks: <code>{html.escape(', '.join(shopaikey_image_model_sequence()[1:]) or '-')}</code>",
         f"• Video tier config: <code>{'/'.join(pricing['video_tiers'].keys())}</code> | enabled/configured <code>{html.escape(video_tier_public_status_text())}</code>",
         f"• Video aspect ratios: <code>{html.escape('/'.join(media_aspect_ratio_options('video')))}</code>",
         f"• Video combos: <code>{len(pricing.get('video_combos') or [])}</code> | rank/top-up points <code>excluded</code>",
@@ -37567,7 +37691,7 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• Token: <code>{html.escape(str(usage.get('token_name') or '-'))}</code>",
         f"• Last check: <code>{html.escape(str(usage.get('last_at') or '-'))}</code>",
         "",
-        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; custom Google image endpoint nano-banana PASS; custom video endpoint admin smoke available; public image/video controlled by ENV and billing guard.",
+        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; image uses configurable primary/fallback models; custom video endpoint admin smoke available; public image/video controlled by ENV and billing guard.",
         "",
         "ShopAIKey không thay OpenRouter/OpenAI/Gemini; raw provider public vẫn đóng, customer flow đi qua guard ENV/billing.",
     ]
@@ -37594,7 +37718,8 @@ async def cmd_image_provider_status(update: Update, context: ContextTypes.DEFAUL
         f"• Public image: <code>{'enabled' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'disabled'}</code>",
         "• Provider: <code>ShopAIKey</code>",
         f"• Image endpoint: <code>{'configured' if SHOPAIKEY_IMAGE_URL else 'missing'}</code>",
-        f"• Image model: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL or 'nano-banana')}</code>",
+        f"• Image model primary: <code>{html.escape(SHOPAIKEY_IMAGE_MODEL_PRIMARY or 'nano-banana')}</code>",
+        f"• Image model fallbacks: <code>{html.escape(', '.join(shopaikey_image_model_sequence()[1:]) or '-')}</code>",
         f"• API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}</code>",
         f"• Ratio mapping: <code>{html.escape('; '.join(ratio_parts))}</code>",
         f"• Image tier public: <code>{html.escape(image_tier_public_status_text())}</code>",
@@ -38320,12 +38445,14 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
             "⏳ Bạn đang có một tác vụ đang chạy. Vui lòng chờ kết quả hoặc kiểm tra trạng thái."
         )
     ratio_arg = str(context.args[0] or "").strip() if context.args else "9:16"
+    explicit_model = str(context.args[1] or "").strip() if len(context.args or []) > 1 else ""
     size_info = get_image_size_for_ratio(ratio_arg, "low", "shopaikey")
     if not size_info.get("provider_supported"):
         return await update.message.reply_text(IMAGE_RATIO_UNSUPPORTED_MESSAGE)
     aspect_ratio = str(size_info.get("ratio") or "9:16")
     tool_type = "shopaikey_image"
-    normalized_prompt = normalize_generation_prompt(f"shopaikey image smoke test nano-banana {aspect_ratio}")
+    primary_model = explicit_model or SHOPAIKEY_IMAGE_MODEL_PRIMARY or SHOPAIKEY_IMAGE_MODEL or "nano-banana"
+    normalized_prompt = normalize_generation_prompt(f"shopaikey image smoke test {primary_model} {aspect_ratio}")
     if is_duplicate_pending_job(uid, tool_type, normalized_prompt):
         return await update.message.reply_text("⏳ Yêu cầu trước của bạn vẫn đang xử lý. Vui lòng chờ kết quả, không cần gửi lại.")
     start_generation_pending_job(uid, tool_type, normalized_prompt, provider="shopaikey", xu_cost=0, command="/tool_test_shopaikey_image")
@@ -38335,14 +38462,14 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         uid,
         update.effective_chat.id,
         "image",
-        model=SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+        model=primary_model,
         prompt=job_prompt,
         status="IN_PROGRESS",
         admin_only=True,
         xu_cost_planned=0,
     )
     waiting_message = await send_waiting_message(update, context, "image") if SHOPAIKEY_IMAGE_WAITING_MESSAGE_ENABLED else None
-    result = await shopaikey_image_smoke_test(aspect_ratio)
+    result = await shopaikey_image_smoke_test(aspect_ratio, explicit_model)
     status = str(result.get("status") or "FAIL")
     image_url = str(result.get("image_url") or "")
     b64_json = str(result.get("b64_json") or "")
@@ -38350,7 +38477,9 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
     if status == "PASS" and (image_url or b64_json):
         caption = (
             "🖼 ShopAIKey Image Smoke Test — PASS\n"
-            f"Model: {result.get('model') or SHOPAIKEY_IMAGE_MODEL}\n"
+            f"Model: {result.get('model') or primary_model}\n"
+            f"Models tried: {', '.join(result.get('models_tried') or []) or primary_model}\n"
+            f"Fallback used: {'yes' if result.get('fallback_used') else 'no'}\n"
             f"Ratio: {result.get('aspect_ratio') or aspect_ratio}\n"
             f"Size: {result.get('size') or '-'}\n"
             f"Size sent: {result.get('size_sent') or size_info.get('size_string') or '-'}\n"
@@ -38366,7 +38495,9 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
             b64_json=b64_json,
         )
     detail = (
-        f"model={result.get('model') or SHOPAIKEY_IMAGE_MODEL}; http={result.get('http_status')}; "
+        f"model={result.get('model') or primary_model}; final_model={result.get('final_model') or result.get('model') or primary_model}; "
+        f"models_tried={','.join(result.get('models_tried') or []) or primary_model}; fallback_used={'yes' if result.get('fallback_used') else 'no'}; "
+        f"http={result.get('http_status')}; "
         f"latency_ms={result.get('latency_ms')}; ratio={result.get('aspect_ratio') or aspect_ratio}; "
         f"size_sent={result.get('size_sent') or size_info.get('size_string') or '-'}; size={result.get('size') or '-'}; "
         f"output_sent={'yes' if output_sent else 'no'}; "
@@ -38388,7 +38519,7 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         status="SUCCESS" if status == "PASS" else "FAILED",
         result_url=image_url,
         result_sent=1 if output_sent else 0,
-        model=result.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+        model=result.get("model") or primary_model,
         error_class=result.get("error_class") or "",
         provider_error_code=result.get("provider_error_code") or "",
         provider_message=result.get("detail") or "",
@@ -38401,7 +38532,10 @@ async def cmd_tool_test_shopaikey_image(update: Update, context: ContextTypes.DE
         f"• Provider freeze: <code>{html.escape(shopaikey_admin_freeze_warning_text())}</code>\n"
         f"• Status: <code>{html.escape(status)}</code>\n"
         f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>\n"
-        f"• Model: <code>{html.escape(str(result.get('model') or SHOPAIKEY_IMAGE_MODEL or '-'))}</code>\n"
+        f"• Model primary: <code>{html.escape(str(primary_model or '-'))}</code>\n"
+        f"• Models tried: <code>{html.escape(', '.join(result.get('models_tried') or []) or primary_model or '-')}</code>\n"
+        f"• Final model: <code>{html.escape(str(result.get('final_model') or result.get('model') or '-'))}</code>\n"
+        f"• Fallback used: <code>{'yes' if result.get('fallback_used') else 'no'}</code>\n"
         f"• Ratio requested: <code>{html.escape(str(aspect_ratio))}</code>\n"
         f"• Size sent: <code>{html.escape(str(result.get('size_sent') or size_info.get('size_string') or '-'))}</code>\n"
         f"• Size: <code>{html.escape(str(result.get('size') or '-'))}</code>\n"
