@@ -1582,8 +1582,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'ui_text(lang, "video.guided_flow")' not in video_keyboard_source
     assert 'callback_data="menu|video_ai_true"' in video_keyboard_source
     assert 'callback_data="menu|video_frame_intro"' in video_keyboard_source
-    assert 'callback_data="menu|video_self_scene_ai"' in video_keyboard_source
-    assert 'callback_data="menu|video_long_script"' in video_keyboard_source
+    assert 'callback_data="selfscene|start"' in video_keyboard_source
+    assert 'callback_data="longvideo|start"' in video_keyboard_source
     assert 'callback_data="trendg|start"' in video_keyboard_source
     assert 'callback_data="framevideo|start"' in source
     assert "📢 Concept quảng cáo" in video_keyboard_source
@@ -1640,6 +1640,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "handle_public_video_prompt_pending_text(update, context)" in message_source
     assert "handle_creative_motion_pending_text(update, context)" in message_source
     assert "handle_cinematic_ad_pending_text(update, context)" in message_source
+    assert "handle_developing_video_pending_text(update, context)" in message_source
     photo_handler_source = source_between(source, "async def handle_photo", "async def handle_document_cache_only")
     assert "handle_frame_video_photo(update, context)" in photo_handler_source
     assert photo_handler_source.index("handle_frame_video_photo(update, context)") < photo_handler_source.index("remember_last_user_file(update)")
@@ -1648,6 +1649,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert message_source.index("handle_public_video_prompt_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_creative_motion_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_cinematic_ad_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
+    assert message_source.index("handle_developing_video_pending_text(update, context)") < message_source.index("handle_quick_media_pending_text(update, context)")
     assert message_source.index("handle_quick_media_pending_text(update, context)") < message_source.index("is_probable_media_tags_text")
     assert "clear_quick_media_pending(uid)" in quick_source
     assert "clear_media_creator_pending_states(uid)" in source_between(source, "async def cmd_cancel", "async def cmd_create_media")
@@ -2070,9 +2072,47 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Không dùng VEO" in bot.video_frame_intro_text("vi")
     assert "Đang phát triển" in bot.video_self_scene_ai_text("vi")
     assert "Bot chưa gọi API và chưa trừ Xu" in bot.video_self_scene_ai_text("vi")
+    self_scene_labels = [button.text for row in bot.self_scene_input_keyboard("vi").inline_keyboard for button in row]
+    assert "👤 Người thật / cá nhân" in self_scene_labels
+    assert "📦 Sản phẩm / vật phẩm" in self_scene_labels
+    assert "🐶 Thú cưng" in self_scene_labels
+    assert "🎬 Video tự quay" in self_scene_labels
+    assert "✍️ Nhập riêng" in self_scene_labels
+    product_contexts = bot.self_scene_context_suggestions("product", "máy xay sinh tố mini màu xanh ngọc")
+    assert len(product_contexts) == 3
+    assert any("Luxury showroom" in item for item in product_contexts)
+    assert any("Nhà bếp hiện đại" in item for item in product_contexts)
+    assert any("Quán cafe / lifestyle" in item for item in product_contexts)
+    self_scene_plan = bot.self_scene_plan_text({
+        "input_type": "product",
+        "selected_topic": "máy xay sinh tố mini màu xanh ngọc",
+        "selected_context": product_contexts[0],
+        "selected_style": "cinematic",
+    })
+    assert "Kế hoạch đổi cảnh AI" in self_scene_plan
+    assert "Prompt ảnh khung chính" in self_scene_plan
+    assert "Prompt video" in self_scene_plan
+    assert "Gợi ý chuyển động" in self_scene_plan
+    assert "Lưu ý giữ nhận diện" in self_scene_plan
+    assert "Bot chưa gọi API ảnh/video và chưa trừ Xu" in self_scene_plan
     long_script_labels = [button.text for row in bot.video_long_script_keyboard("vi").inline_keyboard for button in row]
     assert "3 phút" in long_script_labels and "60 phút" in long_script_labels
     assert "Chưa tạo video dài hàng loạt" in bot.video_long_script_text("vi")
+    long_topic_labels = [button.text for row in bot.long_video_topic_keyboard("vi").inline_keyboard for button in row]
+    assert "1️⃣ Bán hàng / affiliate" in long_topic_labels
+    assert "2️⃣ Giáo dục / hướng dẫn" in long_topic_labels
+    assert "3️⃣ Kể chuyện / giải trí" in long_topic_labels
+    assert bot.long_video_structure_suggestions("10 phút") == ["10 đoạn x 60 giây", "20 đoạn x 30 giây", "5 chương x 2 phút"]
+    long_plan = bot.long_video_plan_text({
+        "selected_topic": "affiliate AI tool cho người mới",
+        "duration": "10 phút",
+        "selected_style": "professional",
+    })
+    assert "Lộ trình video dài AI" in long_plan
+    assert "Prompt ảnh" in long_plan
+    assert "Prompt video" in long_plan
+    assert "Gợi ý voice/nhạc" in long_plan
+    assert "Bot chưa gọi provider và chưa trừ Xu" in long_plan
     vi_video_off = bot.public_video_off_options_text("vi")
     assert "Video thật chưa mở công khai" in vi_video_off
     assert "Bot chưa gọi API video" in vi_video_off
@@ -2728,6 +2768,9 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "Tạo video thật chưa mở công khai" not in english_video_off
     assert "callback_data=\"trendg|start\"" in source
     assert "CallbackQueryHandler(handle_trend_guided_callback, pattern=r\"^trendg\\|\")" in source
+    assert 'CallbackQueryHandler(handle_self_scene_ai_callback, pattern=r"^selfscene\\|")' in source
+    assert 'CallbackQueryHandler(handle_long_video_callback, pattern=r"^longvideo\\|")' in source
+    assert "handle_developing_video_pending_text(update, context)" in source
 
     product_text = bot.cinematic_ad_product_text()
     assert "Bạn muốn làm quảng cáo cho sản phẩm/dịch vụ gì" in product_text
