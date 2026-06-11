@@ -33553,7 +33553,7 @@ CUSTOMER_GUIDE_SECTIONS = [
         "Hướng dẫn tạo video AI",
         (
             "🎬 <b>Hướng dẫn tạo video AI</b>\n\n"
-            "1. Mở <b>Tạo nội dung / Video</b> hoặc chọn <b>Tạo video nhanh</b>.\n"
+            "1. Mở <b>Tạo nội dung / Video</b> rồi chọn <b>🎬 Video AI thật</b>.\n"
             "2. Gửi mô tả video: sản phẩm, cảnh quay, chuyển động, tỉ lệ, thời lượng, phong cách.\n"
             "3. Nếu cần, tạo ảnh khung chính trước rồi dùng ảnh đó để làm video.\n"
             "4. Chọn chất lượng video và xác nhận giá.\n"
@@ -34487,25 +34487,112 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🧩 Kịch bản → Ảnh → Video", callback_data="storyboard|start")],
-            [InlineKeyboardButton("🎞 Ghép ảnh có sẵn thành video", callback_data="framevideo|start")],
-            [InlineKeyboardButton("🎬 Tạo video nhanh", callback_data="create_media|quick_video")],
-            [InlineKeyboardButton("🖼➡️🎬 Tạo video AI từ ảnh", callback_data="menu|hint_image_to_video_pack")],
             [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start")],
-            [InlineKeyboardButton("🧠 Concept quảng cáo", callback_data="adconcept|start")],
-            [InlineKeyboardButton("🎥 Gợi ý chuyển động / prompt video", callback_data="motion|start")],
+            [InlineKeyboardButton("🧩 Kịch bản → Ảnh → Video", callback_data="storyboard|start")],
+            [InlineKeyboardButton("🎬 Video AI thật", callback_data="menu|video_ai_true")],
+            [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data="menu|video_frame_intro")],
+            [InlineKeyboardButton("🎥 Tự quay & đổi cảnh AI", callback_data="menu|video_self_scene_ai")],
+            [InlineKeyboardButton("📺 Kịch bản video dài", callback_data="menu|video_long_script")],
+            [InlineKeyboardButton("📢 Concept quảng cáo", callback_data="adconcept|start")],
+            [InlineKeyboardButton("🎥 Prompt / Chuyển động", callback_data="motion|start")],
             [InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main")],
             [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
+    if lang == "zh":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔥 Trend 视频", callback_data="trendg|start")],
+            [InlineKeyboardButton("🧩 脚本 → 图片 → 视频", callback_data="storyboard|start")],
+            [InlineKeyboardButton("🎬 真实 AI 视频", callback_data="menu|video_ai_true")],
+            [InlineKeyboardButton("🎞 图片合成视频", callback_data="menu|video_frame_intro")],
+            [InlineKeyboardButton("🎥 自拍换场景 AI", callback_data="menu|video_self_scene_ai")],
+            [InlineKeyboardButton("📺 长视频脚本", callback_data="menu|video_long_script")],
+            [InlineKeyboardButton("📢 广告概念", callback_data="adconcept|start")],
+            [InlineKeyboardButton("🎥 Prompt / 镜头运动", callback_data="motion|start")],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start")],
         [InlineKeyboardButton("🧩 Script → Images → Video", callback_data="storyboard|start")],
-        [InlineKeyboardButton("🎞 Use my existing images", callback_data="framevideo|start")],
-        [InlineKeyboardButton(ui_text(lang, "video.quick_admin_public"), callback_data="create_media|quick_video")],
-        [InlineKeyboardButton(ui_text(lang, "video.image_to_video"), callback_data="menu|hint_image_to_video_pack")],
-        [InlineKeyboardButton(ui_text(lang, "video.trend_short"), callback_data="trendg|start")],
-        [InlineKeyboardButton("🧠 Concept quảng cáo" if lang == "vi" else ui_text(lang, "video.concept_short"), callback_data="adconcept|start")],
-        [InlineKeyboardButton(ui_text(lang, "video.motion_short"), callback_data="motion|start")],
+        [InlineKeyboardButton("🎬 Real AI Video", callback_data="menu|video_ai_true")],
+        [InlineKeyboardButton("🎞 Image slideshow video", callback_data="menu|video_frame_intro")],
+        [InlineKeyboardButton("🎥 Self-shot scene AI", callback_data="menu|video_self_scene_ai")],
+        [InlineKeyboardButton("📺 Long-form video script", callback_data="menu|video_long_script")],
+        [InlineKeyboardButton("📢 Ad concept", callback_data="adconcept|start")],
+        [InlineKeyboardButton("🎥 Prompt / Motion", callback_data="motion|start")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) == "zh":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Prompt → AI 视频", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🖼 图片 → AI 视频", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("📊 视频状态", callback_data="menu|hint_video_status")],
+            [InlineKeyboardButton("🔙 返回视频菜单", callback_data="menu|main_video")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Prompt → AI Video", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🖼 Image → AI Video", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("📊 Video status", callback_data="menu|hint_video_status")],
+            [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📝 Prompt → Video AI", callback_data="create_media|quick_video")],
+        [InlineKeyboardButton("🖼 Ảnh → Video AI", callback_data="menu|hint_image_to_video_pack")],
+        [InlineKeyboardButton("📊 Trạng thái video", callback_data="menu|hint_video_status")],
+        [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def video_frame_intro_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📷 Start image slideshow video", callback_data="framevideo|start")],
+            [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📷 Bắt đầu ghép ảnh", callback_data="framevideo|start")],
+        [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def video_self_scene_ai_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    if normalize_user_language(lang) == "zh":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 发送图片/产品", callback_data="menu|video_self_scene_ai_image")],
+            [InlineKeyboardButton("🎬 发送自拍视频", callback_data="menu|video_self_scene_ai_video")],
+            [InlineKeyboardButton("✍️ 输入自定义场景", callback_data="menu|video_self_scene_ai_custom")],
+            [InlineKeyboardButton("🔙 返回视频菜单", callback_data="menu|main_video")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    if normalize_user_language(lang) != "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Send image/product", callback_data="menu|video_self_scene_ai_image")],
+            [InlineKeyboardButton("🎬 Send self-shot video", callback_data="menu|video_self_scene_ai_video")],
+            [InlineKeyboardButton("✍️ Enter custom scene", callback_data="menu|video_self_scene_ai_custom")],
+            [InlineKeyboardButton("🔙 Back to Video", callback_data="menu|main_video")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Gửi ảnh/sản phẩm", callback_data="menu|video_self_scene_ai_image")],
+        [InlineKeyboardButton("🎬 Gửi video tự quay", callback_data="menu|video_self_scene_ai_video")],
+        [InlineKeyboardButton("✍️ Nhập ngữ cảnh riêng", callback_data="menu|video_self_scene_ai_custom")],
+        [InlineKeyboardButton("🔙 Quay lại Video", callback_data="menu|main_video")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def video_long_script_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("3 phút" if normalize_user_language(lang) == "vi" else "3 min", callback_data="menu|video_long_script_3m"), InlineKeyboardButton("5 phút" if normalize_user_language(lang) == "vi" else "5 min", callback_data="menu|video_long_script_5m")],
+        [InlineKeyboardButton("10 phút" if normalize_user_language(lang) == "vi" else "10 min", callback_data="menu|video_long_script_10m"), InlineKeyboardButton("30 phút" if normalize_user_language(lang) == "vi" else "30 min", callback_data="menu|video_long_script_30m")],
+        [InlineKeyboardButton("60 phút" if normalize_user_language(lang) == "vi" else "60 min", callback_data="menu|video_long_script_60m"), InlineKeyboardButton("✍️ Nhập độ dài khác" if normalize_user_language(lang) == "vi" else "✍️ Custom length", callback_data="menu|video_long_script_custom")],
+        [InlineKeyboardButton("🔙 Quay lại Video" if normalize_user_language(lang) == "vi" else "🔙 Back to Video", callback_data="menu|main_video")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -35103,13 +35190,153 @@ def menu_text_main_video() -> str:
     return (
         "🎬 <b>Tạo nội dung / Video</b>\n\n"
         "Người mới nên chọn <b>🔥 Video theo trend</b>.\n"
-        "Bot sẽ dẫn bạn từ chủ đề → hướng trend → chuyển động → prompt ảnh → prompt video → nhạc.\n\n"
+        "Bot sẽ dẫn bạn từ chủ đề → ngữ cảnh → hướng trend → chuyển động → prompt ảnh → prompt video → nhạc.\n\n"
         "Nếu chỉ cần một phần, bạn có thể chọn nhanh các nút bên dưới.\n"
-        "Tạo video thật hiện vẫn chưa mở công khai; nếu chưa mở, bot không gọi API video và không trừ Xu.\n\n"
-        "<b>Lệnh nhanh:</b>\n"
-        "• <code>/film &lt;chủ đề&gt;</code> — tạo kịch bản video cơ bản\n"
-        "• <code>/trend_video_flow</code> — tạo workflow video theo trend\n"
-        "• <code>/video_factory_flow</code> — xem quy trình tạo nội dung video"
+        "\n<b>Lưu ý:</b>\n"
+        "• 🎬 Video AI thật dùng provider, chỉ chạy khi hệ thống sẵn sàng.\n"
+        "• 🎞 Ghép ảnh thành video dùng Local Worker + ffmpeg, không dùng VEO.\n"
+        "• Sản phẩm đang phát triển sẽ chỉ tạo prompt/kế hoạch trước, chưa trừ Xu."
+    )
+
+def video_ai_true_text(lang: str = "vi") -> str:
+    enabled, _message = shopaikey_public_generation_guard("video")
+    if normalize_user_language(lang) == "zh":
+        warning = "" if enabled else "\n\n🎬 真实 AI 视频目前维护中或尚未公开。TOAN AAS 未扣除 Xu。你可以先用 Trend 视频生成 prompt/计划。"
+        return (
+            "🎬 <b>真实 AI 视频</b>\n\n"
+            "使用 ShopAIKey VEO 等 AI 视频 provider 生成视频，后续可接 Kling/Runway/WokuShop/Key4U。\n\n"
+            "只在具备价格确认、job lock、等待/状态、退款和 provider guard 后开放。"
+            f"{warning}"
+        )
+    if normalize_user_language(lang) != "vi":
+        warning = "" if enabled else "\n\n🎬 Real AI Video is currently under maintenance or not public yet. TOAN AAS has not charged Xu. You can use Trend video to create prompts/plans first."
+        return (
+            "🎬 <b>Real AI Video</b>\n\n"
+            "Generate video through AI providers such as ShopAIKey VEO, and later Kling/Runway/WokuShop/Key4U.\n\n"
+            "It only runs when price confirmation, job lock, waiting/status, refund and provider guards are ready."
+            f"{warning}"
+        )
+    warning = "" if enabled else "\n\n🎬 Video AI thật hiện đang được bảo trì hoặc chưa mở public. TOAN AAS chưa trừ Xu. Bạn có thể dùng Video theo trend để tạo prompt/kế hoạch trước."
+    return (
+        "🎬 <b>Video AI thật</b>\n\n"
+        "Tạo video bằng provider AI như ShopAIKey VEO, sau này có thể dùng Kling/Runway/WokuShop/Key4U.\n\n"
+        "Chỉ mở khi có:\n"
+        "• confirm giá\n"
+        "• job lock\n"
+        "• waiting/status\n"
+        "• refund\n"
+        "• provider guard\n\n"
+        "Nếu public video đang tắt, bot sẽ không gọi API video và không trừ Xu."
+        f"{warning}"
+    )
+
+def frame_video_intro_ready(user_id=0) -> bool:
+    if not FRAME_VIDEO_ENABLED:
+        return False
+    if not FRAME_VIDEO_PUBLIC_ENABLED and not is_admin_user(user_id):
+        return False
+    if FRAME_VIDEO_REQUIRE_LOCAL_WORKER and not frame_video_worker_connected():
+        return False
+    if not FRAME_VIDEO_DIRECT_RENDER_ENABLED and not frame_video_worker_connected():
+        return False
+    return True
+
+def video_frame_intro_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return (
+            "🎞 <b>图片合成视频</b>\n\n"
+            "这个工具使用你已有的图片，通过 Local Worker + ffmpeg 合成短视频。\n"
+            "不使用 VEO，也不调用 AI 视频 provider。\n\n"
+            "适合：产品图片短视频、slideshow、简单 short、基础转场效果。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎞 <b>Image slideshow video</b>\n\n"
+            "This tool uses your existing images to create a short video through Local Worker + ffmpeg.\n"
+            "It does not use VEO and does not call the AI video provider.\n\n"
+            "Good for product slideshows, simple shorts and basic transitions."
+        )
+    return (
+        "🎞 <b>Ghép ảnh thành video</b>\n\n"
+        "Công cụ này dùng ảnh có sẵn của bạn để ghép thành video ngắn bằng Local Worker + ffmpeg.\n"
+        "Không dùng VEO, không gọi provider video AI.\n\n"
+        "Phù hợp để:\n"
+        "• ghép ảnh sản phẩm thành video ngắn\n"
+        "• làm slideshow\n"
+        "• tạo video short đơn giản\n"
+        "• thêm hiệu ứng/chuyển cảnh cơ bản"
+    )
+
+def video_self_scene_ai_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "zh":
+        return (
+            "🎥 <b>自拍换场景 AI — 开发中</b>\n\n"
+            "你可以发送人物、产品、物品或宠物的图片/视频。Bot 会帮助规划场景、光线、风格，并生成图片/视频 prompt。\n\n"
+            "场景示例：未来科技、sci-fi battle、luxury showroom、fantasy/cyberpunk、现代办公室、干净厨房、咖啡馆 lifestyle。\n\n"
+            "阶段说明：先生成 prompt/计划，未开放批量公开视频，Bot 未扣除 Xu。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎥 <b>Self-shot scene AI — In development</b>\n\n"
+            "Send an image/video of a person, product, object or pet. The bot helps plan a new scene, lighting, style and image/video prompts.\n\n"
+            "Example scenes: futuristic technology, sci-fi battle, luxury showroom, fantasy/cyberpunk, modern office, clean kitchen, cafe/lifestyle.\n\n"
+            "This stage creates prompts/plans first, does not open bulk public video, and does not charge Xu."
+        )
+    return (
+        "🎥 <b>Tự quay & đổi cảnh AI — Đang phát triển</b>\n\n"
+        "Bạn có thể gửi ảnh/video của người, sản phẩm, vật phẩm hoặc thú cưng.\n"
+        "Bot sẽ giúp đổi bối cảnh, ánh sáng, phong cách và tạo prompt ảnh/video.\n\n"
+        "<b>Ví dụ ngữ cảnh:</b>\n"
+        "1. Công nghệ tương lai\n"
+        "2. Chiến tranh hành tinh / sci-fi battle\n"
+        "3. Luxury showroom\n"
+        "4. Fantasy / cyberpunk\n"
+        "5. Văn phòng hiện đại\n"
+        "6. Nhà bếp sạch đẹp\n"
+        "7. Quán cafe / lifestyle\n\n"
+        "<b>Lưu ý:</b>\n"
+        "• Giữ nhân vật/sản phẩm ổn định.\n"
+        "• Không làm méo mặt.\n"
+        "• Không đổi logo/sản phẩm quá mức.\n"
+        "• Người thật cần có quyền sử dụng hình ảnh/đồng ý.\n"
+        "• Giai đoạn này ưu tiên tạo prompt/kế hoạch trước, chưa mở public video hàng loạt.\n\n"
+        "Bot chưa gọi API và chưa trừ Xu."
+    )
+
+def video_long_script_text(lang: str = "vi", selected: str = "") -> str:
+    selected_line = f"\n\nĐộ dài đang chọn: <b>{html.escape(selected)}</b>. Bot chưa render video thật." if selected and normalize_user_language(lang) == "vi" else ""
+    if normalize_user_language(lang) == "zh":
+        return (
+            "📺 <b>长视频脚本 / AI 长视频路线 — 开发中</b>\n\n"
+            "Bot 帮你规划 3/5/10/30/60 分钟长视频。\n\n"
+            "阶段初期只生成：outline、章节、分镜、hook、script、图片 prompt、视频 prompt、voice 建议和音乐建议。\n\n"
+            "暂不批量生成长视频，以避免 provider 错误和高成本。Bot 未扣除 Xu。"
+        )
+    if normalize_user_language(lang) != "vi":
+        chosen = f"\n\nSelected length: <b>{html.escape(selected)}</b>. The bot has not rendered a real video." if selected else ""
+        return (
+            "📺 <b>Long-form video script / AI video roadmap — In development</b>\n\n"
+            "The bot helps plan 3/5/10/30/60 minute videos.\n\n"
+            "Early stage only creates: outline, chapters, scenes, hook, script, image prompts, video prompts, voice suggestions and music suggestions.\n\n"
+            "No bulk long-form rendering yet to avoid provider errors and high cost. The bot has not charged Xu."
+            f"{chosen}"
+        )
+    return (
+        "📺 <b>Kịch bản video dài / Lộ trình video dài AI — Đang phát triển</b>\n\n"
+        "Bot giúp bạn lập kế hoạch video dài 3/5/10/30/60 phút.\n\n"
+        "Giai đoạn đầu chỉ tạo:\n"
+        "• outline\n"
+        "• chia chương\n"
+        "• chia cảnh\n"
+        "• hook\n"
+        "• script\n"
+        "• prompt ảnh\n"
+        "• prompt video\n"
+        "• gợi ý voice\n"
+        "• gợi ý nhạc\n\n"
+        "Chưa tạo video dài hàng loạt để tránh lỗi provider và chi phí cao.\n"
+        "Bot chưa gọi API và chưa trừ Xu."
+        f"{selected_line}"
     )
 
 def menu_text_main_ai() -> str:
@@ -35391,7 +35618,7 @@ def menu_text_main_guide() -> str:
 
 def menu_hint_text(action: str) -> tuple[str, str]:
     hints = {
-        "hint_film": ("main_video", "🎬 <b>Tạo video nhanh</b>\n\nCopy lệnh:\n<code>/film chủ đề của bạn</code>\n\nVí dụ:\n<code>/film review máy xay sinh tố mini, đăng TikTok, giọng gần gũi</code>"),
+        "hint_film": ("main_video", "🎬 <b>Tạo nội dung / Video</b>\n\nCopy lệnh:\n<code>/film chủ đề của bạn</code>\n\nVí dụ:\n<code>/film review máy xay sinh tố mini, đăng TikTok, giọng gần gũi</code>"),
         "hint_ai_prompt": ("main_ai", "✍️ <b>Cách hỏi AI hay</b>\n\nNói rõ mục tiêu, đối tượng, nền tảng, giọng văn và kết quả bạn muốn.\n\nVí dụ:\n<code>Viết caption bán hàng cho sản phẩm X, giọng gần gũi, có CTA, dành cho mẹ bỉm.</code>"),
         "hint_note": ("main_memory", "📝 <b>Lưu ghi chú</b>\n\nCopy lệnh:\n<code>/note nội dung cần lưu</code>"),
         "hint_search_note": ("main_memory", "🔎 <b>Tìm ghi chú</b>\n\nCopy lệnh:\n<code>/search_note từ khóa</code>"),
@@ -35450,21 +35677,23 @@ def menu_text_main_video_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "zh":
         return (
             "🎬 <b>内容 / 视频</b>\n\n"
-            "新用户建议选择 <b>✨ 分步制作</b>。\n"
-            "Bot 会带你从 idea → image → video prompt → music。\n\n"
-            "真实视频生成目前尚未公开；未公开时 Bot 不调用视频 API，也不扣除 Xu。\n\n"
-            "<b>Quick commands:</b>\n"
-            "• <code>/film &lt;主题&gt;</code> — 创建基础视频脚本\n"
-            "• <code>/trend_video_flow</code> — 创建 trend 视频 workflow"
+            "新用户建议选择 <b>🔥 Trend 视频</b>。\n"
+            "Bot 会带你从主题 → 场景 → trend 方向 → 镜头运动 → 图片 prompt → 视频 prompt → 音乐。\n\n"
+            "如果只需要某一部分，可以直接选择下面的工具。\n\n"
+            "<b>说明:</b>\n"
+            "• 🎬 真实 AI 视频使用 provider，只在系统准备好时运行。\n"
+            "• 🎞 图片合成视频使用 Local Worker + ffmpeg，不使用 VEO。\n"
+            "• 开发中产品只生成 prompt/计划，未扣除 Xu。"
         )
     return (
         "🎬 <b>CONTENT / VIDEO</b>\n\n"
-        "New users should choose <b>✨ Step-by-step flow</b>.\n"
-        "The bot will guide you from idea → image → video prompt → music.\n\n"
-        "Real video generation is not public yet; while it is off, the bot does not call the video API and does not charge Xu.\n\n"
-        "<b>Quick commands:</b>\n"
-        "• <code>/film &lt;topic&gt;</code> — create a basic video script/content pack\n"
-        "• <code>/trend_video_flow</code> — create a trend video workflow"
+        "New users should choose <b>🔥 Trend video</b>.\n"
+        "The bot guides you from topic → context → trend direction → motion → image prompt → video prompt → music.\n\n"
+        "If you only need one part, choose a quick item below.\n\n"
+        "<b>Notes:</b>\n"
+        "• 🎬 Real AI Video uses providers and only runs when the system is ready.\n"
+        "• 🎞 Image slideshow video uses Local Worker + ffmpeg, not VEO.\n"
+        "• Products in development create prompts/plans first and do not charge Xu."
     )
 
 def menu_text_main_ai_i18n(lang: str) -> str:
@@ -36928,6 +37157,49 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             query,
             support_contact_text(),
             reply_markup=support_contact_keyboard(lang=lang),
+        )
+    if action == "video_ai_true":
+        return await safe_edit_query_message(
+            query,
+            video_ai_true_text(lang),
+            reply_markup=video_ai_true_keyboard(lang),
+        )
+    if action == "video_frame_intro":
+        if not frame_video_intro_ready(query.from_user.id):
+            set_frame_video_last_error("video_menu_worker_not_ready")
+            return await safe_edit_query_message(
+                query,
+                frame_video_maintenance_text(),
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 Quay lại Video" if normalize_user_language(lang) == "vi" else "🔙 Back to Video", callback_data="menu|main_video")],
+                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                ]),
+            )
+        return await safe_edit_query_message(
+            query,
+            video_frame_intro_text(lang),
+            reply_markup=video_frame_intro_keyboard(lang),
+        )
+    if action.startswith("video_self_scene_ai"):
+        return await safe_edit_query_message(
+            query,
+            video_self_scene_ai_text(lang),
+            reply_markup=video_self_scene_ai_keyboard(lang),
+        )
+    if action == "video_long_script" or action.startswith("video_long_script_"):
+        selected_map = {
+            "video_long_script_3m": "3 phút",
+            "video_long_script_5m": "5 phút",
+            "video_long_script_10m": "10 phút",
+            "video_long_script_30m": "30 phút",
+            "video_long_script_60m": "60 phút",
+            "video_long_script_custom": "độ dài khác",
+        }
+        return await safe_edit_query_message(
+            query,
+            video_long_script_text(lang, selected_map.get(action, "")),
+            reply_markup=video_long_script_keyboard(lang),
         )
     if action == "image_prompt_start":
         set_image_menu_pending(query.from_user.id, "image_prompt_only")
