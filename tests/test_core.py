@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -3674,6 +3675,96 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
         assert desc == "already_paid"
         credits_after_replay, _, _ = bot.get_user(user_id)
         assert credits_after_replay == credits_after_paid
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_finance_ledger_revenue_usage_expense_and_year_profit(monkeypatch):
+    source = bot_source_text()
+    init_source = source_between(source, "def init_db():", "def now_text():")
+    assert "finance_revenue_events" in init_source
+    assert "finance_usage_events" in init_source
+    assert "finance_expense_events" in init_source
+    assert "DROP TABLE" not in init_source.upper()
+    assert 'CommandHandler("finance_dashboard", cmd_finance_dashboard)' in source
+    assert 'CommandHandler("revenue_report", cmd_revenue_report)' in source
+    assert 'CommandHandler("expense_report", cmd_expense_report)' in source
+    assert 'CommandHandler("profit_report", cmd_profit_report)' in source
+    assert 'CommandHandler("finance_export", cmd_finance_export)' in source
+    assert "💰 Tài chính" in source
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    monkeypatch.setattr(bot, "TAX_RESERVE_RATE", 0.05)
+    try:
+        bot.init_db()
+        user_id = "finance-user"
+        bot.create_order("fin-10001", user_id, 50000, 500)
+        processed, desc, paid_info = bot.process_payos_paid_order("fin-10001", 50000)
+        assert processed is True
+        assert desc == "success"
+        assert int(paid_info.get("base_xu") or paid_info.get("xu") or 0) >= 500
+
+        conn = bot.db_connect()
+        try:
+            revenue_rows = conn.execute(
+                "SELECT source_type, source_id, amount_vnd, xu_credited FROM finance_revenue_events WHERE source_id=?",
+                ("fin-10001",),
+            ).fetchall()
+            assert len(revenue_rows) == 1
+            assert revenue_rows[0][0] == "payos_topup"
+            assert revenue_rows[0][2] == 50000
+        finally:
+            conn.close()
+
+        processed, desc, _paid_info = bot.process_payos_paid_order("fin-10001", 50000)
+        assert processed is False
+        conn = bot.db_connect()
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM finance_revenue_events WHERE source_id=?", ("fin-10001",)).fetchone()[0] == 1
+        finally:
+            conn.close()
+
+        charge = bot.spend_fixed_credit_info(user_id, 50, "shopaikey_image", "unit finance image", True)
+        assert charge["ok"] is True
+        charged_amount = int(charge.get("final_cost") or 0)
+        assert charged_amount >= 0
+        conn = bot.db_connect()
+        try:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM finance_usage_events WHERE user_id=? AND service_type='image' AND status='success'",
+                (user_id,),
+            ).fetchone()[0] >= 1
+        finally:
+            conn.close()
+        if charged_amount > 0:
+            assert bot.refund_charged_credit(user_id, charged_amount, "image_refund", "job-1", "unit refund", True) is True
+            conn = bot.db_connect()
+            try:
+                assert conn.execute(
+                    "SELECT COUNT(*) FROM finance_usage_events WHERE user_id=? AND status='refunded'",
+                    (user_id,),
+                ).fetchone()[0] >= 1
+            finally:
+                conn.close()
+
+        expense_id = bot.add_finance_expense(32500, "provider_ai", "ShopAIKey", "nap api credit", "admin-only")
+        pre_id = bot.add_finance_expense(3000000, "provider_ai", "ShopAIKey_ChatGPT", "chi phi truoc thanh lap", "admin-only", pre_establishment=True)
+        assert expense_id > 0
+        assert pre_id > 0
+        start_at, end_at, label, kind = bot.finance_period_bounds(str(datetime.now().year), "year")
+        assert kind == "year"
+        payload = bot.finance_summary_payload(start_at, end_at, label)
+        assert payload["revenue_success"] >= 50000
+        assert payload["expenses_after"] >= 32500
+        assert payload["expenses_pre_total"] >= 3000000
+        assert payload["tax_reserve"] >= 2500
+        assert "Lãi/lỗ" in bot.finance_report_text(payload)
+        assert "finance_revenue_events" not in bot.finance_report_text(payload).lower()
+        assert "fin-10001" in bot.finance_csv("revenue", start_at, end_at)
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)

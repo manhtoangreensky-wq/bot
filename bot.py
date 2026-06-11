@@ -221,6 +221,12 @@ def env_int(name: str, default: int = 0) -> int:
     except Exception:
         return int(default)
 
+def env_float(name: str, default: float = 0.0) -> float:
+    try:
+        return float(str(os.environ.get(name, str(default)) or str(default)).strip())
+    except Exception:
+        return float(default)
+
 ADMIN_DEBUG = env_flag("ADMIN_DEBUG", "false")
 ADMIN_DEBUG_PUBLIC_ERRORS = env_flag("ADMIN_DEBUG_PUBLIC_ERRORS", "true" if ADMIN_DEBUG else "false")
 
@@ -1010,6 +1016,9 @@ MEMORY_PLANS = {
         "price": "99.000đ/tháng",
     },
 }
+
+FINANCE_TRACKING_START_DATE = _env("FINANCE_TRACKING_START_DATE", datetime.now(VN_TZ).strftime("%Y-%m-%d"))
+TAX_RESERVE_RATE = max(0.0, env_float("TAX_RESERVE_RATE", 0.0))
 CHAT_TIER_NORMAL = "normal"
 CHAT_TIER_PRO = "pro"
 CHAT_TIER_DEEP = "deep"
@@ -1625,6 +1634,55 @@ def migrate_feedback_schema(cursor) -> None:
     ]:
         _add_column_if_missing(cursor, "feedback", column_name, column_sql, columns)
 
+def migrate_finance_schema(cursor) -> None:
+    finance_tables = {
+        "finance_revenue_events": [
+            ("created_at", "created_at TEXT"),
+            ("user_id", "user_id TEXT"),
+            ("source_type", "source_type TEXT"),
+            ("source_id", "source_id TEXT"),
+            ("amount_vnd", "amount_vnd INTEGER DEFAULT 0"),
+            ("xu_credited", "xu_credited INTEGER DEFAULT 0"),
+            ("payment_method", "payment_method TEXT DEFAULT ''"),
+            ("status", "status TEXT DEFAULT 'success'"),
+            ("note", "note TEXT"),
+            ("created_by_admin_id", "created_by_admin_id TEXT DEFAULT ''"),
+        ],
+        "finance_usage_events": [
+            ("created_at", "created_at TEXT"),
+            ("user_id", "user_id TEXT"),
+            ("service_type", "service_type TEXT"),
+            ("job_id", "job_id TEXT DEFAULT ''"),
+            ("xu_spent", "xu_spent INTEGER DEFAULT 0"),
+            ("package_id", "package_id TEXT DEFAULT ''"),
+            ("provider", "provider TEXT DEFAULT ''"),
+            ("provider_cost_estimate_vnd", "provider_cost_estimate_vnd INTEGER DEFAULT 0"),
+            ("status", "status TEXT DEFAULT 'success'"),
+            ("note", "note TEXT"),
+        ],
+        "finance_expense_events": [
+            ("expense_date", "expense_date TEXT"),
+            ("created_at", "created_at TEXT"),
+            ("amount_vnd", "amount_vnd INTEGER DEFAULT 0"),
+            ("category", "category TEXT"),
+            ("vendor", "vendor TEXT"),
+            ("payment_method", "payment_method TEXT DEFAULT ''"),
+            ("invoice_status", "invoice_status TEXT DEFAULT 'internal_only'"),
+            ("is_pre_establishment", "is_pre_establishment INTEGER DEFAULT 0"),
+            ("is_recurring", "is_recurring INTEGER DEFAULT 0"),
+            ("note", "note TEXT"),
+            ("evidence_folder_or_file_note", "evidence_folder_or_file_note TEXT DEFAULT ''"),
+            ("created_by_admin_id", "created_by_admin_id TEXT"),
+            ("deleted_at", "deleted_at TEXT DEFAULT ''"),
+            ("deleted_by_admin_id", "deleted_by_admin_id TEXT DEFAULT ''"),
+            ("delete_reason", "delete_reason TEXT DEFAULT ''"),
+        ],
+    }
+    for table_name, columns_sql in finance_tables.items():
+        existing = _table_columns(cursor, table_name)
+        for column_name, column_sql in columns_sql:
+            _add_column_if_missing(cursor, table_name, column_name, column_sql, existing)
+
 def init_db():
     evaluate_data_persistence_startup_state()
     ensure_startup_sqlite_backup_once()
@@ -1968,6 +2026,60 @@ def init_db():
         detail TEXT,
         created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS finance_revenue_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT,
+        user_id TEXT,
+        source_type TEXT,
+        source_id TEXT,
+        amount_vnd INTEGER DEFAULT 0,
+        xu_credited INTEGER DEFAULT 0,
+        payment_method TEXT DEFAULT '',
+        status TEXT DEFAULT 'success',
+        note TEXT,
+        created_by_admin_id TEXT DEFAULT '',
+        UNIQUE(source_type, source_id)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS finance_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT,
+        user_id TEXT,
+        service_type TEXT,
+        job_id TEXT DEFAULT '',
+        xu_spent INTEGER DEFAULT 0,
+        package_id TEXT DEFAULT '',
+        provider TEXT DEFAULT '',
+        provider_cost_estimate_vnd INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'success',
+        note TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS finance_expense_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        expense_date TEXT,
+        created_at TEXT,
+        amount_vnd INTEGER DEFAULT 0,
+        category TEXT,
+        vendor TEXT,
+        payment_method TEXT DEFAULT '',
+        invoice_status TEXT DEFAULT 'internal_only',
+        is_pre_establishment INTEGER DEFAULT 0,
+        is_recurring INTEGER DEFAULT 0,
+        note TEXT,
+        evidence_folder_or_file_note TEXT DEFAULT '',
+        created_by_admin_id TEXT,
+        deleted_at TEXT DEFAULT '',
+        deleted_by_admin_id TEXT DEFAULT '',
+        delete_reason TEXT DEFAULT ''
+    )""")
+    migrate_finance_schema(c)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_revenue_created_at ON finance_revenue_events(created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_revenue_source ON finance_revenue_events(source_type, source_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_revenue_status ON finance_revenue_events(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_usage_created_at ON finance_usage_events(created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_usage_user_service ON finance_usage_events(user_id, service_type)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_usage_status ON finance_usage_events(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_expense_date ON finance_expense_events(expense_date)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_expense_category ON finance_expense_events(category)")
     c.execute("""CREATE TABLE IF NOT EXISTS system_flags (
         key TEXT PRIMARY KEY,
         value TEXT,
@@ -3349,6 +3461,7 @@ def record_credit_event(conn, user_id, delta, event_type, ref_id="", note=""):
             xu_delta=int(delta or 0),
             detail=f"{event_type}; ref={ref_id}; {note}",
         )
+    record_finance_usage_from_credit_event_conn(conn, user_id, delta, event_type, ref_id, note)
 
 USER_LANGUAGE_LABELS = {
     "vi": "Tiếng Việt",
@@ -24662,6 +24775,17 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 provider="payos",
                 detail=f"order={order_code}; package_type={package_type}; package_code={package_code}; counts_for_member_tier=false",
             )
+            record_finance_revenue_event_conn(
+                conn,
+                target_id,
+                "monthly_plan" if package_type == "monthly" else "combo_purchase",
+                str(order_code),
+                int(amount_vnd or 0),
+                0,
+                "payos",
+                "success",
+                f"PayOS package purchase {package_type}:{package_code}",
+            )
             record_audit(
                 conn,
                 "payos",
@@ -24729,6 +24853,17 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 amount_vnd=int(amount_vnd or 0),
                 provider="payos",
                 detail=f"order={order_code}; plan={plan_id}; plan_xu={int(plan_xu or 0)}; counts_for_member_tier=false",
+            )
+            record_finance_revenue_event_conn(
+                conn,
+                target_id,
+                "monthly_plan",
+                str(order_code),
+                int(amount_vnd or 0),
+                0,
+                "payos",
+                "success",
+                f"PayOS monthly plan {plan_id}",
             )
             record_audit(
                 conn,
@@ -24802,6 +24937,17 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             amount_vnd=int(amount_vnd or 0),
             provider="payos",
             detail=f"order={order_code}; promo={promo_result.get('code') or ''}",
+        )
+        record_finance_revenue_event_conn(
+            conn,
+            target_id,
+            "payos_topup",
+            str(order_code),
+            int(amount_vnd or 0),
+            int(base_xu or 0) + int(launch_bonus or 0) + int(promo_bonus or 0),
+            "payos",
+            "success",
+            f"PayOS topup; promo={promo_result.get('code') or ''}",
         )
         referral_result = award_referral_bonus_if_needed(
             conn,
@@ -27592,6 +27738,14 @@ def admin_center_text(section: str = "main") -> str:
         "• <code>/stats</code>\n"
         "• <code>/admin_report_month YYYY-MM</code>\n"
         "• <code>/admin_report_year YYYY</code>\n\n"
+        "<b>G2. Tài chính nội bộ</b>\n"
+        "• <code>/finance_dashboard</code> — doanh thu/chi phí/lãi lỗ hôm nay, tháng, năm\n"
+        "• <code>/revenue_report [YYYY-MM|YYYY]</code> — doanh thu tiền thật\n"
+        "• <code>/expense_report [YYYY-MM|YYYY]</code> — chi phí tháng/năm\n"
+        "• <code>/profit_report [YYYY-MM|YYYY]</code> — lãi/lỗ ước tính, có tổng năm\n"
+        "• <code>/expense_add &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n"
+        "• <code>/expense_add_pre &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n"
+        "• <code>/finance_export YYYY-MM</code> hoặc <code>/finance_export YYYY</code>\n\n"
         "<b>H. Bảo mật</b>\n"
         "• <code>/admin_docs</code>\n"
         "• <code>/security_status</code>\n"
@@ -33843,6 +33997,7 @@ def menu_parent_action(section: str = "main") -> str:
         "doc_tools": "main_docs",
         "memory": "main_memory",
         "billing": "main_topup",
+        "finance": "admin",
         "support": "main_guide",
         "legal": "main_guide",
         "guide": "main_guide",
@@ -34051,7 +34206,10 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
     elif section == "admin" and is_admin:
         rows.append([InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
         rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="pricing|combo")])
+        rows.append([InlineKeyboardButton("💰 Tài chính", callback_data="menu|finance")])
         rows.append([InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|hint_video_status")])
+    elif section == "finance" and is_admin:
+        rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing")])
     elif section == "system" and is_admin:
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
     elif section == "operator" and is_admin:
@@ -34388,7 +34546,15 @@ def menu_text_admin() -> str:
         "• <code>/costs</code> — chi phí/provider nội bộ nếu có\n"
         "• <code>/sales_ready</code> — kiểm tra public guard, billing, refund\n"
         "• <code>/providers</code> — xác nhận provider không lộ secret\n\n"
-        "<b>G. Maintenance / Freeze / Refund / Queue</b>\n"
+        "<b>G. Tài chính nội bộ</b>\n"
+        "• <code>/finance_dashboard</code> — doanh thu/chi phí/lãi lỗ hôm nay, tháng, năm\n"
+        "• <code>/revenue_report [YYYY-MM|YYYY]</code> — doanh thu tiền thật\n"
+        "• <code>/expense_report [YYYY-MM|YYYY]</code> — chi phí tháng/năm\n"
+        "• <code>/profit_report [YYYY-MM|YYYY]</code> — lãi/lỗ ước tính, có tổng năm\n"
+        "• <code>/expense_add &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code> — thêm chi phí\n"
+        "• <code>/expense_add_pre &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code> — chi phí trước thành lập\n"
+        "• <code>/finance_export YYYY-MM</code> hoặc <code>/finance_export YYYY</code> — xuất CSV\n\n"
+        "<b>H. Maintenance / Freeze / Refund / Queue</b>\n"
         "• <code>/freeze_status</code> — xem maintenance/provider freeze/job queue\n"
         "• <code>/maintenance_status</code> — trạng thái bảo trì toàn hệ thống\n"
         "• <code>/maintenance_on &lt;lý_do&gt;</code> / <code>/maintenance_off</code> — bật/tắt bảo trì\n"
@@ -34399,7 +34565,7 @@ def menu_text_admin() -> str:
         "• <code>/clear_job_lock &lt;user_id&gt;</code> — clear lock khi job kẹt\n"
         "• <code>/freeze_tools</code> / <code>/unfreeze_tools</code> — khóa/mở tool public\n"
         "• <code>/provider_freeze &lt;provider&gt;</code> / <code>/provider_unfreeze &lt;provider&gt;</code> — khóa/mở provider\n\n"
-        "<b>H. Góp ý / Admin notes</b>\n• <code>/admin_gopy</code>"
+        "<b>I. Góp ý / Admin notes</b>\n• <code>/admin_gopy</code>"
     )
 
 def menu_text_system() -> str:
@@ -35078,6 +35244,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_operator(is_admin), menu_nav_keyboard("operator", is_admin)
     if action == "admin":
         return menu_text_admin(), menu_nav_keyboard("admin", is_admin)
+    if action == "finance":
+        return finance_menu_text(), menu_nav_keyboard("finance", is_admin)
     if action == "system":
         return menu_text_system(), menu_nav_keyboard("system", is_admin)
     if action == "billing":
@@ -36211,7 +36379,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     user_is_admin = is_admin_user(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
     clear_media_creator_pending_states(query.from_user.id)
-    admin_only = {"affiliate", "operator", "admin", "system"}
+    admin_only = {"affiliate", "operator", "admin", "system", "finance"}
     public_hints = {
         "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
         "hint_note", "hint_search_note", "hint_remind", "hint_doc_tools", "hint_pricing",
@@ -44353,6 +44521,451 @@ def vnd_text(value) -> str:
 
 def xu_text(value) -> str:
     return f"{int(value or 0):,} Xu".replace(",", ".")
+
+FINANCE_EXPENSE_CATEGORIES = {
+    "provider_ai",
+    "railway_hosting",
+    "domain_hosting",
+    "software_subscription",
+    "marketing_ads",
+    "content_affiliate",
+    "staff_freelancer",
+    "office_equipment",
+    "internet_phone",
+    "bank_payment_fee",
+    "refund_customer",
+    "legal_tax_accounting",
+    "other",
+}
+
+FINANCE_INVOICE_STATUSES = {"invoice_ok", "receipt_only", "screenshot_only", "no_document", "internal_only"}
+
+def finance_tracking_start_text() -> str:
+    raw = str(FINANCE_TRACKING_START_DATE or "").strip()
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now(VN_TZ).strftime("%Y-%m-%d")
+
+def finance_period_bounds(raw: str = "", default_period: str = "month") -> tuple[str, str, str, str]:
+    value = str(raw or "").strip()
+    now = datetime.now()
+    if value.lower() in {"today", "day"}:
+        dt = datetime(now.year, now.month, now.day)
+        return _report_dt_text(dt), _report_dt_text(dt + timedelta(days=1) - timedelta(seconds=1)), "Hôm nay", "day"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        dt = datetime.strptime(value, "%Y-%m-%d")
+        return _report_dt_text(dt), _report_dt_text(dt + timedelta(days=1) - timedelta(seconds=1)), f"Ngày {value}", "day"
+    if re.fullmatch(r"\d{4}-\d{2}", value):
+        start_at, end_at, label = month_report_bounds(value)
+        return start_at, end_at, label, "month"
+    if re.fullmatch(r"\d{4}", value):
+        start_at, end_at, label = year_report_bounds(value)
+        return start_at, end_at, label, "year"
+    if value:
+        raise ValueError("invalid_finance_period")
+    if default_period == "year":
+        start_at, end_at, label = year_report_bounds("")
+        return start_at, end_at, label, "year"
+    if default_period == "day":
+        dt = datetime(now.year, now.month, now.day)
+        return _report_dt_text(dt), _report_dt_text(now), "Hôm nay", "day"
+    start_at, end_at, label = month_report_bounds("")
+    return start_at, end_at, label, "month"
+
+def finance_credit_service_type(event_type: str, note: str = "") -> str:
+    value = f"{event_type or ''} {note or ''}".lower()
+    if "frame_video" in value:
+        return "frame_video"
+    if "storyboard" in value:
+        return "storyboard_image"
+    if "video" in value:
+        return "video_ai"
+    if "image" in value or "shopaikey_image" in value or "ai_image" in value:
+        return "image"
+    if "chat" in value or "ai_chat" in value:
+        return "chat"
+    if "voice" in value or "tts" in value:
+        return "tts"
+    if "music" in value or "sfx" in value:
+        return "music"
+    if "package" in value or "combo" in value:
+        return "combo_usage"
+    if "admin" in value or "deduct" in value:
+        return "admin_adjust"
+    return "other"
+
+def record_finance_revenue_event_conn(
+    conn,
+    user_id,
+    source_type: str,
+    source_id: str,
+    amount_vnd: int,
+    xu_credited: int = 0,
+    payment_method: str = "",
+    status: str = "success",
+    note: str = "",
+    created_by_admin_id: str = "",
+    created_at: str = "",
+) -> None:
+    try:
+        source_type = str(source_type or "manual_revenue").strip()[:80]
+        source_id = str(source_id or "").strip()[:160]
+        if not source_id:
+            source_id = f"{source_type}:{user_id}:{amount_vnd}:{now_text()}"
+        conn.execute(
+            """INSERT OR IGNORE INTO finance_revenue_events
+            (created_at, user_id, source_type, source_id, amount_vnd, xu_credited, payment_method, status, note, created_by_admin_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                created_at or now_text(),
+                str(user_id or ""),
+                source_type,
+                source_id,
+                int(amount_vnd or 0),
+                int(xu_credited or 0),
+                str(payment_method or "")[:80],
+                str(status or "success")[:40],
+                sanitize_log_text(str(note or ""))[:1000],
+                str(created_by_admin_id or "")[:80],
+            ),
+        )
+    except Exception as e:
+        logger.warning(f"Finance revenue write failed: {e}")
+
+def record_finance_usage_event_conn(
+    conn,
+    user_id,
+    service_type: str,
+    xu_spent: int,
+    job_id: str = "",
+    package_id: str = "",
+    provider: str = "",
+    provider_cost_estimate_vnd: int = 0,
+    status: str = "success",
+    note: str = "",
+    created_at: str = "",
+) -> None:
+    try:
+        conn.execute(
+            """INSERT INTO finance_usage_events
+            (created_at, user_id, service_type, job_id, xu_spent, package_id, provider, provider_cost_estimate_vnd, status, note)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                created_at or now_text(),
+                str(user_id or ""),
+                str(service_type or "other")[:80],
+                str(job_id or "")[:120],
+                int(xu_spent or 0),
+                str(package_id or "")[:120],
+                str(provider or "")[:80],
+                int(provider_cost_estimate_vnd or 0),
+                str(status or "success")[:40],
+                sanitize_log_text(str(note or ""))[:1000],
+            ),
+        )
+    except Exception as e:
+        logger.warning(f"Finance usage write failed: {e}")
+
+def record_finance_usage_from_credit_event_conn(conn, user_id, delta, event_type, ref_id="", note="") -> None:
+    try:
+        delta = int(delta or 0)
+        event = str(event_type or "")
+        if delta < 0:
+            record_finance_usage_event_conn(
+                conn,
+                user_id,
+                finance_credit_service_type(event, note),
+                abs(delta),
+                job_id=str(ref_id or ""),
+                status="success",
+                note=f"credit_event={event}; {note or ''}",
+            )
+        elif delta > 0 and "refund" in event.lower():
+            record_finance_usage_event_conn(
+                conn,
+                user_id,
+                finance_credit_service_type(event, note),
+                -abs(delta),
+                job_id=str(ref_id or ""),
+                status="refunded",
+                note=f"credit_event={event}; {note or ''}",
+            )
+    except Exception as e:
+        logger.warning(f"Finance usage from credit event failed: {e}")
+
+def add_finance_expense(
+    amount_vnd: int,
+    category: str,
+    vendor: str,
+    note: str,
+    admin_id,
+    pre_establishment: bool = False,
+    expense_date: str = "",
+    payment_method: str = "manual",
+    invoice_status: str = "internal_only",
+    is_recurring: bool = False,
+    evidence_note: str = "",
+) -> int:
+    category = str(category or "other").strip().lower()
+    if category not in FINANCE_EXPENSE_CATEGORIES:
+        category = "other"
+    invoice_status = str(invoice_status or "internal_only").strip().lower()
+    if invoice_status not in FINANCE_INVOICE_STATUSES:
+        invoice_status = "internal_only"
+    if not expense_date:
+        expense_date = datetime.now(VN_TZ).strftime("%Y-%m-%d")
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO finance_expense_events
+            (expense_date, created_at, amount_vnd, category, vendor, payment_method, invoice_status,
+             is_pre_establishment, is_recurring, note, evidence_folder_or_file_note, created_by_admin_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(expense_date)[:10],
+                now_text(),
+                int(amount_vnd or 0),
+                category,
+                str(vendor or "")[:160],
+                str(payment_method or "manual")[:80],
+                invoice_status,
+                1 if pre_establishment else 0,
+                1 if is_recurring else 0,
+                sanitize_log_text(str(note or ""))[:1000],
+                sanitize_log_text(str(evidence_note or ""))[:500],
+                str(admin_id or ""),
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    finally:
+        conn.close()
+
+def finance_summary_payload(start_at: str, end_at: str, label: str) -> dict:
+    conn = db_connect()
+    try:
+        revenue_success = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(amount_vnd),0) FROM finance_revenue_events WHERE status='success' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        revenue_count = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM finance_revenue_events WHERE status='success' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        xu_credited = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(xu_credited),0) FROM finance_revenue_events WHERE status='success' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        revenue_by_source = sql_rows(
+            conn,
+            """SELECT source_type, COUNT(*), COALESCE(SUM(amount_vnd),0), COALESCE(SUM(xu_credited),0)
+            FROM finance_revenue_events
+            WHERE status='success' AND created_at BETWEEN ? AND ?
+            GROUP BY source_type ORDER BY SUM(amount_vnd) DESC""",
+            (start_at, end_at),
+        )
+        expenses_after = int(sql_scalar(
+            conn,
+            """SELECT COALESCE(SUM(amount_vnd),0) FROM finance_expense_events
+            WHERE COALESCE(deleted_at,'')='' AND COALESCE(is_pre_establishment,0)=0 AND expense_date BETWEEN ? AND ?""",
+            (start_at[:10], end_at[:10]),
+            0,
+        ) or 0)
+        expenses_pre_period = int(sql_scalar(
+            conn,
+            """SELECT COALESCE(SUM(amount_vnd),0) FROM finance_expense_events
+            WHERE COALESCE(deleted_at,'')='' AND COALESCE(is_pre_establishment,0)=1 AND expense_date BETWEEN ? AND ?""",
+            (start_at[:10], end_at[:10]),
+            0,
+        ) or 0)
+        expenses_pre_total = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(amount_vnd),0) FROM finance_expense_events WHERE COALESCE(deleted_at,'')='' AND COALESCE(is_pre_establishment,0)=1",
+            default=0,
+        ) or 0)
+        expense_count = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM finance_expense_events WHERE COALESCE(deleted_at,'')='' AND expense_date BETWEEN ? AND ?",
+            (start_at[:10], end_at[:10]),
+            0,
+        ) or 0)
+        expenses_by_category = sql_rows(
+            conn,
+            """SELECT category, COUNT(*), COALESCE(SUM(amount_vnd),0)
+            FROM finance_expense_events
+            WHERE COALESCE(deleted_at,'')='' AND expense_date BETWEEN ? AND ?
+            GROUP BY category ORDER BY SUM(amount_vnd) DESC""",
+            (start_at[:10], end_at[:10]),
+        )
+        xu_spent = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(xu_spent),0) FROM finance_usage_events WHERE status='success' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        xu_refunded = abs(int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(xu_spent),0) FROM finance_usage_events WHERE status='refunded' AND created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0))
+        provider_cost_estimate = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(provider_cost_estimate_vnd),0) FROM finance_usage_events WHERE created_at BETWEEN ? AND ?",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        usage_by_service = sql_rows(
+            conn,
+            """SELECT service_type, COUNT(*), COALESCE(SUM(xu_spent),0)
+            FROM finance_usage_events
+            WHERE status='success' AND created_at BETWEEN ? AND ?
+            GROUP BY service_type ORDER BY SUM(xu_spent) DESC, COUNT(*) DESC""",
+            (start_at, end_at),
+        )
+        tax_reserve = int(round(revenue_success * float(TAX_RESERVE_RATE or 0)))
+        profit_management = revenue_success - expenses_after - expenses_pre_period - provider_cost_estimate - tax_reserve
+        profit_operating = revenue_success - expenses_after - provider_cost_estimate - tax_reserve
+        return {
+            "label": label,
+            "start_at": start_at,
+            "end_at": end_at,
+            "tracking_start_date": finance_tracking_start_text(),
+            "tax_reserve_rate": float(TAX_RESERVE_RATE or 0),
+            "revenue_success": revenue_success,
+            "revenue_count": revenue_count,
+            "xu_credited": xu_credited,
+            "revenue_by_source": revenue_by_source,
+            "expenses_after": expenses_after,
+            "expenses_pre_period": expenses_pre_period,
+            "expenses_pre_total": expenses_pre_total,
+            "expense_count": expense_count,
+            "expenses_by_category": expenses_by_category,
+            "xu_spent": xu_spent,
+            "xu_refunded": xu_refunded,
+            "provider_cost_estimate": provider_cost_estimate,
+            "usage_by_service": usage_by_service,
+            "tax_reserve": tax_reserve,
+            "profit_management": profit_management,
+            "profit_operating": profit_operating,
+        }
+    finally:
+        conn.close()
+
+def finance_report_text(payload: dict, report_type: str = "dashboard") -> str:
+    usage_lines = [
+        f"• {html.escape(str(service or 'other'))}: <b>{int(count or 0)}</b> job/lượt / <b>{xu_text(xu)}</b>"
+        for service, count, xu in payload.get("usage_by_service", [])[:8]
+    ]
+    source_lines = [
+        f"• {html.escape(str(source or 'unknown'))}: <b>{vnd_text(amount)}</b> ({int(count or 0)} đơn, {xu_text(xu)})"
+        for source, count, amount, xu in payload.get("revenue_by_source", [])[:8]
+    ]
+    expense_lines = [
+        f"• {html.escape(str(category or 'other'))}: <b>{vnd_text(amount)}</b> ({int(count or 0)} khoản)"
+        for category, count, amount in payload.get("expenses_by_category", [])[:8]
+    ]
+    lines = [
+        "💰 <b>TOAN AAS — Tài chính nội bộ</b>",
+        f"• Kỳ: <code>{html.escape(payload.get('label') or '')}</code>",
+        f"• Từ <code>{html.escape(payload.get('start_at') or '')}</code> đến <code>{html.escape(payload.get('end_at') or '')}</code>",
+        f"• Ngày bắt đầu ghi nhận: <code>{html.escape(payload.get('tracking_start_date') or '')}</code>",
+        "",
+        "<b>Doanh thu tiền thật</b>",
+        f"• Tiền nạp/thanh toán thành công: <b>{vnd_text(payload.get('revenue_success'))}</b>",
+        f"• Số giao dịch: <b>{int(payload.get('revenue_count') or 0)}</b>",
+        f"• Xu đã phát hành theo doanh thu: <b>{xu_text(payload.get('xu_credited'))}</b>",
+    ]
+    if source_lines:
+        lines.extend(source_lines)
+    lines.extend([
+        "",
+        "<b>Xu tiêu dùng / dịch vụ</b>",
+        f"• Xu khách đã dùng: <b>{xu_text(payload.get('xu_spent'))}</b>",
+        f"• Xu đã hoàn trong kỳ: <b>{xu_text(payload.get('xu_refunded'))}</b>",
+    ])
+    if usage_lines:
+        lines.extend(usage_lines)
+    lines.extend([
+        "",
+        "<b>Chi phí</b>",
+        f"• Chi phí sau vận hành: <b>{vnd_text(payload.get('expenses_after'))}</b>",
+        f"• Chi phí trước thành lập trong kỳ: <b>{vnd_text(payload.get('expenses_pre_period'))}</b>",
+        f"• Tổng chi phí trước thành lập đã ghi nhận: <b>{vnd_text(payload.get('expenses_pre_total'))}</b>",
+        f"• Provider cost ước tính: <b>{vnd_text(payload.get('provider_cost_estimate'))}</b>",
+        f"• Số khoản chi: <b>{int(payload.get('expense_count') or 0)}</b>",
+    ])
+    if expense_lines:
+        lines.extend(expense_lines)
+    lines.extend([
+        "",
+        "<b>Lãi/lỗ ước tính</b>",
+        f"• Thuế dự phòng ({float(payload.get('tax_reserve_rate') or 0):.2%}): <b>{vnd_text(payload.get('tax_reserve'))}</b>",
+        f"• Lãi/lỗ vận hành: <b>{vnd_text(payload.get('profit_operating'))}</b>",
+        f"• Lãi/lỗ quản trị gồm chi phí trước thành lập trong kỳ: <b>{vnd_text(payload.get('profit_management'))}</b>",
+        "",
+        "Lưu ý: Báo cáo này phục vụ quản trị nội bộ. Số liệu thuế chính thức cần đối chiếu hóa đơn/chứng từ và quy định thuế.",
+    ])
+    if report_type == "export_hint":
+        lines.append("Export CSV: <code>/finance_export YYYY-MM</code> hoặc <code>/finance_export YYYY</code>")
+    return "\n".join(lines)
+
+def finance_csv(kind: str, start_at: str, end_at: str) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["TOAN AAS finance export", kind, start_at, end_at])
+    conn = db_connect()
+    try:
+        if kind == "revenue":
+            writer.writerow(["id", "created_at", "user_id", "source_type", "source_id", "amount_vnd", "xu_credited", "payment_method", "status", "note", "created_by_admin_id"])
+            rows = sql_rows(
+                conn,
+                """SELECT id,created_at,user_id,source_type,source_id,amount_vnd,xu_credited,payment_method,status,note,created_by_admin_id
+                FROM finance_revenue_events WHERE created_at BETWEEN ? AND ? ORDER BY created_at,id""",
+                (start_at, end_at),
+            )
+        elif kind == "expenses":
+            writer.writerow(["id", "expense_date", "created_at", "amount_vnd", "category", "vendor", "payment_method", "invoice_status", "is_pre_establishment", "is_recurring", "note", "evidence", "created_by_admin_id", "deleted_at", "delete_reason"])
+            rows = sql_rows(
+                conn,
+                """SELECT id,expense_date,created_at,amount_vnd,category,vendor,payment_method,invoice_status,is_pre_establishment,is_recurring,note,evidence_folder_or_file_note,created_by_admin_id,deleted_at,delete_reason
+                FROM finance_expense_events WHERE expense_date BETWEEN ? AND ? ORDER BY expense_date,id""",
+                (start_at[:10], end_at[:10]),
+            )
+        else:
+            writer.writerow(["id", "created_at", "user_id", "service_type", "job_id", "xu_spent", "package_id", "provider", "provider_cost_estimate_vnd", "status", "note"])
+            rows = sql_rows(
+                conn,
+                """SELECT id,created_at,user_id,service_type,job_id,xu_spent,package_id,provider,provider_cost_estimate_vnd,status,note
+                FROM finance_usage_events WHERE created_at BETWEEN ? AND ? ORDER BY created_at,id""",
+                (start_at, end_at),
+            )
+        for row in rows:
+            writer.writerow(list(row))
+        return buffer.getvalue()
+    finally:
+        conn.close()
+
+async def send_named_text_document(context: ContextTypes.DEFAULT_TYPE, chat_id: int, content: str, filename: str, caption: str = ""):
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=os.path.splitext(filename)[1] or ".csv", encoding="utf-8", newline="") as f:
+        f.write(content or "")
+        tmp_path = f.name
+    try:
+        with open(tmp_path, "rb") as doc:
+            await context.bot.send_document(chat_id=chat_id, document=doc, filename=filename, caption=caption or filename)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
 
 def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
     conn = db_connect()
@@ -71979,6 +72592,19 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             after={"status": "approved", "deposit_id": int(pending_deposit_id), "user_id": str(target_id), "xu": int(amount), "launch_bonus_recorded": int(launch_recorded or 0), "promo_code": promo_code, "promo_bonus": promo_bonus},
             note="Admin approved manual bill",
         )
+        if int(order_amount or 0) > 0:
+            record_finance_revenue_event_conn(
+                conn,
+                target_id,
+                "manual_revenue",
+                f"manual_deposit:{pending_deposit_id}",
+                int(order_amount or 0),
+                int(amount or 0) + int(promo_bonus or 0),
+                "bank",
+                "success",
+                f"Manual bill approved; order={pending_order_code}",
+                update.effective_user.id,
+            )
         conn.commit()
         conn.close()
         record_usage_event(
@@ -72600,6 +73226,263 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  ➔ <code>/tuchoi {r[0]}</code>"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+def finance_admin_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📈 Doanh thu tháng", callback_data="menu|finance"), InlineKeyboardButton("📉 Lãi/lỗ", callback_data="menu|finance")],
+        [InlineKeyboardButton("💸 Chi phí tháng", callback_data="menu|finance"), InlineKeyboardButton("📤 Export CSV", callback_data="menu|finance")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_menu_text() -> str:
+    return (
+        "💰 <b>Tài chính nội bộ TOAN AAS</b>\n\n"
+        "<b>Lệnh nhanh</b>\n"
+        "• <code>/finance_dashboard</code> — tổng quan hôm nay/tháng/năm\n"
+        "• <code>/revenue_report</code> hoặc <code>/revenue_report 2026-06</code> / <code>/revenue_report 2026</code>\n"
+        "• <code>/expense_report</code> hoặc <code>/expense_report 2026-06</code> / <code>/expense_report 2026</code>\n"
+        "• <code>/profit_report</code> hoặc <code>/profit_report 2026-06</code> / <code>/profit_report 2026</code>\n"
+        "• <code>/expense_add &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n"
+        "• <code>/expense_add_pre &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n"
+        "• <code>/expense_edit &lt;expense_id&gt; &lt;field&gt; &lt;value&gt;</code>\n"
+        "• <code>/expense_delete &lt;expense_id&gt; &lt;reason&gt;</code>\n"
+        "• <code>/finance_export 2026-06</code> hoặc <code>/finance_export 2026</code>\n\n"
+        "<b>Category gợi ý</b>\n"
+        "<code>provider_ai</code>, <code>railway_hosting</code>, <code>domain_hosting</code>, "
+        "<code>software_subscription</code>, <code>marketing_ads</code>, <code>bank_payment_fee</code>, <code>other</code>\n\n"
+        "Ghi chú: báo cáo này phục vụ quản trị nội bộ; số liệu thuế chính thức cần đối chiếu chứng từ."
+    )
+
+async def cmd_finance_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    today_start, today_end, today_label, _ = finance_period_bounds("today", "day")
+    month_start, month_end, month_label, _ = finance_period_bounds("", "month")
+    year_start, year_end, year_label, _ = finance_period_bounds("", "year")
+    today = finance_summary_payload(today_start, today_end, today_label)
+    month = finance_summary_payload(month_start, month_end, month_label)
+    year = finance_summary_payload(year_start, year_end, year_label)
+    top_services = [
+        f"• {html.escape(str(service or 'other'))}: <b>{int(count or 0)}</b> job/lượt / <b>{xu_text(xu)}</b>"
+        for service, count, xu in month.get("usage_by_service", [])[:6]
+    ] or ["• Chưa có usage event trong tháng."]
+    lines = [
+        "💰 <b>TOAN AAS — Tài chính nội bộ</b>",
+        f"Ngày bắt đầu ghi nhận: <code>{html.escape(finance_tracking_start_text())}</code>",
+        "",
+        "<b>Hôm nay</b>",
+        f"• Tiền nạp/thanh toán thực tế: <b>{vnd_text(today.get('revenue_success'))}</b>",
+        f"• Số đơn thành công: <b>{int(today.get('revenue_count') or 0)}</b>",
+        f"• Xu đã phát hành: <b>{xu_text(today.get('xu_credited'))}</b>",
+        f"• Xu khách đã dùng: <b>{xu_text(today.get('xu_spent'))}</b>",
+        f"• Chi phí hôm nay: <b>{vnd_text(today.get('expenses_after') + today.get('expenses_pre_period'))}</b>",
+        f"• Lãi/lỗ ước tính hôm nay: <b>{vnd_text(today.get('profit_management'))}</b>",
+        "",
+        f"<b>{html.escape(month_label)}</b>",
+        f"• Doanh thu tiền thật: <b>{vnd_text(month.get('revenue_success'))}</b>",
+        f"• Chi phí sau vận hành: <b>{vnd_text(month.get('expenses_after'))}</b>",
+        f"• Chi phí trước thành lập đã ghi nhận: <b>{vnd_text(month.get('expenses_pre_total'))}</b>",
+        f"• Provider cost ước tính: <b>{vnd_text(month.get('provider_cost_estimate'))}</b>",
+        f"• Lãi/lỗ quản trị tháng: <b>{vnd_text(month.get('profit_management'))}</b>",
+        "",
+        f"<b>{html.escape(year_label)}</b>",
+        f"• Tổng doanh thu năm: <b>{vnd_text(year.get('revenue_success'))}</b>",
+        f"• Tổng chi phí năm: <b>{vnd_text(year.get('expenses_after') + year.get('expenses_pre_period') + year.get('provider_cost_estimate') + year.get('tax_reserve'))}</b>",
+        f"• Lãi/lỗ năm: <b>{vnd_text(year.get('profit_management'))}</b>",
+        "",
+        "<b>Dịch vụ sử dụng nhiều trong tháng</b>",
+        *top_services,
+        "",
+        "Báo cáo này phục vụ quản trị nội bộ. Số liệu thuế chính thức cần đối chiếu hóa đơn/chứng từ và quy định thuế.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=finance_admin_keyboard())
+
+async def cmd_revenue_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        start_at, end_at, label, _kind = finance_period_bounds(context.args[0] if context.args else "", "month")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/revenue_report</code>, <code>/revenue_report 2026-06</code> hoặc <code>/revenue_report 2026</code>", parse_mode="HTML")
+    payload = finance_summary_payload(start_at, end_at, label)
+    await update.message.reply_text(finance_report_text(payload, "export_hint"), parse_mode="HTML")
+
+async def cmd_expense_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        start_at, end_at, label, _kind = finance_period_bounds(context.args[0] if context.args else "", "month")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/expense_report</code>, <code>/expense_report 2026-06</code> hoặc <code>/expense_report 2026</code>", parse_mode="HTML")
+    payload = finance_summary_payload(start_at, end_at, label)
+    lines = [
+        "💸 <b>TOAN AAS — Báo cáo chi phí</b>",
+        f"• Kỳ: <code>{html.escape(label)}</code>",
+        f"• Chi phí sau vận hành: <b>{vnd_text(payload.get('expenses_after'))}</b>",
+        f"• Chi phí trước thành lập trong kỳ: <b>{vnd_text(payload.get('expenses_pre_period'))}</b>",
+        f"• Tổng chi phí trước thành lập đã ghi nhận: <b>{vnd_text(payload.get('expenses_pre_total'))}</b>",
+        f"• Số khoản chi: <b>{int(payload.get('expense_count') or 0)}</b>",
+        "",
+        "<b>Theo category</b>",
+    ]
+    rows = payload.get("expenses_by_category") or []
+    if not rows:
+        lines.append("• Chưa có chi phí trong kỳ.")
+    for category, count, amount in rows[:12]:
+        lines.append(f"• {html.escape(str(category or 'other'))}: <b>{vnd_text(amount)}</b> ({int(count or 0)} khoản)")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_profit_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        start_at, end_at, label, kind = finance_period_bounds(context.args[0] if context.args else "", "month")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/profit_report</code>, <code>/profit_report 2026-06</code> hoặc <code>/profit_report 2026</code>", parse_mode="HTML")
+    payload = finance_summary_payload(start_at, end_at, label)
+    title = "📉 <b>TOAN AAS — Lãi/lỗ năm</b>" if kind == "year" else "📉 <b>TOAN AAS — Lãi/lỗ ước tính</b>"
+    lines = [
+        title,
+        f"• Kỳ: <code>{html.escape(label)}</code>",
+        f"• Doanh thu tiền thật: <b>{vnd_text(payload.get('revenue_success'))}</b>",
+        f"• Chi phí sau vận hành: <b>{vnd_text(payload.get('expenses_after'))}</b>",
+        f"• Chi phí trước thành lập trong kỳ: <b>{vnd_text(payload.get('expenses_pre_period'))}</b>",
+        f"• Provider cost ước tính: <b>{vnd_text(payload.get('provider_cost_estimate'))}</b>",
+        f"• Thuế dự phòng: <b>{vnd_text(payload.get('tax_reserve'))}</b>",
+        f"• Lãi/lỗ vận hành: <b>{vnd_text(payload.get('profit_operating'))}</b>",
+        f"• Lãi/lỗ quản trị: <b>{vnd_text(payload.get('profit_management'))}</b>",
+    ]
+    if kind == "year":
+        total_year_cost = int(payload.get("expenses_after") or 0) + int(payload.get("expenses_pre_period") or 0) + int(payload.get("provider_cost_estimate") or 0) + int(payload.get("tax_reserve") or 0)
+        lines.extend([
+            "",
+            f"• Tổng chi phí năm: <b>{vnd_text(total_year_cost)}</b>",
+            f"• Doanh thu năm: <b>{vnd_text(payload.get('revenue_success'))}</b>",
+            f"• Lãi/lỗ năm: <b>{vnd_text(payload.get('profit_management'))}</b>",
+        ])
+    lines.append("\nLưu ý: đây là số quản trị nội bộ, chưa phải báo cáo thuế chính thức.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_expense_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(context.args or [])
+    if len(args) < 3:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/expense_add &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>\n"
+            "Ví dụ: <code>/expense_add 32500 provider_ai ShopAIKey nap api credit</code>",
+            parse_mode="HTML",
+        )
+    try:
+        amount = int(re.sub(r"[^\d]", "", args[0]))
+    except Exception:
+        amount = 0
+    if amount <= 0:
+        return await update.message.reply_text("⚠️ amount_vnd không hợp lệ.")
+    category = args[1]
+    vendor = args[2]
+    note = " ".join(args[3:]).strip()
+    expense_id = add_finance_expense(amount, category, vendor, note, update.effective_user.id, pre_establishment=False)
+    await update.message.reply_text(
+        f"✅ Đã ghi chi phí #{expense_id}: <b>{vnd_text(amount)}</b> | <code>{html.escape(category)}</code> | {html.escape(vendor)}",
+        parse_mode="HTML",
+    )
+
+async def cmd_expense_add_pre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(context.args or [])
+    if len(args) < 3:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/expense_add_pre &lt;amount_vnd&gt; &lt;category&gt; &lt;vendor&gt; &lt;note&gt;</code>",
+            parse_mode="HTML",
+        )
+    try:
+        amount = int(re.sub(r"[^\d]", "", args[0]))
+    except Exception:
+        amount = 0
+    if amount <= 0:
+        return await update.message.reply_text("⚠️ amount_vnd không hợp lệ.")
+    category = args[1]
+    vendor = args[2]
+    note = " ".join(args[3:]).strip()
+    expense_id = add_finance_expense(amount, category, vendor, note, update.effective_user.id, pre_establishment=True)
+    await update.message.reply_text(
+        f"✅ Đã ghi chi phí trước thành lập #{expense_id}: <b>{vnd_text(amount)}</b> | <code>{html.escape(category)}</code> | {html.escape(vendor)}",
+        parse_mode="HTML",
+    )
+
+async def cmd_expense_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(context.args or [])
+    allowed = {"amount_vnd", "category", "vendor", "payment_method", "invoice_status", "expense_date", "note", "evidence_folder_or_file_note", "is_recurring", "is_pre_establishment"}
+    if len(args) < 3 or args[1] not in allowed:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/expense_edit &lt;expense_id&gt; &lt;field&gt; &lt;value&gt;</code>",
+            parse_mode="HTML",
+        )
+    expense_id = int(args[0]) if str(args[0]).isdigit() else 0
+    field = args[1]
+    value = " ".join(args[2:]).strip()
+    if not expense_id:
+        return await update.message.reply_text("⚠️ expense_id không hợp lệ.")
+    if field in {"amount_vnd", "is_recurring", "is_pre_establishment"}:
+        value_db = int(re.sub(r"[^\d]", "", value) or 0)
+    else:
+        value_db = sanitize_log_text(value)[:1000]
+    conn = db_connect()
+    try:
+        cur = conn.execute(f"UPDATE finance_expense_events SET {field}=? WHERE id=? AND COALESCE(deleted_at,'')=''", (value_db, expense_id))
+        conn.commit()
+        if cur.rowcount <= 0:
+            return await update.message.reply_text("⚠️ Không tìm thấy expense_id hoặc khoản chi đã bị xóa.")
+    finally:
+        conn.close()
+    await update.message.reply_text(f"✅ Đã sửa chi phí #{expense_id}: <code>{html.escape(field)}</code>.", parse_mode="HTML")
+
+async def cmd_expense_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(context.args or [])
+    if len(args) < 2 or not str(args[0]).isdigit():
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/expense_delete &lt;expense_id&gt; &lt;reason&gt;</code>", parse_mode="HTML")
+    expense_id = int(args[0])
+    reason = sanitize_log_text(" ".join(args[1:]).strip())[:500]
+    conn = db_connect()
+    try:
+        cur = conn.execute(
+            """UPDATE finance_expense_events
+            SET deleted_at=?, deleted_by_admin_id=?, delete_reason=?
+            WHERE id=? AND COALESCE(deleted_at,'')=''""",
+            (now_text(), str(update.effective_user.id), reason, expense_id),
+        )
+        conn.commit()
+        if cur.rowcount <= 0:
+            return await update.message.reply_text("⚠️ Không tìm thấy expense_id hoặc khoản chi đã bị xóa.")
+    finally:
+        conn.close()
+    await update.message.reply_text(f"🗑 Đã đánh dấu xóa chi phí #{expense_id}. Lịch sử vẫn được giữ, không DROP/xóa DB.")
+
+async def cmd_finance_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    raw = context.args[0] if context.args else datetime.now().strftime("%Y-%m")
+    try:
+        start_at, end_at, label, kind = finance_period_bounds(raw, "month")
+    except Exception:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/finance_export 2026-06</code> hoặc <code>/finance_export 2026</code>", parse_mode="HTML")
+    stem = raw if raw else start_at[:7]
+    await update.message.reply_text(f"📤 Đang xuất CSV tài chính cho <b>{html.escape(label)}</b>...", parse_mode="HTML")
+    for kind_name in ("revenue", "expenses", "usage"):
+        content = finance_csv(kind_name, start_at, end_at)
+        await send_named_text_document(
+            context,
+            update.effective_chat.id,
+            content,
+            f"{kind_name}_{stem}.csv",
+            f"TOAN AAS {kind_name} export {label}",
+        )
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -73616,6 +74499,15 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("export_accounting_year", cmd_export_accounting_year))
     tg_app.add_handler(CommandHandler("billing_report", cmd_billing_report))
     tg_app.add_handler(CommandHandler("xu_ledger_export", cmd_xu_ledger_export))
+    tg_app.add_handler(CommandHandler("finance_dashboard", cmd_finance_dashboard))
+    tg_app.add_handler(CommandHandler("revenue_report", cmd_revenue_report))
+    tg_app.add_handler(CommandHandler("expense_report", cmd_expense_report))
+    tg_app.add_handler(CommandHandler("profit_report", cmd_profit_report))
+    tg_app.add_handler(CommandHandler("expense_add", cmd_expense_add))
+    tg_app.add_handler(CommandHandler("expense_add_pre", cmd_expense_add_pre))
+    tg_app.add_handler(CommandHandler("expense_edit", cmd_expense_edit))
+    tg_app.add_handler(CommandHandler("expense_delete", cmd_expense_delete))
+    tg_app.add_handler(CommandHandler("finance_export", cmd_finance_export))
     tg_app.add_handler(CommandHandler("report_ai_today", cmd_report_ai_today))
     tg_app.add_handler(CommandHandler("report_ai_week", cmd_report_ai_week))
     tg_app.add_handler(CommandHandler("report_ai_month", cmd_report_ai_month))

@@ -120,6 +120,15 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/user_packages` | `cmd_user_packages` | YES | YES | Shows a user's active/revoked package wallet and remaining item slots. |
 | `/adjust_package` | `cmd_adjust_package` | YES | YES | Admin adjusts package item quantities without changing Xu balance. |
 | `/revoke_package` | `cmd_revoke_package` | YES | YES | Admin revokes a package while preserving history. |
+| `/finance_dashboard` | `cmd_finance_dashboard` | YES | YES | Internal revenue/expense/profit dashboard for today, month, and year. |
+| `/revenue_report` | `cmd_revenue_report` | YES | YES | Internal cash revenue report by month or year; accepts `YYYY-MM` or `YYYY`. |
+| `/expense_report` | `cmd_expense_report` | YES | YES | Internal expense report by month or year. |
+| `/profit_report` | `cmd_profit_report` | YES | YES | Internal profit/loss estimate by month or year, including annual totals. |
+| `/expense_add` | `cmd_expense_add` | YES | YES | Add operating expense manually; no payment/Xu logic changes. |
+| `/expense_add_pre` | `cmd_expense_add_pre` | YES | YES | Add pre-establishment expense for internal management reporting. |
+| `/expense_edit` | `cmd_expense_edit` | YES | YES | Correct an expense field without deleting history. |
+| `/expense_delete` | `cmd_expense_delete` | YES | YES | Soft-delete an expense with a reason; does not DROP or delete DB data. |
+| `/finance_export` | `cmd_finance_export` | YES | YES | Export finance revenue, expense, and usage CSV files for a month or year. |
 | `/shopaikey_status` | `cmd_shopaikey_status` | YES | YES | ShopAIKey admin status, usage and smoke-test snapshots. |
 | `/shopaikey_usage` | `cmd_shopaikey_usage` | YES | YES | ShopAIKey usage monitor, no key leakage. |
 | `/shopaikey_video_job` | `cmd_shopaikey_video_job` | YES | YES | Query ShopAIKey video job status. |
