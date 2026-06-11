@@ -34056,14 +34056,14 @@ def main_memory_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("⏰ Reminders", callback_data="menu|hint_remind"), InlineKeyboardButton("📄 Document tools", callback_data="menu|doc_tools")],
             [InlineKeyboardButton("📄 PDF to Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Image to PDF", callback_data="menu|hint_doc_image_to_pdf")],
             [InlineKeyboardButton("🗜 Compress PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Split PDF", callback_data="menu|hint_doc_split_pdf")],
-            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
+            [InlineKeyboardButton("🧩 Merge PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 Lưu ghi chú", callback_data="menu|hint_note"), InlineKeyboardButton("🔎 Tìm ghi chú", callback_data="menu|hint_search_note")],
         [InlineKeyboardButton("⏰ Nhắc việc", callback_data="menu|hint_remind"), InlineKeyboardButton("📄 Công cụ tài liệu", callback_data="menu|doc_tools")],
         [InlineKeyboardButton("📄 PDF sang Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Ảnh sang PDF", callback_data="menu|hint_doc_image_to_pdf")],
         [InlineKeyboardButton("🗜 Nén PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Tách PDF", callback_data="menu|hint_doc_split_pdf")],
-        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🧩 Gộp PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
 def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -34927,7 +34927,7 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_doc_image_to_pdf": ("main_memory", "🖼 <b>Ảnh sang PDF</b>\n\nGửi hoặc reply ảnh rồi gõ:\n<code>/image_to_pdf</code>\n\nCông cụ này dùng local engine, không gọi tách nền/PayOS."),
         "hint_doc_compress_pdf": ("main_memory", "🗜 <b>Nén PDF</b>\n\nGửi hoặc reply file PDF rồi gõ:\n<code>/compress_pdf</code>\n\nNếu thiếu engine local, TOAN AAS sẽ báo bảo trì và không trừ Xu."),
         "hint_doc_split_pdf": ("main_memory", "✂️ <b>Tách PDF</b>\n\nGửi hoặc reply file PDF rồi gõ trang cần tách, ví dụ:\n<code>/split_pdf 1-3</code>"),
-        "hint_doc_merge_pdf": ("main_memory", "🧩 <b>Gộp PDF</b>\n\nCopy lệnh:\n<code>/merge_pdf</code>\n\nMVP hiện đang planned/admin test; bot không trừ Xu nếu chưa hỗ trợ workflow nhiều file."),
+        "hint_doc_merge_pdf": ("main_memory", "📄 Công cụ gộp PDF đang bảo trì hoặc chưa bật. TOAN AAS chưa trừ Xu."),
         "hint_pricing": ("main_topup", "💰 <b>Bảng giá</b>\n\nĐang mở bảng giá TOAN AAS."),
         "hint_image_tools": ("main_image", "🖼 <b>Công cụ ảnh</b>\n\nCopy lệnh:\n<code>/image_tools</code>"),
         "hint_image_to_video_pack": ("main_image", "🎬 <b>Ảnh sang video prompt</b>\n\nCopy lệnh:\n<code>/image_to_video_pack chủ đề hoặc mô tả ảnh</code>"),

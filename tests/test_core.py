@@ -1999,6 +1999,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🖼 Ảnh sang PDF" in memory_labels
     assert "🗜 Nén PDF" in memory_labels
     assert "✂️ Tách PDF" in memory_labels
+    assert "🧩 Gộp PDF" in memory_labels
+    assert [button.text for button in bot.main_memory_keyboard("vi").inline_keyboard[-1]] == ["🧩 Gộp PDF", "⬅️ Về menu chính"]
+    merge_section, merge_hint = bot.menu_hint_text("hint_doc_merge_pdf")
+    assert merge_section == "main_memory"
+    assert "Công cụ gộp PDF đang bảo trì hoặc chưa bật" in merge_hint
+    assert "chưa trừ Xu" in merge_hint
     memory_text = bot.menu_text_main_memory()
     assert "TÀI LIỆU" in memory_text
     assert "/doc_tools" in memory_text
