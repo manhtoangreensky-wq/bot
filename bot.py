@@ -30386,6 +30386,104 @@ def get_feedback_pending(user_id) -> dict | None:
 def clear_feedback_pending(user_id) -> bool:
     return USER_PENDING.pop(feedback_pending_key(user_id), None) is not None
 
+IMAGE_MENU_PENDING_ACTIONS = {"image_prompt_only", "image_edit_wait_image", "image_edit_instruction", "image_upscale_wait_image"}
+
+def image_menu_pending_key(user_id) -> str:
+    return f"image_menu:{user_id}"
+
+def set_image_menu_pending(user_id, action: str, **fields) -> None:
+    action = str(action or "").strip()
+    if action not in IMAGE_MENU_PENDING_ACTIONS:
+        return
+    payload = {
+        "pending_action": action,
+        "created_at_ts": time.time(),
+    }
+    if fields:
+        for key, value in fields.items():
+            if key in {"file_id", "file_unique_id"}:
+                payload[key] = str(value or "")[:240]
+            elif key in {"note"}:
+                payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:500]
+    USER_PENDING[image_menu_pending_key(user_id)] = payload
+
+def get_image_menu_pending(user_id) -> dict | None:
+    key = image_menu_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") not in IMAGE_MENU_PENDING_ACTIONS:
+        return None
+    age = time.time() - float(pending.get("created_at_ts") or 0)
+    if age > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_image_menu_pending(user_id) -> bool:
+    return USER_PENDING.pop(image_menu_pending_key(user_id), None) is not None
+
+def image_menu_child_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Về menu ảnh" if normalize_user_language(lang) == "vi" else "🔙 Back to image menu", callback_data="menu|main_image")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def image_prompt_menu_start_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✍️ <b>Image prompt</b>\n\n"
+            "Send the product/topic/style you want. TOAN AAS will create image prompts only; it will not generate a real image in this step.\n\n"
+            "The bot has not called an image provider and has not charged Xu."
+        )
+    return (
+        "✍️ <b>Tạo prompt ảnh</b>\n\n"
+        "Bạn hãy gửi sản phẩm/chủ đề/phong cách ảnh muốn tạo. TOAN AAS chỉ tạo prompt ảnh ở bước này, chưa tạo ảnh thật.\n\n"
+        "Bot chưa gọi provider ảnh và chưa trừ Xu."
+    )
+
+def image_edit_menu_start_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🧩 <b>Edit image</b>\n\n"
+            "Please send or reply to the image you want to edit. The public edit provider is still guarded; the bot will not charge Xu just for opening this flow."
+        )
+    return (
+        "🧩 <b>Sửa ảnh / edit ảnh</b>\n\n"
+        "Bạn hãy gửi hoặc reply ảnh cần sửa. Công cụ sửa ảnh public vẫn đang có guard; chỉ mở flow này sẽ không gọi API và không trừ Xu."
+    )
+
+def image_edit_instruction_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✅ Image received.\n\n"
+            "Send the edit request, for example: brighten the background, keep the logo, remove small distractions.\n\n"
+            "The bot has not charged Xu."
+        )
+    return (
+        "✅ Đã nhận ảnh.\n\n"
+        "Bạn hãy gửi yêu cầu sửa ảnh, ví dụ: làm nền sáng hơn, giữ nguyên logo, xóa vật thể thừa nhỏ.\n\n"
+        "Bot chưa trừ Xu."
+    )
+
+def image_upscale_menu_start_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📐 <b>Upscale / resize</b>\n\n"
+            "Please send or reply to the image. This tool is still admin-tested/public guarded, so TOAN AAS will not charge Xu in this step."
+        )
+    return (
+        "📐 <b>Nâng cấp / đổi kích thước ảnh</b>\n\n"
+        "Bạn hãy gửi hoặc reply ảnh cần nâng cấp/đổi kích thước. Công cụ này đang admin test/guard public, nên TOAN AAS chưa trừ Xu ở bước này."
+    )
+
+def image_menu_guarded_result_text(action: str, lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        if action == "image_edit_instruction":
+            return "🧩 Image editing is still admin-tested/not public. TOAN AAS has not called the provider and has not charged Xu."
+        return "📐 Image upscale/resize is still admin-tested/not public. TOAN AAS has not called the provider and has not charged Xu."
+    if action == "image_edit_instruction":
+        return "🧩 Sửa ảnh AI đang admin test/chưa mở public. TOAN AAS chưa gọi provider và chưa trừ Xu."
+    return "📐 Nâng cấp/đổi kích thước ảnh đang admin test/chưa mở public. TOAN AAS chưa gọi provider và chưa trừ Xu."
+
 def feedback_message_prompt(category: str, lang: str = "vi") -> str:
     label = FEEDBACK_CATEGORY_LABELS.get(str(category or ""), FEEDBACK_CATEGORY_LABELS["other_error"])
     if normalize_user_language(lang) != "vi":
@@ -30441,9 +30539,10 @@ def clear_media_creator_pending_states(user_id) -> bool:
     trend_cleared = clear_trend_video_flow_pending(user_id)
     trend_confirm_cleared = clear_trend_workflow_confirm_pending(user_id)
     feedback_cleared = clear_feedback_pending(user_id)
+    image_menu_cleared = clear_image_menu_pending(user_id)
     frame_video_cleared = clear_frame_video_state(user_id)
     storyboard_cleared = clear_storyboard_state(user_id)
-    return bool(quick_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or frame_video_cleared or storyboard_cleared)
+    return bool(quick_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -34460,19 +34559,17 @@ def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if lang != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 Quick image", callback_data="create_media|quick_image")],
-            [InlineKeyboardButton("✍️ Image prompt", callback_data="menu|hint_image_tools")],
-            [InlineKeyboardButton("🧩 Edit image", callback_data="menu|hint_image_tools")],
-            [InlineKeyboardButton("📐 Upscale / resize", callback_data="menu|hint_image_tools")],
-            [InlineKeyboardButton("🎬 Image to video", callback_data="menu|hint_image_to_video_pack")],
+            [InlineKeyboardButton("✍️ Image prompt", callback_data="menu|image_prompt_start")],
+            [InlineKeyboardButton("🧩 Edit image", callback_data="menu|image_edit_start")],
+            [InlineKeyboardButton("📐 Upscale / resize", callback_data="menu|image_upscale_start")],
             [InlineKeyboardButton("🔙 Back", callback_data="menu|main")],
             [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")],
-        [InlineKeyboardButton("✍️ Tạo prompt ảnh", callback_data="menu|hint_image_tools")],
-        [InlineKeyboardButton("🧩 Sửa ảnh / edit ảnh", callback_data="menu|hint_image_tools")],
-        [InlineKeyboardButton("📐 Nâng cấp / đổi kích thước", callback_data="menu|hint_image_tools")],
-        [InlineKeyboardButton("🎬 Tạo video từ ảnh", callback_data="menu|hint_image_to_video_pack")],
+        [InlineKeyboardButton("✍️ Tạo prompt ảnh", callback_data="menu|image_prompt_start")],
+        [InlineKeyboardButton("🧩 Sửa ảnh / edit ảnh", callback_data="menu|image_edit_start")],
+        [InlineKeyboardButton("📐 Nâng cấp / đổi kích thước", callback_data="menu|image_upscale_start")],
         [InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -35306,8 +35403,8 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_doc_split_pdf": ("main_memory", "✂️ <b>Tách PDF</b>\n\nGửi hoặc reply file PDF rồi gõ trang cần tách, ví dụ:\n<code>/split_pdf 1-3</code>"),
         "hint_doc_merge_pdf": ("main_memory", "📄 Công cụ gộp PDF đang bảo trì hoặc chưa bật. TOAN AAS chưa trừ Xu."),
         "hint_pricing": ("main_topup", "💰 <b>Bảng giá</b>\n\nĐang mở bảng giá TOAN AAS."),
-        "hint_image_tools": ("main_image", "🖼 <b>Công cụ ảnh</b>\n\nCopy lệnh:\n<code>/image_tools</code>"),
-        "hint_image_to_video_pack": ("main_image", "🎬 <b>Ảnh sang video prompt</b>\n\nCopy lệnh:\n<code>/image_to_video_pack chủ đề hoặc mô tả ảnh</code>"),
+        "hint_image_tools": ("main_image", "🖼 <b>Hình ảnh TOAN AAS</b>\n\nChọn đúng tác vụ bằng nút trong menu ảnh. Bot chưa gọi API và chưa trừ Xu khi chỉ mở menu."),
+        "hint_image_to_video_pack": ("main_video", "🎬 <b>Ảnh sang video prompt</b>\n\nCopy lệnh:\n<code>/image_to_video_pack chủ đề hoặc mô tả ảnh</code>"),
         "hint_media_factory": ("main_audio", "🎤 <b>Trung tâm Video & Media</b>\n\nCopy lệnh:\n<code>/media_factory</code>\n\nTạo voice, bóc băng và video/content pack tùy công cụ đã bật."),
         "hint_video_status": ("main_guide", "🔄 <b>Kiểm tra trạng thái video</b>\n\nKhi video được gửi vào queue, bot sẽ gửi kèm nút <b>Kiểm tra trạng thái video</b> trong chính tin nhắn job.\n\nNếu bạn không còn tin nhắn đó, hãy gửi admin ID Telegram và job/task gần nhất để TOAN AAS kiểm tra. Không cần bấm tạo lại nhiều lần khi job đang xử lý."),
         "hint_film_blueprint": ("video_workflow", "🚀 <b>Film Blueprint</b>\n\nCopy lệnh:\n<code>/film_blueprint</code>"),
@@ -35337,8 +35434,8 @@ def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
         "hint_doc_split_pdf": ("main_memory", "✂️ <b>Split PDF</b>\n\nSend or reply to a PDF, then use:\n<code>/split_pdf 1-3</code>"),
         "hint_doc_merge_pdf": ("main_memory", "🧩 <b>Merge PDF</b>\n\nCopy:\n<code>/merge_pdf</code>\n\nIf the workflow is not public yet, TOAN AAS will not charge Xu."),
         "hint_pricing": ("main_topup", "💰 <b>Pricing</b>\n\nOpening TOAN AAS pricing."),
-        "hint_image_tools": ("main_image", "🖼 <b>Image tools</b>\n\nCopy:\n<code>/image_tools</code>"),
-        "hint_image_to_video_pack": ("main_image", "🎬 <b>Image-to-video prompt pack</b>\n\nCopy:\n<code>/image_to_video_pack topic or image description</code>"),
+        "hint_image_tools": ("main_image", "🖼 <b>Image tools</b>\n\nChoose the exact image task using the image menu buttons. Opening the menu does not call APIs and does not charge Xu."),
+        "hint_image_to_video_pack": ("main_video", "🎬 <b>Image-to-video prompt pack</b>\n\nCopy:\n<code>/image_to_video_pack topic or image description</code>"),
         "hint_media_factory": ("main_audio", "🎤 <b>Media tools</b>\n\nCopy:\n<code>/media_factory</code>\n\nVoice, transcription and media/content packs depending on enabled tools."),
         "hint_video_status": ("main_guide", "🔄 <b>Video status</b>\n\nWhen a video is queued, the bot adds a status button to that job message. If you no longer have it, contact support with your Telegram ID and latest job/task. Do not create duplicate jobs while one is processing."),
         "hint_naptien": ("billing", "💳 <b>Top up Xu</b>\n\nCopy:\n<code>/naptien</code>"),
@@ -35423,11 +35520,10 @@ def menu_text_main_image_i18n(lang: str) -> str:
         return menu_text_main_image()
     return (
         "🖼 <b>IMAGE TOOLS</b>\n\n"
-        "Create image prompts, prepare images for video, and use image tools when they are enabled.\n\n"
+        "Create image prompts and use image tools when they are enabled.\n\n"
         "<b>Quick commands:</b>\n"
         "• <code>/image_tools</code> — open image tools\n"
-        "• <code>/image_prompt</code> — create image prompts\n"
-        "• <code>/image_to_video_pack</code> — create image-to-video prompts\n\n"
+        "• <code>/image_prompt</code> — create image prompts\n\n"
         "Advanced image tools stay admin-tested until they are ready."
     )
 
@@ -36832,6 +36928,27 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             query,
             support_contact_text(),
             reply_markup=support_contact_keyboard(lang=lang),
+        )
+    if action == "image_prompt_start":
+        set_image_menu_pending(query.from_user.id, "image_prompt_only")
+        return await safe_edit_query_message(
+            query,
+            image_prompt_menu_start_text(lang),
+            reply_markup=image_menu_child_keyboard(lang),
+        )
+    if action == "image_edit_start":
+        set_image_menu_pending(query.from_user.id, "image_edit_wait_image")
+        return await safe_edit_query_message(
+            query,
+            image_edit_menu_start_text(lang),
+            reply_markup=image_menu_child_keyboard(lang),
+        )
+    if action == "image_upscale_start":
+        set_image_menu_pending(query.from_user.id, "image_upscale_wait_image")
+        return await safe_edit_query_message(
+            query,
+            image_upscale_menu_start_text(lang),
+            reply_markup=image_menu_child_keyboard(lang),
         )
     if action.startswith("translate_set_"):
         target = normalize_translate_target(action.replace("translate_set_", "", 1))
@@ -39211,6 +39328,76 @@ async def handle_public_image_prompt_pending_text(update: Update, context: Conte
         reply_markup=public_media_aspect_ratio_keyboard("image", lang),
     )
     return True
+
+async def handle_image_menu_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_image_menu_pending(uid)
+    if not pending:
+        return False
+    text = re.sub(r"\s+", " ", update.message.text.strip())
+    if not text or text.startswith("/"):
+        return False
+    lang = get_user_language(uid) or "vi"
+    action = str(pending.get("pending_action") or "")
+    if action == "image_prompt_only":
+        clear_image_menu_pending(uid)
+        await run_image_prompt_topic(update, uid, text)
+        return True
+    if action in {"image_edit_wait_image", "image_upscale_wait_image"}:
+        await update.message.reply_text(
+            image_edit_menu_start_text(lang) if action == "image_edit_wait_image" else image_upscale_menu_start_text(lang),
+            parse_mode="HTML",
+            reply_markup=image_menu_child_keyboard(lang),
+        )
+        return True
+    if action == "image_edit_instruction":
+        clear_image_menu_pending(uid)
+        await update.message.reply_text(
+            image_menu_guarded_result_text(action, lang),
+            reply_markup=image_menu_child_keyboard(lang),
+        )
+        return True
+    return False
+
+async def handle_image_menu_pending_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_image_menu_pending(uid)
+    if not pending:
+        return False
+    lang = get_user_language(uid) or "vi"
+    action = str(pending.get("pending_action") or "")
+    if action == "image_prompt_only":
+        await update.message.reply_text(
+            image_prompt_menu_start_text(lang),
+            parse_mode="HTML",
+            reply_markup=image_menu_child_keyboard(lang),
+        )
+        return True
+    if action == "image_edit_wait_image":
+        remember_last_user_file(update)
+        cache_recent_media_state(update)
+        file_id = update.message.photo[-1].file_id if update.message.photo else ""
+        file_unique_id = update.message.photo[-1].file_unique_id if update.message.photo else ""
+        set_image_menu_pending(uid, "image_edit_instruction", file_id=file_id, file_unique_id=file_unique_id)
+        await update.message.reply_text(
+            image_edit_instruction_text(lang),
+            reply_markup=image_menu_child_keyboard(lang),
+        )
+        return True
+    if action == "image_upscale_wait_image":
+        remember_last_user_file(update)
+        cache_recent_media_state(update)
+        clear_image_menu_pending(uid)
+        await update.message.reply_text(
+            image_menu_guarded_result_text(action, lang),
+            reply_markup=image_menu_child_keyboard(lang),
+        )
+        return True
+    return False
 
 async def handle_image_warranty_retry_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
@@ -49771,11 +49958,8 @@ async def cmd_trend_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
-async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    topic = media_factory_topic_from_args(context)
-    if not topic:
-        return await update.message.reply_text("⚠️ Cú pháp: /image_prompt <chủ đề hoặc trend>")
+async def run_image_prompt_topic(update: Update, uid: int, topic: str) -> None:
+    topic = re.sub(r"\s+", " ", str(topic or "").strip())[:1200]
     if not is_feature_enabled("image_prompt_factory", uid, default=True):
         return await update.message.reply_text("⚠️ Image Prompt Factory đang tắt tạm thời. Vui lòng thử lại sau.")
     ok_credit, charge_preview = await preview_media_factory_credit_or_reply(update, uid, IMAGE_PROMPT_PACK_COST, "spend_image_prompt")
@@ -49801,6 +49985,13 @@ async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     create_media_factory_job(uid, media_factory_username(update), "image_prompt", topic, image_prompt_pack=output, cost_xu=IMAGE_PROMPT_PACK_COST)
     balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
     await reply_long_text(update, f"{output}\n\n💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
+
+async def cmd_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    topic = media_factory_topic_from_args(context)
+    if not topic:
+        return await update.message.reply_text("⚠️ Cú pháp: /image_prompt <chủ đề hoặc trend>")
+    await run_image_prompt_topic(update, uid, topic)
 
 def image_story_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -56626,6 +56817,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_public_video_prompt_pending(uid)
         clear_media_aspect_pending(uid)
         clear_public_video_package_context(uid)
+        clear_image_menu_pending(uid)
         if shopaikey_active_job_for_user(uid, "image"):
             return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         enabled, message = shopaikey_public_generation_guard("image")
@@ -56780,6 +56972,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_public_video_prompt_pending(uid)
         clear_media_aspect_pending(uid)
         clear_public_video_package_context(uid)
+        clear_image_menu_pending(uid)
         tier = normalize_image_tier(action.replace("image_tier_", "", 1))
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
@@ -56798,6 +56991,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_public_video_prompt_pending(uid)
         clear_media_aspect_pending(uid)
         clear_public_video_package_context(uid)
+        clear_image_menu_pending(uid)
         active_video_job = shopaikey_active_job_for_user(uid, "video")
         if active_video_job:
             return await safe_edit_or_send(
@@ -56825,6 +57019,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_quick_media_pending(uid)
         clear_public_image_prompt_pending(uid)
         clear_media_aspect_pending(uid)
+        clear_image_menu_pending(uid)
         tier = normalize_video_tier(action.replace("video_tier_", "", 1))
         payload = video_tier_payload(tier)
         if tier == "premium" or payload.get("admin_only"):
@@ -57036,37 +57231,12 @@ async def cmd_tool_test_workflow_image_to_video(update: Update, context: Context
 async def cmd_image_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     lang = get_user_language(uid) or "vi"
-    if normalize_user_language(lang) != "vi":
-        return await update.message.reply_text(menu_text_main_image_i18n(lang), parse_mode="HTML", reply_markup=localized_public_back_keyboard(lang))
-    readiness = customer_tool_readiness_payload()
-    openai_image_label = (
-        "admin đã bật/test nội bộ" if (ENABLE_OPENAI_IMAGE and openai_client and is_feature_enabled("image_openai_generation", uid, default=False))
-        else "tạm khóa để kiểm soát chi phí"
+    clear_image_menu_pending(uid)
+    await update.message.reply_text(
+        menu_text_main_image_i18n(lang),
+        parse_mode="HTML",
+        reply_markup=main_image_keyboard(lang),
     )
-    openai_edit_label = (
-        "admin đã bật/test nội bộ" if (ENABLE_OPENAI_IMAGE_EDIT and openai_client and is_feature_enabled("image_openai_edit", uid, default=False))
-        else "tạm khóa để kiểm soát chi phí"
-    )
-    lines = [
-        "🖼 <b>Công cụ ảnh trong Video & Media Factory</b>",
-        "",
-        "<b>Công cụ tiết kiệm:</b>",
-        "• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật",
-        "• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo prompt video từ ảnh",
-        "• <code>/remove_bg</code> — tách nền ảnh nếu công cụ đã mở public",
-        "",
-        "<b>Công cụ cao cấp:</b>",
-        f"• <code>/ai_image &lt;mô tả ảnh&gt;</code> — tạo ảnh AI thật: <code>{html.escape(openai_image_label)}</code>",
-        f"• <code>/ai_image_edit &lt;yêu cầu sửa ảnh&gt;</code> — sửa ảnh AI thật: <code>{html.escape(openai_edit_label)}</code>",
-        "",
-        "Lưu ý: tạo và sửa ảnh AI là gói cao cấp, chỉ hoạt động khi admin bật công cụ. "
-        "Nếu chưa bật, bot không trừ Xu và sẽ gợi ý dùng /image_prompt trước.",
-        "",
-        "Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.",
-        "",
-        "TOAN AAS gom nhiều công cụ vào một bot để khách không phải chạy nhiều website khác nhau.",
-    ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_image_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -74850,6 +75020,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if await handle_image_menu_pending_photo(update, context):
+        return
+
     if await handle_frame_video_photo(update, context):
         return
 
@@ -74985,6 +75158,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_public_video_prompt_pending_text(update, context):
+        return
+
+    if await handle_image_menu_pending_text(update, context):
         return
 
     if await handle_creative_motion_pending_text(update, context):

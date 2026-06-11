@@ -2021,6 +2021,17 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         assert voice_rows
     image_labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
     assert "🖼 Tạo ảnh nhanh" in image_labels
+    assert "✍️ Tạo prompt ảnh" in image_labels
+    assert "🧩 Sửa ảnh / edit ảnh" in image_labels
+    assert "📐 Nâng cấp / đổi kích thước" in image_labels
+    assert "🎬 Tạo video từ ảnh" not in image_labels
+    image_buttons = [button for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
+    image_callback_by_label = {button.text: button.callback_data for button in image_buttons}
+    assert image_callback_by_label["✍️ Tạo prompt ảnh"] == "menu|image_prompt_start"
+    assert image_callback_by_label["🧩 Sửa ảnh / edit ảnh"] == "menu|image_edit_start"
+    assert image_callback_by_label["📐 Nâng cấp / đổi kích thước"] == "menu|image_upscale_start"
+    assert "menu|hint_image_to_video_pack" not in [button.callback_data for button in image_buttons]
+    assert "menu|hint_image_tools" not in [button.callback_data for button in image_buttons]
     assert "💳 Xem bảng giá" not in image_labels
     assert "💰 Xem giá" not in image_labels
     assert "📞 Liên hệ admin" not in image_labels
@@ -2068,6 +2079,21 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🗜 Nén PDF" in memory_labels
     assert "✂️ Tách PDF" in memory_labels
     assert "🧩 Gộp PDF" in memory_labels
+    image_keyboard_source = source_between(source, "def main_image_keyboard", "def main_audio_keyboard")
+    assert "hint_image_tools" not in image_keyboard_source
+    assert "hint_image_to_video_pack" not in image_keyboard_source
+    assert "image_prompt_start" in image_keyboard_source
+    assert "image_edit_start" in image_keyboard_source
+    assert "image_upscale_start" in image_keyboard_source
+    image_video_parent, _hint = bot.menu_hint_text("hint_image_to_video_pack")
+    assert image_video_parent == "main_video"
+    assert "/image_to_video_pack" not in bot.menu_text_main_image_i18n("en")
+    message_handler_source = message_source
+    assert "handle_image_menu_pending_text(update, context)" in message_handler_source
+    assert message_handler_source.index("handle_image_menu_pending_text") < message_handler_source.index("handle_quick_media_pending_text")
+    photo_handler_source = source_between(source, "async def handle_photo", "async def handle_document_cache_only")
+    assert "handle_image_menu_pending_photo(update, context)" in photo_handler_source
+    assert photo_handler_source.index("handle_image_menu_pending_photo") < photo_handler_source.index("handle_frame_video_photo")
     assert [button.text for button in bot.main_memory_keyboard("vi").inline_keyboard[-1]] == ["🧩 Gộp PDF", "⬅️ Về menu chính"]
     merge_section, merge_hint = bot.menu_hint_text("hint_doc_merge_pdf")
     assert merge_section == "main_memory"
