@@ -36274,6 +36274,7 @@ def menu_text_admin() -> str:
         "• <code>/tool_test_shopaikey_tts</code> — smoke TTS admin-only\n\n"
         "<b>F. Giá / Sẵn sàng bán</b>\n"
         "• <code>/banggia</code> — bảng giá khách hàng tập trung\n"
+        "• <code>/pricing_audit</code> — audit feature/price/source/guard cho admin\n"
         "• <code>/costs</code> — chi phí/provider nội bộ nếu có\n"
         "• <code>/sales_ready</code> — kiểm tra public guard, billing, refund\n"
         "• <code>/providers</code> — xác nhận provider không lộ secret\n\n"
@@ -53782,7 +53783,7 @@ async def cmd_storage_status(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"• File/audio: <b>{FILES_AUDIO_FREE_MB}MB/user</b>\n"
         f"• Total: <b>{TOTAL_FREE_STORAGE_MB}MB/user</b>\n\n"
         "<b>Add-on:</b>\n"
-        f"• +{STORAGE_ADDON_BLOCK_MB}MB/month = <b>{STORAGE_ADDON_BLOCK_PRICE_VND:,}đ</b>\n".replace(",", ".")
+        + "\n".join(storage_addon_lines()) + "\n"
         + "\n<b>System:</b>\n"
         f"• Users with notes: <b>{user_count}</b>\n"
         f"• Permanent notes/files rows: <b>{note_count}</b>\n"
@@ -63273,40 +63274,185 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+def pricing_free_lines() -> list[str]:
+    return [
+        "🆓 <b>MIỄN PHÍ / 0 XU</b>",
+        "",
+        "Các bước dưới đây chỉ tạo prompt/kế hoạch/text hoặc mở menu. TOAN AAS chưa gọi provider nặng và chưa trừ Xu.",
+        "",
+        "• <code>/start</code>, <code>/menu</code>, đổi ngôn ngữ, hướng dẫn, bảng giá.",
+        "• Ghi chú text cơ bản: tạo, xem, sửa, tìm kiếm trong quota lưu trữ.",
+        "• Tạo prompt ảnh, prompt từ ảnh, 3 biến thể prompt, lưu prompt.",
+        "• Ý tưởng video, kịch bản video dài dạng plan/text, storyboard text.",
+        "• Prompt ảnh từng cảnh, prompt video từng cảnh, gợi ý nhạc/voice dạng text.",
+        "• Gợi ý chuyển động, concept quảng cáo, video theo trend dạng kế hoạch khi chưa tạo thật.",
+        "• Tìm nhạc/SFX/library, nghe thử và chọn nguồn nếu chưa xử lý file/provider.",
+        "• Admin smoke test: không trừ Xu, nhưng provider có thể tốn credit thật.",
+        "",
+        "Nếu bước nào chuyển sang tạo ảnh/video/voice/file thật, bot sẽ hiện màn xác nhận phí trước khi trừ Xu.",
+    ]
+
+def pricing_frame_video_lines() -> list[str]:
+    examples = [
+        ("5 ảnh, 1.5s/ảnh, không hiệu ứng", {"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "none"}),
+        ("6 ảnh, 1.5s/ảnh, không hiệu ứng", {"photos": [{"file_id": str(i)} for i in range(6)], "duration": "fast", "effect": "none"}),
+        ("10 ảnh, 1.5s/ảnh, không hiệu ứng", {"photos": [{"file_id": str(i)} for i in range(10)], "duration": "fast", "effect": "none"}),
+        ("5 ảnh, zoom nhẹ", {"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "zoom"}),
+        ("5 ảnh, random nhẹ", {"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "random"}),
+    ]
+    rows = [
+        "🎞 <b>GHÉP ẢNH THÀNH VIDEO</b>",
+        "",
+        "Dùng Local Worker/FFmpeg, không gọi VEO/video AI provider. Đây là luồng rẻ hơn video AI thật.",
+        "",
+    ]
+    for label, state in examples:
+        rows.append(f"• {label}: <b>{frame_video_price_for_state(state)} Xu</b>")
+    rows.extend([
+        "",
+        "Giá tăng theo số ảnh, thời lượng và hiệu ứng. Bot luôn xác nhận giá trước khi trừ Xu.",
+        "Nếu worker offline, ffmpeg thiếu hoặc render guard đang khóa: TOAN AAS không render trực tiếp trên Railway, không trừ Xu.",
+    ])
+    return rows
+
+def pricing_voice_lines() -> list[str]:
+    return [
+        "🗣 <b>VOICE / TTS / AUDIO</b>",
+        "",
+        "• Gợi ý voice/nhạc dạng text: <b>0 Xu</b>.",
+        f"• TTS/voice ngắn: từ <b>{VOICE_BASE_COST} Xu</b>.",
+        "• TTS/voice dài: từ <b>80–150 Xu</b>, tùy ký tự/thời lượng/provider.",
+        f"• STT/bóc băng audio ngắn: từ <b>{AUDIO_MIN_COST} Xu</b>.",
+        "• STT/audio dài: tính theo MB/thời lượng.",
+        "• Ghép audio local nếu có sẵn: thấp hoặc miễn phí tùy flow.",
+        "• Tạo nhạc AI/Suno/provider-heavy: admin-only hoặc liên hệ admin cho đến khi provider ổn định.",
+        "",
+        "Nếu provider lỗi/quota/timeout: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
+    ]
+
+def pricing_docs_lines() -> list[str]:
+    return [
+        "📄 <b>TÀI LIỆU / PDF</b>",
+        "",
+        "Các công cụ local giữ giá thấp và luôn báo trước nếu chưa bật public.",
+        "",
+        f"• Ảnh sang PDF: <b>{DOC_COSTS.get('image_to_pdf', 0)} Xu</b>",
+        f"• PDF sang ảnh: <b>{DOC_COSTS.get('pdf_to_images', 0)} Xu</b>",
+        f"• PDF sang Word text: <b>{DOC_COSTS.get('pdf_to_word_text', 0)} Xu</b>",
+        f"• Nén PDF: <b>{DOC_COSTS.get('compress_pdf', 0)} Xu</b>",
+        f"• Tách PDF: <b>{DOC_COSTS.get('split_pdf', 0)} Xu</b>",
+        f"• Gộp PDF: <b>{DOC_COSTS.get('merge_pdf', 0)} Xu</b> nếu workflow đã bật",
+        f"• OCR ảnh/PDF: <b>{DOC_COSTS.get('ocr_image', 0)} Xu</b> / <b>{DOC_COSTS.get('ocr_pdf_per_page', 0)} Xu/trang</b>",
+        "",
+        "Nếu công cụ đang bảo trì/chưa bật, TOAN AAS báo trước, không gọi xử lý và không trừ Xu.",
+    ]
+
+def pricing_storage_lines() -> list[str]:
+    return [
+        "📝 <b>GHI CHÚ / LƯU TRỮ</b>",
+        "",
+        "<b>Miễn phí:</b>",
+        "✅ Tạo ghi chú",
+        "✅ Sửa/xem lại ghi chú",
+        f"✅ Lưu tài liệu trong {TOTAL_FREE_STORAGE_MB}MB đầu tiên",
+        "✅ Tìm kiếm/xem lại tài liệu",
+        "",
+        "<b>Gói lưu trữ mở rộng:</b>",
+        *storage_addon_lines(),
+        "",
+        "Ghi chú text nhỏ vẫn tính dung lượng thật. File đính kèm tính đúng size file. File tạm không tính vào quota lâu dài nếu tự xóa theo TTL.",
+    ]
+
+def pricing_premium_lines() -> list[str]:
+    return [
+        "👑 <b>DỊCH VỤ CAO CẤP / LIÊN HỆ ADMIN</b>",
+        "",
+        "• Video premium/admin-only hoặc tác vụ provider quá đắt.",
+        "• Tạo nhạc AI thật, video dài nhiều cảnh, workflow doanh nghiệp.",
+        "• Tác vụ cần review riêng về bản quyền, ngân sách provider hoặc hạ tầng.",
+        "",
+        "Admin sẽ báo giá trước. TOAN AAS không trừ Xu nếu chưa có xác nhận rõ.",
+    ]
+
+def pricing_audit_lines() -> list[str]:
+    pricing = media_workflow_pricing_payload()
+    frame_status = frame_video_status_payload()
+    return [
+        "🧾 <b>TOAN AAS Pricing Audit V6</b>",
+        "",
+        "<b>Feature | Price | Source | Guard</b>",
+        f"• Free/menu/guide/prompt planning | 0 Xu | pricing_free_lines | no provider/no charge",
+        f"• Chat thường | {CHAT_COST_NORMAL} Xu | CHAT_COST_NORMAL | refund/no-charge on provider fail",
+        f"• Chat Pro | {CHAT_COST_PRO} Xu | CHAT_COST_PRO | upfront charge/refund guard",
+        f"• Chat Deep | từ {CHAT_COST_DEEP_BASE} Xu | CHAT_COST_DEEP_BASE | dynamic by task length",
+        f"• Image tiers | {', '.join(str((pricing['image_tiers'].get(t) or {}).get('cost')) for t in IMAGE_TIER_ORDER if t in pricing['image_tiers'])} Xu | IMAGE_*_COST_XU | confirm + refund",
+        f"• Image prompt/edit planning | 0 Xu | image menu guard | no provider/no charge",
+        f"• Video AI tiers | {', '.join(str((pricing['video_tiers'].get(t) or {}).get('cost')) for t in VIDEO_TIER_ORDER if t != 'premium' and t in pricing['video_tiers'])} Xu | VIDEO_*_COST_XU | confirm + freeze/refund",
+        f"• Video premium | liên hệ admin | VIDEO_PREMIUM_COST_XU | admin-only/contact",
+        f"• Frame video | base {frame_status.get('base_2_5_xu')}/{frame_status.get('base_6_10_xu')}/{frame_status.get('base_11_20_xu')} Xu | FRAME_VIDEO_* | require worker/OOM guard",
+        f"• Workflow content-only | {pricing.get('workflow_content_total_cost')} Xu | WORKFLOW_* | plan only; image/video separate",
+        f"• Motion guide | {int(CREATIVE_MOTION_GUIDE_COST_XU or 0)} Xu | CREATIVE_MOTION_GUIDE_COST_XU | no provider if text-only",
+        f"• Voice/TTS | từ {VOICE_BASE_COST} Xu | VOICE_* | provider guard/refund",
+        f"• STT/audio | từ {AUDIO_MIN_COST} Xu | AUDIO_* | provider guard/refund",
+        f"• Document/PDF local | {DOC_COSTS.get('image_to_pdf', 0)}–{DOC_COSTS.get('ocr_pdf_per_page', 0)} Xu | DOC_COSTS | local/guarded",
+        f"• Notes/storage | {TOTAL_FREE_STORAGE_MB}MB free; +{STORAGE_ADDON_BLOCK_MB}MB {STORAGE_ADDON_BLOCK_PRICE_VND:,}đ/month | storage constants | quota block/no charge".replace(",", "."),
+        "• Combo/monthly/package wallet | PayOS/product catalog | package_catalog_payload | no Xu top-up mixing",
+        "",
+        "<b>Confirm/refund requirements</b>",
+        "• Paid customer actions must confirm before Xu/package deduction.",
+        "• Freeze/maintenance/provider fail: no API call/no charge or refund if already deducted.",
+        "• Admin smoke tests do not deduct Xu and do not log key/token/raw provider response.",
+    ]
+
+async def cmd_pricing_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, pricing_audit_lines())
+
 def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     labels = {
         "vi": {
-            "topup": "💳 Nạp Xu", "video": "🎬 Giá video", "image": "🖼 Giá ảnh",
-            "combo": "🎁 Combo", "my": "📦 Gói của tôi", "monthly": "📅 Gói tháng",
-            "terms": "📜 Điều khoản Xu", "main": "🏠 Menu chính",
+            "free": "🆓 Miễn phí", "image": "🖼 Hình ảnh",
+            "video": "🎬 Video", "frame": "🎞 Ghép ảnh thành video",
+            "voice": "🗣 Voice/TTS", "docs": "📄 Tài liệu/PDF",
+            "storage": "📝 Ghi chú/Lưu trữ", "combo": "🎁 Gói/Combo",
+            "premium": "👑 Cao cấp", "main": "🏠 Menu chính",
         },
         "en": {
-            "topup": "💳 Top up Xu", "video": "🎬 Video pricing", "image": "🖼 Image pricing",
-            "combo": "🎁 Combos", "my": "📦 My packages", "monthly": "📅 Monthly plans",
-            "terms": "📜 Xu terms", "main": "🏠 Main menu",
+            "free": "🆓 Free", "image": "🖼 Images",
+            "video": "🎬 Video", "frame": "🎞 Frame video",
+            "voice": "🗣 Voice/TTS", "docs": "📄 Docs/PDF",
+            "storage": "📝 Notes/Storage", "combo": "🎁 Packages",
+            "premium": "👑 Premium", "main": "🏠 Main menu",
         },
         "zh": {
-            "topup": "💳 充值 Xu", "video": "🎬 视频价格", "image": "🖼 图片价格",
-            "combo": "🎁 组合套餐", "my": "📦 我的套餐", "monthly": "📅 月度套餐",
-            "terms": "📜 Xu 条款", "main": "🏠 主菜单",
+            "free": "🆓 免费", "image": "🖼 图片",
+            "video": "🎬 视频", "frame": "🎞 图片成片",
+            "voice": "🗣 语音/TTS", "docs": "📄 文档/PDF",
+            "storage": "📝 笔记/存储", "combo": "🎁 套餐",
+            "premium": "👑 高级", "main": "🏠 主菜单",
         },
     }.get(lang, {})
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(labels.get("topup", "💳 Top up Xu"), callback_data="menu|main_topup"),
-            InlineKeyboardButton(labels.get("video", "🎬 Video pricing"), callback_data="pricing|video"),
+            InlineKeyboardButton(labels.get("free", "🆓 Free"), callback_data="pricing|free"),
+            InlineKeyboardButton(labels.get("image", "🖼 Image pricing"), callback_data="pricing|image"),
         ],
         [
-            InlineKeyboardButton(labels.get("image", "🖼 Image pricing"), callback_data="pricing|image"),
+            InlineKeyboardButton(labels.get("video", "🎬 Video pricing"), callback_data="pricing|video"),
+            InlineKeyboardButton(labels.get("frame", "🎞 Frame video"), callback_data="pricing|frame"),
+        ],
+        [
+            InlineKeyboardButton(labels.get("voice", "🗣 Voice/TTS"), callback_data="pricing|voice"),
+            InlineKeyboardButton(labels.get("docs", "📄 Docs/PDF"), callback_data="pricing|docs"),
+        ],
+        [
+            InlineKeyboardButton(labels.get("storage", "📝 Notes/Storage"), callback_data="pricing|storage"),
             InlineKeyboardButton(labels.get("combo", "🎁 Combos"), callback_data="pricing|combo"),
         ],
         [
-            InlineKeyboardButton(labels.get("my", "📦 My packages"), callback_data="pricing|my_packages"),
-            InlineKeyboardButton(labels.get("monthly", "📅 Monthly plans"), callback_data="pricing|plans"),
-        ],
-        [
-            InlineKeyboardButton(labels.get("terms", "📜 Xu terms"), callback_data="pricing|terms"),
+            InlineKeyboardButton(labels.get("premium", "👑 Premium"), callback_data="pricing|premium"),
             InlineKeyboardButton(labels.get("main", "🏠 Main menu"), callback_data="menu|main"),
         ],
     ])
@@ -63469,108 +63615,71 @@ def pricing_main_lines() -> list[str]:
         *storage_addon_lines(),
         "• File tạm tự xóa theo TTL không tính quota lâu dài. File user lưu lâu dài mới tính dung lượng.",
     ]
+    frame_examples = [
+        f"• 5 ảnh, 1.5s/ảnh, không hiệu ứng: <b>{frame_video_price_for_state({'photos': [{'file_id': str(i)} for i in range(5)], 'duration': 'fast', 'effect': 'none'})} Xu</b>",
+        f"• 6 ảnh, 1.5s/ảnh, không hiệu ứng: <b>{frame_video_price_for_state({'photos': [{'file_id': str(i)} for i in range(6)], 'duration': 'fast', 'effect': 'none'})} Xu</b>",
+        f"• 10 ảnh, 1.5s/ảnh, không hiệu ứng: <b>{frame_video_price_for_state({'photos': [{'file_id': str(i)} for i in range(10)], 'duration': 'fast', 'effect': 'none'})} Xu</b>",
+        f"• 5 ảnh, zoom nhẹ: <b>{frame_video_price_for_state({'photos': [{'file_id': str(i)} for i in range(5)], 'duration': 'fast', 'effect': 'zoom'})} Xu</b>",
+        f"• 5 ảnh, random nhẹ: <b>{frame_video_price_for_state({'photos': [{'file_id': str(i)} for i in range(5)], 'duration': 'fast', 'effect': 'random'})} Xu</b>",
+    ]
     return [
-        "💳 <b>BẢNG GIÁ TOAN AAS</b>",
+        "💰 <b>BẢNG GIÁ TOAN AAS V6</b>",
         "",
-        "<b>A. Nạp Xu / Mệnh giá</b>",
-        "• 10.000đ → <b>100 Xu</b>",
-        "• 20.000đ → <b>200 Xu</b>",
-        "• 50.000đ → <b>500 Xu</b>",
-        "• 100.000đ → <b>1.000 Xu</b>",
-        "• 200.000đ → <b>2.000 Xu</b>",
-        "• 500.000đ → <b>5.000 Xu</b>",
-        "• 1.000.000đ → <b>10.000 Xu</b> nếu có mở",
-        f"• Trial trải nghiệm: <b>{TRIAL_BONUS_AMOUNT if TRIAL_BONUS_ENABLED else 0} Xu</b> / tài khoản hợp lệ, nhận 1 lần.",
-        "• Launch bonus / ưu đãi nạp nếu đang bật sẽ áp dụng theo chính sách hiện hành.",
+        "<b>1. 🆓 Miễn phí / 0 Xu</b>",
+        "• Mở menu, bảng giá, hướng dẫn, đổi ngôn ngữ.",
+        "• Tạo prompt ảnh, prompt video, ý tưởng video, storyboard text, concept quảng cáo, gợi ý nhạc/voice dạng text.",
+        "• Các bước chuẩn bị chưa gọi provider: <b>0 Xu</b>. Bot sẽ nói rõ “chưa gọi API và chưa trừ Xu”.",
         "",
-        "<b>B. AI Chat / Hỏi AI</b>",
+        "<b>AI Chat</b>",
         f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b> / lượt thành công.",
         f"• Chat Pro: <b>{CHAT_COST_PRO} Xu</b> / lượt thành công.",
         f"• Chat Deep: từ <b>{CHAT_COST_DEEP_BASE} Xu</b>, tùy độ dài/tác vụ.",
-        "• Nếu provider lỗi/quota, bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
         "",
-        "<b>C. Hình ảnh AI</b>",
+        "<b>2. 🖼 Hình ảnh</b>",
         *image_items,
+        "• Tạo prompt từ ảnh / tạo prompt thủ công / biến thể prompt: <b>0 Xu</b> nếu chỉ tạo text.",
         f"• Trạng thái public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         "",
-        "<b>D. Video AI</b>",
+        "<b>3. 🎬 Video AI</b>",
         *video_items,
-        "• Tỉ lệ khung hình: 9:16, 16:9, 1:1, 4:5, 3:4. Combo TikTok khuyến nghị 9:16 nhưng không khóa cứng.",
+        "• Prompt/kế hoạch video: <b>0 Xu</b> nếu chưa tạo video thật.",
+        "• Ảnh → Video AI dùng cùng tier Video AI thật.",
         f"• Trạng thái public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
-        "<b>E. Combo dịch vụ</b>",
-        *combo_items,
-        "• Combo là lượt dịch vụ ưu đãi, không cộng Xu, không tính điểm nâng hạng/thưởng nạp và không làm thay đổi mệnh giá nạp Xu thường.",
-        "• Sau khi thanh toán PayOS thành công, combo nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt khi dùng.",
+        "<b>4. 🎞 Ghép ảnh thành video</b>",
+        *frame_examples,
+        "• Dùng Local Worker/FFmpeg, không gọi VEO. Nếu worker offline: không render, không trừ Xu.",
+        "• Giá tăng theo số ảnh, thời lượng và hiệu ứng.",
         "",
-        "<b>F. Workflow nội dung theo trend</b>",
-        f"• Gói nội dung theo trend: <b>{pricing['workflow_content_total_cost']} Xu</b>",
-        f"• Phân tích trend: <b>{pricing['workflow_trend_analysis_cost']} Xu</b>",
-        f"• Hook/script/storyboard: <b>{pricing['workflow_script_storyboard_cost']} Xu</b>",
-        f"• Prompt pack: <b>{pricing['workflow_prompt_pack_cost']} Xu</b>",
-        f"• Tổng gói content-only: <b>{pricing['workflow_content_total_cost']} Xu</b>",
-        f"• Gợi ý chuyển động video: <b>{int(CREATIVE_MOTION_GUIDE_COST_XU or 0)} Xu</b> — đang miễn phí giai đoạn thử nghiệm." if int(CREATIVE_MOTION_GUIDE_COST_XU or 0) <= 0 else f"• Gợi ý chuyển động video: <b>{int(CREATIVE_MOTION_GUIDE_COST_XU)} Xu</b>",
-        "• Gói này chưa bao gồm tạo ảnh/video thật. Ảnh/video tính riêng theo bảng giá Hình ảnh AI / Video AI.",
-        "",
-        "<b>G. Dịch thuật</b>",
-        "• Dịch văn bản ngắn: từ <b>5 Xu</b> / lượt thành công.",
-        "• Dịch văn bản dài: từ <b>20 Xu</b>, tùy độ dài.",
-        "• Dịch file: từ <b>100 Xu</b> / file.",
-        "• Dịch phụ đề: từ <b>150 Xu</b> / file.",
-        "• Dịch voice/audio ngắn: từ <b>30–80 Xu</b>.",
-        f"• Transcribe audio: từ <b>{AUDIO_MIN_COST} Xu</b>, tùy MB/thời lượng.",
-        "• Dịch/lồng tiếng video: từ <b>800 Xu</b> / video, admin test trước.",
-        "• Giá có thể thay đổi theo độ dài, dung lượng và provider.",
-        "",
-        "<b>H. Voice / TTS / STT</b>",
+        "<b>5. 🗣 Voice / TTS / Audio</b>",
+        "• Gợi ý voice/nhạc dạng text: <b>0 Xu</b>.",
         f"• TTS/voice ngắn: từ <b>{VOICE_BASE_COST} Xu</b>.",
         "• TTS/voice dài: từ <b>80–150 Xu</b>, tùy số ký tự/thời lượng.",
         f"• STT/bóc băng audio ngắn: từ <b>{AUDIO_MIN_COST} Xu</b>.",
-        "• STT/audio dài: tính theo MB/thời lượng.",
         "• Thêm voice vào video: từ <b>150 Xu</b>.",
-        "• Dịch voice/audio: xem nhóm Dịch thuật.",
-        "",
-        "<b>I. Nhạc / SFX / Audio</b>",
         "• Tìm nhạc/SFX library: miễn phí hoặc không trừ Xu khi chỉ tìm/nghe thử.",
-        "• Tạo prompt nhạc: miễn phí hoặc <b>5 Xu</b> nếu sau này bật tính phí.",
-        "• Thêm nhạc nền vào video: từ <b>120 Xu</b>.",
-        "• Tạo video nhạc từ ảnh: từ <b>150 Xu</b>.",
-        "• Thêm voice vào video: từ <b>150 Xu</b>.",
-        "• Video music / ghép nhạc video: từ <b>200 Xu</b>.",
-        "• Audio enhance: từ <b>80 Xu</b>.",
         "• Tạo nhạc AI thật: từ <b>300–1.000 Xu</b>, chỉ mở khi provider/giá đã xác nhận.",
-        "• Suno/Musicful/MiniMax music: admin-only/planned nếu chưa public.",
         "",
-        "<b>J. Ghi chú / Tài liệu / Lưu trữ</b>",
-        *storage_items,
-        "",
-        "<b>Tài liệu / PDF</b>",
+        "<b>6. 📄 Tài liệu / PDF</b>",
         *doc_items,
         "",
-        "<b>K. Gói tháng</b>",
-        "• Starter / Creator / Shop / Pro là hạn mức dịch vụ theo tháng, tách riêng với hạng thành viên.",
-        "• Gói tháng không cộng Xu tự do, không tính tổng nạp nâng hạng và không chạy bonus nạp.",
-        "• Sau khi thanh toán PayOS thành công, hạn mức nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt khi dùng.",
-        "• Tác vụ phát sinh hoặc vượt hạn mức xem tại Bảng giá tổng này.",
+        "<b>7. 📝 Ghi chú / Lưu trữ</b>",
+        *storage_items,
         "",
-        "<b>L. Thành viên</b>",
-        "• Hạng thành viên không làm tăng Xu theo mệnh giá nạp.",
-        "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ đủ điều kiện.",
-        "• Rank-up/top-up bonus nếu có thì chỉ theo chính sách hiện hành.",
+        "<b>8. 🎁 Gói / Combo</b>",
+        *combo_items,
+        "• Gói tháng Starter/Creator/Shop/Pro là hạn mức dịch vụ theo tháng, tách riêng với hạng thành viên và nạp Xu.",
+        "• Combo/gói tháng sau thanh toán PayOS thành công nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt khi dùng.",
         "",
-        "<b>M. Điều khoản Xu</b>",
-        "• Xu là đơn vị nội bộ trong TOAN AAS.",
-        "• Không rút tiền, không chuyển nhượng.",
-        "• Provider lỗi/quota/timeout thì không trừ Xu hoặc hoàn Xu nếu đã trừ.",
+        "<b>9. 👑 Cao cấp / Liên hệ admin</b>",
+        "• Video premium, tạo nhạc AI thật, video dài nhiều cảnh, workflow doanh nghiệp hoặc tác vụ provider quá đắt.",
+        "• Admin báo giá trước. TOAN AAS không trừ Xu nếu chưa có xác nhận rõ.",
         "",
-        "<b>Pricing mode</b>",
-        f"• <code>{html.escape(pricing['billing_mode'])}</code>",
-        "• Giá media lấy từ bảng giá tập trung và có biên dự phòng provider/refund.",
-        "",
-        "<b>Lưu ý:</b>",
+        "<b>Xác nhận / Refund / Guard</b>",
+        "• Tất cả action có phí phải có màn xác nhận trước khi trừ Xu/lượt.",
+        "• Tool freeze/maintenance/provider lỗi: không gọi API và không trừ Xu, hoặc hoàn Xu/lượt nếu đã trừ.",
         "• Xu là đơn vị nội bộ trong TOAN AAS, không phải tiền/tiền điện tử, không rút tiền, không chuyển nhượng.",
-        "• Nếu provider lỗi/quota/timeout hoặc xử lý thất bại: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
-        "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
+        f"• Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
     ]
 
 def pricing_image_lines() -> list[str]:
@@ -64398,12 +64507,24 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
         clear_media_creator_pending_states(query.from_user.id)
     if action == "xu":
         return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang), pricing_xu_keyboard(lang))
+    if action == "free":
+        return await edit_or_send_pricing_lines(query, pricing_free_lines(), pricing_detail_keyboard("free", lang))
     if action == "image":
         return await edit_or_send_pricing_lines(query, pricing_image_lines(), pricing_detail_keyboard("image", lang))
     if action == "video":
         return await edit_or_send_pricing_lines(query, pricing_video_lines(), pricing_detail_keyboard("video", lang))
+    if action == "frame":
+        return await edit_or_send_pricing_lines(query, pricing_frame_video_lines(), pricing_detail_keyboard("frame", lang))
+    if action == "voice":
+        return await edit_or_send_pricing_lines(query, pricing_voice_lines(), pricing_detail_keyboard("voice", lang))
+    if action == "docs":
+        return await edit_or_send_pricing_lines(query, pricing_docs_lines(), pricing_detail_keyboard("docs", lang))
+    if action == "storage":
+        return await edit_or_send_pricing_lines(query, pricing_storage_lines(), pricing_detail_keyboard("storage", lang))
     if action == "combo":
         return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_detail_keyboard("combo", lang))
+    if action == "premium":
+        return await edit_or_send_pricing_lines(query, pricing_premium_lines(), pricing_detail_keyboard("premium", lang))
     if action == "my_packages":
         return await edit_or_send_pricing_lines(query, [user_package_summary_text(query.from_user.id)], my_packages_keyboard(lang))
     if action == "plans":
@@ -81347,6 +81468,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("vip_services", cmd_vip_services))
     tg_app.add_handler(CommandHandler("member_policy", cmd_member_policy))
     tg_app.add_handler(CommandHandler("pricing_admin", cmd_pricing_admin))
+    tg_app.add_handler(CommandHandler("pricing_audit", cmd_pricing_audit))
     tg_app.add_handler(CommandHandler("mode",        cmd_mode))
     tg_app.add_handler(CommandHandler("chat_pro_on", cmd_chat_pro_on))
     tg_app.add_handler(CommandHandler("chat_pro_off", cmd_chat_pro_off))

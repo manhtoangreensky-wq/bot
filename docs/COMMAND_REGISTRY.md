@@ -129,6 +129,7 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/gift_disable` | `cmd_gift_disable` | YES | YES | Disables a gift/reward code without deleting data. |
 | `/mark_payos_test` | `cmd_mark_payos_test` | YES | YES | Admin records PayOS real test PASS/FAIL/NOT_TESTED; does not alter payments. |
 | `/pricing_admin` | `cmd_pricing_admin` | YES | YES | Admin-only formula/constants for Pricing Engine V2. |
+| `/pricing_audit` | `cmd_pricing_audit` | YES | YES | Admin-only V6 feature/price/source/guard audit; no secrets or raw provider responses. |
 | `/banggia` | `cmd_pricing` | YES | YES | Public/admin price menu entry shown in admin menu for quick access. |
 | `/package_catalog` | `cmd_package_catalog` | YES | YES | Lists admin-grantable combo/monthly package catalog. |
 | `/grant_combo` | `cmd_grant_combo` | YES | YES | Admin grants a combo package; does not add Xu or rank/top-up points. |

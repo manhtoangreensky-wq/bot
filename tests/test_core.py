@@ -1980,13 +1980,16 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "321 Xu" not in bot.create_media_pricing_text()
     assert "654 Xu" not in bot.create_media_pricing_text()
     pricing_text = "\n".join(bot.pricing_main_lines())
-    assert "BẢNG GIÁ TOAN AAS" in pricing_text
-    assert "Nạp Xu / Mệnh giá" in pricing_text
-    assert "Hình ảnh AI" in pricing_text
+    assert "BẢNG GIÁ TOAN AAS V6" in pricing_text
+    assert "Miễn phí / 0 Xu" in pricing_text
+    assert "Hình ảnh" in pricing_text
     assert "Video AI" in pricing_text
-    assert "Combo dịch vụ" in pricing_text
-    assert "Workflow nội dung theo trend" in pricing_text
-    assert "Ghi chú / Tài liệu / Lưu trữ" in pricing_text
+    assert "Ghép ảnh thành video" in pricing_text
+    assert "Voice / TTS / Audio" in pricing_text
+    assert "Tài liệu / PDF" in pricing_text
+    assert "Ghi chú / Lưu trữ" in pricing_text
+    assert "Gói / Combo" in pricing_text
+    assert "Cao cấp / Liên hệ admin" in pricing_text
     assert "Text/ghi chú: <b>10MB miễn phí</b>" in pricing_text
     assert "Tệp/ảnh/âm thanh lưu lâu dài: <b>40MB miễn phí</b>" in pricing_text
     assert "Tổng free storage: <b>50MB/tài khoản</b>" in pricing_text
@@ -1999,18 +2002,37 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "tiered_media_pricing" in pricing_text
     price_keyboard_labels = [button.text for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
     assert price_keyboard_labels == [
-        "💳 Nạp Xu",
-        "🎬 Giá video",
-        "🖼 Giá ảnh",
-        "🎁 Combo",
-        "📦 Gói của tôi",
-        "📅 Gói tháng",
-        "📜 Điều khoản Xu",
+        "🆓 Miễn phí",
+        "🖼 Hình ảnh",
+        "🎬 Video",
+        "🎞 Ghép ảnh thành video",
+        "🗣 Voice/TTS",
+        "📄 Tài liệu/PDF",
+        "📝 Ghi chú/Lưu trữ",
+        "🎁 Gói/Combo",
+        "👑 Cao cấp",
         "🏠 Menu chính",
+    ]
+    pricing_callbacks = [button.callback_data for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
+    assert pricing_callbacks == [
+        "pricing|free",
+        "pricing|image",
+        "pricing|video",
+        "pricing|frame",
+        "pricing|voice",
+        "pricing|docs",
+        "pricing|storage",
+        "pricing|combo",
+        "pricing|premium",
+        "menu|main",
     ]
     image_price_text = "\n".join(bot.pricing_image_lines())
     video_price_text = "\n".join(bot.pricing_video_lines())
     combo_price_text = "\n".join(bot.pricing_combo_lines())
+    free_price_text = "\n".join(bot.pricing_free_lines())
+    frame_price_text = "\n".join(bot.pricing_frame_video_lines())
+    storage_price_text = "\n".join(bot.pricing_storage_lines())
+    audit_price_text = "\n".join(bot.pricing_audit_lines())
     assert "Ảnh tiết kiệm: <b>321 Xu</b>" in image_price_text
     assert "Ảnh tiêu chuẩn: <b>777 Xu</b>" in image_price_text
     assert "Video Trải Nghiệm: <b>654 Xu</b>" in video_price_text
@@ -2020,6 +2042,17 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Combo Ưu Đãi TikTok" in combo_price_text
     assert "khuyến nghị 9:16" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
+    assert "MIỄN PHÍ / 0 XU" in free_price_text
+    assert "chưa gọi provider nặng và chưa trừ Xu" in free_price_text
+    assert "Local Worker/FFmpeg" in frame_price_text
+    assert "50MB đầu tiên" in storage_price_text
+    assert "+50MB/tháng: 10.000đ" in storage_price_text
+    assert "500MB/tháng: 29.000đ" not in storage_price_text
+    assert "TOAN AAS Pricing Audit V6" in audit_price_text
+    assert "Feature | Price | Source | Guard" in audit_price_text
+    assert "50MB free; +50MB 10.000đ/month" in audit_price_text
+    assert "key/token/raw provider response" in audit_price_text
+    assert 'CommandHandler("pricing_audit", cmd_pricing_audit)' in source
     combo_callbacks = [button.callback_data for row in bot.pricing_detail_keyboard("combo", "vi").inline_keyboard for button in row]
     assert "pkgbuy|combo|tiktok_99k" in combo_callbacks
     assert "pkgbuy|combo|posting_499k" in combo_callbacks
