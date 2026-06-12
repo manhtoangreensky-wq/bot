@@ -3038,6 +3038,241 @@ def test_support_feedback_split_and_lead_menus():
     assert 'CallbackQueryHandler(handle_human_support_callback, pattern=r"^support\\|")' in source
 
 
+def test_support_v3_menu_states_and_back_routing(monkeypatch):
+    replies = []
+
+    async def fake_edit(_query, text, reply_markup=None, **kwargs):
+        replies.append({"text": str(text), "reply_markup": reply_markup})
+        return SimpleNamespace(text=text, reply_markup=reply_markup)
+
+    class FakeQuery:
+        def __init__(self, data, user_id=93001):
+            self.data = data
+            self.from_user = SimpleNamespace(id=user_id)
+            self.message = SimpleNamespace()
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+    async def press(data, user_id=93001):
+        await bot.handle_human_support_callback(
+            SimpleNamespace(callback_query=FakeQuery(data, user_id)),
+            SimpleNamespace(),
+        )
+        return replies[-1]
+
+    monkeypatch.setattr(bot, "safe_edit_or_send", fake_edit)
+    labels = [button.text for row in bot.human_support_keyboard().inline_keyboard for button in row]
+    assert "📂 Ticket của tôi" in labels
+    assert "👨‍💼 Nhắn admin @toanaas" in labels
+    assert "🎫 Tạo ticket hỗ trợ" in labels
+
+    bot.clear_support_ticket_pending(93001)
+    asyncio.run(press("support|ticket"))
+    state = bot.get_support_ticket_pending(93001)
+    assert state["support_flow"] == "create_support_ticket"
+    assert state["awaiting_support_message"] == "1"
+    ticket_prompt_callbacks = [
+        button.callback_data
+        for row in replies[-1]["reply_markup"].inline_keyboard
+        for button in row
+    ]
+    assert "ticket|mine" in ticket_prompt_callbacks
+    assert "support|start" in ticket_prompt_callbacks
+
+    bot.clear_support_ticket_pending(93001)
+    shop_page = asyncio.run(press("support|bot_type|shop"))
+    assert "Bot bán hàng/shop online" in shop_page["text"]
+    shop_callbacks = [button.callback_data for row in shop_page["reply_markup"].inline_keyboard for button in row]
+    assert "support|bot_input|shop" in shop_callbacks
+    assert "support|bot" in shop_callbacks
+    asyncio.run(press("support|bot_input|shop"))
+    shop_state = bot.get_support_ticket_pending(93001)
+    assert shop_state["category"] == "custom_bot_lead"
+    assert shop_state["lead_type"] == "shop_bot"
+    assert shop_state["back_to"] == "support|bot_type|shop"
+
+    bot.clear_support_ticket_pending(93001)
+    video_page = asyncio.run(press("support|consult_type|video"))
+    video_callbacks = [button.callback_data for row in video_page["reply_markup"].inline_keyboard for button in row]
+    assert "support|consult_need|video|0" in video_callbacks
+    assert "support|consult" in video_callbacks
+    asyncio.run(press("support|consult_need|video|0"))
+    consult_state = bot.get_support_ticket_pending(93001)
+    assert consult_state["category"] == "service_consulting"
+    assert consult_state["service_type"] == "video"
+    assert consult_state["back_to"] == "support|consult_type|video"
+
+    bot.clear_support_ticket_pending(93001)
+    asyncio.run(press("support|premium_type|shop"))
+    premium_state = bot.get_support_ticket_pending(93001)
+    assert premium_state["category"] == "premium_lead"
+    assert premium_state["back_to"] == "support|premium"
+
+
+def test_support_v3_pending_input_creates_tickets_and_auto_replies(monkeypatch, tmp_path):
+    db_path = tmp_path / "support_v3.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+
+    class FakeMessage:
+        def __init__(self, text):
+            self.text = text
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((str(text), kwargs))
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, **kwargs):
+            self.sent.append(kwargs)
+
+    async def submit(user_id, text, **state):
+        user = SimpleNamespace(id=user_id, username=f"user_{user_id}", first_name="Support")
+        message = FakeMessage(text)
+        fake_bot = FakeBot()
+        bot.set_support_ticket_pending(user_id, state.pop("step", "awaiting_message"), **state)
+        handled = await bot.handle_support_ticket_pending_text(
+            SimpleNamespace(effective_user=user, message=message),
+            SimpleNamespace(bot=fake_bot),
+        )
+        return handled, message, fake_bot, bot.list_support_tickets(user_id=user_id)[0]
+
+    handled, payment_message, payment_alert, payment_ticket = asyncio.run(submit(
+        "support-payment",
+        "Tôi nạp tiền chưa thấy Xu",
+        category="general_support",
+    ))
+    assert handled is True
+    assert payment_ticket["category"] == "payment_topup"
+    assert payment_ticket["priority"] == "high"
+    assert "Mã ticket" in payment_message.sent[0][0]
+    assert payment_alert.sent
+
+    handled, angry_message, angry_alert, angry_ticket = asyncio.run(submit(
+        "support-angry",
+        "Bot trừ Xu mà không ra video",
+        category="general_support",
+    ))
+    assert handled is True
+    assert angry_ticket["priority"] == "urgent"
+    assert "đã hoàn Xu" not in angry_message.sent[0][0]
+    assert angry_alert.sent
+
+    handled, shop_message, shop_alert, shop_ticket = asyncio.run(submit(
+        "support-shop",
+        "Tôi bán mỹ phẩm trên TikTok Shop và muốn tự động trả lời khách, lưu lead",
+        step="lead_input",
+        category="custom_bot_lead",
+        selected_option="🛒 Bot bán hàng/shop online",
+        lead_type="shop_bot",
+    ))
+    assert handled is True
+    assert shop_ticket["category"] == "custom_bot_lead"
+    assert shop_ticket["priority"] == "high"
+    assert "bot bán hàng/shop online" in shop_message.sent[0][0]
+    assert shop_alert.sent
+
+    handled, premium_message, premium_alert, premium_ticket = asyncio.run(submit(
+        "support-premium",
+        "Tôi cần tạo ảnh và video mỗi ngày cho shop",
+        step="lead_input",
+        category="premium_lead",
+        selected_option="Shop/Affiliate",
+        lead_type="premium_shop",
+    ))
+    assert handled is True
+    assert premium_ticket["category"] == "premium_lead"
+    assert premium_ticket["priority"] == "high"
+    assert "Mã ticket" in premium_message.sent[0][0]
+    assert premium_alert.sent
+
+    handled, consult_message, consult_alert, consult_ticket = asyncio.run(submit(
+        "support-consult",
+        "Tôi cần 20 video TikTok mỗi tháng, ngân sách vừa phải",
+        step="lead_input",
+        category="service_consulting",
+        selected_option="🎬 Tư vấn tạo video — TikTok/Affiliate",
+        service_type="video",
+        lead_type="video",
+    ))
+    assert handled is True
+    assert consult_ticket["category"] == "service_consulting"
+    assert "tư vấn gói video" in consult_message.sent[0][0]
+    assert consult_alert.sent == []
+
+
+def test_support_v3_my_tickets_reply_and_done(monkeypatch, tmp_path):
+    db_path = tmp_path / "support_v3_reply.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+    user = SimpleNamespace(id="support-owner", username="owner", first_name="Owner")
+    ticket = bot.create_support_ticket(user, "general_support", "Nội dung ban đầu")
+
+    list_text, list_keyboard = bot.public_support_ticket_list_keyboard(user.id)
+    assert "Ticket của tôi" in list_text
+    list_callbacks = [button.callback_data for row in list_keyboard.inline_keyboard for button in row]
+    assert f"ticket|pv|{ticket['id']}" in list_callbacks
+    assert "support|ticket" in list_callbacks
+    assert "support|start" in list_callbacks
+
+    edits = []
+
+    async def fake_edit(_query, text, reply_markup=None, **kwargs):
+        edits.append({"text": str(text), "reply_markup": reply_markup})
+        return None
+
+    class FakeQuery:
+        def __init__(self, data):
+            self.data = data
+            self.from_user = SimpleNamespace(id=user.id)
+            self.message = SimpleNamespace()
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(bot, "safe_edit_or_send", fake_edit)
+    asyncio.run(bot.handle_ticket_callback(
+        SimpleNamespace(callback_query=FakeQuery(f"ticket|reply_user|{ticket['id']}")),
+        SimpleNamespace(),
+    ))
+    state = bot.get_support_ticket_pending(user.id)
+    assert state["step"] == "awaiting_ticket_reply"
+    assert state["ticket_id"] == str(ticket["id"])
+
+    class ReplyMessage:
+        text = "Tôi bổ sung mã job VIDEO-123"
+
+        def __init__(self):
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((str(text), kwargs))
+
+    class FakeBot:
+        async def send_message(self, **kwargs):
+            return None
+
+    reply_message = ReplyMessage()
+    assert asyncio.run(bot.handle_support_ticket_pending_text(
+        SimpleNamespace(effective_user=user, message=reply_message),
+        SimpleNamespace(bot=FakeBot()),
+    )) is True
+    assert "VIDEO-123" in bot.latest_support_ticket_message(ticket["id"], "user")
+    assert bot.get_support_ticket_pending(user.id) is None
+
+    asyncio.run(bot.handle_ticket_callback(
+        SimpleNamespace(callback_query=FakeQuery(f"ticket|done|{ticket['id']}")),
+        SimpleNamespace(),
+    ))
+    assert bot.get_support_ticket(ticket["id"], user.id)["status"] == "resolved"
+
+
 def test_feedback_public_flow_creates_ticket_not_auto_refund(monkeypatch, tmp_path):
     db_path = tmp_path / "feedback_ticket.db"
     monkeypatch.setattr(bot, "DB_FILE", str(db_path))
@@ -3109,7 +3344,7 @@ def test_premium_lead_pending_creates_high_priority_ticket(monkeypatch, tmp_path
     ticket = bot.list_support_tickets(user_id=user.id)[0]
     assert ticket["category"] == "premium_lead"
     assert ticket["priority"] == "high"
-    assert "Mã yêu cầu" in message.sent[0][0]
+    assert "Mã ticket" in message.sent[0][0]
 
 
 def test_support_ticket_admin_reply_requires_preview_and_targets_ticket_owner(monkeypatch, tmp_path):

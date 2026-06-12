@@ -17,6 +17,7 @@ SUPPORT_CATEGORIES = {
     "feature_request": "💡 Góp ý tính năng",
     "lead_consulting": "🧑‍💼 Tư vấn dịch vụ",
     "general_support": "🎫 Hỗ trợ chung",
+    "service_consulting": "📦 Tư vấn gói dịch vụ",
     "premium_lead": "⭐ Đăng ký Premium",
     "custom_bot_lead": "🤖 Kết nối bot riêng",
     "other": "✍️ Nội dung khác",
@@ -274,6 +275,7 @@ LEGACY_CATEGORY_TO_SCENARIO = {
     "feature_request": "feature_question",
     "lead_consulting": "admin_escalation",
     "general_support": "feature_question",
+    "service_consulting": "admin_escalation",
     "premium_lead": "admin_escalation",
     "custom_bot_lead": "admin_escalation",
     "other": "feature_question",
@@ -328,10 +330,16 @@ def classify_support_escalation(user_message: str, context: dict | None = None, 
     }
 
     illegal = ("hack nick", "hack tai khoan", "cach lua dao", "gia mao giay to", "xam pham quyen rieng tu")
-    angry = ("lua dao", "buc minh", "lam an kieu gi", "dang phot", "bao cong an", "qua te", "doi tien", "chui")
+    angry = (
+        "lua dao", "buc minh", "lam an kieu gi", "dang phot", "bao cong an",
+        "qua te", "doi tien", "chui", "tru xu ma khong ra video",
+    )
     refund = ("hoan tien", "hoan xu", "bi tru xu", "da tru xu", "mat xu", "tru xu ma", "khong ra ket qua")
     payment = ("nap tien chua", "nap xu chua", "chuyen khoan roi", "payos loi", "qr het han", "cong thieu xu", "chua thay xu")
     b2b = ("hop dong", "bao gia doanh nghiep", "du an", "trien khai cho cong ty", "so luong lon", "doi tac", "chiet khau", "hoa hong", "agency", "shop lon")
+    custom_bot = ("lam bot rieng", "bot rieng", "bot cho shop", "bot ban hang", "bot cskh", "bot noi bo", "tu dong hoa cho shop")
+    premium = ("dang ky premium", "goi premium", "premium cho shop", "premium doanh nghiep")
+    service_consulting = ("tu van goi", "tu van dich vu", "goi video", "goi tao anh", "goi voice", "goi tai lieu")
     technical = (" api", "api ", "webhook", "provider", "server", "vps", "bao mat", "du lieu", "tich hop he thong", "deepgram", "khong render", "render loi")
     pricing = ("bang gia", "gia bao nhieu", "hoi gia", "dat qua", "chi phi cao", "gia cao")
     onboarding = ("bot nay lam duoc gi", "toan aas la gi", "huong dan bat dau")
@@ -358,6 +366,24 @@ def classify_support_escalation(user_message: str, context: dict | None = None, 
             matched=True, needs_admin=True, priority="high", reason="payment_reconciliation",
             category="payment", ticket_category="payment_topup", suggested_reply_id="payment_missing_xu",
             should_create_ticket=True, should_alert_admin=True,
+        )
+    elif _contains_any(text, custom_bot):
+        result.update(
+            matched=True, needs_admin=True, priority="high", reason="custom_bot_lead",
+            category="admin_escalation", ticket_category="custom_bot_lead", suggested_reply_id="b2b_contract",
+            should_create_ticket=True, should_alert_admin=True,
+        )
+    elif _contains_any(text, premium):
+        result.update(
+            matched=True, needs_admin=True, priority="high", reason="premium_lead",
+            category="admin_escalation", ticket_category="premium_lead", suggested_reply_id="b2b_contract",
+            should_create_ticket=True, should_alert_admin=True,
+        )
+    elif _contains_any(text, service_consulting):
+        result.update(
+            matched=True, needs_admin=True, priority="normal", reason="service_consulting",
+            category="admin_escalation", ticket_category="service_consulting", suggested_reply_id="b2b_contract",
+            should_create_ticket=True, should_alert_admin=False,
         )
     elif _contains_any(text, b2b):
         result.update(
@@ -447,6 +473,10 @@ def ticket_priority(category: str, message: str = "") -> str:
         base_priority = "high"
     elif category == "video_error" and classification.get("reason") == "refund_or_xu_loss":
         base_priority = "high"
+    elif category in {"premium_lead", "custom_bot_lead"}:
+        base_priority = "high"
+    elif category == "service_consulting":
+        base_priority = "normal"
     elif category == "feature_request":
         base_priority = "low"
     else:

@@ -30629,25 +30629,41 @@ def support_contact_keyboard(back_to_media: bool = False, lang: str = "vi") -> I
 def human_support_text() -> str:
     return (
         "👨‍💼 <b>Hỗ trợ TOAN AAS</b>\n\n"
-        "Bạn cần gặp admin, tư vấn gói dịch vụ hay đăng ký Premium/kết nối bot riêng?\n\n"
-        "Nếu cần báo lỗi kỹ thuật, thanh toán hoặc hoàn Xu, hãy dùng mục "
-        "<b>Góp ý / Báo lỗi</b> để TOAN AAS tạo ticket đối soát rõ hơn."
+        "Bạn muốn gặp admin, xem ticket, tư vấn gói hay đăng ký dịch vụ riêng?\n\n"
+        "Nếu bạn cần báo lỗi thanh toán, lỗi video/ảnh hoặc hoàn Xu, hãy dùng "
+        "<b>Góp ý / Báo lỗi</b> để TOAN AAS tạo ticket kiểm tra rõ hơn."
     )
 
 def human_support_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("👨‍💼 Nhắn admin @toanaas", url=SUPPORT_TELEGRAM_URL),
+            InlineKeyboardButton("👨‍💼 Nhắn admin @toanaas", callback_data="support|admin_contact"),
             InlineKeyboardButton("🎫 Tạo ticket hỗ trợ", callback_data="support|ticket"),
         ],
         [
+            InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine"),
             InlineKeyboardButton("⭐ Đăng ký Premium", callback_data="support|premium"),
-            InlineKeyboardButton("🤖 Kết nối bot riêng", callback_data="support|bot"),
         ],
         [
+            InlineKeyboardButton("🤖 Kết nối bot riêng", callback_data="support|bot"),
             InlineKeyboardButton("📦 Tư vấn gói dịch vụ", callback_data="support|consult"),
-            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
         ],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def support_admin_contact_text() -> str:
+    return (
+        "👨‍💼 <b>Nhắn admin @toanaas</b>\n\n"
+        "Bạn có thể nhắn trực tiếp admin TOAN AAS tại @toanaas.\n\n"
+        "Nếu cần kiểm tra giao dịch, hoàn Xu hoặc lỗi job, bạn nên tạo ticket "
+        "trong bot để admin có đủ thông tin đối soát."
+    )
+
+def support_admin_contact_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 Mở Telegram @toanaas", url=SUPPORT_TELEGRAM_URL)],
+        [InlineKeyboardButton("🎫 Tạo ticket hỗ trợ", callback_data="support|ticket"), InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")],
+        [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def support_general_ticket_prompt() -> str:
@@ -30672,23 +30688,23 @@ def support_premium_text() -> str:
 
 def support_premium_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Gói cá nhân", callback_data="support|premium_type|personal"), InlineKeyboardButton("🛒 Shop/Affiliate", callback_data="support|premium_type|shop")],
+        [InlineKeyboardButton("👤 Cá nhân/Creator", callback_data="support|premium_type|personal"), InlineKeyboardButton("🛒 Shop/Affiliate", callback_data="support|premium_type|shop")],
         [InlineKeyboardButton("🏢 Doanh nghiệp", callback_data="support|premium_type|business"), InlineKeyboardButton("🤝 Tư vấn riêng", callback_data="support|premium_type|private")],
-        [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine"), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def support_custom_bot_text() -> str:
     return (
         "🤖 <b>Kết nối bot riêng</b>\n\n"
-        "TOAN AAS có thể tư vấn workflow bot riêng cho shop, affiliate, đội content hoặc doanh nghiệp.\n\n"
-        "Ví dụ: bot CSKH, bot tạo ảnh/video, bot quản lý nội dung hoặc bot nội bộ kết nối quy trình riêng.\n\n"
+        "TOAN AAS có thể tư vấn bot riêng cho shop, đội content, CSKH hoặc quy trình nội bộ doanh nghiệp.\n\n"
         "Bạn muốn làm loại bot nào?"
     )
 
 def support_custom_bot_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛒 Bot cho shop", callback_data="support|bot_type|shop"), InlineKeyboardButton("📣 Bot content/marketing", callback_data="support|bot_type|content")],
-        [InlineKeyboardButton("🎧 Bot CSKH", callback_data="support|bot_type|support"), InlineKeyboardButton("🏢 Bot nội bộ doanh nghiệp", callback_data="support|bot_type|internal")],
+        [InlineKeyboardButton("🛒 Bot bán hàng/shop online", callback_data="support|bot_type|shop"), InlineKeyboardButton("📣 Bot content/marketing", callback_data="support|bot_type|content")],
+        [InlineKeyboardButton("🎧 Bot CSKH/ticket", callback_data="support|bot_type|support"), InlineKeyboardButton("🏢 Bot nội bộ doanh nghiệp", callback_data="support|bot_type|internal")],
         [InlineKeyboardButton("✍️ Nhập nhu cầu riêng", callback_data="support|bot_type|custom"), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -30710,6 +30726,78 @@ def support_consult_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
+SUPPORT_CUSTOM_BOT_DETAILS = {
+    "shop": {
+        "title": "🛒 Bot bán hàng/shop online",
+        "lead_type": "shop_bot",
+        "body": "Phù hợp nếu bạn muốn bot hỗ trợ:\n• Tư vấn sản phẩm\n• Trả lời khách tự động\n• Ghi nhận đơn hàng/lead\n• Gửi thông tin cho admin\n• Hỗ trợ affiliate/content cho shop",
+        "questions": "1. Bạn bán sản phẩm gì?\n2. Khách thường hỏi vấn đề gì?\n3. Bạn muốn bot tự động hóa bước nào?",
+    },
+    "content": {
+        "title": "📣 Bot content/marketing",
+        "lead_type": "content_bot",
+        "body": "Phù hợp nếu bạn muốn bot hỗ trợ:\n• Lên ý tưởng content\n• Viết caption/script\n• Tạo prompt ảnh/video\n• Lên lịch nội dung\n• Hỗ trợ affiliate/TikTok/Reels",
+        "questions": "1. Bạn làm nội dung cho ngành nào?\n2. Muốn đăng nền tảng nào?\n3. Muốn tự động hóa bước nào?",
+    },
+    "support": {
+        "title": "🎧 Bot CSKH/ticket",
+        "lead_type": "support_bot",
+        "body": "Phù hợp nếu bạn muốn bot hỗ trợ:\n• Trả lời câu hỏi thường gặp\n• Tạo ticket hỗ trợ\n• Báo admin khi khách nóng/VIP\n• Quản lý khiếu nại, bảo hành, thanh toán\n• Cho admin trả lời khách qua bot",
+        "questions": "1. Kênh khách nhắn hiện tại là gì?\n2. Bot cần trả lời tự động phần nào?\n3. Khi nào cần báo admin?",
+    },
+    "internal": {
+        "title": "🏢 Bot nội bộ doanh nghiệp",
+        "lead_type": "internal_bot",
+        "body": "Phù hợp nếu bạn muốn bot hỗ trợ:\n• Lưu hồ sơ nội bộ\n• Tìm tài liệu\n• Báo cáo công việc\n• Quản lý quy trình\n• Tự động hóa tác vụ văn phòng",
+        "questions": "1. Team cần tự động hóa việc gì?\n2. Có tài liệu/quy trình mẫu chưa?\n3. Ai sẽ dùng bot: admin, nhân viên hay khách hàng?",
+    },
+    "custom": {
+        "title": "✍️ Nhu cầu bot riêng",
+        "lead_type": "custom_bot",
+        "body": "TOAN AAS sẽ ghi nhận nhu cầu riêng và chuyển admin phân tích phạm vi phù hợp.",
+        "questions": "1. Mục tiêu chính là gì?\n2. Quy trình hiện tại ra sao?\n3. Bạn muốn bot tự động hóa bước nào?",
+    },
+}
+
+SUPPORT_CONSULT_DETAILS = {
+    "image": ("🖼 Tư vấn tạo ảnh", ["Ảnh sản phẩm", "Ảnh quảng cáo/social", "Ảnh thương hiệu"], "Bạn cần loại ảnh nào, số lượng bao nhiêu và dùng trên kênh nào?"),
+    "video": ("🎬 Tư vấn tạo video", ["TikTok/Affiliate", "Quảng cáo sản phẩm", "Video doanh nghiệp"], "Bạn muốn làm video theo hướng nào, tần suất và ngân sách dự kiến ra sao?"),
+    "frame_video": ("🎞 Tư vấn ghép ảnh thành video", ["Slideshow sản phẩm", "Reels/Shorts", "Video có nhạc/voice"], "Bạn có bao nhiêu ảnh, cần tỷ lệ/thời lượng và có nhạc hoặc voice sẵn chưa?"),
+    "document": ("📄 Tư vấn tài liệu/PDF", ["Chuyển đổi PDF", "OCR/tách nội dung", "Quy trình tài liệu"], "Bạn đang có loại file nào và muốn nhận đầu ra gì?"),
+    "voice": ("🎙 Tư vấn Voice/TTS", ["Voice quảng cáo", "Thuyết minh video", "Giọng đọc nội dung"], "Bạn cần giọng, ngôn ngữ, độ dài và mục đích sử dụng nào?"),
+    "package": ("🎁 Tư vấn Gói/Combo", ["Gói cá nhân", "Gói shop/affiliate", "Gói doanh nghiệp"], "Bạn dùng tính năng nào nhiều nhất, tần suất và ngân sách dự kiến ra sao?"),
+}
+
+def support_custom_bot_detail_text(bot_type: str) -> str:
+    detail = SUPPORT_CUSTOM_BOT_DETAILS.get(bot_type) or SUPPORT_CUSTOM_BOT_DETAILS["custom"]
+    return f"{detail['title']}\n\n{detail['body']}\n\nBạn mô tả giúp mình:\n{detail['questions']}"
+
+def support_custom_bot_detail_keyboard(bot_type: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Nhập nhu cầu", callback_data=f"support|bot_input|{bot_type}"), InlineKeyboardButton("🎫 Tạo lead tư vấn", callback_data=f"support|bot_input|{bot_type}")],
+        [InlineKeyboardButton("⬅️ Kết nối bot riêng", callback_data="support|bot"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def support_consult_detail_text(service_type: str) -> str:
+    title, choices, question = SUPPORT_CONSULT_DETAILS.get(service_type) or SUPPORT_CONSULT_DETAILS["video"]
+    bullets = "\n".join(f"• {choice}" for choice in choices)
+    return f"📦 <b>{html.escape(title)}</b>\n\nTOAN AAS có thể hỗ trợ:\n{html.escape(bullets)}\n\n{html.escape(question)}"
+
+def support_consult_detail_keyboard(service_type: str) -> InlineKeyboardMarkup:
+    _title, choices, _question = SUPPORT_CONSULT_DETAILS.get(service_type) or SUPPORT_CONSULT_DETAILS["video"]
+    rows = []
+    for index in range(0, len(choices), 2):
+        rows.append([
+            InlineKeyboardButton(choice, callback_data=f"support|consult_need|{service_type}|{index + offset}")
+            for offset, choice in enumerate(choices[index:index + 2])
+        ])
+    rows.extend([
+        [InlineKeyboardButton("✍️ Nhập nhu cầu riêng", callback_data=f"support|consult_input|{service_type}"), InlineKeyboardButton("🎫 Tạo ticket tư vấn", callback_data=f"support|consult_input|{service_type}")],
+        [InlineKeyboardButton("⭐ Đăng ký Premium", callback_data="support|premium"), InlineKeyboardButton("⬅️ Tư vấn gói dịch vụ", callback_data="support|consult")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
 def support_lead_input_text(category: str, selected_option: str) -> str:
     if category == "premium_lead":
         return (
@@ -30727,11 +30815,15 @@ def support_lead_input_text(category: str, selected_option: str) -> str:
         "cách liên hệ thuận tiện. TOAN AAS sẽ tạo lead ưu tiên cao cho admin."
     )
 
-def support_flow_back_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"),
+def support_flow_back_keyboard(back_callback: str = "support|start", back_label: str = "⬅️ Hỗ trợ", *, include_tickets: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if include_tickets:
+        rows.append([InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")])
+    rows.append([
+        InlineKeyboardButton(back_label, callback_data=back_callback),
         InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
-    ]])
+    ])
+    return InlineKeyboardMarkup(rows)
 
 SUPPORT_TICKET_TTL_SECONDS = 15 * 60
 
@@ -30745,7 +30837,11 @@ def set_support_ticket_pending(user_id, step: str, **fields) -> dict:
         "created_at_ts": time.time(),
     }
     for key, value in fields.items():
-        if key in {"category", "ticket_id", "source", "reply_text", "variant", "lead_type", "selected_option"}:
+        if key in {
+            "category", "ticket_id", "source", "reply_text", "variant", "lead_type",
+            "selected_option", "service_type", "back_to", "needs_admin", "support_flow",
+            "awaiting_support_message",
+        }:
             state[key] = str(value or "")[:4000]
     USER_PENDING[support_ticket_pending_key(user_id)] = state
     return state
@@ -30996,6 +31092,17 @@ def latest_admin_ticket_reply(ticket_id) -> str:
     finally:
         conn.close()
 
+def latest_support_ticket_message(ticket_id, sender_type: str = "user") -> str:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            "SELECT message FROM support_ticket_messages WHERE ticket_id=? AND sender_type=? ORDER BY id DESC LIMIT 1",
+            (int(ticket_id), str(sender_type or "user")),
+        ).fetchone()
+        return str(row[0] or "") if row else ""
+    finally:
+        conn.close()
+
 def support_ticket_created_text(ticket: dict) -> str:
     return (
         "✅ <b>TOAN AAS đã nhận yêu cầu hỗ trợ của bạn.</b>\n\n"
@@ -31008,18 +31115,21 @@ def support_ticket_created_text(ticket: dict) -> str:
 
 def support_ticket_created_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📎 Gửi thêm ảnh/file", callback_data=f"ticket|attach|{ticket_id}"), InlineKeyboardButton("🔍 Xem ticket của tôi", callback_data="ticket|mine")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📂 Xem ticket này", callback_data=f"ticket|pv|{ticket_id}"), InlineKeyboardButton("💬 Gửi thêm nội dung", callback_data=f"ticket|reply_user|{ticket_id}")],
+        [InlineKeyboardButton("📎 Gửi thêm ảnh/file", callback_data=f"ticket|attach|{ticket_id}"), InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")],
+        [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def public_support_ticket_text(ticket: dict) -> str:
     reply = latest_admin_ticket_reply(ticket["id"])
+    latest_user_message = latest_support_ticket_message(ticket["id"], "user") or ticket.get("message") or ""
     lines = [
         f"🎫 <b>Ticket {html.escape(ticket.get('ticket_code') or '')}</b>", "",
         f"Nhóm: {html.escape(support_category_label(ticket.get('category')))}",
         f"Trạng thái: <b>{html.escape(support_status_label(ticket.get('status')))}</b>",
+        f"Ưu tiên: <b>{html.escape(support_priority_label(ticket.get('priority')))}</b>",
         f"Thời gian: <code>{html.escape(ticket.get('created_at') or '')}</code>", "",
-        "<b>Nội dung:</b>", html.escape(ticket.get("message") or ""),
+        "<b>Nội dung gần nhất:</b>", html.escape(latest_user_message),
     ]
     if reply:
         lines.extend(["", "<b>Phản hồi mới nhất:</b>", html.escape(reply)])
@@ -31030,16 +31140,17 @@ def public_support_ticket_text(ticket: dict) -> str:
 def public_support_ticket_list_keyboard(user_id) -> tuple[str, InlineKeyboardMarkup]:
     tickets = list_support_tickets(user_id=user_id, limit=10)
     if not tickets:
-        text = "🎫 <b>Ticket của bạn</b>\n\nBạn chưa có ticket hỗ trợ nào."
+        text = "📂 <b>Ticket của tôi</b>\n\nBạn chưa có ticket hỗ trợ nào.\nBạn có thể tạo ticket mới nếu cần TOAN AAS hỗ trợ riêng."
     else:
-        lines = ["🎫 <b>Ticket của bạn</b>", ""]
+        lines = ["📂 <b>Ticket của tôi</b>", "", "Các yêu cầu hỗ trợ gần đây:", ""]
         for ticket in tickets:
             lines.append(f"• <code>{html.escape(ticket['ticket_code'])}</code> — {html.escape(support_category_label(ticket['category']))} — {html.escape(support_status_label(ticket['status']))}")
         text = "\n".join(lines)
     rows = []
     for index in range(0, len(tickets), 2):
         rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|pv|{ticket['id']}") for ticket in tickets[index:index + 2]])
-    rows.append([InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="ticket|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    rows.append([InlineKeyboardButton("🎫 Tạo ticket mới", callback_data="support|ticket"), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")])
+    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return text, InlineKeyboardMarkup(rows)
 
 def support_admin_menu_text() -> str:
@@ -43636,19 +43747,21 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
     step = state.get("step")
     text = update.message.text.strip()
     if step == "lead_input":
-        category = state.get("category") if state.get("category") in {"premium_lead", "custom_bot_lead"} else "premium_lead"
+        category = state.get("category") if state.get("category") in {"premium_lead", "custom_bot_lead", "service_consulting"} else "premium_lead"
         selected_option = str(state.get("selected_option") or "").strip()
+        lead_type = str(state.get("lead_type") or state.get("service_type") or "").strip()
         full_message = f"{selected_option}\n{text}".strip()
+        priority = "high" if category in {"premium_lead", "custom_bot_lead"} else "normal"
         classification = {
             "matched": True,
-            "needs_admin": True,
-            "priority": "high",
-            "reason": "premium_lead" if category == "premium_lead" else "custom_bot_lead",
+            "needs_admin": category in {"premium_lead", "custom_bot_lead"},
+            "priority": priority,
+            "reason": category,
             "category": "admin_escalation",
             "ticket_category": category,
             "suggested_reply_id": "b2b_contract",
             "should_create_ticket": True,
-            "should_alert_admin": True,
+            "should_alert_admin": category in {"premium_lead", "custom_bot_lead"},
             "allowed_auto_send": True,
             "classifier_source": "support_lead_flow",
         }
@@ -43659,22 +43772,40 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
             classification,
         )
         clear_support_ticket_pending(uid)
-        lead_name = "Premium" if category == "premium_lead" else "kết nối bot riêng"
+        lead_name = {
+            "premium_lead": "đăng ký Premium",
+            "custom_bot_lead": "kết nối bot riêng",
+            "service_consulting": "tư vấn gói dịch vụ",
+        }.get(category, "tư vấn")
+        if category == "custom_bot_lead" and lead_type == "shop_bot":
+            auto_reply = (
+                "Dạ TOAN AAS đã nhận nhu cầu làm bot bán hàng/shop online của bạn nhé. "
+                "Admin sẽ xem quy mô shop, nền tảng đang bán và quy trình bạn muốn tự động hóa."
+            )
+        elif category == "service_consulting" and (lead_type == "video" or "video" in selected_option.lower()):
+            auto_reply = (
+                "Dạ mình nhận được nhu cầu tư vấn gói video rồi nhé. TOAN AAS sẽ xem theo "
+                "số lượng video, tần suất dùng và ngân sách phù hợp."
+            )
+        else:
+            auto_reply = f"Dạ TOAN AAS đã nhận nhu cầu {lead_name} của bạn nhé."
         await update.message.reply_text(
-            f"✅ <b>TOAN AAS đã nhận yêu cầu {lead_name} của bạn.</b>\n\n"
-            "Admin sẽ xem nhu cầu và tư vấn phương án phù hợp nhất nhé.\n\n"
-            f"Mã yêu cầu: <code>{html.escape(ticket.get('ticket_code') or '')}</code>",
+            f"✅ <b>{html.escape(auto_reply)}</b>\n\n"
+            "Mình đã ghi nhận nội dung trong ticket để hỗ trợ tiếp.\n\n"
+            f"Mã ticket: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
+            f"Trạng thái: {html.escape(support_status_label(ticket.get('status')))}",
             parse_mode="HTML",
             reply_markup=support_ticket_created_keyboard(ticket["id"]),
         )
-        await notify_admin_new_support_ticket(
-            context,
-            ticket,
-            classification,
-            support_reply_for_classification(classification),
-            is_new=is_new,
-            customer_message=full_message,
-        )
+        if classification.get("should_alert_admin"):
+            await notify_admin_new_support_ticket(
+                context,
+                ticket,
+                classification,
+                support_reply_for_classification(classification),
+                is_new=is_new,
+                customer_message=full_message,
+            )
         return True
     if step == "awaiting_message":
         if len(text) < 5:
@@ -43691,11 +43822,24 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
             classification,
         )
         clear_support_ticket_pending(uid)
-        intro = (
-            support_reply_for_classification(classification)
-            if classification.get("matched")
-            else "Dạ mình nhận được rồi nhé. TOAN AAS sẽ chuyển admin kiểm tra trực tiếp để chắc hơn."
-        )
+        if selected_category == "custom_bot_lead":
+            intro = (
+                "Dạ TOAN AAS đã nhận nhu cầu làm bot riêng của bạn nhé. Bạn có thể gửi thêm "
+                "quy mô sử dụng, nền tảng hiện tại và quy trình muốn tự động hóa để admin tư vấn đúng hơn."
+            )
+        elif selected_category == "premium_lead":
+            intro = "Dạ TOAN AAS đã nhận nhu cầu đăng ký Premium. Admin sẽ xem tần suất sử dụng và nhóm công cụ phù hợp để tư vấn."
+        elif selected_category == "service_consulting":
+            intro = (
+                "Dạ mình nhận được nhu cầu tư vấn gói dịch vụ rồi nhé. TOAN AAS sẽ xem theo "
+                "tần suất sử dụng, loại đầu ra và ngân sách phù hợp."
+            )
+        else:
+            intro = (
+                support_reply_for_classification(classification)
+                if classification.get("matched")
+                else "Dạ mình nhận được rồi nhé. TOAN AAS sẽ chuyển admin kiểm tra trực tiếp để chắc hơn."
+            )
         ticket_text = (
             support_ticket_created_text(ticket)
             if is_new
@@ -43717,6 +43861,41 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
             is_new=is_new,
             customer_message=text,
         )
+        return True
+    if step == "awaiting_ticket_reply":
+        ticket_id = int(state.get("ticket_id") or 0)
+        ticket = get_support_ticket(ticket_id, uid)
+        if not ticket:
+            clear_support_ticket_pending(uid)
+            await update.message.reply_text("⚠️ Không tìm thấy ticket của bạn. Vui lòng mở lại mục Ticket của tôi.")
+            return True
+        if len(text) < 2:
+            await update.message.reply_text("Vui lòng nhập nội dung cần bổ sung.")
+            return True
+        add_support_ticket_message(ticket_id, "user", uid, text[:4000], "recorded")
+        classification = await classify_support_message(text, uid)
+        desired_priority = str(classification.get("priority") or ticket.get("priority") or "normal")
+        priority_rank = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
+        update_fields = {"status": "reviewing"}
+        if priority_rank.get(desired_priority, 1) > priority_rank.get(str(ticket.get("priority")), 1):
+            update_fields["priority"] = desired_priority
+        ticket = update_support_ticket(ticket_id, **update_fields) or ticket
+        clear_support_ticket_pending(uid)
+        await update.message.reply_text(
+            f"✅ Đã bổ sung nội dung vào ticket <code>{html.escape(ticket.get('ticket_code') or '')}</code>.\n\n"
+            "TOAN AAS đã ghi nhận cập nhật và sẽ báo admin nếu cần xử lý ưu tiên.",
+            parse_mode="HTML",
+            reply_markup=support_ticket_created_keyboard(ticket_id),
+        )
+        if classification.get("needs_admin") or str(ticket.get("priority")) in {"high", "urgent"}:
+            await notify_admin_new_support_ticket(
+                context,
+                ticket,
+                classification,
+                support_reply_for_classification(classification),
+                is_new=False,
+                customer_message=text,
+            )
         return True
     if step == "awaiting_attachment":
         await update.message.reply_text("📎 Vui lòng gửi một ảnh hoặc file tài liệu. Nếu không cần đính kèm, bạn có thể mở ticket khác hoặc về Menu chính.")
@@ -43769,36 +43948,79 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
     if action == "start":
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, human_support_text(), reply_markup=human_support_keyboard())
+    if action == "admin_contact":
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(query, support_admin_contact_text(), reply_markup=support_admin_contact_keyboard())
     if action == "ticket":
-        set_support_ticket_pending(uid, "awaiting_message", category="general_support", source="human_support")
-        return await safe_edit_or_send(query, support_general_ticket_prompt(), reply_markup=support_flow_back_keyboard())
+        set_support_ticket_pending(
+            uid,
+            "awaiting_message",
+            category="general_support",
+            source="human_support",
+            support_flow="create_support_ticket",
+            awaiting_support_message="1",
+            back_to="support|start",
+        )
+        return await safe_edit_or_send(
+            query,
+            support_general_ticket_prompt(),
+            reply_markup=support_flow_back_keyboard("support|start", "⬅️ Hỗ trợ", include_tickets=True),
+        )
     if action == "premium":
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_premium_text(), reply_markup=support_premium_keyboard())
     if action == "premium_type" and len(parts) >= 3:
         options = {
-            "personal": "Gói cá nhân",
+            "personal": "Cá nhân/Creator",
             "shop": "Shop/Affiliate",
             "business": "Doanh nghiệp",
             "private": "Tư vấn riêng",
         }
         selected = options.get(parts[2], "Tư vấn Premium")
-        set_support_ticket_pending(uid, "lead_input", category="premium_lead", selected_option=selected)
-        return await safe_edit_or_send(query, support_lead_input_text("premium_lead", selected), reply_markup=support_flow_back_keyboard())
+        set_support_ticket_pending(
+            uid,
+            "lead_input",
+            category="premium_lead",
+            selected_option=selected,
+            lead_type=f"premium_{parts[2]}",
+            support_flow=f"premium_{parts[2]}",
+            awaiting_support_message="1",
+            back_to="support|premium",
+        )
+        return await safe_edit_or_send(
+            query,
+            support_lead_input_text("premium_lead", selected),
+            reply_markup=support_flow_back_keyboard("support|premium", "⬅️ Đăng ký Premium", include_tickets=True),
+        )
     if action == "bot":
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_custom_bot_text(), reply_markup=support_custom_bot_keyboard())
     if action == "bot_type" and len(parts) >= 3:
-        options = {
-            "shop": "Bot cho shop",
-            "content": "Bot content/marketing",
-            "support": "Bot CSKH",
-            "internal": "Bot nội bộ doanh nghiệp",
-            "custom": "Nhu cầu bot riêng",
-        }
-        selected = options.get(parts[2], "Nhu cầu bot riêng")
-        set_support_ticket_pending(uid, "lead_input", category="custom_bot_lead", selected_option=selected)
-        return await safe_edit_or_send(query, support_lead_input_text("custom_bot_lead", selected), reply_markup=support_flow_back_keyboard())
+        bot_type = parts[2] if parts[2] in SUPPORT_CUSTOM_BOT_DETAILS else "custom"
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(
+            query,
+            support_custom_bot_detail_text(bot_type),
+            reply_markup=support_custom_bot_detail_keyboard(bot_type),
+        )
+    if action == "bot_input" and len(parts) >= 3:
+        bot_type = parts[2] if parts[2] in SUPPORT_CUSTOM_BOT_DETAILS else "custom"
+        detail = SUPPORT_CUSTOM_BOT_DETAILS[bot_type]
+        set_support_ticket_pending(
+            uid,
+            "lead_input",
+            category="custom_bot_lead",
+            selected_option=detail["title"],
+            lead_type=detail["lead_type"],
+            support_flow=f"custom_bot_{bot_type}",
+            awaiting_support_message="1",
+            back_to=f"support|bot_type|{bot_type}",
+        )
+        return await safe_edit_or_send(
+            query,
+            support_custom_bot_detail_text(bot_type) + "\n\n✍️ Bạn nhập câu trả lời trong một tin nhắn nhé.",
+            reply_markup=support_flow_back_keyboard(f"support|bot_type|{bot_type}", "⬅️ Loại bot này", include_tickets=True),
+        )
     if action == "consult":
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(
@@ -43807,17 +44029,38 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             reply_markup=support_consult_keyboard(),
         )
     if action == "consult_type" and len(parts) >= 3:
-        selected = SUPPORT_CONSULT_OPTIONS.get(parts[2], "Dịch vụ TOAN AAS")
+        service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
         return await safe_edit_or_send(
             query,
-            f"📦 <b>{html.escape(selected)}</b>\n\n"
-            "Bạn có thể xem giá chính thức trong Bảng giá. Nếu nhu cầu dùng thường xuyên "
-            "hoặc cần workflow riêng, hãy đăng ký Premium để admin tư vấn.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📋 Xem bảng giá", callback_data="pricing|main"), InlineKeyboardButton("⭐ Đăng ký Premium", callback_data="support|premium")],
-                [InlineKeyboardButton("👨‍💼 Gặp admin", url=SUPPORT_TELEGRAM_URL), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")],
-                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-            ]),
+            support_consult_detail_text(service_type),
+            reply_markup=support_consult_detail_keyboard(service_type),
+        )
+    if action in {"consult_need", "consult_input"} and len(parts) >= 3:
+        service_type = parts[2] if parts[2] in SUPPORT_CONSULT_DETAILS else "video"
+        title, choices, question = SUPPORT_CONSULT_DETAILS[service_type]
+        selected = title
+        if action == "consult_need" and len(parts) >= 4:
+            choice_index = max(0, min(int(parts[3] or 0), len(choices) - 1))
+            selected = f"{title} — {choices[choice_index]}"
+        set_support_ticket_pending(
+            uid,
+            "lead_input",
+            category="service_consulting",
+            selected_option=selected,
+            service_type=service_type,
+            lead_type=service_type,
+            support_flow=f"service_consulting_{service_type}",
+            awaiting_support_message="1",
+            back_to=f"support|consult_type|{service_type}",
+        )
+        return await safe_edit_or_send(
+            query,
+            f"📦 <b>{html.escape(selected)}</b>\n\n{html.escape(question)}\n\n✍️ Bạn nhập nhu cầu trong một tin nhắn nhé.",
+            reply_markup=support_flow_back_keyboard(
+                f"support|consult_type|{service_type}",
+                f"⬅️ {title}",
+                include_tickets=True,
+            ),
         )
     return await query.answer("Thao tác hỗ trợ chưa được hỗ trợ.", show_alert=True)
 
@@ -43852,7 +44095,39 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             query,
             public_support_ticket_text(ticket),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📎 Gửi thêm ảnh/file", callback_data=f"ticket|attach|{ticket['id']}"), InlineKeyboardButton("⬅️ Ticket của tôi", callback_data="ticket|mine")],
+                [InlineKeyboardButton("💬 Gửi thêm nội dung", callback_data=f"ticket|reply_user|{ticket['id']}"), InlineKeyboardButton("📎 Gửi thêm ảnh/file", callback_data=f"ticket|attach|{ticket['id']}")],
+                [InlineKeyboardButton("✅ Đánh dấu đã xong", callback_data=f"ticket|done|{ticket['id']}"), InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")],
+                [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    if action == "reply_user" and len(parts) >= 3:
+        ticket = get_support_ticket(int(parts[2]), uid)
+        if not ticket:
+            return await query.answer("Ticket không tồn tại hoặc không thuộc tài khoản của bạn.", show_alert=True)
+        set_support_ticket_pending(
+            uid,
+            "awaiting_ticket_reply",
+            ticket_id=ticket["id"],
+            support_flow="ticket_reply",
+            awaiting_support_message="1",
+            back_to=f"ticket|pv|{ticket['id']}",
+        )
+        return await safe_edit_or_send(
+            query,
+            f"💬 <b>Bổ sung ticket {html.escape(ticket['ticket_code'])}</b>\n\nBạn nhập nội dung cần bổ sung. TOAN AAS sẽ lưu vào đúng ticket này.",
+            reply_markup=support_flow_back_keyboard(f"ticket|pv|{ticket['id']}", "⬅️ Ticket"),
+        )
+    if action == "done" and len(parts) >= 3:
+        ticket = get_support_ticket(int(parts[2]), uid)
+        if not ticket:
+            return await query.answer("Ticket không tồn tại hoặc không thuộc tài khoản của bạn.", show_alert=True)
+        ticket = update_support_ticket(ticket["id"], status="resolved") or ticket
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(
+            query,
+            f"✅ Ticket <code>{html.escape(ticket['ticket_code'])}</code> đã được đánh dấu đã xong.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine"), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")],
                 [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
             ]),
         )
