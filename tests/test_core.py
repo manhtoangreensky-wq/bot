@@ -2328,7 +2328,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Gộp PDF" in merge_hint
     assert "gửi từng file PDF" in merge_hint
     memory_text = bot.menu_text_main_memory()
-    assert "TÀI LIỆU" in memory_text
+    assert "Ghi chú / Tài liệu" in memory_text
     assert "10MB cho ghi chú/text/nhắc hẹn" in memory_text
     assert "40MB cho tệp/ảnh/âm thanh" in memory_text
     assert "Tổng 50MB miễn phí" in memory_text
@@ -5187,10 +5187,11 @@ def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
     assert "🔙 Quay lại" in image_edit_result_labels
 
     memory_rows = rows(bot.main_memory_keyboard("vi"))
-    assert memory_rows[:3] == [
+    assert memory_rows[:4] == [
         ["📝 Tạo ghi chú", "⏰ Nhắc hẹn"],
-        ["📄 Lưu tài liệu", "💾 Dung lượng của tôi"],
-        ["📦 Mua thêm dung lượng", "🧹 Dọn file cũ"],
+        ["📄 Lưu tài liệu", "🔍 Tìm ghi chú"],
+        ["💾 Dung lượng của tôi", "📦 Mua thêm dung lượng"],
+        ["🧹 Dọn file cũ", "🧰 Công cụ PDF / Word"],
     ]
     assert memory_rows[-1] == ["⬅️ Quay lại", "🏠 Menu chính"]
     storage_text = "\n".join(bot.storage_addon_lines())
@@ -5228,6 +5229,7 @@ def test_document_pdf_tools_v6_guided_upload_confirm_flow():
     memory_callbacks = [button.callback_data for row in bot.main_memory_keyboard("vi").inline_keyboard for button in row]
     assert "menu|hint_doc_save_document" in memory_callbacks
     assert "menu|doc_tools" not in memory_callbacks
+    assert "menu|main_docs" in memory_callbacks
 
     for text in [
         bot.menu_text_main_docs(),
@@ -5250,11 +5252,18 @@ def test_document_pdf_tools_v6_guided_upload_confirm_flow():
     assert image_state["doc_tool_user_id"] == "u-doc"
     assert "doc_tool_options" in image_state
     assert "doc_tool_previous_step" in image_state
+    assert image_state["doc_menu_origin"] == "pdf_tools"
+    assert image_state["doc_current_menu"] == "pdf_tools"
+    assert image_state["doc_current_tool"] == "image_to_pdf"
+    assert image_state["doc_previous_menu"] == "main_docs"
+    assert image_state["doc_expected_type"] == "image"
+    assert bot.doc_tool_parent_action(image_state) == "main_docs"
+    assert "Công cụ PDF / Word" in bot.doc_tool_parent_label(image_state, lang="vi")
     assert "Ảnh sang PDF" in bot.doc_tool_start_text("image_to_pdf")
     assert "gửi từng ảnh" in bot.doc_tool_start_text("image_to_pdf")
     start_labels = [button.text for row in bot.doc_tool_start_keyboard("image_to_pdf").inline_keyboard for button in row]
     assert "➕ Tôi sẽ gửi ảnh" in start_labels
-    assert "⬅️ Quay lại" in start_labels and "🏠 Menu chính" in start_labels
+    assert "⬅️ Công cụ PDF / Word" in start_labels and "🏠 Menu chính" in start_labels
 
     image_info = {"kind": "photo", "file_id": "photo-file", "file_name": "a.jpg", "mime_type": "image/jpeg", "file_size": 1024}
     pdf_info = {"kind": "document", "file_id": "pdf-file", "file_name": "a.pdf", "mime_type": "application/pdf", "file_size": 2048}
@@ -5273,6 +5282,8 @@ def test_document_pdf_tools_v6_guided_upload_confirm_flow():
     assert "a.jpg" in confirm_text and "b.jpg" in confirm_text
     confirm_callbacks = [button.callback_data for row in bot.doc_tool_confirm_keyboard().inline_keyboard for button in row]
     assert "docflow|run" in confirm_callbacks
+    assert "docflow|reset_files" in confirm_callbacks
+    assert "docflow|back" in confirm_callbacks
 
     merge_state = bot.set_doc_tool_pending("u-doc", "merge_pdf")
     merge_state["doc_tool_files"] = [pdf_info, {**pdf_info, "file_name": "b.pdf"}]
@@ -5283,7 +5294,26 @@ def test_document_pdf_tools_v6_guided_upload_confirm_flow():
     assert bot.doc_tool_after_file_keyboard(split_state).inline_keyboard[0][0].callback_data == "docflow|ask_pages"
     save_state = bot.set_doc_tool_pending("u-doc", "save_document")
     assert save_state["doc_tool_expected_type"] == "any"
+    assert save_state["doc_menu_origin"] == "notes_root"
+    assert save_state["doc_previous_menu"] == "main_memory"
+    assert bot.doc_tool_parent_action(save_state) == "main_memory"
+    assert "Ghi chú / Tài liệu" in bot.doc_tool_parent_label(save_state, lang="vi")
     assert "Lưu tài liệu" in bot.doc_tool_start_text("save_document")
+    save_start_callbacks = [
+        button.callback_data
+        for row in bot.doc_tool_start_keyboard("save_document", "vi", save_state).inline_keyboard
+        for button in row
+    ]
+    assert save_start_callbacks == [
+        "docflow|send_more",
+        "menu|memory_storage_status",
+        "docflow|back",
+        "menu|main",
+    ]
+    callback_source = source_between(source, "async def handle_doc_tool_callback", "async def cmd_doc_tools")
+    assert 'if parent_action == "main_memory":' in callback_source
+    assert "menu_text_main_memory_i18n(lang)" in callback_source
+    assert "menu_text_main_docs_i18n(lang)" in callback_source
     bot.clear_doc_tool_pending("u-doc")
 
 

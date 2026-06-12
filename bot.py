@@ -35961,9 +35961,11 @@ def main_memory_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("📝 Tạo ghi chú" if is_vi else "📝 Create note", "menu|hint_note"),
         ("⏰ Nhắc hẹn" if is_vi else "⏰ Reminder", "menu|hint_remind"),
         ("📄 Lưu tài liệu" if is_vi else "📄 Save document", "menu|hint_doc_save_document"),
+        ("🔍 Tìm ghi chú" if is_vi else "🔍 Search notes", "menu|hint_search_note"),
         ("💾 Dung lượng của tôi" if is_vi else "💾 My storage", "menu|memory_storage_status"),
         ("📦 Mua thêm dung lượng" if is_vi else "📦 Add storage", "menu|memory_storage_addon"),
         ("🧹 Dọn file cũ" if is_vi else "🧹 Clean old files", "menu|memory_storage_cleanup"),
+        ("🧰 Công cụ PDF / Word" if is_vi else "🧰 PDF / Word tools", "menu|main_docs"),
     ]
     back = ("⬅️ Quay lại", "menu|main") if is_vi else ("⬅️ Back", "menu|main")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
@@ -35976,7 +35978,7 @@ def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("🗜 Nén PDF" if is_vi else "🗜 Compress PDF", "menu|hint_doc_compress_pdf"),
         ("✂️ Tách PDF" if is_vi else "✂️ Split PDF", "menu|hint_doc_split_pdf"),
         ("🧩 Gộp PDF" if is_vi else "🧩 Merge PDF", "menu|hint_doc_merge_pdf"),
-        ("📄 Tất cả công cụ" if is_vi else "📄 All document tools", "menu|doc_tools"),
+        ("📋 Tất cả công cụ" if is_vi else "📋 All document tools", "menu|doc_tools"),
     ]
     back = ("⬅️ Ghi chú / Tài liệu", "menu|main_memory") if is_vi else ("⬅️ Notes / Docs", "menu|main_memory")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
@@ -40130,49 +40132,38 @@ def menu_text_main_memory() -> str:
     if not (has_memory or has_docs):
         return "📝 <b>GHI CHÚ / TÀI LIỆU</b>\n\nGhi chú và tài liệu đang được admin kiểm tra, sẽ mở sau."
     return (
-        "📝 <b>GHI CHÚ / TÀI LIỆU</b>\n\n"
-        "Dùng để lưu ghi chú, ý tưởng, việc cần làm, nhắc hẹn và xử lý nhanh tài liệu/PDF.\n\n"
+        "📝 <b>Ghi chú / Tài liệu</b>\n\n"
+        "Bạn có thể lưu ghi chú, nhắc hẹn, checklist và tài liệu cá nhân tại đây.\n\n"
         "<b>Dung lượng miễn phí:</b>\n"
         + "\n".join(storage_policy_short_lines()) + "\n\n"
         "<b>Mở rộng dung lượng:</b>\n"
         + "\n".join(storage_addon_lines()) + "\n\n"
-        "TOAN AAS đang trong giai đoạn đầu nên dung lượng miễn phí còn giới hạn. Khi hạ tầng lưu trữ lớn hơn, TOAN AAS sẽ tăng dung lượng miễn phí và tối ưu giá lưu trữ tốt hơn cho bạn.\n\n"
-        "<b>Ghi chú:</b>\n"
-        "• <code>/memory</code> — mở kho ghi nhớ\n"
-        "• <code>/note &lt;nội dung&gt;</code> — lưu nhanh một ghi chú\n"
-        "• <code>/notes</code> — xem ghi chú đã lưu\n"
-        "• <code>/search_note &lt;từ khóa&gt;</code> — tìm lại ghi chú\n"
-        "• <code>/remind 30m &lt;nội dung&gt;</code> — đặt nhắc việc\n"
-        "• <code>/reminders</code> — xem các nhắc việc\n\n"
-        "<b>Tài liệu / PDF:</b>\n"
-        "• Bấm <b>📄 Lưu tài liệu</b> để gửi file vào kho tài liệu cá nhân.\n"
-        "• Bấm <b>📄 Tất cả công cụ</b> để mở PDF sang Word, ảnh sang PDF, nén/tách/gộp PDF.\n"
-        "• Flow tài liệu sẽ hướng dẫn gửi file → xác nhận → xử lý; không cần nhớ lệnh kỹ thuật.\n\n"
-        "<b>Quota:</b>\n"
+        "Nếu cần xử lý PDF/Word như nén, tách, gộp hoặc ảnh sang PDF, hãy vào <b>🧰 Công cụ PDF / Word</b>.\n\n"
+        "<b>Cách tính dung lượng:</b>\n"
         "• Ghi chú text nhỏ vẫn tính dung lượng thật.\n"
         "• File đính kèm tính đúng size file.\n"
         "• File tạm không tính vào quota lâu dài nếu tự xóa theo TTL.\n\n"
-        "<b>Ví dụ:</b>\n"
-        "• <code>/note khách A hỏi báo giá video 500k</code>\n"
-        "• <code>/remind 2h gọi lại cho khách A</code>"
+        "Flow tài liệu sẽ hướng dẫn gửi file → xác nhận → xử lý; bạn không cần nhớ lệnh kỹ thuật."
     )
 
 def menu_text_main_docs() -> str:
     if not (public_command_exists("doc_tools") or public_command_exists("pdf_to_word")):
-        return "📄 <b>TÀI LIỆU / PDF / WORD</b>\n\nCông cụ PDF/Word đang được admin kiểm tra, sẽ mở sau."
+        return "🧰 <b>Công cụ PDF / Word</b>\n\nCông cụ PDF/Word đang được admin kiểm tra, sẽ mở sau."
     lines = [
-        "📄 <b>TÀI LIỆU / PDF / WORD</b>",
+        "🧰 <b>Công cụ PDF / Word</b>",
         "",
         "Dùng để xử lý file văn phòng nhanh:",
-        "chuyển PDF sang Word, ảnh sang PDF, nén PDF, tách/gộp PDF hoặc xuất PDF thành ảnh.",
-        "",
-        "Phù hợp khi bạn cần xử lý hồ sơ, báo giá, tài liệu học tập, tài liệu khách gửi.",
+        "• Ảnh sang PDF",
+        "• PDF sang Word",
+        "• Nén PDF",
+        "• Tách PDF",
+        "• Gộp PDF",
         "",
         "<b>Cách dùng:</b>",
-        "• Chọn công cụ bằng nút bên dưới.",
-        "• Gửi file/ảnh theo hướng dẫn.",
-        "• Bấm xác nhận để bot xử lý bằng local engine.",
-        "• Nên gửi từng file một để tránh lỗi Telegram.",
+        "1. Chọn công cụ bên dưới.",
+        "2. Gửi file/ảnh theo hướng dẫn.",
+        "3. Bấm xác nhận để xử lý.",
+        "4. Nên gửi từng file một để tránh lỗi Telegram.",
     ]
     return "\n".join(lines)
 
@@ -40477,8 +40468,8 @@ def menu_text_main_memory_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
         return menu_text_main_memory()
     return (
-        "📝 <b>NOTES / DOCUMENTS</b>\n\n"
-        "Save notes, ideas, customer details and reminders, or process PDF/document files.\n\n"
+        "📝 <b>Notes / Documents</b>\n\n"
+        "Save notes, reminders, checklists and personal documents here.\n\n"
         "<b>Free storage:</b>\n"
         f"• {NOTES_TEXT_FREE_MB}MB for notes/text/reminders/checklists\n"
         f"• {FILES_AUDIO_FREE_MB}MB for long-term files/images/audio\n"
@@ -40486,33 +40477,22 @@ def menu_text_main_memory_i18n(lang: str) -> str:
         "<b>Add-on storage:</b>\n"
         "• +50MB/month: 10.000đ\n"
         "• Need more: add another +50MB block at the same unit price.\n\n"
-        "TOAN AAS is still early-stage, so free storage is intentionally limited until larger storage infrastructure is ready.\n\n"
-        "<b>Notes:</b>\n"
-        "• <code>/memory</code> — open memory\n"
-        "• <code>/note &lt;text&gt;</code> — save a note\n"
-        "• <code>/notes</code> — list notes\n"
-        "• <code>/search_note &lt;keyword&gt;</code> — search notes\n"
-        "• <code>/remind 30m &lt;text&gt;</code> — create a reminder\n"
-        "• <code>/reminders</code> — list reminders\n\n"
-        "<b>Documents / PDF:</b>\n"
-        "• Tap <b>Save document</b> to send a file to personal storage.\n"
-        "• Tap <b>All document tools</b> for PDF to Word, image to PDF, compress/split/merge PDF.\n"
-        "• Document tools guide upload → confirm → process. No technical command needed.\n\n"
-        "Text notes count by real size. Attachments count by file size. Temporary files do not count as long-term quota when they are auto-cleaned."
+        "For PDF/Word conversion, compression, splitting, merging or image-to-PDF, open <b>🧰 PDF / Word tools</b>.\n\n"
+        "Text notes count by real size. Attachments count by file size. Temporary files do not count as long-term quota when auto-cleaned.\n\n"
+        "Document flows guide upload → confirm → process. No technical command is required."
     )
 
 def menu_text_main_docs_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
         return menu_text_main_docs()
     return (
-        "📄 <b>DOCUMENTS / PDF / WORD</b>\n\n"
-        "Process office files quickly: PDF to Word, image to PDF, PDF to images, compress or split PDF.\n\n"
+        "🧰 <b>PDF / Word tools</b>\n\n"
+        "Process office files quickly: image to PDF, PDF to Word, compress, split or merge PDF.\n\n"
         "<b>How to use:</b>\n"
-        "• Choose a tool with the buttons below.\n"
-        "• Send the requested file/image.\n"
-        "• Confirm before the bot processes it with the local engine.\n"
-        "• Sending files one by one is safer than albums.\n\n"
-        "Document tools use local engines. They do not create PayOS orders and do not use background-removal tools."
+        "1. Choose a tool below.\n"
+        "2. Send the requested file/image.\n"
+        "3. Confirm before processing.\n"
+        "4. Sending files one by one is safer than albums."
     )
 
 def menu_text_main_image_i18n(lang: str) -> str:
@@ -53599,36 +53579,33 @@ def doc_tools_status_text() -> str:
 
 def doc_tools_menu_text() -> str:
     return (
-        "📄 <b>CÔNG CỤ TÀI LIỆU TOAN AAS</b>\n\n"
-        "Chọn công cụ bằng nút bên dưới. Bot sẽ hướng dẫn theo luồng:\n"
-        "bấm công cụ → gửi file/ảnh → xác nhận → xử lý bằng local engine.\n\n"
-        "<b>Lưu ý:</b>\n"
-        "• Nên gửi từng file một để tránh lỗi Telegram.\n"
-        "• Nếu lỡ gửi album/nhiều file, bot sẽ cố gắng nhận và không crash.\n"
-        "• Flow hướng dẫn này chưa trừ Xu.\n\n"
-        "<b>Giới hạn MVP:</b>\n"
-        f"• PDF tối đa {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB\n"
-        f"• Tối đa {DOC_MAX_PAGES} trang/lần cho công cụ PDF cơ bản\n"
-        f"• OCR tối đa {DOC_OCR_MAX_PAGES} trang/lần\n\n"
-        f"<b>Local engine:</b> <code>{html.escape(doc_tools_status_text())}</code>"
+        "🧰 <b>Công cụ PDF / Word</b>\n\n"
+        "Dùng để xử lý file văn phòng nhanh:\n"
+        "• Ảnh sang PDF\n"
+        "• PDF sang Word\n"
+        "• Nén PDF\n"
+        "• Tách PDF\n"
+        "• Gộp PDF\n\n"
+        "<b>Cách dùng:</b>\n"
+        "1. Chọn công cụ bên dưới.\n"
+        "2. Gửi file/ảnh theo hướng dẫn.\n"
+        "3. Bấm xác nhận để xử lý.\n"
+        "4. Nên gửi từng file một để tránh lỗi Telegram.\n\n"
+        "Nếu lỡ gửi album/nhiều file, bot sẽ cố gắng nhận an toàn. Flow hướng dẫn này không gọi provider AI và chưa trừ Xu."
     )
 
 def doc_tools_menu_text_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "vi":
         return doc_tools_menu_text()
     return (
-        "📄 <b>TOAN AAS DOCUMENT TOOLS</b>\n\n"
-        "Choose a tool with the buttons below. The guided flow is:\n"
-        "choose tool → send file/image → confirm → process with local engine.\n\n"
-        "<b>Notes:</b>\n"
-        "• Send files one by one for best Telegram stability.\n"
-        "• If you accidentally send an album/multiple files, the bot will try to collect them safely.\n"
-        "• This guided flow does not charge Xu.\n\n"
-        "<b>MVP limits:</b>\n"
-        f"• PDF max {DOC_MAX_FILE_BYTES // (1024 * 1024)}MB\n"
-        f"• Up to {DOC_MAX_PAGES} pages per basic PDF action\n"
-        f"• OCR max {DOC_OCR_MAX_PAGES} pages\n\n"
-        f"<b>Local engine:</b> <code>{html.escape(doc_tools_status_text())}</code>"
+        "🧰 <b>PDF / Word tools</b>\n\n"
+        "Use these tools for image to PDF, PDF to Word, compression, splitting and merging.\n\n"
+        "<b>How to use:</b>\n"
+        "1. Choose a tool below.\n"
+        "2. Send the requested file/image.\n"
+        "3. Confirm before processing.\n"
+        "4. Send files one by one for best Telegram stability.\n\n"
+        "Albums/multiple files are collected best effort. This guided flow does not call an AI provider or charge Xu."
     )
 
 DOC_TOOL_MENU_ACTIONS = {
@@ -53705,7 +53682,6 @@ def doc_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("🗜 Nén PDF" if is_vi else "🗜 Compress PDF", "menu|hint_doc_compress_pdf"),
         ("✂️ Tách PDF" if is_vi else "✂️ Split PDF", "menu|hint_doc_split_pdf"),
         ("🧩 Gộp PDF" if is_vi else "🧩 Merge PDF", "menu|hint_doc_merge_pdf"),
-        ("📄 Lưu tài liệu" if is_vi else "📄 Save document", "menu|hint_doc_save_document"),
     ]
     return build_2col_keyboard(
         buttons,
@@ -53732,6 +53708,8 @@ def get_doc_tool_pending(user_id) -> dict:
 def set_doc_tool_pending(user_id, tool: str, **fields) -> dict:
     config = DOC_TOOL_CONFIG.get(tool) or DOC_TOOL_CONFIG["save_document"]
     previous = USER_PENDING.get(doc_tool_pending_key(user_id)) or {}
+    default_parent = "main_memory" if tool == "save_document" else "main_docs"
+    previous_menu = fields.pop("doc_tool_previous_step", default_parent)
     payload = {
         "doc_tool_current": tool,
         "doc_tool_expected_type": config.get("expected") or "any",
@@ -53739,7 +53717,13 @@ def set_doc_tool_pending(user_id, tool: str, **fields) -> dict:
         "doc_tool_file_count": 0,
         "doc_tool_max_files": int(config.get("max_files") or DOC_TOOL_MAX_FILES),
         "doc_tool_options": dict(previous.get("doc_tool_options") or {}) if previous.get("doc_tool_current") == tool else {},
-        "doc_tool_previous_step": fields.pop("doc_tool_previous_step", "main_docs"),
+        "doc_tool_previous_step": previous_menu,
+        "doc_menu_origin": "notes_root" if tool == "save_document" else "pdf_tools",
+        "doc_current_menu": "document_storage" if tool == "save_document" else "pdf_tools",
+        "doc_current_tool": tool,
+        "doc_previous_menu": previous_menu,
+        "doc_files": list(previous.get("doc_tool_files") or []) if previous.get("doc_tool_current") == tool else [],
+        "doc_expected_type": config.get("expected") or "any",
         "doc_tool_user_id": str(user_id or ""),
         "created_at_ts": time.time(),
         "created_at": now_text(),
@@ -53749,6 +53733,20 @@ def set_doc_tool_pending(user_id, tool: str, **fields) -> dict:
     payload["doc_tool_file_count"] = len(payload.get("doc_tool_files") or [])
     USER_PENDING[doc_tool_pending_key(user_id)] = payload
     return payload
+
+def doc_tool_parent_action(state: dict | None = None, tool: str = "") -> str:
+    state = state or {}
+    current_tool = str(tool or state.get("doc_tool_current") or "")
+    previous = str(state.get("doc_previous_menu") or state.get("doc_tool_previous_step") or "")
+    if current_tool == "save_document" or previous == "main_memory":
+        return "main_memory"
+    return "main_docs"
+
+def doc_tool_parent_label(state: dict | None = None, tool: str = "", lang: str = "vi") -> str:
+    parent = doc_tool_parent_action(state, tool)
+    if normalize_user_language(lang) != "vi":
+        return "⬅️ Notes / Docs" if parent == "main_memory" else "⬅️ PDF / Word tools"
+    return "⬅️ Ghi chú / Tài liệu" if parent == "main_memory" else "⬅️ Công cụ PDF / Word"
 
 def doc_tool_config(tool: str) -> dict:
     return DOC_TOOL_CONFIG.get(str(tool or "")) or DOC_TOOL_CONFIG["save_document"]
@@ -53796,18 +53794,33 @@ def doc_tool_start_text(tool: str, lang: str = "vi") -> str:
         "Lưu ý: nên gửi từng file một để tránh lỗi."
     )
 
-def doc_tool_start_keyboard(tool: str, lang: str = "vi") -> InlineKeyboardMarkup:
+def doc_tool_start_keyboard(tool: str, lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     config = doc_tool_config(tool)
     expected = config.get("expected")
     is_vi = normalize_user_language(lang) == "vi"
     label = "➕ Tôi sẽ gửi ảnh" if expected == "image" else "📎 Tôi sẽ gửi PDF" if expected == "pdf" else "📎 Tôi sẽ gửi file"
     if not is_vi:
         label = "➕ I will send images" if expected == "image" else "📎 I will send PDF" if expected == "pdf" else "📎 I will send a file"
-    return build_2col_keyboard(
-        [(label, "docflow|send_more")],
-        nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "docflow|back"),
-        lang=lang,
-    )
+    if tool == "save_document":
+        rows = [
+            [
+                InlineKeyboardButton(label, callback_data="docflow|send_more"),
+                InlineKeyboardButton("💾 Dung lượng của tôi" if is_vi else "💾 My storage", callback_data="menu|memory_storage_status"),
+            ],
+            [
+                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ],
+        ]
+    else:
+        rows = [
+            [
+                InlineKeyboardButton(label, callback_data="docflow|send_more"),
+                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+            ],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ]
+    return InlineKeyboardMarkup(rows)
 
 def doc_tool_files_summary(files: list[dict], unit: str = "file") -> str:
     lines = []
@@ -53882,11 +53895,28 @@ def doc_tool_after_file_keyboard(state: dict, lang: str = "vi") -> InlineKeyboar
             ("📎 Gửi file khác", "docflow|reset_files"),
         ]
     elif tool == "save_document":
-        buttons = [
-            ("✅ Lưu tài liệu", "docflow|confirm"),
-            ("📎 Gửi file khác", "docflow|reset_files"),
-            ("💾 Dung lượng của tôi", "menu|memory_storage_status"),
-        ]
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Lưu tài liệu" if is_vi else "✅ Save document", callback_data="docflow|confirm"),
+                InlineKeyboardButton("📎 Gửi file khác" if is_vi else "📎 Send another file", callback_data="docflow|reset_files"),
+            ],
+            [
+                InlineKeyboardButton("💾 Dung lượng của tôi" if is_vi else "💾 My storage", callback_data="menu|memory_storage_status"),
+                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+            ],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    elif tool == "pdf_to_word":
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Chuyển sang Word" if is_vi else "✅ Convert to Word", callback_data="docflow|confirm"),
+                InlineKeyboardButton("📎 Gửi file khác" if is_vi else "📎 Send another file", callback_data="docflow|reset_files"),
+            ],
+            [
+                InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ],
+        ])
     else:
         buttons = [
             (f"✅ {config['verb']}", "docflow|confirm"),
@@ -53894,11 +53924,14 @@ def doc_tool_after_file_keyboard(state: dict, lang: str = "vi") -> InlineKeyboar
             ("↩️ Xóa ảnh cuối" if config.get("expected") == "image" else "↩️ Xóa file cuối", "docflow|pop"),
             ("🧹 Xóa tất cả", "docflow|clear"),
         ]
-    return build_2col_keyboard(
-        buttons,
-        nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "docflow|back"),
-        lang=lang,
-    )
+    rows = []
+    for idx in range(0, len(buttons), 2):
+        rows.append([InlineKeyboardButton(text, callback_data=callback) for text, callback in buttons[idx:idx + 2]])
+    rows.append([
+        InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
 
 def doc_tool_confirm_text(state: dict, lang: str = "vi") -> str:
     tool = str(state.get("doc_tool_current") or "")
@@ -53924,13 +53957,19 @@ def doc_tool_confirm_text(state: dict, lang: str = "vi") -> str:
     lines.extend(["", f"Bạn có muốn {config['verb'].lower()} không?"])
     return "\n".join(lines)
 
-def doc_tool_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def doc_tool_confirm_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    return build_2col_keyboard(
-        [("✅ Xác nhận xử lý" if is_vi else "✅ Confirm processing", "docflow|run")],
-        nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "docflow|back_received"),
-        lang=lang,
-    )
+    tool = str((state or {}).get("doc_tool_current") or "")
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Xác nhận xử lý" if is_vi else "✅ Confirm processing", callback_data="docflow|run"),
+            InlineKeyboardButton("📎 Gửi file khác" if is_vi else "📎 Send another file", callback_data="docflow|reset_files"),
+        ],
+        [
+            InlineKeyboardButton(doc_tool_parent_label(state, tool, lang), callback_data="docflow|back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
 
 def doc_tool_wrong_file_text(state: dict, info: dict, lang: str = "vi") -> str:
     expected = str(state.get("doc_tool_expected_type") or "any")
@@ -54297,12 +54336,13 @@ async def start_doc_tool_flow(query, user_id, tool: str, lang: str = "vi"):
     if tool not in DOC_TOOL_CONFIG:
         tool = "save_document"
     clear_doc_tool_pending(user_id)
-    set_doc_tool_pending(user_id, tool, doc_tool_previous_step="main_docs")
+    previous_menu = "main_memory" if tool == "save_document" else "main_docs"
+    state = set_doc_tool_pending(user_id, tool, doc_tool_previous_step=previous_menu)
     return await safe_edit_or_send(
         query,
         doc_tool_start_text(tool, lang),
         parse_mode="HTML",
-        reply_markup=doc_tool_start_keyboard(tool, lang),
+        reply_markup=doc_tool_start_keyboard(tool, lang, state),
     )
 
 async def doc_tool_send_received_message(message, state: dict, lang: str = "vi"):
@@ -54347,6 +54387,7 @@ async def handle_doc_tool_pending_upload(update: Update, context: ContextTypes.D
         files = []
     files.append(info)
     state["doc_tool_files"] = files
+    state["doc_files"] = list(files)
     state["doc_tool_file_count"] = len(files)
     state["created_at_ts"] = time.time()
     USER_PENDING[doc_tool_pending_key(uid)] = state
@@ -54372,7 +54413,7 @@ async def handle_doc_tool_pending_text(update: Update, context: ContextTypes.DEF
     await update.message.reply_text(
         doc_tool_confirm_text(state, get_user_language(uid) or "vi"),
         parse_mode="HTML",
-        reply_markup=doc_tool_confirm_keyboard(get_user_language(uid) or "vi"),
+        reply_markup=doc_tool_confirm_keyboard(get_user_language(uid) or "vi", state),
     )
     return True
 
@@ -54404,7 +54445,7 @@ async def run_doc_tool_state(message, context: ContextTypes.DEFAULT_TYPE, uid, s
                     parse_mode="HTML",
                     reply_markup=build_2col_keyboard(
                         [("📦 Mua thêm dung lượng", "menu|memory_storage_addon"), ("🧹 Dọn file cũ", "menu|memory_storage_cleanup")],
-                        nav_back=("⬅️ Quay lại", "docflow|back_received"),
+                        nav_back=(doc_tool_parent_label(state, tool, lang), "docflow|back"),
                         lang=lang,
                     ),
                 )
@@ -54470,9 +54511,14 @@ async def run_doc_tool_state(message, context: ContextTypes.DEFAULT_TYPE, uid, s
                 return
             save_tool_test_result(tool, "PASS", "Guided document flow completed", uid)
             clear_doc_tool_pending(uid)
+            parent_action = doc_tool_parent_action(state, tool)
             await message.reply_text(
                 "✅ Xử lý xong. TOAN AAS chưa trừ Xu.",
-                reply_markup=build_2col_keyboard([], nav_back=("⬅️ Ghi chú / Tài liệu", "menu|main_memory"), lang=lang),
+                reply_markup=build_2col_keyboard(
+                    [],
+                    nav_back=(doc_tool_parent_label(state, tool, lang), f"menu|{parent_action}"),
+                    lang=lang,
+                ),
             )
     except Exception as e:
         state["processing"] = False
@@ -54491,35 +54537,42 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
         clear_doc_tool_pending(uid)
         return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))
     if action == "back":
+        parent_action = doc_tool_parent_action(state)
+        clear_doc_tool_pending(uid)
+        if parent_action == "main_memory":
+            return await safe_edit_or_send(query, menu_text_main_memory_i18n(lang), parse_mode="HTML", reply_markup=main_memory_keyboard(lang))
         return await safe_edit_or_send(query, menu_text_main_docs_i18n(lang), parse_mode="HTML", reply_markup=main_docs_keyboard(lang))
     if not state:
         return await safe_edit_or_send(query, "⏰ Yêu cầu tài liệu đã hết hạn. TOAN AAS chưa xử lý file và chưa trừ Xu.", reply_markup=doc_tools_keyboard(lang))
     tool = str(state.get("doc_tool_current") or "save_document")
     if action == "send_more":
-        return await safe_edit_or_send(query, doc_tool_start_text(tool, lang), parse_mode="HTML", reply_markup=doc_tool_start_keyboard(tool, lang))
+        return await safe_edit_or_send(query, doc_tool_start_text(tool, lang), parse_mode="HTML", reply_markup=doc_tool_start_keyboard(tool, lang, state))
     if action == "reset_files":
         state["doc_tool_files"] = []
+        state["doc_files"] = []
         state["doc_tool_file_count"] = 0
         state["doc_tool_options"] = {}
         state["awaiting_page_spec"] = "0"
         USER_PENDING[doc_tool_pending_key(uid)] = state
-        return await safe_edit_or_send(query, doc_tool_start_text(tool, lang), parse_mode="HTML", reply_markup=doc_tool_start_keyboard(tool, lang))
+        return await safe_edit_or_send(query, doc_tool_start_text(tool, lang), parse_mode="HTML", reply_markup=doc_tool_start_keyboard(tool, lang, state))
     if action == "pop":
         files = list(state.get("doc_tool_files") or [])
         if files:
             files.pop()
         state["doc_tool_files"] = files
+        state["doc_files"] = list(files)
         state["doc_tool_file_count"] = len(files)
         USER_PENDING[doc_tool_pending_key(uid)] = state
         text = doc_tool_received_text(state, lang) if files else doc_tool_start_text(tool, lang)
-        keyboard = doc_tool_after_file_keyboard(state, lang) if files else doc_tool_start_keyboard(tool, lang)
+        keyboard = doc_tool_after_file_keyboard(state, lang) if files else doc_tool_start_keyboard(tool, lang, state)
         return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=keyboard)
     if action == "clear":
         state["doc_tool_files"] = []
+        state["doc_files"] = []
         state["doc_tool_file_count"] = 0
         state["doc_tool_options"] = {}
         USER_PENDING[doc_tool_pending_key(uid)] = state
-        return await safe_edit_or_send(query, "🧹 Đã xóa danh sách file tạm. TOAN AAS chưa xử lý và chưa trừ Xu.", reply_markup=doc_tool_start_keyboard(tool, lang))
+        return await safe_edit_or_send(query, "🧹 Đã xóa danh sách file tạm. TOAN AAS chưa xử lý và chưa trừ Xu.", reply_markup=doc_tool_start_keyboard(tool, lang, state))
     if action == "back_received":
         return await safe_edit_or_send(query, doc_tool_received_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_after_file_keyboard(state, lang))
     if action == "ask_pages":
@@ -54532,7 +54585,7 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
         options["compression_level"] = {"light": "Nén nhẹ", "medium": "Nén vừa", "strong": "Nén mạnh"}.get(level, "Nén vừa")
         state["doc_tool_options"] = options
         USER_PENDING[doc_tool_pending_key(uid)] = state
-        return await safe_edit_or_send(query, doc_tool_confirm_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_confirm_keyboard(lang))
+        return await safe_edit_or_send(query, doc_tool_confirm_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_confirm_keyboard(lang, state))
     if action == "confirm":
         config = doc_tool_config(tool)
         files = list(state.get("doc_tool_files") or [])
@@ -54544,12 +54597,12 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
             return await safe_edit_or_send(query, "✍️ Bạn hãy nhập khoảng trang cần tách.\n\nVí dụ: 1-3 hoặc 2-4,8,10-12.", reply_markup=doc_tool_after_file_keyboard(state, lang))
         if tool == "compress_pdf" and not (state.get("doc_tool_options") or {}).get("compression_level"):
             return await safe_edit_or_send(query, doc_tool_received_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_after_file_keyboard(state, lang))
-        return await safe_edit_or_send(query, doc_tool_confirm_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_confirm_keyboard(lang))
+        return await safe_edit_or_send(query, doc_tool_confirm_text(state, lang), parse_mode="HTML", reply_markup=doc_tool_confirm_keyboard(lang, state))
     if action == "run":
         if query.message:
             return await run_doc_tool_state(query.message, context, uid, state, lang)
         return None
-    return await safe_edit_or_send(query, doc_tool_start_text(tool, lang), parse_mode="HTML", reply_markup=doc_tool_start_keyboard(tool, lang))
+    return await safe_edit_or_send(query, doc_tool_start_text(tool, lang), parse_mode="HTML", reply_markup=doc_tool_start_keyboard(tool, lang, state))
 
 async def cmd_doc_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
