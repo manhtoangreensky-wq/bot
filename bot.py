@@ -36637,6 +36637,150 @@ def video_v6_suggestion_bank(key: str, lang: str = "vi") -> list[str]:
                 "Expectation versus reality hook",
                 "Quick tip carousel as video",
             ],
+            "long_sales": [
+                "Affiliate AI tools for complete beginners",
+                "Roadmap to selling a first digital product",
+                "Case study: build a TikTok Shop channel from zero",
+                "Review five tools that save sellers time",
+                "How freelancers can package a service offer",
+                "Landing-page conversion checklist",
+                "Lessons from a failed advertising campaign",
+                "Turn one small skill into side income",
+                "Compare three ways to earn with AI",
+                "Thirty-day content strategy for a small shop",
+            ],
+            "long_education": [
+                "Beginner guide to creating content with AI",
+                "Mini course on marketing prompts",
+                "Seven-day affiliate learning roadmap",
+                "No-code business automation explained",
+                "Plan a week of short videos",
+                "Build a personal CRM with notes",
+                "Translate and reuse content efficiently",
+                "Learn AI product-image design",
+                "Build a long video script from one small idea",
+                "Read basic campaign metrics",
+            ],
+            "long_story": [
+                "A beginner starts a first content channel",
+                "A small cafe finds customers online",
+                "Before and after a workday with automation",
+                "Overcoming procrastination to make a first sale",
+                "A founder learns brand storytelling",
+                "A difficult customer and the solution",
+                "A family opens a neighborhood cafe",
+                "A creator loses an old channel and rebuilds",
+                "Lessons after thirty days of consistent posting",
+                "An ordinary product becomes a meaningful gift",
+            ],
+            "idea_physical": [
+                "Turquoise mini blender",
+                "Smart desk lamp for a creator setup",
+                "Waterproof travel backpack",
+                "Minimal insulated bottle",
+                "Clean masculine perfume",
+                "Brightening skincare set",
+                "Affordable noise-cancelling headphones",
+                "Neck massager for office workers",
+                "Healthy insulated lunch box",
+                "Phone stand for filming content",
+            ],
+            "idea_service": [
+                "AI app for sales captions",
+                "Menu design service for cafes",
+                "Online English course",
+                "Landing-page service for small shops",
+                "Spa appointment management tool",
+                "TikTok channel consulting package",
+                "Product photo editing service",
+                "Notes and reminders app",
+                "Automated sales reporting service",
+                "Monthly short-video editing package",
+            ],
+            "idea_affiliate": [
+                "Affiliate AI tool for new creators",
+                "Beginner online-income course",
+                "Notion sales template pack",
+                "Affordable email marketing software",
+                "No-code landing-page builder",
+                "AI photo and video editing app",
+                "Basic advertising course",
+                "Sales prompt digital product",
+                "Affiliate link management tool",
+                "TikTok content resource pack",
+            ],
+            "image_video_style": [
+                "Clean product ad with hero reveal and practical demo",
+                "Emotional cinematic style with a slow push-in",
+                "Viral TikTok/Reels style with fast match cuts",
+                "Black-and-white luxury style with a gentle orbit",
+                "Natural lifestyle UGC with handheld motion",
+                "Clear before/after transformation",
+                "Future technology style with turquoise parallax",
+                "Friendly review video with stable phone-camera motion",
+                "3D-style product reveal with spotlight and dolly-in",
+                "Short tutorial with detail cutaways",
+            ],
+            "motion_place": [
+                "Minimal model apartment with daylight",
+                "New cafe with a strong check-in corner",
+                "Beach homestay for a weekend trip",
+                "Modern technology office for a small team",
+                "Premium furniture showroom walk-through",
+                "Rooftop restaurant at night",
+                "Quiet yoga studio with natural light",
+                "Clean and private spa interior",
+                "Fashion boutique on a walking street",
+                "Open kitchen of a newly launched restaurant",
+            ],
+            "motion_fashion": [
+                "Sun-protection jacket in a morning commute routine",
+                "Minimal office outfit for young professionals",
+                "Lifestyle sneakers on a city street at night",
+                "Luxury black-and-white handbag concept",
+                "Men's watch with edge-light product reveal",
+                "Sportswear for an outdoor workout",
+                "Eyewear in a fast outfit transition",
+                "Minimal jewelry with macro detail and orbit",
+                "Weekend travel outfit in a coastal city",
+                "Before-and-after styling for an important date",
+            ],
+            "motion_food": [
+                "Cold brew with slow pouring and melting ice",
+                "Crispy hot bread in a morning shop",
+                "Layered fruit tea for a TikTok reveal",
+                "Spicy noodles with steam and ingredient close-ups",
+                "Boutique pastry with a premium product reveal",
+                "Fast clean office lunch combo",
+                "Grilled dish from raw ingredients to final plate",
+                "Summer ice cream with macro texture",
+                "Healthy juice in a morning routine",
+                "Cafe menu launch featuring three signature drinks",
+            ],
+            "motion_education": [
+                "Beginner tutorial for AI sales videos",
+                "Three steps to plan one week of content",
+                "Write a hook that holds viewers for three seconds",
+                "Basic customer-service automation tutorial",
+                "Choose image and video ratios for each platform",
+                "Build a storyboard from one short idea",
+                "Film a product at home with a phone",
+                "Use voice and music without masking narration",
+                "Checklist before launching a video ad",
+                "Turn a long article into short-video episodes",
+            ],
+            "motion_story": [
+                "A solo founder before the first order",
+                "An old gift reconnects two generations",
+                "Someone regains confidence before an important day",
+                "A small store becomes a modern brand",
+                "A chaotic day becomes calmer with automation",
+                "A paper sketch becomes a real product",
+                "A neighborhood cafe finds its first online customer",
+                "Before and after a beginner starts making content",
+                "An ordinary product becomes a meaningful gift",
+                "A future city where technology saves people time",
+            ],
         }
         return bank.get(key, bank["prompt_ad"])
     bank = {
@@ -36846,7 +36990,8 @@ def set_developing_video_pending(user_id, flow: str, step: str, **fields) -> Non
             "idea_kind", "product", "message", "context", "platform", "trend_type",
             "genre", "scene_context", "idea_choice", "product_type", "source_file_id",
             "source_file_name", "source_mime_type", "prompt_kind", "custom_prompt",
-            "suggest_offset", "prompt_variant_offset", "selected_suggestion_index",
+            "suggest_offset", "prompt_variant_offset", "motion_offset", "music_offset",
+            "style_offset", "selected_suggestion_index",
         }:
             payload[key] = _short_pending_text(value)
     USER_PENDING[developing_video_pending_key(user_id)] = payload
@@ -37003,9 +37148,9 @@ def prompt_video_description_text(state: dict | None = None, lang: str = "vi") -
         "Ví dụ: máy xay sinh tố mini màu xanh ngọc trong căn bếp hiện đại, dành cho người bận rộn."
     )
 
-def prompt_video_description_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def prompt_video_description_keyboard(lang: str = "vi", back_callback: str = "promptvideo|back_start") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_start"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data=back_callback), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def prompt_video_suggestions(state: dict | None = None, lang: str = "vi") -> list[str]:
@@ -37086,42 +37231,137 @@ def prompt_video_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         back=("🔙 Quay lại" if is_vi else "🔙 Back", "promptvideo|back_description"),
     )
 
+def guided_video_motion_suggestions(state: dict | None = None, lang: str = "vi", from_image: bool = False) -> list[dict]:
+    state = state or {}
+    topic = _short_pending_text(state.get("selected_topic") or state.get("selected_style") or state.get("selected_prompt"), 160)
+    if not topic:
+        topic = "the uploaded image" if from_image and normalize_user_language(lang) != "vi" else ("ảnh đã gửi" if from_image else ("video subject" if normalize_user_language(lang) != "vi" else "chủ đề video"))
+    offset = _safe_int(state.get("motion_offset"), 0)
+    if normalize_user_language(lang) != "vi":
+        items = [
+            {"code": "pushin", "label": f"Slow push-in toward {topic}"},
+            {"code": "orbit", "label": f"Gentle orbit/parallax around {topic}"},
+            {"code": "fastcut", "label": f"Fast before/after cuts for {topic}"},
+            {"code": "macro", "label": f"Macro detail reveal then pull back to {topic}"},
+            {"code": "handheld", "label": f"Natural handheld walk-in with {topic}"},
+            {"code": "matchcut", "label": f"Match cut transition showing {topic} before and after"},
+            {"code": "dolly", "label": f"Smooth dolly-in with premium lighting for {topic}"},
+            {"code": "parallax", "label": f"Subtle 2.5D parallax layers around {topic}"},
+            {"code": "snapzoom", "label": f"TikTok snap zoom and quick caption beats for {topic}"},
+        ]
+    else:
+        items = [
+            {"code": "pushin", "label": f"Camera tiến chậm vào {topic}"},
+            {"code": "orbit", "label": f"Xoay nhẹ/parallax quanh {topic}"},
+            {"code": "fastcut", "label": f"Before/after nhanh cho {topic}"},
+            {"code": "macro", "label": f"Macro chi tiết rồi kéo ra toàn cảnh {topic}"},
+            {"code": "handheld", "label": f"Handheld tự nhiên tiến vào {topic}"},
+            {"code": "matchcut", "label": f"Match cut trước/sau để làm nổi bật {topic}"},
+            {"code": "dolly", "label": f"Dolly-in mượt với ánh sáng cao cấp cho {topic}"},
+            {"code": "parallax", "label": f"Parallax 2.5D nhẹ quanh {topic}"},
+            {"code": "snapzoom", "label": f"Snap zoom TikTok và nhịp caption nhanh cho {topic}"},
+        ]
+    rotated = video_v6_rotating_items([json.dumps(item, ensure_ascii=False) for item in items], offset, 3)
+    result = []
+    for raw in rotated:
+        try:
+            result.append(json.loads(raw))
+        except Exception:
+            result.append({"code": "pushin", "label": str(raw)})
+    return result
+
 def guided_video_motion_text(state: dict | None = None, lang: str = "vi", from_image: bool = False) -> str:
     prompt = _short_pending_text((state or {}).get("selected_prompt"), 240)
     title = "Bạn muốn ảnh chuyển động như thế nào?" if from_image else "Bạn muốn chuyển động video như thế nào?"
     if normalize_user_language(lang) != "vi":
         title = "How should the image move?" if from_image else "How should the video move?"
-    return f"🎥 <b>{title}</b>\n\nPrompt: <code>{html.escape(prompt)}</code>"
+    lines = [f"🎥 <b>{title}</b>", ""]
+    if prompt:
+        lines.append(f"Prompt: <code>{html.escape(prompt)}</code>")
+        lines.append("")
+    suggestions = guided_video_motion_suggestions(state, lang, from_image)
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
+    lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
+    return "\n".join(lines)
 
 def guided_video_motion_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        labels = ("1️⃣ Slow push-in", "2️⃣ Gentle orbit/parallax", "3️⃣ Fast before/after", "✍️ Custom motion")
-    else:
-        labels = ("1️⃣ Tiến chậm vào chủ thể", "2️⃣ Xoay nhẹ / parallax", "3️⃣ Before/after nhanh", "✍️ Nhập chuyển động riêng")
+    is_vi = normalize_user_language(lang) == "vi"
     back_action = "back_choices" if prefix == "promptvideo" else "back_style"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels[0], callback_data=f"{prefix}|motion|pushin"), InlineKeyboardButton(labels[1], callback_data=f"{prefix}|motion|orbit")],
-        [InlineKeyboardButton(labels[2], callback_data=f"{prefix}|motion|fastcut"), InlineKeyboardButton(labels[3], callback_data=f"{prefix}|motion_custom")],
-        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data=f"{prefix}|{back_action}"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn chuyển động 1" if is_vi else "1️⃣ Choose motion 1", f"{prefix}|motion_choice|1"),
+            ("2️⃣ Chọn chuyển động 2" if is_vi else "2️⃣ Choose motion 2", f"{prefix}|motion_choice|2"),
+            ("3️⃣ Chọn chuyển động 3" if is_vi else "3️⃣ Choose motion 3", f"{prefix}|motion_choice|3"),
+            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More motions", f"{prefix}|motion_refresh"),
+            ("✍️ Nhập chuyển động riêng" if is_vi else "✍️ Custom motion", f"{prefix}|motion_custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", f"{prefix}|{back_action}"),
+    )
 
 def guided_video_music_text(state: dict | None = None, lang: str = "vi") -> str:
     motion = self_scene_style_label((state or {}).get("selected_motion"), lang)
+    suggestions = guided_video_music_suggestions(state, lang)
     if normalize_user_language(lang) != "vi":
-        return f"🎵 <b>Choose music/voice direction</b>\n\nMotion: <code>{html.escape(motion)}</code>\nThis step only plans the soundtrack."
-    return f"🎵 <b>Bạn muốn nhạc/voice theo phong cách nào?</b>\n\nChuyển động: <code>{html.escape(motion)}</code>\nBước này chỉ lập kế hoạch âm thanh."
+        lines = ["🎵 <b>Choose music/voice direction</b>", "", f"Motion: <code>{html.escape(motion)}</code>", ""]
+    else:
+        lines = ["🎵 <b>Bạn muốn nhạc/voice theo phong cách nào?</b>", "", f"Chuyển động: <code>{html.escape(motion)}</code>", ""]
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
+    lines.extend(["", "This step only plans the soundtrack." if normalize_user_language(lang) != "vi" else "Bước này chỉ lập kế hoạch âm thanh."])
+    return "\n".join(lines)
+
+def guided_video_music_suggestions(state: dict | None = None, lang: str = "vi") -> list[dict]:
+    state = state or {}
+    motion = self_scene_style_label(state.get("selected_motion"), lang)
+    offset = _safe_int(state.get("music_offset"), 0)
+    if normalize_user_language(lang) != "vi":
+        items = [
+            {"code": "cinematic", "label": f"Powerful cinematic rise matching {motion}"},
+            {"code": "tech", "label": f"Clean technology/future pulse under {motion}"},
+            {"code": "viral", "label": f"Fast viral beat with short whoosh hits"},
+            {"code": "piano", "label": f"Soft piano and warm emotional pad"},
+            {"code": "luxury", "label": f"Ambient luxury texture, slow and premium"},
+            {"code": "ugc", "label": f"Natural UGC voice-first background"},
+            {"code": "corporate", "label": f"Light corporate bed for clear narration"},
+            {"code": "suspense", "label": f"Subtle build-up for before/after reveal"},
+            {"code": "none", "label": "No music, keep only clean voice/SFX"},
+        ]
+    else:
+        items = [
+            {"code": "cinematic", "label": f"Cinematic tăng dần, hợp chuyển động {motion}"},
+            {"code": "tech", "label": f"Nhịp công nghệ/tương lai sạch dưới chuyển động {motion}"},
+            {"code": "viral", "label": "Beat viral nhanh với whoosh ngắn"},
+            {"code": "piano", "label": "Piano nhẹ và pad cảm xúc ấm"},
+            {"code": "luxury", "label": "Ambient luxury chậm, cao cấp"},
+            {"code": "ugc", "label": "Nền UGC tự nhiên, ưu tiên voice rõ"},
+            {"code": "corporate", "label": "Nhạc corporate nhẹ để lời đọc rõ"},
+            {"code": "suspense", "label": "Nhạc build-up nhẹ cho before/after reveal"},
+            {"code": "none", "label": "Không nhạc, chỉ giữ voice/SFX sạch"},
+        ]
+    rotated = video_v6_rotating_items([json.dumps(item, ensure_ascii=False) for item in items], offset, 3)
+    result = []
+    for raw in rotated:
+        try:
+            result.append(json.loads(raw))
+        except Exception:
+            result.append({"code": "cinematic", "label": str(raw)})
+    return result
 
 def guided_video_music_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        labels = ("1️⃣ Powerful cinematic", "2️⃣ Technology/future", "3️⃣ Fast viral", "⏭ No music", "✍️ Custom")
-    else:
-        labels = ("1️⃣ Điện ảnh mạnh mẽ", "2️⃣ Công nghệ/tương lai", "3️⃣ Viral TikTok nhanh", "⏭ Không nhạc", "✍️ Nhập riêng")
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels[0], callback_data=f"{prefix}|music|cinematic"), InlineKeyboardButton(labels[1], callback_data=f"{prefix}|music|tech")],
-        [InlineKeyboardButton(labels[2], callback_data=f"{prefix}|music|viral"), InlineKeyboardButton(labels[3], callback_data=f"{prefix}|music|none")],
-        [InlineKeyboardButton(labels[4], callback_data=f"{prefix}|music_custom")],
-        [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data=f"{prefix}|back_motion"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn nhạc/voice 1" if is_vi else "1️⃣ Choose music 1", f"{prefix}|music_choice|1"),
+            ("2️⃣ Chọn nhạc/voice 2" if is_vi else "2️⃣ Choose music 2", f"{prefix}|music_choice|2"),
+            ("3️⃣ Chọn nhạc/voice 3" if is_vi else "3️⃣ Choose music 3", f"{prefix}|music_choice|3"),
+            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More music ideas", f"{prefix}|music_refresh"),
+            ("✍️ Nhập riêng" if is_vi else "✍️ Custom", f"{prefix}|music_custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", f"{prefix}|back_motion"),
+    )
 
 def guided_video_plan_text(state: dict | None = None, lang: str = "vi", from_image: bool = False) -> str:
     state = state or {}
@@ -37275,6 +37515,12 @@ def self_scene_style_label(style: str, lang: str = "vi") -> str:
             "pushin": "slow push-in",
             "orbit": "gentle orbit",
             "fastcut": "fast viral cuts",
+            "macro": "macro detail reveal",
+            "handheld": "natural handheld walk-in",
+            "matchcut": "before/after match cut",
+            "dolly": "smooth dolly-in",
+            "parallax": "2.5D parallax",
+            "snapzoom": "TikTok snap zoom",
         }
         return labels.get(code, str(style or "custom style"))
     labels = {
@@ -37284,6 +37530,12 @@ def self_scene_style_label(style: str, lang: str = "vi") -> str:
         "pushin": "máy quay tiến chậm vào chủ thể",
         "orbit": "máy quay xoay nhẹ quanh người/sản phẩm",
         "fastcut": "chuyển cảnh nhanh kiểu viral",
+        "macro": "macro chi tiết rồi reveal toàn cảnh",
+        "handheld": "handheld tự nhiên tiến vào chủ thể",
+        "matchcut": "match cut before/after",
+        "dolly": "dolly-in mượt",
+        "parallax": "parallax 2.5D nhẹ",
+        "snapzoom": "snap zoom TikTok",
     }
     return labels.get(code, str(style or "phong cách riêng"))
 
@@ -37310,6 +37562,11 @@ def self_scene_music_label(music: str, lang: str = "vi") -> str:
             "cinematic": "powerful cinematic",
             "tech": "technology / future",
             "viral": "fast TikTok viral",
+            "piano": "soft piano emotional",
+            "luxury": "ambient luxury",
+            "ugc": "UGC voice-first background",
+            "corporate": "light corporate bed",
+            "suspense": "subtle before/after build-up",
             "none": "no music",
         }
         return labels.get(code, str(music or "custom music"))
@@ -37317,9 +37574,48 @@ def self_scene_music_label(music: str, lang: str = "vi") -> str:
         "cinematic": "điện ảnh mạnh mẽ",
         "tech": "công nghệ / tương lai",
         "viral": "viral TikTok nhanh",
+        "piano": "piano cảm xúc nhẹ",
+        "luxury": "ambient luxury",
+        "ugc": "nền UGC ưu tiên voice",
+        "corporate": "corporate nhẹ",
+        "suspense": "build-up before/after nhẹ",
         "none": "không nhạc",
     }
     return labels.get(code, str(music or "nhạc riêng"))
+
+def self_scene_direction_suggestions(offset: int = 0, lang: str = "vi") -> list[dict]:
+    if normalize_user_language(lang) != "vi":
+        items = [
+            {"code": "context", "label": "Change the background into a clean premium scene"},
+            {"code": "cinematic", "label": "Keep the subject and make the video cinematic"},
+            {"code": "ad", "label": "Turn it into a TikTok/Reels product ad"},
+            {"code": "context", "label": "Move the subject into a futuristic technology space"},
+            {"code": "cinematic", "label": "Create an emotional before/after transformation"},
+            {"code": "ad", "label": "Make a fast UGC demo with clear benefits"},
+            {"code": "context", "label": "Place the subject in a luxury lifestyle setting"},
+            {"code": "cinematic", "label": "Build a slow brand-story reveal around the subject"},
+            {"code": "ad", "label": "Create a direct marketplace hook/demo/CTA video"},
+        ]
+    else:
+        items = [
+            {"code": "context", "label": "Đổi nền thành bối cảnh premium sạch"},
+            {"code": "cinematic", "label": "Giữ chủ thể và biến video thành cinematic"},
+            {"code": "ad", "label": "Biến thành quảng cáo TikTok/Reels cho sản phẩm"},
+            {"code": "context", "label": "Đưa chủ thể vào không gian công nghệ tương lai"},
+            {"code": "cinematic", "label": "Tạo before/after chuyển đổi cảm xúc"},
+            {"code": "ad", "label": "Làm demo UGC nhanh, rõ lợi ích"},
+            {"code": "context", "label": "Đặt chủ thể trong lifestyle luxury"},
+            {"code": "cinematic", "label": "Dựng brand-story reveal chậm quanh chủ thể"},
+            {"code": "ad", "label": "Tạo hook/demo/CTA bán hàng trực diện"},
+        ]
+    rotated = video_v6_rotating_items([json.dumps(item, ensure_ascii=False) for item in items], offset, 3)
+    result = []
+    for raw in rotated:
+        try:
+            result.append(json.loads(raw))
+        except Exception:
+            result.append({"code": "context", "label": str(raw)})
+    return result
 
 def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str = "vi", offset: int = 0) -> list[str]:
     topic = _short_pending_text(topic, 160) or ("subject" if normalize_user_language(lang) != "vi" else "đối tượng")
@@ -37333,6 +37629,9 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
                 f"Luxury office launch scene for {topic}",
                 f"Clean studio portrait scene for {topic}",
                 f"Rainy city lifestyle scene for {topic}",
+                f"Creator desk scene with soft monitor light for {topic}",
+                f"Premium hotel lobby reveal for {topic}",
+                f"Morning routine scene with natural window light for {topic}",
             ],
             "product": [
                 f"Luxury showroom product reveal for {topic}",
@@ -37341,6 +37640,9 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
                 f"Bright e-commerce studio setup for {topic}",
                 f"Outdoor morning routine scene for {topic}",
                 f"Futuristic retail display for {topic}",
+                f"Macro tabletop ad scene with premium shadows for {topic}",
+                f"Before/after problem-solution setup for {topic}",
+                f"Creator unboxing desk scene for {topic}",
             ],
             "pet": [
                 f"Fantasy garden scene for {topic}",
@@ -37349,6 +37651,9 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
                 f"Cozy home scene with warm daylight for {topic}",
                 f"Playful product commercial scene for {topic}",
                 f"Clean veterinary care scene for {topic}",
+                f"Outdoor golden-hour walk scene for {topic}",
+                f"Minimal pet-care product scene for {topic}",
+                f"Wholesome family living-room scene for {topic}",
             ],
         }
         return video_v6_rotating_items(catalog.get(code, [
@@ -37358,6 +37663,9 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
             f"Luxury studio scene for {topic}",
             f"Outdoor creator scene for {topic}",
             f"Minimal product demo scene for {topic}",
+            f"Before/after transformation scene for {topic}",
+            f"Clean social ad scene for {topic}",
+            f"Future-tech launch scene for {topic}",
         ]), offset, 3)
     catalog = {
         "person": [
@@ -37367,6 +37675,9 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
             f"Văn phòng luxury khi ra mắt dự án mới, nhân vật {topic}",
             f"Studio chân dung sạch, ánh sáng mềm, nhân vật {topic}",
             f"Thành phố mưa đêm lifestyle, giữ nhân vật {topic} tự nhiên",
+            f"Góc creator với ánh sáng màn hình mềm, nhân vật {topic}",
+            f"Sảnh khách sạn premium, reveal nhân vật {topic}",
+            f"Routine buổi sáng với ánh sáng cửa sổ tự nhiên cho {topic}",
         ],
         "product": [
             f"Luxury showroom, spotlight cao cấp cho {topic}",
@@ -37375,6 +37686,9 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
             f"Studio e-commerce nền sáng, {topic} nổi rõ chi tiết",
             f"Routine buổi sáng ngoài trời, {topic} xuất hiện tự nhiên",
             f"Kệ trưng bày tương lai, ánh sáng xanh ngọc cho {topic}",
+            f"Macro tabletop với bóng đổ premium cho {topic}",
+            f"Setup before/after vấn đề → giải pháp cho {topic}",
+            f"Góc unboxing của creator dành cho {topic}",
         ],
         "pet": [
             f"Khu vườn fantasy, ánh sáng mềm, giữ biểu cảm thú cưng {topic}",
@@ -37383,6 +37697,9 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
             f"Nhà ấm áp ánh sáng ban ngày, giữ biểu cảm {topic}",
             f"Cảnh vui nhộn quảng cáo pet product với {topic}",
             f"Phòng chăm sóc thú cưng sạch, cảm giác an toàn cho {topic}",
+            f"Dạo ngoài trời golden hour, giữ chuyển động tự nhiên của {topic}",
+            f"Cảnh pet-care tối giản, sạch, tập trung vào {topic}",
+            f"Phòng khách gia đình ấm áp với {topic}",
         ],
     }
     return video_v6_rotating_items(catalog.get(code, [
@@ -37392,30 +37709,47 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
         f"Studio luxury nền tối, spotlight cho {topic}",
         f"Bối cảnh creator quay video tại nhà cho {topic}",
         f"Cảnh demo sản phẩm tối giản, dễ dựng quảng cáo cho {topic}",
+        f"Cảnh before/after chuyển đổi rõ cho {topic}",
+        f"Cảnh social ad nền sạch, dễ thêm caption cho {topic}",
+        f"Cảnh ra mắt công nghệ tương lai cho {topic}",
     ]), offset, 3)
 
-def self_scene_start_text(lang: str = "vi") -> str:
+def self_scene_start_text(lang: str = "vi", state: dict | None = None) -> str:
+    suggestions = self_scene_direction_suggestions(_safe_int((state or {}).get("style_offset"), 0), lang)
     if normalize_user_language(lang) != "vi":
-        return (
+        lines = [
             "🎥 <b>Self-shot scene AI</b>\n\n"
             "How do you want to transform this video?\n\n"
             "TOAN AAS will guide you step by step: direction → subject to preserve → new scene → camera motion → music/sound.\n\n"
-            "Planning only. No image/video provider call and no Xu deducted."
-        )
-    return (
-        "🎥 <b>Tự quay & đổi cảnh AI</b>\n\n"
-        "Bạn muốn đổi video này theo hướng nào?\n\n"
-        "TOAN AAS sẽ hỏi từng bước: hướng đổi video → đối tượng cần giữ → bối cảnh mới → chuyển động camera → nhạc/âm thanh.\n\n"
-        "Bước này chỉ tạo prompt/kế hoạch. Bot chưa gọi API ảnh/video và chưa trừ Xu."
-    )
+            "Three suggested directions:",
+        ]
+        for idx, item in enumerate(suggestions, 1):
+            lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
+        lines.extend(["", "Planning only. No image/video provider call and no Xu deducted."])
+        return "\n".join(lines)
+    lines = [
+        "🎥 <b>Tự quay & đổi cảnh AI</b>",
+        "",
+        "Bạn muốn đổi video này theo hướng nào?",
+        "",
+        "TOAN AAS sẽ hỏi từng bước: hướng đổi video → đối tượng cần giữ → bối cảnh mới → chuyển động camera → nhạc/âm thanh.",
+        "",
+        "3 gợi ý hướng đổi video:",
+    ]
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
+    lines.extend(["", "Bước này chỉ tạo prompt/kế hoạch. Bot chưa gọi API ảnh/video và chưa trừ Xu."])
+    return "\n".join(lines)
 
-def self_scene_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def self_scene_input_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    suggestions = self_scene_direction_suggestions(_safe_int((state or {}).get("style_offset"), 0), lang)
     return video_v6_keyboard(
         [
-            ("1️⃣ Đổi bối cảnh" if is_vi else "1️⃣ Change surrounding scene", "selfscene|direction|context"),
-            ("2️⃣ Phong cách điện ảnh" if is_vi else "2️⃣ Cinematic style", "selfscene|direction|cinematic"),
-            ("3️⃣ Quảng cáo/TikTok" if is_vi else "3️⃣ Ad/TikTok video", "selfscene|direction|ad"),
+            ("1️⃣ Chọn hướng 1" if is_vi else "1️⃣ Choose direction 1", "selfscene|direction_choice|1"),
+            ("2️⃣ Chọn hướng 2" if is_vi else "2️⃣ Choose direction 2", "selfscene|direction_choice|2"),
+            ("3️⃣ Chọn hướng 3" if is_vi else "3️⃣ Choose direction 3", "selfscene|direction_choice|3"),
+            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More directions", "selfscene|direction_refresh"),
             ("✍️ Nhập hướng riêng" if is_vi else "✍️ Custom direction", "selfscene|direction_custom"),
         ],
         lang,
@@ -37504,23 +37838,24 @@ def self_scene_context_custom_text(lang: str = "vi") -> str:
 
 def self_scene_style_text(state: dict, lang: str = "vi") -> str:
     context_text = state.get("selected_context") or ""
+    suggestions = guided_video_motion_suggestions({**(state or {}), "selected_topic": context_text}, lang)
     if normalize_user_language(lang) != "vi":
-        return (
-            "🎥 <b>Choose camera motion</b>\n\n"
-            f"Selected scene: <code>{html.escape(context_text)}</code>"
-        )
-    return (
-        "🎥 <b>Bạn muốn chuyển động video như thế nào?</b>\n\n"
-        f"Bối cảnh đã chọn: <code>{html.escape(context_text)}</code>"
-    )
+        lines = ["🎥 <b>Choose camera motion</b>", "", f"Selected scene: <code>{html.escape(context_text)}</code>", ""]
+    else:
+        lines = ["🎥 <b>Bạn muốn chuyển động video như thế nào?</b>", "", f"Bối cảnh đã chọn: <code>{html.escape(context_text)}</code>", ""]
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
+    lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
+    return "\n".join(lines)
 
 def self_scene_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
         [
-            ("1️⃣ Tiến chậm" if is_vi else "1️⃣ Slow push-in", "selfscene|style|pushin"),
-            ("2️⃣ Xoay nhẹ" if is_vi else "2️⃣ Gentle orbit", "selfscene|style|orbit"),
-            ("3️⃣ Chuyển cảnh nhanh" if is_vi else "3️⃣ Fast viral cuts", "selfscene|style|fastcut"),
+            ("1️⃣ Chọn chuyển động 1" if is_vi else "1️⃣ Choose motion 1", "selfscene|style_choice|1"),
+            ("2️⃣ Chọn chuyển động 2" if is_vi else "2️⃣ Choose motion 2", "selfscene|style_choice|2"),
+            ("3️⃣ Chọn chuyển động 3" if is_vi else "3️⃣ Choose motion 3", "selfscene|style_choice|3"),
+            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More motions", "selfscene|style_refresh"),
             ("✍️ Nhập chuyển động riêng" if is_vi else "✍️ Custom motion", "selfscene|style_custom"),
         ],
         lang,
@@ -37534,26 +37869,24 @@ def self_scene_style_custom_text(lang: str = "vi") -> str:
 
 def self_scene_music_text(state: dict, lang: str = "vi") -> str:
     motion = self_scene_style_label(state.get("selected_motion") or state.get("selected_style"), lang)
+    suggestions = guided_video_music_suggestions(state, lang)
     if normalize_user_language(lang) != "vi":
-        return (
-            "🎵 <b>Choose music/sound direction</b>\n\n"
-            f"Camera motion: <code>{html.escape(motion)}</code>\n\n"
-            "This step only suggests music style. It does not generate music."
-        )
-    return (
-        "🎵 <b>Bạn muốn nhạc/âm thanh theo phong cách nào?</b>\n\n"
-        f"Chuyển động đã chọn: <code>{html.escape(motion)}</code>\n\n"
-        "Bước này chỉ gợi ý nhạc, chưa tạo nhạc thật và chưa trừ Xu."
-    )
+        lines = ["🎵 <b>Choose music/sound direction</b>", "", f"Camera motion: <code>{html.escape(motion)}</code>", ""]
+    else:
+        lines = ["🎵 <b>Bạn muốn nhạc/âm thanh theo phong cách nào?</b>", "", f"Chuyển động đã chọn: <code>{html.escape(motion)}</code>", ""]
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
+    lines.extend(["", "This step only suggests music style. It does not generate music." if normalize_user_language(lang) != "vi" else "Bước này chỉ gợi ý nhạc, chưa tạo nhạc thật và chưa trừ Xu."])
+    return "\n".join(lines)
 
 def self_scene_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
         [
-            ("1️⃣ Điện ảnh" if is_vi else "1️⃣ Cinematic", "selfscene|music|cinematic"),
-            ("2️⃣ Công nghệ" if is_vi else "2️⃣ Technology / future", "selfscene|music|tech"),
-            ("3️⃣ Viral/TikTok" if is_vi else "3️⃣ Viral/TikTok", "selfscene|music|viral"),
-            ("⏭ Không nhạc" if is_vi else "⏭ No music", "selfscene|music|none"),
+            ("1️⃣ Chọn nhạc/voice 1" if is_vi else "1️⃣ Choose music 1", "selfscene|music_choice|1"),
+            ("2️⃣ Chọn nhạc/voice 2" if is_vi else "2️⃣ Choose music 2", "selfscene|music_choice|2"),
+            ("3️⃣ Chọn nhạc/voice 3" if is_vi else "3️⃣ Choose music 3", "selfscene|music_choice|3"),
+            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More music ideas", "selfscene|music_refresh"),
             ("✍️ Nhập riêng" if is_vi else "✍️ Custom music", "selfscene|music_custom"),
         ],
         lang,
@@ -37947,7 +38280,7 @@ def long_video_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save roadmap", "longvideo|save"),
         ],
         lang,
-        back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
+        back=("🔙 Quay lại cấu trúc" if is_vi else "🔙 Back to structure", "longvideo|back_structure"),
     )
 
 def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -> str:
@@ -38248,6 +38581,69 @@ def video_idea_topic_text(kind: str, lang: str = "vi") -> str:
     }
     return prompts.get(kind, prompts["custom"]) + "\n\nBot chưa gọi nhà cung cấp AI và chưa trừ Xu."
 
+def video_idea_cinema_suggestions(offset: int = 0, lang: str = "vi") -> list[str]:
+    if normalize_user_language(lang) != "vi":
+        bank = [
+            "A character changes their life after one quiet decision",
+            "A future world where one tool saves human time",
+            "A small brand becomes meaningful through a customer story",
+            "A memory object connects two generations",
+            "A founder works alone before the first breakthrough",
+            "A product turns chaos into a calm daily ritual",
+            "A city night luxury reveal with a subtle emotional turn",
+            "A before/after story told with cinematic match cuts",
+            "A cafe or small shop finds its first loyal community",
+        ]
+    else:
+        bank = [
+            "Nhân vật thay đổi cuộc đời sau một quyết định nhỏ",
+            "Thế giới tương lai nơi một công cụ giúp con người tiết kiệm thời gian",
+            "Câu chuyện thương hiệu nhỏ trở nên có ý nghĩa qua một khách hàng",
+            "Một món đồ ký ức nối hai thế hệ",
+            "Founder làm việc một mình trước bước ngoặt đầu tiên",
+            "Sản phẩm biến sự lộn xộn thành routine bình yên",
+            "Product reveal luxury trong thành phố về đêm với cảm xúc nhẹ",
+            "Câu chuyện before/after bằng match cut điện ảnh",
+            "Quán cafe hoặc shop nhỏ tìm được cộng đồng khách trung thành",
+        ]
+    return video_v6_rotating_items(bank, offset, 3)
+
+def video_idea_cinema_suggestions_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    suggestions = video_idea_cinema_suggestions(_safe_int(state.get("suggest_offset"), 0), lang)
+    if normalize_user_language(lang) != "vi":
+        lines = [
+            "🎬 <b>Cinematic / story idea</b>",
+            "",
+            "Which story direction do you want?",
+            "",
+        ]
+    else:
+        lines = [
+            "🎬 <b>Ý tưởng điện ảnh / kể chuyện</b>",
+            "",
+            "Bạn muốn kể câu chuyện điện ảnh theo hướng nào?",
+            "",
+        ]
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(item)}")
+    lines.append("")
+    lines.append(ui_text(lang, "common.no_api_no_charge"))
+    return "\n".join(lines)
+
+def video_idea_cinema_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn hướng 1" if is_vi else "1️⃣ Choose direction 1", "videoidea|cinema_choice|1"),
+            ("2️⃣ Chọn hướng 2" if is_vi else "2️⃣ Choose direction 2", "videoidea|cinema_choice|2"),
+            ("3️⃣ Chọn hướng 3" if is_vi else "3️⃣ Choose direction 3", "videoidea|cinema_choice|3"),
+            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More ideas", "videoidea|cinema_refresh"),
+            ("✍️ Nhập chủ đề riêng" if is_vi else "✍️ Custom topic", "videoidea|cinema_custom"),
+        ],
+        lang,
+        back=("⬅️ Quay lại Ý tưởng video" if is_vi else "⬅️ Back to video ideas", "videoidea|start"),
+    )
 
 def video_idea_platform_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_v6_keyboard(
@@ -38672,11 +39068,11 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
                 )
                 return True
             if kind == "cinema":
-                set_developing_video_pending(uid, "videoidea", "genre", idea_kind=kind, selected_topic=text)
-                await update.message.reply_text(
-                    "🎭 Bạn muốn thể loại kể chuyện nào?" if normalize_user_language(lang) == "vi" else "🎭 Which story genre do you want?",
-                    reply_markup=video_idea_genre_keyboard(lang),
-                )
+                state = dict(pending)
+                state.update({"selected_topic": text, "product": text, "context": "điện ảnh/kể chuyện" if normalize_user_language(lang) == "vi" else "cinematic/story", "prompt_variant_offset": 0})
+                clear_developing_video_pending(uid)
+                plan = save_developing_video_plan(uid, "videoidea", state)
+                await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
                 return True
             state = dict(pending)
             state["selected_topic"] = text
@@ -38684,6 +39080,13 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             clear_developing_video_pending(uid)
             plan = save_developing_video_plan(uid, "videoidea", state)
             await safe_reply_long_html(update.message, video_idea_result_text(plan, 1, lang), reply_markup=video_idea_result_keyboard(lang))
+            return True
+        if step == "cinema_custom":
+            state = dict(pending)
+            state.update({"idea_kind": "cinema", "selected_topic": text, "product": text, "context": "điện ảnh/kể chuyện" if normalize_user_language(lang) == "vi" else "cinematic/story", "prompt_variant_offset": 0})
+            clear_developing_video_pending(uid)
+            plan = save_developing_video_plan(uid, "videoidea", state)
+            await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
             return True
         if step == "goal_custom":
             set_developing_video_pending(uid, "videoidea", "context", goal=text)
@@ -38772,7 +39175,7 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
         if not state.get("prompt_kind"):
             return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
         restore_developing_video_pending(uid, "promptvideo", state, "describe")
-        return await safe_edit_or_send(query, prompt_video_description_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_description_keyboard(lang))
+        return await safe_edit_or_send(query, prompt_video_description_text(state, lang), parse_mode="HTML", reply_markup=prompt_video_description_keyboard(lang, "promptvideo|back_description"))
     if action == "topic_choice":
         if not state.get("prompt_kind"):
             return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
@@ -38827,10 +39230,27 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_motion"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
-    if action == "motion":
+    if action == "motion_refresh":
         if not state.get("selected_prompt"):
             return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
-        set_developing_video_pending(uid, "promptvideo", "music", selected_motion=value or "pushin")
+        offset = _safe_int(state.get("motion_offset"), 0) + 3
+        restore_developing_video_pending(uid, "promptvideo", state, "motion")
+        set_developing_video_pending(uid, "promptvideo", "motion", motion_offset=offset)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, guided_video_motion_text(current, lang), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("promptvideo", lang))
+    if action in {"motion", "motion_choice"}:
+        if not state.get("selected_prompt"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        selected_motion = value or "pushin"
+        if action == "motion_choice":
+            try:
+                idx = max(1, min(3, int(value or "1")))
+            except Exception:
+                idx = 1
+            options = guided_video_motion_suggestions(state, lang)
+            selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
+            selected_motion = selected.get("code") or selected.get("label") or "pushin"
+        set_developing_video_pending(uid, "promptvideo", "music", selected_motion=selected_motion)
         current = get_developing_video_pending(uid) or {}
         return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("promptvideo", lang))
     if action == "back_motion":
@@ -38842,11 +39262,28 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
-    if action == "music":
+    if action == "music_refresh":
         if not state.get("selected_prompt"):
             return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        offset = _safe_int(state.get("music_offset"), 0) + 3
+        restore_developing_video_pending(uid, "promptvideo", state, "music")
+        set_developing_video_pending(uid, "promptvideo", "music", music_offset=offset)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("promptvideo", lang))
+    if action in {"music", "music_choice"}:
+        if not state.get("selected_prompt"):
+            return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        selected_music = value or "none"
+        if action == "music_choice":
+            try:
+                idx = max(1, min(3, int(value or "1")))
+            except Exception:
+                idx = 1
+            options = guided_video_music_suggestions(state, lang)
+            selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
+            selected_music = selected.get("code") or selected.get("label") or "none"
         state = dict(state)
-        state["selected_music"] = value or "none"
+        state["selected_music"] = selected_music
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "promptvideo", state)
         return await safe_edit_or_send(query, guided_video_plan_text(plan, lang), parse_mode="HTML", reply_markup=guided_video_result_keyboard("promptvideo", lang))
@@ -38945,10 +39382,27 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
         return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_motion"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
-    if action == "motion":
+    if action == "motion_refresh":
         if not state.get("source_file_id"):
             return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
-        set_developing_video_pending(uid, "imagevideo", "music", selected_motion=value or "pushin")
+        offset = _safe_int(state.get("motion_offset"), 0) + 3
+        restore_developing_video_pending(uid, "imagevideo", state, "motion")
+        set_developing_video_pending(uid, "imagevideo", "motion", motion_offset=offset)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, guided_video_motion_text(current, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("imagevideo", lang))
+    if action in {"motion", "motion_choice"}:
+        if not state.get("source_file_id"):
+            return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
+        selected_motion = value or "pushin"
+        if action == "motion_choice":
+            try:
+                idx = max(1, min(3, int(value or "1")))
+            except Exception:
+                idx = 1
+            options = guided_video_motion_suggestions(state, lang, from_image=True)
+            selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
+            selected_motion = selected.get("code") or selected.get("label") or "pushin"
+        set_developing_video_pending(uid, "imagevideo", "music", selected_motion=selected_motion)
         current = get_developing_video_pending(uid) or {}
         return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("imagevideo", lang))
     if action == "back_motion":
@@ -38960,9 +39414,26 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
         return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
-    if action == "music":
+    if action == "music_refresh":
+        if not state.get("source_file_id"):
+            return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
+        offset = _safe_int(state.get("music_offset"), 0) + 3
+        restore_developing_video_pending(uid, "imagevideo", state, "music")
+        set_developing_video_pending(uid, "imagevideo", "music", music_offset=offset)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("imagevideo", lang))
+    if action in {"music", "music_choice"}:
+        selected_music = value or "none"
+        if action == "music_choice":
+            try:
+                idx = max(1, min(3, int(value or "1")))
+            except Exception:
+                idx = 1
+            options = guided_video_music_suggestions(state, lang)
+            selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
+            selected_music = selected.get("code") or selected.get("label") or "none"
         state = dict(state)
-        state["selected_music"] = value or "none"
+        state["selected_music"] = selected_music
         state["selected_prompt"] = image_video_prompt_from_state(state, lang)
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "imagevideo", state)
@@ -38996,6 +39467,24 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
     if action == "start":
         clear_developing_video_pending(uid)
         return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+    if action == "direction_refresh":
+        current = get_developing_video_pending(uid) or {}
+        offset = _safe_int(current.get("style_offset"), 0) + 3
+        set_developing_video_pending(uid, "selfscene", "direction", style_offset=offset)
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_query_message(query, self_scene_start_text(lang, state), reply_markup=self_scene_input_keyboard(lang, state))
+    if action == "direction_choice":
+        state = get_developing_video_pending(uid) or {}
+        try:
+            idx = max(1, min(3, int(parts[2] if len(parts) > 2 else "1")))
+        except Exception:
+            idx = 1
+        options = self_scene_direction_suggestions(_safe_int(state.get("style_offset"), 0), lang)
+        selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
+        direction_text = selected.get("label") or self_scene_direction_label(selected.get("code"), lang)
+        set_developing_video_pending(uid, "selfscene", "object", direction=direction_text, direction_code=selected.get("code") or "")
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_query_message(query, self_scene_object_text(state, lang), reply_markup=self_scene_object_keyboard(lang))
     if action == "direction":
         direction = parts[2] if len(parts) > 2 else "context"
         set_developing_video_pending(uid, "selfscene", "object", direction=direction)
@@ -39003,10 +39492,15 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_query_message(query, self_scene_object_text(state, lang), reply_markup=self_scene_object_keyboard(lang))
     if action == "direction_custom":
         set_developing_video_pending(uid, "selfscene", "direction_custom")
-        return await safe_edit_query_message(query, self_scene_direction_custom_text(lang), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="selfscene|start")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ]))
+        return await safe_edit_query_message(
+            query,
+            self_scene_direction_custom_text(lang),
+            reply_markup=video_v6_keyboard(
+                [],
+                lang,
+                back=("⬅️ Quay lại hướng" if normalize_user_language(lang) == "vi" else "⬅️ Back to directions", "selfscene|start"),
+            ),
+        )
     if action in {"object", "input"}:
         input_type = parts[2] if len(parts) > 2 else "custom"
         if input_type != "custom":
@@ -39015,10 +39509,15 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             state = get_developing_video_pending(uid) or {}
             return await safe_edit_query_message(query, self_scene_context_text(state, lang), reply_markup=self_scene_context_keyboard(lang))
         set_developing_video_pending(uid, "selfscene", "describe", input_type=input_type)
-        return await safe_edit_query_message(query, self_scene_describe_text(input_type, lang), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="selfscene|start")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ]))
+        return await safe_edit_query_message(
+            query,
+            self_scene_describe_text(input_type, lang),
+            reply_markup=video_v6_keyboard(
+                [],
+                lang,
+                back=("⬅️ Quay lại đối tượng" if normalize_user_language(lang) == "vi" else "⬅️ Back to subject", "selfscene|back_object"),
+            ),
+        )
     pending = get_developing_video_pending(uid)
     if action == "back_object":
         if not pending:
@@ -39040,10 +39539,15 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
         set_developing_video_pending(uid, "selfscene", "context_custom")
-        return await safe_edit_query_message(query, self_scene_context_custom_text(lang), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="selfscene|start")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ]))
+        return await safe_edit_query_message(
+            query,
+            self_scene_context_custom_text(lang),
+            reply_markup=video_v6_keyboard(
+                [],
+                lang,
+                back=("⬅️ Quay lại ngữ cảnh" if normalize_user_language(lang) == "vi" else "⬅️ Back to contexts", "selfscene|back_context"),
+            ),
+        )
     if action == "context_refresh":
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
@@ -39067,14 +39571,34 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
         set_developing_video_pending(uid, "selfscene", "style_custom")
-        return await safe_edit_query_message(query, self_scene_style_custom_text(lang), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="selfscene|start")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ]))
-    if action == "style":
+        return await safe_edit_query_message(
+            query,
+            self_scene_style_custom_text(lang),
+            reply_markup=video_v6_keyboard(
+                [],
+                lang,
+                back=("⬅️ Quay lại chuyển động" if normalize_user_language(lang) == "vi" else "⬅️ Back to motion", "selfscene|back_style"),
+            ),
+        )
+    if action == "style_refresh":
+        if not pending:
+            return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+        offset = _safe_int(pending.get("motion_offset"), 0) + 3
+        set_developing_video_pending(uid, "selfscene", "style", motion_offset=offset)
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_query_message(query, self_scene_style_text(state, lang), reply_markup=self_scene_style_keyboard(lang))
+    if action in {"style", "style_choice"}:
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
         style = parts[2] if len(parts) > 2 else "pushin"
+        if action == "style_choice":
+            try:
+                idx = max(1, min(3, int(parts[2] if len(parts) > 2 else "1")))
+            except Exception:
+                idx = 1
+            options = guided_video_motion_suggestions(pending, lang)
+            selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
+            style = selected.get("code") or selected.get("label") or "pushin"
         set_developing_video_pending(uid, "selfscene", "music", selected_motion=style, selected_style=style)
         state = get_developing_video_pending(uid) or {}
         return await safe_edit_query_message(query, self_scene_music_text(state, lang), reply_markup=self_scene_music_keyboard(lang))
@@ -39082,14 +39606,34 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
         set_developing_video_pending(uid, "selfscene", "music_custom")
-        return await safe_edit_query_message(query, self_scene_music_custom_text(lang), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="selfscene|start")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ]))
-    if action == "music":
+        return await safe_edit_query_message(
+            query,
+            self_scene_music_custom_text(lang),
+            reply_markup=video_v6_keyboard(
+                [],
+                lang,
+                back=("⬅️ Quay lại nhạc/voice" if normalize_user_language(lang) == "vi" else "⬅️ Back to music", "selfscene|back_music"),
+            ),
+        )
+    if action == "music_refresh":
+        if not pending:
+            return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+        offset = _safe_int(pending.get("music_offset"), 0) + 3
+        set_developing_video_pending(uid, "selfscene", "music", music_offset=offset)
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_query_message(query, self_scene_music_text(state, lang), reply_markup=self_scene_music_keyboard(lang))
+    if action in {"music", "music_choice"}:
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
         music = parts[2] if len(parts) > 2 else "cinematic"
+        if action == "music_choice":
+            try:
+                idx = max(1, min(3, int(parts[2] if len(parts) > 2 else "1")))
+            except Exception:
+                idx = 1
+            options = guided_video_music_suggestions(pending, lang)
+            selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
+            music = selected.get("code") or selected.get("label") or "cinematic"
         state = dict(pending)
         state["selected_music"] = music
         clear_developing_video_pending(uid)
@@ -39251,6 +39795,10 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
         if kind == "ad":
             set_developing_video_pending(uid, "videoidea", "product_type", idea_kind=kind)
             return await safe_edit_or_send(query, video_idea_product_type_text(lang), parse_mode="HTML", reply_markup=video_idea_product_type_keyboard(lang))
+        if kind == "cinema":
+            set_developing_video_pending(uid, "videoidea", "cinema_suggestions", idea_kind=kind, suggest_offset=0)
+            current = get_developing_video_pending(uid) or {}
+            return await safe_edit_or_send(query, video_idea_cinema_suggestions_text(current, lang), parse_mode="HTML", reply_markup=video_idea_cinema_suggestions_keyboard(lang))
         set_developing_video_pending(uid, "videoidea", "topic", idea_kind=kind)
         return await safe_edit_or_send(
             query,
@@ -39264,6 +39812,34 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
     pending = get_developing_video_pending(uid)
     plan = get_latest_developing_video_plan(uid, "videoidea")
     state = pending or plan or {}
+    if action == "cinema_refresh":
+        offset = _safe_int(state.get("suggest_offset"), 0) + 3
+        set_developing_video_pending(uid, "videoidea", "cinema_suggestions", idea_kind="cinema", suggest_offset=offset)
+        current = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, video_idea_cinema_suggestions_text(current, lang), parse_mode="HTML", reply_markup=video_idea_cinema_suggestions_keyboard(lang))
+    if action == "cinema_custom":
+        set_developing_video_pending(uid, "videoidea", "cinema_custom", idea_kind="cinema")
+        return await safe_edit_or_send(
+            query,
+            video_idea_topic_text("cinema", lang),
+            reply_markup=video_v6_keyboard(
+                [],
+                lang,
+                back=("⬅️ Quay lại 3 gợi ý" if normalize_user_language(lang) == "vi" else "⬅️ Back to ideas", "videoidea|kind|cinema"),
+            ),
+        )
+    if action == "cinema_choice":
+        try:
+            idx = max(1, min(3, int(value or "1")))
+        except Exception:
+            idx = 1
+        suggestions = video_idea_cinema_suggestions(_safe_int(state.get("suggest_offset"), 0), lang)
+        topic = suggestions[idx - 1] if idx <= len(suggestions) else (suggestions[0] if suggestions else "")
+        base = dict(state or {})
+        base.update({"idea_kind": "cinema", "selected_topic": topic, "product": topic, "context": "điện ảnh/kể chuyện" if normalize_user_language(lang) == "vi" else "cinematic/story", "prompt_variant_offset": 0})
+        clear_developing_video_pending(uid)
+        plan = save_developing_video_plan(uid, "videoidea", base)
+        return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
     if action == "product_type":
         if value == "custom":
             set_developing_video_pending(uid, "videoidea", "product_type_custom", idea_kind="ad")
@@ -59760,7 +60336,7 @@ def set_trend_video_flow_pending(user_id, step: str = "topic", **fields) -> None
         "created_at_ts": time.time(),
     }
     for key, value in (fields or {}).items():
-        if key in {"topic", "custom_trend", "custom_motion", "custom_image_prompt", "custom_video_prompt", "music_choice"}:
+        if key in {"topic", "custom_trend", "custom_motion", "custom_image_prompt", "custom_video_prompt", "music_choice", "selected_trend_title", "selected_trend_summary", "selected_motion_title", "selected_motion_summary", "topic_group"}:
             pending[key] = re.sub(r"\s+", " ", str(value or "").strip())[:1200]
         elif key in {"trend_choice", "motion_choice", "image_prompt_choice", "video_prompt_choice"}:
             pending[key] = max(0, min(3, safe_int(value, 0)))
@@ -59960,11 +60536,220 @@ def trend_video_pending_prompt_text(lang: str = "vi") -> str:
         "Bot sẽ hỏi cách lấy trend trước. Bot chưa gọi API ảnh/video và chưa trừ Xu."
     )
 
-def trend_video_pending_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="trendg|cancel")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+def trend_video_pending_keyboard(lang: str = "vi", back_callback: str = "trendg|topic_groups") -> InlineKeyboardMarkup:
+    return video_v6_keyboard(
+        [],
+        lang,
+        back=("⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back", back_callback),
+    )
+
+def trend_guided_topic_group_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🔥 <b>Trend video</b>\n\n"
+            "Which group is closest to your product/service/topic?\n\n"
+            "TOAN AAS will suggest 3 relevant trend-video ideas first. Pick one, refresh the ideas, or enter your own topic.\n\n"
+            "Planning only. No image/video provider call and no Xu deducted."
+        )
+    return (
+        "🔥 <b>Video theo trend</b>\n\n"
+        "Bạn muốn làm video theo trend cho nhóm nào?\n\n"
+        "TOAN AAS sẽ gợi ý 3 chủ đề video trend phù hợp trước. Bạn có thể chọn một gợi ý, đổi gợi ý khác hoặc nhập chủ đề riêng.\n\n"
+        "Bước này chỉ tạo gợi ý/kế hoạch. Bot chưa gọi API ảnh/video và chưa trừ Xu."
+    )
+
+def trend_guided_topic_group_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("📦 Sản phẩm / quảng cáo" if is_vi else "📦 Product / ad", "trendg|topic_group|product"),
+            ("🛒 Affiliate / TikTok Shop" if is_vi else "🛒 Affiliate / TikTok Shop", "trendg|topic_group|affiliate"),
+            ("🤖 AI tool / phần mềm" if is_vi else "🤖 AI tool / software", "trendg|topic_group|ai_tool"),
+            ("🍔 Food / quán ăn" if is_vi else "🍔 Food / restaurant", "trendg|topic_group|food"),
+            ("📚 Giáo dục / hướng dẫn" if is_vi else "📚 Education / tutorial", "trendg|topic_group|education"),
+            ("✍️ Nhập chủ đề riêng" if is_vi else "✍️ Custom topic", "trendg|topic_custom"),
+        ],
+        lang,
+        back=("⬅️ Quay lại Video" if is_vi else "⬅️ Back to Video", "menu|main_video"),
+    )
+
+def trend_guided_topic_group_label(group: str = "", lang: str = "vi") -> str:
+    group = str(group or "product").strip().lower()
+    labels_vi = {
+        "product": "Sản phẩm / quảng cáo",
+        "affiliate": "Affiliate / TikTok Shop",
+        "ai_tool": "AI tool / phần mềm",
+        "food": "Food / quán ăn",
+        "education": "Giáo dục / hướng dẫn",
+    }
+    labels_en = {
+        "product": "Product / advertising",
+        "affiliate": "Affiliate / TikTok Shop",
+        "ai_tool": "AI tool / software",
+        "food": "Food / restaurant",
+        "education": "Education / tutorial",
+    }
+    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(group, labels_vi["product"])
+
+def trend_guided_topic_suggestions(group: str = "product", offset: int = 0, lang: str = "vi") -> list[str]:
+    group = str(group or "product").strip().lower()
+    if normalize_user_language(lang) != "vi":
+        bank = {
+            "product": [
+                "Men's perfume confidence before an important meeting",
+                "Waterproof backpack before/after rainy commute",
+                "Minimal desk lamp for focused night work",
+                "Skincare routine with visible morning glow",
+                "Smart thermos in a busy office day",
+                "Noise-cancelling headphones for deep work",
+                "Phone stand for hands-free content filming",
+                "Mini blender as a fast healthy breakfast fix",
+                "Premium product reveal for a clean lifestyle brand",
+            ],
+            "affiliate": [
+                "Beginner affiliate journey from zero to first commission",
+                "TikTok Shop product review without sounding too salesy",
+                "Three mistakes new affiliates make",
+                "POV: you discover a tool that saves one hour daily",
+                "Before/after content workflow using one affiliate tool",
+                "Faceless affiliate video structure for beginners",
+                "Affiliate offer explained with a soft CTA",
+                "Quick comparison of two tools for creators",
+                "A 7-day affiliate content challenge",
+            ],
+            "ai_tool": [
+                "AI tool that turns one idea into 10 content posts",
+                "Automation app for solo sellers answering customers faster",
+                "Before/after workflow with an AI content assistant",
+                "Three hidden features in an AI productivity tool",
+                "POV: your content calendar is built in minutes",
+                "AI tool demo for small business owners",
+                "No-code automation that saves weekly reporting time",
+                "AI prompt pack for affiliate creators",
+                "Future office scene using AI automation",
+            ],
+            "food": [
+                "New coffee shop morning ritual trend",
+                "Before/after plating for a signature dish",
+                "POV: finding a quiet cafe to work from",
+                "Three quick reasons to try this drink",
+                "Kitchen prep to final serving reveal",
+                "Street food close-up with satisfying steam",
+                "Cafe corner check-in for students",
+                "Restaurant date-night ambience reveal",
+                "Behind the scenes of a fresh dessert",
+            ],
+            "education": [
+                "Three quick tips for learning affiliate marketing",
+                "POV: a beginner understands one hard concept",
+                "Before/after study plan with an AI assistant",
+                "Mini tutorial for creating the first sales caption",
+                "One common mistake in online learning",
+                "Checklist for a 7-day skill challenge",
+                "Teacher explains one concept with a practical demo",
+                "Study routine for busy professionals",
+                "How to turn notes into a short video script",
+            ],
+        }
+    else:
+        bank = {
+            "product": [
+                "Nước hoa nam giúp tự tin trước buổi gặp khách hàng quan trọng",
+                "Balo chống nước trong tình huống đi mưa bất ngờ",
+                "Đèn bàn tối giản cho góc làm việc đêm tập trung",
+                "Routine skincare buổi sáng với kết quả sáng sạch",
+                "Bình giữ nhiệt cho một ngày văn phòng bận rộn",
+                "Tai nghe chống ồn giúp làm việc sâu",
+                "Giá đỡ điện thoại để quay content rảnh tay",
+                "Máy xay mini như giải pháp bữa sáng healthy nhanh",
+                "Product reveal cao cấp cho thương hiệu lifestyle sạch",
+            ],
+            "affiliate": [
+                "Người mới làm affiliate từ số 0 đến đơn đầu tiên",
+                "Review sản phẩm TikTok Shop không bị quá bán hàng",
+                "3 lỗi người mới làm affiliate hay mắc",
+                "POV: bạn tìm thấy một tool tiết kiệm 1 giờ mỗi ngày",
+                "Before/after quy trình làm content bằng một affiliate tool",
+                "Video affiliate faceless cho người mới",
+                "Giải thích offer affiliate với CTA mềm",
+                "So sánh nhanh hai công cụ cho creator",
+                "Thử thách 7 ngày làm content affiliate",
+            ],
+            "ai_tool": [
+                "App AI biến một ý tưởng thành 10 bài content",
+                "Công cụ automation giúp shop nhỏ trả lời khách nhanh hơn",
+                "Before/after workflow với trợ lý AI tạo nội dung",
+                "3 tính năng ẩn trong tool AI năng suất",
+                "POV: lịch content cả tuần được dựng trong vài phút",
+                "Demo AI tool cho chủ kinh doanh nhỏ",
+                "Automation không code giúp tiết kiệm thời gian báo cáo",
+                "Prompt pack AI cho creator affiliate",
+                "Văn phòng tương lai dùng AI automation",
+            ],
+            "food": [
+                "Quán cà phê mới mở với ritual buổi sáng",
+                "Before/after plating cho món signature",
+                "POV: tìm được quán cafe yên tĩnh để làm việc",
+                "3 lý do nhanh để thử món nước này",
+                "Từ chuẩn bị bếp đến reveal món ăn cuối",
+                "Cận cảnh street food có hơi nóng và texture hấp dẫn",
+                "Góc check-in cafe dành cho sinh viên",
+                "Không khí nhà hàng date-night về đêm",
+                "Behind the scenes làm món tráng miệng tươi",
+            ],
+            "education": [
+                "3 mẹo nhanh để học affiliate marketing",
+                "POV: người mới hiểu được một khái niệm khó",
+                "Before/after kế hoạch học với trợ lý AI",
+                "Mini tutorial tạo caption bán hàng đầu tiên",
+                "Một lỗi phổ biến khi học online",
+                "Checklist thử thách học kỹ năng trong 7 ngày",
+                "Giáo viên giải thích một khái niệm bằng demo thực tế",
+                "Routine học cho người đi làm bận rộn",
+                "Biến ghi chú thành kịch bản video ngắn",
+            ],
+        }
+    return video_v6_rotating_items(bank.get(group, bank["product"]), offset, 3)
+
+def trend_guided_topic_suggestions_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    group = state.get("topic_group") or "product"
+    suggestions = trend_guided_topic_suggestions(group, _safe_int(state.get("suggest_offset"), 0), lang)
+    if normalize_user_language(lang) != "vi":
+        lines = [
+            "🔥 <b>3 trend-video topic ideas</b>",
+            "",
+            f"Group: <code>{html.escape(trend_guided_topic_group_label(group, lang))}</code>",
+            "Choose one suggestion, refresh ideas, or enter your own topic.",
+            "",
+        ]
+    else:
+        lines = [
+            "🔥 <b>3 gợi ý video trend</b>",
+            "",
+            f"Nhóm: <code>{html.escape(trend_guided_topic_group_label(group, lang))}</code>",
+            "Chọn một gợi ý, đổi gợi ý khác hoặc tự nhập chủ đề riêng.",
+            "",
+        ]
+    for idx, item in enumerate(suggestions, 1):
+        lines.append(f"{idx}. {html.escape(item)}")
+    lines.append("")
+    lines.append(ui_text(lang, "common.no_api_no_charge"))
+    return "\n".join(lines)
+
+def trend_guided_topic_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn gợi ý 1" if is_vi else "1️⃣ Choose idea 1", "trendg|topic_select_1"),
+            ("2️⃣ Chọn gợi ý 2" if is_vi else "2️⃣ Choose idea 2", "trendg|topic_select_2"),
+            ("3️⃣ Chọn gợi ý 3" if is_vi else "3️⃣ Choose idea 3", "trendg|topic_select_3"),
+            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More ideas", "trendg|topic_refresh"),
+            ("✍️ Nhập riêng" if is_vi else "✍️ Custom topic", "trendg|topic_custom"),
+        ],
+        lang,
+        back=("⬅️ Quay lại nhóm" if is_vi else "⬅️ Back to groups", "trendg|topic_groups"),
+    )
 
 def trend_guided_project_missing_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -59992,6 +60777,65 @@ def trend_guided_trend_label(index: int, lang: str = "vi") -> str:
         3: "Trend quick tips / mẹo nhanh",
     }
     return labels[idx]
+
+def trend_guided_trend_ideas(topic: str = "", offset: int = 0, lang: str = "vi") -> list[dict]:
+    topic = re.sub(r"\s+", " ", str(topic or "").strip())[:220] or ("your topic" if normalize_user_language(lang) != "vi" else "chủ đề của bạn")
+    if normalize_user_language(lang) != "vi":
+        templates = [
+            ("Before/after transformation", "Show the pain before {topic}, then reveal the clear after-result."),
+            ("POV everyday situation", "Put the viewer inside a familiar moment where {topic} becomes the solution."),
+            ("Three quick tips", "Give three fast tips and position {topic} as the time-saving tool."),
+            ("Do not make this mistake", "Open with a strong warning, show the common mistake, then show the better way with {topic}."),
+            ("Expectation vs reality", "Create a quick contrast between what people expect and what really happens with {topic}."),
+            ("Hidden feature / hidden benefit", "Reveal one overlooked benefit of {topic} through a practical mini demo."),
+            ("One-day challenge", "Show a simple 24-hour challenge or routine built around {topic}."),
+            ("Problem checklist", "List three symptoms of the problem, then connect each one to how {topic} helps."),
+            ("Mini story customer moment", "Follow one relatable person discovering {topic} at the right moment."),
+        ]
+    else:
+        templates = [
+            ("Trend before/after", "Nêu vấn đề trước khi dùng {topic}, rồi chuyển sang kết quả sau khi dùng."),
+            ("Trend POV / tình huống đời thường", "Đặt người xem vào một tình huống quen thuộc, {topic} xuất hiện như giải pháp."),
+            ("Trend quick tips / mẹo nhanh", "Đưa 3 mẹo ngắn, {topic} là công cụ giúp tiết kiệm thời gian."),
+            ("Đừng mắc lỗi này", "Mở bằng cảnh báo mạnh, chỉ ra lỗi phổ biến rồi đưa {topic} vào như cách làm tốt hơn."),
+            ("Kỳ vọng vs thực tế", "Tạo tương phản nhanh giữa kỳ vọng và thực tế khi dùng {topic}."),
+            ("Tính năng/lợi ích bị bỏ qua", "Reveal một lợi ích ít ai để ý của {topic} qua demo ngắn."),
+            ("Thử thách 1 ngày", "Dựng routine/thử thách 24 giờ xoay quanh {topic}."),
+            ("Checklist vấn đề", "Liệt kê 3 dấu hiệu của vấn đề rồi nối từng điểm với cách {topic} hỗ trợ."),
+            ("Mini story khách hàng", "Theo chân một nhân vật quen thuộc phát hiện {topic} đúng lúc cần."),
+        ]
+    selected = video_v6_rotating_items([f"{title}|||{body}" for title, body in templates], offset, 3)
+    ideas = []
+    for item in selected:
+        title, body = item.split("|||", 1)
+        ideas.append({"title": title, "summary": body.format(topic=topic)})
+    return ideas
+
+def trend_guided_selected_trend_title(state: dict, index: int = 1, lang: str = "vi") -> str:
+    custom = str((state or {}).get("custom_trend") or "").strip()
+    if custom:
+        return custom
+    stored = str((state or {}).get("selected_trend_title") or "").strip()
+    if stored:
+        return stored
+    ideas = trend_guided_trend_ideas(trend_guided_topic(state), _safe_int((state or {}).get("trend_offset"), 0), lang)
+    idx = max(1, min(3, int(index or 1)))
+    if idx <= len(ideas):
+        return ideas[idx - 1]["title"]
+    return trend_guided_trend_label(idx, lang)
+
+def trend_guided_selected_trend_summary(state: dict, index: int = 1, lang: str = "vi") -> str:
+    custom = str((state or {}).get("custom_trend") or "").strip()
+    if custom:
+        return custom
+    stored = str((state or {}).get("selected_trend_summary") or "").strip()
+    if stored:
+        return stored
+    ideas = trend_guided_trend_ideas(trend_guided_topic(state), _safe_int((state or {}).get("trend_offset"), 0), lang)
+    idx = max(1, min(3, int(index or 1)))
+    if idx <= len(ideas):
+        return ideas[idx - 1]["summary"]
+    return trend_guided_choice_summary("trend", idx, state, lang)
 
 def trend_guided_motion_label(index: int, lang: str = "vi") -> str:
     idx = max(1, min(3, int(index or 1)))
@@ -60054,24 +60898,22 @@ def trend_guided_trend_source_text(topic: str, lang: str = "vi") -> str:
     )
 
 def trend_guided_trend_source_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔥 Suggest 3 popular trends", callback_data="trendg|trend_source_popular")],
-            [InlineKeyboardButton("🔎 Suggest trends for this topic", callback_data="trendg|trend_source_search")],
-            [InlineKeyboardButton("✍️ I will enter my own trend", callback_data="trendg|trend_source_custom")],
-            [InlineKeyboardButton("➡️ Skip trend, create a normal video", callback_data="trendg|trend_source_skip")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔥 Gợi ý 3 trend phổ biến", callback_data="trendg|trend_source_popular")],
-        [InlineKeyboardButton("🔎 Tìm trend theo ngành/chủ đề", callback_data="trendg|trend_source_search")],
-        [InlineKeyboardButton("✍️ Tôi tự nhập trend", callback_data="trendg|trend_source_custom")],
-        [InlineKeyboardButton("➡️ Bỏ qua trend, tạo video thường", callback_data="trendg|trend_source_skip")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("🔥 Gợi ý 3 trend phổ biến" if is_vi else "🔥 Suggest 3 popular trends", "trendg|trend_source_popular"),
+            ("🔎 Tìm trend theo ngành/chủ đề" if is_vi else "🔎 Suggest trends for this topic", "trendg|trend_source_search"),
+            ("✍️ Tôi tự nhập trend" if is_vi else "✍️ I will enter my own trend", "trendg|trend_source_custom"),
+            ("➡️ Bỏ qua trend, tạo video thường" if is_vi else "➡️ Skip trend, create normal video", "trendg|trend_source_skip"),
+        ],
+        lang,
+        back=("⬅️ Quay lại chủ đề" if is_vi else "⬅️ Back to topic", "trendg|topic_back"),
+    )
 
 def trend_guided_trend_choices_text(topic: str, lang: str = "vi") -> str:
     safe_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500] or ("your topic" if normalize_user_language(lang) != "vi" else "chủ đề của bạn")
+    state = {"topic": safe_topic}
+    ideas = trend_guided_trend_ideas(safe_topic, 0, lang)
     source = ""
     if normalize_user_language(lang) == "vi":
         source = "TOAN AAS sẽ gợi ý trend phù hợp theo chủ đề. Trend live từ internet sẽ mở sau.\n\n"
@@ -60082,49 +60924,74 @@ def trend_guided_trend_choices_text(topic: str, lang: str = "vi") -> str:
             "🔥 <b>Choose 1 of 3 trend ideas</b>\n\n"
             f"Topic: <b>{html.escape(safe_topic)}</b>\n\n"
             f"{source}"
-            "<b>1. Before/after trend</b>\n"
-            "• Show the problem before using the product.\n"
-            "• Cut to the result after using it.\n\n"
-            "<b>2. POV / everyday situation trend</b>\n"
-            "• Put viewers in a familiar situation.\n"
-            "• The product appears naturally as the solution.\n\n"
-            "<b>3. Quick tips trend</b>\n"
-            "• Share 3 short tips.\n"
-            "• The product becomes the tool that saves time.\n\n"
+            + "\n\n".join(
+                f"<b>{idx}. {html.escape(item['title'])}</b>\n• {html.escape(item['summary'])}"
+                for idx, item in enumerate(ideas, 1)
+            )
+            + "\n\n"
             "The bot has not called image/video APIs and has not charged Xu."
         )
     return (
         "🔥 <b>Chọn 1 trong 3 trend video</b>\n\n"
         f"Chủ đề: <b>{html.escape(safe_topic)}</b>\n\n"
         f"{source}"
-        "<b>1️⃣ Trend before/after</b>\n"
-        "• Nêu vấn đề trước khi dùng sản phẩm.\n"
-        "• Chuyển cảnh sang kết quả sau khi dùng.\n\n"
-        "<b>2️⃣ Trend POV / tình huống đời thường</b>\n"
-        "• Đặt người xem vào một tình huống quen thuộc.\n"
-        "• Sản phẩm xuất hiện như giải pháp tự nhiên.\n\n"
-        "<b>3️⃣ Trend quick tips / mẹo nhanh</b>\n"
-        "• Đưa 3 mẹo ngắn, dễ xem.\n"
-        "• Sản phẩm là công cụ giúp tiết kiệm thời gian.\n\n"
+        + "\n\n".join(
+            f"<b>{idx}️⃣ {html.escape(item['title'])}</b>\n• {html.escape(item['summary'])}"
+            for idx, item in enumerate(ideas, 1)
+        )
+        + "\n\n"
         "Bot chưa gọi API ảnh/video và chưa trừ Xu."
     )
 
+def trend_guided_trend_choices_text_from_state(state: dict, lang: str = "vi") -> str:
+    state = state or {}
+    topic = trend_guided_topic(state)
+    ideas = trend_guided_trend_ideas(topic, _safe_int(state.get("trend_offset"), 0), lang)
+    if normalize_user_language(lang) != "vi":
+        lines = [
+            "🔥 <b>Choose 1 of 3 trend ideas</b>",
+            "",
+            f"Topic: <b>{html.escape(topic)}</b>",
+            "",
+            "TOAN AAS will suggest trends for this topic. Live internet trend search will open later.",
+            "",
+        ]
+        for idx, item in enumerate(ideas, 1):
+            lines.extend([f"<b>{idx}. {html.escape(item['title'])}</b>", f"• {html.escape(item['summary'])}", ""])
+        lines.append("No image/video provider call and no Xu deducted.")
+        return "\n".join(lines)
+    lines = [
+        "🔥 <b>Chọn 1 trong 3 trend video</b>",
+        "",
+        f"Chủ đề: <b>{html.escape(topic)}</b>",
+        "",
+        "TOAN AAS sẽ gợi ý trend phù hợp theo chủ đề. Trend live từ internet sẽ mở sau.",
+        "",
+    ]
+    for idx, item in enumerate(ideas, 1):
+        lines.extend([f"<b>{idx}️⃣ {html.escape(item['title'])}</b>", f"• {html.escape(item['summary'])}", ""])
+    lines.append("Bot chưa gọi API ảnh/video và chưa trừ Xu.")
+    return "\n".join(lines)
+
 def trend_guided_trend_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn trend 1" if normalize_user_language(lang) == "vi" else "1️⃣ Choose trend 1", callback_data="trendg|trend_select_1")],
-        [InlineKeyboardButton("2️⃣ Chọn trend 2" if normalize_user_language(lang) == "vi" else "2️⃣ Choose trend 2", callback_data="trendg|trend_select_2")],
-        [InlineKeyboardButton("3️⃣ Chọn trend 3" if normalize_user_language(lang) == "vi" else "3️⃣ Choose trend 3", callback_data="trendg|trend_select_3")],
-        [InlineKeyboardButton("🔁 Tạo lại 3 trend khác" if normalize_user_language(lang) == "vi" else "🔁 Regenerate 3 trends", callback_data="trendg|trend_source_popular")],
-        [InlineKeyboardButton("✍️ Nhập trend riêng" if normalize_user_language(lang) == "vi" else "✍️ Enter custom trend", callback_data="trendg|trend_source_custom")],
-        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="trendg|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn trend 1" if is_vi else "1️⃣ Choose trend 1", "trendg|trend_select_1"),
+            ("2️⃣ Chọn trend 2" if is_vi else "2️⃣ Choose trend 2", "trendg|trend_select_2"),
+            ("3️⃣ Chọn trend 3" if is_vi else "3️⃣ Choose trend 3", "trendg|trend_select_3"),
+            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More trends", "trendg|trend_refresh"),
+            ("✍️ Nhập trend riêng" if is_vi else "✍️ Enter custom trend", "trendg|trend_source_custom"),
+        ],
+        lang,
+        back=("⬅️ Quay lại cách lấy trend" if is_vi else "⬅️ Back to trend source", "trendg|trend_choices"),
+    )
 
 def trend_guided_selected_trend_text(state: dict, index: int = 1, lang: str = "vi") -> str:
-    custom = str((state or {}).get("custom_trend") or "").strip()
     idx = max(1, min(3, int(index or 1)))
     if normalize_user_language(lang) != "vi":
-        chosen = html.escape(custom or trend_guided_trend_label(idx, lang))
-        summary = html.escape(custom or trend_guided_choice_summary("trend", idx, state, lang))
+        chosen = html.escape(trend_guided_selected_trend_title(state, idx, lang))
+        summary = html.escape(trend_guided_selected_trend_summary(state, idx, lang))
         return (
             f"✅ <b>Selected trend: {chosen}</b>\n\n"
             f"<b>Summary:</b>\n{summary}\n\n"
@@ -60132,8 +60999,8 @@ def trend_guided_selected_trend_text(state: dict, index: int = 1, lang: str = "v
             "The bot has not called image/video APIs and has not charged Xu.\n\n"
             "What would you like to do next?"
         )
-    chosen = html.escape(custom or trend_guided_trend_label(idx, lang))
-    summary = html.escape(custom or trend_guided_choice_summary("trend", idx, state, lang))
+    chosen = html.escape(trend_guided_selected_trend_title(state, idx, lang))
+    summary = html.escape(trend_guided_selected_trend_summary(state, idx, lang))
     return (
         f"✅ <b>Đã chọn trend: {chosen}</b>\n\n"
         f"<b>Tóm tắt:</b>\n{summary}\n\n"
@@ -60143,56 +61010,87 @@ def trend_guided_selected_trend_text(state: dict, index: int = 1, lang: str = "v
     )
 
 def trend_guided_selected_trend_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Chốt trend này" if normalize_user_language(lang) == "vi" else "✅ Lock this trend", callback_data="trendg|trend_lock")],
-        [InlineKeyboardButton("✍️ Sửa trend" if normalize_user_language(lang) == "vi" else "✍️ Edit trend", callback_data="trendg|trend_source_custom")],
-        [InlineKeyboardButton("🔁 Chọn trend khác" if normalize_user_language(lang) == "vi" else "🔁 Choose another trend", callback_data="trendg|trend_choices")],
-        [InlineKeyboardButton("➡️ Sang bước chuyển động" if normalize_user_language(lang) == "vi" else "➡️ Next: motion", callback_data="trendg|motion_step")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("✅ Chốt trend này" if is_vi else "✅ Lock this trend", "trendg|trend_lock"),
+            ("➡️ Sang bước chuyển động" if is_vi else "➡️ Next: motion", "trendg|motion_step"),
+            ("✍️ Sửa trend" if is_vi else "✍️ Edit trend", "trendg|trend_source_custom"),
+            ("🔁 Chọn trend khác" if is_vi else "🔁 Choose another trend", "trendg|trend_choices"),
+        ],
+        lang,
+        back=("⬅️ Quay lại 3 trend" if is_vi else "⬅️ Back to trends", "trendg|trend_back_choices"),
+    )
+
+def trend_guided_motion_ideas(state: dict | None = None, lang: str = "vi") -> list[dict]:
+    state = state or {}
+    topic = trend_guided_topic(state)
+    trend = trend_guided_selected_trend_title(state, state.get("trend_choice") or 1, lang)
+    offset = _safe_int(state.get("motion_offset"), 0)
+    if normalize_user_language(lang) != "vi":
+        templates = [
+            ("Slow product push-in", "0-3s slow push-in to {topic}; 3-8s gentle orbit; 8-15s clean CTA hold."),
+            ("Cinematic detail reveal", "Open on a macro detail, reveal {topic} smoothly, then finish with a premium hero shot."),
+            ("Fast before/after", "Use a two-second hook, a match cut before/after and a clear result frame tied to {trend}."),
+            ("POV handheld motion", "Start in first-person handheld style, discover {topic} naturally, then stabilize on the result."),
+            ("Orbit and parallax", "Build depth with a gentle orbit and parallax layers around {topic}, ending on one strong benefit."),
+            ("Snap-zoom viral rhythm", "Use snap zooms, quick caption beats and a short demo that follows {trend}."),
+            ("Lifestyle walk-through", "Move through a real-use scene, follow the subject using {topic}, then reveal the benefit."),
+            ("Problem-to-solution match cut", "Show the problem frame, match cut into {topic} in action, then hold the solved result."),
+            ("Luxury light sweep", "Use a controlled light sweep, slow dolly-in and subtle product rotation for {topic}."),
+        ]
+    else:
+        templates = [
+            ("Push-in sản phẩm chậm", "0-3s camera tiến vào {topic}; 3-8s orbit nhẹ; 8-15s giữ khung CTA sạch."),
+            ("Cinematic reveal chi tiết", "Mở bằng macro, reveal mượt {topic}, kết bằng hero shot ánh sáng cao cấp."),
+            ("Before/after nhanh", "Hook 2 giây, match cut before/after và khung kết quả rõ theo {trend}."),
+            ("POV handheld tự nhiên", "Mở kiểu góc nhìn người dùng, phát hiện {topic} tự nhiên rồi ổn định ở cảnh kết quả."),
+            ("Orbit và parallax", "Tạo chiều sâu bằng orbit nhẹ/parallax quanh {topic}, kết bằng một lợi ích chính."),
+            ("Snap zoom viral", "Dùng snap zoom, nhịp caption nhanh và demo ngắn bám theo {trend}."),
+            ("Lifestyle walk-through", "Đi qua bối cảnh sử dụng thật, theo nhân vật dùng {topic}, rồi reveal lợi ích."),
+            ("Match cut vấn đề → giải pháp", "Cho thấy vấn đề, match cut sang {topic} đang hoạt động, giữ khung kết quả."),
+            ("Luxury light sweep", "Quét ánh sáng có kiểm soát, dolly-in chậm và xoay nhẹ sản phẩm {topic}."),
+        ]
+    selected = video_v6_rotating_items([f"{title}|||{body}" for title, body in templates], offset, 3)
+    ideas = []
+    for item in selected:
+        title, body = item.split("|||", 1)
+        ideas.append({"title": title, "summary": body.format(topic=topic, trend=trend)})
+    return ideas
 
 def trend_guided_motion_choices_text(state: dict, lang: str = "vi") -> str:
     topic = trend_guided_topic(state)
-    trend = str((state or {}).get("custom_trend") or trend_guided_trend_label((state or {}).get("trend_choice") or 1, lang))
+    trend = trend_guided_selected_trend_title(state, (state or {}).get("trend_choice") or 1, lang)
+    ideas = trend_guided_motion_ideas(state, lang)
     if normalize_user_language(lang) != "vi":
-        return (
-            "🎥 <b>Choose 1 motion direction</b>\n\n"
-            f"Topic: <b>{html.escape(topic)}</b>\n"
-            f"Direction: <b>{html.escape(trend)}</b>\n\n"
-            "<b>1. Simple easy motion</b>\n"
-            "• 0-3s: slow push-in to product\n• 3-8s: gentle orbit\n• 8-15s: hold final CTA frame\n\n"
-            "<b>2. Cinematic motion</b>\n"
-            "• 0-3s: detail close-up\n• 3-8s: smooth reveal\n• 8-15s: beautiful hero shot\n\n"
-            "<b>3. Viral TikTok/Reels motion</b>\n"
-            "• 0-2s: fast hook\n• 2-7s: before/after transition\n• 7-15s: result + clear CTA"
-        )
-    return (
-        "🎥 <b>Chọn 1 kiểu chuyển động</b>\n\n"
-        f"Chủ đề: <b>{html.escape(topic)}</b>\n"
-        f"Hướng video: <b>{html.escape(trend)}</b>\n\n"
-        "<b>1️⃣ Chuyển động đơn giản / dễ tạo</b>\n"
-        "• 0–3s: camera tiến chậm vào sản phẩm\n• 3–8s: xoay nhẹ quanh sản phẩm\n• 8–15s: giữ khung cuối để hiện lời kêu gọi hành động\n\n"
-        "<b>2️⃣ Chuyển động cinematic</b>\n"
-        "• 0–3s: cận cảnh chi tiết sản phẩm\n• 3–8s: chuyển cảnh mượt, reveal sản phẩm\n• 8–15s: cảnh hero shot, ánh sáng đẹp\n\n"
-        "<b>3️⃣ Chuyển động viral TikTok/Reels</b>\n"
-        "• 0–2s: hook nhanh\n• 2–7s: chuyển cảnh before/after\n• 7–15s: kết quả + lời kêu gọi hành động rõ"
-    )
+        lines = ["🎥 <b>Choose 1 motion direction</b>", "", f"Topic: <b>{html.escape(topic)}</b>", f"Direction: <b>{html.escape(trend)}</b>", ""]
+    else:
+        lines = ["🎥 <b>Chọn 1 kiểu chuyển động</b>", "", f"Chủ đề: <b>{html.escape(topic)}</b>", f"Hướng video: <b>{html.escape(trend)}</b>", ""]
+    for idx, item in enumerate(ideas, 1):
+        lines.extend([f"<b>{idx}. {html.escape(item['title'])}</b>", f"• {html.escape(item['summary'])}", ""])
+    lines.append(ui_text(lang, "common.no_api_no_charge"))
+    return "\n".join(lines)
 
 def trend_guided_motion_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn chuyển động 1" if normalize_user_language(lang) == "vi" else "1️⃣ Choose motion 1", callback_data="trendg|motion_select_1")],
-        [InlineKeyboardButton("2️⃣ Chọn chuyển động 2" if normalize_user_language(lang) == "vi" else "2️⃣ Choose motion 2", callback_data="trendg|motion_select_2")],
-        [InlineKeyboardButton("3️⃣ Chọn chuyển động 3" if normalize_user_language(lang) == "vi" else "3️⃣ Choose motion 3", callback_data="trendg|motion_select_3")],
-        [InlineKeyboardButton("🔁 Tạo lại 3 chuyển động" if normalize_user_language(lang) == "vi" else "🔁 Regenerate 3 motions", callback_data="trendg|motion_step")],
-        [InlineKeyboardButton("🔙 Quay lại hướng trend" if normalize_user_language(lang) == "vi" else "🔙 Back to direction", callback_data="trendg|trend_review")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn chuyển động 1" if is_vi else "1️⃣ Choose motion 1", "trendg|motion_select_1"),
+            ("2️⃣ Chọn chuyển động 2" if is_vi else "2️⃣ Choose motion 2", "trendg|motion_select_2"),
+            ("3️⃣ Chọn chuyển động 3" if is_vi else "3️⃣ Choose motion 3", "trendg|motion_select_3"),
+            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More motions", "trendg|motion_refresh"),
+        ],
+        lang,
+        back=("⬅️ Quay lại hướng trend" if is_vi else "⬅️ Back to trend", "trendg|trend_review"),
+    )
 
 def trend_guided_selected_motion_text(state: dict, index: int = 1, lang: str = "vi") -> str:
     custom = str((state or {}).get("custom_motion") or "").strip()
     idx = max(1, min(3, int(index or 1)))
-    title = custom or trend_guided_motion_label(idx, lang)
-    summary = custom or trend_guided_choice_summary("motion", idx, state, lang)
+    ideas = trend_guided_motion_ideas(state, lang)
+    selected = ideas[idx - 1] if idx <= len(ideas) else {}
+    title = custom or str((state or {}).get("selected_motion_title") or selected.get("title") or trend_guided_motion_label(idx, lang))
+    summary = custom or str((state or {}).get("selected_motion_summary") or selected.get("summary") or trend_guided_choice_summary("motion", idx, state, lang))
     if normalize_user_language(lang) != "vi":
         return f"✅ <b>Motion direction selected.</b>\n\n<b>{html.escape(title)}</b>\n{html.escape(summary)}\n\nThe bot has not called a video API and has not charged Xu."
     return f"✅ <b>Đã chọn hướng chuyển động.</b>\n\n<b>{html.escape(title)}</b>\n{html.escape(summary)}\n\nBot chưa gọi API video và chưa trừ Xu."
@@ -60212,8 +61110,8 @@ def trend_guided_image_prompt_for_index(state: dict, index: int = 1, lang: str =
         return custom
     idx = max(1, min(3, int(index or 1)))
     topic = trend_guided_topic(state)
-    trend = str((state or {}).get("custom_trend") or trend_guided_trend_label((state or {}).get("trend_choice") or 1, lang))
-    motion = str((state or {}).get("custom_motion") or trend_guided_motion_label((state or {}).get("motion_choice") or 1, lang))
+    trend = trend_guided_selected_trend_title(state, (state or {}).get("trend_choice") or 1, lang)
+    motion = str((state or {}).get("custom_motion") or (state or {}).get("selected_motion_title") or trend_guided_motion_label((state or {}).get("motion_choice") or 1, lang))
     if normalize_user_language(lang) != "vi":
         if idx == 1:
             return f"Main product image for {topic}: sharp product centered in frame, clean background, soft lighting, vertical 9:16 composition, modern advertising style, supports {trend}, planned motion {motion}, no watermark, no broken text."
@@ -60289,8 +61187,8 @@ def trend_guided_video_prompt_for_index(state: dict, index: int = 1, lang: str =
         return custom
     idx = max(1, min(3, int(index or 1)))
     topic = trend_guided_topic(state)
-    trend = str((state or {}).get("custom_trend") or trend_guided_trend_label((state or {}).get("trend_choice") or 1, lang))
-    motion = str((state or {}).get("custom_motion") or trend_guided_motion_label((state or {}).get("motion_choice") or 1, lang))
+    trend = trend_guided_selected_trend_title(state, (state or {}).get("trend_choice") or 1, lang)
+    motion = str((state or {}).get("custom_motion") or (state or {}).get("selected_motion_title") or trend_guided_motion_label((state or {}).get("motion_choice") or 1, lang))
     image_prompt = trend_guided_image_prompt_for_index(state, (state or {}).get("image_prompt_choice") or 1, lang)
     guard = video_text_render_guard(lang)
     if normalize_user_language(lang) != "vi":
@@ -60482,8 +61380,8 @@ def trend_guided_no_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def trend_guided_finalize_text(state: dict, lang: str = "vi") -> str:
     topic = trend_guided_topic(state)
-    trend = str((state or {}).get("custom_trend") or trend_guided_trend_label((state or {}).get("trend_choice") or 1, lang))
-    motion = str((state or {}).get("custom_motion") or trend_guided_motion_label((state or {}).get("motion_choice") or 1, lang))
+    trend = trend_guided_selected_trend_title(state, (state or {}).get("trend_choice") or 1, lang)
+    motion = str((state or {}).get("custom_motion") or (state or {}).get("selected_motion_title") or trend_guided_motion_label((state or {}).get("motion_choice") or 1, lang))
     if normalize_user_language(lang) != "vi":
         return (
             "✅ <b>Trend video guided flow completed</b>\n\n"
@@ -61333,19 +62231,26 @@ async def send_trend_guided_choices_message(message, uid: int, topic: str, lang:
         "trend_choices",
         topic=safe_topic,
         trend_choice=0,
+        trend_offset=0,
         motion_choice=0,
+        motion_offset=0,
         image_prompt_choice=0,
         video_prompt_choice=0,
         custom_trend="",
         custom_motion="",
+        selected_trend_title="",
+        selected_trend_summary="",
+        selected_motion_title="",
+        selected_motion_summary="",
         custom_image_prompt="",
         custom_video_prompt="",
         music_choice="",
         trend_locked=False,
         motion_locked=False,
     )
+    state = get_trend_video_flow_pending(uid) or {"topic": safe_topic}
     return await message.reply_text(
-        trend_guided_trend_choices_text(safe_topic, lang),
+        trend_guided_trend_choices_text_from_state(state, lang),
         parse_mode="HTML",
         reply_markup=trend_guided_trend_choices_keyboard(lang),
     )
@@ -61358,11 +62263,17 @@ async def send_trend_guided_source_message(message, uid: int, topic: str, lang: 
         "trend_source",
         topic=safe_topic,
         trend_choice=0,
+        trend_offset=0,
         motion_choice=0,
+        motion_offset=0,
         image_prompt_choice=0,
         video_prompt_choice=0,
         custom_trend="",
         custom_motion="",
+        selected_trend_title="",
+        selected_trend_summary="",
+        selected_motion_title="",
+        selected_motion_summary="",
         custom_image_prompt="",
         custom_video_prompt="",
         music_choice="",
@@ -61375,6 +62286,15 @@ async def send_trend_guided_source_message(message, uid: int, topic: str, lang: 
         reply_markup=trend_guided_trend_source_keyboard(lang),
     )
 
+async def send_trend_guided_topic_groups_message(message, uid: int, lang: str = "vi"):
+    clear_trend_video_flow_pending(uid)
+    set_trend_video_flow_pending(uid, "topic_group")
+    return await message.reply_text(
+        trend_guided_topic_group_text(lang),
+        parse_mode="HTML",
+        reply_markup=trend_guided_topic_group_keyboard(lang),
+    )
+
 async def trend_guided_start_from_query(query, uid: int, lang: str = "vi"):
     clear_quick_media_pending(uid)
     clear_public_image_prompt_pending(uid)
@@ -61385,12 +62305,12 @@ async def trend_guided_start_from_query(query, uid: int, lang: str = "vi"):
         return await safe_edit_or_send(query, "🛠 Trend video workflow is temporarily under maintenance. The bot has not charged Xu." if normalize_user_language(lang) != "vi" else "🛠 Video theo trend đang tạm tắt để bảo trì. Bot chưa trừ Xu.")
     if not trend_video_workflow_can_access(uid):
         return await safe_edit_or_send(query, "🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
-    set_trend_video_flow_pending(uid, "topic")
+    set_trend_video_flow_pending(uid, "topic_group")
     return await safe_edit_or_send(
         query,
-        trend_video_pending_prompt_text(lang),
+        trend_guided_topic_group_text(lang),
         parse_mode="HTML",
-        reply_markup=trend_video_pending_keyboard(lang),
+        reply_markup=trend_guided_topic_group_keyboard(lang),
     )
 
 async def cmd_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61406,9 +62326,7 @@ async def cmd_trend_video_flow(update: Update, context: ContextTypes.DEFAULT_TYP
         return await update.message.reply_text("🧪 Trend video workflow is in internal testing and is not public yet.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else f"{TREND_VIDEO_WORKFLOW_PUBLIC_OFF_MESSAGE}\nBot chưa trừ Xu.")
     topic = media_factory_topic_from_args(context)
     if not topic:
-        clear_trend_video_flow_pending(uid)
-        set_trend_video_flow_pending(uid, "topic")
-        return await update.message.reply_text(trend_video_pending_prompt_text(lang), parse_mode="HTML", reply_markup=trend_video_pending_keyboard(lang))
+        return await send_trend_guided_topic_groups_message(update.message, uid, lang)
     await send_trend_guided_source_message(update.message, uid, topic, lang)
 
 async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61437,10 +62355,74 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang),
         )
+    if action == "topic_groups":
+        clear_trend_video_flow_pending(uid)
+        set_trend_video_flow_pending(uid, "topic_group")
+        return await safe_edit_or_send(
+            query,
+            trend_guided_topic_group_text(lang),
+            parse_mode="HTML",
+            reply_markup=trend_guided_topic_group_keyboard(lang),
+        )
 
     state = get_trend_video_flow_pending(uid)
     if not state:
         return await safe_edit_or_send(query, trend_guided_project_missing_text(lang), reply_markup=trend_guided_main_keyboard(lang))
+
+    if action == "topic_group":
+        group = value if value in {"product", "affiliate", "ai_tool", "food", "education"} else "product"
+        set_trend_video_flow_pending(uid, "topic_suggestions", topic_group=group, suggest_offset=0)
+        state = get_trend_video_flow_pending(uid) or state
+        return await safe_edit_or_send(
+            query,
+            trend_guided_topic_suggestions_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=trend_guided_topic_suggestions_keyboard(lang),
+        )
+    if action == "topic_refresh":
+        group = state.get("topic_group") or "product"
+        offset = _safe_int(state.get("suggest_offset"), 0) + 3
+        set_trend_video_flow_pending(uid, "topic_suggestions", topic_group=group, suggest_offset=offset)
+        state = get_trend_video_flow_pending(uid) or state
+        return await safe_edit_or_send(
+            query,
+            trend_guided_topic_suggestions_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=trend_guided_topic_suggestions_keyboard(lang),
+        )
+    if action == "topic_custom":
+        set_trend_video_flow_pending(uid, "topic")
+        return await safe_edit_or_send(
+            query,
+            trend_video_pending_prompt_text(lang),
+            parse_mode="HTML",
+            reply_markup=trend_video_pending_keyboard(lang, "trendg|topic_groups"),
+        )
+    if action.startswith("topic_select_"):
+        idx = max(1, min(3, safe_int(action.rsplit("_", 1)[-1], 1)))
+        group = state.get("topic_group") or "product"
+        suggestions = trend_guided_topic_suggestions(group, _safe_int(state.get("suggest_offset"), 0), lang)
+        topic = suggestions[idx - 1] if idx <= len(suggestions) else (suggestions[0] if suggestions else trend_guided_topic_group_label(group, lang))
+        set_trend_video_flow_pending(uid, "trend_source", topic=topic)
+        state = get_trend_video_flow_pending(uid) or state
+        return await safe_edit_or_send(
+            query,
+            trend_guided_trend_source_text(topic, lang),
+            parse_mode="HTML",
+            reply_markup=trend_guided_trend_source_keyboard(lang),
+        )
+    if action == "topic_back":
+        if state.get("topic_group"):
+            set_trend_video_flow_pending(uid, "topic_suggestions")
+            state = get_trend_video_flow_pending(uid) or state
+            return await safe_edit_or_send(
+                query,
+                trend_guided_topic_suggestions_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=trend_guided_topic_suggestions_keyboard(lang),
+            )
+        set_trend_video_flow_pending(uid, "topic_group")
+        return await safe_edit_or_send(query, trend_guided_topic_group_text(lang), parse_mode="HTML", reply_markup=trend_guided_topic_group_keyboard(lang))
 
     if action == "trend_choices":
         set_trend_video_flow_pending(uid, "trend_source")
@@ -61452,17 +62434,36 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
             reply_markup=trend_guided_trend_source_keyboard(lang),
         )
     if action in {"trend_source_popular", "trend_source_search"}:
-        set_trend_video_flow_pending(uid, "trend_choices", trend_source=("industry" if action == "trend_source_search" else "popular"), trend_locked=False, motion_locked=False)
+        set_trend_video_flow_pending(uid, "trend_choices", trend_source=("industry" if action == "trend_source_search" else "popular"), trend_offset=0, trend_locked=False, motion_locked=False)
         state = get_trend_video_flow_pending(uid) or state
         return await safe_edit_or_send(
             query,
-            trend_guided_trend_choices_text(trend_guided_topic(state), lang),
+            trend_guided_trend_choices_text_from_state(state, lang),
+            parse_mode="HTML",
+            reply_markup=trend_guided_trend_choices_keyboard(lang),
+        )
+    if action == "trend_back_choices":
+        set_trend_video_flow_pending(uid, "trend_choices")
+        state = get_trend_video_flow_pending(uid) or state
+        return await safe_edit_or_send(
+            query,
+            trend_guided_trend_choices_text_from_state(state, lang),
+            parse_mode="HTML",
+            reply_markup=trend_guided_trend_choices_keyboard(lang),
+        )
+    if action == "trend_refresh":
+        offset = _safe_int(state.get("trend_offset"), 0) + 3
+        set_trend_video_flow_pending(uid, "trend_choices", trend_offset=offset)
+        state = get_trend_video_flow_pending(uid) or state
+        return await safe_edit_or_send(
+            query,
+            trend_guided_trend_choices_text_from_state(state, lang),
             parse_mode="HTML",
             reply_markup=trend_guided_trend_choices_keyboard(lang),
         )
     if action == "trend_source_custom":
         set_trend_video_flow_pending(uid, "trend_custom", trend_source="manual")
-        return await safe_edit_or_send(query, "✍️ Please enter the trend/video style you want to follow." if normalize_user_language(lang) != "vi" else "✍️ Bạn hãy nhập trend/mẫu video bạn muốn bắt chước.", reply_markup=trend_video_pending_keyboard(lang))
+        return await safe_edit_or_send(query, "✍️ Please enter the trend/video style you want to follow." if normalize_user_language(lang) != "vi" else "✍️ Bạn hãy nhập trend/mẫu video bạn muốn bắt chước.", reply_markup=trend_video_pending_keyboard(lang, "trendg|trend_choices"))
     if action == "trend_source_skip":
         skip_label = "Normal video without a selected trend" if normalize_user_language(lang) != "vi" else "Bỏ qua trend, tạo video thường"
         set_trend_video_flow_pending(uid, "trend_selected", trend_choice=0, custom_trend=skip_label, trend_source="skip", trend_locked=False, motion_locked=False)
@@ -61470,12 +62471,23 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, trend_guided_selected_trend_text(state, 1, lang), parse_mode="HTML", reply_markup=trend_guided_selected_trend_keyboard(lang))
     if action.startswith("trend_select_"):
         idx = max(1, min(3, safe_int(action.rsplit("_", 1)[-1], 1)))
-        set_trend_video_flow_pending(uid, "trend_selected", trend_choice=idx, custom_trend="", trend_locked=False, motion_locked=False)
+        ideas = trend_guided_trend_ideas(trend_guided_topic(state), _safe_int(state.get("trend_offset"), 0), lang)
+        selected = ideas[idx - 1] if idx <= len(ideas) else {}
+        set_trend_video_flow_pending(
+            uid,
+            "trend_selected",
+            trend_choice=idx,
+            custom_trend="",
+            selected_trend_title=selected.get("title") or trend_guided_trend_label(idx, lang),
+            selected_trend_summary=selected.get("summary") or trend_guided_choice_summary("trend", idx, state, lang),
+            trend_locked=False,
+            motion_locked=False,
+        )
         state = get_trend_video_flow_pending(uid) or state
         return await safe_edit_or_send(query, trend_guided_selected_trend_text(state, idx, lang), parse_mode="HTML", reply_markup=trend_guided_selected_trend_keyboard(lang))
     if action == "trend_custom":
         set_trend_video_flow_pending(uid, "trend_custom", trend_source="manual")
-        return await safe_edit_or_send(query, "✍️ Please enter the trend/video style you want to follow." if normalize_user_language(lang) != "vi" else "✍️ Bạn hãy nhập trend/mẫu video bạn muốn bắt chước.", reply_markup=trend_video_pending_keyboard(lang))
+        return await safe_edit_or_send(query, "✍️ Please enter the trend/video style you want to follow." if normalize_user_language(lang) != "vi" else "✍️ Bạn hãy nhập trend/mẫu video bạn muốn bắt chước.", reply_markup=trend_video_pending_keyboard(lang, "trendg|trend_choices"))
     if action in {"trend_review", "trend_lock"}:
         if action == "trend_lock":
             set_trend_video_flow_pending(uid, "trend_selected", trend_locked=True)
@@ -61488,14 +62500,28 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         set_trend_video_flow_pending(uid, "motion_choices", trend_locked=True)
         state = get_trend_video_flow_pending(uid) or state
         return await safe_edit_or_send(query, trend_guided_motion_choices_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_motion_choices_keyboard(lang))
+    if action == "motion_refresh":
+        offset = _safe_int(state.get("motion_offset"), 0) + 3
+        set_trend_video_flow_pending(uid, "motion_choices", trend_locked=True, motion_offset=offset)
+        state = get_trend_video_flow_pending(uid) or state
+        return await safe_edit_or_send(query, trend_guided_motion_choices_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_motion_choices_keyboard(lang))
     if action.startswith("motion_select_"):
         idx = max(1, min(3, safe_int(action.rsplit("_", 1)[-1], 1)))
-        set_trend_video_flow_pending(uid, "motion_selected", motion_choice=idx, custom_motion="")
+        ideas = trend_guided_motion_ideas(state, lang)
+        selected = ideas[idx - 1] if idx <= len(ideas) else {}
+        set_trend_video_flow_pending(
+            uid,
+            "motion_selected",
+            motion_choice=idx,
+            custom_motion="",
+            selected_motion_title=selected.get("title") or trend_guided_motion_label(idx, lang),
+            selected_motion_summary=selected.get("summary") or trend_guided_choice_summary("motion", idx, state, lang),
+        )
         state = get_trend_video_flow_pending(uid) or state
         return await safe_edit_or_send(query, trend_guided_selected_motion_text(state, idx, lang), parse_mode="HTML", reply_markup=trend_guided_selected_motion_keyboard(lang))
     if action == "motion_custom":
         set_trend_video_flow_pending(uid, "motion_custom")
-        return await safe_edit_or_send(query, "✍️ Send your custom motion direction." if normalize_user_language(lang) != "vi" else "✍️ Hãy nhập hướng chuyển động riêng của bạn.", reply_markup=trend_video_pending_keyboard(lang))
+        return await safe_edit_or_send(query, "✍️ Send your custom motion direction." if normalize_user_language(lang) != "vi" else "✍️ Hãy nhập hướng chuyển động riêng của bạn.", reply_markup=trend_video_pending_keyboard(lang, "trendg|motion_step"))
     if action in {"motion_review", "motion_lock"}:
         if action == "motion_lock":
             set_trend_video_flow_pending(uid, "motion_selected", motion_locked=True)
@@ -61515,7 +62541,7 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, trend_guided_selected_image_prompt_text(state, idx, lang), parse_mode="HTML", reply_markup=trend_guided_selected_image_prompt_keyboard(lang))
     if action == "image_prompt_custom":
         set_trend_video_flow_pending(uid, "image_prompt_custom")
-        return await safe_edit_or_send(query, "✍️ Send your edited image prompt." if normalize_user_language(lang) != "vi" else "✍️ Hãy nhập prompt ảnh đã sửa.", reply_markup=trend_video_pending_keyboard(lang))
+        return await safe_edit_or_send(query, "✍️ Send your edited image prompt." if normalize_user_language(lang) != "vi" else "✍️ Hãy nhập prompt ảnh đã sửa.", reply_markup=trend_video_pending_keyboard(lang, "trendg|image_review"))
     if action in {"image_review", "image_prompt_save"}:
         if action == "image_prompt_save":
             set_trend_video_flow_pending(uid, "image_prompt_selected", image_prompt_saved=True)
@@ -61574,7 +62600,7 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, trend_guided_selected_video_prompt_text(state, idx, lang), parse_mode="HTML", reply_markup=trend_guided_selected_video_prompt_keyboard(lang, is_admin_user(uid)))
     if action == "video_prompt_custom":
         set_trend_video_flow_pending(uid, "video_prompt_custom")
-        return await safe_edit_or_send(query, "✍️ Send your edited video prompt." if normalize_user_language(lang) != "vi" else "✍️ Hãy nhập prompt video đã sửa.", reply_markup=trend_video_pending_keyboard(lang))
+        return await safe_edit_or_send(query, "✍️ Send your edited video prompt." if normalize_user_language(lang) != "vi" else "✍️ Hãy nhập prompt video đã sửa.", reply_markup=trend_video_pending_keyboard(lang, "trendg|video_review"))
     if action in {"video_review", "video_prompt_save"}:
         if action == "video_prompt_save":
             set_trend_video_flow_pending(uid, "video_prompt_selected", video_prompt_saved=True)
@@ -61638,7 +62664,7 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         set_trend_video_flow_pending(uid, "finalized", finalized=True)
         state = get_trend_video_flow_pending(uid) or state
         return await safe_edit_or_send(query, trend_guided_finalize_text(state, lang), parse_mode="HTML", reply_markup=trend_guided_review_keyboard(lang))
-    return await safe_edit_or_send(query, trend_video_pending_prompt_text(lang), parse_mode="HTML", reply_markup=trend_video_pending_keyboard(lang))
+    return await safe_edit_or_send(query, trend_guided_topic_group_text(lang), parse_mode="HTML", reply_markup=trend_guided_topic_group_keyboard(lang))
 
 async def handle_trend_video_flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query

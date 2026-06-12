@@ -2222,9 +2222,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Đang phát triển" in bot.video_self_scene_ai_text("vi")
     assert "Bot chưa gọi API và chưa trừ Xu" in bot.video_self_scene_ai_text("vi")
     self_scene_labels = [button.text for row in bot.self_scene_input_keyboard("vi").inline_keyboard for button in row]
-    assert "1️⃣ Đổi bối cảnh" in self_scene_labels
-    assert "2️⃣ Phong cách điện ảnh" in self_scene_labels
-    assert "3️⃣ Quảng cáo/TikTok" in self_scene_labels
+    assert "1️⃣ Chọn hướng 1" in self_scene_labels
+    assert "2️⃣ Chọn hướng 2" in self_scene_labels
+    assert "3️⃣ Chọn hướng 3" in self_scene_labels
+    assert "🔄 Đổi gợi ý khác" in self_scene_labels
     assert "✍️ Nhập hướng riêng" in self_scene_labels
     self_scene_object_labels = [button.text for row in bot.self_scene_object_keyboard("vi").inline_keyboard for button in row]
     assert "👤 Người thật" in self_scene_object_labels
@@ -2902,7 +2903,8 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "trendg|trend_select_1" in trend_callbacks
     assert "trendg|trend_select_2" in trend_callbacks
     assert "trendg|trend_select_3" in trend_callbacks
-    assert "trendg|trend_source_popular" in trend_callbacks
+    assert "trendg|trend_refresh" in trend_callbacks
+    assert "trendg|cancel" not in trend_callbacks
     selected_trend_text = bot.trend_guided_selected_trend_text(bot.get_trend_video_flow_pending("u_trend") or {}, 1)
     assert "Đã chọn trend" in selected_trend_text
     assert "Bot sẽ dùng trend này để tạo concept/chuyển động/prompt ảnh/prompt video" in selected_trend_text
@@ -4593,9 +4595,10 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
         for button in row
     ]
     assert "Bạn muốn đổi video này theo hướng nào" in selfscene_start
-    assert "selfscene|direction|context" in selfscene_direction_callbacks
-    assert "selfscene|direction|cinematic" in selfscene_direction_callbacks
-    assert "selfscene|direction|ad" in selfscene_direction_callbacks
+    assert "selfscene|direction_choice|1" in selfscene_direction_callbacks
+    assert "selfscene|direction_choice|2" in selfscene_direction_callbacks
+    assert "selfscene|direction_choice|3" in selfscene_direction_callbacks
+    assert "selfscene|direction_refresh" in selfscene_direction_callbacks
     assert "selfscene|direction_custom" in selfscene_direction_callbacks
     assert "Trong video này cần giữ ổn định đối tượng nào" in bot.self_scene_object_text({"direction": "context"}, "vi")
     motion_buttons = [
@@ -4608,8 +4611,8 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
         for row in bot.self_scene_music_keyboard("vi").inline_keyboard
         for button in row
     ]
-    assert {"1️⃣ Tiến chậm", "2️⃣ Xoay nhẹ", "3️⃣ Chuyển cảnh nhanh"}.issubset(set(motion_buttons))
-    assert {"1️⃣ Điện ảnh", "2️⃣ Công nghệ", "3️⃣ Viral/TikTok", "⏭ Không nhạc"}.issubset(set(music_buttons))
+    assert {"1️⃣ Chọn chuyển động 1", "2️⃣ Chọn chuyển động 2", "3️⃣ Chọn chuyển động 3", "🔄 Đổi gợi ý khác"}.issubset(set(motion_buttons))
+    assert {"1️⃣ Chọn nhạc/voice 1", "2️⃣ Chọn nhạc/voice 2", "3️⃣ Chọn nhạc/voice 3", "🔄 Đổi gợi ý khác"}.issubset(set(music_buttons))
     selfscene_plan = bot.self_scene_plan_text(
         {
             "direction": "ad",
@@ -4837,6 +4840,98 @@ def test_video_ux_v6_shared_suggestions_and_navigation():
     assert [button.callback_data for button in result_rows[-1]] == ["promptvideo|back_music", "menu|main"]
     idea_result_rows = bot.video_idea_result_keyboard("vi").inline_keyboard
     assert [button.callback_data for button in idea_result_rows[-1]] == ["videoidea|back_choices", "menu|main"]
+
+
+def test_video_ux_v7_trend_back_and_suggestion_flow():
+    source = bot_source_text()
+    trend_handler = source_between(source, "async def handle_trend_guided_callback", "async def handle_trend_video_flow_callback")
+    self_scene_handler = source_between(source, "async def handle_self_scene_ai_callback", "async def handle_long_video_callback")
+
+    group_text = bot.trend_guided_topic_group_text("vi")
+    assert "Video theo trend" in group_text
+    assert "gợi ý 3 chủ đề video trend" in group_text
+    group_callbacks = [button.callback_data for row in bot.trend_guided_topic_group_keyboard("vi").inline_keyboard for button in row]
+    assert {
+        "trendg|topic_group|product",
+        "trendg|topic_group|affiliate",
+        "trendg|topic_group|ai_tool",
+        "trendg|topic_custom",
+    }.issubset(set(group_callbacks))
+    assert "trendg|cancel" not in group_callbacks
+
+    state = {"topic_group": "product", "suggest_offset": 0}
+    first_topics = bot.trend_guided_topic_suggestions("product", 0, "vi")
+    second_topics = bot.trend_guided_topic_suggestions("product", 3, "vi")
+    assert len(first_topics) == 3
+    assert first_topics != second_topics
+    assert any("Nước hoa" in item or "Balo" in item for item in first_topics)
+    topic_callbacks = [button.callback_data for row in bot.trend_guided_topic_suggestions_keyboard("vi").inline_keyboard for button in row]
+    assert {"trendg|topic_select_1", "trendg|topic_select_2", "trendg|topic_select_3", "trendg|topic_refresh", "trendg|topic_custom"}.issubset(set(topic_callbacks))
+    assert "trendg|cancel" not in topic_callbacks
+
+    source_callbacks = [button.callback_data for row in bot.trend_guided_trend_source_keyboard("vi").inline_keyboard for button in row]
+    assert "trendg|topic_back" in source_callbacks
+    assert "trendg|cancel" not in source_callbacks
+    assert "trendg|topic_group" in trend_handler
+    assert "trendg|topic_select_1" in source
+
+    trend_state = {"topic": "nước hoa nam", "trend_offset": 0}
+    trend_text = bot.trend_guided_trend_choices_text_from_state(trend_state, "vi")
+    trend_text_next = bot.trend_guided_trend_choices_text_from_state({"topic": "nước hoa nam", "trend_offset": 3}, "vi")
+    assert "nước hoa nam" in trend_text
+    assert trend_text != trend_text_next
+    trend_callbacks = [button.callback_data for row in bot.trend_guided_trend_choices_keyboard("vi").inline_keyboard for button in row]
+    assert {"trendg|trend_select_1", "trendg|trend_select_2", "trendg|trend_select_3", "trendg|trend_refresh"}.issubset(set(trend_callbacks))
+    assert "trendg|cancel" not in trend_callbacks
+
+    motion_state = {"topic": "nước hoa nam", "trend_choice": 1, "selected_trend_title": "Trend before/after", "motion_offset": 0}
+    motion_first = bot.trend_guided_motion_ideas(motion_state, "vi")
+    motion_second = bot.trend_guided_motion_ideas({**motion_state, "motion_offset": 3}, "vi")
+    assert len(motion_first) == 3
+    assert motion_first != motion_second
+    assert "nước hoa nam" in " ".join(item["summary"] for item in motion_first)
+    trend_motion_callbacks = [button.callback_data for row in bot.trend_guided_motion_choices_keyboard("vi").inline_keyboard for button in row]
+    assert {"trendg|motion_select_1", "trendg|motion_select_2", "trendg|motion_select_3", "trendg|motion_refresh"}.issubset(set(trend_motion_callbacks))
+
+    guided_state = {"selected_topic": "app AI automation", "selected_prompt": "video app AI automation", "motion_offset": 0, "music_offset": 0}
+    guided_motion_first = bot.guided_video_motion_suggestions(guided_state, "vi")
+    guided_motion_second = bot.guided_video_motion_suggestions({**guided_state, "motion_offset": 3}, "vi")
+    assert len(guided_motion_first) == 3
+    assert guided_motion_first != guided_motion_second
+    guided_music_first = bot.guided_video_music_suggestions(guided_state, "vi")
+    guided_music_second = bot.guided_video_music_suggestions({**guided_state, "music_offset": 3}, "vi")
+    assert len(guided_music_first) == 3
+    assert guided_music_first != guided_music_second
+    prompt_motion_callbacks = [button.callback_data for row in bot.guided_video_motion_keyboard("promptvideo", "vi").inline_keyboard for button in row]
+    prompt_music_callbacks = [button.callback_data for row in bot.guided_video_music_keyboard("promptvideo", "vi").inline_keyboard for button in row]
+    assert "promptvideo|motion_refresh" in prompt_motion_callbacks
+    assert "promptvideo|music_refresh" in prompt_music_callbacks
+    assert "affiliate" in " ".join(bot.long_video_topic_suggestions("sales", 0, "en")).lower()
+    assert "product" in " ".join(bot.image_video_style_suggestions(0, "en")).lower()
+    assert "cafe" in " ".join(bot.video_v6_suggestion_bank("motion_place", "en")).lower()
+
+    cinema_first = bot.video_idea_cinema_suggestions(0, "vi")
+    cinema_second = bot.video_idea_cinema_suggestions(3, "vi")
+    assert len(cinema_first) == 3
+    assert cinema_first != cinema_second
+    cinema_callbacks = [button.callback_data for row in bot.video_idea_cinema_suggestions_keyboard("vi").inline_keyboard for button in row]
+    assert {"videoidea|cinema_choice|1", "videoidea|cinema_refresh", "videoidea|cinema_custom"}.issubset(set(cinema_callbacks))
+    assert "videoidea|kind|cinema" in source_between(source, "async def handle_video_idea_callback", "def menu_text_main_ai")
+
+    self_scene_callbacks = [button.callback_data for row in bot.self_scene_input_keyboard("vi").inline_keyboard for button in row]
+    assert "selfscene|direction_refresh" in self_scene_callbacks
+    assert "selfscene|direction_choice|1" in self_scene_callbacks
+    assert bot.self_scene_direction_suggestions(0, "vi") != bot.self_scene_direction_suggestions(3, "vi")
+    assert bot.self_scene_context_suggestions("product", "nước hoa nam", "vi", 0) != bot.self_scene_context_suggestions("product", "nước hoa nam", "vi", 6)
+    self_scene_motion_callbacks = [button.callback_data for row in bot.self_scene_style_keyboard("vi").inline_keyboard for button in row]
+    self_scene_music_callbacks = [button.callback_data for row in bot.self_scene_music_keyboard("vi").inline_keyboard for button in row]
+    assert "selfscene|style_refresh" in self_scene_motion_callbacks
+    assert "selfscene|music_refresh" in self_scene_music_callbacks
+    assert "selfscene|back_context" in self_scene_handler
+    assert "selfscene|back_style" in self_scene_handler
+    assert "selfscene|back_music" in self_scene_handler
+    long_result_callbacks = [button.callback_data for row in bot.long_video_result_keyboard("vi").inline_keyboard for button in row]
+    assert "longvideo|back_structure" in long_result_callbacks
 
 
 def test_quick_image_flow_prompt_before_ratio_and_pricing():
