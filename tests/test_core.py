@@ -5142,6 +5142,82 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     assert bot.clear_quick_image_flow("quick-image-test") is True
 
 
+def test_image_system_v9_structured_prompt_quality_and_unavailable_tool_guards():
+    product = bot.build_image_prompt(
+        "chai nước hoa nam cao cấp",
+        "product_photo",
+        "luxury studio",
+        "9:16",
+        "high",
+    )
+    assert product["purpose"] == "product_photo"
+    assert "Professional product photography" in product["prompt"]
+    assert "vertical composition" in product["prompt"]
+    assert "TikTok, Reels and Shorts" in product["prompt"]
+    assert "premium cinematic and commercial grade" in product["prompt"]
+    assert "controlled lighting" in product["prompt"]
+    assert "distorted product" in product["negative_prompt"]
+    assert product["suggested_ratio"] == "9:16"
+
+    logo = bot.build_image_prompt("logo TOAN AAS màu xanh ngọc", "", "minimal", "1:1", "standard")
+    assert logo["purpose"] == "logo_branding"
+    assert "concept-first" in logo["prompt"]
+    assert "avoid random text" in logo["prompt"]
+    assert "sai chữ hoặc logo" in logo["text_logo_caution"]
+    assert "misspelled brand name" in logo["negative_prompt"]
+
+    wide = bot.build_image_prompt("banner app AI", "social_banner", "modern", "16:9", "standard")
+    assert "wide composition" in wide["prompt"]
+    assert "YouTube, banners and video thumbnails" in wide["prompt"]
+    assert bot.build_image_prompt("tạo ảnh đẹp")["needs_clarification"] is True
+
+    generated = bot.image_tier_prompt_for_generation("chai nước hoa nam cao cấp", "high", "9:16")
+    assert "Aspect ratio 9:16" in generated
+    assert "premium cinematic and commercial grade" in generated
+    assert "Negative prompt:" in generated
+
+    preview_state = {
+        "selected_topic": "logo TOAN AAS màu xanh ngọc",
+        "original_request": "logo TOAN AAS màu xanh ngọc",
+        "prompt": logo["prompt"],
+        "negative_prompt": logo["negative_prompt"],
+        "image_purpose": logo["purpose"],
+        "purpose_label": logo["purpose_label"],
+        "suggested_ratio": logo["suggested_ratio"],
+        "text_logo_caution": logo["text_logo_caution"],
+    }
+    preview = bot.quick_image_prepared_prompt_text(preview_state, "vi")
+    assert "Prompt ảnh đã được soạn và tối ưu" in preview
+    assert "Mục tiêu:" in preview
+    assert "Negative prompt:" in preview
+    assert "Tỉ lệ đề xuất:" in preview
+    assert "AI tạo ảnh có thể sai chữ hoặc logo" in preview
+    assert "chưa gọi API và chưa trừ Xu" in preview
+
+    confirm = bot.public_image_confirm_text("high", logo["prompt"], 1000, "vi", "1:1")
+    assert "Kiểm soát chất lượng" in confirm
+    assert "key visual" in confirm
+
+    source = bot_source_text()
+    callback_source = source_between(source, "async def handle_image_tools_callback", "async def handle_image_menu_pending_text")
+    custom_pending_source = source_between(source, "async def handle_quick_image_flow_pending_text", "async def handle_quick_media_pending_text")
+    assert '"prepared_prompt"' in custom_pending_source
+    assert "build_image_prompt(" in custom_pending_source
+    assert "quick_image_prepared_prompt_text" in custom_pending_source
+    assert "quick_image_ratio_text" not in custom_pending_source
+
+    for guard_text in (
+        bot.image_manual_edit_guard_text("vi"),
+        bot.image_edit_ai_guard_text("vi"),
+        bot.image_upscale_ai_guard_text("vi"),
+    ):
+        assert "chưa xử lý ảnh" in guard_text
+        assert "chưa gọi provider" in guard_text
+        assert "chưa trừ Xu" in guard_text
+    assert "shopaikey_image_generate(" not in callback_source
+    assert "spend_fixed_credit_info(" not in callback_source
+
+
 def test_image_ux_v8_manual_and_ai_edit_confirmation_guards():
     source = bot_source_text()
     callback_source = source_between(source, "async def handle_image_tools_callback", "async def handle_image_menu_pending_text")

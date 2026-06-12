@@ -52,6 +52,10 @@ from telegram.ext import (
     CallbackQueryHandler, filters, ContextTypes, ApplicationHandlerStop
 )
 from creative_suggestions import creative_suggestion_bank, rotating_suggestions
+from image_prompt_quality import (
+    build_image_prompt,
+    enhance_image_prompt_for_generation,
+)
 try:
     import edge_tts
     EDGE_TTS_IMPORT_ERROR = ""
@@ -29149,6 +29153,26 @@ def image_tier_warranty_note(tier: str = "", lang: str = "vi") -> str:
         return "This package includes 1 retry in the same request." if has_warranty else "This package does not include a free retry."
     return "Gói này kèm 1 lần tạo lại trong cùng yêu cầu." if has_warranty else "Gói này không kèm tạo lại miễn phí."
 
+def image_tier_quality_note(tier: str = "", lang: str = "vi") -> str:
+    tier_norm = normalize_image_tier(tier)
+    if normalize_user_language(lang) != "vi":
+        notes = {
+            "low": "Best for quick tests, simple ideas, and low-cost drafts.",
+            "standard": "Best for product images, basic advertising, and social posts.",
+            "standard_warranty": "Professional quality with one retry for the same request.",
+            "high": "Best for advertising, key visuals, cinematic work, and controlled detail.",
+            "high_warranty": "Premium controlled quality with one retry for the same request.",
+        }
+    else:
+        notes = {
+            "low": "Phù hợp test nhanh, ý tưởng đơn giản, chi phí thấp.",
+            "standard": "Phù hợp ảnh sản phẩm, quảng cáo cơ bản và social post.",
+            "standard_warranty": "Chất lượng chuyên nghiệp, kèm 1 lần tạo lại trong cùng yêu cầu.",
+            "high": "Phù hợp ảnh quảng cáo, key visual, cinematic và yêu cầu chi tiết cao.",
+            "high_warranty": "Chất lượng cao được kiểm soát, kèm 1 lần tạo lại trong cùng yêu cầu.",
+        }
+    return notes.get(tier_norm, notes["low"])
+
 def public_image_waiting_text(tier: str = "", lang: str = "vi") -> str:
     tier_norm = normalize_image_tier(tier)
     base = ui_text(lang, "image.waiting")
@@ -29387,14 +29411,11 @@ def media_aspect_instruction(aspect_ratio: str = "", kind: str = "video") -> str
     return f"Aspect ratio {aspect}."
 
 def image_tier_prompt_for_generation(prompt: str, tier: str = "", aspect_ratio: str = "") -> str:
-    prompt = re.sub(r"\s+", " ", str(prompt or "").strip())[:1200]
-    tier_norm = normalize_image_tier(tier)
-    aspect_note = media_aspect_instruction(aspect_ratio, "image") if aspect_ratio else ""
-    if tier_norm in {"standard", "standard_warranty"}:
-        return f"{prompt}. {aspect_note} High quality, clean composition, professional lighting, detailed but natural, no watermark, no extra text.".replace(".  ", ". ")
-    if tier_norm in {"high", "high_warranty"}:
-        return f"{prompt}. {aspect_note} Premium commercial quality, refined composition, sharp details, professional studio lighting, polished brand-safe look, no watermark, no extra text.".replace(".  ", ". ")
-    return f"{prompt}. {aspect_note} Clean simple composition, fast draft quality, clear subject, no watermark, no extra text.".replace(".  ", ". ")
+    return enhance_image_prompt_for_generation(
+        re.sub(r"\s+", " ", str(prompt or "").strip())[:1200],
+        normalize_media_aspect_ratio(aspect_ratio, "1:1", "image") if aspect_ratio else "",
+        normalize_image_tier(tier),
+    )
 
 def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool = True) -> str:
     tier_norm = normalize_image_tier(tier)
@@ -30568,15 +30589,16 @@ def image_edit_menu_start_text(lang: str = "vi") -> str:
         return (
             "🧩 <b>Edit image</b>\n\n"
             "Send or reply to the image you want to edit.\n\n"
-            "TOAN AAS will then let you choose local edits or guarded AI edits. It will ask before any provider call or Xu charge."
+            "Local ratio and pixel resize tools are available. Manual edit, AI edit, and AI upscale are still being completed; "
+            "those guarded tools do not process images, call providers, or charge Xu."
         )
     return (
         "🧩 <b>Chỉnh sửa ảnh</b>\n\n"
         "Bạn hãy gửi hoặc reply vào ảnh cần sửa.\n\n"
         "Sau đó TOAN AAS sẽ cho bạn chọn cách xử lý:\n\n"
-        "• Chỉnh sửa local/thủ công: đổi tỉ lệ, resize, crop, thêm nền, nền mờ.\n"
-        "• Chỉnh sửa AI: đổi nền, xóa/thêm vật thể, đổi phong cách, nâng chất lượng nếu công cụ mở.\n\n"
-        "TOAN AAS sẽ hỏi rõ trước khi gọi API hoặc trừ Xu."
+        "• Đã mở ổn định: đổi tỉ lệ local, resize pixel, crop/thêm nền/nền mờ theo flow local.\n"
+        "• Đang hoàn thiện: chỉnh sửa thủ công, chỉnh sửa AI và nâng chất lượng AI.\n\n"
+        "Các công cụ đang hoàn thiện chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu."
     )
 
 def image_edit_instruction_text(lang: str = "vi") -> str:
@@ -30586,8 +30608,8 @@ def image_edit_instruction_text(lang: str = "vi") -> str:
             "Choose how you want to process it.\n\n"
             "• Local ratio change: free, quick, crop/pad/blur.\n"
             "• Pixel resize: free local processing.\n"
-            "• Manual edit: simple local edits when available.\n"
-            "• AI edit/upscale: only runs when providers are ready.\n\n"
+            "• Manual edit: still being completed; request capture only.\n"
+            "• AI edit/upscale: still being completed; no real processing.\n\n"
             "No provider call and no Xu charged."
         )
     return (
@@ -30595,8 +30617,8 @@ def image_edit_instruction_text(lang: str = "vi") -> str:
         "Bạn muốn chỉnh ảnh theo cách nào?\n\n"
         "1. Đổi tỉ lệ local: miễn phí, nhanh, có thể thêm nền/nền mờ/crop.\n"
         "2. Resize pixel: đổi kích thước cụ thể như 1920x1080.\n"
-        "3. Chỉnh sửa thủ công: thêm chữ, vẽ/đánh dấu, crop/căn chỉnh nếu hệ thống hỗ trợ.\n"
-        "4. Chỉnh sửa AI: đổi nền, xóa/thêm vật thể, đổi phong cách. Chỉ chạy khi nhà cung cấp ổn định.\n\n"
+        "3. Chỉnh sửa thủ công: đang hoàn thiện, hiện chỉ ghi nhận yêu cầu.\n"
+        "4. Chỉnh sửa AI / nâng chất lượng AI: đang hoàn thiện, chưa xử lý ảnh thật.\n\n"
         "Bot chưa gọi provider và chưa trừ Xu."
     )
 
@@ -30604,12 +30626,12 @@ def image_upscale_menu_start_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "📐 <b>Upscale / resize</b>\n\n"
-            "Send or reply to the image. Local resize/crop/pad is free in V1. AI upscale is still provider-guarded."
+            "Send or reply to the image. Local resize/crop/pad is available. AI upscale is still being completed and does not process images or charge Xu."
         )
     return (
         "📐 <b>Nâng cấp / đổi kích thước ảnh</b>\n\n"
         "Bạn hãy gửi hoặc reply ảnh cần xử lý.\n\n"
-        "Đổi tỷ lệ/resize local miễn phí trong V1. Nâng chất lượng AI vẫn đang kiểm tra provider và sẽ có xác nhận trước nếu mở."
+        "Đổi tỷ lệ/resize local đã mở ổn định. Nâng chất lượng AI đang được hoàn thiện, chưa xử lý ảnh thật, chưa gọi provider và chưa trừ Xu."
     )
 
 def image_menu_guarded_result_text(action: str, lang: str = "vi") -> str:
@@ -31137,15 +31159,15 @@ def image_manual_edit_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🧩 <b>Manual edit</b>\n\n"
-            "Choose a simple local edit direction. If an item is not available yet, TOAN AAS will report that clearly and will not charge Xu."
+            "This tool is still being completed. You may describe the requested edit, but TOAN AAS will not process the image, call a provider, or charge Xu."
         )
     return (
         "🧩 <b>Chỉnh sửa thủ công</b>\n\n"
-        "Bạn muốn chỉnh thủ công theo hướng nào?\n\n"
+        "Tính năng này đang được hoàn thiện. Bạn có thể mô tả yêu cầu để TOAN AAS ghi nhận, nhưng hệ thống chưa xử lý ảnh thật.\n\n"
         "1. Thêm chữ / ghi chú lên ảnh\n"
         "2. Cắt/căn chỉnh ảnh\n"
         "3. Làm mờ/che một vùng đơn giản nếu hỗ trợ\n\n"
-        "Nếu tính năng chưa hoàn thiện, TOAN AAS sẽ báo rõ và chưa trừ Xu."
+        "TOAN AAS chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu."
     )
 
 def image_manual_edit_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -31164,12 +31186,12 @@ def image_manual_edit_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def image_manual_edit_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "🧩 This manual edit tool is still being completed.\n\n"
-            "TOAN AAS saved your request for this step, but did not process the image, call a provider, or charge Xu."
+            "🧩 TOAN AAS recorded your request, but this tool is not open for real image processing yet.\n\n"
+            "The system did not process the image, call a provider, or charge Xu."
         )
     return (
-        "🧩 Công cụ chỉnh sửa thủ công này đang được hoàn thiện.\n\n"
-        "TOAN AAS đã ghi nhận yêu cầu cho bước này nhưng chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu."
+        "🧩 TOAN AAS đã ghi nhận yêu cầu của bạn, nhưng công cụ này chưa mở xử lý ảnh thật.\n\n"
+        "Hệ thống chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu."
     )
 
 def image_manual_edit_action_label(action: str = "", lang: str = "vi") -> str:
@@ -31255,15 +31277,15 @@ def image_edit_ai_choice_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "✨ <b>AI image edit</b>\n\n"
-            "Choose what AI should do. TOAN AAS will show a confirmation/guard before any provider call or Xu charge."
+            "This tool is still being completed. You may prepare an edit request, but TOAN AAS will not process the image, call a provider, or charge Xu."
         )
     return (
         "✨ <b>Chỉnh sửa AI</b>\n\n"
-        "Bạn muốn AI chỉnh ảnh theo hướng nào?\n\n"
+        "Tính năng này đang được hoàn thiện. Bạn có thể chuẩn bị yêu cầu chỉnh sửa, nhưng hệ thống chưa xử lý ảnh thật.\n\n"
         "1. Đổi nền / đổi bối cảnh\n"
         "2. Xóa vật thể / làm sạch ảnh\n"
         "3. Thêm vật thể/chữ hoặc đổi phong cách\n\n"
-        "TOAN AAS sẽ xác nhận rõ trước khi gọi API hoặc trừ Xu."
+        "TOAN AAS chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu."
     )
 
 def image_edit_ai_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -31401,14 +31423,14 @@ def image_edit_ai_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def image_edit_ai_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "🧩 AI image edit is still being verified with providers.\n"
-            "TOAN AAS has not called an API and has not charged Xu.\n\n"
-            "You can use local ratio change / pixel resize first."
+            "🧩 This feature is still being completed.\n"
+            "TOAN AAS has not processed the image, called a provider, or charged Xu.\n\n"
+            "You can return to the stable image tools instead."
         )
     return (
-        "✨ <b>Chỉnh sửa AI hiện đang được kiểm tra nhà cung cấp.</b>\n"
-        "TOAN AAS chưa gọi API và chưa trừ Xu.\n\n"
-        "Bạn có thể dùng Đổi tỉ lệ local / Resize pixel trước."
+        "✨ <b>Tính năng này đang được hoàn thiện.</b>\n"
+        "TOAN AAS chưa xử lý ảnh, chưa gọi provider. Hệ thống chưa gọi API và chưa trừ Xu.\n\n"
+        "Bạn có thể quay lại dùng các công cụ ảnh đã mở ổn định trước."
     )
 
 def image_edit_create_new_text(state: dict, lang: str = "vi") -> str:
@@ -31454,15 +31476,15 @@ def image_resize_choice_text(lang: str = "vi") -> str:
             "✅ <b>Image received.</b>\n\nHow do you want to process it?\n\n"
             "• Local ratio change: free, crop/pad/blur.\n"
             "• Pixel resize: free local processing.\n"
-            "• Manual edit: simple local edits when available.\n"
-            "• AI edit/upscale: provider-guarded."
+            "• Manual edit: still being completed; request capture only.\n"
+            "• AI edit/upscale: still being completed; no real processing or charge."
         )
     return (
         "✅ <b>Đã nhận ảnh.</b>\n\nBạn muốn chỉnh ảnh theo cách nào?\n\n"
         "1. 📐 Đổi tỉ lệ local — miễn phí, có nền mờ/thêm nền/crop.\n"
         "2. 🖼 Resize pixel — đổi kích thước cụ thể.\n"
-        "3. 🧩 Chỉnh sửa thủ công — các thao tác đơn giản nếu hệ thống hỗ trợ.\n"
-        "4. ✨ Chỉnh sửa AI / nâng chất lượng — chỉ chạy khi nhà cung cấp ổn định."
+        "3. 🧩 Chỉnh sửa thủ công — đang hoàn thiện, hiện chỉ ghi nhận yêu cầu.\n"
+        "4. ✨ Chỉnh sửa AI / nâng chất lượng — đang hoàn thiện, chưa xử lý thật và chưa trừ Xu."
     )
 
 def image_resize_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -31774,13 +31796,14 @@ async def send_local_resized_image(update_or_query, context: ContextTypes.DEFAUL
 def image_upscale_ai_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "✨ AI enhance/upscale is still being verified with providers.\n\n"
-            "You can use local resize/crop/pad for free now. TOAN AAS has not called a provider and has not charged Xu."
+            "✨ This feature is still being completed.\n\n"
+            "TOAN AAS has not processed the image, called a provider, or charged Xu. "
+            "You can return to the stable local image tools instead."
         )
     return (
-        "✨ <b>Nâng chất lượng AI đang được kiểm tra provider.</b>\n\n"
-        "Bạn vẫn có thể dùng resize/đổi tỷ lệ local miễn phí trước.\n"
-        "TOAN AAS chưa gọi provider và chưa trừ Xu."
+        "✨ <b>Tính năng này đang được hoàn thiện.</b>\n\n"
+        "TOAN AAS chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu.\n"
+        "Bạn có thể quay lại dùng các công cụ ảnh đã mở ổn định trước."
     )
 
 def image_aspect_ai_guard_text(lang: str = "vi") -> str:
@@ -60096,7 +60119,10 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
         payload["step"] = normalized_step
         payload["created_at_ts"] = time.time()
     for key, value in fields.items():
-        if key in {"prompt", "prompt_source", "selected_topic", "negative_prompt"}:
+        if key in {
+            "prompt", "prompt_source", "selected_topic", "negative_prompt", "original_request",
+            "image_purpose", "purpose_label", "style", "suggested_ratio", "text_logo_caution",
+        }:
             payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:1400]
         elif key in {"aspect_ratio", "tier", "confirm_token"}:
             payload[key] = str(value or "").strip()[:120]
@@ -60180,22 +60206,13 @@ def quick_image_suggestion_bank(lang: str = "vi") -> list[str]:
 def quick_image_prompt_from_topic(topic: str = "", lang: str = "vi", variant: int = 0) -> tuple[str, str]:
     clean_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:300]
     variant_index = max(0, _safe_int(variant, 0)) % 3
-    if normalize_user_language(lang) != "vi":
-        endings = [
-            "clear hero subject, clean composition, professional lighting, balanced colors, high quality, no extra text",
-            "strong visual hierarchy, polished commercial lighting, realistic materials, brand-safe composition, high quality",
-            "modern editorial framing, refined details, natural depth, social-ready composition, no watermark",
-        ]
-        prompt = f"{clean_topic}, {endings[variant_index]}"
-    else:
-        endings = [
-            "chủ thể nổi bật, bố cục sạch, ánh sáng chuyên nghiệp, màu sắc hài hòa, chất lượng cao, không thêm chữ thừa",
-            "phân cấp thị giác rõ, ánh sáng quảng cáo chỉn chu, vật liệu chân thực, bố cục an toàn cho thương hiệu",
-            "khung hình hiện đại, chi tiết tinh tế, chiều sâu tự nhiên, phù hợp social và quảng cáo, không watermark",
-        ]
-        prompt = f"{clean_topic}, {endings[variant_index]}"
-    negative = "low quality, blurry, distorted face, distorted hands, broken logo, wrong text, watermark, extra text, messy background"
-    return prompt, negative
+    styles = [
+        "modern, clean and commercially polished",
+        "premium editorial direction with realistic materials and controlled light",
+        "refined social advertising style with natural depth and strong visual hierarchy",
+    ]
+    result = build_image_prompt(clean_topic, style=styles[variant_index], tier="standard")
+    return str(result.get("prompt") or ""), str(result.get("negative_prompt") or "")
 
 def quick_image_suggestions(offset: int = 0, lang: str = "vi") -> list[str]:
     return video_v6_rotating_items(quick_image_suggestion_bank(lang), offset, 3)
@@ -60261,22 +60278,47 @@ def quick_image_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     topic = _short_pending_text(state.get("selected_topic"), 300)
+    original_request = _short_pending_text(state.get("original_request"), 500) or topic or state.get("prompt") or ""
+    prompt_package = build_image_prompt(
+        original_request,
+        state.get("image_purpose") or "",
+        state.get("style") or "",
+        state.get("suggested_ratio") or "",
+        "standard",
+    )
+    purpose_label = str(state.get("purpose_label") or prompt_package.get("purpose_label") or "")
+    suggested_ratio = str(state.get("suggested_ratio") or prompt_package.get("suggested_ratio") or "1:1")
     prompt = shopaikey_safe_prompt_preview(state.get("prompt") or "")
     negative = shopaikey_safe_prompt_preview(state.get("negative_prompt") or "")
+    caution = str(state.get("text_logo_caution") or prompt_package.get("text_logo_caution") or "")
+    vague_note = ""
+    if prompt_package.get("needs_clarification"):
+        vague_note = (
+            "\nYêu cầu ban đầu còn ngắn. TOAN AAS đã dựng bản có cấu trúc; bạn nên bấm Sửa prompt nếu cần thêm sản phẩm, bối cảnh hoặc phong cách.\n"
+            if normalize_user_language(lang) == "vi"
+            else "\nThe original request was brief. TOAN AAS prepared a structured draft; edit it if you need a more specific subject, context, or style.\n"
+        )
     if normalize_user_language(lang) != "vi":
         return (
-            "✨ <b>Prepared image prompt</b>\n\n"
-            f"Topic: <b>{html.escape(topic)}</b>\n\n"
-            f"Prompt:\n<code>{html.escape(prompt)}</code>\n\n"
-            f"Avoid:\n<code>{html.escape(negative)}</code>\n\n"
+            "✨ <b>Optimized image prompt</b>\n\n"
+            f"Purpose: <b>{html.escape(purpose_label)}</b>\n"
+            f"Topic: <b>{html.escape(topic or original_request)}</b>\n"
+            f"Suggested ratio: <b>{html.escape(suggested_ratio)}</b>\n\n"
+            f"Main prompt:\n<code>{html.escape(prompt)}</code>\n\n"
+            f"Negative prompt:\n<code>{html.escape(negative)}</code>\n"
+            f"{html.escape(caution)}{vague_note}\n"
             "Choose the aspect ratio when this prompt is ready, or rewrite it first. No API call and no Xu charged."
         )
     return (
-        "✨ <b>Prompt ảnh đã được soạn</b>\n\n"
-        f"Chủ đề: <b>{html.escape(topic)}</b>\n\n"
-        f"Prompt:\n<code>{html.escape(prompt)}</code>\n\n"
+        "✨ <b>Prompt ảnh đã được soạn và tối ưu</b>\n\n"
+        f"Mục tiêu: <b>{html.escape(purpose_label)}</b>\n"
+        f"Chủ đề: <b>{html.escape(topic or original_request)}</b>\n"
+        f"Tỉ lệ đề xuất: <b>{html.escape(suggested_ratio)}</b>\n\n"
+        f"Prompt chính:\n<code>{html.escape(prompt)}</code>\n\n"
         f"Negative prompt:\n<code>{html.escape(negative)}</code>\n\n"
-        "Nếu prompt đã phù hợp, hãy chọn tỉ lệ. Bạn cũng có thể viết lại hoặc chọn chủ đề khác.\n"
+        + (f"Lưu ý: {html.escape(caution)}\n\n" if caution else "")
+        + vague_note
+        + "Nếu prompt đã phù hợp, hãy chọn tỉ lệ. Bạn cũng có thể viết lại hoặc chọn chủ đề khác.\n"
         "Bot chưa gọi API và chưa trừ Xu."
     )
 
@@ -60285,11 +60327,11 @@ def quick_image_prepared_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMark
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📐 Chọn tỉ lệ" if vi else "📐 Choose ratio", callback_data="create_media|qi_choose_ratio"),
-            InlineKeyboardButton("🔄 Viết lại prompt" if vi else "🔄 Rewrite prompt", callback_data="create_media|qi_rewrite"),
+            InlineKeyboardButton("🔄 Tối ưu lại prompt" if vi else "🔄 Re-optimize prompt", callback_data="create_media|qi_rewrite"),
         ],
         [
             InlineKeyboardButton("✨ Chọn chủ đề khác" if vi else "✨ Another topic", callback_data="create_media|qi_topics"),
-            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
+            InlineKeyboardButton("✍️ Sửa prompt" if vi else "✍️ Edit prompt", callback_data="create_media|qi_custom"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_suggestions"),
@@ -60484,7 +60526,7 @@ def shopaikey_confirm_keyboard(job_type: str, token: str, tier: str, lang: str =
 def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi", aspect_ratio: str = "") -> str:
     payload = image_tier_payload(tier)
     cost = int(payload.get("cost") or 0)
-    return with_aspect_line(ui_text(
+    text = with_aspect_line(ui_text(
         lang,
         "image.confirm.cost",
         label=html.escape(localized_image_tier_label(tier, lang)),
@@ -60493,6 +60535,8 @@ def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         warranty_note=html.escape(image_tier_warranty_note(tier, lang)),
         prompt=html.escape(shopaikey_safe_prompt_preview(prompt)),
     ), aspect_ratio, lang, "image")
+    quality_label = "Quality control" if normalize_user_language(lang) != "vi" else "Kiểm soát chất lượng"
+    return f"{text}\n\n<b>{quality_label}:</b> {html.escape(image_tier_quality_note(tier, lang))}"
 
 def public_image_success_billing_note(deducted: int = 0, lang: str = "vi", admin_internal_free: bool = False) -> str:
     amount = int(deducted or 0)
@@ -65002,11 +65046,24 @@ async def handle_quick_image_flow_pending_text(update: Update, context: ContextT
     if not prompt:
         return False
     lang = get_user_language(uid) or "vi"
-    state = set_quick_image_flow(uid, "ratio", prompt=prompt, prompt_source="custom")
+    package = build_image_prompt(prompt, tier="standard")
+    state = set_quick_image_flow(
+        uid,
+        "prepared_prompt",
+        selected_topic=prompt,
+        original_request=prompt,
+        prompt=package.get("prompt") or prompt,
+        negative_prompt=package.get("negative_prompt") or "",
+        prompt_source="custom",
+        image_purpose=package.get("purpose") or "custom",
+        purpose_label=package.get("purpose_label") or "",
+        suggested_ratio=package.get("suggested_ratio") or "1:1",
+        text_logo_caution=package.get("text_logo_caution") or "",
+    )
     await update.message.reply_text(
-        quick_image_ratio_text(state, lang),
+        quick_image_prepared_prompt_text(state, lang),
         parse_mode="HTML",
-        reply_markup=quick_image_ratio_keyboard(lang),
+        reply_markup=quick_image_prepared_prompt_keyboard(lang),
     )
     return True
 
@@ -65128,15 +65185,21 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             index = 1
         suggestions = quick_image_suggestions(_safe_int(state.get("suggest_offset"), 0), lang)
         topic = suggestions[index - 1] if index <= len(suggestions) else (suggestions[0] if suggestions else "")
+        package = build_image_prompt(topic, tier="standard")
         prompt, negative_prompt = quick_image_prompt_from_topic(topic, lang, 0)
         state = set_quick_image_flow(
             uid,
             "prepared_prompt",
             selected_topic=topic,
+            original_request=topic,
             prompt=prompt,
             negative_prompt=negative_prompt,
             prompt_source="suggestion",
             prompt_variant=0,
+            image_purpose=package.get("purpose") or "custom",
+            purpose_label=package.get("purpose_label") or "",
+            suggested_ratio=package.get("suggested_ratio") or "1:1",
+            text_logo_caution=package.get("text_logo_caution") or "",
         )
         return await safe_edit_or_send(
             query,
@@ -65240,6 +65303,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
     if action.startswith("qi_tier_"):
         state = get_quick_image_flow(uid) or {}
         prompt = str(state.get("prompt") or "").strip()
+        original_request = str(state.get("original_request") or state.get("selected_topic") or prompt).strip()
         aspect = normalize_media_aspect_ratio(state.get("aspect_ratio"), "1:1", "image")
         if not prompt:
             set_quick_image_flow(uid, "entry", suggest_offset=0)
@@ -65262,8 +65326,8 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
         token = set_shopaikey_pending_confirmation(uid, {
             "job_type": "image",
-            "prompt": image_tier_prompt_for_generation(prompt, tier, aspect),
-            "original_prompt": prompt,
+            "prompt": image_tier_prompt_for_generation(original_request, tier, aspect),
+            "original_prompt": original_request,
             "base_cost": base_cost,
             "from_image": False,
             "image_tier": tier,
