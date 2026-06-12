@@ -4833,6 +4833,99 @@ def test_video_ux_v6_shared_suggestions_and_navigation():
     assert [button.callback_data for button in idea_result_rows[-1]] == ["videoidea|back_choices", "menu|main"]
 
 
+def test_quick_image_flow_prompt_before_ratio_and_pricing():
+    source = bot_source_text()
+    callback_source = source_between(source, "async def handle_create_media_callback", "async def cmd_tool_test_workflow_image")
+    quick_entry_source = source_between(callback_source, 'if action == "quick_image":', 'if action == "qi_entry":')
+    message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
+
+    assert "quick_image_entry_text(lang)" in quick_entry_source
+    assert "quick_image_entry_keyboard(lang)" in quick_entry_source
+    assert "public_image_tier_selection_text(lang)" not in quick_entry_source
+    assert message_source.index("handle_quick_image_flow_pending_text(update, context)") < message_source.index("handle_public_image_prompt_pending_text(update, context)")
+
+    entry_text = bot.quick_image_entry_text("vi")
+    assert "Tạo ảnh nhanh" in entry_text
+    assert "chọn prompt trước" in entry_text
+    assert "chưa gọi API" in entry_text
+    entry_rows = bot.quick_image_entry_keyboard("vi").inline_keyboard
+    assert [button.callback_data for button in entry_rows[0]] == ["create_media|qi_suggest", "create_media|qi_refresh"]
+    assert [button.callback_data for button in entry_rows[1]] == ["create_media|qi_custom", "menu|main_image"]
+
+    first = bot.quick_image_suggestions(0, "vi")
+    second = bot.quick_image_suggestions(3, "vi")
+    assert len(bot.quick_image_suggestion_bank("vi")) >= 10
+    assert len(first) == 3
+    assert first != second
+    suggestions_text = bot.quick_image_suggestions_text({"suggest_offset": 0}, "vi")
+    assert "3 gợi ý tạo ảnh cho bạn" in suggestions_text
+    assert first[0] in suggestions_text
+    suggestion_callbacks = [
+        button.callback_data
+        for row in bot.quick_image_suggestions_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert {"create_media|qi_pick_1", "create_media|qi_pick_2", "create_media|qi_pick_3", "create_media|qi_refresh", "create_media|qi_custom"}.issubset(set(suggestion_callbacks))
+
+    bot.clear_quick_image_flow("quick-image-test")
+    state = bot.set_quick_image_flow(
+        "quick-image-test",
+        "ratio",
+        prompt="logo TOAN AAS màu xanh ngọc",
+        prompt_source="custom",
+        suggest_offset=3,
+    )
+    assert state["step"] == "ratio"
+    assert state["prompt_source"] == "custom"
+    assert bot.get_quick_image_flow("quick-image-test")["prompt"] == "logo TOAN AAS màu xanh ngọc"
+    state = bot.set_quick_image_flow("quick-image-test", "tier", aspect_ratio="16:9")
+    assert state["prompt"] == "logo TOAN AAS màu xanh ngọc"
+    assert state["aspect_ratio"] == "16:9"
+
+    ratio_text = bot.quick_image_ratio_text(state, "vi")
+    assert "Chọn tỉ lệ khung hình" in ratio_text
+    assert "logo TOAN AAS" in ratio_text
+    ratio_rows = bot.quick_image_ratio_keyboard("vi").inline_keyboard
+    ratio_callbacks = [button.callback_data for row in ratio_rows for button in row]
+    assert "create_media|qi_ratio_16x9" in ratio_callbacks
+    assert [button.callback_data for button in ratio_rows[-1]] == ["create_media|qi_back_prompt", "menu|main"]
+
+    tier_text = bot.quick_image_tier_text(state, "vi")
+    assert "Bạn muốn tạo ảnh chất lượng nào" in tier_text
+    assert "16:9" in tier_text
+    tier_rows = bot.quick_image_tier_keyboard("vi").inline_keyboard
+    tier_callbacks = [button.callback_data for row in tier_rows for button in row]
+    assert {
+        "create_media|qi_tier_low",
+        "create_media|qi_tier_standard",
+        "create_media|qi_tier_standard_warranty",
+        "create_media|qi_tier_high",
+        "create_media|qi_tier_high_warranty",
+    }.issubset(set(tier_callbacks))
+    assert "create_media|qi_back_ratio" in tier_callbacks
+
+    confirm_rows = bot.quick_image_confirm_keyboard("token-1", "vi").inline_keyboard
+    assert [button.callback_data for button in confirm_rows[0]] == ["shopai|confirm|token-1", "create_media|qi_back_tier"]
+    assert [button.callback_data for button in confirm_rows[-1]] == ["menu|main"]
+
+    planning_keyboards = [
+        bot.quick_image_entry_keyboard("vi"),
+        bot.quick_image_suggestions_keyboard("vi"),
+        bot.quick_image_custom_prompt_keyboard("vi"),
+        bot.quick_image_ratio_keyboard("vi"),
+        bot.quick_image_tier_keyboard("vi"),
+        bot.quick_image_confirm_keyboard("token-1", "vi"),
+    ]
+    for keyboard in planning_keyboards:
+        assert all(len(row) <= 2 for row in keyboard.inline_keyboard)
+        assert all("Hủy" not in button.text for row in keyboard.inline_keyboard for button in row)
+
+    assert '"source": "quick_image_v6"' in callback_source
+    assert "shopaikey_image_generate" not in callback_source
+    assert "spend_fixed_credit_info" not in callback_source
+    assert bot.clear_quick_image_flow("quick-image-test") is True
+
+
 def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
     source = bot_source_text()
     callback_source = source_between(source, "async def handle_image_tools_callback", "async def handle_image_menu_pending_text")

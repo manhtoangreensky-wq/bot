@@ -31680,6 +31680,7 @@ def store_customer_feedback(user, category: str, content: str, context: str = ""
 
 def clear_media_creator_pending_states(user_id) -> bool:
     quick_cleared = clear_quick_media_pending(user_id)
+    quick_image_flow_cleared = clear_quick_image_flow(user_id)
     public_image_cleared = clear_public_image_prompt_pending(user_id)
     public_video_cleared = clear_public_video_prompt_pending(user_id)
     media_aspect_cleared = clear_media_aspect_pending(user_id)
@@ -31693,7 +31694,7 @@ def clear_media_creator_pending_states(user_id) -> bool:
     frame_video_cleared = clear_frame_video_state(user_id)
     storyboard_cleared = clear_storyboard_state(user_id)
     developing_video_cleared = clear_developing_video_pending(user_id)
-    return bool(quick_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared)
+    return bool(quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -44479,6 +44480,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             return await safe_edit_or_send(query, shopaikey_processed_callback_text(lang, recent_image_job))
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     job_type = str(pending.get("job_type") or "").lower()
+    if str(pending.get("source") or "") == "quick_image_v6":
+        clear_quick_image_flow(uid)
     prompt = str(pending.get("prompt") or "").strip()
     base_cost = int(pending.get("base_cost") or 0)
     image_tier = normalize_image_tier(pending.get("image_tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
@@ -58047,6 +58050,252 @@ async def execute_image_warranty_retry(context: ContextTypes.DEFAULT_TYPE, chat_
 def public_image_tier_selection_text(lang: str = "vi") -> str:
     return ui_text(lang, "image.choose_tier.title")
 
+QUICK_IMAGE_FLOW_TTL_SECONDS = 10 * 60
+QUICK_IMAGE_FLOW_STEPS = {
+    "entry",
+    "suggestions",
+    "custom_prompt",
+    "ratio",
+    "tier",
+    "confirm",
+    "generating",
+}
+
+def quick_image_flow_pending_key(user_id) -> str:
+    return f"quick_image_flow:{user_id}"
+
+def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
+    normalized_step = str(step or "entry").strip().lower()
+    if normalized_step not in QUICK_IMAGE_FLOW_STEPS:
+        normalized_step = "entry"
+    current = USER_PENDING.get(quick_image_flow_pending_key(user_id)) or {}
+    payload = {
+        "pending_action": "quick_image_flow",
+        "step": normalized_step,
+        "created_at_ts": time.time(),
+    }
+    if current.get("pending_action") == "quick_image_flow":
+        payload.update({key: value for key, value in current.items() if key not in {"step", "created_at_ts"}})
+        payload["step"] = normalized_step
+        payload["created_at_ts"] = time.time()
+    for key, value in fields.items():
+        if key in {"prompt", "prompt_source"}:
+            payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:1400]
+        elif key in {"aspect_ratio", "tier", "confirm_token"}:
+            payload[key] = str(value or "").strip()[:120]
+        elif key == "suggest_offset":
+            payload[key] = max(0, _safe_int(value, 0))
+    USER_PENDING[quick_image_flow_pending_key(user_id)] = payload
+    return payload
+
+def get_quick_image_flow(user_id) -> dict | None:
+    key = quick_image_flow_pending_key(user_id)
+    pending = USER_PENDING.get(key) or {}
+    if pending.get("pending_action") != "quick_image_flow":
+        return None
+    if time.time() - float(pending.get("created_at_ts") or 0) > QUICK_IMAGE_FLOW_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return pending
+
+def clear_quick_image_flow(user_id) -> bool:
+    pending = USER_PENDING.pop(quick_image_flow_pending_key(user_id), None) or {}
+    token = str(pending.get("confirm_token") or "")
+    if token:
+        pop_shopaikey_pending_confirmation(token, user_id)
+    return bool(pending)
+
+def quick_image_suggestion_bank(lang: str = "vi") -> list[str]:
+    if normalize_user_language(lang) != "vi":
+        return [
+            "Turquoise TOAN AAS technology logo on a clean white background, minimal professional brand style",
+            "Modern TOAN AAS social banner with AI and automation icons, clean turquoise accents",
+            "Studio product advertising image with a clear hero subject, polished commercial lighting",
+            "Cinematic night product reveal with premium rim light and deep contrast",
+            "Future AI workspace with turquoise holographic automation panels and clean composition",
+            "Warm lifestyle scene showing a busy creator using an AI assistant naturally",
+            "Premium male perfume hero image, black-and-white luxury mood, accurate bottle geometry",
+            "Skincare flat lay with soft daylight, clean textures and social-ad composition",
+            "Minimal smart desk setup for a creator, realistic materials and modern lighting",
+            "Before-and-after advertising frame with matching composition and visible improvement",
+            "Friendly Vietnamese entrepreneur portrait in a bright modern workspace",
+            "Vertical TikTok product poster with strong subject focus and safe text space",
+            "Modern coffee shop launch visual with lifestyle customers and warm morning light",
+            "Waterproof travel backpack in a rainy city scene, dynamic but realistic",
+            "Healthy meal-prep product photo with fresh ingredients and clean packaging",
+            "Futuristic technology campaign key visual, white background, turquoise energy details",
+        ]
+    return [
+        "Logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản và chuyên nghiệp",
+        "Banner TOAN AAS hiện đại, có biểu tượng AI và automation, điểm nhấn xanh ngọc, bố cục social rõ ràng",
+        "Ảnh sản phẩm quảng cáo studio, chủ thể nổi bật, ánh sáng thương mại đẹp, bố cục sạch",
+        "Product reveal cinematic ban đêm, ánh sáng viền cao cấp, tương phản sâu, không chữ thừa",
+        "Không gian làm việc AI tương lai với bảng automation hologram xanh ngọc, bố cục gọn",
+        "Cảnh lifestyle ấm áp, creator bận rộn dùng trợ lý AI tự nhiên trong công việc",
+        "Nước hoa nam cao cấp, phong cách luxury đen trắng, giữ đúng hình dáng chai",
+        "Bộ skincare flat lay dưới ánh sáng ban ngày mềm, texture sạch, hợp ảnh quảng cáo",
+        "Góc bàn thông minh tối giản cho creator, vật liệu chân thực, ánh sáng hiện đại",
+        "Khung hình before/after đồng bố cục, thể hiện kết quả thay đổi rõ ràng",
+        "Chân dung doanh nhân Việt Nam thân thiện trong văn phòng hiện đại sáng sạch",
+        "Poster sản phẩm dọc cho TikTok, chủ thể rõ, chừa vùng an toàn để đặt caption",
+        "Hình ảnh khai trương quán cà phê hiện đại, khách lifestyle, ánh sáng buổi sáng ấm",
+        "Balo du lịch chống nước trong phố mưa, chuyển động năng động nhưng chân thực",
+        "Ảnh meal-prep healthy với nguyên liệu tươi, bao bì sạch và màu sắc tự nhiên",
+        "Key visual chiến dịch công nghệ tương lai, nền trắng, năng lượng xanh ngọc tinh tế",
+    ]
+
+def quick_image_suggestions(offset: int = 0, lang: str = "vi") -> list[str]:
+    return video_v6_rotating_items(quick_image_suggestion_bank(lang), offset, 3)
+
+def quick_image_entry_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🖼 <b>Quick image</b>\n\n"
+            "How would you like to start?\n\n"
+            "TOAN AAS helps you choose the prompt first, then the aspect ratio and image tier before real generation. "
+            "No API has been called and no Xu has been charged."
+        )
+    return (
+        "🖼 <b>Tạo ảnh nhanh</b>\n\n"
+        "Bạn muốn bắt đầu tạo ảnh theo cách nào?\n\n"
+        "TOAN AAS sẽ giúp bạn chọn prompt trước, sau đó mới chọn tỉ lệ và gói giá để tạo ảnh thật.\n"
+        "Bot chưa gọi API và chưa trừ Xu."
+    )
+
+def quick_image_entry_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✨ 3 gợi ý tạo ảnh" if vi else "✨ 3 image ideas", callback_data="create_media|qi_suggest"),
+            InlineKeyboardButton("🔄 Gợi ý khác" if vi else "🔄 More ideas", callback_data="create_media|qi_refresh"),
+        ],
+        [
+            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
+            InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="menu|main_image"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def quick_image_suggestions_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    suggestions = quick_image_suggestions(_safe_int(state.get("suggest_offset"), 0), lang)
+    if normalize_user_language(lang) != "vi":
+        lines = ["✨ <b>Three image prompt suggestions</b>", "", "Choose one, refresh the set, or enter your own prompt.", ""]
+    else:
+        lines = ["✨ <b>3 gợi ý tạo ảnh cho bạn</b>", "", "Chọn một gợi ý bên dưới, đổi bộ gợi ý khác hoặc tự nhập prompt.", ""]
+    lines.extend(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions, 1))
+    lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
+    return "\n".join(lines)
+
+def quick_image_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("1️⃣ Dùng gợi ý 1" if vi else "1️⃣ Use idea 1", callback_data="create_media|qi_pick_1"),
+            InlineKeyboardButton("2️⃣ Dùng gợi ý 2" if vi else "2️⃣ Use idea 2", callback_data="create_media|qi_pick_2"),
+        ],
+        [
+            InlineKeyboardButton("3️⃣ Dùng gợi ý 3" if vi else "3️⃣ Use idea 3", callback_data="create_media|qi_pick_3"),
+            InlineKeyboardButton("🔄 Gợi ý khác" if vi else "🔄 More ideas", callback_data="create_media|qi_refresh"),
+        ],
+        [
+            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
+            InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="create_media|qi_entry"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def quick_image_custom_prompt_text(lang: str = "vi", prompt: str = "") -> str:
+    current = ""
+    if prompt:
+        current = (
+            f"\n\nCurrent prompt:\n<code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>"
+            if normalize_user_language(lang) != "vi"
+            else f"\n\nPrompt hiện tại:\n<code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✍️ <b>Enter the image description</b>\n\n"
+            "Example: turquoise TOAN AAS logo, clean white background, minimal modern technology style."
+            f"{current}\n\nNo API call and no Xu charged."
+        )
+    return (
+        "✍️ <b>Hãy nhập mô tả ảnh bạn muốn tạo</b>\n\n"
+        "Ví dụ: logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản."
+        f"{current}\n\nBot chưa gọi API và chưa trừ Xu."
+    )
+
+def quick_image_custom_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="create_media|qi_entry"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+def quick_image_ratio_text(state: dict | None = None, lang: str = "vi") -> str:
+    prompt = shopaikey_safe_prompt_preview((state or {}).get("prompt") or "")
+    if normalize_user_language(lang) != "vi":
+        return f"📐 <b>Choose aspect ratio</b>\n\nSelected prompt:\n<code>{html.escape(prompt)}</code>\n\nNo API call and no Xu charged."
+    return f"📐 <b>Chọn tỉ lệ khung hình</b>\n\nPrompt đã chọn:\n<code>{html.escape(prompt)}</code>\n\nBạn muốn tạo theo tỉ lệ nào?\nBot chưa gọi API và chưa trừ Xu."
+
+def quick_image_ratio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    options = media_aspect_ratio_options("image")
+    for idx in range(0, len(options), 2):
+        rows.append([
+            InlineKeyboardButton(
+                media_aspect_ratio_label(aspect, "image", lang),
+                callback_data=f"create_media|qi_ratio_{media_aspect_ratio_token(aspect)}",
+            )
+            for aspect in options[idx:idx + 2]
+        ])
+    rows.append([
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_prompt"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+def quick_image_tier_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    prompt = shopaikey_safe_prompt_preview(state.get("prompt") or "")
+    aspect = normalize_media_aspect_ratio(state.get("aspect_ratio"), "1:1", "image")
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🖼 <b>Choose image quality</b>\n\n"
+            f"Prompt: <code>{html.escape(prompt)}</code>\n"
+            f"Aspect ratio: <b>{html.escape(media_aspect_ratio_label(aspect, 'image', lang))}</b>\n\n"
+            "Choose a tier below. Prices use the centralized image pricing table."
+        )
+    return (
+        "🖼 <b>Bạn muốn tạo ảnh chất lượng nào?</b>\n\n"
+        f"Prompt: <code>{html.escape(prompt)}</code>\n"
+        f"Tỉ lệ: <b>{html.escape(media_aspect_ratio_label(aspect, 'image', lang))}</b>\n\n"
+        "Chọn tier ảnh bên dưới. Giá lấy từ bảng giá hiện tại."
+    )
+
+def quick_image_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    tiers = list(IMAGE_TIER_ORDER)
+    tier_buttons = [
+        InlineKeyboardButton(image_tier_button_text(tier, lang), callback_data=f"create_media|qi_tier_{tier}")
+        for tier in tiers
+    ]
+    rows = [tier_buttons[0:2], tier_buttons[2:4]]
+    last_row = tier_buttons[4:5]
+    last_row.append(InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_ratio"))
+    rows.append(last_row)
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def quick_image_confirm_keyboard(token: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Xác nhận tạo" if vi else "✅ Confirm generation", callback_data=f"shopai|confirm|{token}"),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_tier"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
 def public_image_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     rows = image_tier_choice_rows(lambda tier: f"create_media|image_tier_{tier}", lang)
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_image")])
@@ -62179,6 +62428,25 @@ async def run_quick_video_admin_smoke(update: Update, context: ContextTypes.DEFA
     finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
     return
 
+async def handle_quick_image_flow_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_quick_image_flow(uid)
+    if not pending or pending.get("step") != "custom_prompt":
+        return False
+    prompt = re.sub(r"\s+", " ", update.message.text.strip())[:1400]
+    if not prompt:
+        return False
+    lang = get_user_language(uid) or "vi"
+    state = set_quick_image_flow(uid, "ratio", prompt=prompt, prompt_source="custom")
+    await update.message.reply_text(
+        quick_image_ratio_text(state, lang),
+        parse_mode="HTML",
+        reply_markup=quick_image_ratio_keyboard(lang),
+    )
+    return True
+
 async def handle_quick_media_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
         return False
@@ -62239,6 +62507,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
     if action == "quick_image":
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
+        clear_quick_image_flow(uid)
         clear_public_image_prompt_pending(uid)
         clear_public_video_prompt_pending(uid)
         clear_media_aspect_pending(uid)
@@ -62246,14 +62515,169 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_image_menu_pending(uid)
         if shopaikey_active_job_for_user(uid, "image"):
             return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
-        enabled, message = shopaikey_public_generation_guard("image")
-        if not enabled and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
-            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
+        set_quick_image_flow(uid, "entry", suggest_offset=0)
         return await safe_edit_or_send(
             query,
-            public_image_tier_selection_text(lang),
+            quick_image_entry_text(lang),
             parse_mode="HTML",
-            reply_markup=public_image_tier_keyboard(lang),
+            reply_markup=quick_image_entry_keyboard(lang),
+        )
+    if action == "qi_entry":
+        state = get_quick_image_flow(uid) or {}
+        token = str(state.get("confirm_token") or "")
+        if token:
+            pop_shopaikey_pending_confirmation(token, uid)
+        set_quick_image_flow(uid, "entry", confirm_token="")
+        return await safe_edit_or_send(
+            query,
+            quick_image_entry_text(lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_entry_keyboard(lang),
+        )
+    if action in {"qi_suggest", "qi_refresh"}:
+        state = get_quick_image_flow(uid) or set_quick_image_flow(uid, "entry", suggest_offset=0)
+        offset = _safe_int(state.get("suggest_offset"), 0)
+        if action == "qi_refresh":
+            offset += 3
+        state = set_quick_image_flow(uid, "suggestions", suggest_offset=offset, prompt_source="suggestion")
+        return await safe_edit_or_send(
+            query,
+            quick_image_suggestions_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_suggestions_keyboard(lang),
+        )
+    if action == "qi_custom":
+        state = set_quick_image_flow(uid, "custom_prompt", prompt_source="custom")
+        return await safe_edit_or_send(
+            query,
+            quick_image_custom_prompt_text(lang, state.get("prompt") or ""),
+            parse_mode="HTML",
+            reply_markup=quick_image_custom_prompt_keyboard(lang),
+        )
+    if action.startswith("qi_pick_"):
+        state = get_quick_image_flow(uid)
+        if not state:
+            set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+        try:
+            index = max(1, min(3, int(action.rsplit("_", 1)[1])))
+        except Exception:
+            index = 1
+        suggestions = quick_image_suggestions(_safe_int(state.get("suggest_offset"), 0), lang)
+        prompt = suggestions[index - 1] if index <= len(suggestions) else (suggestions[0] if suggestions else "")
+        state = set_quick_image_flow(uid, "ratio", prompt=prompt, prompt_source="suggestion")
+        return await safe_edit_or_send(
+            query,
+            quick_image_ratio_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_ratio_keyboard(lang),
+        )
+    if action == "qi_back_prompt":
+        state = get_quick_image_flow(uid) or {}
+        if state.get("prompt_source") == "suggestion":
+            state = set_quick_image_flow(uid, "suggestions")
+            return await safe_edit_or_send(
+                query,
+                quick_image_suggestions_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=quick_image_suggestions_keyboard(lang),
+            )
+        state = set_quick_image_flow(uid, "custom_prompt", prompt_source="custom")
+        return await safe_edit_or_send(
+            query,
+            quick_image_custom_prompt_text(lang, state.get("prompt") or ""),
+            parse_mode="HTML",
+            reply_markup=quick_image_custom_prompt_keyboard(lang),
+        )
+    if action.startswith("qi_ratio_"):
+        state = get_quick_image_flow(uid) or {}
+        prompt = str(state.get("prompt") or "").strip()
+        if not prompt:
+            set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+        aspect = media_aspect_ratio_from_token(action.replace("qi_ratio_", "", 1), "image")
+        state = set_quick_image_flow(uid, "tier", aspect_ratio=aspect)
+        return await safe_edit_or_send(
+            query,
+            quick_image_tier_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_tier_keyboard(lang),
+        )
+    if action == "qi_back_ratio":
+        state = get_quick_image_flow(uid) or {}
+        if not state.get("prompt"):
+            set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+        state = set_quick_image_flow(uid, "ratio")
+        return await safe_edit_or_send(
+            query,
+            quick_image_ratio_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_ratio_keyboard(lang),
+        )
+    if action == "qi_back_tier":
+        state = get_quick_image_flow(uid) or {}
+        token = str(state.get("confirm_token") or "")
+        if token:
+            pop_shopaikey_pending_confirmation(token, uid)
+        if not state.get("prompt") or not state.get("aspect_ratio"):
+            set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+        state = set_quick_image_flow(uid, "tier", confirm_token="")
+        return await safe_edit_or_send(
+            query,
+            quick_image_tier_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_tier_keyboard(lang),
+        )
+    if action.startswith("qi_tier_"):
+        state = get_quick_image_flow(uid) or {}
+        prompt = str(state.get("prompt") or "").strip()
+        aspect = normalize_media_aspect_ratio(state.get("aspect_ratio"), "1:1", "image")
+        if not prompt:
+            set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+        tier = normalize_image_tier(action.replace("qi_tier_", "", 1))
+        payload = image_tier_payload(tier)
+        if not payload.get("enabled"):
+            return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
+        enabled, _message = shopaikey_public_generation_guard("image")
+        if not enabled:
+            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
+        if shopaikey_active_job_for_user(uid, "image"):
+            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
+        credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Image user")
+        base_cost = int(payload.get("cost") or 0)
+        final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
+        package_item_type = package_item_type_for_image_tier(tier)
+        package_item = active_package_item_for_user(uid, package_item_type)
+        if int(credits or 0) < final_preview_cost and not is_admin_user(uid) and not package_item:
+            return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
+        token = set_shopaikey_pending_confirmation(uid, {
+            "job_type": "image",
+            "prompt": image_tier_prompt_for_generation(prompt, tier, aspect),
+            "original_prompt": prompt,
+            "base_cost": base_cost,
+            "from_image": False,
+            "image_tier": tier,
+            "tier_label": payload.get("label") or tier,
+            "model": payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            "retry_warranty_count": int(payload.get("retry_warranty_count") or 0),
+            "aspect_ratio": aspect,
+            "package_item_type": package_item_type,
+            "source": "quick_image_v6",
+        })
+        set_quick_image_flow(uid, "confirm", tier=tier, confirm_token=token)
+        confirm_text = public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect)
+        confirm_markup = quick_image_confirm_keyboard(token, lang)
+        if package_item:
+            confirm_text = package_offer_text(package_item, confirm_text, lang)
+            confirm_markup = package_use_choice_keyboard("image", token, tier, lang)
+        return await safe_edit_or_send(
+            query,
+            confirm_text,
+            parse_mode="HTML",
+            reply_markup=confirm_markup,
         )
     if action.startswith("ia_") or action.startswith("va_"):
         token = action.split("_", 1)[1]
@@ -81239,6 +81663,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_image_warranty_retry_pending_text(update, context):
+        return
+
+    if await handle_quick_image_flow_pending_text(update, context):
         return
 
     if await handle_public_image_prompt_pending_text(update, context):
