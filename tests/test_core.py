@@ -2323,9 +2323,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         [button.text for button in row] for row in bot.main_docs_keyboard("vi").inline_keyboard
     ]
     merge_section, merge_hint = bot.menu_hint_text("hint_doc_merge_pdf")
-    assert merge_section == "main_memory"
-    assert "Công cụ gộp PDF đang bảo trì hoặc chưa bật" in merge_hint
-    assert "chưa trừ Xu" in merge_hint
+    assert merge_section == "main_docs"
+    assert "Gộp PDF" in merge_hint
+    assert "gửi từng file PDF" in merge_hint
     memory_text = bot.menu_text_main_memory()
     assert "TÀI LIỆU" in memory_text
     assert "10MB cho ghi chú/text/nhắc hẹn" in memory_text
@@ -2335,9 +2335,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Ghi chú text nhỏ vẫn tính dung lượng thật" in memory_text
     assert "File đính kèm tính đúng size file" in memory_text
     assert "File tạm không tính vào quota lâu dài" in memory_text
-    assert "/doc_tools" in memory_text
-    assert "/pdf_to_word" in memory_text
-    assert "/image_to_pdf" in memory_text
+    assert "Flow tài liệu sẽ hướng dẫn gửi file" in memory_text
+    assert "/pdf_to_word" not in memory_text
+    assert "/image_to_pdf" not in memory_text
     memory_plan_text = bot.memory_plan_text()
     assert "Tổng 50MB miễn phí" in memory_plan_text
     assert "+50MB/tháng: 10.000đ" in memory_plan_text
@@ -5016,6 +5016,92 @@ def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
     assert "+250MB" not in storage_text
     assert "+500MB" not in storage_text
     assert bot.TOTAL_FREE_STORAGE_MB == 50
+
+
+def test_document_pdf_tools_v6_guided_upload_confirm_flow():
+    source = bot_source_text()
+    menu_source = source_between(source, "async def handle_menu_callback", "async def handle_feedback_callback")
+    photo_source = source_between(source, "async def handle_photo", "async def handle_document_cache_only")
+    document_source = source_between(source, "async def handle_document_cache_only", "async def handle_media")
+    message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
+
+    assert 'CallbackQueryHandler(handle_doc_tool_callback, pattern=r"^docflow\\|")' in source
+    assert "DOC_TOOL_MENU_ACTIONS" in source
+    assert "start_doc_tool_flow(query, query.from_user.id, DOC_TOOL_MENU_ACTIONS[action], lang)" in menu_source
+    assert "handle_doc_tool_pending_upload(update, context)" in photo_source
+    assert photo_source.index("handle_doc_tool_pending_upload(update, context)") < photo_source.index("handle_image_menu_pending_photo(update, context)")
+    assert "handle_doc_tool_pending_upload(update, context)" in document_source
+    assert document_source.index("handle_doc_tool_pending_upload(update, context)") < document_source.index("handle_image_menu_pending_document(update, context)")
+    assert "handle_doc_tool_pending_text(update, context)" in message_source
+    assert message_source.index("handle_doc_tool_pending_text(update, context)") < message_source.index("handle_storyboard_pending_text(update, context)")
+
+    docs_callbacks = [button.callback_data for row in bot.main_docs_keyboard("vi").inline_keyboard for button in row]
+    assert "menu|hint_doc_pdf_to_word" in docs_callbacks
+    assert "menu|hint_doc_image_to_pdf" in docs_callbacks
+    assert "menu|hint_doc_compress_pdf" in docs_callbacks
+    assert "menu|hint_doc_split_pdf" in docs_callbacks
+    assert "menu|hint_doc_merge_pdf" in docs_callbacks
+
+    memory_callbacks = [button.callback_data for row in bot.main_memory_keyboard("vi").inline_keyboard for button in row]
+    assert "menu|hint_doc_save_document" in memory_callbacks
+    assert "menu|doc_tools" not in memory_callbacks
+
+    for text in [
+        bot.menu_text_main_docs(),
+        bot.menu_text_main_docs_i18n("en"),
+        bot.doc_tools_menu_text(),
+        bot.doc_tools_menu_text_i18n("en"),
+    ]:
+        assert "/image_to_pdf" not in text
+        assert "/pdf_to_word" not in text
+        assert "/compress_pdf" not in text
+        assert "/split_pdf" not in text
+        assert "/merge_pdf" not in text
+        assert "xác nhận" in text.lower() or "confirm" in text.lower()
+
+    image_state = bot.set_doc_tool_pending("u-doc", "image_to_pdf")
+    assert image_state["doc_tool_current"] == "image_to_pdf"
+    assert image_state["doc_tool_expected_type"] == "image"
+    assert image_state["doc_tool_file_count"] == 0
+    assert image_state["doc_tool_max_files"] == bot.DOC_TOOL_MAX_FILES
+    assert image_state["doc_tool_user_id"] == "u-doc"
+    assert "doc_tool_options" in image_state
+    assert "doc_tool_previous_step" in image_state
+    assert "Ảnh sang PDF" in bot.doc_tool_start_text("image_to_pdf")
+    assert "gửi từng ảnh" in bot.doc_tool_start_text("image_to_pdf")
+    start_labels = [button.text for row in bot.doc_tool_start_keyboard("image_to_pdf").inline_keyboard for button in row]
+    assert "➕ Tôi sẽ gửi ảnh" in start_labels
+    assert "⬅️ Quay lại" in start_labels and "🏠 Menu chính" in start_labels
+
+    image_info = {"kind": "photo", "file_id": "photo-file", "file_name": "a.jpg", "mime_type": "image/jpeg", "file_size": 1024}
+    pdf_info = {"kind": "document", "file_id": "pdf-file", "file_name": "a.pdf", "mime_type": "application/pdf", "file_size": 2048}
+    assert bot.doc_tool_file_matches(image_state, image_info) is True
+    assert bot.doc_tool_file_matches(image_state, pdf_info) is False
+    assert "Công cụ này cần ảnh" in bot.doc_tool_wrong_file_text(image_state, pdf_info)
+
+    image_state["doc_tool_files"] = [image_info, {**image_info, "file_name": "b.jpg"}]
+    image_state["doc_tool_file_count"] = 2
+    received_text = bot.doc_tool_received_text(image_state)
+    assert "Số ảnh hiện có" in received_text
+    assert "✅ Tạo PDF" in str(bot.doc_tool_after_file_keyboard(image_state).inline_keyboard)
+    confirm_text = bot.doc_tool_confirm_text(image_state)
+    assert "Phí: <b>0 Xu</b>" in confirm_text
+    assert "Local engine" in confirm_text
+    assert "a.jpg" in confirm_text and "b.jpg" in confirm_text
+    confirm_callbacks = [button.callback_data for row in bot.doc_tool_confirm_keyboard().inline_keyboard for button in row]
+    assert "docflow|run" in confirm_callbacks
+
+    merge_state = bot.set_doc_tool_pending("u-doc", "merge_pdf")
+    merge_state["doc_tool_files"] = [pdf_info, {**pdf_info, "file_name": "b.pdf"}]
+    assert "Thứ tự" in bot.doc_tool_confirm_text(merge_state)
+    split_state = bot.set_doc_tool_pending("u-doc", "split_pdf")
+    split_state["doc_tool_files"] = [pdf_info]
+    split_state["awaiting_page_spec"] = "1"
+    assert bot.doc_tool_after_file_keyboard(split_state).inline_keyboard[0][0].callback_data == "docflow|ask_pages"
+    save_state = bot.set_doc_tool_pending("u-doc", "save_document")
+    assert save_state["doc_tool_expected_type"] == "any"
+    assert "Lưu tài liệu" in bot.doc_tool_start_text("save_document")
+    bot.clear_doc_tool_pending("u-doc")
 
 
 def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
