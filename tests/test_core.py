@@ -1152,6 +1152,96 @@ def test_payos_package_purchase_grants_wallet_without_xu_or_rank_points(monkeypa
             os.unlink(db_path)
 
 
+def test_package_purchase_selection_requires_confirm_before_checkout(monkeypatch):
+    captured = {"details": [], "checkout": []}
+
+    async def fake_edit(_query, lines, reply_markup=None, limit=3600):
+        captured["details"].append((list(lines), reply_markup, limit))
+
+    async def fake_start(_update, _context, package_type, code, message=None):
+        captured["checkout"].append((package_type, code, message))
+
+    class FakeQuery:
+        def __init__(self, data):
+            self.data = data
+            self.from_user = SimpleNamespace(id=123, first_name="Buyer", username="buyer")
+            self.message = SimpleNamespace()
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(bot, "edit_or_send_pricing_lines", fake_edit)
+    monkeypatch.setattr(bot, "start_package_purchase", fake_start)
+    context = SimpleNamespace()
+
+    update = SimpleNamespace(callback_query=FakeQuery("pkgbuy|combo|tiktok_99k"))
+    asyncio.run(bot.handle_package_purchase_callback(update, context))
+    assert captured["checkout"] == []
+    assert "Bạn có muốn thanh toán" in "\n".join(captured["details"][0][0])
+    detail_callbacks = [
+        button.callback_data
+        for row in captured["details"][0][1].inline_keyboard
+        for button in row
+    ]
+    assert "pkgbuy|confirm|combo|tiktok_99k" in detail_callbacks
+    assert "pricing|combo" in detail_callbacks
+
+    update = SimpleNamespace(callback_query=FakeQuery("pkgbuy|confirm|combo|tiktok_99k"))
+    asyncio.run(bot.handle_package_purchase_callback(update, context))
+    assert captured["checkout"][0][:2] == ("combo", "tiktok_99k")
+
+
+def test_package_purchase_checkout_metadata_is_classified(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "PAYOS_CLIENT_ID", "client")
+    monkeypatch.setattr(bot, "PAYOS_API_KEY", "api")
+    monkeypatch.setattr(bot, "PAYOS_CHECKSUM_KEY", "checksum")
+    monkeypatch.setattr(bot, "generate_order_code", lambda: "900002")
+    monkeypatch.setattr(bot, "make_payos_return_url", lambda _context: "https://www.toanaas.vn/")
+    monkeypatch.setattr(bot, "record_usage_event", lambda *args, **kwargs: None)
+
+    async def fake_payos(_body):
+        return SimpleNamespace(status_code=200), {"code": "00", "data": {"checkoutUrl": "https://pay.example/900002", "paymentLinkId": "link-900002"}}, "", ""
+
+    class FakeMessage:
+        def __init__(self):
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((text, kwargs))
+
+    monkeypatch.setattr(bot, "create_payos_payment_request", fake_payos)
+    try:
+        bot.init_db()
+        message = FakeMessage()
+        user = SimpleNamespace(id=456, first_name="Package Buyer", username="package_buyer")
+        update = SimpleNamespace(effective_user=user, message=message)
+        asyncio.run(bot.start_package_purchase(update, SimpleNamespace(), "combo", "tiktok_99k", message=message))
+        conn = bot.db_connect()
+        try:
+            order = conn.execute(
+                "SELECT order_type, metadata_json FROM payos_orders WHERE order_code=?",
+                ("900002",),
+            ).fetchone()
+        finally:
+            conn.close()
+        metadata = json.loads(order[1])
+        assert metadata["payment_type"] == "combo_purchase"
+        assert metadata["item_id"] == "tiktok_99k"
+        assert metadata["user_id"] == "456"
+        assert metadata["amount_vnd"] == 99000
+        assert metadata["status"] == "pending"
+        assert metadata["created_at"]
+        assert metadata["expires_at"]
+        assert metadata["note"] == "combo_purchase:tiktok_99k"
+        assert order[0] == "package_purchase"
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -1985,58 +2075,36 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.clear_public_video_package_context("u_video") is True
     assert "321 Xu" not in bot.create_media_pricing_text()
     assert "654 Xu" not in bot.create_media_pricing_text()
-    pricing_text = "\n".join(bot.pricing_main_lines())
-    assert "BẢNG GIÁ TOAN AAS V6" in pricing_text
-    assert "Miễn phí / 0 Xu" in pricing_text
-    assert "Hình ảnh" in pricing_text
-    assert "Video AI" in pricing_text
-    assert "Ghép ảnh thành video" in pricing_text
-    assert "Voice / TTS / Audio" in pricing_text
-    assert "Tài liệu / PDF" in pricing_text
-    assert "Ghi chú / Lưu trữ" in pricing_text
-    assert "Gói / Combo" in pricing_text
-    assert "Cao cấp / Liên hệ admin" in pricing_text
-    assert "Text/ghi chú: <b>10MB miễn phí</b>" in pricing_text
-    assert "Tệp/ảnh/âm thanh lưu lâu dài: <b>40MB miễn phí</b>" in pricing_text
-    assert "Tổng free storage: <b>50MB/tài khoản</b>" in pricing_text
-    assert "+50MB/tháng: 10.000đ" in pricing_text
-    assert "Free 5MB" not in pricing_text
-    assert "Lite — 19.000" not in pricing_text
-    assert "500MB 29.000" not in pricing_text
-    assert "1GB 39.000" not in pricing_text
-    assert "provider cost" not in pricing_text.lower()
-    assert "tiered_media_pricing" in pricing_text
+    pricing_hub_text = "\n".join(bot.pricing_hub_lines("vi"))
+    assert "Nạp Xu / Bảng giá TOAN AAS" in pricing_hub_text
+    assert "xem bảng giá, nạp Xu hay mua gói/combo" in pricing_hub_text
     price_keyboard_labels = [button.text for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
     assert price_keyboard_labels == [
-        "🆓 Miễn phí",
-        "🖼 Hình ảnh",
-        "🎬 Video",
-        "🎞 Ghép ảnh thành video",
-        "🗣 Voice/TTS",
-        "📄 Tài liệu/PDF",
-        "📝 Ghi chú/Lưu trữ",
-        "🎁 Gói/Combo",
-        "👑 Cao cấp",
+        "📋 Bảng giá",
+        "💳 Nạp Xu",
+        "🎁 Gói / Combo",
         "🏠 Menu chính",
     ]
     pricing_callbacks = [button.callback_data for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
     assert pricing_callbacks == [
-        "pricing|free",
-        "pricing|image",
-        "pricing|video",
-        "pricing|frame",
-        "pricing|voice",
-        "pricing|docs",
-        "pricing|storage",
-        "pricing|combo",
-        "pricing|premium",
+        "pricing|catalog",
+        "menu|main_topup",
+        "pricing|packages",
         "menu|main",
     ]
+    catalog_labels = [button.text for row in bot.pricing_catalog_keyboard("vi").inline_keyboard for button in row]
+    catalog_callbacks = [button.callback_data for row in bot.pricing_catalog_keyboard("vi").inline_keyboard for button in row]
+    assert "🆓 Miễn phí" not in catalog_labels
+    assert "🖼 Hình ảnh" in catalog_labels
+    assert "🎬 Video" in catalog_labels
+    assert "📄 Tài liệu/PDF" in catalog_labels
+    assert "📝 Ghi chú/Lưu trữ" in catalog_labels
+    assert "pricing|package_summary" in catalog_callbacks
     image_price_text = "\n".join(bot.pricing_image_lines())
     video_price_text = "\n".join(bot.pricing_video_lines())
     combo_price_text = "\n".join(bot.pricing_combo_lines())
-    free_price_text = "\n".join(bot.pricing_free_lines())
     frame_price_text = "\n".join(bot.pricing_frame_video_lines())
+    docs_price_text = "\n".join(bot.pricing_docs_lines())
     storage_price_text = "\n".join(bot.pricing_storage_lines())
     audit_price_text = "\n".join(bot.pricing_audit_lines())
     assert "Ảnh tiết kiệm: <b>321 Xu</b>" in image_price_text
@@ -2048,10 +2116,16 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Combo Ưu Đãi TikTok" in combo_price_text
     assert "khuyến nghị 9:16" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
-    assert "MIỄN PHÍ / 0 XU" in free_price_text
-    assert "chưa gọi provider nặng và chưa trừ Xu" in free_price_text
     assert "Local Worker/FFmpeg" in frame_price_text
-    assert "50MB đầu tiên" in storage_price_text
+    assert "Ảnh sang PDF: <b>0 Xu</b>" in docs_price_text
+    assert "PDF sang ảnh: <b>0 Xu</b>" in docs_price_text
+    assert "Gộp PDF: <b>0 Xu</b>" in docs_price_text
+    assert "đang thử nghiệm" in docs_price_text
+    assert "5 Xu" not in docs_price_text
+    assert "10 Xu" not in docs_price_text
+    assert "10MB cho ghi chú" in storage_price_text
+    assert "40MB cho tệp" in storage_price_text
+    assert "Tổng miễn phí: 50MB/tài khoản" in storage_price_text
     assert "+50MB/tháng: 10.000đ" in storage_price_text
     assert "500MB/tháng: 29.000đ" not in storage_price_text
     assert "TOAN AAS Pricing Audit V6" in audit_price_text
@@ -2059,9 +2133,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "50MB free; +50MB 10.000đ/month" in audit_price_text
     assert "key/token/raw provider response" in audit_price_text
     assert 'CommandHandler("pricing_audit", cmd_pricing_audit)' in source
-    combo_callbacks = [button.callback_data for row in bot.pricing_detail_keyboard("combo", "vi").inline_keyboard for button in row]
+    combo_callbacks = [button.callback_data for row in bot.pricing_combo_keyboard("vi").inline_keyboard for button in row]
     assert "pkgbuy|combo|tiktok_99k" in combo_callbacks
     assert "pkgbuy|combo|posting_499k" in combo_callbacks
+    assert "pricing|packages" in combo_callbacks
+    package_hub_callbacks = [button.callback_data for row in bot.pricing_packages_keyboard("vi").inline_keyboard for button in row]
+    assert package_hub_callbacks == ["pricing|plans", "pricing|combo", "pricing|my_packages", "pricing|main", "menu|main"]
     xu_text = "\n".join(bot.pricing_xu_lines())
     assert xu_text.count("💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>") == 1
     plan_text = "\n".join(bot.pricing_plans_lines())
@@ -2071,6 +2148,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     plan_callbacks = [button.callback_data for row in bot.pricing_plans_keyboard("vi").inline_keyboard for button in row]
     assert "pkgbuy|monthly|starter_monthly" in plan_callbacks
     assert "pkgbuy|monthly|pro_monthly" in plan_callbacks
+    assert "pricing|packages" in plan_callbacks
     assert "Giá tác vụ dịch tham khảo" not in plan_text
     assert "<code>/translate_voice</code>: từ 30–80 Xu/audio ngắn" not in plan_text
     assert "Music / Audio Factory" not in plan_text

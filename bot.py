@@ -1020,14 +1020,14 @@ CHAT_PRO_MB_UNIT_COST = 20
 CHAT_PRO_MIN_COST = 10
 CHAT_TEXT_MB_CHARS = 4000
 DOC_COSTS = {
-    "image_to_pdf": 5,
-    "compress_pdf": 5,
-    "pdf_to_images": 10,
-    "pdf_to_word_text": 10,
-    "split_pdf": 10,
-    "merge_pdf": 10,
-    "ocr_image": 10,
-    "ocr_pdf_per_page": 10,
+    "image_to_pdf": 0,
+    "compress_pdf": 0,
+    "pdf_to_images": 0,
+    "pdf_to_word_text": 0,
+    "split_pdf": 0,
+    "merge_pdf": 0,
+    "ocr_image": 0,
+    "ocr_pdf_per_page": 0,
 }
 DOC_MAX_FILE_BYTES = 20 * 1024 * 1024
 DOC_MAX_PAGES = 30
@@ -43396,7 +43396,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
     if action == "hint_pricing":
-        return await send_pricing_lines(query.message, pricing_main_lines_i18n(lang), pricing_main_keyboard(lang))
+        return await send_pricing_lines(query.message, pricing_hub_lines(lang), pricing_main_keyboard(lang))
     if action in DOC_TOOL_MENU_ACTIONS:
         return await start_doc_tool_flow(query, query.from_user.id, DOC_TOOL_MENU_ACTIONS[action], lang)
     if action == "main_guide":
@@ -66350,7 +66350,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_media_creator_pending_states(uid)
         return await safe_edit_or_send(
             query,
-            "\n".join(pricing_main_lines_i18n(lang)),
+            "\n".join(pricing_hub_lines(lang)),
             parse_mode="HTML",
             reply_markup=pricing_main_keyboard(lang),
         )
@@ -68024,15 +68024,16 @@ def pricing_docs_lines() -> list[str]:
     return [
         "📄 <b>TÀI LIỆU / PDF</b>",
         "",
-        "Các công cụ local giữ giá thấp và luôn báo trước nếu chưa bật public.",
+        "Các công cụ tài liệu/PDF local đang miễn phí trong giai đoạn hiện tại.",
         "",
-        f"• Ảnh sang PDF: <b>{DOC_COSTS.get('image_to_pdf', 0)} Xu</b>",
-        f"• PDF sang ảnh: <b>{DOC_COSTS.get('pdf_to_images', 0)} Xu</b>",
-        f"• PDF sang Word text: <b>{DOC_COSTS.get('pdf_to_word_text', 0)} Xu</b>",
-        f"• Nén PDF: <b>{DOC_COSTS.get('compress_pdf', 0)} Xu</b>",
-        f"• Tách PDF: <b>{DOC_COSTS.get('split_pdf', 0)} Xu</b>",
-        f"• Gộp PDF: <b>{DOC_COSTS.get('merge_pdf', 0)} Xu</b> nếu workflow đã bật",
-        f"• OCR ảnh/PDF: <b>{DOC_COSTS.get('ocr_image', 0)} Xu</b> / <b>{DOC_COSTS.get('ocr_pdf_per_page', 0)} Xu/trang</b>",
+        "<b>Giá hiện tại:</b>",
+        "• Ảnh sang PDF: <b>0 Xu</b>",
+        "• PDF sang ảnh: <b>0 Xu</b>",
+        "• PDF sang Word text: <b>0 Xu</b> nếu công cụ local đã bật",
+        "• Nén PDF: <b>0 Xu</b>",
+        "• Tách PDF: <b>0 Xu</b>",
+        "• Gộp PDF: <b>0 Xu</b> nếu workflow đã bật",
+        "• OCR ảnh/PDF: <b>đang thử nghiệm, chỉ mở khi công cụ ổn định</b>",
         "",
         "Nếu công cụ đang bảo trì/chưa bật, TOAN AAS báo trước, không gọi xử lý và không trừ Xu.",
     ]
@@ -68041,16 +68042,16 @@ def pricing_storage_lines() -> list[str]:
     return [
         "📝 <b>GHI CHÚ / LƯU TRỮ</b>",
         "",
-        "<b>Miễn phí:</b>",
-        "✅ Tạo ghi chú",
-        "✅ Sửa/xem lại ghi chú",
-        f"✅ Lưu tài liệu trong {TOTAL_FREE_STORAGE_MB}MB đầu tiên",
-        "✅ Tìm kiếm/xem lại tài liệu",
+        "<b>Miễn phí mặc định:</b>",
+        f"• {NOTES_TEXT_FREE_MB}MB cho ghi chú/text/nhắc hẹn.",
+        f"• {FILES_AUDIO_FREE_MB}MB cho tệp/ảnh/âm thanh lưu lâu dài.",
+        f"• Tổng miễn phí: {TOTAL_FREE_STORAGE_MB}MB/tài khoản.",
         "",
-        "<b>Gói lưu trữ mở rộng:</b>",
+        "<b>Mua thêm dung lượng:</b>",
         *storage_addon_lines(),
         "",
         "Ghi chú text nhỏ vẫn tính dung lượng thật. File đính kèm tính đúng size file. File tạm không tính vào quota lâu dài nếu tự xóa theo TTL.",
+        "TOAN AAS đang tối ưu hạ tầng lưu trữ; chính sách mở rộng có thể được cải thiện khi hạ tầng ổn định hơn.",
     ]
 
 def pricing_premium_lines() -> list[str]:
@@ -68102,49 +68103,47 @@ async def cmd_pricing_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     labels = {
-        "vi": {
-            "free": "🆓 Miễn phí", "image": "🖼 Hình ảnh",
-            "video": "🎬 Video", "frame": "🎞 Ghép ảnh thành video",
-            "voice": "🗣 Voice/TTS", "docs": "📄 Tài liệu/PDF",
-            "storage": "📝 Ghi chú/Lưu trữ", "combo": "🎁 Gói/Combo",
-            "premium": "👑 Cao cấp", "main": "🏠 Menu chính",
-        },
-        "en": {
-            "free": "🆓 Free", "image": "🖼 Images",
-            "video": "🎬 Video", "frame": "🎞 Frame video",
-            "voice": "🗣 Voice/TTS", "docs": "📄 Docs/PDF",
-            "storage": "📝 Notes/Storage", "combo": "🎁 Packages",
-            "premium": "👑 Premium", "main": "🏠 Main menu",
-        },
-        "zh": {
-            "free": "🆓 免费", "image": "🖼 图片",
-            "video": "🎬 视频", "frame": "🎞 图片成片",
-            "voice": "🗣 语音/TTS", "docs": "📄 文档/PDF",
-            "storage": "📝 笔记/存储", "combo": "🎁 套餐",
-            "premium": "👑 高级", "main": "🏠 主菜单",
-        },
-    }.get(lang, {})
+        "vi": ("📋 Bảng giá", "💳 Nạp Xu", "🎁 Gói / Combo", "🏠 Menu chính"),
+        "en": ("📋 Pricing", "💳 Top up Xu", "🎁 Plans / Combos", "🏠 Main menu"),
+        "zh": ("📋 价格表", "💳 充值 Xu", "🎁 月度套餐 / 组合", "🏠 主菜单"),
+    }.get(lang, ("📋 Pricing", "💳 Top up Xu", "🎁 Plans / Combos", "🏠 Main menu"))
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(labels.get("free", "🆓 Free"), callback_data="pricing|free"),
-            InlineKeyboardButton(labels.get("image", "🖼 Image pricing"), callback_data="pricing|image"),
+            InlineKeyboardButton(labels[0], callback_data="pricing|catalog"),
+            InlineKeyboardButton(labels[1], callback_data="menu|main_topup"),
         ],
         [
-            InlineKeyboardButton(labels.get("video", "🎬 Video pricing"), callback_data="pricing|video"),
-            InlineKeyboardButton(labels.get("frame", "🎞 Frame video"), callback_data="pricing|frame"),
+            InlineKeyboardButton(labels[2], callback_data="pricing|packages"),
+            InlineKeyboardButton(labels[3], callback_data="menu|main"),
         ],
-        [
-            InlineKeyboardButton(labels.get("voice", "🗣 Voice/TTS"), callback_data="pricing|voice"),
-            InlineKeyboardButton(labels.get("docs", "📄 Docs/PDF"), callback_data="pricing|docs"),
-        ],
-        [
-            InlineKeyboardButton(labels.get("storage", "📝 Notes/Storage"), callback_data="pricing|storage"),
-            InlineKeyboardButton(labels.get("combo", "🎁 Combos"), callback_data="pricing|combo"),
-        ],
-        [
-            InlineKeyboardButton(labels.get("premium", "👑 Premium"), callback_data="pricing|premium"),
-            InlineKeyboardButton(labels.get("main", "🏠 Main menu"), callback_data="menu|main"),
-        ],
+    ])
+
+def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    labels = {
+        "vi": ("🖼 Hình ảnh", "🎬 Video", "🎞 Ghép ảnh thành video", "🎙 Voice/TTS", "📄 Tài liệu/PDF", "📝 Ghi chú/Lưu trữ", "🎁 Gói/Combo", "👑 Cao cấp", "⬅️ Quay lại", "🏠 Menu chính"),
+        "en": ("🖼 Images", "🎬 Video", "🎞 Frame video", "🎙 Voice/TTS", "📄 Docs/PDF", "📝 Notes/Storage", "🎁 Plans/Combos", "👑 Premium", "⬅️ Back", "🏠 Main menu"),
+        "zh": ("🖼 图片", "🎬 视频", "🎞 图片成片", "🎙 语音/TTS", "📄 文档/PDF", "📝 笔记/存储", "🎁 套餐", "👑 高级", "⬅️ 返回", "🏠 主菜单"),
+    }.get(lang)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels[0], callback_data="pricing|image"), InlineKeyboardButton(labels[1], callback_data="pricing|video")],
+        [InlineKeyboardButton(labels[2], callback_data="pricing|frame"), InlineKeyboardButton(labels[3], callback_data="pricing|voice")],
+        [InlineKeyboardButton(labels[4], callback_data="pricing|docs"), InlineKeyboardButton(labels[5], callback_data="pricing|storage")],
+        [InlineKeyboardButton(labels[6], callback_data="pricing|package_summary"), InlineKeyboardButton(labels[7], callback_data="pricing|premium")],
+        [InlineKeyboardButton(labels[8], callback_data="pricing|main"), InlineKeyboardButton(labels[9], callback_data="menu|main")],
+    ])
+
+def pricing_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    labels = {
+        "vi": ("📦 Gói tháng", "🎁 Combo", "📦 Gói của tôi", "⬅️ Quay lại", "🏠 Menu chính"),
+        "en": ("📦 Monthly plans", "🎁 Combos", "📦 My packages", "⬅️ Back", "🏠 Main menu"),
+        "zh": ("📦 月度套餐", "🎁 组合套餐", "📦 我的套餐", "⬅️ 返回", "🏠 主菜单"),
+    }.get(lang)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels[0], callback_data="pricing|plans"), InlineKeyboardButton(labels[1], callback_data="pricing|combo")],
+        [InlineKeyboardButton(labels[2], callback_data="pricing|my_packages"), InlineKeyboardButton(labels[3], callback_data="pricing|main")],
+        [InlineKeyboardButton(labels[4], callback_data="menu|main")],
     ])
 
 def pricing_xu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -68156,11 +68155,17 @@ def pricing_xu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def pricing_plans_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
-        labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 我的套餐", "📞 联系管理员", "🔙 返回价格", "🏠 主菜单"]
+        labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 我的套餐", "⬅️ 套餐", "🏠 主菜单"]
     elif lang == "en":
-        labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 My packages", "📞 Contact admin", "🔙 Back to pricing", "🏠 Main menu"]
+        labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 My packages", "⬅️ Plans / Combos", "🏠 Main menu"]
     else:
-        labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 Gói của tôi", "📞 Liên hệ admin", "🔙 Quay lại bảng giá", "🏠 Menu chính"]
+        labels = [
+            f"🌱 Starter — {package_purchase_display_price('monthly', 'starter_monthly')}",
+            f"🎨 Creator — {package_purchase_display_price('monthly', 'creator_monthly')}",
+            f"🛒 Shop — {package_purchase_display_price('monthly', 'shop_monthly')}",
+            f"🏢 Pro — {package_purchase_display_price('monthly', 'pro_monthly')}",
+            "📦 Gói của tôi", "⬅️ Gói / Combo", "🏠 Menu chính",
+        ]
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(labels[0], callback_data="pkgbuy|monthly|starter_monthly"),
@@ -68172,12 +68177,9 @@ def pricing_plans_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(labels[4], callback_data="pricing|my_packages"),
-            InlineKeyboardButton(labels[5], callback_data="menu|support"),
+            InlineKeyboardButton(labels[5], callback_data="pricing|packages"),
         ],
-        [
-            InlineKeyboardButton(labels[6], callback_data="pricing|main"),
-            InlineKeyboardButton(labels[7], callback_data="menu|main"),
-        ],
+        [InlineKeyboardButton(labels[6], callback_data="menu|main")],
     ])
 
 def vip_services_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -68266,6 +68268,99 @@ async def edit_or_send_pricing_lines(query, lines: list[str], reply_markup: Inli
             parse_mode="HTML",
             reply_markup=reply_markup if idx == len(chunks) - 1 else None,
         )
+
+def pricing_hub_lines(lang: str = "vi") -> list[str]:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return [
+            "💳 <b>TOAN AAS 充值 / 价格</b>", "",
+            "请选择查看价格、充值 Xu 或购买月度套餐/组合。", "",
+            "• 价格表：查看各工具价格。",
+            "• 充值 Xu：为账户充值服务额度。",
+            "• 月度套餐 / 组合：按需求购买服务权益。",
+        ]
+    if lang == "en":
+        return [
+            "💳 <b>TOAN AAS Top-up / Pricing</b>", "",
+            "Choose pricing, Xu top-up, or a monthly plan/combo.", "",
+            "• Pricing: view prices by tool group.",
+            "• Top up Xu: add service credits to your account.",
+            "• Plans / Combos: buy service allowances for a specific need.",
+        ]
+    return [
+        "💳 <b>Nạp Xu / Bảng giá TOAN AAS</b>", "",
+        "Bạn muốn xem bảng giá, nạp Xu hay mua gói/combo?", "",
+        "• Bảng giá: xem giá từng công cụ.",
+        "• Nạp Xu: nạp Xu vào tài khoản.",
+        "• Gói / Combo: mua gói dịch vụ hoặc combo theo nhu cầu.",
+    ]
+
+def pricing_catalog_lines(lang: str = "vi") -> list[str]:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return [
+            "📋 <b>TOAN AAS 价格表</b>", "", "请选择服务分类。", "",
+            "• 未调用付费 provider 的提示词、规划和建议通常免费。",
+            "• 本地文档/PDF 工具当前免费。",
+            "• 所有收费操作都会在扣除 Xu 前确认。",
+            "• 工具维护时不会扣除 Xu。",
+        ]
+    if lang == "en":
+        return [
+            "📋 <b>TOAN AAS Pricing</b>", "", "Choose a service group.", "",
+            "• Prompt, planning and suggestion steps are normally free before a paid provider is called.",
+            "• Local document/PDF tools are currently free.",
+            "• Paid actions require confirmation before Xu is deducted.",
+            "• Maintenance or unavailable tools do not charge Xu.",
+        ]
+    return [
+        "📋 <b>Bảng giá TOAN AAS</b>", "", "Chọn nhóm dịch vụ bạn muốn xem giá.", "",
+        "• Các bước tạo prompt/kế hoạch/gợi ý thường miễn phí nếu chưa gọi provider.",
+        "• Công cụ tài liệu/PDF local đang miễn phí trong giai đoạn hiện tại.",
+        "• Các tác vụ có phí đều phải có màn xác nhận trước khi trừ Xu.",
+        "• Nếu provider/tool đang bảo trì, TOAN AAS sẽ báo trước và không trừ Xu.",
+    ]
+
+def pricing_packages_lines(lang: str = "vi") -> list[str]:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return [
+            "🎁 <b>TOAN AAS 月度套餐 / 组合</b>", "", "请选择购买类型。", "",
+            "• 月度套餐：适合经常使用的客户。",
+            "• 组合：按具体需求购买一组服务次数。", "",
+            "付款成功后权益会自动保存到“我的套餐”。购买套餐不会充值普通 Xu，也不会触发充值奖励。",
+        ]
+    if lang == "en":
+        return [
+            "🎁 <b>TOAN AAS Plans / Combos</b>", "", "What would you like to buy?", "",
+            "• Monthly plans: recurring service allowances for regular users.",
+            "• Combos: a set of service units for a specific need.", "",
+            "After PayOS confirms payment, the item appears in My packages. It does not add normal Xu or trigger top-up bonuses.",
+        ]
+    return [
+        "🎁 <b>Gói / Combo TOAN AAS</b>", "", "Bạn muốn mua loại nào?", "",
+        "• Gói tháng: dùng theo chu kỳ/tháng, phù hợp khách dùng thường xuyên.",
+        "• Combo: mua một bộ dịch vụ theo nhu cầu cụ thể, dùng theo lượt/quyền trong gói.", "",
+        "Gói/Combo không phải nạp Xu thường, không cộng bonus nạp Xu và không tự nâng hạng thành viên.",
+        "Sau khi PayOS xác nhận thanh toán, gói/combo sẽ nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt/quyền khi sử dụng.",
+    ]
+
+def pricing_package_summary_lines() -> list[str]:
+    catalog = package_catalog_payload()
+    rows = ["🎁 <b>GÓI / COMBO</b>", "", "<b>Gói tháng</b>"]
+    for code, entry in (catalog.get("monthly") or {}).items():
+        rows.append(f"• {html.escape(str(entry.get('label') or code))}: <b>{html.escape(package_purchase_display_price('monthly', code))}</b>")
+    rows.extend(["", "<b>Combo</b>"])
+    for item in video_combo_pricing_payload():
+        rows.append(f"• {html.escape(str(item.get('label') or item.get('code') or 'Combo'))}: <b>{html.escape(str(item.get('display_price') or '-'))}</b>")
+    rows.extend(["", "Để mua, mở <b>Nạp Xu / Bảng giá → Gói / Combo</b>."])
+    return rows
+
+def pricing_package_summary_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎁 Mua Gói/Combo", callback_data="pricing|packages"), InlineKeyboardButton("⬅️ Quay lại bảng giá", callback_data="pricing|catalog")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
 
 def pricing_main_lines() -> list[str]:
     pricing = media_workflow_pricing_payload()
@@ -68435,36 +68530,45 @@ def pricing_combo_lines() -> list[str]:
 
 def pricing_detail_keyboard(section: str = "main", lang: str = "vi") -> InlineKeyboardMarkup:
     rows = []
-    if section == "combo":
-        rows.extend([
-            [InlineKeyboardButton("🎁 TikTok 99k", callback_data="pkgbuy|combo|tiktok_99k"), InlineKeyboardButton("📦 Cơ Bản 199k", callback_data="pkgbuy|combo|basic_199k")],
-            [InlineKeyboardButton("⭐ Tiêu Chuẩn 299k", callback_data="pkgbuy|combo|standard_299k"), InlineKeyboardButton("📅 Đăng Đều 499k", callback_data="pkgbuy|combo|posting_499k")],
-            [InlineKeyboardButton("🚀 Quảng Cáo 699k", callback_data="pkgbuy|combo|product_ads_699k")],
-            [InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
-        ])
-    elif section in {"image", "video"}:
+    if section in {"image", "video"}:
         rows.append([
             InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
-            InlineKeyboardButton("🎁 Combo", callback_data="pricing|combo"),
+            InlineKeyboardButton("🎁 Gói / Combo", callback_data="pricing|packages"),
         ])
-    rows.append([InlineKeyboardButton(ui_text(lang, "pricing.back"), callback_data="pricing|main"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    elif section == "storage":
+        rows.append([
+            InlineKeyboardButton("📦 Mua thêm dung lượng", callback_data="menu|memory_storage_addon"),
+            InlineKeyboardButton("💾 Dung lượng của tôi", callback_data="menu|memory_storage_status"),
+        ])
+    rows.append([InlineKeyboardButton(ui_text(lang, "pricing.back"), callback_data="pricing|catalog"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+def pricing_combo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎬 TikTok — 99k", callback_data="pkgbuy|combo|tiktok_99k"), InlineKeyboardButton("📦 Cơ bản — 199k", callback_data="pkgbuy|combo|basic_199k")],
+        [InlineKeyboardButton("⭐ Tiêu chuẩn — 299k", callback_data="pkgbuy|combo|standard_299k"), InlineKeyboardButton("📅 Đăng đều — 499k", callback_data="pkgbuy|combo|posting_499k")],
+        [InlineKeyboardButton("🚀 Quảng cáo — 699k", callback_data="pkgbuy|combo|product_ads_699k"), InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
+        [InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pricing|packages"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
 
 def my_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎁 购买组合套餐", callback_data="pricing|combo"), InlineKeyboardButton("📆 月度套餐", callback_data="pricing|plans")],
-            [InlineKeyboardButton("🔙 返回价格", callback_data="pricing|main"), InlineKeyboardButton("🏠 主菜单", callback_data="menu|main")],
+            [InlineKeyboardButton("🔄 刷新", callback_data="pricing|my_packages"), InlineKeyboardButton("🎁 购买组合套餐", callback_data="pricing|combo")],
+            [InlineKeyboardButton("📆 月度套餐", callback_data="pricing|plans"), InlineKeyboardButton("⬅️ 套餐", callback_data="pricing|packages")],
+            [InlineKeyboardButton("🏠 主菜单", callback_data="menu|main")],
         ])
     if lang == "en":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎁 Buy combo", callback_data="pricing|combo"), InlineKeyboardButton("📆 Monthly plans", callback_data="pricing|plans")],
-            [InlineKeyboardButton("🔙 Back to pricing", callback_data="pricing|main"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
+            [InlineKeyboardButton("🔄 Refresh", callback_data="pricing|my_packages"), InlineKeyboardButton("🎁 Buy combo", callback_data="pricing|combo")],
+            [InlineKeyboardButton("📆 Monthly plans", callback_data="pricing|plans"), InlineKeyboardButton("⬅️ Plans / Combos", callback_data="pricing|packages")],
+            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎁 Mua combo", callback_data="pricing|combo"), InlineKeyboardButton("📆 Gói tháng", callback_data="pricing|plans")],
-        [InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🔄 Làm mới", callback_data="pricing|my_packages"), InlineKeyboardButton("🎁 Mua Combo", callback_data="pricing|combo")],
+        [InlineKeyboardButton("📦 Mua Gói tháng", callback_data="pricing|plans"), InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pricing|packages")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def pricing_xu_lines() -> list[str]:
@@ -68769,7 +68873,7 @@ def pricing_plans_lines_i18n(lang: str = "vi") -> list[str]:
 async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
     try:
-        await send_pricing_lines(update.message, pricing_main_lines_i18n(lang), pricing_main_keyboard(lang), limit=3600)
+        await send_pricing_lines(update.message, pricing_hub_lines(lang), pricing_main_keyboard(lang), limit=3600)
     except Exception as e:
         logger.warning("Pricing command failed | %s", sanitize_log_text(str(e))[:240])
         await update.message.reply_text("⚠️ Bảng giá đang tải lỗi tạm thời. Bot chưa trừ Xu. Vui lòng thử lại sau.")
@@ -68809,6 +68913,42 @@ def plan_purchase_keyboard(checkout_url: str = "") -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton("📦 Xem gói tháng", callback_data="pricing|plans")])
     rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+def package_purchase_detail_lines(package_type: str, code: str) -> list[str]:
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan"} else "combo"
+    code = str(code or "").strip().lower()
+    entry = package_catalog_entry(code, package_type)
+    if not entry:
+        return ["⚠️ <b>Gói không hợp lệ</b>", "", "Bot chưa tạo đơn và chưa trừ Xu."]
+    kind = package_purchase_kind_label(package_type)
+    label = str(entry.get("label") or code)
+    price = package_purchase_price_vnd(package_type, code)
+    price_text = f"{price:,}đ".replace(",", ".") if price > 0 else "liên hệ admin"
+    duration_days = int(entry.get("default_days") or 0) if package_type == "monthly" else 0
+    rows = [
+        f"🎁 <b>{html.escape(kind)}: {html.escape(label)}</b>", "",
+        f"• Giá: <b>{html.escape(price_text)}</b>" + ("/tháng" if package_type == "monthly" and price > 0 else ""),
+    ]
+    if duration_days:
+        rows.append(f"• Thời hạn: <b>{duration_days} ngày</b>")
+    rows.extend([
+        f"• Quyền lợi: {html.escape(package_items_summary(entry.get('items') or {}))}",
+        f"• Phù hợp: {html.escape(str(entry.get('note') or 'Dùng dịch vụ theo lượt/quyền trong gói.'))}", "",
+        "Sau khi PayOS xác nhận thanh toán, gói/combo sẽ nằm trong <b>📦 Gói của tôi</b>.",
+        "Khi dùng công cụ thuộc gói, hệ thống ưu tiên trừ lượt/quyền trong gói nếu còn.", "",
+        "Gói/Combo không phải nạp Xu thường, không cộng bonus nạp Xu và không tự nâng hạng thành viên.", "",
+        "Bạn có muốn thanh toán sản phẩm này không?",
+    ])
+    return rows
+
+def package_purchase_confirm_keyboard(package_type: str, code: str) -> InlineKeyboardMarkup:
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan"} else "combo"
+    code = str(code or "").strip().lower()
+    back_action = "pricing|plans" if package_type == "monthly" else "pricing|combo"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận thanh toán", callback_data=f"pkgbuy|confirm|{package_type}|{code}"), InlineKeyboardButton("⬅️ Hủy", callback_data=back_action)],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
 
 async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, package_type: str, code: str, message=None):
     message = message or update.message
@@ -68856,8 +68996,19 @@ async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_T
     duration_days = int(entry.get("default_days") or 0) if package_type == "monthly" else 0
     label = str(entry.get("label") or code)
     item_summary = package_items_summary(entry.get("items") or {})
+    created_at = now_text()
+    expires_at = datetime_text(datetime.now() + timedelta(minutes=ORDER_TTL_MINUTES))
+    payment_type = "monthly_package_purchase" if package_type == "monthly" else "combo_purchase"
     metadata = {
         "type": "package_purchase",
+        "payment_type": payment_type,
+        "item_id": code,
+        "user_id": str(uid),
+        "amount_vnd": int(amount),
+        "status": "pending",
+        "created_at": created_at,
+        "expires_at": expires_at,
+        "note": f"{payment_type}:{code}",
         "package_type": package_type,
         "package_code": code,
         "package_label": label,
@@ -69097,8 +69248,20 @@ async def handle_package_purchase_callback(update: Update, context: ContextTypes
     parts = (query.data or "").split("|")
     if len(parts) < 3:
         return await safe_edit_or_send(query, "⚠️ Gói không hợp lệ. Bot chưa tạo đơn.")
+    if parts[1] == "confirm":
+        if len(parts) < 4:
+            return await safe_edit_or_send(query, "⚠️ Xác nhận không hợp lệ. Bot chưa tạo đơn.")
+        package_type, code = parts[2], parts[3]
+        return await start_package_purchase(update, context, package_type, code, message=query.message)
     package_type, code = parts[1], parts[2]
-    return await start_package_purchase(update, context, package_type, code, message=query.message)
+    entry = package_catalog_entry(code, package_type)
+    if not entry:
+        return await safe_edit_or_send(query, "⚠️ Gói không hợp lệ. Bot chưa tạo đơn.")
+    return await edit_or_send_pricing_lines(
+        query,
+        package_purchase_detail_lines(package_type, code),
+        package_purchase_confirm_keyboard(package_type, code),
+    )
 
 async def cmd_admin_grant_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -69195,6 +69358,14 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     lang = get_user_language(query.from_user.id) if query.from_user else "vi"
     if query.from_user:
         clear_media_creator_pending_states(query.from_user.id)
+    if action == "main":
+        return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang), pricing_main_keyboard(lang))
+    if action == "catalog":
+        return await edit_or_send_pricing_lines(query, pricing_catalog_lines(lang), pricing_catalog_keyboard(lang))
+    if action == "packages":
+        return await edit_or_send_pricing_lines(query, pricing_packages_lines(lang), pricing_packages_keyboard(lang))
+    if action == "package_summary":
+        return await edit_or_send_pricing_lines(query, pricing_package_summary_lines(), pricing_package_summary_keyboard(lang))
     if action == "xu":
         return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang), pricing_xu_keyboard(lang))
     if action == "free":
@@ -69212,7 +69383,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if action == "storage":
         return await edit_or_send_pricing_lines(query, pricing_storage_lines(), pricing_detail_keyboard("storage", lang))
     if action == "combo":
-        return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_detail_keyboard("combo", lang))
+        return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_combo_keyboard(lang))
     if action == "premium":
         return await edit_or_send_pricing_lines(query, pricing_premium_lines(), pricing_detail_keyboard("premium", lang))
     if action == "my_packages":
@@ -69234,7 +69405,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
         return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=member_policy_keyboard(lang))
     if action == "terms":
         return await edit_or_send_pricing_lines(query, pricing_terms_lines(), pricing_terms_keyboard(lang))
-    return await edit_or_send_pricing_lines(query, pricing_main_lines_i18n(lang), pricing_main_keyboard(lang))
+    return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang), pricing_main_keyboard(lang))
 
 def parse_chat_pro_args(raw: str) -> dict:
     kv, remainder = parse_loose_kv_args(raw)
