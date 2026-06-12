@@ -64,6 +64,19 @@ from video_prompt_quality import (
     validate_video_prompt_against_user_request,
     video_request_is_vague,
 )
+from operations_v1a import (
+    EXPENSE_CATEGORIES as OPERATIONS_EXPENSE_CATEGORIES,
+    INTERNAL_DOC_DEPARTMENTS,
+    INTERNAL_DOC_TYPES,
+    RETENTION_LABELS,
+    REVENUE_CATEGORIES,
+    TAX_PREP_DISCLAIMER,
+    calculate_tax_estimate,
+    csv_with_no_data,
+    default_document_type,
+    default_retention,
+    revenue_category_for_source,
+)
 try:
     import edge_tts
     EDGE_TTS_IMPORT_ERROR = ""
@@ -1716,6 +1729,8 @@ def migrate_finance_schema(cursor) -> None:
             ("is_recurring", "is_recurring INTEGER DEFAULT 0"),
             ("note", "note TEXT"),
             ("evidence_folder_or_file_note", "evidence_folder_or_file_note TEXT DEFAULT ''"),
+            ("invoice_file_id", "invoice_file_id TEXT DEFAULT ''"),
+            ("receipt_file_id", "receipt_file_id TEXT DEFAULT ''"),
             ("created_by_admin_id", "created_by_admin_id TEXT"),
             ("deleted_at", "deleted_at TEXT DEFAULT ''"),
             ("deleted_by_admin_id", "deleted_by_admin_id TEXT DEFAULT ''"),
@@ -1723,6 +1738,49 @@ def migrate_finance_schema(cursor) -> None:
         ],
     }
     for table_name, columns_sql in finance_tables.items():
+        existing = _table_columns(cursor, table_name)
+        for column_name, column_sql in columns_sql:
+            _add_column_if_missing(cursor, table_name, column_name, column_sql, existing)
+
+def migrate_operations_v1a_schema(cursor) -> None:
+    tables = {
+        "tax_profiles": [
+            ("owner_admin_id", "owner_admin_id TEXT"),
+            ("business_type", "business_type TEXT DEFAULT ''"),
+            ("tax_method", "tax_method TEXT DEFAULT 'manual_config'"),
+            ("vat_rate_percent", "vat_rate_percent REAL DEFAULT 0"),
+            ("pit_rate_percent", "pit_rate_percent REAL DEFAULT 0"),
+            ("revenue_threshold_vnd", "revenue_threshold_vnd INTEGER DEFAULT 0"),
+            ("license_fee_enabled", "license_fee_enabled INTEGER DEFAULT 0"),
+            ("license_fee_amount_vnd", "license_fee_amount_vnd INTEGER DEFAULT 0"),
+            ("effective_from", "effective_from TEXT DEFAULT ''"),
+            ("effective_to", "effective_to TEXT DEFAULT ''"),
+            ("note", "note TEXT DEFAULT ''"),
+            ("created_at", "created_at TEXT"),
+            ("updated_at", "updated_at TEXT"),
+        ],
+        "internal_documents": [
+            ("title", "title TEXT"),
+            ("department", "department TEXT"),
+            ("document_type", "document_type TEXT"),
+            ("file_id", "file_id TEXT"),
+            ("file_name", "file_name TEXT"),
+            ("mime_type", "mime_type TEXT"),
+            ("size_bytes", "size_bytes INTEGER DEFAULT 0"),
+            ("owner_admin_id", "owner_admin_id TEXT"),
+            ("related_customer_id", "related_customer_id TEXT DEFAULT ''"),
+            ("related_provider", "related_provider TEXT DEFAULT ''"),
+            ("related_payment_id", "related_payment_id TEXT DEFAULT ''"),
+            ("tags", "tags TEXT DEFAULT ''"),
+            ("description", "description TEXT DEFAULT ''"),
+            ("retention_policy", "retention_policy TEXT DEFAULT 'manual_review'"),
+            ("confidentiality_level", "confidentiality_level TEXT DEFAULT 'internal'"),
+            ("status", "status TEXT DEFAULT 'active'"),
+            ("created_at", "created_at TEXT"),
+            ("updated_at", "updated_at TEXT"),
+        ],
+    }
+    for table_name, columns_sql in tables.items():
         existing = _table_columns(cursor, table_name)
         for column_name, column_sql in columns_sql:
             _add_column_if_missing(cursor, table_name, column_name, column_sql, existing)
@@ -2110,6 +2168,8 @@ def init_db():
         is_recurring INTEGER DEFAULT 0,
         note TEXT,
         evidence_folder_or_file_note TEXT DEFAULT '',
+        invoice_file_id TEXT DEFAULT '',
+        receipt_file_id TEXT DEFAULT '',
         created_by_admin_id TEXT,
         deleted_at TEXT DEFAULT '',
         deleted_by_admin_id TEXT DEFAULT '',
@@ -2124,6 +2184,46 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_finance_usage_status ON finance_usage_events(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_finance_expense_date ON finance_expense_events(expense_date)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_finance_expense_category ON finance_expense_events(category)")
+    c.execute("""CREATE TABLE IF NOT EXISTS tax_profiles (
+        owner_admin_id TEXT PRIMARY KEY,
+        business_type TEXT DEFAULT '',
+        tax_method TEXT DEFAULT 'manual_config',
+        vat_rate_percent REAL DEFAULT 0,
+        pit_rate_percent REAL DEFAULT 0,
+        revenue_threshold_vnd INTEGER DEFAULT 0,
+        license_fee_enabled INTEGER DEFAULT 0,
+        license_fee_amount_vnd INTEGER DEFAULT 0,
+        effective_from TEXT DEFAULT '',
+        effective_to TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS internal_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        department TEXT,
+        document_type TEXT,
+        file_id TEXT,
+        file_name TEXT,
+        mime_type TEXT,
+        size_bytes INTEGER DEFAULT 0,
+        owner_admin_id TEXT,
+        related_customer_id TEXT DEFAULT '',
+        related_provider TEXT DEFAULT '',
+        related_payment_id TEXT DEFAULT '',
+        tags TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        retention_policy TEXT DEFAULT 'manual_review',
+        confidentiality_level TEXT DEFAULT 'internal',
+        status TEXT DEFAULT 'active',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    migrate_operations_v1a_schema(c)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_internal_documents_owner ON internal_documents(owner_admin_id, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_internal_documents_department ON internal_documents(department, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_internal_documents_created_at ON internal_documents(created_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS system_flags (
         key TEXT PRIMARY KEY,
         value TEXT,
@@ -36021,6 +36121,7 @@ def main_memory_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("📦 Mua thêm dung lượng" if is_vi else "📦 Add storage", "menu|memory_storage_addon"),
         ("🧹 Dọn file cũ" if is_vi else "🧹 Clean old files", "menu|memory_storage_cleanup"),
         ("🧰 Công cụ PDF / Word" if is_vi else "🧰 PDF / Word tools", "menu|main_docs"),
+        ("🏢 Hồ sơ nội bộ" if is_vi else "🏢 Internal archive", "menu|internal_archive"),
     ]
     back = ("⬅️ Quay lại", "menu|main") if is_vi else ("⬅️ Back", "menu|main")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
@@ -42494,11 +42595,14 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     user_is_admin = is_admin_user(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
     clear_media_creator_pending_states(query.from_user.id)
+    if action != "internal_archive":
+        clear_internal_archive_pending(query.from_user.id)
     if action not in DOC_TOOL_MENU_ACTIONS:
         clear_doc_tool_pending(query.from_user.id)
-    admin_only = {"affiliate", "operator", "admin", "system", "finance", "billing", "admin_packages", "admin_provider"}
+    admin_only = {"affiliate", "operator", "admin", "system", "finance", "billing", "admin_packages", "admin_provider", "internal_archive"}
     admin_only_prefixes = (
         "finance_",
+        "tax_",
         "freeze_",
         "admin_",
         "system_",
@@ -42541,6 +42645,51 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             support_contact_text(),
             reply_markup=support_contact_keyboard(lang=lang),
         )
+    if action == "internal_archive":
+        return await safe_edit_query_message(
+            query,
+            internal_archive_menu_text(),
+            reply_markup=internal_archive_menu_keyboard(),
+        )
+    if action == "finance_tax":
+        return await safe_edit_query_message(query, tax_accounting_menu_text(), reply_markup=tax_accounting_menu_keyboard())
+    if action == "tax_estimate":
+        start_at, end_at, label, _kind = finance_period_bounds("", "month")
+        payload = tax_estimate_payload(start_at, end_at, label, query.from_user.id)
+        return await safe_edit_query_message(query, tax_estimate_text(payload), reply_markup=tax_estimate_keyboard())
+    if action in {"tax_estimate_month", "tax_estimate_previous", "tax_estimate_quarter"}:
+        if action == "tax_estimate_previous":
+            start_at, end_at, label, _kind = finance_period_bounds(previous_month_arg(), "month")
+        elif action == "tax_estimate_quarter":
+            start_at, end_at, label, _token = tax_quarter_bounds()
+        else:
+            start_at, end_at, label, _kind = finance_period_bounds("", "month")
+        payload = tax_estimate_payload(start_at, end_at, label, query.from_user.id)
+        return await safe_edit_query_message(query, tax_estimate_text(payload), reply_markup=tax_estimate_keyboard())
+    if action == "tax_export":
+        return await safe_edit_query_message(query, tax_export_menu_text(), reply_markup=tax_export_keyboard())
+    if action in {"tax_export_month", "tax_export_previous", "tax_export_quarter"}:
+        if action == "tax_export_previous":
+            start_at, end_at, label, _kind = finance_period_bounds(previous_month_arg(), "month")
+        elif action == "tax_export_quarter":
+            start_at, end_at, label, _token = tax_quarter_bounds()
+        else:
+            start_at, end_at, label, _kind = finance_period_bounds("", "month")
+        await safe_edit_query_message(
+            query,
+            f"📤 Đang xuất 5 file kế toán cho <b>{html.escape(label)}</b>...",
+            reply_markup=tax_export_keyboard(),
+        )
+        await send_tax_accounting_exports(context, query.message.chat_id, start_at, end_at, label, query.from_user.id)
+        return
+    if action == "tax_checklist":
+        return await safe_edit_query_message(query, tax_checklist_text(), reply_markup=tax_checklist_keyboard())
+    if action == "tax_config":
+        return await safe_edit_query_message(query, tax_profile_text(query.from_user.id), reply_markup=tax_accounting_menu_keyboard())
+    if action == "tax_custom_help":
+        return await safe_edit_query_message(query, tax_custom_period_help_text("tax_report"), reply_markup=tax_estimate_keyboard())
+    if action == "tax_export_custom_help":
+        return await safe_edit_query_message(query, tax_custom_period_help_text("tax_export"), reply_markup=tax_export_keyboard())
     if action == "video_ai_true":
         return await safe_edit_query_message(
             query,
@@ -51766,7 +51915,7 @@ FINANCE_EXPENSE_CATEGORIES = {
     "refund_customer",
     "legal_tax_accounting",
     "other",
-}
+} | set(OPERATIONS_EXPENSE_CATEGORIES)
 
 FINANCE_INVOICE_STATUSES = {"invoice_ok", "receipt_only", "screenshot_only", "no_document", "internal_only"}
 
@@ -52183,6 +52332,189 @@ def finance_csv(kind: str, start_at: str, end_at: str) -> str:
         return buffer.getvalue()
     finally:
         conn.close()
+
+def tax_quarter_bounds(now: datetime | None = None) -> tuple[str, str, str, str]:
+    current = now or datetime.now()
+    quarter = ((current.month - 1) // 3) + 1
+    first_month = (quarter - 1) * 3 + 1
+    start = datetime(current.year, first_month, 1)
+    if quarter == 4:
+        next_quarter = datetime(current.year + 1, 1, 1)
+    else:
+        next_quarter = datetime(current.year, first_month + 3, 1)
+    end = next_quarter - timedelta(seconds=1)
+    return _report_dt_text(start), _report_dt_text(end), f"Quý {quarter}/{current.year}", f"{current.year}_Q{quarter}"
+
+def get_tax_profile(admin_id) -> dict:
+    admin_id = str(admin_id or ADMIN_ID or "default")
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT OR IGNORE INTO tax_profiles
+            (owner_admin_id, business_type, tax_method, vat_rate_percent, pit_rate_percent,
+             revenue_threshold_vnd, license_fee_enabled, license_fee_amount_vnd,
+             effective_from, effective_to, note, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (admin_id, "", "manual_config", 0, 0, 0, 0, 0, "", "", "", now_text(), now_text()),
+        )
+        conn.commit()
+        row = conn.execute(
+            """SELECT owner_admin_id,business_type,tax_method,vat_rate_percent,pit_rate_percent,
+                      revenue_threshold_vnd,license_fee_enabled,license_fee_amount_vnd,
+                      effective_from,effective_to,note,created_at,updated_at
+               FROM tax_profiles WHERE owner_admin_id=?""",
+            (admin_id,),
+        ).fetchone()
+        keys = [
+            "owner_admin_id", "business_type", "tax_method", "vat_rate_percent", "pit_rate_percent",
+            "revenue_threshold_vnd", "license_fee_enabled", "license_fee_amount_vnd",
+            "effective_from", "effective_to", "note", "created_at", "updated_at",
+        ]
+        payload = dict(zip(keys, row or []))
+        payload["license_fee_enabled"] = bool(int(payload.get("license_fee_enabled") or 0))
+        return payload
+    finally:
+        conn.close()
+
+def update_tax_profile(admin_id, updates: dict) -> dict:
+    allowed = {
+        "business_type", "tax_method", "vat_rate_percent", "pit_rate_percent",
+        "revenue_threshold_vnd", "license_fee_enabled", "license_fee_amount_vnd",
+        "effective_from", "effective_to", "note",
+    }
+    clean = {key: value for key, value in dict(updates or {}).items() if key in allowed}
+    get_tax_profile(admin_id)
+    if not clean:
+        return get_tax_profile(admin_id)
+    assignments = ", ".join(f"{key}=?" for key in clean)
+    values = list(clean.values()) + [now_text(), str(admin_id or ADMIN_ID or "default")]
+    conn = db_connect()
+    try:
+        conn.execute(f"UPDATE tax_profiles SET {assignments}, updated_at=? WHERE owner_admin_id=?", values)
+        conn.commit()
+    finally:
+        conn.close()
+    return get_tax_profile(admin_id)
+
+def tax_estimate_payload(start_at: str, end_at: str, label: str, admin_id) -> dict:
+    finance = finance_summary_payload(start_at, end_at, label)
+    config = get_tax_profile(admin_id)
+    estimate = calculate_tax_estimate(finance.get("revenue_success") or 0, config)
+    expenses_total = (
+        int(finance.get("expenses_after") or 0)
+        + int(finance.get("expenses_pre_period") or 0)
+        + int(finance.get("provider_cost_estimate") or 0)
+    )
+    return {
+        **finance,
+        **estimate,
+        "tax_config": config,
+        "expenses_total": expenses_total,
+        "management_profit_before_tax": int(finance.get("revenue_success") or 0) - expenses_total,
+    }
+
+def tax_estimate_text(payload: dict) -> str:
+    config = payload.get("tax_config") or {}
+    has_data = int(payload.get("revenue_count") or 0) > 0 or int(payload.get("expense_count") or 0) > 0
+    lines = [
+        "🧾 <b>Thuế ước tính TOAN AAS</b>",
+        "",
+        f"• Kỳ: <code>{html.escape(str(payload.get('label') or ''))}</code>",
+        f"• Doanh thu tính thuế: <b>{vnd_text(payload.get('taxable_revenue'))}</b>",
+        f"• Chi phí nội bộ: <b>{vnd_text(payload.get('expenses_total'))}</b>",
+        f"• Lãi/lỗ quản trị trước thuế: <b>{vnd_text(payload.get('management_profit_before_tax'))}</b>",
+        "",
+        f"• VAT/GTGT ước tính ({float(payload.get('vat_rate_percent') or 0):g}%): <b>{vnd_text(payload.get('vat_estimate'))}</b>",
+        f"• TNCN ước tính ({float(payload.get('pit_rate_percent') or 0):g}%): <b>{vnd_text(payload.get('pit_estimate'))}</b>",
+        f"• Lệ phí môn bài cấu hình: <b>{vnd_text(payload.get('license_fee_estimate'))}</b>",
+        f"• Tổng nghĩa vụ ước tính: <b>{vnd_text(payload.get('total_tax_estimate'))}</b>",
+        "",
+        f"• Phương pháp: <code>{html.escape(str(config.get('tax_method') or 'manual_config'))}</code>",
+        f"• Ngưỡng doanh thu tham chiếu: <b>{vnd_text(config.get('revenue_threshold_vnd'))}</b>",
+    ]
+    if not has_data:
+        lines.extend(["", "Chưa có dữ liệu cho kỳ này."])
+    lines.extend(["", f"⚠️ <i>{html.escape(TAX_PREP_DISCLAIMER)}</i>"])
+    return "\n".join(lines)
+
+def tax_profile_text(admin_id) -> str:
+    config = get_tax_profile(admin_id)
+    return "\n".join([
+        "⚙️ <b>Cấu hình thuế nội bộ</b>",
+        "",
+        f"• Loại hình: <code>{html.escape(str(config.get('business_type') or 'chưa cấu hình'))}</code>",
+        f"• Phương pháp: <code>{html.escape(str(config.get('tax_method') or 'manual_config'))}</code>",
+        f"• VAT/GTGT: <b>{float(config.get('vat_rate_percent') or 0):g}%</b>",
+        f"• TNCN: <b>{float(config.get('pit_rate_percent') or 0):g}%</b>",
+        f"• Ngưỡng doanh thu: <b>{vnd_text(config.get('revenue_threshold_vnd'))}</b>",
+        f"• Lệ phí môn bài: <b>{'ON' if config.get('license_fee_enabled') else 'OFF'}</b> / {vnd_text(config.get('license_fee_amount_vnd'))}",
+        f"• Hiệu lực: <code>{html.escape(str(config.get('effective_from') or '-'))}</code> → <code>{html.escape(str(config.get('effective_to') or '-'))}</code>",
+        f"• Ghi chú: {html.escape(str(config.get('note') or '-'))}",
+        "",
+        "Cập nhật từng trường bằng <code>/tax_config key=value</code>.",
+        "Ví dụ: <code>/tax_config vat=3 pit=1.5 license=true license_amount=1000000</code>",
+        "",
+        f"⚠️ <i>{html.escape(TAX_PREP_DISCLAIMER)}</i>",
+    ])
+
+def _tax_export_period_token(start_at: str, label: str) -> str:
+    if "Quý" in str(label or ""):
+        match = re.search(r"Quý\s+(\d)/(\d{4})", str(label))
+        if match:
+            return f"{match.group(2)}_Q{match.group(1)}"
+    year_match = re.search(r"Năm\s+(\d{4})", str(label or ""))
+    if year_match:
+        return year_match.group(1)
+    return str(start_at or "")[:7].replace("-", "_") or datetime.now().strftime("%Y_%m")
+
+def tax_accounting_csv(kind: str, start_at: str, end_at: str, label: str, admin_id) -> str:
+    conn = db_connect()
+    try:
+        if kind == "revenue":
+            headers = ["date", "user_id", "source", "category", "gross_amount_vnd", "net_amount_vnd", "xu_amount", "payment_method", "payos_order_id", "invoice_status", "note"]
+            raw = sql_rows(conn, """SELECT created_at,user_id,source_type,amount_vnd,xu_credited,payment_method,source_id,status,note
+                                  FROM finance_revenue_events WHERE created_at BETWEEN ? AND ? ORDER BY created_at,id""", (start_at, end_at))
+            rows = [[r[0], r[1], r[2], revenue_category_for_source(r[2]), r[3], r[3] if r[7] == "success" else 0, r[4], r[5], r[6] if "payos" in str(r[2]).lower() else "", "N/A", r[8]] for r in raw]
+        elif kind == "expenses":
+            headers = ["date", "category", "amount_vnd", "vendor", "payment_method", "invoice_file_id", "receipt_file_id", "invoice_status", "note", "created_by_admin", "created_at"]
+            rows = sql_rows(conn, """SELECT expense_date,category,amount_vnd,vendor,payment_method,invoice_file_id,receipt_file_id,invoice_status,note,created_by_admin_id,created_at
+                                      FROM finance_expense_events WHERE COALESCE(deleted_at,'')='' AND expense_date BETWEEN ? AND ? ORDER BY expense_date,id""", (start_at[:10], end_at[:10]))
+        elif kind == "xu_ledger":
+            headers = ["date", "user_id", "delta_xu", "balance_after", "event_type", "reference_id", "note"]
+            rows = sql_rows(conn, """SELECT created_at,user_id,delta,balance_after,event_type,ref_id,note
+                                      FROM credit_events WHERE created_at BETWEEN ? AND ? ORDER BY created_at,id""", (start_at, end_at))
+        elif kind == "refunds":
+            headers = ["date", "user_id", "refund_xu", "event_type", "reference_id", "note"]
+            rows = sql_rows(conn, """SELECT created_at,user_id,delta,event_type,ref_id,note
+                                      FROM credit_events WHERE delta>0 AND lower(event_type) LIKE '%refund%' AND created_at BETWEEN ? AND ? ORDER BY created_at,id""", (start_at, end_at))
+        else:
+            payload = tax_estimate_payload(start_at, end_at, label, admin_id)
+            config = payload.get("tax_config") or {}
+            headers = ["period", "taxable_revenue_vnd", "internal_expenses_vnd", "management_profit_vnd", "vat_rate_percent", "vat_estimate_vnd", "pit_rate_percent", "pit_estimate_vnd", "license_fee_vnd", "total_tax_estimate_vnd", "tax_method", "disclaimer"]
+            rows = [[label, payload.get("taxable_revenue"), payload.get("expenses_total"), payload.get("management_profit_before_tax"), payload.get("vat_rate_percent"), payload.get("vat_estimate"), payload.get("pit_rate_percent"), payload.get("pit_estimate"), payload.get("license_fee_estimate"), payload.get("total_tax_estimate"), config.get("tax_method"), TAX_PREP_DISCLAIMER]]
+        return csv_with_no_data(headers, rows)
+    finally:
+        conn.close()
+
+def tax_accounting_export_files(start_at: str, end_at: str, label: str, admin_id) -> list[tuple[str, str]]:
+    token = _tax_export_period_token(start_at, label)
+    return [
+        (f"revenue_report_{token}.csv", tax_accounting_csv("revenue", start_at, end_at, label, admin_id)),
+        (f"expense_report_{token}.csv", tax_accounting_csv("expenses", start_at, end_at, label, admin_id)),
+        (f"xu_ledger_{token}.csv", tax_accounting_csv("xu_ledger", start_at, end_at, label, admin_id)),
+        (f"refund_report_{token}.csv", tax_accounting_csv("refunds", start_at, end_at, label, admin_id)),
+        (f"tax_prep_summary_{token}.csv", tax_accounting_csv("summary", start_at, end_at, label, admin_id)),
+    ]
+
+async def send_tax_accounting_exports(context: ContextTypes.DEFAULT_TYPE, chat_id, start_at: str, end_at: str, label: str, admin_id) -> None:
+    for filename, content in tax_accounting_export_files(start_at, end_at, label, admin_id):
+        await send_named_text_document(
+            context,
+            chat_id,
+            content,
+            filename,
+            f"TOAN AAS tax/accounting prep — {label}",
+        )
 
 async def send_named_text_document(context: ContextTypes.DEFAULT_TYPE, chat_id: int, content: str, filename: str, caption: str = ""):
     with tempfile.NamedTemporaryFile("w", delete=False, suffix=os.path.splitext(filename)[1] or ".csv", encoding="utf-8", newline="") as f:
@@ -55707,10 +56039,18 @@ def memory_storage_used_breakdown(user_id) -> dict:
             (str(user_id),),
         ).fetchone()
         text_bytes = int(row[0] or 0) if row else 0
-        file_bytes = int(row[1] or 0) if row else 0
+        personal_file_bytes = int(row[1] or 0) if row else 0
+        archive_file_bytes = int(sql_scalar(
+            conn,
+            "SELECT COALESCE(SUM(COALESCE(size_bytes,0)),0) FROM internal_documents WHERE owner_admin_id=? AND status='active'",
+            (str(user_id),),
+            0,
+        ) or 0)
+        file_bytes = personal_file_bytes + archive_file_bytes
         return {
             "text_bytes": text_bytes,
             "file_bytes": file_bytes,
+            "archive_file_bytes": archive_file_bytes,
             "total_bytes": text_bytes + file_bytes,
             "text_mb": text_bytes / (1024 * 1024),
             "file_mb": file_bytes / (1024 * 1024),
@@ -82746,6 +83086,7 @@ def finance_admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📊 Tổng quan", callback_data="menu|finance_overview"), InlineKeyboardButton("💵 Doanh thu", callback_data="menu|finance_revenue")],
         [InlineKeyboardButton("📅 Doanh thu tháng", callback_data="menu|finance_revenue_month"), InlineKeyboardButton("📉 Chi phí tháng", callback_data="menu|finance_expense_month")],
         [InlineKeyboardButton("📈 Lãi / Lỗ", callback_data="menu|finance_profit"), InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|finance_export")],
+        [InlineKeyboardButton("🧾 Thuế / Kế toán", callback_data="menu|finance_tax")],
         [InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense"), InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|finance_help")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -82972,6 +83313,10 @@ def finance_command_help_text() -> str:
         "• <code>/expense_report [YYYY-MM|YYYY]</code> — chi phí\n"
         "• <code>/profit_report [YYYY-MM|YYYY]</code> — lãi/lỗ\n"
         "• <code>/finance_export YYYY-MM</code> hoặc <code>/finance_export YYYY</code> — xuất CSV\n"
+        "• <code>/tax_status</code> / <code>/tax_report [YYYY-MM|YYYY]</code> — thuế ước tính nội bộ\n"
+        "• <code>/tax_export [YYYY-MM|YYYY]</code> — xuất 5 file chuẩn bị kế toán\n"
+        "• <code>/tax_config key=value</code> — cấu hình tỷ lệ theo tư vấn kế toán\n"
+        "• <code>/internal_docs</code> — mở kho hồ sơ nội bộ admin-only\n"
         "• <code>/expense_add ...</code> — thêm chi phí vận hành\n"
         "• <code>/expense_add_pre ...</code> — thêm chi phí trước thành lập\n\n"
         "Category gợi ý: <code>provider_ai</code>, <code>railway_hosting</code>, <code>domain_hosting</code>, "
@@ -83010,6 +83355,75 @@ def finance_export_instruction_text(period: str) -> str:
         return f"📤 <b>Xuất báo cáo năm</b>\n\nDùng lệnh: <code>/finance_export {year}</code>"
     month = datetime.now().strftime("%Y-%m")
     return f"📤 <b>Xuất báo cáo tháng</b>\n\nDùng lệnh: <code>/finance_export {month}</code>"
+
+def tax_accounting_menu_text() -> str:
+    return (
+        "🧾 <b>Thuế / Kế toán TOAN AAS</b>\n\n"
+        "Tổng hợp ledger hiện có, ước tính theo tỷ lệ admin cấu hình và xuất file chuẩn bị cho kế toán.\n"
+        "Mở menu này không sửa doanh thu, chi phí, Xu hoặc PayOS.\n\n"
+        f"⚠️ <i>{html.escape(TAX_PREP_DISCLAIMER)}</i>"
+    )
+
+def tax_accounting_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧾 Thuế ước tính", callback_data="menu|tax_estimate"), InlineKeyboardButton("📤 Xuất file kế toán", callback_data="menu|tax_export")],
+        [InlineKeyboardButton("📚 Hồ sơ cần chuẩn bị", callback_data="menu|tax_checklist"), InlineKeyboardButton("⚙️ Cấu hình thuế", callback_data="menu|tax_config")],
+        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def tax_estimate_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📆 Tháng này", callback_data="menu|tax_estimate_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|tax_estimate_previous")],
+        [InlineKeyboardButton("📊 Quý này", callback_data="menu|tax_estimate_quarter"), InlineKeyboardButton("📅 Tùy chọn kỳ", callback_data="menu|tax_custom_help")],
+        [InlineKeyboardButton("📤 Xuất CSV", callback_data="menu|tax_export"), InlineKeyboardButton("📚 Hồ sơ cần chuẩn bị", callback_data="menu|tax_checklist")],
+        [InlineKeyboardButton("⚙️ Cấu hình thuế", callback_data="menu|tax_config"), InlineKeyboardButton("⬅️ Thuế/Kế toán", callback_data="menu|finance_tax")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def tax_export_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📆 Tháng này", callback_data="menu|tax_export_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|tax_export_previous")],
+        [InlineKeyboardButton("📊 Quý này", callback_data="menu|tax_export_quarter"), InlineKeyboardButton("📅 Tùy chọn kỳ", callback_data="menu|tax_export_custom_help")],
+        [InlineKeyboardButton("⬅️ Thuế/Kế toán", callback_data="menu|finance_tax"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def tax_export_menu_text() -> str:
+    return (
+        "📤 <b>Xuất file kế toán</b>\n\n"
+        "Chọn kỳ để nhận 5 file CSV: doanh thu, chi phí, sổ Xu, hoàn Xu và tóm tắt thuế.\n"
+        "Nếu kỳ chưa có dữ liệu, file vẫn có header và dòng <code>No data</code>."
+    )
+
+def tax_checklist_text() -> str:
+    return "\n".join([
+        "📚 <b>Hồ sơ/chứng từ nên chuẩn bị</b>",
+        "",
+        "1. Sao kê PayOS / ngân hàng.",
+        "2. Danh sách giao dịch nạp Xu.",
+        "3. Danh sách gói/combo đã bán.",
+        "4. Danh sách hoàn Xu/hoàn tiền.",
+        "5. Hóa đơn/biên lai chi phí API/provider.",
+        "6. Chi phí Railway/VPS/domain.",
+        "7. Chi phí phần mềm/công cụ.",
+        "8. Hợp đồng/B2B nếu có.",
+        "9. File export doanh thu/chi phí từ bot.",
+        "10. Ghi chú đối soát thủ công.",
+        "",
+        f"⚠️ <i>{html.escape(TAX_PREP_DISCLAIMER)}</i>",
+    ])
+
+def tax_checklist_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📤 Xuất file kế toán", callback_data="menu|tax_export"), InlineKeyboardButton("🏢 Lưu vào hồ sơ nội bộ", callback_data="archive|dept|tax_invoice")],
+        [InlineKeyboardButton("⬅️ Thuế/Kế toán", callback_data="menu|finance_tax"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def tax_custom_period_help_text(command: str) -> str:
+    return (
+        "📅 <b>Tùy chọn kỳ</b>\n\n"
+        f"Dùng <code>/{html.escape(command)} YYYY-MM</code> hoặc <code>/{html.escape(command)} YYYY</code>.\n"
+        f"Ví dụ: <code>/{html.escape(command)} 2026-06</code>."
+    )
 
 def freeze_queue_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -83828,6 +84242,113 @@ async def cmd_finance_export(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"TOAN AAS {kind_name} export {label}",
         )
 
+async def cmd_tax_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.effective_message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    start_at, end_at, label, _kind = finance_period_bounds("", "month")
+    payload = tax_estimate_payload(start_at, end_at, label, update.effective_user.id)
+    await update.effective_message.reply_text(
+        tax_estimate_text(payload),
+        parse_mode="HTML",
+        reply_markup=tax_estimate_keyboard(),
+    )
+
+async def cmd_tax_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.effective_message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    raw = context.args[0] if context.args else ""
+    try:
+        start_at, end_at, label, _kind = finance_period_bounds(raw, "month")
+    except Exception:
+        return await update.effective_message.reply_text(
+            "⚠️ Cú pháp: <code>/tax_report</code>, <code>/tax_report 2026-06</code> hoặc <code>/tax_report 2026</code>",
+            parse_mode="HTML",
+        )
+    payload = tax_estimate_payload(start_at, end_at, label, update.effective_user.id)
+    await update.effective_message.reply_text(tax_estimate_text(payload), parse_mode="HTML", reply_markup=tax_estimate_keyboard())
+
+async def cmd_tax_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.effective_message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    raw = context.args[0] if context.args else datetime.now().strftime("%Y-%m")
+    try:
+        start_at, end_at, label, _kind = finance_period_bounds(raw, "month")
+    except Exception:
+        return await update.effective_message.reply_text(
+            "⚠️ Cú pháp: <code>/tax_export 2026-06</code> hoặc <code>/tax_export 2026</code>",
+            parse_mode="HTML",
+        )
+    await update.effective_message.reply_text(f"📤 Đang xuất 5 file kế toán cho <b>{html.escape(label)}</b>...", parse_mode="HTML")
+    await send_tax_accounting_exports(context, update.effective_chat.id, start_at, end_at, label, update.effective_user.id)
+
+def parse_tax_config_args(args) -> tuple[dict, str]:
+    aliases = {
+        "business": "business_type",
+        "business_type": "business_type",
+        "method": "tax_method",
+        "tax_method": "tax_method",
+        "vat": "vat_rate_percent",
+        "vat_rate_percent": "vat_rate_percent",
+        "pit": "pit_rate_percent",
+        "pit_rate_percent": "pit_rate_percent",
+        "threshold": "revenue_threshold_vnd",
+        "revenue_threshold_vnd": "revenue_threshold_vnd",
+        "license": "license_fee_enabled",
+        "license_fee_enabled": "license_fee_enabled",
+        "license_amount": "license_fee_amount_vnd",
+        "license_fee_amount_vnd": "license_fee_amount_vnd",
+        "from": "effective_from",
+        "effective_from": "effective_from",
+        "to": "effective_to",
+        "effective_to": "effective_to",
+        "note": "note",
+    }
+    updates = {}
+    for item in args or []:
+        if "=" not in str(item):
+            return {}, f"Thiếu dấu = trong: {item}"
+        raw_key, raw_value = str(item).split("=", 1)
+        key = aliases.get(raw_key.strip().lower())
+        if not key:
+            return {}, f"Field không hỗ trợ: {raw_key}"
+        value = raw_value.strip()
+        try:
+            if key in {"vat_rate_percent", "pit_rate_percent"}:
+                value = float(value)
+                if value < 0 or value > 100:
+                    raise ValueError
+            elif key in {"revenue_threshold_vnd", "license_fee_amount_vnd"}:
+                value = int(re.sub(r"[^\d]", "", value) or 0)
+            elif key == "license_fee_enabled":
+                if value.lower() not in {"true", "false", "1", "0", "on", "off", "yes", "no"}:
+                    raise ValueError
+                value = 1 if value.lower() in {"true", "1", "on", "yes"} else 0
+            else:
+                value = sanitize_log_text(value)[:1000]
+        except Exception:
+            return {}, f"Giá trị không hợp lệ cho {raw_key}"
+        updates[key] = value
+    return updates, ""
+
+async def cmd_tax_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.effective_message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    if not context.args:
+        return await update.effective_message.reply_text(
+            tax_profile_text(update.effective_user.id),
+            parse_mode="HTML",
+            reply_markup=tax_accounting_menu_keyboard(),
+        )
+    updates, error = parse_tax_config_args(context.args)
+    if error:
+        return await update.effective_message.reply_text(f"⚠️ {html.escape(error)}", parse_mode="HTML")
+    update_tax_profile(update.effective_user.id, updates)
+    await update.effective_message.reply_text(
+        "✅ Đã cập nhật cấu hình thuế nội bộ.\n\n" + tax_profile_text(update.effective_user.id),
+        parse_mode="HTML",
+        reply_markup=tax_accounting_menu_keyboard(),
+    )
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return
@@ -84124,6 +84645,435 @@ async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
 
+# ─── OPERATIONS V1A: INTERNAL BUSINESS ARCHIVE ───────────────────────────────
+INTERNAL_ARCHIVE_TTL_SECONDS = 15 * 60
+
+def internal_archive_pending_key(user_id) -> str:
+    return f"internal_archive:{user_id}"
+
+def set_internal_archive_pending(user_id, step: str, **fields) -> dict:
+    key = internal_archive_pending_key(user_id)
+    current = USER_PENDING.get(key) or {}
+    state = dict(current) if current.get("pending_action") == "internal_archive" else {}
+    state.update({
+        "pending_action": "internal_archive",
+        "step": str(step or "")[:60],
+        "created_at_ts": time.time(),
+    })
+    state.update({key: value for key, value in fields.items() if key not in {"pending_action", "step", "created_at_ts"}})
+    USER_PENDING[key] = state
+    return state
+
+def get_internal_archive_pending(user_id) -> dict | None:
+    key = internal_archive_pending_key(user_id)
+    state = USER_PENDING.get(key) or {}
+    if state.get("pending_action") != "internal_archive":
+        return None
+    if time.time() - float(state.get("created_at_ts") or 0) > INTERNAL_ARCHIVE_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return state
+
+def clear_internal_archive_pending(user_id) -> bool:
+    return USER_PENDING.pop(internal_archive_pending_key(user_id), None) is not None
+
+def internal_archive_menu_text() -> str:
+    return (
+        "🏢 <b>Hồ sơ nội bộ doanh nghiệp</b>\n\n"
+        "Lưu tài liệu quan trọng theo phòng ban/nhóm nghiệp vụ. Khu vực này tách biệt với ghi chú cá nhân và Công cụ PDF / Word.\n\n"
+        "Chỉ admin hoặc owner được xem và lưu hồ sơ. Bot chỉ lưu Telegram file ID và metadata; không lưu API key/token."
+    )
+
+def internal_archive_menu_keyboard() -> InlineKeyboardMarkup:
+    items = [(label, f"archive|dept|{code}") for code, label in INTERNAL_DOC_DEPARTMENTS.items()]
+    rows = [[InlineKeyboardButton(label, callback_data=callback) for label, callback in items[index:index + 2]] for index in range(0, len(items), 2)]
+    rows.append([InlineKeyboardButton("🔍 Tìm hồ sơ", callback_data="archive|search"), InlineKeyboardButton("⬅️ Ghi chú/Tài liệu", callback_data="menu|main_memory")])
+    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def internal_archive_department_text(department: str) -> str:
+    label = INTERNAL_DOC_DEPARTMENTS.get(department, department or "Hồ sơ nội bộ")
+    types = INTERNAL_DOC_TYPES.get(department, ())
+    type_lines = "\n".join(f"• <code>{html.escape(value)}</code>" for value in types[:6]) or "• <code>internal_document</code>"
+    return (
+        f"📁 <b>{html.escape(label)}</b>\n\n"
+        "Hãy gửi một file muốn lưu vào nhóm này. Nên gửi từng file một để tránh lỗi Telegram.\n\n"
+        "Loại hồ sơ gợi ý:\n"
+        f"{type_lines}\n\n"
+        "TOAN AAS sẽ hiển thị metadata để admin xác nhận trước khi lưu."
+    )
+
+def internal_archive_department_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📎 Tôi sẽ gửi file", callback_data="archive|send_file"), InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def internal_archive_current_file_info(update: Update) -> dict:
+    message = update.effective_message
+    if not message:
+        return {}
+    if getattr(message, "document", None):
+        doc = message.document
+        return {
+            "file_id": str(doc.file_id or ""),
+            "file_name": str(doc.file_name or "file")[:240],
+            "mime_type": str(doc.mime_type or "application/octet-stream")[:160],
+            "size_bytes": int(doc.file_size or 0),
+        }
+    if getattr(message, "photo", None):
+        photo = message.photo[-1]
+        return {
+            "file_id": str(photo.file_id or ""),
+            "file_name": "telegram_photo.jpg",
+            "mime_type": "image/jpeg",
+            "size_bytes": int(photo.file_size or 0),
+        }
+    return {}
+
+def internal_archive_storage_used_bytes(admin_id) -> int:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(COALESCE(size_bytes,0)),0) FROM internal_documents WHERE owner_admin_id=? AND status='active'",
+            (str(admin_id),),
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+    finally:
+        conn.close()
+
+def internal_archive_quota_error(admin_id, extra_bytes: int) -> str:
+    status = memory_status_payload(admin_id)
+    after_bytes = int(status.get("storage_bytes") or 0) + max(0, int(extra_bytes or 0))
+    if after_bytes <= int(status.get("total_limit_bytes") or 0):
+        return ""
+    return (
+        "⚠️ Dung lượng lưu trữ không đủ.\n\n"
+        f"• Đã dùng: {storage_bytes_to_mb_text(status.get('storage_bytes'))} / {status.get('total_limit_mb')}MB\n"
+        f"• File mới: {storage_bytes_to_mb_text(extra_bytes)}\n\n"
+        "TOAN AAS chưa lưu hồ sơ này. Bạn có thể dọn file cũ hoặc mua thêm dung lượng."
+    )
+
+def internal_archive_preview_text(state: dict) -> str:
+    info = state.get("file_info") or {}
+    department = state.get("department") or ""
+    return "\n".join([
+        "✅ <b>Đã nhận hồ sơ</b>",
+        "",
+        f"• File: <b>{html.escape(str(info.get('file_name') or 'file'))}</b>",
+        f"• Dung lượng: <b>{storage_bytes_to_mb_text(info.get('size_bytes'))}</b>",
+        f"• Nhóm: <b>{html.escape(INTERNAL_DOC_DEPARTMENTS.get(department, department))}</b>",
+        f"• Tên hồ sơ: <b>{html.escape(str(state.get('title') or info.get('file_name') or 'Hồ sơ nội bộ'))}</b>",
+        f"• Loại hồ sơ: <code>{html.escape(str(state.get('document_type') or default_document_type(department)))}</code>",
+        f"• Bảo mật: <code>{html.escape(str(state.get('confidentiality_level') or 'internal'))}</code>",
+        f"• Thời hạn lưu: <code>{html.escape(str(state.get('retention_policy') or default_retention(department)))}</code>",
+        f"• Tag: {html.escape(str(state.get('tags') or '-'))}",
+        "",
+        "Bạn có muốn lưu hồ sơ này không?",
+    ])
+
+def internal_archive_preview_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Lưu hồ sơ", callback_data="archive|save"), InlineKeyboardButton("✍️ Sửa thông tin", callback_data="archive|edit")],
+        [InlineKeyboardButton("🏷 Thêm tag", callback_data="archive|tags"), InlineKeyboardButton("📁 Đổi phòng ban", callback_data="archive|change_dept")],
+        [InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def save_internal_document(admin_id, state: dict) -> int:
+    info = state.get("file_info") or {}
+    department = str(state.get("department") or "")
+    if department not in INTERNAL_DOC_DEPARTMENTS or not info.get("file_id"):
+        raise ValueError("invalid_internal_document")
+    retention = str(state.get("retention_policy") or default_retention(department))
+    if retention not in RETENTION_LABELS:
+        retention = "manual_review"
+    conn = db_connect()
+    try:
+        cur = conn.execute(
+            """INSERT INTO internal_documents
+            (title,department,document_type,file_id,file_name,mime_type,size_bytes,owner_admin_id,
+             related_customer_id,related_provider,related_payment_id,tags,description,retention_policy,
+             confidentiality_level,status,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(state.get("title") or info.get("file_name") or "Hồ sơ nội bộ")[:240],
+                department,
+                str(state.get("document_type") or default_document_type(department))[:120],
+                str(info.get("file_id") or "")[:500],
+                str(info.get("file_name") or "file")[:240],
+                str(info.get("mime_type") or "application/octet-stream")[:160],
+                int(info.get("size_bytes") or 0),
+                str(admin_id),
+                str(state.get("related_customer_id") or "")[:120],
+                str(state.get("related_provider") or "")[:120],
+                str(state.get("related_payment_id") or "")[:160],
+                str(state.get("tags") or "")[:500],
+                str(state.get("description") or "")[:1000],
+                retention,
+                str(state.get("confidentiality_level") or "internal")[:80],
+                "active",
+                now_text(),
+                now_text(),
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    finally:
+        conn.close()
+
+def search_internal_documents(admin_id, keyword: str, limit: int = 10) -> list[dict]:
+    value = str(keyword or "").strip()
+    if not value:
+        return []
+    pattern = f"%{value}%"
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT id,title,department,document_type,file_name,mime_type,size_bytes,tags,description,
+                      retention_policy,confidentiality_level,created_at,file_id
+               FROM internal_documents
+               WHERE owner_admin_id=? AND status='active' AND (
+                   title LIKE ? OR file_name LIKE ? OR department LIKE ? OR document_type LIKE ? OR
+                   tags LIKE ? OR description LIKE ? OR related_customer_id LIKE ? OR related_provider LIKE ? OR
+                   related_payment_id LIKE ? OR created_at LIKE ?)
+               ORDER BY id DESC LIMIT ?""",
+            (str(admin_id), pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, max(1, min(20, int(limit or 10)))),
+        ).fetchall()
+        keys = ["id", "title", "department", "document_type", "file_name", "mime_type", "size_bytes", "tags", "description", "retention_policy", "confidentiality_level", "created_at", "file_id"]
+        return [dict(zip(keys, row)) for row in rows]
+    finally:
+        conn.close()
+
+def get_internal_document(admin_id, document_id: int) -> dict:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT id,title,department,document_type,file_name,mime_type,size_bytes,tags,description,
+                      retention_policy,confidentiality_level,created_at,file_id
+               FROM internal_documents WHERE id=? AND owner_admin_id=? AND status='active'""",
+            (int(document_id), str(admin_id)),
+        ).fetchone()
+        keys = ["id", "title", "department", "document_type", "file_name", "mime_type", "size_bytes", "tags", "description", "retention_policy", "confidentiality_level", "created_at", "file_id"]
+        return dict(zip(keys, row)) if row else {}
+    finally:
+        conn.close()
+
+def internal_archive_search_results_text(rows: list[dict], keyword: str) -> str:
+    if not rows:
+        return f"🔍 <b>Kết quả tìm hồ sơ</b>\n\nChưa có hồ sơ phù hợp với <code>{html.escape(keyword)}</code>."
+    lines = ["🔍 <b>Kết quả tìm hồ sơ</b>", ""]
+    for index, item in enumerate(rows[:10], 1):
+        lines.append(
+            f"{index}. <b>{html.escape(str(item.get('title') or item.get('file_name') or 'Hồ sơ'))}</b>\n"
+            f"   {html.escape(INTERNAL_DOC_DEPARTMENTS.get(item.get('department'), str(item.get('department') or '-')))} · "
+            f"<code>{html.escape(str(item.get('document_type') or '-'))}</code> · {html.escape(str(item.get('created_at') or '-'))}"
+        )
+    return "\n".join(lines)
+
+def internal_archive_search_keyboard(rows: list[dict]) -> InlineKeyboardMarkup:
+    buttons = [(f"{index}️⃣ Xem {index}", f"archive|view|{item['id']}") for index, item in enumerate(rows[:3], 1)]
+    keyboard = [[InlineKeyboardButton(label, callback_data=callback) for label, callback in buttons[index:index + 2]] for index in range(0, len(buttons), 2)]
+    keyboard.append([InlineKeyboardButton("🔍 Tìm lại", callback_data="archive|search"), InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root")])
+    keyboard.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(keyboard)
+
+def internal_archive_document_text(item: dict) -> str:
+    return "\n".join([
+        f"🏢 <b>Hồ sơ #{int(item.get('id') or 0)}</b>",
+        "",
+        f"• Tên: <b>{html.escape(str(item.get('title') or '-'))}</b>",
+        f"• File: {html.escape(str(item.get('file_name') or '-'))}",
+        f"• Nhóm: {html.escape(INTERNAL_DOC_DEPARTMENTS.get(item.get('department'), str(item.get('department') or '-')))}",
+        f"• Loại: <code>{html.escape(str(item.get('document_type') or '-'))}</code>",
+        f"• Dung lượng: {storage_bytes_to_mb_text(item.get('size_bytes'))}",
+        f"• Tag: {html.escape(str(item.get('tags') or '-'))}",
+        f"• Bảo mật: <code>{html.escape(str(item.get('confidentiality_level') or '-'))}</code>",
+        f"• Thời hạn lưu: <code>{html.escape(str(item.get('retention_policy') or '-'))}</code>",
+        f"• Ngày lưu: {html.escape(str(item.get('created_at') or '-'))}",
+        f"• Mô tả: {html.escape(str(item.get('description') or '-'))}",
+    ])
+
+async def handle_internal_archive_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    uid = query.from_user.id
+    if not is_admin_user(uid):
+        clear_internal_archive_pending(uid)
+        return await query.answer("Tính năng Hồ sơ nội bộ chỉ dành cho admin.", show_alert=True)
+    await query.answer()
+    clear_doc_tool_pending(uid)
+    clear_media_creator_pending_states(uid)
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "root"
+    state = get_internal_archive_pending(uid) or {}
+    if action == "root":
+        clear_internal_archive_pending(uid)
+        return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
+    if action == "dept" and len(parts) > 2:
+        department = parts[2]
+        if department not in INTERNAL_DOC_DEPARTMENTS:
+            return await query.answer("Phòng ban không hợp lệ.", show_alert=True)
+        if state.get("file_info"):
+            fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
+            fields["department"] = department
+            state = set_internal_archive_pending(uid, "preview", **fields)
+            return await safe_edit_query_message(query, internal_archive_preview_text(state), reply_markup=internal_archive_preview_keyboard())
+        set_internal_archive_pending(uid, "awaiting_file", department=department)
+        return await safe_edit_query_message(query, internal_archive_department_text(department), reply_markup=internal_archive_department_keyboard())
+    if action == "send_file":
+        department = state.get("department")
+        if department not in INTERNAL_DOC_DEPARTMENTS:
+            return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
+        set_internal_archive_pending(uid, "awaiting_file", department=department)
+        return await safe_edit_query_message(query, internal_archive_department_text(department), reply_markup=internal_archive_department_keyboard())
+    if action == "back_department":
+        department = state.get("department")
+        if department not in INTERNAL_DOC_DEPARTMENTS:
+            return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
+        set_internal_archive_pending(uid, "awaiting_file", department=department)
+        return await safe_edit_query_message(query, internal_archive_department_text(department), reply_markup=internal_archive_department_keyboard())
+    if action == "save":
+        info = state.get("file_info") or {}
+        if state.get("step") != "preview" or not info:
+            return await query.answer("Chưa có hồ sơ chờ lưu.", show_alert=True)
+        quota_error = internal_archive_quota_error(uid, int(info.get("size_bytes") or 0))
+        if quota_error:
+            return await safe_edit_query_message(query, quota_error, reply_markup=internal_archive_preview_keyboard())
+        document_id = save_internal_document(uid, state)
+        clear_internal_archive_pending(uid)
+        return await safe_edit_query_message(
+            query,
+            f"✅ <b>Đã lưu hồ sơ #{document_id}</b>\n\nFile và metadata đã được lưu vào {html.escape(INTERNAL_DOC_DEPARTMENTS.get(state.get('department'), 'Hồ sơ nội bộ'))}.",
+            reply_markup=internal_archive_menu_keyboard(),
+        )
+    if action == "edit":
+        set_internal_archive_pending(uid, "awaiting_metadata", **{key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}})
+        return await safe_edit_query_message(
+            query,
+            "✍️ Gửi một dòng theo mẫu:\n<code>Tên hồ sơ | loại_hồ_sơ | retention | bảo_mật | mô tả</code>\n\nRetention: 1_year, 3_years, 5_years, 10_years, permanent, manual_review.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Xem lại hồ sơ", callback_data="archive|preview"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]),
+        )
+    if action == "tags":
+        set_internal_archive_pending(uid, "awaiting_tags", **{key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}})
+        return await safe_edit_query_message(query, "🏷 Hãy nhập tag, ngăn cách bằng dấu phẩy.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Xem lại hồ sơ", callback_data="archive|preview"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
+    if action == "preview":
+        if not state.get("file_info"):
+            return await query.answer("Chưa có hồ sơ chờ lưu.", show_alert=True)
+        state = set_internal_archive_pending(uid, "preview", **{key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}})
+        return await safe_edit_query_message(query, internal_archive_preview_text(state), reply_markup=internal_archive_preview_keyboard())
+    if action == "change_dept":
+        return await safe_edit_query_message(query, "📁 <b>Chọn phòng ban mới</b>", reply_markup=internal_archive_menu_keyboard())
+    if action == "search":
+        set_internal_archive_pending(uid, "awaiting_search")
+        return await safe_edit_query_message(query, "🔍 <b>Tìm hồ sơ nội bộ</b>\n\nNhập từ khóa, ví dụ: PayOS, thuế tháng 6, hợp đồng, provider, khách hàng A.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
+    if action == "view" and len(parts) > 2:
+        item = get_internal_document(uid, int(parts[2]))
+        if not item:
+            return await query.answer("Không tìm thấy hồ sơ.", show_alert=True)
+        return await safe_edit_query_message(query, internal_archive_document_text(item), reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📎 Gửi file", callback_data=f"archive|file|{item['id']}"), InlineKeyboardButton("🔍 Tìm lại", callback_data="archive|search")],
+            [InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ]))
+    if action == "file" and len(parts) > 2:
+        item = get_internal_document(uid, int(parts[2]))
+        if not item or not item.get("file_id"):
+            return await query.answer("File không còn khả dụng.", show_alert=True)
+        await context.bot.send_document(chat_id=query.message.chat_id, document=item["file_id"], caption=f"Hồ sơ #{item['id']}: {item.get('title') or item.get('file_name')}")
+        return
+
+async def handle_internal_archive_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    state = get_internal_archive_pending(uid)
+    if not state:
+        return False
+    if not is_admin_user(uid):
+        clear_internal_archive_pending(uid)
+        await update.effective_message.reply_text("⛔ Tính năng Hồ sơ nội bộ chỉ dành cho admin.")
+        return True
+    if state.get("step") == "preview":
+        await update.effective_message.reply_text("⚠️ Đang có một hồ sơ chờ xác nhận. Hãy lưu hoặc quay lại phòng ban trước khi gửi file khác.", reply_markup=internal_archive_preview_keyboard())
+        return True
+    if state.get("step") != "awaiting_file":
+        return False
+    info = internal_archive_current_file_info(update)
+    if not info:
+        return False
+    quota_error = internal_archive_quota_error(uid, int(info.get("size_bytes") or 0))
+    if quota_error:
+        await update.effective_message.reply_text(quota_error)
+        return True
+    department = state.get("department") or ""
+    title = os.path.splitext(str(info.get("file_name") or "Hồ sơ nội bộ"))[0]
+    state = set_internal_archive_pending(
+        uid,
+        "preview",
+        department=department,
+        file_info=info,
+        title=title,
+        document_type=default_document_type(department),
+        retention_policy=default_retention(department),
+        confidentiality_level="internal",
+        tags="",
+        description="",
+    )
+    await update.effective_message.reply_text(internal_archive_preview_text(state), parse_mode="HTML", reply_markup=internal_archive_preview_keyboard())
+    return True
+
+async def handle_internal_archive_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.effective_message:
+        return False
+    uid = update.effective_user.id
+    state = get_internal_archive_pending(uid)
+    if not state:
+        return False
+    if not is_admin_user(uid):
+        clear_internal_archive_pending(uid)
+        await update.effective_message.reply_text("⛔ Tính năng Hồ sơ nội bộ chỉ dành cho admin.")
+        return True
+    text = str(update.effective_message.text or "").strip()
+    step = state.get("step")
+    if step == "awaiting_search":
+        rows = search_internal_documents(uid, text)
+        set_internal_archive_pending(uid, "search_results", search_keyword=text, search_result_ids=[item["id"] for item in rows])
+        await update.effective_message.reply_text(internal_archive_search_results_text(rows, text), parse_mode="HTML", reply_markup=internal_archive_search_keyboard(rows))
+        return True
+    if step == "awaiting_tags":
+        fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
+        fields["tags"] = text[:500]
+        state = set_internal_archive_pending(uid, "preview", **fields)
+        await update.effective_message.reply_text(internal_archive_preview_text(state), parse_mode="HTML", reply_markup=internal_archive_preview_keyboard())
+        return True
+    if step == "awaiting_metadata":
+        values = [value.strip() for value in text.split("|", 4)]
+        fields = ["title", "document_type", "retention_policy", "confidentiality_level", "description"]
+        updates = {field: values[index] for index, field in enumerate(fields) if index < len(values) and values[index]}
+        if updates.get("retention_policy") and updates["retention_policy"] not in RETENTION_LABELS:
+            await update.effective_message.reply_text("⚠️ Retention không hợp lệ. Dùng: " + ", ".join(RETENTION_LABELS))
+            return True
+        fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
+        fields.update(updates)
+        state = set_internal_archive_pending(uid, "preview", **fields)
+        await update.effective_message.reply_text(internal_archive_preview_text(state), parse_mode="HTML", reply_markup=internal_archive_preview_keyboard())
+        return True
+    return False
+
+async def cmd_internal_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.effective_message.reply_text("⛔ Tính năng Hồ sơ nội bộ chỉ dành cho admin.")
+    clear_internal_archive_pending(update.effective_user.id)
+    await update.effective_message.reply_text(internal_archive_menu_text(), parse_mode="HTML", reply_markup=internal_archive_menu_keyboard())
+
+async def cmd_search_internal_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.effective_message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    keyword = " ".join(context.args or []).strip()
+    if not keyword:
+        set_internal_archive_pending(update.effective_user.id, "awaiting_search")
+        return await update.effective_message.reply_text("🔍 Nhập từ khóa cần tìm trong tin nhắn tiếp theo.")
+    rows = search_internal_documents(update.effective_user.id, keyword)
+    await update.effective_message.reply_text(internal_archive_search_results_text(rows, keyword), parse_mode="HTML", reply_markup=internal_archive_search_keyboard(rows))
+
 # ─── MESSAGE HANDLERS ─────────────────────────────────────────────────────────
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -84181,6 +85131,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if await handle_internal_archive_pending_upload(update, context):
+        return
+
     if await handle_doc_tool_pending_upload(update, context):
         return
 
@@ -84205,6 +85158,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_internal_archive_pending_upload(update, context):
+        return
+
     if await handle_doc_tool_pending_upload(update, context):
         return
 
@@ -84991,6 +85947,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_feedback_pending_text(update, context):
         return
 
+    if await handle_internal_archive_pending_text(update, context):
+        return
+
     if await handle_doc_tool_pending_text(update, context):
         return
 
@@ -85457,6 +86416,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("storage_status", cmd_storage_status))
     tg_app.add_handler(CommandHandler("storage_user", cmd_storage_user))
     tg_app.add_handler(CommandHandler("cleanup_temp_files", cmd_cleanup_temp_files))
+    tg_app.add_handler(CommandHandler("internal_docs", cmd_internal_docs))
+    tg_app.add_handler(CommandHandler("search_internal_doc", cmd_search_internal_doc))
     tg_app.add_handler(CommandHandler("note", cmd_note))
     tg_app.add_handler(CommandHandler("note_ai", cmd_note_ai))
     tg_app.add_handler(CommandHandler("notes", cmd_notes))
@@ -85563,6 +86524,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("expense_edit", cmd_expense_edit))
     tg_app.add_handler(CommandHandler("expense_delete", cmd_expense_delete))
     tg_app.add_handler(CommandHandler("finance_export", cmd_finance_export))
+    tg_app.add_handler(CommandHandler("tax_status", cmd_tax_status))
+    tg_app.add_handler(CommandHandler("tax_report", cmd_tax_report))
+    tg_app.add_handler(CommandHandler("tax_export", cmd_tax_export))
+    tg_app.add_handler(CommandHandler("tax_config", cmd_tax_config))
     tg_app.add_handler(CommandHandler("report_ai_today", cmd_report_ai_today))
     tg_app.add_handler(CommandHandler("report_ai_week", cmd_report_ai_week))
     tg_app.add_handler(CommandHandler("report_ai_month", cmd_report_ai_month))
@@ -85926,6 +86891,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_buy_plan_callback, pattern=r"^buy_plan\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_doc_tool_callback, pattern=r"^docflow\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_manual_package_choice, pattern=r"^manual\|"))

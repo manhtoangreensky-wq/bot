@@ -146,6 +146,12 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/expense_edit` | `cmd_expense_edit` | YES | YES | Correct an expense field without deleting history. |
 | `/expense_delete` | `cmd_expense_delete` | YES | YES | Soft-delete an expense with a reason; does not DROP or delete DB data. |
 | `/finance_export` | `cmd_finance_export` | YES | YES | Export finance revenue, expense, and usage CSV files for a month or year. |
+| `/tax_status` | `cmd_tax_status` | YES | YES | Show the current-month internal tax estimate using admin-configured rates. |
+| `/tax_report` | `cmd_tax_report` | YES | YES | Show an internal tax-prep estimate for `YYYY-MM` or `YYYY`; not an official filing. |
+| `/tax_export` | `cmd_tax_export` | YES | YES | Export five accounting-prep CSV files for a month or year, including empty headers. |
+| `/tax_config` | `cmd_tax_config` | YES | YES | View or update manual tax assumptions; no tax law is hard-coded. |
+| `/internal_docs` | `cmd_internal_docs` | YES | YES | Open the admin-only internal business archive by department. |
+| `/search_internal_doc` | `cmd_search_internal_doc` | YES | YES | Search internal archive metadata; never exposes provider secrets. |
 | `/shopaikey_status` | `cmd_shopaikey_status` | YES | YES | ShopAIKey admin status, usage and smoke-test snapshots. |
 | `/shopaikey_usage` | `cmd_shopaikey_usage` | YES | YES | ShopAIKey usage monitor, no key leakage. |
 | `/shopaikey_video_job` | `cmd_shopaikey_video_job` | YES | YES | Query ShopAIKey video job status. |

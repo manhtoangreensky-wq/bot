@@ -4159,6 +4159,171 @@ def test_finance_ledger_revenue_usage_expense_and_year_profit(monkeypatch):
             os.unlink(db_path)
 
 
+def test_operations_v1a_tax_prep_and_accounting_exports(monkeypatch):
+    source = bot_source_text()
+    assert 'CommandHandler("tax_status", cmd_tax_status)' in source
+    assert 'CommandHandler("tax_report", cmd_tax_report)' in source
+    assert 'CommandHandler("tax_export", cmd_tax_export)' in source
+    assert 'CommandHandler("tax_config", cmd_tax_config)' in source
+    assert "DROP TABLE" not in source_between(source, "def migrate_operations_v1a_schema", "def init_db").upper()
+    assert set(bot.REVENUE_CATEGORIES) >= {
+        "payos_topup_xu",
+        "manual_topup_xu",
+        "combo_package_sale",
+        "storage_addon",
+        "image_service",
+        "video_service",
+        "refund_reversal",
+    }
+    assert set(bot.OPERATIONS_EXPENSE_CATEGORIES) >= {
+        "provider_ai_api",
+        "shopaikey",
+        "railway",
+        "domain",
+        "bank_fee",
+        "accounting_service",
+        "legal_service",
+    }
+    finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
+    assert "🧾 Thuế / Kế toán" in finance_labels
+    tax_callbacks = [
+        button.callback_data
+        for row in bot.tax_accounting_menu_keyboard().inline_keyboard
+        for button in row
+    ]
+    assert {"menu|tax_estimate", "menu|tax_export", "menu|tax_checklist", "menu|tax_config"}.issubset(set(tax_callbacks))
+    assert "Không phải tờ khai thuế chính thức" in bot.tax_accounting_menu_text()
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        profile = bot.get_tax_profile("tax-admin")
+        assert profile["tax_method"] == "manual_config"
+        assert profile["vat_rate_percent"] == 0
+        assert profile["pit_rate_percent"] == 0
+        assert profile["license_fee_enabled"] is False
+
+        updated = bot.update_tax_profile("tax-admin", {
+            "vat_rate_percent": 3.0,
+            "pit_rate_percent": 1.5,
+            "license_fee_enabled": 1,
+            "license_fee_amount_vnd": 1000000,
+        })
+        assert updated["vat_rate_percent"] == 3.0
+        assert updated["pit_rate_percent"] == 1.5
+        assert updated["license_fee_enabled"] is True
+
+        estimate = bot.calculate_tax_estimate(10000000, updated)
+        assert estimate["vat_estimate"] == 300000
+        assert estimate["pit_estimate"] == 150000
+        assert estimate["total_tax_estimate"] == 1450000
+
+        start_at, end_at, label, _ = bot.finance_period_bounds("2026-06", "month")
+        files = dict(bot.tax_accounting_export_files(start_at, end_at, label, "tax-admin"))
+        assert set(files) == {
+            "revenue_report_2026_06.csv",
+            "expense_report_2026_06.csv",
+            "xu_ledger_2026_06.csv",
+            "refund_report_2026_06.csv",
+            "tax_prep_summary_2026_06.csv",
+        }
+        assert "No data" in files["revenue_report_2026_06.csv"]
+        assert "No data" in files["expense_report_2026_06.csv"]
+        assert "date,user_id,source,category" in files["revenue_report_2026_06.csv"]
+        assert "Không phải tờ khai thuế chính thức" in files["tax_prep_summary_2026_06.csv"]
+
+        conn = bot.db_connect()
+        try:
+            conn.execute(
+                """INSERT INTO finance_revenue_events
+                (created_at,user_id,source_type,source_id,amount_vnd,xu_credited,payment_method,status,note)
+                VALUES (?,?,?,?,?,?,?,?,?)""",
+                ("2026-06-10 10:00:00", "u-tax", "payos_topup", "tax-order-1", 50000, 500, "payos", "success", "paid"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        revenue_csv = bot.tax_accounting_csv("revenue", start_at, end_at, label, "tax-admin")
+        assert "payos_topup_xu" in revenue_csv
+        assert "tax-order-1" in revenue_csv
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_operations_v1a_internal_archive_schema_flow_and_routing(monkeypatch):
+    source = bot_source_text()
+    init_source = source_between(source, "def init_db():", "def now_text():")
+    assert "CREATE TABLE IF NOT EXISTS internal_documents" in init_source
+    assert "DROP TABLE" not in init_source.upper()
+    assert 'CommandHandler("internal_docs", cmd_internal_docs)' in source
+    assert 'CommandHandler("search_internal_doc", cmd_search_internal_doc)' in source
+    assert 'CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\\|")' in source
+
+    memory_labels = [button.text for row in bot.main_memory_keyboard("vi").inline_keyboard for button in row]
+    assert "🏢 Hồ sơ nội bộ" in memory_labels
+    archive_callbacks = [
+        button.callback_data
+        for row in bot.internal_archive_menu_keyboard().inline_keyboard
+        for button in row
+    ]
+    assert "archive|dept|finance_accounting" in archive_callbacks
+    assert "archive|dept|tax_invoice" in archive_callbacks
+    assert "archive|search" in archive_callbacks
+    assert "menu|main_memory" in archive_callbacks
+    assert all(len(row) <= 2 for row in bot.internal_archive_menu_keyboard().inline_keyboard)
+
+    photo_source = source_between(source, "async def handle_photo", "async def handle_document_cache_only")
+    document_source = source_between(source, "async def handle_document_cache_only", "async def handle_media")
+    message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
+    assert photo_source.index("handle_internal_archive_pending_upload") < photo_source.index("handle_doc_tool_pending_upload")
+    assert document_source.index("handle_internal_archive_pending_upload") < document_source.index("handle_doc_tool_pending_upload")
+    assert message_source.index("handle_internal_archive_pending_text") < message_source.index("handle_doc_tool_pending_text")
+    assert "Tính năng Hồ sơ nội bộ chỉ dành cho admin" in source_between(
+        source,
+        "async def handle_internal_archive_callback",
+        "async def handle_internal_archive_pending_upload",
+    )
+
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        state = {
+            "department": "tax_invoice",
+            "title": "Thuế tháng 6",
+            "document_type": "tax_prep_file",
+            "file_info": {
+                "file_id": "telegram-file-id",
+                "file_name": "tax-june.csv",
+                "mime_type": "text/csv",
+                "size_bytes": 2048,
+            },
+            "tags": "tax,2026-06",
+            "description": "File chuẩn bị cho kế toán",
+            "retention_policy": "10_years",
+            "confidentiality_level": "internal",
+        }
+        document_id = bot.save_internal_document("archive-admin", state)
+        assert document_id > 0
+        rows = bot.search_internal_documents("archive-admin", "2026-06")
+        assert len(rows) == 1
+        assert rows[0]["file_name"] == "tax-june.csv"
+        assert rows[0]["file_id"] == "telegram-file-id"
+        assert bot.internal_archive_storage_used_bytes("archive-admin") == 2048
+        item = bot.get_internal_document("archive-admin", document_id)
+        assert item["department"] == "tax_invoice"
+        assert item["retention_policy"] == "10_years"
+        bot.init_db()
+        assert bot.get_internal_document("archive-admin", document_id)["title"] == "Thuế tháng 6"
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_launch_bonus_once_per_user_package(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
