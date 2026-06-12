@@ -1604,11 +1604,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     video_keyboard_source = source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert 'InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")' in source
     assert 'ui_text(lang, "video.guided_flow")' not in video_keyboard_source
-    assert 'callback_data="menu|video_ai_true"' in video_keyboard_source
-    assert 'callback_data="menu|video_frame_intro"' in video_keyboard_source
-    assert 'callback_data="selfscene|start"' in video_keyboard_source
-    assert 'callback_data="longvideo|start"' in video_keyboard_source
-    assert 'callback_data="trendg|start"' in video_keyboard_source
+    assert '"menu|video_ai_true"' in video_keyboard_source
+    assert '"menu|video_frame_intro"' in video_keyboard_source
+    assert '"selfscene|start"' in video_keyboard_source
+    assert '"longvideo|start"' in video_keyboard_source
+    assert '"trendg|start"' in video_keyboard_source
     assert 'callback_data="framevideo|start"' in source
     assert "🧠 Ý tưởng video" in video_keyboard_source
     assert "📢 Concept quảng cáo" not in video_keyboard_source
@@ -4748,7 +4748,9 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
     image_start_callbacks = [button.callback_data for row in bot.image_video_start_keyboard("vi").inline_keyboard for button in row]
     assert "imagevideo|await_image" in image_start_callbacks
     image_style_callbacks = [button.callback_data for row in bot.image_video_style_keyboard("vi").inline_keyboard for button in row]
-    assert "imagevideo|style|ad" in image_style_callbacks
+    assert {"imagevideo|style_choice|1", "imagevideo|style_choice|2", "imagevideo|style_choice|3"}.issubset(set(image_style_callbacks))
+    assert "imagevideo|style_refresh" in image_style_callbacks
+    assert "imagevideo|style_custom" in image_style_callbacks
     image_result = bot.guided_video_plan_text({"prompt_kind": "ad", "selected_prompt": "animate image", "selected_motion": "orbit", "selected_music": "tech"}, "vi", from_image=True)
     assert "Prompt video từ ảnh đã sẵn sàng" in image_result
     assert "/image_to_video_pack" not in bot.menu_hint_text("hint_image_to_video_pack")[1]
@@ -4762,6 +4764,73 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
     assert "Bạn muốn tìm nhạc theo phong cách nào" in music_text
     assert "Không tìm thấy kết quả số này" not in music_text
     assert {"1️⃣ Điện ảnh", "2️⃣ Công nghệ", "3️⃣ Viral/TikTok", "4️⃣ Nhẹ nhàng"}.issubset(set(music_buttons))
+
+
+def test_video_ux_v6_shared_suggestions_and_navigation():
+    bank_keys = [
+        "prompt_ad",
+        "prompt_cinema",
+        "prompt_viral",
+        "long_sales",
+        "long_education",
+        "long_story",
+        "idea_physical",
+        "idea_service",
+        "idea_affiliate",
+        "motion_place",
+        "motion_fashion",
+        "motion_food",
+        "motion_education",
+        "motion_story",
+        "image_video_style",
+    ]
+    for key in bank_keys:
+        assert len(bot.video_v6_suggestion_bank(key, "vi")) >= 10
+
+    main_rows = bot.main_video_keyboard("vi").inline_keyboard
+    assert [button.callback_data for button in main_rows[-1]] == ["menu|main", "menu|main"]
+    assert len(main_rows[-1]) == 2
+
+    ai_rows = bot.video_ai_true_keyboard("vi").inline_keyboard
+    assert [button.callback_data for button in ai_rows[-1]] == ["menu|main_video", "menu|main"]
+
+    self_scene_rows = bot.video_self_scene_ai_keyboard("vi").inline_keyboard
+    assert all(len(row) <= 2 for row in self_scene_rows)
+    assert [button.callback_data for button in self_scene_rows[-1]] == ["menu|main_video", "menu|main"]
+
+    storyboard_rows = bot.storyboard_start_keyboard().inline_keyboard
+    assert [button.callback_data for button in storyboard_rows[-1]] == ["menu|main_video", "menu|main"]
+    storyboard_callbacks = [button.callback_data for row in bot.storyboard_scripts_keyboard().inline_keyboard for button in row]
+    assert "storyboard|script_refresh" in storyboard_callbacks
+    assert "storyboard|idea_custom" in storyboard_callbacks
+
+    motion_first = bot.creative_motion_suggestions("product", 0, "vi")
+    motion_next = bot.creative_motion_suggestions("product", 3, "vi")
+    assert len(motion_first) == 3
+    assert [item["title"] for item in motion_first] != [item["title"] for item in motion_next]
+    for item in motion_first:
+        assert item["prompt"]
+        assert item["motion"]
+        assert item["music"]
+    motion_text = bot.creative_motion_suggestions_text({"kind": "product", "suggest_offset": 0}, "vi")
+    assert "3 gợi ý Prompt / Chuyển động" in motion_text
+    assert "Prompt video" in motion_text
+    assert "Nhạc/voice" in motion_text
+    motion_callbacks = [button.callback_data for row in bot.creative_motion_suggestions_keyboard("vi").inline_keyboard for button in row]
+    assert {"motion|choice|1", "motion|choice|2", "motion|choice|3", "motion|refresh"}.issubset(set(motion_callbacks))
+    assert "motion|cancel" not in motion_callbacks
+
+    image_first = bot.image_video_style_suggestions(0, "vi")
+    image_next = bot.image_video_style_suggestions(3, "vi")
+    assert len(image_first) == 3
+    assert image_first != image_next
+    image_rows = bot.image_video_style_keyboard("vi").inline_keyboard
+    assert [button.callback_data for button in image_rows[-1]] == ["imagevideo|back_image", "menu|main"]
+
+    result_rows = bot.guided_video_result_keyboard("promptvideo", "vi").inline_keyboard
+    assert [button.callback_data for button in result_rows[-1]] == ["promptvideo|back_music", "menu|main"]
+    idea_result_rows = bot.video_idea_result_keyboard("vi").inline_keyboard
+    assert [button.callback_data for button in idea_result_rows[-1]] == ["videoidea|back_choices", "menu|main"]
 
 
 def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
