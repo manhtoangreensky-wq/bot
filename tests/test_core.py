@@ -275,7 +275,8 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "🤖 Provider" in admin_nav_labels
     admin_nav_rows = [[button.text for button in row] for row in bot.menu_nav_keyboard("admin", True).inline_keyboard]
     assert ["💰 Tài chính", "🧊 Freeze / Queue"] in admin_nav_rows
-    assert ["🤖 Provider", "⬅️ Quay lại"] in admin_nav_rows
+    assert ["🤖 Provider"] in admin_nav_rows
+    assert ["⬅️ Quay lại", "🏠 Menu chính"] in admin_nav_rows
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
     for label in ["📊 Tổng quan", "💵 Doanh thu", "📅 Doanh thu tháng", "📉 Chi phí tháng", "📈 Lãi / Lỗ", "📤 Xuất báo cáo", "➕ Thêm chi phí", "📚 Hướng dẫn lệnh"]:
         assert label in finance_labels
@@ -1602,7 +1603,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")' in source
     assert 'InlineKeyboardButton("🎬 Tạo nội dung / Video", callback_data="menu|main_video")' not in source_between(source, "def main_menu_keyboard", "def language_choice_text")
     video_keyboard_source = source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
-    assert 'InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image")' in source
+    image_callbacks = {
+        button.text: button.callback_data
+        for row in bot.main_image_keyboard("vi").inline_keyboard
+        for button in row
+    }
+    assert image_callbacks["🖼 Tạo ảnh nhanh"] == "create_media|quick_image"
     assert 'ui_text(lang, "video.guided_flow")' not in video_keyboard_source
     assert '"menu|video_ai_true"' in video_keyboard_source
     assert '"menu|video_frame_intro"' in video_keyboard_source
@@ -2277,18 +2283,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "📄 PDF sang Word" in docs_labels
     assert "🖼 Ảnh sang PDF" in docs_labels
     memory_labels = [button.text for row in bot.main_memory_keyboard("vi").inline_keyboard for button in row]
-    assert "📄 Công cụ tài liệu" in memory_labels
     assert "📝 Tạo ghi chú" in memory_labels
     assert "⏰ Nhắc hẹn" in memory_labels
     assert "📄 Lưu tài liệu" in memory_labels
     assert "💾 Dung lượng của tôi" in memory_labels
     assert "📦 Mua thêm dung lượng" in memory_labels
     assert "🧹 Dọn file cũ" in memory_labels
-    assert "📄 PDF sang Word" in memory_labels
-    assert "🖼 Ảnh sang PDF" in memory_labels
-    assert "🗜 Nén PDF" in memory_labels
-    assert "✂️ Tách PDF" in memory_labels
-    assert "🧩 Gộp PDF" in memory_labels
+    assert "📄 PDF sang Word" not in memory_labels
+    assert "🧩 Gộp PDF" not in memory_labels
     image_keyboard_source = source_between(source, "def main_image_keyboard", "def main_audio_keyboard")
     assert "hint_image_tools" not in image_keyboard_source
     assert "hint_image_to_video_pack" not in image_keyboard_source
@@ -2316,8 +2318,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "/image_to_music_video" not in photo_handler_source
     assert "/remove_bg" not in photo_handler_source
     assert "/ai_image_edit" not in photo_handler_source
-    assert ["🧩 Gộp PDF", "⬅️ Về menu chính"] in [
-        [button.text for button in row] for row in bot.main_memory_keyboard("vi").inline_keyboard
+    assert "🧩 Gộp PDF" in docs_labels
+    assert ["⬅️ Ghi chú / Tài liệu", "🏠 Menu chính"] in [
+        [button.text for button in row] for row in bot.main_docs_keyboard("vi").inline_keyboard
     ]
     merge_section, merge_hint = bot.menu_hint_text("hint_doc_merge_pdf")
     assert merge_section == "main_memory"
@@ -2337,7 +2340,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "/image_to_pdf" in memory_text
     memory_plan_text = bot.memory_plan_text()
     assert "Tổng 50MB miễn phí" in memory_plan_text
-    assert "+100MB/tháng: 20.000đ" in memory_plan_text
+    assert "+50MB/tháng: 10.000đ" in memory_plan_text
+    assert "+100MB/tháng" not in memory_plan_text
+    assert "+250MB/tháng" not in memory_plan_text
+    assert "+500MB/tháng" not in memory_plan_text
     assert "Lite — 19.000" not in memory_plan_text
     assert "5MB storage" not in memory_plan_text
     assert bot.TOTAL_FREE_STORAGE_MB == 50
@@ -2349,8 +2355,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         ["💳 10k", "💳 20k"],
         ["💳 50k", "💳 100k"],
         ["💳 200k", "💳 500k"],
-        ["🏦 Nạp thủ công", "🔙 Quay lại bảng giá"],
-        ["🏠 Menu chính"],
+        ["🏦 Nạp thủ công"],
+        ["🔙 Quay lại bảng giá", "🏠 Menu chính"],
     ]
     guide_labels = [button.text for row in bot.main_guide_keyboard("vi").inline_keyboard for button in row]
     assert "💰 Bảng giá" not in guide_labels
@@ -4924,6 +4930,92 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     assert "shopaikey_image_generate" not in callback_source
     assert "spend_fixed_credit_info" not in callback_source
     assert bot.clear_quick_image_flow("quick-image-test") is True
+
+
+def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
+    def rows(keyboard):
+        return [[button.text for button in row] for row in keyboard.inline_keyboard]
+
+    def callbacks(keyboard):
+        return [[button.callback_data for button in row] for row in keyboard.inline_keyboard]
+
+    polished_keyboards = [
+        bot.main_image_keyboard("vi"),
+        bot.image_menu_child_keyboard("vi"),
+        bot.image_prompt_goal_keyboard("vi"),
+        bot.image_prompt_ratio_keyboard("vi"),
+        bot.image_prompt_output_keyboard("vi"),
+        bot.image_prompt_tier_keyboard("vi"),
+        bot.image_prompt_variants_keyboard("vi"),
+        bot.image_prompt_save_choice_keyboard("vi"),
+        bot.image_edit_start_keyboard("vi"),
+        bot.image_edit_choice_keyboard("vi"),
+        bot.image_edit_tier_keyboard("vi"),
+        bot.image_resize_start_keyboard("vi"),
+        bot.image_resize_choice_keyboard("vi"),
+        bot.image_resize_method_keyboard("vi"),
+        bot.image_resize_pixels_keyboard("vi"),
+        bot.main_video_keyboard("vi"),
+        bot.video_ai_true_keyboard("vi"),
+        bot.main_memory_keyboard("vi"),
+        bot.main_docs_keyboard("vi"),
+        bot.create_media_menu_keyboard("vi"),
+        bot.main_topup_keyboard("vi"),
+        bot.menu_nav_keyboard("admin", True),
+        bot.freeze_queue_keyboard(),
+        bot.freeze_status_keyboard(),
+        bot.smoke_test_menu_keyboard(),
+        bot.smoke_action_keyboard(),
+        bot.admin_provider_keyboard(),
+    ]
+    assert all(all(len(row) <= 2 for row in keyboard.inline_keyboard) for keyboard in polished_keyboards)
+
+    assert callbacks(bot.main_image_keyboard("vi"))[-1] == ["menu|main", "menu|main"]
+    assert callbacks(bot.image_menu_child_keyboard("vi"))[-1] == ["menu|main_image", "menu|main"]
+    assert callbacks(bot.image_prompt_goal_keyboard("vi"))[-1] == ["imgtool|prompt_back_wait_image", "menu|main"]
+    assert callbacks(bot.image_prompt_ratio_keyboard("vi"))[-1] == ["imgtool|prompt_back_style", "menu|main"]
+    assert callbacks(bot.image_prompt_output_keyboard("vi"))[-1] == ["imgtool|prompt_back_ratio", "menu|main"]
+    assert callbacks(bot.main_docs_keyboard("vi"))[-1] == ["menu|main_memory", "menu|main"]
+    assert callbacks(bot.menu_nav_keyboard("admin", True))[-1] == ["menu|main", "menu|main"]
+    assert callbacks(bot.freeze_queue_keyboard())[-1] == ["menu|admin", "menu|main"]
+    assert callbacks(bot.smoke_test_menu_keyboard())[-1] == ["menu|admin", "menu|main"]
+
+    planning_keyboards = [
+        bot.main_image_keyboard("vi"),
+        bot.image_prompt_goal_keyboard("vi"),
+        bot.image_prompt_ratio_keyboard("vi"),
+        bot.image_prompt_output_keyboard("vi"),
+        bot.image_prompt_variants_keyboard("vi"),
+        bot.image_prompt_save_choice_keyboard("vi"),
+        bot.image_edit_start_keyboard("vi"),
+        bot.image_edit_choice_keyboard("vi"),
+        bot.image_resize_start_keyboard("vi"),
+        bot.image_resize_choice_keyboard("vi"),
+        bot.image_resize_method_keyboard("vi"),
+        bot.image_resize_pixels_keyboard("vi"),
+        bot.create_media_menu_keyboard("vi"),
+    ]
+    assert all(
+        "Hủy" not in button.text
+        for keyboard in planning_keyboards
+        for row in keyboard.inline_keyboard
+        for button in row
+    )
+    assert "❌ Hủy" in [button.text for row in bot.image_edit_result_keyboard("vi").inline_keyboard for button in row]
+
+    memory_rows = rows(bot.main_memory_keyboard("vi"))
+    assert memory_rows[:3] == [
+        ["📝 Tạo ghi chú", "⏰ Nhắc hẹn"],
+        ["📄 Lưu tài liệu", "💾 Dung lượng của tôi"],
+        ["📦 Mua thêm dung lượng", "🧹 Dọn file cũ"],
+    ]
+    assert memory_rows[-1] == ["⬅️ Quay lại", "🏠 Menu chính"]
+    storage_text = "\n".join(bot.storage_addon_lines())
+    assert "+50MB/tháng: 10.000đ" in storage_text
+    assert "+100MB" not in storage_text
+    assert "+250MB" not in storage_text
+    assert "+500MB" not in storage_text
+    assert bot.TOTAL_FREE_STORAGE_MB == 50
 
 
 def test_image_tools_v5_unified_hotfix_state_resize_and_guards():

@@ -1025,13 +1025,13 @@ MEMORY_PLANS = {
         "note_limit": 2000,
         "storage_limit_mb": TOTAL_FREE_STORAGE_MB + 250,
         "ai_classify_monthly_limit": 2000,
-        "price": "+250MB/tháng 50.000đ",
+        "price": "5 block +50MB/tháng, tổng 50.000đ",
     },
     "vip": {
         "note_limit": 10000,
         "storage_limit_mb": TOTAL_FREE_STORAGE_MB + 500,
         "ai_classify_monthly_limit": 10000,
-        "price": "+500MB/tháng 100.000đ",
+        "price": "10 block +50MB/tháng, tổng 100.000đ",
     },
 }
 
@@ -30477,10 +30477,11 @@ def clear_image_menu_pending(user_id) -> bool:
     return USER_PENDING.pop(image_menu_pending_key(user_id), None) is not None
 
 def image_menu_child_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 Về menu ảnh" if normalize_user_language(lang) == "vi" else "🔙 Back to image menu", callback_data="menu|main_image")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    back = (
+        "🔙 Về menu ảnh" if normalize_user_language(lang) == "vi" else "🔙 Back to image menu",
+        "menu|main_image",
+    )
+    return build_2col_keyboard([], nav_back=back, lang=lang)
 
 def image_prompt_menu_start_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -30589,7 +30590,7 @@ def image_menu_v5_text(lang: str = "vi") -> str:
         return (
             "🖼 <b>TOAN AAS Image Tools</b>\n\n"
             "Choose a task below.\n\n"
-            "• Quick image: enter a description and generate a real image.\n"
+            "• Quick image: choose from suggestions or enter a prompt, then select ratio and tier.\n"
             "• Prompt from image: send an image so the bot writes a matching prompt.\n"
             "• Edit image: resize, crop/pad/blur, or guarded AI edit when available.\n\n"
             "Any real image generation step will ask for confirmation before charging Xu."
@@ -30597,7 +30598,7 @@ def image_menu_v5_text(lang: str = "vi") -> str:
     return (
         "🖼 <b>Hình ảnh TOAN AAS</b>\n\n"
         "Chọn tác vụ bên dưới:\n\n"
-        "• 🖼 <b>Tạo ảnh nhanh</b>: nhập mô tả và tạo ảnh thật.\n"
+        "• 🖼 <b>Tạo ảnh nhanh</b>: chọn gợi ý hoặc nhập prompt, sau đó chọn tỉ lệ và tier.\n"
         "• ✍️ <b>Tạo prompt từ ảnh</b>: gửi ảnh để bot viết prompt giống/phù hợp ảnh đó.\n"
         "• 🧩 <b>Chỉnh sửa ảnh</b>: resize, đổi tỉ lệ, crop/thêm nền, chỉnh sửa AI nếu công cụ mở.\n\n"
         "Các bước tạo ảnh thật đều có xác nhận trước khi trừ Xu và hoàn Xu nếu provider lỗi theo policy."
@@ -30692,19 +30693,18 @@ def image_prompt_goal_label(goal_code: str = "", custom: str = "", lang: str = "
     return (labels if normalize_user_language(lang) == "vi" else labels_en).get(code, "Ảnh sản phẩm" if normalize_user_language(lang) == "vi" else "Product image")
 
 def image_prompt_goal_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📦 Product image", callback_data="imgtool|prompt_goal|product"), InlineKeyboardButton("📢 Advertising image", callback_data="imgtool|prompt_goal|ad")],
-            [InlineKeyboardButton("🎬 Cinematic/video image", callback_data="imgtool|prompt_goal|cinematic"), InlineKeyboardButton("✍️ Custom purpose", callback_data="imgtool|prompt_goal_custom")],
-            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|prompt_back_wait_image"), InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Ảnh sản phẩm", callback_data="imgtool|prompt_goal|product"), InlineKeyboardButton("📢 Ảnh quảng cáo", callback_data="imgtool|prompt_goal|ad")],
-        [InlineKeyboardButton("🎬 Ảnh cinematic/video", callback_data="imgtool|prompt_goal|cinematic"), InlineKeyboardButton("✍️ Nhập mục đích riêng", callback_data="imgtool|prompt_goal_custom")],
-        [InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|prompt_back_wait_image"), InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("📦 Ảnh sản phẩm" if is_vi else "📦 Product image", "imgtool|prompt_goal|product"),
+        ("📢 Ảnh quảng cáo" if is_vi else "📢 Advertising image", "imgtool|prompt_goal|ad"),
+        ("🎬 Ảnh cinematic/video" if is_vi else "🎬 Cinematic/video image", "imgtool|prompt_goal|cinematic"),
+        ("✍️ Nhập mục đích riêng" if is_vi else "✍️ Custom purpose", "imgtool|prompt_goal_custom"),
+    ]
+    return build_2col_keyboard(
+        buttons,
+        nav_back=(ui_text(lang, "common.back"), "imgtool|prompt_back_wait_image"),
+        lang=lang,
+    )
 
 def image_prompt_subject_text(goal: str = "", lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -30798,14 +30798,17 @@ def image_prompt_ratio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             "3:2": "3:2 Ảnh ngang sản phẩm",
             "4:3": "4:3 Slide/Màn hình cũ",
         }
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels["1:1"], callback_data="imgtool|prompt_ratio|1x1"), InlineKeyboardButton(labels["9:16"], callback_data="imgtool|prompt_ratio|9x16")],
-        [InlineKeyboardButton(labels["16:9"], callback_data="imgtool|prompt_ratio|16x9"), InlineKeyboardButton(labels["4:5"], callback_data="imgtool|prompt_ratio|4x5")],
-        [InlineKeyboardButton(labels["3:4"], callback_data="imgtool|prompt_ratio|3x4"), InlineKeyboardButton(labels["4:3"], callback_data="imgtool|prompt_ratio|4x3")],
-        [InlineKeyboardButton("✍️ Custom ratio" if normalize_user_language(lang) != "vi" else "✍️ Nhập tỷ lệ khác", callback_data="imgtool|prompt_ratio_custom")],
-        [InlineKeyboardButton("⬅️ Back" if normalize_user_language(lang) != "vi" else "⬅️ Quay lại", callback_data="imgtool|prompt_back_style")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    buttons = [
+        (labels["1:1"], "imgtool|prompt_ratio|1x1"),
+        (labels["9:16"], "imgtool|prompt_ratio|9x16"),
+        (labels["16:9"], "imgtool|prompt_ratio|16x9"),
+        (labels["4:5"], "imgtool|prompt_ratio|4x5"),
+        (labels["3:4"], "imgtool|prompt_ratio|3x4"),
+        (labels["4:3"], "imgtool|prompt_ratio|4x3"),
+        ("✍️ Custom ratio" if normalize_user_language(lang) != "vi" else "✍️ Nhập tỷ lệ khác", "imgtool|prompt_ratio_custom"),
+    ]
+    back = ("⬅️ Back" if normalize_user_language(lang) != "vi" else "⬅️ Quay lại", "imgtool|prompt_back_style")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def build_image_prompt_output(state: dict, lang: str = "vi") -> tuple[str, str]:
     goal = image_prompt_goal_label(state.get("goal_code"), state.get("goal"), lang)
@@ -30947,25 +30950,30 @@ def image_prompt_state_with_ratio(state: dict, ratio: str) -> dict:
     return result
 
 def image_prompt_output_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Create image from this prompt", callback_data="imgtool|prompt_use"), InlineKeyboardButton("📐 Change ratio", callback_data="imgtool|prompt_change_ratio")],
-            [InlineKeyboardButton("🔁 Create 3 prompt variants", callback_data="imgtool|prompt_variants"), InlineKeyboardButton("💾 Save prompt", callback_data="imgtool|prompt_save")],
-            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|prompt_back_ratio"), InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 Tạo ảnh từ prompt này", callback_data="imgtool|prompt_use"), InlineKeyboardButton("📐 Đổi tỉ lệ", callback_data="imgtool|prompt_change_ratio")],
-        [InlineKeyboardButton("🔁 Tạo 3 biến thể prompt", callback_data="imgtool|prompt_variants"), InlineKeyboardButton("💾 Lưu prompt", callback_data="imgtool|prompt_save")],
-        [InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|prompt_back_ratio"), InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("🖼 Tạo ảnh từ prompt này" if is_vi else "🖼 Create image from this prompt", "imgtool|prompt_use"),
+        ("📐 Đổi tỉ lệ" if is_vi else "📐 Change ratio", "imgtool|prompt_change_ratio"),
+        ("🔁 Tạo 3 biến thể prompt" if is_vi else "🔁 Create 3 prompt variants", "imgtool|prompt_variants"),
+        ("💾 Lưu prompt" if is_vi else "💾 Save prompt", "imgtool|prompt_save"),
+    ]
+    return build_2col_keyboard(
+        buttons,
+        nav_back=(ui_text(lang, "common.back"), "imgtool|prompt_back_ratio"),
+        lang=lang,
+    )
 
 def image_prompt_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    rows = image_tier_choice_rows(lambda tier: f"imgtool|prompt_tier|{tier}", lang)
-    rows.append([InlineKeyboardButton("⬅️ Về prompt ảnh" if normalize_user_language(lang) == "vi" else "⬅️ Back to prompt", callback_data="imgtool|prompt_back_result")])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-    return InlineKeyboardMarkup(rows)
+    buttons = [
+        button
+        for row in image_tier_choice_rows(lambda tier: f"imgtool|prompt_tier|{tier}", lang)
+        for button in row
+    ]
+    back = (
+        "⬅️ Về prompt ảnh" if normalize_user_language(lang) == "vi" else "⬅️ Back to prompt",
+        "imgtool|prompt_back_result",
+    )
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def image_prompt_variants_text(result: dict, lang: str = "vi") -> str:
     subject = _short_pending_text(result.get("subject"), 220) or "sản phẩm/chủ đề"
@@ -31006,23 +31014,29 @@ def image_prompt_variants(result: dict, lang: str = "vi") -> list[str]:
 
 def image_prompt_variants_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn biến thể 1" if vi else "1️⃣ Select variant 1", callback_data="imgtool|prompt_variant_select|1")],
-        [InlineKeyboardButton("2️⃣ Chọn biến thể 2" if vi else "2️⃣ Select variant 2", callback_data="imgtool|prompt_variant_select|2")],
-        [InlineKeyboardButton("3️⃣ Chọn biến thể 3" if vi else "3️⃣ Select variant 3", callback_data="imgtool|prompt_variant_select|3")],
-        [InlineKeyboardButton("💾 Chọn prompt để lưu" if vi else "💾 Choose prompt to save", callback_data="imgtool|prompt_save")],
-        [InlineKeyboardButton("⬅️ Về prompt gốc" if vi else "⬅️ Back to original prompt", callback_data="imgtool|prompt_variant_original")],
-    ])
+    return build_2col_keyboard(
+        [
+            ("1️⃣ Chọn biến thể 1" if vi else "1️⃣ Select variant 1", "imgtool|prompt_variant_select|1"),
+            ("2️⃣ Chọn biến thể 2" if vi else "2️⃣ Select variant 2", "imgtool|prompt_variant_select|2"),
+            ("3️⃣ Chọn biến thể 3" if vi else "3️⃣ Select variant 3", "imgtool|prompt_variant_select|3"),
+            ("💾 Chọn prompt để lưu" if vi else "💾 Choose prompt to save", "imgtool|prompt_save"),
+        ],
+        nav_back=("⬅️ Về prompt gốc" if vi else "⬅️ Back to original prompt", "imgtool|prompt_variant_original"),
+        lang=lang,
+    )
 
 def image_prompt_save_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Lưu biến thể 1" if vi else "1️⃣ Save variant 1", callback_data="imgtool|prompt_save_variant|1")],
-        [InlineKeyboardButton("2️⃣ Lưu biến thể 2" if vi else "2️⃣ Save variant 2", callback_data="imgtool|prompt_save_variant|2")],
-        [InlineKeyboardButton("3️⃣ Lưu biến thể 3" if vi else "3️⃣ Save variant 3", callback_data="imgtool|prompt_save_variant|3")],
-        [InlineKeyboardButton("💾 Lưu prompt gốc" if vi else "💾 Save original prompt", callback_data="imgtool|prompt_save_variant|0")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|prompt_variants")],
-    ])
+    return build_2col_keyboard(
+        [
+            ("1️⃣ Lưu biến thể 1" if vi else "1️⃣ Save variant 1", "imgtool|prompt_save_variant|1"),
+            ("2️⃣ Lưu biến thể 2" if vi else "2️⃣ Save variant 2", "imgtool|prompt_save_variant|2"),
+            ("3️⃣ Lưu biến thể 3" if vi else "3️⃣ Save variant 3", "imgtool|prompt_save_variant|3"),
+            ("💾 Lưu prompt gốc" if vi else "💾 Save original prompt", "imgtool|prompt_save_variant|0"),
+        ],
+        nav_back=(ui_text(lang, "common.back"), "imgtool|prompt_variants"),
+        lang=lang,
+    )
 
 def save_image_prompt_to_memory(user_id, result: dict, prompt_value: str) -> tuple[int, str]:
     subject = _short_pending_text(result.get("subject"), 100) or "Ảnh"
@@ -31056,17 +31070,12 @@ def save_image_prompt_to_memory(user_id, result: dict, prompt_value: str) -> tup
         return 0, "Prompt vẫn được giữ trong phiên hiện tại."
 
 def image_edit_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📷 Send image", callback_data="imgtool|edit_need_image")],
-            [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📷 Gửi ảnh", callback_data="imgtool|edit_need_image")],
-        [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [("📷 Gửi ảnh" if is_vi else "📷 Send image", "imgtool|edit_need_image")],
+        nav_back=("⬅️ Về menu ảnh" if is_vi else "⬅️ Back to image menu", "menu|main_image"),
+        lang=lang,
+    )
 
 def image_edit_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
@@ -31242,10 +31251,14 @@ def image_edit_prompt_text(state: dict, lang: str = "vi") -> str:
 def image_edit_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Xác nhận chỉnh sửa AI" if vi else "✅ Confirm AI edit", callback_data="imgtool|edit_ai")],
-        [InlineKeyboardButton("✍️ Sửa yêu cầu" if vi else "✍️ Edit request", callback_data="imgtool|edit_request_custom")],
-        [InlineKeyboardButton("❌ Hủy" if vi else "❌ Cancel", callback_data="menu|main_image"), InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="imgtool|edit_ai_menu")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [
+            InlineKeyboardButton("✅ Xác nhận chỉnh sửa AI" if vi else "✅ Confirm AI edit", callback_data="imgtool|edit_ai"),
+            InlineKeyboardButton("✍️ Sửa yêu cầu" if vi else "✍️ Edit request", callback_data="imgtool|edit_request_custom"),
+        ],
+        [
+            InlineKeyboardButton("❌ Hủy" if vi else "❌ Cancel", callback_data="menu|main_image"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
     ])
 
 def image_edit_ai_guard_text(lang: str = "vi") -> str:
@@ -31279,17 +31292,24 @@ def image_edit_create_new_text(state: dict, lang: str = "vi") -> str:
     )
 
 def image_edit_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    rows = image_tier_choice_rows(lambda tier: f"imgtool|edit_create_tier|{tier}", lang)
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_back_result")])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-    return InlineKeyboardMarkup(rows)
+    buttons = [
+        button
+        for row in image_tier_choice_rows(lambda tier: f"imgtool|edit_create_tier|{tier}", lang)
+        for button in row
+    ]
+    return build_2col_keyboard(
+        buttons,
+        nav_back=(ui_text(lang, "common.back"), "imgtool|edit_back_result"),
+        lang=lang,
+    )
 
 def image_resize_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📷 Gửi ảnh" if normalize_user_language(lang) == "vi" else "📷 Send image", callback_data="imgtool|resize_need_image")],
-        [InlineKeyboardButton("⬅️ Về menu ảnh" if normalize_user_language(lang) == "vi" else "⬅️ Back to image menu", callback_data="menu|main_image")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [("📷 Gửi ảnh" if is_vi else "📷 Send image", "imgtool|resize_need_image")],
+        nav_back=("⬅️ Về menu ảnh" if is_vi else "⬅️ Back to image menu", "menu|main_image"),
+        lang=lang,
+    )
 
 def image_resize_choice_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -31349,25 +31369,32 @@ def image_resize_ratio_text(lang: str = "vi") -> str:
     return "📐 <b>Chọn tỷ lệ đầu ra</b>"
 
 def image_resize_method_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🌫 Blur background, preserve subject", callback_data="imgtool|resize_method|blur"), InlineKeyboardButton("⬜ Add border/background", callback_data="imgtool|resize_method|pad")],
-            [InlineKeyboardButton("✂️ Crop to frame", callback_data="imgtool|resize_method|crop"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|resize_back_ratio")],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌫 Nền mờ, không cắt chủ thể", callback_data="imgtool|resize_method|blur"), InlineKeyboardButton("⬜ Thêm nền/viền", callback_data="imgtool|resize_method|pad")],
-        [InlineKeyboardButton("✂️ Cắt vừa khung", callback_data="imgtool|resize_method|crop"), InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|resize_back_ratio")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("🌫 Nền mờ, không cắt chủ thể" if is_vi else "🌫 Blur background, preserve subject", "imgtool|resize_method|blur"),
+        ("⬜ Thêm nền/viền" if is_vi else "⬜ Add border/background", "imgtool|resize_method|pad"),
+        ("✂️ Cắt vừa khung" if is_vi else "✂️ Crop to frame", "imgtool|resize_method|crop"),
+    ]
+    return build_2col_keyboard(
+        buttons,
+        nav_back=(ui_text(lang, "common.back"), "imgtool|resize_back_ratio"),
+        lang=lang,
+    )
 
 def image_resize_pixels_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1024x1024", callback_data="imgtool|resize_pixels|1024x1024"), InlineKeyboardButton("1920x1080", callback_data="imgtool|resize_pixels|1920x1080")],
-        [InlineKeyboardButton("1080x1920", callback_data="imgtool|resize_pixels|1080x1920"), InlineKeyboardButton("1080x1350", callback_data="imgtool|resize_pixels|1080x1350")],
-        [InlineKeyboardButton("✍️ Nhập kích thước khác", callback_data="imgtool|resize_pixels_custom"), InlineKeyboardButton("⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back", callback_data="imgtool|resize_back_choice")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("1024x1024", "imgtool|resize_pixels|1024x1024"),
+        ("1920x1080", "imgtool|resize_pixels|1920x1080"),
+        ("1080x1920", "imgtool|resize_pixels|1080x1920"),
+        ("1080x1350", "imgtool|resize_pixels|1080x1350"),
+        ("✍️ Nhập kích thước khác" if is_vi else "✍️ Custom size", "imgtool|resize_pixels_custom"),
+    ]
+    return build_2col_keyboard(
+        buttons,
+        nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "imgtool|resize_back_choice"),
+        lang=lang,
+    )
 
 def image_resize_pixels_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -31712,12 +31739,14 @@ def create_media_open_text(user_id) -> str:
     return create_media_menu_text(lang)
 
 def create_media_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "media.quick_image"), callback_data="create_media|quick_image")],
-        [InlineKeyboardButton(ui_text(lang, "media.quick_video"), callback_data="create_media|quick_video")],
-        [InlineKeyboardButton(ui_text(lang, "media.back_main"), callback_data="create_media|main")],
-        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="create_media|cancel")],
-    ])
+    return build_2col_keyboard(
+        [
+            (ui_text(lang, "media.quick_image"), "create_media|quick_image"),
+            (ui_text(lang, "media.quick_video"), "create_media|quick_video"),
+        ],
+        nav_back=(ui_text(lang, "media.back_main"), "create_media|main"),
+        lang=lang,
+    )
 
 def create_media_pricing_text() -> str:
     return (
@@ -35408,6 +35437,34 @@ def admin_internal_command(handler):
         return await handler(update, context)
     return wrapped
 
+def build_2col_keyboard(
+    buttons,
+    nav_back: tuple[str, str] | None = None,
+    nav_main: bool = True,
+    lang: str = "vi",
+) -> InlineKeyboardMarkup:
+    rows = []
+    current = []
+    for item in buttons or []:
+        if isinstance(item, InlineKeyboardButton):
+            button = item
+        else:
+            button = InlineKeyboardButton(str(item[0]), callback_data=str(item[1]))
+        current.append(button)
+        if len(current) == 2:
+            rows.append(current)
+            current = []
+    if current:
+        rows.append(current)
+    nav = []
+    if nav_back:
+        nav.append(InlineKeyboardButton(str(nav_back[0]), callback_data=str(nav_back[1])))
+    if nav_main:
+        nav.append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"))
+    if nav:
+        rows.append(nav)
+    return InlineKeyboardMarkup(rows)
+
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
@@ -35776,56 +35833,41 @@ def main_ai_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def main_memory_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📝 Create note", callback_data="menu|hint_note"), InlineKeyboardButton("⏰ Reminder", callback_data="menu|hint_remind")],
-            [InlineKeyboardButton("📄 Save document", callback_data="menu|doc_tools"), InlineKeyboardButton("💾 My storage", callback_data="menu|memory_storage_status")],
-            [InlineKeyboardButton("📦 Add storage", callback_data="menu|memory_storage_addon"), InlineKeyboardButton("🧹 Clean old files", callback_data="menu|memory_storage_cleanup")],
-            [InlineKeyboardButton("🔎 Search notes", callback_data="menu|hint_search_note"), InlineKeyboardButton("📄 Document tools", callback_data="menu|doc_tools")],
-            [InlineKeyboardButton("📄 PDF to Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Image to PDF", callback_data="menu|hint_doc_image_to_pdf")],
-            [InlineKeyboardButton("🗜 Compress PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Split PDF", callback_data="menu|hint_doc_split_pdf")],
-            [InlineKeyboardButton("🧩 Merge PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
-            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Tạo ghi chú", callback_data="menu|hint_note"), InlineKeyboardButton("⏰ Nhắc hẹn", callback_data="menu|hint_remind")],
-        [InlineKeyboardButton("📄 Lưu tài liệu", callback_data="menu|doc_tools"), InlineKeyboardButton("💾 Dung lượng của tôi", callback_data="menu|memory_storage_status")],
-        [InlineKeyboardButton("📦 Mua thêm dung lượng", callback_data="menu|memory_storage_addon"), InlineKeyboardButton("🧹 Dọn file cũ", callback_data="menu|memory_storage_cleanup")],
-        [InlineKeyboardButton("🔎 Tìm ghi chú", callback_data="menu|hint_search_note"), InlineKeyboardButton("📄 Công cụ tài liệu", callback_data="menu|doc_tools")],
-        [InlineKeyboardButton("📄 PDF sang Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Ảnh sang PDF", callback_data="menu|hint_doc_image_to_pdf")],
-        [InlineKeyboardButton("🗜 Nén PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Tách PDF", callback_data="menu|hint_doc_split_pdf")],
-        [InlineKeyboardButton("🧩 Gộp PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("📝 Tạo ghi chú" if is_vi else "📝 Create note", "menu|hint_note"),
+        ("⏰ Nhắc hẹn" if is_vi else "⏰ Reminder", "menu|hint_remind"),
+        ("📄 Lưu tài liệu" if is_vi else "📄 Save document", "menu|doc_tools"),
+        ("💾 Dung lượng của tôi" if is_vi else "💾 My storage", "menu|memory_storage_status"),
+        ("📦 Mua thêm dung lượng" if is_vi else "📦 Add storage", "menu|memory_storage_addon"),
+        ("🧹 Dọn file cũ" if is_vi else "🧹 Clean old files", "menu|memory_storage_cleanup"),
+    ]
+    back = ("⬅️ Quay lại", "menu|main") if is_vi else ("⬅️ Back", "menu|main")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def main_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("📄 PDF to Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Image to PDF", callback_data="menu|hint_doc_image_to_pdf")],
-            [InlineKeyboardButton("🗜 Compress PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Split PDF", callback_data="menu|hint_doc_split_pdf")],
-            [InlineKeyboardButton("🧩 Merge PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("📄 All document tools", callback_data="menu|doc_tools")],
-            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📄 PDF sang Word", callback_data="menu|hint_doc_pdf_to_word"), InlineKeyboardButton("🖼 Ảnh sang PDF", callback_data="menu|hint_doc_image_to_pdf")],
-        [InlineKeyboardButton("🗜 Nén PDF", callback_data="menu|hint_doc_compress_pdf"), InlineKeyboardButton("✂️ Tách PDF", callback_data="menu|hint_doc_split_pdf")],
-        [InlineKeyboardButton("🧩 Gộp PDF", callback_data="menu|hint_doc_merge_pdf"), InlineKeyboardButton("📄 Tất cả công cụ", callback_data="menu|doc_tools")],
-        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("📄 PDF sang Word" if is_vi else "📄 PDF to Word", "menu|hint_doc_pdf_to_word"),
+        ("🖼 Ảnh sang PDF" if is_vi else "🖼 Image to PDF", "menu|hint_doc_image_to_pdf"),
+        ("🗜 Nén PDF" if is_vi else "🗜 Compress PDF", "menu|hint_doc_compress_pdf"),
+        ("✂️ Tách PDF" if is_vi else "✂️ Split PDF", "menu|hint_doc_split_pdf"),
+        ("🧩 Gộp PDF" if is_vi else "🧩 Merge PDF", "menu|hint_doc_merge_pdf"),
+        ("📄 Tất cả công cụ" if is_vi else "📄 All document tools", "menu|doc_tools"),
+    ]
+    back = ("⬅️ Ghi chú / Tài liệu", "menu|main_memory") if is_vi else ("⬅️ Notes / Docs", "menu|main_memory")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
-    if lang != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Quick image", callback_data="create_media|quick_image"), InlineKeyboardButton("✍️ Prompt from image", callback_data="menu|image_prompt_start")],
-            [InlineKeyboardButton("🧩 Edit image", callback_data="menu|image_edit_start"), InlineKeyboardButton("🔙 Back", callback_data="menu|main")],
-            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 Tạo ảnh nhanh", callback_data="create_media|quick_image"), InlineKeyboardButton("✍️ Tạo prompt từ ảnh", callback_data="menu|image_prompt_start")],
-        [InlineKeyboardButton("🧩 Chỉnh sửa ảnh", callback_data="menu|image_edit_start"), InlineKeyboardButton("🔙 Quay lại", callback_data="menu|main")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    is_vi = lang == "vi"
+    buttons = [
+        ("🖼 Tạo ảnh nhanh" if is_vi else "🖼 Quick image", "create_media|quick_image"),
+        ("✍️ Tạo prompt từ ảnh" if is_vi else "✍️ Prompt from image", "menu|image_prompt_start"),
+        ("🧩 Chỉnh sửa ảnh" if is_vi else "🧩 Edit image", "menu|image_edit_start"),
+    ]
+    back = ("🔙 Quay lại", "menu|main") if is_vi else ("🔙 Back", "menu|main")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def main_audio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
@@ -35895,8 +35937,8 @@ def main_topup_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💳 10k", callback_data=payos_package_callback_data("10k", uid)), InlineKeyboardButton("💳 20k", callback_data=payos_package_callback_data("20k", uid))],
         [InlineKeyboardButton("💳 50k", callback_data=payos_package_callback_data("50k", uid)), InlineKeyboardButton("💳 100k", callback_data=payos_package_callback_data("100k", uid))],
         [InlineKeyboardButton("💳 200k", callback_data=payos_package_callback_data("200k", uid)), InlineKeyboardButton("💳 500k", callback_data=payos_package_callback_data("500k", uid))],
-        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data("manual_custom", uid)), InlineKeyboardButton(back_label, callback_data="pricing|main")],
-        [InlineKeyboardButton(main_label, callback_data="menu|main")],
+        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data("manual_custom", uid))],
+        [InlineKeyboardButton(back_label, callback_data="pricing|main"), InlineKeyboardButton(main_label, callback_data="menu|main")],
     ])
 
 def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -35940,8 +35982,8 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_packages")])
         rows.append([InlineKeyboardButton("💰 Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|freeze_queue")])
         rows.append([InlineKeyboardButton("📊 Báo cáo tổng", callback_data="menu|admin_overview"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")])
-        rows.append([InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider"), InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main")])
-        rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+        rows.append([InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider")])
+        rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
         return InlineKeyboardMarkup(rows)
     elif section == "finance" and is_admin:
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing")])
@@ -36545,27 +36587,7 @@ def _safe_int(value, default: int = 0) -> int:
         return default
 
 def video_v6_keyboard(items: list, lang: str = "vi", back: tuple[str, str] | None = None, main: bool = True) -> InlineKeyboardMarkup:
-    rows = []
-    current = []
-    for item in items:
-        if isinstance(item, InlineKeyboardButton):
-            button = item
-        else:
-            button = InlineKeyboardButton(str(item[0]), callback_data=str(item[1]))
-        current.append(button)
-        if len(current) == 2:
-            rows.append(current)
-            current = []
-    if current:
-        rows.append(current)
-    nav = []
-    if back:
-        nav.append(InlineKeyboardButton(back[0], callback_data=back[1]))
-    if main:
-        nav.append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"))
-    if nav:
-        rows.append(nav)
-    return InlineKeyboardMarkup(rows)
+    return build_2col_keyboard(items, nav_back=back, nav_main=main, lang=lang)
 
 def video_v6_rotating_items(items: list[str], offset: int = 0, limit: int = 3) -> list[str]:
     clean = [str(item or "").strip() for item in items if str(item or "").strip()]
@@ -39413,7 +39435,7 @@ def menu_text_main_memory() -> str:
         "Dùng để lưu ghi chú, ý tưởng, việc cần làm, nhắc hẹn và xử lý nhanh tài liệu/PDF.\n\n"
         "<b>Dung lượng miễn phí:</b>\n"
         + "\n".join(storage_policy_short_lines()) + "\n\n"
-        "<b>Gói mở rộng:</b>\n"
+        "<b>Mở rộng dung lượng:</b>\n"
         + "\n".join(storage_addon_lines()) + "\n\n"
         "TOAN AAS đang trong giai đoạn đầu nên dung lượng miễn phí còn giới hạn. Khi hạ tầng lưu trữ lớn hơn, TOAN AAS sẽ tăng dung lượng miễn phí và tối ưu giá lưu trữ tốt hơn cho bạn.\n\n"
         "<b>Ghi chú:</b>\n"
@@ -39778,9 +39800,7 @@ def menu_text_main_memory_i18n(lang: str) -> str:
         f"• {TOTAL_FREE_STORAGE_MB}MB total free storage per account\n\n"
         "<b>Add-on storage:</b>\n"
         "• +50MB/month: 10.000đ\n"
-        "• +100MB/month: 20.000đ\n"
-        "• +250MB/month: 50.000đ\n"
-        "• +500MB/month: 100.000đ\n\n"
+        "• Need more: add another +50MB block at the same unit price.\n\n"
         "TOAN AAS is still early-stage, so free storage is intentionally limited until larger storage infrastructure is ready.\n\n"
         "<b>Notes:</b>\n"
         "• <code>/memory</code> — open memory\n"
@@ -53446,9 +53466,7 @@ def storage_bytes_to_mb_text(value: int | float) -> str:
 def storage_addon_lines() -> list[str]:
     return [
         f"• +50MB/tháng: {STORAGE_ADDON_BLOCK_PRICE_VND:,}đ".replace(",", "."),
-        "• +100MB/tháng: 20.000đ",
-        "• +250MB/tháng: 50.000đ",
-        "• +500MB/tháng: 100.000đ",
+        "• Cần nhiều hơn: mua thêm theo từng block +50MB, không đổi thành gói dung lượng khác.",
     ]
 
 def storage_policy_short_lines() -> list[str]:
@@ -53830,7 +53848,7 @@ def memory_plan_text() -> str:
         f"• {NOTES_TEXT_FREE_MB}MB cho ghi chú/text/nhắc hẹn/checklist\n"
         f"• {FILES_AUDIO_FREE_MB}MB cho tệp/ảnh/âm thanh lưu lâu dài\n"
         f"• Tổng {TOTAL_FREE_STORAGE_MB}MB miễn phí cho mỗi tài khoản\n\n"
-        "<b>Gói mở rộng:</b>\n"
+        "<b>Mở rộng dung lượng:</b>\n"
         + "\n".join(storage_addon_lines()) + "\n"
         "• Dung lượng lớn hơn: liên hệ admin hoặc tính theo block +50MB.\n\n"
         "<b>Lưu ý:</b>\n"
@@ -53850,7 +53868,7 @@ def memory_menu_text() -> str:
         "Bạn có thể lưu ghi chú, checklist, nhắc hẹn và tài liệu quan trọng tại đây.\n\n"
         "<b>Miễn phí:</b>\n"
         + "\n".join(storage_policy_short_lines()) + "\n\n"
-        "<b>Gói mở rộng:</b>\n"
+        "<b>Mở rộng dung lượng:</b>\n"
         + "\n".join(storage_addon_lines()) + "\n\n"
         "<b>Lưu ý nhỏ:</b>\n"
         "Hiện TOAN AAS vẫn đang trong giai đoạn đầu, dung lượng hạ tầng chưa quá lớn nên phần lưu trữ miễn phí còn giới hạn. "
@@ -53881,7 +53899,7 @@ def memory_status_text(user_id) -> str:
             f"• Text/ghi chú: <b>0MB / {NOTES_TEXT_FREE_MB}MB</b>\n"
             f"• Tệp/ảnh/âm thanh: <b>0MB / {FILES_AUDIO_FREE_MB}MB</b>\n"
             f"• Tổng đã dùng: <b>0MB / {TOTAL_FREE_STORAGE_MB}MB</b>\n\n"
-            "<b>Gói mở rộng:</b>\n"
+            "<b>Mở rộng dung lượng:</b>\n"
             + "\n".join(storage_addon_lines()[:3])
         )
     status = memory_status_payload(user_id)
@@ -53904,7 +53922,7 @@ def memory_status_text(user_id) -> str:
         f"• Tổng đã dùng: <b>{storage_bytes_to_mb_text(status['storage_bytes'])} / {status['total_limit_mb']}MB</b> ({status['used_percent']:.1f}%)\n"
         f"• AI classify còn lại: <b>{status['ai_remaining']}/{plan['ai_classify_monthly_limit']}</b>\n"
         f"• Reminder active: <b>{status['active_reminders']}</b>\n"
-        "\n<b>Gói mở rộng:</b>\n"
+        "\n<b>Mở rộng dung lượng:</b>\n"
         + "\n".join(storage_addon_lines()[:3])
         + warning
     )
@@ -53912,7 +53930,7 @@ def memory_status_text(user_id) -> str:
 def memory_storage_addon_text() -> str:
     return (
         "📦 <b>Mua thêm dung lượng</b>\n\n"
-        "Gói mở rộng hiện có:\n"
+        "Mở rộng theo block:\n"
         + "\n".join(storage_addon_lines()) + "\n\n"
         "Thanh toán sẽ dùng hệ thống nạp tiền/thanh toán hiện có của TOAN AAS khi được bật cho add-on lưu trữ.\n"
         "Hiện tại nếu cần mở dung lượng ngay, vui lòng liên hệ admin. TOAN AAS chưa gọi PayOS và chưa trừ Xu ở màn này."
@@ -80248,8 +80266,8 @@ def freeze_queue_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🖼 Freeze Image", callback_data="menu|freeze_image_help"), InlineKeyboardButton("🎬 Freeze Video", callback_data="menu|freeze_video_help")],
         [InlineKeyboardButton("🎞 Freeze Frame", callback_data="menu|freeze_frame_help"), InlineKeyboardButton("🤖 Freeze Provider", callback_data="menu|freeze_provider_help")],
         [InlineKeyboardButton("✅ Unfreeze Tool", callback_data="menu|unfreeze_tool_help"), InlineKeyboardButton("🧹 Clear Stale Jobs", callback_data="menu|clear_stale_jobs_help")],
-        [InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|freeze_queue_help"), InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|freeze_queue_help")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def freeze_queue_menu_text() -> str:
@@ -80307,8 +80325,8 @@ def freeze_status_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh Freeze", callback_data="menu|freeze_status"), InlineKeyboardButton("✅ Unfreeze Tool", callback_data="menu|unfreeze_tool_help")],
         [InlineKeyboardButton("🛠 Maintenance ON", callback_data="menu|admin_confirm_maintenance_on"), InlineKeyboardButton("✅ Maintenance OFF", callback_data="menu|admin_confirm_maintenance_off")],
-        [InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider"), InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider")],
+        [InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def freeze_status_menu_text() -> str:
@@ -80528,9 +80546,9 @@ def freeze_action_keyboard(kind: str) -> InlineKeyboardMarkup:
         rows = [
             [InlineKeyboardButton("🟡 Freeze ShopAIKey", callback_data="menu|admin_confirm_provider_freeze_shopaikey"), InlineKeyboardButton("🟢 Unfreeze ShopAIKey", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")],
             [InlineKeyboardButton("🎬 Freeze ShopAIKey Video", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("🖼 Freeze ShopAIKey Image", callback_data="menu|admin_confirm_provider_freeze_image")],
-            [InlineKeyboardButton("✍️ Nhập provider khác", callback_data="menu|provider_custom_help"), InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue")],
+            [InlineKeyboardButton("✍️ Nhập provider khác", callback_data="menu|provider_custom_help")],
+            [InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ]
-        rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
         return InlineKeyboardMarkup(rows)
     elif kind == "unfreeze":
         rows = [
@@ -80570,7 +80588,6 @@ def smoke_test_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🖼 Test Image", callback_data="menu|smoke_image"), InlineKeyboardButton("🎬 Test Video", callback_data="menu|smoke_video")],
         [InlineKeyboardButton("🎞 Test FFmpeg", callback_data="menu|smoke_ffmpeg"), InlineKeyboardButton("🧩 Test ComfyUI", callback_data="menu|smoke_comfy")],
         [InlineKeyboardButton("📊 Providers", callback_data="menu|smoke_providers"), InlineKeyboardButton("✅ Sales Ready", callback_data="menu|smoke_sales_ready")],
-        [InlineKeyboardButton("⬅️ Operator", callback_data="menu|operator"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -80596,8 +80613,8 @@ def smoke_action_text(action_key: str) -> str:
 
 def smoke_action_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ Smoke Test", callback_data="menu|smoke_test"), InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider")],
+        [InlineKeyboardButton("⬅️ Smoke Test", callback_data="menu|smoke_test"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def admin_provider_menu_text() -> str:
@@ -80615,8 +80632,8 @@ def admin_provider_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status"), InlineKeyboardButton("🧪 Test Provider", callback_data="menu|admin_provider_test")],
         [InlineKeyboardButton("🟡 Freeze Provider", callback_data="menu|freeze_provider_help"), InlineKeyboardButton("🟢 Unfreeze Provider", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")],
-        [InlineKeyboardButton("🧾 Provider Usage", callback_data="menu|admin_provider_usage"), InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🧾 Provider Usage", callback_data="menu|admin_provider_usage")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def admin_provider_status_text() -> str:
@@ -80695,8 +80712,8 @@ def system_help_text(kind: str) -> str:
 
 def system_help_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("📊 Admin", callback_data="menu|admin")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📊 Admin", callback_data="menu|admin")],
+        [InlineKeyboardButton("⬅️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def admin_billing_text() -> str:
