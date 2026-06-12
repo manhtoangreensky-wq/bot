@@ -5760,6 +5760,269 @@ def test_video_ux_v7_trend_back_and_suggestion_flow():
     assert "longvideo|back_structure" in long_result_callbacks
 
 
+def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch):
+    replies = []
+
+    async def fake_edit(query, text, reply_markup=None, parse_mode="HTML"):
+        replies.append({"text": str(text), "reply_markup": reply_markup, "parse_mode": parse_mode})
+        return SimpleNamespace(text=text, reply_markup=reply_markup)
+
+    monkeypatch.setattr(bot, "safe_edit_or_send", fake_edit)
+    monkeypatch.setattr(bot, "safe_edit_query_message", fake_edit)
+    monkeypatch.setattr(bot, "safe_edit_or_send_long_html", fake_edit)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "user_ui_lang", lambda _uid: "vi")
+
+    class FakeQuery:
+        def __init__(self, data, user_id=91001):
+            self.data = data
+            self.from_user = SimpleNamespace(id=user_id, first_name="Video Test", username="video_test")
+            self.message = SimpleNamespace(chat_id=92001)
+
+        async def answer(self):
+            return None
+
+    async def press(handler, data, user_id=91001):
+        query = FakeQuery(data, user_id)
+        await handler(SimpleNamespace(callback_query=query), SimpleNamespace())
+        return replies[-1]
+
+    uid = 91001
+    bot.clear_developing_video_pending(uid)
+    bot.LAST_DEVELOPING_VIDEO_PLANS.pop(bot.developing_video_latest_key(uid, "videoidea"), None)
+    bot.LAST_DEVELOPING_VIDEO_PLANS.pop(bot.developing_video_latest_key(uid, "selfscene"), None)
+    bot.LAST_DEVELOPING_VIDEO_PLANS.pop(bot.developing_video_latest_key(uid, "longvideo"), None)
+
+    asyncio.run(press(bot.handle_video_idea_callback, "videoidea|kind|ad", uid))
+    asyncio.run(press(bot.handle_video_idea_callback, "videoidea|product_type|physical", uid))
+    asyncio.run(press(bot.handle_video_idea_callback, "videoidea|product_choice|1", uid))
+    asyncio.run(press(bot.handle_video_idea_callback, "videoidea|goal|sales", uid))
+    ad_choices = asyncio.run(press(bot.handle_video_idea_callback, "videoidea|context|1", uid))
+    assert "3 ý tưởng video quảng cáo" in ad_choices["text"]
+    ad_result = asyncio.run(press(bot.handle_video_idea_callback, "videoidea|choose|1", uid))
+    assert "Ý tưởng quảng cáo hoàn chỉnh" in ad_result["text"]
+    assert "Prompt video từng cảnh" in ad_result["text"]
+
+    asyncio.run(press(bot.handle_video_idea_callback, "videoidea|kind|cinema", uid))
+    cinema_choices = asyncio.run(press(bot.handle_video_idea_callback, "videoidea|cinema_choice|1", uid))
+    assert "3 ý tưởng điện ảnh / kể chuyện" in cinema_choices["text"]
+    cinema_callbacks = [
+        button.callback_data
+        for row in cinema_choices["reply_markup"].inline_keyboard
+        for button in row
+    ]
+    assert "videoidea|kind|cinema" in cinema_callbacks
+    cinema_result = asyncio.run(press(bot.handle_video_idea_callback, "videoidea|choose|1", uid))
+    assert "Kế hoạch điện ảnh / kể chuyện" in cinema_result["text"]
+    assert "Mâu thuẫn/chuyển biến" in cinema_result["text"]
+    cinema_storyboard = asyncio.run(press(bot.handle_video_idea_callback, "videoidea|storyboard", uid))
+    assert "Storyboard điện ảnh" in cinema_storyboard["text"]
+
+    asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|start", uid))
+    asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|direction_choice|1", uid))
+    asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|object|product", uid))
+    asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|context|1", uid))
+    asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|style_choice|1", uid))
+    selfscene_result = asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|music_choice|1", uid))
+    assert "Kế hoạch đổi cảnh video" in selfscene_result["text"]
+    music_result = asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|music_guard", uid))
+    assert "Gợi ý nhạc/SFX" in music_result["text"]
+    assert "Bạn muốn đổi video này theo hướng nào" not in music_result["text"]
+    frame_guard = asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|frame_hint", uid))
+    assert "chưa có bộ ảnh" in frame_guard["text"].lower()
+    image_prompt = asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|image_guard", uid))
+    assert "Prompt ảnh khung chính" in image_prompt["text"]
+
+    asyncio.run(press(bot.handle_long_video_callback, "longvideo|start", uid))
+    asyncio.run(press(bot.handle_long_video_callback, "longvideo|topic|sales", uid))
+    asyncio.run(press(bot.handle_long_video_callback, "longvideo|topic_choice|1", uid))
+    asyncio.run(press(bot.handle_long_video_callback, "longvideo|duration|3 phút", uid))
+    asyncio.run(press(bot.handle_long_video_callback, "longvideo|style|professional", uid))
+    long_result = asyncio.run(press(bot.handle_long_video_callback, "longvideo|structure|1", uid))
+    assert "Lộ trình video dài AI" in long_result["text"]
+    long_back = asyncio.run(press(bot.handle_long_video_callback, "longvideo|back_structure", uid))
+    assert "Chọn cấu trúc" in long_back["text"]
+    assert bot.get_developing_video_pending(uid)["step"] == "structure"
+
+    bot.clear_trend_video_flow_pending(uid)
+    bot.set_trend_video_flow_pending(uid, "topic_group")
+    asyncio.run(press(bot.handle_trend_guided_callback, "trendg|topic_group|product", uid))
+    asyncio.run(press(bot.handle_trend_guided_callback, "trendg|topic_select_1", uid))
+    asyncio.run(press(bot.handle_trend_guided_callback, "trendg|trend_source_popular", uid))
+    trend_selected = asyncio.run(press(bot.handle_trend_guided_callback, "trendg|trend_select_1", uid))
+    assert "Đã chọn trend" in trend_selected["text"]
+    trend_locked = asyncio.run(press(bot.handle_trend_guided_callback, "trendg|trend_lock", uid))
+    assert "chọn chuyển động" in trend_locked["text"].lower()
+
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
+    monkeypatch.setattr(bot, "shopaikey_active_job_for_user", lambda *_args, **_kwargs: None)
+    bot.save_developing_video_plan(uid, "promptvideo", {
+        "prompt_kind": "ad",
+        "selected_topic": "app AI",
+        "selected_prompt": "clean product demo",
+        "selected_motion": "slow push-in",
+        "selected_music": "none",
+    })
+    provider_guard = asyncio.run(press(bot.handle_prompt_video_callback, "promptvideo|generate", uid))
+    assert "chưa gọi API" in provider_guard["text"]
+    assert "chưa trừ Xu" in provider_guard["text"]
+
+    bot.clear_developing_video_pending(uid)
+    bot.clear_trend_video_flow_pending(uid)
+
+
+def test_video_regression_v91_storyboard_restores_project_and_reuses_frame_flow(monkeypatch):
+    replies = []
+    uid = 93001
+    project_id = 77
+
+    async def fake_edit(query, text, reply_markup=None, parse_mode="HTML"):
+        replies.append({"text": str(text), "reply_markup": reply_markup, "parse_mode": parse_mode})
+        return SimpleNamespace(text=text, reply_markup=reply_markup)
+
+    monkeypatch.setattr(bot, "safe_edit_or_send", fake_edit)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(
+        bot,
+        "storyboard_project_for_user",
+        lambda pid, user_id: {
+            "id": project_id,
+            "user_id": str(uid),
+            "scene_count": 3,
+            "source_type": "ai_suggested",
+        }
+        if int(pid) == project_id and int(user_id) == uid
+        else {},
+    )
+    monkeypatch.setattr(
+        bot,
+        "storyboard_scenes_for_project",
+        lambda pid: [
+            {"scene_index": 1, "image_file_id": "image-1", "image_url": ""},
+            {"scene_index": 2, "image_file_id": "image-2", "image_url": ""},
+            {"scene_index": 3, "image_file_id": "image-3", "image_url": ""},
+        ]
+        if int(pid) == project_id
+        else [],
+    )
+    monkeypatch.setattr(bot, "create_storyboard_video_record", lambda *args, **kwargs: 1)
+
+    class FakeQuery:
+        data = f"storyboard|mode_frame|{project_id}"
+        from_user = SimpleNamespace(id=uid, first_name="Storyboard", username="storyboard")
+        message = SimpleNamespace(chat_id=94001)
+
+        async def answer(self):
+            return None
+
+    bot.clear_storyboard_state(uid)
+    bot.clear_frame_video_state(uid)
+    asyncio.run(bot.handle_storyboard_callback(SimpleNamespace(callback_query=FakeQuery()), SimpleNamespace()))
+    frame_state = bot.get_frame_video_state(uid)
+    assert frame_state["step"] == "planning"
+    assert frame_state["source"] == "storyboard_project"
+    assert frame_state["project_id"] == project_id
+    assert len(frame_state["photos"]) == 3
+    assert "Kế hoạch ghép ảnh thành video" in replies[-1]["text"]
+    callbacks = [
+        button.callback_data
+        for row in replies[-1]["reply_markup"].inline_keyboard
+        for button in row
+    ]
+    assert "framevideo|planning_continue" in callbacks
+    assert "framevideo|planning_refresh" in callbacks
+
+    bot.clear_storyboard_state(uid)
+    bot.clear_frame_video_state(uid)
+
+
+def test_video_regression_v91_storyboard_sqlite_rows_are_mapping_safe(monkeypatch, tmp_path):
+    db_path = tmp_path / "storyboard-regression.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_ENABLED", False)
+    bot.init_db()
+
+    scenes = bot.storyboard_build_scenes("Máy xay mini cho dân văn phòng", 3)
+    project_id = bot.create_storyboard_project(
+        "storyboard-owner",
+        "user_script",
+        "Máy xay mini",
+        "Máy xay mini cho dân văn phòng",
+        scenes,
+    )
+    bot.update_storyboard_scene_asset(project_id, 1, image_job_id=101, image_file_id="file-1", status="image_ready")
+    bot.update_storyboard_scene_asset(project_id, 2, image_job_id=102, image_file_id="file-2", status="image_ready")
+
+    project = bot.storyboard_project_for_user(project_id, "storyboard-owner")
+    rows = bot.storyboard_scenes_for_project(project_id)
+    assert project["id"] == project_id
+    assert project["user_id"] == "storyboard-owner"
+    assert len(rows) == 3
+    assert rows[0]["image_file_id"] == "file-1"
+    assert rows[1]["image_file_id"] == "file-2"
+    assert bot.storyboard_project_for_user(project_id, "different-user") == {}
+
+
+def test_video_regression_v91_callback_prefixes_are_registered_and_not_orphaned():
+    source = bot_source_text()
+    handler_by_prefix = {
+        "videoidea": "CallbackQueryHandler(handle_video_idea_callback",
+        "selfscene": "CallbackQueryHandler(handle_self_scene_ai_callback",
+        "longvideo": "CallbackQueryHandler(handle_long_video_callback",
+        "trendg": "CallbackQueryHandler(handle_trend_guided_callback",
+        "storyboard": "CallbackQueryHandler(handle_storyboard_callback",
+        "framevideo": "CallbackQueryHandler(handle_frame_video_callback",
+        "promptvideo": "CallbackQueryHandler(handle_prompt_video_callback",
+        "imagevideo": "CallbackQueryHandler(handle_image_video_callback",
+        "videoref": "CallbackQueryHandler(handle_video_reference_callback",
+    }
+    keyboards = [
+        bot.main_video_keyboard("vi"),
+        bot.video_idea_menu_keyboard("vi"),
+        bot.video_idea_cinema_suggestions_keyboard("vi"),
+        bot.video_idea_choice_keyboard("vi", "cinema"),
+        bot.video_idea_result_keyboard("vi"),
+        bot.self_scene_input_keyboard("vi"),
+        bot.self_scene_object_keyboard("vi"),
+        bot.self_scene_context_keyboard("vi"),
+        bot.self_scene_style_keyboard("vi"),
+        bot.self_scene_music_keyboard("vi"),
+        bot.self_scene_result_keyboard("vi"),
+        bot.long_video_topic_keyboard("vi"),
+        bot.long_video_topic_suggestions_keyboard("vi"),
+        bot.long_video_duration_keyboard("vi"),
+        bot.long_video_style_keyboard("vi"),
+        bot.long_video_structure_keyboard("10 phút", "vi"),
+        bot.long_video_result_keyboard("vi"),
+        bot.trend_guided_topic_group_keyboard("vi"),
+        bot.trend_guided_trend_source_keyboard("vi"),
+        bot.trend_guided_trend_choices_keyboard("vi"),
+        bot.storyboard_start_keyboard(),
+        bot.storyboard_scripts_keyboard(),
+        bot.storyboard_ready_keyboard(),
+        bot.storyboard_after_images_keyboard(77),
+        bot.frame_video_planning_keyboard("vi"),
+    ]
+    callbacks = [
+        button.callback_data
+        for keyboard in keyboards
+        for row in keyboard.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert "selfscene|music_guard" in callbacks
+    assert "selfscene|music" not in [
+        button.callback_data
+        for row in bot.self_scene_result_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    for callback in callbacks:
+        assert len(callback.encode("utf-8")) <= 64
+        prefix = callback.split("|", 1)[0]
+        if prefix in handler_by_prefix:
+            assert handler_by_prefix[prefix] in source
+
+
 def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monkeypatch):
     source = bot_source_text()
     monkeypatch.setattr(bot, "is_admin_user", lambda user_id: str(user_id) == "1")

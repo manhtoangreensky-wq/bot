@@ -38458,11 +38458,11 @@ def image_video_prompt_from_state(state: dict | None = None, lang: str = "vi") -
 def guided_video_public_guard_text(lang: str = "vi", from_image: bool = False) -> str:
     if normalize_user_language(lang) != "vi":
         extra = " The uploaded-image provider bridge is not opened yet." if from_image else ""
-        return f"🎬 Real AI Video is under maintenance or not public yet.{extra}\nTOAN AAS has not charged Xu. You can save this plan first."
+        return f"🎬 Real AI Video is under maintenance or not public yet.{extra}\nTOAN AAS has not called the provider API, processed a real video, or charged Xu. You can save this plan first."
     extra = "\nCầu nối gửi ảnh Telegram sang provider video chưa mở an toàn." if from_image else ""
     return (
         "🎬 Video AI thật hiện đang được bảo trì hoặc chưa mở công khai."
-        f"{extra}\nTOAN AAS chưa trừ Xu.\nBạn có thể lưu prompt/kế hoạch trước."
+        f"{extra}\nTOAN AAS chưa gọi API, chưa xử lý video thật và chưa trừ Xu.\nBạn có thể lưu prompt/kế hoạch trước."
     )
 
 def video_reference_start_text(lang: str = "vi") -> str:
@@ -39100,7 +39100,7 @@ def self_scene_object_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("✍️ Nhập riêng" if is_vi else "✍️ Custom subject", "selfscene|object|custom"),
         ],
         lang,
-        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_object"),
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|start"),
     )
 
 def self_scene_describe_text(input_type: str, lang: str = "vi") -> str:
@@ -39144,7 +39144,7 @@ def self_scene_context_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🔁 Đổi gợi ý khác" if is_vi else "🔁 More suggestions", "selfscene|context_refresh"),
         ],
         lang,
-        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_context"),
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_object"),
     )
 
 def self_scene_context_custom_text(lang: str = "vi") -> str:
@@ -39175,7 +39175,7 @@ def self_scene_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("✍️ Nhập chuyển động riêng" if is_vi else "✍️ Custom motion", "selfscene|style_custom"),
         ],
         lang,
-        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_style"),
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_context"),
     )
 
 def self_scene_style_custom_text(lang: str = "vi") -> str:
@@ -39206,7 +39206,7 @@ def self_scene_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("✍️ Nhập riêng" if is_vi else "✍️ Custom music", "selfscene|music_custom"),
         ],
         lang,
-        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_music"),
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_style"),
     )
 
 def self_scene_music_custom_text(lang: str = "vi") -> str:
@@ -39288,16 +39288,19 @@ def self_scene_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🖼 Tạo ảnh khung chính nếu công cụ ảnh mở" if is_vi else "🖼 Keyframe image prompt", "selfscene|image_guard"),
             ("🎬 Tạo video AI nếu video công khai mở" if is_vi else "🎬 AI video prompt", "selfscene|video_guard"),
             ("🎞 Ghép ảnh thành video nếu có ảnh" if is_vi else "🎞 Use image slideshow video", "selfscene|frame_hint"),
-            ("🎵 Gợi ý nhạc" if is_vi else "🎵 Music suggestions", "selfscene|music"),
+            ("🎵 Gợi ý nhạc" if is_vi else "🎵 Music suggestions", "selfscene|music_guard"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", "selfscene|save"),
         ],
         lang,
         back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
     )
 
-def self_scene_guard_text(action: str, lang: str = "vi") -> str:
+def self_scene_guard_text(action: str, lang: str = "vi", plan: dict | None = None) -> str:
+    plan = plan or {}
+    topic = _short_pending_text(plan.get("selected_topic"), 220) or ("the selected subject" if normalize_user_language(lang) != "vi" else "chủ thể đã chọn")
+    context_text = _short_pending_text(plan.get("selected_context"), 220) or ("the selected scene" if normalize_user_language(lang) != "vi" else "bối cảnh đã chọn")
     if normalize_user_language(lang) != "vi":
-        if action == "music":
+        if action == "music_guard":
             return (
                 "🎵 <b>Music/SFX suggestions</b>\n\n"
                 "1. Soft cinematic piano for emotional reveal.\n"
@@ -39305,12 +39308,18 @@ def self_scene_guard_text(action: str, lang: str = "vi") -> str:
                 "3. Electronic future pulse for tech/cyberpunk scenes.\n\n"
                 "This is suggestion-only. No provider call and no Xu charged."
             )
+        if action == "image_guard":
+            return (
+                "🖼 <b>Keyframe image prompt</b>\n\n"
+                f"<code>{html.escape(topic)}, {html.escape(context_text)}, stable subject identity, clean composition, natural light, cinematic depth, no watermark, no extra text.</code>\n\n"
+                "This planning step has not called an image provider and has not charged Xu."
+            )
         if action == "frame_hint":
-            return "🎞 You can use the image slideshow video flow when you already have images. This action has not rendered video and has not charged Xu."
+            return "⚠️ There is no image set in this plan yet. Create or upload at least two images before using the image slideshow video flow. No video was rendered and no Xu was charged."
         if action == "save":
             return "💾 Plan saved in this session. No provider call and no Xu charged."
         return "⚙️ Real image/video creation is guarded from this planning step. TOAN AAS has not called a provider and has not charged Xu."
-    if action == "music":
+    if action == "music_guard":
         return (
             "🎵 <b>Gợi ý nhạc/SFX</b>\n\n"
             "1. Piano cinematic nhẹ cho cảnh cảm xúc.\n"
@@ -39318,8 +39327,14 @@ def self_scene_guard_text(action: str, lang: str = "vi") -> str:
             "3. Electronic future pulse cho cảnh công nghệ/cyberpunk.\n\n"
             "Đây chỉ là gợi ý. Bot chưa gọi provider và chưa trừ Xu."
         )
+    if action == "image_guard":
+        return (
+            "🖼 <b>Prompt ảnh khung chính</b>\n\n"
+            f"<code>{html.escape(topic)}, {html.escape(context_text)}, giữ nhận diện chủ thể ổn định, bố cục sạch, ánh sáng tự nhiên, chiều sâu điện ảnh, không watermark, không chữ thừa.</code>\n\n"
+            "Đây là bước lập kế hoạch. Bot chưa gọi provider ảnh và chưa trừ Xu."
+        )
     if action == "frame_hint":
-        return "🎞 Bạn có thể dùng luồng Ghép ảnh thành video khi đã có ảnh. Nút này chưa render video và chưa trừ Xu."
+        return "⚠️ Kế hoạch này chưa có bộ ảnh để ghép video. Vui lòng tạo hoặc gửi ít nhất 2 ảnh trước. Bot chưa render video và chưa trừ Xu."
     if action == "save":
         return "💾 TOAN AAS đã lưu kế hoạch trong phiên hiện tại. Bot chưa gọi provider và chưa trừ Xu."
     if action == "video_guard":
@@ -40009,6 +40024,76 @@ def video_idea_choices_text(state: dict, lang: str = "vi") -> str:
     topic = _short_pending_text(state.get("selected_topic") or state.get("product"), 200)
     kind = str(state.get("idea_kind") or "custom")
     offset = _safe_int(state.get("prompt_variant_offset"), 0)
+    if kind == "cinema":
+        variants_vi = [
+            (
+                "A. Quyết định làm đổi hướng cuộc đời",
+                "Một nhân vật bình thường đứng trước lựa chọn nhỏ nhưng dẫn tới chuyển biến cảm xúc lớn.",
+                "B. Ký ức nối hai thời điểm",
+                "Một vật thể hoặc địa điểm gợi lại ký ức, dùng match cut để nối quá khứ với hiện tại.",
+                "C. Thành phố tương lai và khoảnh khắc con người",
+                "Bối cảnh công nghệ rộng lớn tương phản với một câu chuyện gần gũi, giàu cảm xúc.",
+            ),
+            (
+                "A. Trước bình minh",
+                "Nhân vật đi qua một đêm khó khăn rồi tìm thấy hướng đi mới khi ánh sáng xuất hiện.",
+                "B. Điều chưa từng nói",
+                "Câu chuyện được kể bằng ánh mắt, chi tiết bàn tay và khoảng lặng thay vì lời thoại dài.",
+                "C. Một ngày lặp lại nhưng khác đi",
+                "Routine quen thuộc thay đổi nhờ một hành động nhỏ, nhịp cảnh tăng dần tới cao trào.",
+            ),
+            (
+                "A. Người lạ để lại một dấu hiệu",
+                "Một cuộc gặp ngắn tạo ra manh mối khiến nhân vật nhìn lại mục tiêu của mình.",
+                "B. Hai thế giới trong một khung hình",
+                "Dùng phản chiếu, cửa kính và chuyển cảnh đồng khung để kể sự giằng co nội tâm.",
+                "C. Hành trình trở về",
+                "Nhân vật trở lại nơi cũ, nhận ra bản thân đã thay đổi qua chi tiết bối cảnh và âm thanh.",
+            ),
+        ]
+        variants_en = [
+            (
+                "A. One decision changes the journey",
+                "An ordinary character makes a small choice that creates a meaningful emotional turn.",
+                "B. A memory connects two times",
+                "An object or place links past and present through cinematic match cuts.",
+                "C. A human moment in a future city",
+                "A vast technology setting contrasts with an intimate emotional story.",
+            ),
+            (
+                "A. Before sunrise",
+                "A character moves through a difficult night and finds a new direction as light appears.",
+                "B. What was never said",
+                "Eyes, hands and pauses carry the story instead of long dialogue.",
+                "C. The repeated day changes",
+                "A familiar routine shifts after one small action, building toward an emotional peak.",
+            ),
+            (
+                "A. A stranger leaves a sign",
+                "A brief encounter gives the character a clue that changes how they see their goal.",
+                "B. Two worlds in one frame",
+                "Reflections, windows and matched compositions reveal an inner conflict.",
+                "C. The return journey",
+                "A character revisits an old place and recognizes personal change through setting and sound.",
+            ),
+        ]
+        variant = (variants_vi if normalize_user_language(lang) == "vi" else variants_en)[(offset // 3) % 3]
+        if normalize_user_language(lang) != "vi":
+            return (
+                f"🎬 <b>Three cinematic/story ideas for {html.escape(topic)}</b>\n\n"
+                f"<b>{html.escape(variant[0])}</b> — {html.escape(variant[1])}\n"
+                f"<b>{html.escape(variant[2])}</b> — {html.escape(variant[3])}\n"
+                f"<b>{html.escape(variant[4])}</b> — {html.escape(variant[5])}\n\n"
+                "Choose one direction to build the cinematic package."
+            )
+        return (
+            f"🎬 <b>3 ý tưởng điện ảnh / kể chuyện</b>\n\n"
+            f"Chủ đề: <code>{html.escape(topic)}</code>\n\n"
+            f"<b>{html.escape(variant[0])}</b>\n{html.escape(variant[1])}\n\n"
+            f"<b>{html.escape(variant[2])}</b>\n{html.escape(variant[3])}\n\n"
+            f"<b>{html.escape(variant[4])}</b>\n{html.escape(variant[5])}\n\n"
+            "Chọn một hướng để TOAN AAS dựng kế hoạch điện ảnh chi tiết."
+        )
     variants_vi = [
         (
             "A. Vấn đề → giải pháp",
@@ -40080,8 +40165,13 @@ def video_idea_choices_text(state: dict, lang: str = "vi") -> str:
         "Chọn một ý tưởng để TOAN AAS dựng gói chi tiết."
     )
 
-def video_idea_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_idea_choice_keyboard(lang: str = "vi", idea_kind: str = "ad") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    back = (
+        ("🔙 Quay lại 3 hướng điện ảnh" if is_vi else "🔙 Back to cinematic directions", "videoidea|kind|cinema")
+        if str(idea_kind or "") == "cinema"
+        else ("🔙 Quay lại ngữ cảnh" if is_vi else "🔙 Back to context", "videoidea|back_context")
+    )
     return video_v6_keyboard(
         [
             ("1️⃣ Chọn ý tưởng A" if is_vi else "1️⃣ Choose idea A", "videoidea|choose|1"),
@@ -40091,13 +40181,55 @@ def video_idea_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🔁 Đổi 3 ý tưởng khác" if is_vi else "🔁 More ideas", "videoidea|idea_refresh"),
         ],
         lang,
-        back=("🔙 Quay lại ngữ cảnh" if is_vi else "🔙 Back to context", "videoidea|back_context"),
+        back=back,
     )
 
 def video_idea_result_text(state: dict, choice: int = 1, lang: str = "vi") -> str:
     topic = _short_pending_text(state.get("selected_topic") or state.get("product"), 220) or "chủ đề"
     goal = _short_pending_text(state.get("goal"), 120) or "thu hút và giữ người xem"
     context_text = _short_pending_text(state.get("context") or state.get("platform") or state.get("scene_context"), 160) or "bối cảnh phù hợp"
+    if str(state.get("idea_kind") or "") == "cinema":
+        if normalize_user_language(lang) != "vi":
+            return (
+                f"🎬 <b>Cinematic story package #{choice}</b>\n\n"
+                f"Subject: <code>{html.escape(topic)}</code>\n\n"
+                "<b>1. Character / subject</b>\nA relatable protagonist with one clear desire and a recognizable visual trait.\n\n"
+                "<b>2. Setting</b>\nA location that changes with the character's emotion, using light and production design as story signals.\n\n"
+                "<b>3. Conflict and turn</b>\nOpen with unresolved tension, introduce one visual clue, then reveal a small but meaningful decision.\n\n"
+                "<b>4. Emotional rhythm</b>\nQuiet observation → rising tension → decisive action → reflective ending.\n\n"
+                "<b>5. Storyboard</b>\n1) atmospheric wide shot, 2) character close-up, 3) conflict detail, 4) turning-point action, 5) emotional result, 6) final symbolic frame.\n\n"
+                f"<b>6. Image prompt</b>\n<code>{html.escape(topic)}, cinematic character study, coherent wardrobe and identity, expressive natural light, layered environment, film still, no watermark.</code>\n\n"
+                f"<b>7. Video prompt</b>\n<code>Animate {html.escape(topic)} with controlled natural movement, slow push-in, motivated camera transition, stable identity, cinematic pacing.</code>\n\n"
+                "<b>8. Camera</b>\nWide establishing shot, close-up, over-the-shoulder, slow push-in, match cut and restrained handheld movement.\n\n"
+                "<b>9. Music / voice</b>\nEmotional piano or ambient strings; concise reflective narration with intentional pauses.\n\n"
+                "<b>10. Caption / CTA</b>\nInvite the viewer to reflect or continue the story; avoid a hard sales ending.\n\n"
+                "No image/video provider call and no Xu deducted."
+            )
+        return (
+            f"🎬 <b>Kế hoạch điện ảnh / kể chuyện #{choice}</b>\n\n"
+            f"Chủ đề: <code>{html.escape(topic)}</code>\n\n"
+            "<b>1. Nhân vật/chủ thể</b>\n"
+            "Một nhân vật gần gũi, có mong muốn rõ và một dấu hiệu nhận diện xuyên suốt.\n\n"
+            "<b>2. Bối cảnh</b>\n"
+            "Không gian thay đổi theo cảm xúc nhân vật; ánh sáng và đạo cụ đều phục vụ câu chuyện.\n\n"
+            "<b>3. Mâu thuẫn/chuyển biến</b>\n"
+            "Mở bằng căng thẳng chưa được giải quyết, đưa vào một manh mối thị giác rồi chốt bằng quyết định nhỏ nhưng có ý nghĩa.\n\n"
+            "<b>4. Cảm xúc và nhịp cảnh</b>\n"
+            "Quan sát yên → căng thẳng tăng → hành động quyết định → kết lắng lại.\n\n"
+            "<b>5. Storyboard 6 cảnh</b>\n"
+            "1. Wide shot dựng bối cảnh.\n2. Close-up nhân vật.\n3. Chi tiết mâu thuẫn.\n4. Hành động chuyển biến.\n5. Kết quả cảm xúc.\n6. Khung hình biểu tượng kết.\n\n"
+            "<b>6. Prompt ảnh từng cảnh</b>\n"
+            f"<code>{html.escape(topic)}, cinematic character study, giữ trang phục và nhận diện nhất quán, ánh sáng tự nhiên giàu cảm xúc, bối cảnh nhiều lớp, film still, không watermark.</code>\n\n"
+            "<b>7. Prompt video từng cảnh</b>\n"
+            f"<code>Chuyển động có kiểm soát cho {html.escape(topic)}, slow push-in, camera chuyển theo động cơ câu chuyện, giữ nhận diện ổn định, nhịp điện ảnh.</code>\n\n"
+            "<b>8. Chuyển động camera</b>\n"
+            "Wide establishing, close-up, over-the-shoulder, slow push-in, match cut và handheld tiết chế.\n\n"
+            "<b>9. Nhạc/voice</b>\n"
+            "Piano cảm xúc hoặc ambient strings; voice kể chuyện ngắn, có khoảng dừng.\n\n"
+            "<b>10. Caption/CTA</b>\n"
+            "Mời người xem suy ngẫm hoặc xem tiếp câu chuyện, không kết bằng lời bán hàng gượng ép.\n\n"
+            "TOAN AAS chưa gọi API ảnh/video và chưa trừ Xu."
+        )
     if normalize_user_language(lang) != "vi":
         return (
             f"🧠 <b>Video idea package #{choice}</b>\n\n"
@@ -40163,6 +40295,54 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
     plan = plan or {}
     topic = _short_pending_text(plan.get("selected_topic") or plan.get("product"), 200) or ("product" if normalize_user_language(lang) != "vi" else "sản phẩm")
     context_text = _short_pending_text(plan.get("context"), 160) or ("selected context" if normalize_user_language(lang) != "vi" else "bối cảnh đã chọn")
+    if str(plan.get("idea_kind") or "") == "cinema":
+        if normalize_user_language(lang) != "vi":
+            if action == "storyboard":
+                return (
+                    f"🧩 <b>Cinematic storyboard — {html.escape(topic)}</b>\n\n"
+                    "1. Establishing wide shot and visual motif.\n2. Character close-up and desire.\n3. Conflict detail.\n"
+                    "4. Turning-point action.\n5. Emotional consequence.\n6. Symbolic final frame.\n\nNo provider call and no Xu charged."
+                )
+            if action == "image_prompts":
+                return (
+                    "🖼 <b>Cinematic image prompts</b>\n\n"
+                    f"1. <code>{html.escape(topic)}, atmospheric establishing shot, layered environment, cinematic natural light</code>\n"
+                    f"2. <code>{html.escape(topic)}, intimate character close-up, stable identity, expressive eyes, film still</code>\n"
+                    f"3. <code>{html.escape(topic)}, turning-point action, motivated light, coherent wardrobe and setting</code>\n\n"
+                    "No image API call and no Xu charged."
+                )
+            if action == "video_prompts":
+                return (
+                    "🎬 <b>Cinematic video prompts</b>\n\n"
+                    "1. Slow establishing dolly, restrained environmental motion.\n"
+                    "2. Slow push-in on the character as tension rises.\n"
+                    "3. Motivated match cut into the turning point, then a quiet pull-out ending.\n\n"
+                    "No video API call and no Xu charged."
+                )
+            return "🎵 <b>Cinematic music/voice</b>\n\nEmotional piano, ambient strings or restrained electronic texture. Voice: reflective, concise, with pauses.\n\nNo provider call and no Xu charged."
+        if action == "storyboard":
+            return (
+                f"🧩 <b>Storyboard điện ảnh — {html.escape(topic)}</b>\n\n"
+                "1. Wide shot dựng bối cảnh và motif thị giác.\n2. Close-up nhân vật và mong muốn.\n3. Chi tiết mâu thuẫn.\n"
+                "4. Hành động tạo bước ngoặt.\n5. Hệ quả cảm xúc.\n6. Khung hình biểu tượng kết.\n\nBot chưa gọi provider và chưa trừ Xu."
+            )
+        if action == "image_prompts":
+            return (
+                "🖼 <b>Prompt ảnh điện ảnh từng cảnh</b>\n\n"
+                f"1. <code>{html.escape(topic)}, atmospheric establishing shot, bối cảnh nhiều lớp, ánh sáng tự nhiên điện ảnh</code>\n"
+                f"2. <code>{html.escape(topic)}, close-up nhân vật, nhận diện ổn định, ánh mắt giàu cảm xúc, film still</code>\n"
+                f"3. <code>{html.escape(topic)}, hành động bước ngoặt, ánh sáng có động cơ, trang phục và bối cảnh nhất quán</code>\n\n"
+                "Bot chưa gọi API ảnh và chưa trừ Xu."
+            )
+        if action == "video_prompts":
+            return (
+                "🎬 <b>Prompt video điện ảnh từng cảnh</b>\n\n"
+                "1. Establishing dolly chậm, chuyển động môi trường tiết chế.\n"
+                "2. Slow push-in vào nhân vật khi căng thẳng tăng.\n"
+                "3. Match cut có động cơ sang bước ngoặt, kết bằng pull-out yên.\n\n"
+                "Bot chưa gọi API video và chưa trừ Xu."
+            )
+        return "🎵 <b>Nhạc/voice điện ảnh</b>\n\nPiano cảm xúc, ambient strings hoặc electronic tiết chế. Voice kể chuyện ngắn, có khoảng dừng.\n\nBot chưa gọi provider và chưa trừ Xu."
     if normalize_user_language(lang) != "vi":
         if action == "storyboard":
             return (
@@ -40405,7 +40585,7 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
                 state.update({"selected_topic": text, "product": text, "context": "điện ảnh/kể chuyện" if normalize_user_language(lang) == "vi" else "cinematic/story", "prompt_variant_offset": 0})
                 clear_developing_video_pending(uid)
                 plan = save_developing_video_plan(uid, "videoidea", state)
-                await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
+                await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang, plan.get("idea_kind")))
                 return True
             state = dict(pending)
             state["selected_topic"] = text
@@ -40419,7 +40599,7 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             state.update({"idea_kind": "cinema", "selected_topic": text, "product": text, "context": "điện ảnh/kể chuyện" if normalize_user_language(lang) == "vi" else "cinematic/story", "prompt_variant_offset": 0})
             clear_developing_video_pending(uid)
             plan = save_developing_video_plan(uid, "videoidea", state)
-            await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
+            await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang, plan.get("idea_kind")))
             return True
         if step == "goal_custom":
             set_developing_video_pending(uid, "videoidea", "context", goal=text)
@@ -40435,7 +40615,7 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             state["context"] = text
             clear_developing_video_pending(uid)
             plan = save_developing_video_plan(uid, "videoidea", state)
-            await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
+            await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang, plan.get("idea_kind")))
             return True
         if step == "choice_custom":
             state = dict(pending)
@@ -41133,10 +41313,15 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "selfscene", state)
         return await safe_edit_query_message(query, self_scene_plan_text(plan, lang), reply_markup=self_scene_result_keyboard(lang))
-    if action in {"image_guard", "video_guard", "frame_hint", "music", "save"}:
-        if not get_latest_developing_video_plan(uid, "selfscene"):
+    if action in {"image_guard", "video_guard", "frame_hint", "music_guard", "save"}:
+        plan = get_latest_developing_video_plan(uid, "selfscene")
+        if not plan:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
-        return await safe_edit_query_message(query, self_scene_guard_text(action, lang), reply_markup=self_scene_result_keyboard(lang))
+        if action == "frame_hint":
+            photos = developing_video_frame_photos(plan)
+            if len(photos) >= 2:
+                return await open_existing_images_in_frame_video(query, uid, photos, "selfscene_plan", lang=lang)
+        return await safe_edit_query_message(query, self_scene_guard_text(action, lang, plan), reply_markup=self_scene_result_keyboard(lang))
     return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
 
 async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41161,6 +41346,7 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
         state = get_developing_video_pending(uid) or {}
         return await safe_edit_query_message(query, long_video_topic_suggestions_text(state, lang), reply_markup=long_video_topic_suggestions_keyboard(lang))
     pending = get_developing_video_pending(uid)
+    saved_plan = get_latest_developing_video_plan(uid, "longvideo")
     if action == "topic_refresh":
         if not pending:
             return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
@@ -41193,12 +41379,14 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
             return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
         return await safe_edit_query_message(query, long_video_style_text(pending, lang), reply_markup=long_video_style_keyboard(lang))
     if action == "back_structure":
-        if not pending:
+        state = pending or saved_plan
+        if not state:
             return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+        restore_developing_video_pending(uid, "longvideo", state, "structure")
         return await safe_edit_query_message(
             query,
-            long_video_structure_text(pending, lang),
-            reply_markup=long_video_structure_keyboard(pending.get("duration"), lang),
+            long_video_structure_text(state, lang),
+            reply_markup=long_video_structure_keyboard(state.get("duration"), lang),
         )
     if action == "duration_custom":
         if not pending:
@@ -41267,7 +41455,7 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
         plan = save_developing_video_plan(uid, "longvideo", state)
         return await safe_edit_or_send_long_html(query, long_video_plan_text(plan, lang), reply_markup=long_video_result_keyboard(lang))
     if action in {"storyboard", "image_prompts", "video_prompts", "music", "save"}:
-        plan = get_latest_developing_video_plan(uid, "longvideo")
+        plan = saved_plan
         if not plan:
             return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
         return await safe_edit_or_send_long_html(query, long_video_followup_text(action, plan, lang), reply_markup=long_video_result_keyboard(lang))
@@ -41333,7 +41521,7 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
         base.update({"idea_kind": "cinema", "selected_topic": topic, "product": topic, "context": "điện ảnh/kể chuyện" if normalize_user_language(lang) == "vi" else "cinematic/story", "prompt_variant_offset": 0})
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "videoidea", base)
-        return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
+        return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang, plan.get("idea_kind")))
     if action == "product_type":
         if value == "custom":
             set_developing_video_pending(uid, "videoidea", "product_type_custom", idea_kind="ad")
@@ -41387,14 +41575,14 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
     if action == "back_choices":
         if not plan:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
-        return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
+        return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang, plan.get("idea_kind")))
     if action == "idea_refresh":
         base = dict(plan or state or {})
         if not base.get("selected_topic") and not base.get("product"):
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
         base["prompt_variant_offset"] = str(_safe_int(base.get("prompt_variant_offset"), 0) + 3)
         refreshed = save_developing_video_plan(uid, "videoidea", base)
-        return await safe_edit_or_send(query, video_idea_choices_text(refreshed, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang))
+        return await safe_edit_or_send(query, video_idea_choices_text(refreshed, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang, refreshed.get("idea_kind")))
     if action == "goal_custom":
         if not pending:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
@@ -41441,7 +41629,7 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
         state["context"] = options[idx - 1]
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "videoidea", state)
-        return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), reply_markup=video_idea_choice_keyboard(lang))
+        return await safe_edit_or_send(query, video_idea_choices_text(plan, lang), reply_markup=video_idea_choice_keyboard(lang, plan.get("idea_kind")))
     if action == "genre":
         if not pending:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
@@ -52341,6 +52529,7 @@ def create_storyboard_project(user_id, source_type: str, title: str, selected_sc
 
 def storyboard_scenes_for_project(project_id: int) -> list[dict]:
     conn = db_connect()
+    conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
             "SELECT * FROM storyboard_scenes WHERE project_id=? ORDER BY scene_index ASC",
@@ -52349,6 +52538,57 @@ def storyboard_scenes_for_project(project_id: int) -> list[dict]:
         return [dict(row) for row in rows]
     finally:
         conn.close()
+
+def storyboard_project_for_user(project_id: int, user_id) -> dict:
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT * FROM storyboard_projects WHERE id=? AND user_id=? LIMIT 1",
+            (int(project_id or 0), str(user_id or "")),
+        ).fetchone()
+        return dict(row) if row else {}
+    finally:
+        conn.close()
+
+def developing_video_frame_photos(state: dict | None) -> list[dict]:
+    state = state or {}
+    photos = []
+    for item in list(state.get("photos") or []):
+        if isinstance(item, dict):
+            file_id = str(item.get("file_id") or item.get("image_file_id") or "").strip()
+            image_url = str(item.get("image_url") or item.get("url") or "").strip()
+        else:
+            file_id = str(item or "").strip()
+            image_url = ""
+        if file_id or image_url:
+            photos.append({"file_id": file_id, "image_url": image_url})
+    return photos[:FRAME_VIDEO_MAX_IMAGES]
+
+async def open_existing_images_in_frame_video(query, uid, photos: list[dict], source: str, lang: str = "vi", **metadata):
+    clean_photos = developing_video_frame_photos({"photos": photos})
+    if len(clean_photos) < 2:
+        return await safe_edit_or_send(
+            query,
+            "⚠️ Chưa có bộ ảnh để ghép video. Vui lòng tạo storyboard/ảnh trước. Bot chưa render và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "⚠️ There is no image set to assemble yet. Create or upload at least two images first. No video was rendered and no Xu was charged.",
+            parse_mode=None,
+        )
+    state = {
+        "step": "planning",
+        "photos": clean_photos,
+        "source": str(source or "existing_images")[:80],
+        "motion_mode": "frame",
+        **metadata,
+    }
+    set_frame_video_state(uid, state)
+    return await safe_edit_or_send(
+        query,
+        frame_video_planning_text(state, lang),
+        parse_mode="HTML",
+        reply_markup=frame_video_planning_keyboard(lang),
+    )
 
 def update_storyboard_scene_asset(project_id: int, scene_index: int, image_job_id: int = 0, image_file_id: str = "", image_url: str = "", tier: str = "", price_xu: int = 0, status: str = "image_ready") -> None:
     conn = db_connect()
@@ -66468,8 +66708,19 @@ async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAU
     if action == "images":
         return await storyboard_start_user_images(query, uid)
     state = get_storyboard_state(uid)
+    persisted_project_actions = {"mode_back", "mode_select", "mode_frame", "render", "mode_ai", "ai_scene", "ai_motion", "mode_audio"}
+    if not state and action in persisted_project_actions and len(parts) > 2:
+        project_id = safe_int(parts[2], 0)
+        project = storyboard_project_for_user(project_id, uid)
+        if project:
+            state = set_storyboard_state(uid, {
+                "step": "images_ready",
+                "project_id": project_id,
+                "scene_count": int(project.get("scene_count") or 0),
+                "source_type": str(project.get("source_type") or "restored_project"),
+            })
     if not state:
-        return await safe_edit_or_send(query, "⏰ Storyboard đã hết hạn hoặc đã xử lý. Bot chưa trừ Xu.", parse_mode=None)
+        return await safe_edit_or_send(query, "⚠️ Thiếu dữ liệu storyboard ở bước này. Vui lòng quay lại bước trước để chọn hoặc tạo lại. Bot chưa gọi API và chưa trừ Xu.", parse_mode=None)
     if action == "script_refresh":
         offset = _safe_int(state.get("suggest_offset"), 0) + 3
         idea, scripts = storyboard_default_scripts(offset)
@@ -66559,9 +66810,15 @@ async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAU
         ]
         if len(photos) < 2:
             return await safe_edit_or_send(query, "⚠️ Chưa đủ ảnh để ghép video. Hãy tạo đủ ảnh hoặc dùng nhánh gửi ảnh có sẵn.", parse_mode=None, reply_markup=storyboard_after_images_keyboard(project_id))
-        set_frame_video_state(uid, {"step": "ratio", "photos": photos[:FRAME_VIDEO_MAX_IMAGES], "source": "storyboard_project", "project_id": project_id, "motion_mode": "frame"})
         create_storyboard_video_record(project_id, "handoff_to_frame_video", frame_video_price_for_state({"effect": "fade", "photos": photos[:FRAME_VIDEO_MAX_IMAGES]}))
-        return await safe_edit_or_send(query, frame_video_ratio_text(get_frame_video_state(uid)), parse_mode="HTML", reply_markup=frame_video_ratio_keyboard())
+        return await open_existing_images_in_frame_video(
+            query,
+            uid,
+            photos,
+            "storyboard_project",
+            lang=get_user_language(uid) or "vi",
+            project_id=project_id,
+        )
     if action == "mode_ai" and len(parts) > 2:
         project_id = int(parts[2] or 0)
         enabled, message = shopaikey_public_generation_guard("video")
