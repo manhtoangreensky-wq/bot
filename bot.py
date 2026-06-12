@@ -66,6 +66,8 @@ from video_prompt_quality import (
 )
 from operations_v1a import (
     EXPENSE_CATEGORIES as OPERATIONS_EXPENSE_CATEGORIES,
+    INTERNAL_DOC_DEPARTMENT_DESCRIPTIONS,
+    INTERNAL_DOC_DEPARTMENT_HELP,
     INTERNAL_DOC_DEPARTMENTS,
     INTERNAL_DOC_TYPES,
     RETENTION_LABELS,
@@ -75,6 +77,7 @@ from operations_v1a import (
     csv_with_no_data,
     default_document_type,
     default_retention,
+    document_type_label,
     revenue_category_for_source,
 )
 from support_v1b import (
@@ -85659,20 +85662,133 @@ def internal_archive_menu_keyboard() -> InlineKeyboardMarkup:
 def internal_archive_department_text(department: str) -> str:
     label = INTERNAL_DOC_DEPARTMENTS.get(department, department or "Hồ sơ nội bộ")
     types = INTERNAL_DOC_TYPES.get(department, ())
-    type_lines = "\n".join(f"• <code>{html.escape(value)}</code>" for value in types[:6]) or "• <code>internal_document</code>"
+    description = INTERNAL_DOC_DEPARTMENT_DESCRIPTIONS.get(
+        department,
+        "Dùng để lưu tài liệu nội bộ theo nhóm nghiệp vụ.",
+    )
+    type_lines = "\n".join(
+        f"{index}. {html.escape(document_type_label(value))}"
+        for index, value in enumerate(types[:7], 1)
+    ) or "1. Hồ sơ nội bộ"
+    secret_warning = (
+        "\n\n⚠️ Không lưu API key/token thật. Chỉ lưu tài liệu, trạng thái và ghi chú không chứa secret."
+        if department == "provider_api" else ""
+    )
     return (
         f"📁 <b>{html.escape(label)}</b>\n\n"
-        "Hãy gửi một file muốn lưu vào nhóm này. Nên gửi từng file một để tránh lỗi Telegram.\n\n"
-        "Loại hồ sơ gợi ý:\n"
+        f"{html.escape(description)}\n\n"
+        "<b>Loại hồ sơ thường gặp:</b>\n"
         f"{type_lines}\n\n"
-        "TOAN AAS sẽ hiển thị metadata để admin xác nhận trước khi lưu."
+        "Bạn muốn làm gì?"
+        f"{secret_warning}"
     )
 
 def internal_archive_department_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📎 Tôi sẽ gửi file", callback_data="archive|send_file"), InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root")],
+        [InlineKeyboardButton("📎 Lưu file vào nhóm này", callback_data="archive|quick"), InlineKeyboardButton("🕘 Hồ sơ gần đây", callback_data="archive|recent")],
+        [InlineKeyboardButton("🏷 Chọn loại hồ sơ", callback_data="archive|types"), InlineKeyboardButton("🔍 Tìm trong nhóm", callback_data="archive|search_dept")],
+        [InlineKeyboardButton("ℹ️ Hướng dẫn lưu", callback_data="archive|help"), InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
+
+def internal_archive_quick_save_text(department: str) -> str:
+    label = INTERNAL_DOC_DEPARTMENTS.get(department, department or "Hồ sơ nội bộ")
+    return (
+        f"📎 <b>Lưu nhanh vào nhóm {html.escape(label)}</b>\n\n"
+        "Bạn hãy gửi file cần lưu.\n"
+        "Sau khi nhận file, TOAN AAS sẽ cho bạn sửa tên, tag, loại hồ sơ và thời hạn lưu trước khi xác nhận.\n\n"
+        "Nên gửi từng file một để tránh lỗi Telegram. Nếu lỡ gửi nhiều file, bot sẽ giữ hồ sơ đang chờ và không bị crash."
+    )
+
+def internal_archive_upload_prompt_text(department: str, document_type: str) -> str:
+    label = INTERNAL_DOC_DEPARTMENTS.get(department, department or "Hồ sơ nội bộ")
+    return (
+        "📎 <b>Gửi file hồ sơ</b>\n\n"
+        f"• Nhóm: <b>{html.escape(label)}</b>\n"
+        f"• Loại: <b>{html.escape(document_type_label(document_type))}</b>\n\n"
+        "Bạn hãy gửi file muốn lưu. Nên gửi từng file một để tránh lỗi Telegram."
+    )
+
+def internal_archive_type_keyboard(department: str) -> InlineKeyboardMarkup:
+    values = INTERNAL_DOC_TYPES.get(department, ())
+    buttons = [
+        (document_type_label(value), f"archive|type|{value}")
+        for value in values
+    ]
+    buttons.append(("Loại khác / chưa phân loại", "archive|type|general"))
+    rows = [
+        [InlineKeyboardButton(label, callback_data=callback) for label, callback in buttons[index:index + 2]]
+        for index in range(0, len(buttons), 2)
+    ]
+    rows.append([
+        InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+def internal_archive_type_text(department: str) -> str:
+    label = INTERNAL_DOC_DEPARTMENTS.get(department, department or "Hồ sơ nội bộ")
+    return (
+        f"🏷 <b>Chọn loại hồ sơ — {html.escape(label)}</b>\n\n"
+        "Chọn loại phù hợp bên dưới. TOAN AAS chỉ hiển thị tên tiếng Việt; mã kỹ thuật được lưu nội bộ."
+    )
+
+def internal_archive_help_text(department: str) -> str:
+    label = INTERNAL_DOC_DEPARTMENTS.get(department, department or "Hồ sơ nội bộ")
+    payload = INTERNAL_DOC_DEPARTMENT_HELP.get(department) or {}
+    examples = "\n".join(f"• <code>{html.escape(value)}</code>" for value in payload.get("examples", ())) or "• Đặt tên ngắn gọn, có ngày."
+    return (
+        f"ℹ️ <b>Hướng dẫn lưu — {html.escape(label)}</b>\n\n"
+        f"<b>Mẫu tên:</b> <code>{html.escape(str(payload.get('name') or 'NHOM_NoiDung_YYYYMMDD'))}</code>\n\n"
+        f"<b>Ví dụ:</b>\n{examples}\n\n"
+        f"<b>Tag gợi ý:</b> {html.escape(str(payload.get('tags') or '-'))}\n\n"
+        f"<b>Thời hạn lưu gợi ý:</b> {html.escape(str(payload.get('retention') or 'Admin xem xét theo loại hồ sơ.'))}\n\n"
+        "Không lưu mật khẩu, API key, token hoặc secret thật trong hồ sơ."
+    )
+
+def recent_internal_documents(admin_id, department: str, limit: int = 5) -> list[dict]:
+    if department not in INTERNAL_DOC_DEPARTMENTS:
+        return []
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT id,title,department,document_type,file_name,mime_type,size_bytes,tags,description,
+                      retention_policy,confidentiality_level,created_at,file_id
+               FROM internal_documents
+               WHERE owner_admin_id=? AND department=? AND status='active'
+               ORDER BY id DESC LIMIT ?""",
+            (str(admin_id), department, max(1, min(10, int(limit or 5)))),
+        ).fetchall()
+        keys = ["id", "title", "department", "document_type", "file_name", "mime_type", "size_bytes", "tags", "description", "retention_policy", "confidentiality_level", "created_at", "file_id"]
+        return [dict(zip(keys, row)) for row in rows]
+    finally:
+        conn.close()
+
+def internal_archive_recent_text(rows: list[dict], department: str) -> str:
+    label = INTERNAL_DOC_DEPARTMENTS.get(department, department or "Hồ sơ nội bộ")
+    if not rows:
+        return f"🕘 <b>Hồ sơ gần đây — {html.escape(label)}</b>\n\nChưa có hồ sơ nào trong nhóm này."
+    lines = [f"🕘 <b>Hồ sơ gần đây — {html.escape(label)}</b>", ""]
+    for index, item in enumerate(rows[:5], 1):
+        lines.append(
+            f"{index}. <b>{html.escape(str(item.get('title') or item.get('file_name') or 'Hồ sơ'))}</b>\n"
+            f"   {html.escape(document_type_label(item.get('document_type')))} · {html.escape(str(item.get('created_at') or '-'))}"
+        )
+    return "\n".join(lines)
+
+def internal_archive_results_keyboard(rows: list[dict], department: str = "", search: bool = False) -> InlineKeyboardMarkup:
+    buttons = [(f"{index}️⃣ Xem {index}", f"archive|view|{item['id']}") for index, item in enumerate(rows[:5], 1)]
+    keyboard = [
+        [InlineKeyboardButton(label, callback_data=callback) for label, callback in buttons[index:index + 2]]
+        for index in range(0, len(buttons), 2)
+    ]
+    if search:
+        keyboard.append([InlineKeyboardButton("🔍 Tìm lại", callback_data="archive|search_dept" if department else "archive|search")])
+    keyboard.append([
+        InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department") if department else InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(keyboard)
 
 def internal_archive_current_file_info(update: Update) -> dict:
     message = update.effective_message
@@ -85722,17 +85838,24 @@ def internal_archive_quota_error(admin_id, extra_bytes: int) -> str:
 def internal_archive_preview_text(state: dict) -> str:
     info = state.get("file_info") or {}
     department = state.get("department") or ""
+    retention_labels = {
+        "1_year": "1 năm", "3_years": "3 năm", "5_years": "5 năm",
+        "10_years": "10 năm", "permanent": "Lưu vĩnh viễn", "manual_review": "Admin xem xét",
+    }
+    confidentiality_labels = {
+        "internal": "Nội bộ", "confidential": "Bảo mật", "restricted": "Hạn chế",
+    }
     return "\n".join([
         "✅ <b>Đã nhận hồ sơ</b>",
         "",
-        f"• File: <b>{html.escape(str(info.get('file_name') or 'file'))}</b>",
-        f"• Dung lượng: <b>{storage_bytes_to_mb_text(info.get('size_bytes'))}</b>",
-        f"• Nhóm: <b>{html.escape(INTERNAL_DOC_DEPARTMENTS.get(department, department))}</b>",
-        f"• Tên hồ sơ: <b>{html.escape(str(state.get('title') or info.get('file_name') or 'Hồ sơ nội bộ'))}</b>",
-        f"• Loại hồ sơ: <code>{html.escape(str(state.get('document_type') or default_document_type(department)))}</code>",
-        f"• Bảo mật: <code>{html.escape(str(state.get('confidentiality_level') or 'internal'))}</code>",
-        f"• Thời hạn lưu: <code>{html.escape(str(state.get('retention_policy') or default_retention(department)))}</code>",
-        f"• Tag: {html.escape(str(state.get('tags') or '-'))}",
+        f"<b>Tên file:</b> {html.escape(str(info.get('file_name') or 'file'))}",
+        f"<b>Nhóm:</b> {html.escape(INTERNAL_DOC_DEPARTMENTS.get(department, department))}",
+        f"<b>Loại hồ sơ:</b> {html.escape(document_type_label(state.get('document_type') or default_document_type(department)))}",
+        f"<b>Dung lượng:</b> {storage_bytes_to_mb_text(info.get('size_bytes'))}",
+        f"<b>Tag:</b> {html.escape(str(state.get('tags') or '-'))}",
+        f"<b>Thời hạn lưu:</b> {html.escape(retention_labels.get(str(state.get('retention_policy') or default_retention(department)), 'Admin xem xét'))}",
+        f"<b>Mức bảo mật:</b> {html.escape(confidentiality_labels.get(str(state.get('confidentiality_level') or 'internal'), 'Nội bộ'))}",
+        f"<b>Tên hồ sơ:</b> {html.escape(str(state.get('title') or info.get('file_name') or 'Hồ sơ nội bộ'))}",
         "",
         "Bạn có muốn lưu hồ sơ này không?",
     ])
@@ -85740,8 +85863,8 @@ def internal_archive_preview_text(state: dict) -> str:
 def internal_archive_preview_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Lưu hồ sơ", callback_data="archive|save"), InlineKeyboardButton("✍️ Sửa thông tin", callback_data="archive|edit")],
-        [InlineKeyboardButton("🏷 Thêm tag", callback_data="archive|tags"), InlineKeyboardButton("📁 Đổi phòng ban", callback_data="archive|change_dept")],
-        [InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🏷 Đổi loại", callback_data="archive|types"), InlineKeyboardButton("📁 Đổi nhóm", callback_data="archive|change_dept")],
+        [InlineKeyboardButton("📁 Hồ sơ hiện tại", callback_data="archive|discard_to_dept"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def save_internal_document(admin_id, state: dict) -> int:
@@ -85786,23 +85909,30 @@ def save_internal_document(admin_id, state: dict) -> int:
     finally:
         conn.close()
 
-def search_internal_documents(admin_id, keyword: str, limit: int = 10) -> list[dict]:
+def search_internal_documents(admin_id, keyword: str, limit: int = 10, department: str = "") -> list[dict]:
     value = str(keyword or "").strip()
     if not value:
         return []
     pattern = f"%{value}%"
     conn = db_connect()
     try:
+        params = [str(admin_id)]
+        department_clause = ""
+        if department in INTERNAL_DOC_DEPARTMENTS:
+            department_clause = " AND department=?"
+            params.append(department)
+        params.extend([pattern] * 10)
+        params.append(max(1, min(20, int(limit or 10))))
         rows = conn.execute(
-            """SELECT id,title,department,document_type,file_name,mime_type,size_bytes,tags,description,
-                      retention_policy,confidentiality_level,created_at,file_id
-               FROM internal_documents
-               WHERE owner_admin_id=? AND status='active' AND (
-                   title LIKE ? OR file_name LIKE ? OR department LIKE ? OR document_type LIKE ? OR
-                   tags LIKE ? OR description LIKE ? OR related_customer_id LIKE ? OR related_provider LIKE ? OR
-                   related_payment_id LIKE ? OR created_at LIKE ?)
-               ORDER BY id DESC LIMIT ?""",
-            (str(admin_id), pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, max(1, min(20, int(limit or 10)))),
+            f"""SELECT id,title,department,document_type,file_name,mime_type,size_bytes,tags,description,
+                       retention_policy,confidentiality_level,created_at,file_id
+                FROM internal_documents
+                WHERE owner_admin_id=? AND status='active'{department_clause} AND (
+                    title LIKE ? OR file_name LIKE ? OR department LIKE ? OR document_type LIKE ? OR
+                    tags LIKE ? OR description LIKE ? OR related_customer_id LIKE ? OR related_provider LIKE ? OR
+                    related_payment_id LIKE ? OR created_at LIKE ?)
+                ORDER BY id DESC LIMIT ?""",
+            tuple(params),
         ).fetchall()
         keys = ["id", "title", "department", "document_type", "file_name", "mime_type", "size_bytes", "tags", "description", "retention_policy", "confidentiality_level", "created_at", "file_id"]
         return [dict(zip(keys, row)) for row in rows]
@@ -85823,24 +85953,22 @@ def get_internal_document(admin_id, document_id: int) -> dict:
     finally:
         conn.close()
 
-def internal_archive_search_results_text(rows: list[dict], keyword: str) -> str:
+def internal_archive_search_results_text(rows: list[dict], keyword: str, department: str = "") -> str:
+    scope = INTERNAL_DOC_DEPARTMENTS.get(department, "")
+    scope_line = f" trong <b>{html.escape(scope)}</b>" if scope else ""
     if not rows:
-        return f"🔍 <b>Kết quả tìm hồ sơ</b>\n\nChưa có hồ sơ phù hợp với <code>{html.escape(keyword)}</code>."
-    lines = ["🔍 <b>Kết quả tìm hồ sơ</b>", ""]
+        return f"🔍 <b>Kết quả tìm hồ sơ{scope_line}</b>\n\nChưa có hồ sơ phù hợp với <code>{html.escape(keyword)}</code>."
+    lines = [f"🔍 <b>Kết quả tìm hồ sơ{scope_line}</b>", ""]
     for index, item in enumerate(rows[:10], 1):
         lines.append(
             f"{index}. <b>{html.escape(str(item.get('title') or item.get('file_name') or 'Hồ sơ'))}</b>\n"
             f"   {html.escape(INTERNAL_DOC_DEPARTMENTS.get(item.get('department'), str(item.get('department') or '-')))} · "
-            f"<code>{html.escape(str(item.get('document_type') or '-'))}</code> · {html.escape(str(item.get('created_at') or '-'))}"
+            f"{html.escape(document_type_label(item.get('document_type')))} · {html.escape(str(item.get('created_at') or '-'))}"
         )
     return "\n".join(lines)
 
 def internal_archive_search_keyboard(rows: list[dict]) -> InlineKeyboardMarkup:
-    buttons = [(f"{index}️⃣ Xem {index}", f"archive|view|{item['id']}") for index, item in enumerate(rows[:3], 1)]
-    keyboard = [[InlineKeyboardButton(label, callback_data=callback) for label, callback in buttons[index:index + 2]] for index in range(0, len(buttons), 2)]
-    keyboard.append([InlineKeyboardButton("🔍 Tìm lại", callback_data="archive|search"), InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root")])
-    keyboard.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
-    return InlineKeyboardMarkup(keyboard)
+    return internal_archive_results_keyboard(rows, search=True)
 
 def internal_archive_document_text(item: dict) -> str:
     return "\n".join([
@@ -85849,7 +85977,7 @@ def internal_archive_document_text(item: dict) -> str:
         f"• Tên: <b>{html.escape(str(item.get('title') or '-'))}</b>",
         f"• File: {html.escape(str(item.get('file_name') or '-'))}",
         f"• Nhóm: {html.escape(INTERNAL_DOC_DEPARTMENTS.get(item.get('department'), str(item.get('department') or '-')))}",
-        f"• Loại: <code>{html.escape(str(item.get('document_type') or '-'))}</code>",
+        f"• Loại: {html.escape(document_type_label(item.get('document_type')))}",
         f"• Dung lượng: {storage_bytes_to_mb_text(item.get('size_bytes'))}",
         f"• Tag: {html.escape(str(item.get('tags') or '-'))}",
         f"• Bảo mật: <code>{html.escape(str(item.get('confidentiality_level') or '-'))}</code>",
@@ -85863,7 +85991,10 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
     uid = query.from_user.id
     if not is_admin_user(uid):
         clear_internal_archive_pending(uid)
-        return await query.answer("Tính năng Hồ sơ nội bộ chỉ dành cho admin.", show_alert=True)
+        return await query.answer(
+            "Hồ sơ nội bộ chỉ dành cho admin/owner. Vui lòng dùng mục Hỗ trợ nếu cần gửi tài liệu.",
+            show_alert=True,
+        )
     await query.answer()
     clear_doc_tool_pending(uid)
     clear_media_creator_pending_states(uid)
@@ -85880,22 +86011,90 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         if state.get("file_info"):
             fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
             fields["department"] = department
+            fields["document_type"] = default_document_type(department)
             state = set_internal_archive_pending(uid, "preview", **fields)
             return await safe_edit_query_message(query, internal_archive_preview_text(state), reply_markup=internal_archive_preview_keyboard())
-        set_internal_archive_pending(uid, "awaiting_file", department=department)
+        clear_internal_archive_pending(uid)
+        set_internal_archive_pending(uid, "department_dashboard", department=department)
         return await safe_edit_query_message(query, internal_archive_department_text(department), reply_markup=internal_archive_department_keyboard())
-    if action == "send_file":
+    if action in {"quick", "send_file"}:
         department = state.get("department")
         if department not in INTERNAL_DOC_DEPARTMENTS:
             return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
-        set_internal_archive_pending(uid, "awaiting_file", department=department)
-        return await safe_edit_query_message(query, internal_archive_department_text(department), reply_markup=internal_archive_department_keyboard())
+        set_internal_archive_pending(uid, "awaiting_file", department=department, document_type="general")
+        return await safe_edit_query_message(
+            query,
+            internal_archive_quick_save_text(department),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    if action == "types":
+        department = state.get("department")
+        if department not in INTERNAL_DOC_DEPARTMENTS:
+            return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
+        fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
+        set_internal_archive_pending(uid, "choosing_type", **fields)
+        return await safe_edit_query_message(query, internal_archive_type_text(department), reply_markup=internal_archive_type_keyboard(department))
+    if action == "type" and len(parts) > 2:
+        department = state.get("department")
+        document_type = parts[2]
+        if department not in INTERNAL_DOC_DEPARTMENTS or document_type not in set(INTERNAL_DOC_TYPES.get(department, ())) | {"general"}:
+            return await query.answer("Loại hồ sơ không hợp lệ.", show_alert=True)
+        fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
+        fields["document_type"] = document_type
+        if fields.get("file_info"):
+            state = set_internal_archive_pending(uid, "preview", **fields)
+            return await safe_edit_query_message(query, internal_archive_preview_text(state), reply_markup=internal_archive_preview_keyboard())
+        set_internal_archive_pending(uid, "awaiting_file", **fields)
+        return await safe_edit_query_message(
+            query,
+            internal_archive_upload_prompt_text(department, document_type),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Chọn loại", callback_data="archive|types"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
     if action == "back_department":
         department = state.get("department")
         if department not in INTERNAL_DOC_DEPARTMENTS:
             return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
-        set_internal_archive_pending(uid, "awaiting_file", department=department)
+        if state.get("file_info") and state.get("step") == "choosing_type":
+            fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
+            state = set_internal_archive_pending(uid, "preview", **fields)
+            return await safe_edit_query_message(query, internal_archive_preview_text(state), reply_markup=internal_archive_preview_keyboard())
+        clear_internal_archive_pending(uid)
+        set_internal_archive_pending(uid, "department_dashboard", department=department)
         return await safe_edit_query_message(query, internal_archive_department_text(department), reply_markup=internal_archive_department_keyboard())
+    if action == "discard_to_dept":
+        department = state.get("department")
+        if department not in INTERNAL_DOC_DEPARTMENTS:
+            return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
+        clear_internal_archive_pending(uid)
+        set_internal_archive_pending(uid, "department_dashboard", department=department)
+        return await safe_edit_query_message(query, internal_archive_department_text(department), reply_markup=internal_archive_department_keyboard())
+    if action == "recent":
+        department = state.get("department")
+        if department not in INTERNAL_DOC_DEPARTMENTS:
+            return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
+        rows = recent_internal_documents(uid, department, 5)
+        set_internal_archive_pending(uid, "recent_results", department=department, search_result_ids=[item["id"] for item in rows])
+        return await safe_edit_query_message(
+            query,
+            internal_archive_recent_text(rows, department),
+            reply_markup=internal_archive_results_keyboard(rows, department),
+        )
+    if action == "help":
+        department = state.get("department")
+        if department not in INTERNAL_DOC_DEPARTMENTS:
+            return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
+        return await safe_edit_query_message(
+            query,
+            internal_archive_help_text(department),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📎 Lưu file", callback_data="archive|quick"), InlineKeyboardButton("🏷 Chọn loại", callback_data="archive|types")],
+                [InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
     if action == "save":
         info = state.get("file_info") or {}
         if state.get("step") != "preview" or not info:
@@ -85904,17 +86103,23 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         if quota_error:
             return await safe_edit_query_message(query, quota_error, reply_markup=internal_archive_preview_keyboard())
         document_id = save_internal_document(uid, state)
+        department = state.get("department")
         clear_internal_archive_pending(uid)
         return await safe_edit_query_message(
             query,
             f"✅ <b>Đã lưu hồ sơ #{document_id}</b>\n\nFile và metadata đã được lưu vào {html.escape(INTERNAL_DOC_DEPARTMENTS.get(state.get('department'), 'Hồ sơ nội bộ'))}.",
-            reply_markup=internal_archive_menu_keyboard(),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📁 Phòng ban", callback_data=f"archive|dept|{department}"), InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
         )
     if action == "edit":
         set_internal_archive_pending(uid, "awaiting_metadata", **{key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}})
         return await safe_edit_query_message(
             query,
-            "✍️ Gửi một dòng theo mẫu:\n<code>Tên hồ sơ | loại_hồ_sơ | retention | bảo_mật | mô tả</code>\n\nRetention: 1_year, 3_years, 5_years, 10_years, permanent, manual_review.",
+            "✍️ Gửi một dòng theo mẫu:\n<code>Tên hồ sơ | tag | retention | bảo_mật | mô tả</code>\n\n"
+            "Retention: 1_year, 3_years, 5_years, 10_years, permanent, manual_review.\n"
+            "Đổi loại hồ sơ bằng nút <b>🏷 Đổi loại</b>, không cần nhập mã kỹ thuật.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Xem lại hồ sơ", callback_data="archive|preview"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]),
         )
     if action == "tags":
@@ -85927,6 +86132,18 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         return await safe_edit_query_message(query, internal_archive_preview_text(state), reply_markup=internal_archive_preview_keyboard())
     if action == "change_dept":
         return await safe_edit_query_message(query, "📁 <b>Chọn phòng ban mới</b>", reply_markup=internal_archive_menu_keyboard())
+    if action == "search_dept":
+        department = state.get("department")
+        if department not in INTERNAL_DOC_DEPARTMENTS:
+            return await safe_edit_query_message(query, internal_archive_menu_text(), reply_markup=internal_archive_menu_keyboard())
+        set_internal_archive_pending(uid, "awaiting_search_department", department=department)
+        return await safe_edit_query_message(
+            query,
+            f"🔍 <b>Tìm trong {html.escape(INTERNAL_DOC_DEPARTMENTS.get(department, department))}</b>\n\nNhập từ khóa cần tìm.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
     if action == "search":
         set_internal_archive_pending(uid, "awaiting_search")
         return await safe_edit_query_message(query, "🔍 <b>Tìm hồ sơ nội bộ</b>\n\nNhập từ khóa, ví dụ: PayOS, thuế tháng 6, hợp đồng, provider, khách hàng A.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
@@ -85934,9 +86151,10 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         item = get_internal_document(uid, int(parts[2]))
         if not item:
             return await query.answer("Không tìm thấy hồ sơ.", show_alert=True)
+        department = state.get("department") if state.get("department") in INTERNAL_DOC_DEPARTMENTS else ""
         return await safe_edit_query_message(query, internal_archive_document_text(item), reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📎 Gửi file", callback_data=f"archive|file|{item['id']}"), InlineKeyboardButton("🔍 Tìm lại", callback_data="archive|search")],
-            [InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            [InlineKeyboardButton("📎 Gửi file", callback_data=f"archive|file|{item['id']}"), InlineKeyboardButton("🔍 Tìm lại", callback_data="archive|search_dept" if department else "archive|search")],
+            [InlineKeyboardButton("⬅️ Phòng ban", callback_data="archive|back_department") if department else InlineKeyboardButton("⬅️ Hồ sơ nội bộ", callback_data="archive|root"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ]))
     if action == "file" and len(parts) > 2:
         item = get_internal_document(uid, int(parts[2]))
@@ -85954,7 +86172,10 @@ async def handle_internal_archive_pending_upload(update: Update, context: Contex
         return False
     if not is_admin_user(uid):
         clear_internal_archive_pending(uid)
-        await update.effective_message.reply_text("⛔ Tính năng Hồ sơ nội bộ chỉ dành cho admin.")
+        await update.effective_message.reply_text(
+            "⛔ Hồ sơ nội bộ chỉ dành cho admin/owner.\n"
+            "Nếu bạn cần gửi tài liệu cho TOAN AAS, vui lòng dùng mục Hỗ trợ hoặc gửi theo hướng dẫn của admin."
+        )
         return True
     if state.get("step") == "preview":
         await update.effective_message.reply_text("⚠️ Đang có một hồ sơ chờ xác nhận. Hãy lưu hoặc quay lại phòng ban trước khi gửi file khác.", reply_markup=internal_archive_preview_keyboard())
@@ -85976,7 +86197,7 @@ async def handle_internal_archive_pending_upload(update: Update, context: Contex
         department=department,
         file_info=info,
         title=title,
-        document_type=default_document_type(department),
+        document_type=str(state.get("document_type") or "general"),
         retention_policy=default_retention(department),
         confidentiality_level="internal",
         tags="",
@@ -85994,7 +86215,10 @@ async def handle_internal_archive_pending_text(update: Update, context: ContextT
         return False
     if not is_admin_user(uid):
         clear_internal_archive_pending(uid)
-        await update.effective_message.reply_text("⛔ Tính năng Hồ sơ nội bộ chỉ dành cho admin.")
+        await update.effective_message.reply_text(
+            "⛔ Hồ sơ nội bộ chỉ dành cho admin/owner.\n"
+            "Nếu bạn cần gửi tài liệu cho TOAN AAS, vui lòng dùng mục Hỗ trợ hoặc gửi theo hướng dẫn của admin."
+        )
         return True
     text = str(update.effective_message.text or "").strip()
     step = state.get("step")
@@ -86002,6 +86226,22 @@ async def handle_internal_archive_pending_text(update: Update, context: ContextT
         rows = search_internal_documents(uid, text)
         set_internal_archive_pending(uid, "search_results", search_keyword=text, search_result_ids=[item["id"] for item in rows])
         await update.effective_message.reply_text(internal_archive_search_results_text(rows, text), parse_mode="HTML", reply_markup=internal_archive_search_keyboard(rows))
+        return True
+    if step == "awaiting_search_department":
+        department = state.get("department") or ""
+        rows = search_internal_documents(uid, text, department=department)
+        set_internal_archive_pending(
+            uid,
+            "search_results",
+            department=department,
+            search_keyword=text,
+            search_result_ids=[item["id"] for item in rows],
+        )
+        await update.effective_message.reply_text(
+            internal_archive_search_results_text(rows, text, department),
+            parse_mode="HTML",
+            reply_markup=internal_archive_results_keyboard(rows, department, search=True),
+        )
         return True
     if step == "awaiting_tags":
         fields = {key: value for key, value in state.items() if key not in {"pending_action", "step", "created_at_ts"}}
@@ -86011,7 +86251,7 @@ async def handle_internal_archive_pending_text(update: Update, context: ContextT
         return True
     if step == "awaiting_metadata":
         values = [value.strip() for value in text.split("|", 4)]
-        fields = ["title", "document_type", "retention_policy", "confidentiality_level", "description"]
+        fields = ["title", "tags", "retention_policy", "confidentiality_level", "description"]
         updates = {field: values[index] for index, field in enumerate(fields) if index < len(values) and values[index]}
         if updates.get("retention_policy") and updates["retention_policy"] not in RETENTION_LABELS:
             await update.effective_message.reply_text("⚠️ Retention không hợp lệ. Dùng: " + ", ".join(RETENTION_LABELS))
@@ -86025,7 +86265,10 @@ async def handle_internal_archive_pending_text(update: Update, context: ContextT
 
 async def cmd_internal_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.effective_message.reply_text("⛔ Tính năng Hồ sơ nội bộ chỉ dành cho admin.")
+        return await update.effective_message.reply_text(
+            "⛔ Hồ sơ nội bộ chỉ dành cho admin/owner.\n"
+            "Nếu bạn cần gửi tài liệu cho TOAN AAS, vui lòng dùng mục Hỗ trợ hoặc gửi theo hướng dẫn của admin."
+        )
     clear_internal_archive_pending(update.effective_user.id)
     await update.effective_message.reply_text(internal_archive_menu_text(), parse_mode="HTML", reply_markup=internal_archive_menu_keyboard())
 

@@ -4531,11 +4531,42 @@ def test_operations_v1a_internal_archive_schema_flow_and_routing(monkeypatch):
     assert photo_source.index("handle_internal_archive_pending_upload") < photo_source.index("handle_doc_tool_pending_upload")
     assert document_source.index("handle_internal_archive_pending_upload") < document_source.index("handle_doc_tool_pending_upload")
     assert message_source.index("handle_internal_archive_pending_text") < message_source.index("handle_doc_tool_pending_text")
-    assert "Tính năng Hồ sơ nội bộ chỉ dành cho admin" in source_between(
+    assert "Hồ sơ nội bộ chỉ dành cho admin/owner" in source_between(
         source,
         "async def handle_internal_archive_callback",
         "async def handle_internal_archive_pending_upload",
     )
+    customer_dashboard = bot.internal_archive_department_text("customers")
+    assert "Dùng để lưu thông tin khách hàng" in customer_dashboard
+    assert "Hồ sơ khách hàng" in customer_dashboard
+    assert "Case hoàn Xu / refund" in customer_dashboard
+    assert "customer_profile" not in customer_dashboard
+    provider_dashboard = bot.internal_archive_department_text("provider_api")
+    assert "Tài liệu provider" in provider_dashboard
+    assert "Không lưu API key/token thật" in provider_dashboard
+    department_callbacks = [
+        button.callback_data
+        for row in bot.internal_archive_department_keyboard().inline_keyboard
+        for button in row
+    ]
+    assert department_callbacks == [
+        "archive|quick", "archive|recent",
+        "archive|types", "archive|search_dept",
+        "archive|help", "archive|root",
+        "menu|main",
+    ]
+    assert all(len(row) <= 2 for row in bot.internal_archive_department_keyboard().inline_keyboard)
+    type_labels = [
+        button.text
+        for row in bot.internal_archive_type_keyboard("customers").inline_keyboard
+        for button in row
+    ]
+    assert "Hồ sơ khách hàng" in type_labels
+    assert "Lead B2B / khách tiềm năng" in type_labels
+    assert "customer_profile" not in type_labels
+    assert bot.document_type_label("customer_request") == "Yêu cầu khách gửi"
+    assert bot.document_type_label("unknown_legacy_type") == "Hồ sơ khác"
+    assert "KH_TenKhach_NoiDung_YYYYMMDD" in bot.internal_archive_help_text("customers")
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -4563,15 +4594,112 @@ def test_operations_v1a_internal_archive_schema_flow_and_routing(monkeypatch):
         assert len(rows) == 1
         assert rows[0]["file_name"] == "tax-june.csv"
         assert rows[0]["file_id"] == "telegram-file-id"
-        assert bot.internal_archive_storage_used_bytes("archive-admin") == 2048
+        preview = bot.internal_archive_preview_text(state)
+        assert "File chuẩn bị thuế" in preview
+        assert "tax_prep_file" not in preview
+        assert "10 năm" in preview
+        result_text = bot.internal_archive_search_results_text(rows, "2026-06")
+        assert "File chuẩn bị thuế" in result_text
+        assert "tax_prep_file" not in result_text
+        recent_rows = bot.recent_internal_documents("archive-admin", "tax_invoice")
+        assert len(recent_rows) == 1
+        assert "File chuẩn bị thuế" in bot.internal_archive_recent_text(recent_rows, "tax_invoice")
+        assert bot.recent_internal_documents("archive-admin", "customers") == []
+        assert "Chưa có hồ sơ nào trong nhóm này" in bot.internal_archive_recent_text([], "customers")
+
+        customer_state = dict(state)
+        customer_state.update({
+            "department": "customers",
+            "title": "Khách tháng 6",
+            "document_type": "customer_request",
+            "file_info": {
+                "file_id": "telegram-file-id-2",
+                "file_name": "customer-june.txt",
+                "mime_type": "text/plain",
+                "size_bytes": 1024,
+            },
+            "tags": "customer,2026-06",
+        })
+        bot.save_internal_document("archive-admin", customer_state)
+        scoped_rows = bot.search_internal_documents("archive-admin", "2026-06", department="tax_invoice")
+        assert len(scoped_rows) == 1
+        assert scoped_rows[0]["department"] == "tax_invoice"
+        assert "Khách tháng 6" not in bot.internal_archive_search_results_text(scoped_rows, "2026-06", "tax_invoice")
+        assert bot.internal_archive_storage_used_bytes("archive-admin") == 3072
         item = bot.get_internal_document("archive-admin", document_id)
         assert item["department"] == "tax_invoice"
         assert item["retention_policy"] == "10_years"
+        assert "tax_prep_file" not in bot.internal_archive_document_text(item)
+        assert "File chuẩn bị thuế" in bot.internal_archive_document_text(item)
         bot.init_db()
         assert bot.get_internal_document("archive-admin", document_id)["title"] == "Thuế tháng 6"
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
+
+
+def test_internal_archive_department_callbacks_keep_department_state(monkeypatch):
+    captured = []
+    user_id = 778899
+
+    class FakeQuery:
+        def __init__(self, data):
+            self.data = data
+            self.from_user = SimpleNamespace(id=user_id)
+            self.message = SimpleNamespace()
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+    async def fake_edit(_query, text, **kwargs):
+        captured.append((text, kwargs.get("reply_markup")))
+
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    monkeypatch.setattr(bot, "safe_edit_query_message", fake_edit)
+    bot.clear_internal_archive_pending(user_id)
+    context = SimpleNamespace()
+
+    asyncio.run(bot.handle_internal_archive_callback(
+        SimpleNamespace(callback_query=FakeQuery("archive|dept|customers")),
+        context,
+    ))
+    state = bot.get_internal_archive_pending(user_id)
+    assert state["step"] == "department_dashboard"
+    assert state["department"] == "customers"
+    assert "Hồ sơ khách hàng" in captured[-1][0]
+
+    asyncio.run(bot.handle_internal_archive_callback(
+        SimpleNamespace(callback_query=FakeQuery("archive|types")),
+        context,
+    ))
+    assert bot.get_internal_archive_pending(user_id)["step"] == "choosing_type"
+
+    asyncio.run(bot.handle_internal_archive_callback(
+        SimpleNamespace(callback_query=FakeQuery("archive|type|refund_case")),
+        context,
+    ))
+    state = bot.get_internal_archive_pending(user_id)
+    assert state["step"] == "awaiting_file"
+    assert state["department"] == "customers"
+    assert state["document_type"] == "refund_case"
+    assert "Case hoàn Xu / refund" in captured[-1][0]
+
+    asyncio.run(bot.handle_internal_archive_callback(
+        SimpleNamespace(callback_query=FakeQuery("archive|back_department")),
+        context,
+    ))
+    state = bot.get_internal_archive_pending(user_id)
+    assert state["step"] == "department_dashboard"
+    assert state["department"] == "customers"
+
+    asyncio.run(bot.handle_internal_archive_callback(
+        SimpleNamespace(callback_query=FakeQuery("archive|quick")),
+        context,
+    ))
+    state = bot.get_internal_archive_pending(user_id)
+    assert state["step"] == "awaiting_file"
+    assert state["document_type"] == "general"
+    bot.clear_internal_archive_pending(user_id)
 
 
 def test_launch_bonus_once_per_user_package(monkeypatch):
