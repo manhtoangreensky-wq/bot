@@ -34,6 +34,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -799,6 +800,26 @@ MANUAL_BANK_NAME      = _env("MANUAL_BANK_NAME", "ACB")
 MANUAL_BANK_CODE      = _env("MANUAL_BANK_CODE", "ACB")
 MANUAL_BANK_ACCOUNT   = _env("MANUAL_BANK_ACCOUNT", "8899397968")
 MANUAL_BANK_OWNER     = _env("MANUAL_BANK_OWNER", "NGUYEN MANH TOAN")
+PAYMENT_ASSET_DIR = _env("PAYMENT_ASSET_DIR", "assets/payments")
+MANUAL_BANK_ENABLED = env_flag("MANUAL_BANK_ENABLED", "true")
+MANUAL_ZALOPAY_PERSONAL_ENABLED = env_flag("MANUAL_ZALOPAY_PERSONAL_ENABLED", "true")
+MANUAL_ZALOPAY_MERCHANT_ENABLED = env_flag("MANUAL_ZALOPAY_MERCHANT_ENABLED", "false")
+MANUAL_USDT_TRC20_ENABLED = env_flag("MANUAL_USDT_TRC20_ENABLED", "false")
+MANUAL_USDT_TRC20_ADMIN_ONLY = env_flag("MANUAL_USDT_TRC20_ADMIN_ONLY", "true")
+MANUAL_BANK_QR_PATH = _env("MANUAL_BANK_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "acb_vietqr_manual.jpg"))
+MANUAL_ZALOPAY_PERSONAL_QR_PATH = _env("MANUAL_ZALOPAY_PERSONAL_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "zalopay_personal_qr.jpg"))
+MANUAL_ZALOPAY_MERCHANT_QR_PATH = _env("MANUAL_ZALOPAY_MERCHANT_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "zalopay_merchant_qr.jpg"))
+MANUAL_USDT_TRC20_QR_PATH = _env("MANUAL_USDT_TRC20_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "binance_usdt_trc20_qr.jpg"))
+MANUAL_USDT_TRC20_ADDRESS = _env("MANUAL_USDT_TRC20_ADDRESS", "TUqyVeoRhBtFVJmQzaKkqrTVRa1ULNj6o5")
+PAYOS_ALERT_COOLDOWN_MINUTES = max(1, env_int("PAYOS_ALERT_COOLDOWN_MINUTES", 60))
+PAYOS_REGISTRATION_EXPIRES_AT = _env("PAYOS_REGISTRATION_EXPIRES_AT")
+PAYOS_EXPIRY_ALERT_ENABLED = env_flag("PAYOS_EXPIRY_ALERT_ENABLED", "true")
+PAYOS_EXPIRY_REMINDER_DAYS = tuple(
+    sorted(
+        {int(value.strip()) for value in _env("PAYOS_EXPIRY_REMINDER_DAYS", "45,30,15,7,3,1").split(",") if value.strip().isdigit()},
+        reverse=True,
+    )
+)
 
 # ─── DATABASE ─────────────────────────────────────────────────────────────────
 DATA_PERSISTENCE_MODE = (_env("DATA_PERSISTENCE_MODE", "sqlite") or "sqlite").strip().lower()
@@ -3219,6 +3240,13 @@ def init_db():
         ("order_code", "TEXT"),
         ("amount", "INTEGER DEFAULT 0"),
         ("xu", "INTEGER DEFAULT 0"),
+        ("method", "TEXT DEFAULT 'bank_acb'"),
+        ("file_unique_id", "TEXT DEFAULT ''"),
+        ("tx_hash", "TEXT DEFAULT ''"),
+        ("admin_note", "TEXT DEFAULT ''"),
+        ("approved_by", "TEXT DEFAULT ''"),
+        ("approved_at", "DATETIME"),
+        ("updated_at", "DATETIME"),
     ]:
         try:
             c.execute(f"ALTER TABLE pending_deposits ADD COLUMN {col} {col_type}")
@@ -5233,9 +5261,8 @@ def resolve_payment_package_arg(raw_arg: str | None, default_key: str = "50k") -
     return None
 
 def payos_checkout_unavailable_text(pkg_key: str, amount: int, order_code: int, reason: str = "") -> str:
-    reason_line = f"\n\nLý do kỹ thuật: <code>{html.escape(str(reason)[:180])}</code>" if reason else ""
     return (
-        "⚠️ <b>PayOS QR động hiện chưa tạo được checkout URL.</b>\n\n"
+        "⚠️ <b>PayOS QR động đang tạm thời không tạo được.</b>\n\n"
         f"• Mệnh giá: <code>{html.escape(str(pkg_key))}</code>\n"
         f"• Số tiền: <b>{int(amount):,}đ</b>\n"
         f"• Mã đơn thử: <code>{order_code}</code>\n\n"
@@ -5244,7 +5271,6 @@ def payos_checkout_unavailable_text(pkg_key: str, amount: int, order_code: int, 
         "Lưu ý an toàn:\n"
         "• Xu chỉ được cộng tự động khi PayOS xác nhận thanh toán thành công.\n"
         "• Nếu dùng bill thủ công, admin chỉ duyệt sau khi đối soát tiền thật đã vào tài khoản."
-        f"{reason_line}"
     )
 
 def payos_unavailable_keyboard(pkg_key: str, uid: int) -> InlineKeyboardMarkup:
@@ -5253,6 +5279,109 @@ def payos_unavailable_keyboard(pkg_key: str, uid: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data(pkg_key, uid))],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main_topup")],
     ])
+
+PAYOS_FAILURE_EVENTS: list[dict] = []
+PAYOS_LAST_ALERT_AT = 0.0
+PAYOS_ALERT_MUTED_UNTIL = 0.0
+
+def payos_alert_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💵 Mở nạp thủ công", callback_data="payosalert|manual"), InlineKeyboardButton("🧪 Test PayOS", callback_data="payosalert|test")],
+        [InlineKeyboardButton("🔕 Tắt cảnh báo 1 giờ", callback_data="payosalert|mute")],
+    ])
+
+def record_payos_failure(reason: str, user_id="", now_ts: float | None = None) -> dict:
+    global PAYOS_FAILURE_EVENTS
+    timestamp = float(now_ts if now_ts is not None else time.time())
+    cutoff = timestamp - (10 * 60)
+    PAYOS_FAILURE_EVENTS = [item for item in PAYOS_FAILURE_EVENTS if float(item.get("timestamp") or 0) >= cutoff]
+    event = {
+        "timestamp": timestamp,
+        "reason": sanitize_log_text(str(reason or "PayOS unavailable"))[:240],
+        "user_id": str(user_id or ""),
+    }
+    PAYOS_FAILURE_EVENTS.append(event)
+    return {"count": len(PAYOS_FAILURE_EVENTS), "latest": event}
+
+async def record_payos_failure_and_maybe_alert(context, reason: str, user_id="", now_ts: float | None = None) -> bool:
+    global PAYOS_LAST_ALERT_AT
+    payload = record_payos_failure(reason, user_id=user_id, now_ts=now_ts)
+    timestamp = float(now_ts if now_ts is not None else time.time())
+    cooldown_seconds = PAYOS_ALERT_COOLDOWN_MINUTES * 60
+    if payload["count"] < 3 or timestamp < PAYOS_ALERT_MUTED_UNTIL or (PAYOS_LAST_ALERT_AT and timestamp - PAYOS_LAST_ALERT_AT < cooldown_seconds):
+        return False
+    latest = payload["latest"]
+    text = (
+        "🚨 <b>Cảnh báo PayOS</b>\n\n"
+        "Tình trạng: PayOS QR tạo lỗi liên tiếp.\n"
+        f"Số lần lỗi trong 10 phút: <b>{payload['count']}</b>\n"
+        f"Lỗi gần nhất: <code>{html.escape(latest['reason'])}</code>\n"
+        f"Thời gian: <code>{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</code>\n"
+        f"User bị ảnh hưởng: <code>{html.escape(latest['user_id'] or '-')}</code>\n\n"
+        "Gợi ý: kiểm tra bộ ENV PayOS, trạng thái đăng ký và dùng nạp thủ công trong thời gian gián đoạn."
+    )
+    sent = False
+    for admin_id in owner_and_admin_ids():
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML", reply_markup=payos_alert_keyboard())
+            sent = True
+        except Exception as exc:
+            logger.warning("PayOS alert send skipped: %s", type(exc).__name__)
+    if sent:
+        PAYOS_LAST_ALERT_AT = timestamp
+    return sent
+
+def payos_expiry_days_remaining(today=None) -> int | None:
+    if not PAYOS_REGISTRATION_EXPIRES_AT:
+        return None
+    try:
+        expiry = datetime.strptime(PAYOS_REGISTRATION_EXPIRES_AT, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    current = today or datetime.now().date()
+    return (expiry - current).days
+
+def payos_expiry_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧪 Test PayOS", callback_data="payosalert|test"), InlineKeyboardButton("💵 Mở nạp thủ công", callback_data="payosalert|manual")],
+        [InlineKeyboardButton("✅ Đã gia hạn", callback_data="payosalert|renewed"), InlineKeyboardButton("🔕 Nhắc lại sau", callback_data="payosalert|remind_later")],
+    ])
+
+async def maybe_send_payos_expiry_reminder(bot_client, today=None) -> bool:
+    if not PAYOS_EXPIRY_ALERT_ENABLED:
+        return False
+    days = payos_expiry_days_remaining(today=today)
+    if days is None or days not in PAYOS_EXPIRY_REMINDER_DAYS:
+        return False
+    reminder_key = f"{PAYOS_REGISTRATION_EXPIRES_AT}:{days}"
+    if get_system_setting("payos_expiry_last_reminder", "") == reminder_key:
+        return False
+    text = (
+        "⏰ <b>Nhắc gia hạn PayOS</b>\n\n"
+        f"PayOS của TOAN AAS dự kiến hết hạn vào: <code>{html.escape(PAYOS_REGISTRATION_EXPIRES_AT)}</code>\n"
+        f"Còn khoảng: <b>{days} ngày</b>\n\n"
+        "Bạn nên kiểm tra/gia hạn để tránh QR động bị gián đoạn."
+    )
+    sent = False
+    for admin_id in owner_and_admin_ids():
+        try:
+            await bot_client.send_message(chat_id=admin_id, text=text, parse_mode="HTML", reply_markup=payos_expiry_keyboard())
+            sent = True
+        except Exception as exc:
+            logger.warning("PayOS expiry reminder skipped: %s", type(exc).__name__)
+    if sent:
+        set_system_setting("payos_expiry_last_reminder", reminder_key, note="PayOS expiry reminder sent", updated_by="system")
+    return sent
+
+async def payos_expiry_monitor_loop(bot_client):
+    while True:
+        try:
+            await maybe_send_payos_expiry_reminder(bot_client)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("PayOS expiry monitor skipped: %s", type(exc).__name__)
+        await asyncio.sleep(24 * 60 * 60)
 
 def payos_package_callback_data(pkg_key: str, uid) -> str:
     return f"payos_pkg|{pkg_key}|{uid}"
@@ -5480,6 +5609,150 @@ def manual_custom_payment_text(uid: int, reason: str = "") -> str:
         "TOAN AAS chỉ cộng Xu sau khi admin xác minh tiền thật đã vào tài khoản.\n"
         "⚠️ TOAN AAS không cộng Xu chỉ dựa vào ảnh bill. Admin chỉ duyệt sau khi tiền thật đã vào tài khoản."
     )
+
+MANUAL_PAYMENT_METHODS = {
+    "bank_acb": "🏦 Ngân hàng ACB/VietQR",
+    "zalopay_personal": "💚 ZaloPay cá nhân",
+    "zalopay_merchant": "🛍 ZaloPay cửa hàng",
+    "usdt_trc20": "🪙 USDT TRC20",
+}
+
+def manual_payment_menu_text() -> str:
+    return (
+        "💵 <b>Nạp thủ công TOAN AAS</b>\n\n"
+        "Bạn muốn nạp theo phương thức nào?\n\n"
+        "TOAN AAS chỉ cộng Xu sau khi admin đối soát tiền thật. Ảnh bill không tự động xác nhận giao dịch."
+    )
+
+def manual_payment_menu_keyboard(uid) -> InlineKeyboardMarkup:
+    methods = []
+    if MANUAL_BANK_ENABLED:
+        methods.append("bank_acb")
+    if MANUAL_ZALOPAY_PERSONAL_ENABLED:
+        methods.append("zalopay_personal")
+    if MANUAL_ZALOPAY_MERCHANT_ENABLED:
+        methods.append("zalopay_merchant")
+    if MANUAL_USDT_TRC20_ENABLED and (not MANUAL_USDT_TRC20_ADMIN_ONLY or is_admin_user(uid)):
+        methods.append("usdt_trc20")
+    rows = []
+    for index in range(0, len(methods), 2):
+        rows.append([
+            InlineKeyboardButton(MANUAL_PAYMENT_METHODS[method], callback_data=f"manual|method|{method}|{uid}")
+            for method in methods[index:index + 2]
+        ])
+    rows.extend([
+        [InlineKeyboardButton("📂 Lịch sử nạp thủ công", callback_data=f"manual|history|{uid}"), InlineKeyboardButton("⬅️ Quay lại Nạp Xu", callback_data="menu|main_topup")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+def manual_method_enabled(method: str, uid) -> bool:
+    if method == "bank_acb":
+        return bool(MANUAL_BANK_ENABLED)
+    if method == "zalopay_personal":
+        return bool(MANUAL_ZALOPAY_PERSONAL_ENABLED)
+    if method == "zalopay_merchant":
+        return bool(MANUAL_ZALOPAY_MERCHANT_ENABLED)
+    if method == "usdt_trc20":
+        return bool(MANUAL_USDT_TRC20_ENABLED and (not MANUAL_USDT_TRC20_ADMIN_ONLY or is_admin_user(uid)))
+    return False
+
+def manual_method_asset_path(method: str) -> str:
+    configured = {
+        "bank_acb": MANUAL_BANK_QR_PATH,
+        "zalopay_personal": MANUAL_ZALOPAY_PERSONAL_QR_PATH,
+        "zalopay_merchant": MANUAL_ZALOPAY_MERCHANT_QR_PATH,
+        "usdt_trc20": MANUAL_USDT_TRC20_QR_PATH,
+    }.get(method, "")
+    if not configured:
+        return ""
+    path = Path(configured)
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parent / path
+    return str(path)
+
+def manual_payment_method_text(uid, method: str, state: dict | None = None) -> str:
+    state = state or {}
+    amount = int(state.get("amount") or 0)
+    xu = int(state.get("xu") or 0)
+    pkg_key = str(state.get("pkg_key") or "").strip()
+    transfer_content = f"AAS {uid} MANUAL"
+    selected = f"{pkg_key} — {amount:,}đ" if amount else "chưa chọn"
+    expected_xu = f"{xu} Xu" if xu else "chờ admin xác nhận theo số tiền thật"
+    common = (
+        f"\n\n👤 ID của bạn: <code>{uid}</code>\n"
+        f"📦 Mệnh giá đã chọn: <b>{html.escape(selected)}</b>\n"
+        f"💰 Xu dự kiến: <b>{html.escape(expected_xu)}</b>\n"
+        f"🧾 Nội dung: <code>{transfer_content}</code>\n\n"
+        "Các bước:\n1. Chuyển đúng nội dung.\n2. Chụp bill giao dịch.\n"
+        "3. Bấm gửi bill hoặc gửi ảnh vào bot trong vòng 10 phút.\n4. Chờ admin kiểm tra sao kê thật và duyệt.\n\n"
+        "⚠️ <b>Lưu ý chống fake bill:</b> TOAN AAS chỉ cộng Xu sau khi admin xác minh tiền thật đã vào tài khoản. "
+        "Ảnh bill không đồng nghĩa giao dịch đã thành công."
+    )
+    if method == "bank_acb":
+        return (
+            "🏦 <b>Nạp thủ công qua ngân hàng</b>\n\n"
+            f"• Ngân hàng: <b>{html.escape(MANUAL_BANK_NAME)}</b>\n"
+            f"• Số tài khoản: <code>{html.escape(MANUAL_BANK_ACCOUNT)}</code>\n"
+            f"• Chủ tài khoản: <b>{html.escape(MANUAL_BANK_OWNER)}</b>"
+            + common
+        )
+    if method == "zalopay_personal":
+        return "💚 <b>Nạp thủ công qua ZaloPay</b>\n\nQuét QR ZaloPay cá nhân và chuyển đúng nội dung." + common
+    if method == "zalopay_merchant":
+        return (
+            "🛍 <b>Nạp qua ZaloPay cửa hàng</b>\n\n"
+            "Phương thức này dùng để test/đối soát thủ công và chỉ mở khi admin xác nhận đã test ổn."
+            + common
+        )
+    return (
+        "🪙 <b>Nạp thủ công bằng USDT TRC20</b>\n\n"
+        "• Mạng: Tron (TRC20)\n"
+        f"• Địa chỉ ví: <code>{html.escape(MANUAL_USDT_TRC20_ADDRESS)}</code>\n"
+        "Gửi thêm TXID nếu sàn hỗ trợ. Phương thức này chỉ mở khi admin bật và xác nhận chính sách nội bộ."
+        + common
+    )
+
+def manual_method_keyboard(uid) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📷 Tôi đã chuyển khoản / gửi bill", callback_data=f"manual|await_bill|{uid}"), InlineKeyboardButton("📂 Lịch sử nạp thủ công", callback_data=f"manual|history|{uid}")],
+        [InlineKeyboardButton("⬅️ Phương thức nạp", callback_data=f"manual|menu|{uid}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def manual_topup_history_payload(uid) -> tuple[str, InlineKeyboardMarkup]:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            "SELECT id,method,amount,xu,status,submitted_at FROM pending_deposits WHERE user_id=? ORDER BY id DESC LIMIT 10",
+            (str(uid),),
+        ).fetchall()
+    finally:
+        conn.close()
+    lines = ["📂 <b>Lịch sử nạp thủ công</b>", ""]
+    if not rows:
+        lines.append("Bạn chưa có yêu cầu nạp thủ công nào.")
+    else:
+        for deposit_id, method, amount, xu, status, submitted_at in rows:
+            lines.append(
+                f"• #{int(deposit_id)} — {html.escape(MANUAL_PAYMENT_METHODS.get(method or 'bank_acb', method or 'bank_acb'))} — "
+                f"{int(amount or 0):,}đ / {int(xu or 0)} Xu — <code>{html.escape(str(status or ''))}</code> — {html.escape(str(submitted_at or '')[:16])}"
+            )
+    return "\n".join(lines), InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Nạp thủ công", callback_data=f"manual|menu|{uid}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+async def send_manual_method_qr(context, chat_id, uid, method: str) -> bool:
+    asset_path = manual_method_asset_path(method)
+    if asset_path and os.path.isfile(asset_path):
+        with open(asset_path, "rb") as qr_file:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=qr_file,
+                caption=f"{MANUAL_PAYMENT_METHODS.get(method, method)} — QR nạp thủ công.",
+            )
+        return True
+    await alert_admin(context, "Manual payment asset", f"missing manual payment QR asset: method={method}; path={asset_path or '-'}")
+    return False
 
 def manual_qr_url(uid: int, amount: int, order_code: int) -> str:
     params = {
@@ -20412,7 +20685,7 @@ def payment_money_summary_data(owner_id, days=30):
         {"status": status, "count": int(count or 0), "amount": int(amount or 0)}
         for status, count, amount in c.fetchall()
     ]
-    c.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM pending_deposits WHERE status='pending'")
+    c.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM pending_deposits WHERE status IN ('pending','pending_admin_review')")
     pending_manual_count, pending_manual_amount = c.fetchone()
     c.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM pending_deposits WHERE status='approved' AND submitted_at>=?", (since,))
     approved_manual_count, approved_manual_amount = c.fetchone()
@@ -26336,6 +26609,7 @@ class AgentDownloader:
 
 # ─── STATE ───────────────────────────────────────────────────────────────────
 USER_BILL_STATE: dict = {}
+MANUAL_APPROVAL_STATE: dict = {}
 USER_PENDING: dict = {}
 GENERATION_PENDING_JOBS: dict[tuple, dict] = {}
 SHOPAIKEY_PENDING_CONFIRMATIONS: dict[str, dict] = {}
@@ -26348,6 +26622,7 @@ FRAME_VIDEO_JOBS: dict[str, dict] = {}
 FRAME_VIDEO_JOB_SEQ = 0
 FRAME_VIDEO_LAST_ERROR = ""
 MANUAL_BILL_STATE_TTL_SECONDS = 10 * 60
+MANUAL_APPROVAL_STATE_TTL_SECONDS = 10 * 60
 LAST_USER_FILE_TTL_SECONDS = 10 * 60
 GENERATION_PENDING_TTL_SECONDS = 10 * 60
 SHOPAIKEY_CONFIRMATION_TTL_SECONDS = 10 * 60
@@ -26486,12 +26761,14 @@ def build_trend_prompt_suggestions(trend: dict) -> list[str]:
         "Nếu ảnh này ổn, bạn có thể dùng nó để tạo video. Gợi ý: copy prompt video ở trên.",
     ]
 
-def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key=""):
+def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key="", method="bank_acb"):
     USER_BILL_STATE[uid] = {
         "order_code": str(order_code or ""),
         "amount": int(amount or 0),
         "xu": int(xu or 0),
         "pkg_key": str(pkg_key or ""),
+        "method": str(method or "bank_acb"),
+        "transfer_content": f"AAS {uid} MANUAL",
         "source": "manual_bill_flow",
         "expires_at": time.time() + MANUAL_BILL_STATE_TTL_SECONDS,
     }
@@ -26511,6 +26788,24 @@ def get_active_manual_bill_state(uid):
         return None
     if float(state.get("expires_at") or 0) < time.time():
         USER_BILL_STATE.pop(uid, None)
+        return None
+    return state
+
+def set_manual_approval_state(admin_id, deposit_id: int, target_id, step="await_amount", amount=0):
+    MANUAL_APPROVAL_STATE[str(admin_id)] = {
+        "deposit_id": int(deposit_id),
+        "target_id": str(target_id),
+        "step": str(step),
+        "amount": int(amount or 0),
+        "expires_at": time.time() + MANUAL_APPROVAL_STATE_TTL_SECONDS,
+    }
+
+def get_manual_approval_state(admin_id):
+    state = MANUAL_APPROVAL_STATE.get(str(admin_id))
+    if not state:
+        return None
+    if float(state.get("expires_at") or 0) < time.time():
+        MANUAL_APPROVAL_STATE.pop(str(admin_id), None)
         return None
     return state
 
@@ -27653,6 +27948,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
     if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        await record_payos_failure_and_maybe_alert(context, "PayOS config missing", user_id=uid)
         await query.edit_message_text(
             payos_checkout_unavailable_text(
                 pkg_key,
@@ -27733,15 +28029,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 raw_preview[:500],
             )
             desc = res_data.get("desc") or res_data.get("message") or raw_preview or "Lỗi không rõ"
-            await alert_admin(
-                context,
-                "PayOS tạo hóa đơn",
-                (
-                    f"PayOS create payment link FAIL\n"
-                    f"{format_payos_create_debug(getattr(res, 'status_code', ''), res_data, raw_preview, order_code, amount, payos_body['description'], payos_body['cancelUrl'], payos_body['returnUrl'], raw_str)}\n\n"
-                    "Signature order must be amount,cancelUrl,description,orderCode,returnUrl."
-                )
-            )
+            await record_payos_failure_and_maybe_alert(context, desc, user_id=uid)
             await query.edit_message_text(
                 payos_checkout_unavailable_text(pkg_key, amount, order_code, desc),
                 parse_mode="HTML",
@@ -27750,14 +28038,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
         logger.error(f"PayOS Exception: {e}")
-        await alert_admin(
-            context,
-            "PayOS API",
-            (
-                f"Exception order={order_code}: {str(e)}\n"
-                f"{format_payos_create_debug(getattr(res, 'status_code', '') if res else '', res_data, raw_preview, order_code, amount, payos_body['description'], payos_body['cancelUrl'], payos_body['returnUrl'], raw_str)}"
-            )
-        )
+        await record_payos_failure_and_maybe_alert(context, f"{type(e).__name__}: {e}", user_id=uid)
         await query.edit_message_text(
             payos_checkout_unavailable_text(pkg_key, amount, order_code, str(e)),
             parse_mode="HTML",
@@ -27768,15 +28049,95 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
     query = update.callback_query
     await query.answer()
     parts = (query.data or "").split("|")
-    if len(parts) not in {3, 4}:
+    if len(parts) < 2:
         return
-    _, action, pkg_key, *rest = parts
-    if action != "start":
+    action = parts[1]
+    if action in {"approve", "reject", "confirm"}:
+        if not is_admin_user(query.from_user.id):
+            return await query.answer("Bạn không có quyền duyệt bill.", show_alert=True)
+        if action == "approve" and len(parts) == 3 and str(parts[2]).isdigit():
+            deposit_id = int(parts[2])
+            conn = db_connect()
+            try:
+                row = conn.execute(
+                    "SELECT user_id,xu FROM pending_deposits WHERE id=? AND status IN ('pending','pending_admin_review') LIMIT 1",
+                    (deposit_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if not row:
+                return await query.message.reply_text("⚠️ Bill này không còn ở trạng thái chờ duyệt.")
+            set_manual_approval_state(query.from_user.id, deposit_id, row[0], amount=int(row[1] or 0))
+            return await query.message.reply_text(
+                f"✅ Bill #{deposit_id} đang chờ xác nhận. Hãy nhập số Xu cần cộng trong tin nhắn tiếp theo.\n"
+                "Bot chưa cộng Xu ở bước này."
+            )
+        if action == "reject" and len(parts) == 3 and str(parts[2]).isdigit():
+            proxy_update = SimpleNamespace(effective_user=query.from_user, message=query.message)
+            old_args = list(context.args or [])
+            context.args = [parts[2]]
+            try:
+                return await cmd_tuchoi(proxy_update, context)
+            finally:
+                context.args = old_args
+        if action == "confirm" and len(parts) == 4 and str(parts[2]).isdigit() and str(parts[3]).isdigit():
+            state = get_manual_approval_state(query.from_user.id)
+            if not state or int(state.get("deposit_id") or 0) != int(parts[2]) or int(state.get("amount") or 0) != int(parts[3]):
+                return await query.answer("Xác nhận đã hết hạn hoặc không khớp.", show_alert=True)
+            MANUAL_APPROVAL_STATE.pop(str(query.from_user.id), None)
+            proxy_update = SimpleNamespace(effective_user=query.from_user, message=query.message)
+            old_args = list(context.args or [])
+            context.args = [parts[2], parts[3]]
+            try:
+                return await cmd_duyet(proxy_update, context)
+            finally:
+                context.args = old_args
         return
-    uid = int(rest[0]) if rest and str(rest[0]).isdigit() else int(query.from_user.id)
-    if query.from_user.id != uid:
+    uid_token = parts[-1] if len(parts) >= 3 else str(query.from_user.id)
+    uid = int(uid_token) if str(uid_token).isdigit() else int(query.from_user.id)
+    if query.from_user.id != uid and not (action == "history" and is_admin_user(query.from_user.id)):
         await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
         return
+    if action == "menu":
+        state = get_active_manual_bill_state(uid)
+        if not state:
+            set_manual_bill_state(uid, order_code="MANUAL")
+        return await query.edit_message_text(manual_payment_menu_text(), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
+    if action == "history":
+        text, keyboard = manual_topup_history_payload(uid)
+        return await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+    if action == "method" and len(parts) == 4:
+        method = parts[2]
+        if not manual_method_enabled(method, uid):
+            return await query.edit_message_text(
+                "⚠️ Phương thức này đang được admin kiểm tra, hiện chưa mở công khai.\n\nBạn có thể dùng PayOS QR động hoặc nạp thủ công qua ngân hàng.",
+                reply_markup=manual_payment_menu_keyboard(uid),
+            )
+        state = get_active_manual_bill_state(uid) or {}
+        set_manual_bill_state(
+            uid,
+            order_code=state.get("order_code") or "MANUAL",
+            amount=state.get("amount") or 0,
+            xu=state.get("xu") or 0,
+            pkg_key=state.get("pkg_key") or "",
+            method=method,
+        )
+        await query.edit_message_text(manual_payment_method_text(uid, method, get_active_manual_bill_state(uid)), parse_mode="HTML", reply_markup=manual_method_keyboard(uid))
+        await send_manual_method_qr(context, query.message.chat_id, uid, method)
+        return
+    if action == "await_bill":
+        state = get_active_manual_bill_state(uid)
+        if not state:
+            set_manual_bill_state(uid, order_code="MANUAL")
+        return await query.edit_message_text(
+            "📷 <b>Gửi bill nạp thủ công</b>\n\nHãy gửi một ảnh bill giao dịch trong tin nhắn tiếp theo. "
+            "TOAN AAS chỉ chuyển bill sang chờ admin đối soát, chưa cộng Xu tự động.",
+            parse_mode="HTML",
+            reply_markup=manual_method_keyboard(uid),
+        )
+    if action != "start":
+        return
+    pkg_key = parts[2] if len(parts) >= 3 else "manual_custom"
     if pkg_key in PAYMENT_PACKAGES:
         pkg = PAYMENT_PACKAGES[pkg_key]
         amount = int(pkg["amount"])
@@ -27796,25 +28157,41 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             package_amount_vnd=amount,
         )
         set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=pkg_key)
-        await query.edit_message_text(
-            manual_payment_text(uid, amount, xu, order_code, "Bạn đã chọn nạp thủ công."),
-            parse_mode="HTML",
-        )
-        try:
-            await context.bot.send_photo(
-                chat_id=query.message.chat_id,
-                photo=manual_qr_url(uid, amount, order_code),
-                caption="🏦 QR thủ công theo đúng số tiền và nội dung chuyển khoản.",
-                parse_mode="HTML",
-            )
-        except Exception as e:
-            logger.error(f"Manual QR callback send error: {e}")
-        return
+        return await query.edit_message_text(manual_payment_menu_text(), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
     set_manual_bill_state(uid, order_code="MANUAL")
     return await query.edit_message_text(
-        manual_custom_payment_text(uid, "Bạn đã chọn nạp thủ công."),
+        manual_payment_menu_text(),
         parse_mode="HTML",
+        reply_markup=manual_payment_menu_keyboard(uid),
     )
+
+async def handle_payos_alert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global PAYOS_ALERT_MUTED_UNTIL
+    query = update.callback_query
+    await query.answer()
+    if not is_admin_user(query.from_user.id):
+        return await query.answer("Lệnh này chỉ dành cho admin.", show_alert=True)
+    action = (query.data or "").split("|", 1)[-1]
+    if action == "manual":
+        set_manual_bill_state(query.from_user.id, order_code="MANUAL")
+        return await query.edit_message_text(manual_payment_menu_text(), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(query.from_user.id))
+    if action == "test":
+        return await query.edit_message_text(
+            "🧪 Dùng <code>/payos_debug_create 10000</code> để kiểm tra tạo checkout hoặc "
+            "<code>/payos_env_check</code> để kiểm tra cấu hình đã mask. Các lệnh test không tự cộng Xu.",
+            parse_mode="HTML",
+        )
+    if action == "mute":
+        PAYOS_ALERT_MUTED_UNTIL = time.time() + 60 * 60
+        return await query.edit_message_text("🔕 Đã tắt cảnh báo lỗi PayOS trong 1 giờ. Luồng thanh toán không bị thay đổi.")
+    if action == "renewed":
+        return await query.edit_message_text(
+            "✅ Hãy cập nhật ENV <code>PAYOS_REGISTRATION_EXPIRES_AT=YYYY-MM-DD</code> bằng ngày hết hạn mới rồi redeploy. "
+            "Bot không tự sửa ENV hoặc trạng thái PayOS.",
+            parse_mode="HTML",
+        )
+    if action == "remind_later":
+        return await query.edit_message_text("🔕 Đã đóng nhắc lần này. Bot chỉ nhắc lại ở mốc ngày cấu hình tiếp theo.")
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 def is_admin_user(user_id) -> bool:
@@ -54614,7 +54991,7 @@ def admin_report_payload(start_at: str, end_at: str, label: str) -> dict:
                 "total_amount": payos_amount + manual_amount,
                 "total_count": payos_count + manual_count,
                 "xu_sold": payos_xu + manual_xu,
-                "pending_deposits": int(sql_scalar(conn, "SELECT COUNT(*) FROM pending_deposits WHERE status='pending'", default=0) or 0),
+                "pending_deposits": int(sql_scalar(conn, "SELECT COUNT(*) FROM pending_deposits WHERE status IN ('pending','pending_admin_review')", default=0) or 0),
             },
             "credits": {
                 "added": credit_add,
@@ -71312,11 +71689,14 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
             launch_bonus_xu=launch_preview,
             package_amount_vnd=amount,
         )
-        return await send_manual_payment(context, update.effective_chat.id, uid, amount, xu, order_code)
+        set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=pkg_key)
     else:
         set_manual_bill_state(uid, order_code="MANUAL")
-        text = manual_custom_payment_text(uid)
-    await update.message.reply_text(text, parse_mode="HTML")
+    await update.message.reply_text(
+        manual_payment_menu_text(),
+        parse_mode="HTML",
+        reply_markup=manual_payment_menu_keyboard(uid),
+    )
 
 async def cmd_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -84429,13 +84809,13 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending_order = None
         if str(lookup_key).isdigit():
             lookup_c.execute(
-                "SELECT id, user_id, order_code, amount, xu FROM pending_deposits WHERE id=? AND status='pending' LIMIT 1",
+                "SELECT id, user_id, order_code, amount, xu FROM pending_deposits WHERE id=? AND status IN ('pending','pending_admin_review') LIMIT 1",
                 (str(lookup_key),),
             )
             pending_order = lookup_c.fetchone()
         if not pending_order:
             lookup_c.execute(
-                "SELECT id, user_id, order_code, amount, xu FROM pending_deposits WHERE user_id=? AND status='pending' ORDER BY submitted_at DESC LIMIT 1",
+                "SELECT id, user_id, order_code, amount, xu FROM pending_deposits WHERE user_id=? AND status IN ('pending','pending_admin_review') ORDER BY submitted_at DESC LIMIT 1",
                 (str(lookup_key),),
             )
             pending_order = lookup_c.fetchone()
@@ -84488,8 +84868,8 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pending_order_code,
                 )
         c.execute(
-            "UPDATE pending_deposits SET status='approved' WHERE id=? AND status='pending'",
-            (pending_deposit_id,)
+            "UPDATE pending_deposits SET status='approved', approved_by=?, approved_at=?, updated_at=? WHERE id=? AND status IN ('pending','pending_admin_review')",
+            (str(update.effective_user.id), now_text(), now_text(), pending_deposit_id)
         )
         if pending_order_code:
             c.execute(
@@ -85098,13 +85478,13 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending = None
         if str(lookup_key).isdigit():
             c.execute(
-                "SELECT id, user_id FROM pending_deposits WHERE id=? AND status='pending' LIMIT 1",
+                "SELECT id, user_id FROM pending_deposits WHERE id=? AND status IN ('pending','pending_admin_review') LIMIT 1",
                 (str(lookup_key),),
             )
             pending = c.fetchone()
         if not pending:
             c.execute(
-                "SELECT id, user_id FROM pending_deposits WHERE user_id=? AND status='pending' ORDER BY submitted_at DESC LIMIT 1",
+                "SELECT id, user_id FROM pending_deposits WHERE user_id=? AND status IN ('pending','pending_admin_review') ORDER BY submitted_at DESC LIMIT 1",
                 (str(lookup_key),),
             )
             pending = c.fetchone()
@@ -85117,8 +85497,8 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deposit_id = int(pending[0])
         target_id = str(pending[1])
         c.execute(
-            "UPDATE pending_deposits SET status='rejected' WHERE id=? AND status='pending'",
-            (deposit_id,)
+            "UPDATE pending_deposits SET status='rejected', updated_at=? WHERE id=? AND status IN ('pending','pending_admin_review')",
+            (now_text(), deposit_id)
         )
         rejected_count = c.rowcount
         record_audit(
@@ -85154,7 +85534,7 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c = conn.cursor()
     c.execute(
         "SELECT id, user_id, username, submitted_at, order_code, amount, xu FROM pending_deposits "
-        "WHERE status='pending' ORDER BY submitted_at DESC LIMIT 10"
+        "WHERE status IN ('pending','pending_admin_review') ORDER BY submitted_at DESC LIMIT 10"
     )
     rows = c.fetchall()
     conn.close()
@@ -85169,6 +85549,41 @@ async def cmd_pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  ➔ <code>/tuchoi {r[0]}</code>"
         )
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def handle_manual_approval_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return False
+    state = get_manual_approval_state(update.effective_user.id)
+    if not state or state.get("step") != "await_amount":
+        return False
+    raw = re.sub(r"[^0-9]", "", str(update.effective_message.text or ""))
+    if not raw:
+        await update.effective_message.reply_text("⚠️ Hãy nhập số Xu cần cộng, ví dụ: <code>500</code>.", parse_mode="HTML")
+        return True
+    amount = int(raw)
+    if amount <= 0:
+        await update.effective_message.reply_text("⚠️ Số Xu phải lớn hơn 0.")
+        return True
+    set_manual_approval_state(
+        update.effective_user.id,
+        int(state["deposit_id"]),
+        state["target_id"],
+        step="confirm",
+        amount=amount,
+    )
+    await update.effective_message.reply_text(
+        f"✅ <b>Xác nhận duyệt bill thủ công</b>\n\n"
+        f"• Bill: <code>#{int(state['deposit_id'])}</code>\n"
+        f"• User: <code>{html.escape(str(state['target_id']))}</code>\n"
+        f"• Cộng: <b>{amount} Xu</b>\n\n"
+        "Chỉ xác nhận sau khi đã kiểm tra tiền thật vào tài khoản.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Xác nhận cộng Xu", callback_data=f"manual|confirm|{int(state['deposit_id'])}|{amount}"),
+            InlineKeyboardButton("❌ Không duyệt", callback_data=f"manual|reject|{int(state['deposit_id'])}"),
+        ]]),
+    )
+    return True
 
 def finance_admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -85275,7 +85690,7 @@ def finance_brief_report_text(payload: dict, title: str) -> str:
 def admin_pending_bill_count() -> int:
     conn = db_connect()
     try:
-        return int(sql_scalar(conn, "SELECT COUNT(*) FROM pending_deposits WHERE status='pending'", default=0) or 0)
+        return int(sql_scalar(conn, "SELECT COUNT(*) FROM pending_deposits WHERE status IN ('pending','pending_admin_review')", default=0) or 0)
     finally:
         conn.close()
 
@@ -86523,7 +86938,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT SUM(cost) FROM transactions WHERE created_at >= ?",
               ((datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),))
     revenue_today = c.fetchone()[0] or 0
-    c.execute("SELECT COUNT(*) FROM pending_deposits WHERE status='pending'")
+    c.execute("SELECT COUNT(*) FROM pending_deposits WHERE status IN ('pending','pending_admin_review')")
     pending = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM payos_processed")
     payos_auto = c.fetchone()[0]
@@ -86569,7 +86984,7 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recent_credit = c.fetchall()
     c.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM payos_orders WHERE status=?", (PAYOS_STATUS_PAID,))
     paid_count, paid_amount = c.fetchone()
-    c.execute("SELECT COUNT(*) FROM pending_deposits WHERE status='pending'")
+    c.execute("SELECT COUNT(*) FROM pending_deposits WHERE status IN ('pending','pending_admin_review')")
     pending_count = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM leads")
     lead_count = c.fetchone()[0]
@@ -87487,12 +87902,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order_code = bill_state.get("order_code", "")
         amount = int(bill_state.get("amount", 0) or 0)
         xu = int(bill_state.get("xu", 0) or 0)
+        method = str(bill_state.get("method") or "bank_acb")
+        photo = update.message.photo[-1]
         conn = db_connect()
         c = conn.cursor()
         c.execute(
-            "INSERT INTO pending_deposits (user_id, username, file_id, submitted_at, status, order_code, amount, xu) VALUES (?,?,?,?,?,?,?,?)",
-            (str(uid), username, update.message.photo[-1].file_id,
-             now_text(), "pending", str(order_code), amount, xu)
+            """INSERT INTO pending_deposits
+            (user_id, username, file_id, file_unique_id, submitted_at, status, order_code, amount, xu, method, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (str(uid), username, photo.file_id, str(getattr(photo, "file_unique_id", "") or ""),
+             now_text(), "pending_admin_review", str(order_code), amount, xu, method, now_text())
         )
         deposit_id = c.lastrowid
         conn.commit()
@@ -87506,21 +87925,31 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💸 <b>BILL MỚI TẢI LÊN THỦ CÔNG #{deposit_id}</b>\n\n"
             f"👤 Khách: <b>{username}</b>\n"
             f"🆔 ID: <code>{uid}</code>\n"
+            f"💳 Phương thức: <b>{html.escape(MANUAL_PAYMENT_METHODS.get(method, method))}</b>\n"
+            f"🧾 Nội dung CK: <code>AAS {uid} MANUAL</code>\n"
             f"{expected_line}"
             f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
             "⚠️ <b>Chống fake bill:</b>\n"
             "Chỉ duyệt sau khi đã đối soát tiền thật trong tài khoản ngân hàng. "
             "Không duyệt chỉ dựa vào ảnh bill.\n\n"
-            f"👉 Duyệt: <code>/duyet {deposit_id} {xu or '&lt;Số_Xu&gt;'}</code>\n"
-            f"❌ Từ chối: <code>/tuchoi {deposit_id}</code>\n\n"
+            "Trạng thái: <b>chờ đối soát</b>\n\n"
             f"⚠️ Dùng mã bill <code>#{deposit_id}</code>, không dùng user ID khi có nhiều bill."
         )
-        await context.bot.send_photo(
-            chat_id=ADMIN_ID,
-            photo=update.message.photo[-1].file_id,
-            caption=admin_caption,
-            parse_mode="HTML"
-        )
+        admin_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Duyệt & nhập Xu", callback_data=f"manual|approve|{deposit_id}"), InlineKeyboardButton("❌ Từ chối", callback_data=f"manual|reject|{deposit_id}")],
+            [InlineKeyboardButton("💬 Nhắn user", url=f"tg://user?id={uid}"), InlineKeyboardButton("📂 Xem lịch sử", callback_data=f"manual|history|{uid}")],
+        ])
+        for admin_id in owner_and_admin_ids():
+            try:
+                await context.bot.send_photo(
+                    chat_id=admin_id,
+                    photo=photo.file_id,
+                    caption=admin_caption,
+                    parse_mode="HTML",
+                    reply_markup=admin_keyboard,
+                )
+            except Exception as exc:
+                logger.warning("Manual bill admin alert skipped: %s", type(exc).__name__)
         await update.message.reply_text(
             f"✅ <b>Đã gửi bill cho Admin!</b>\n\n"
             f"📋 Mã đơn: <b>#{deposit_id}</b>\n"
@@ -89030,6 +89459,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     uid  = update.effective_user.id
 
+    if await handle_manual_approval_pending_text(update, context):
+        return
+
     if await handle_finance_compliance_pending_text(update, context):
         return
 
@@ -89267,6 +89699,7 @@ tg_webhook_watchdog_task: asyncio.Task | None = None
 tg_auto_backup_task: asyncio.Task | None = None
 tg_memory_reminder_task: asyncio.Task | None = None
 tg_shopaikey_usage_task: asyncio.Task | None = None
+tg_payos_expiry_task: asyncio.Task | None = None
 
 async def shopaikey_usage_monitor_loop(bot_client):
     await asyncio.sleep(20)
@@ -89318,7 +89751,7 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, tg_payos_expiry_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED
     init_db()
     token_summary = telegram_token_runtime_summary()
     db_summary = runtime_db_status()
@@ -89996,6 +90429,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_payos_alert_callback, pattern=r"^payosalert\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_manual_package_choice, pattern=r"^manual\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_choice, pattern=r"^(payos_pkg|pkg)\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_job_callback, pattern=r"^job\|"))
@@ -90152,6 +90586,8 @@ async def lifespan(app: FastAPI):
         tg_memory_reminder_task = asyncio.create_task(memory_reminder_loop(tg_app.bot))
         if SHOPAIKEY_USAGE_CHECK_ENABLED and SHOPAIKEY_API_KEY:
             tg_shopaikey_usage_task = asyncio.create_task(shopaikey_usage_monitor_loop(tg_app.bot))
+        if PAYOS_EXPIRY_ALERT_ENABLED and PAYOS_REGISTRATION_EXPIRES_AT:
+            tg_payos_expiry_task = asyncio.create_task(payos_expiry_monitor_loop(tg_app.bot))
     except Exception as e:
         TELEGRAM_STARTUP_ERROR = str(e)
         ACTIVE_TELEGRAM_UPDATE_MODE = "telegram_startup_error"
@@ -90182,6 +90618,12 @@ async def lifespan(app: FastAPI):
         tg_shopaikey_usage_task.cancel()
         try:
             await tg_shopaikey_usage_task
+        except asyncio.CancelledError:
+            pass
+    if tg_payos_expiry_task:
+        tg_payos_expiry_task.cancel()
+        try:
+            await tg_payos_expiry_task
         except asyncio.CancelledError:
             pass
     if tg_app and telegram_started:
@@ -93659,10 +94101,14 @@ async def webhook_payos(request: Request):
 
     if not PAYOS_CHECKSUM_KEY:
         logger.warning("PayOS webhook rejected: PAYOS_CHECKSUM_KEY is not configured")
+        if tg_app:
+            await record_payos_failure_and_maybe_alert(SimpleNamespace(bot=tg_app.bot), "PayOS webhook checksum config missing")
         raise HTTPException(status_code=500, detail="PayOS checksum key not configured")
 
     if not verify_payos_signature(data, sig):
         logger.warning("PayOS webhook: chữ ký xác thực không hợp lệ!")
+        if tg_app:
+            await record_payos_failure_and_maybe_alert(SimpleNamespace(bot=tg_app.bot), "PayOS webhook invalid signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     if not (body.get("success") or data.get("status") == "PAID"):

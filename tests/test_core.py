@@ -7427,3 +7427,177 @@ def test_video_system_v9_preview_and_stable_flow_linkage():
     assert 'structured_video_plan(plan, "videoref")' in reference_handler
     assert "video_request_is_vague(prompt)" in vague_handler
     assert "TOAN AAS chưa gọi API video và chưa trừ Xu" in vague_handler
+
+
+def test_manual_topup_menu_methods(monkeypatch):
+    monkeypatch.setattr(bot, "MANUAL_BANK_ENABLED", True)
+    monkeypatch.setattr(bot, "MANUAL_ZALOPAY_PERSONAL_ENABLED", True)
+    monkeypatch.setattr(bot, "MANUAL_ZALOPAY_MERCHANT_ENABLED", True)
+    monkeypatch.setattr(bot, "MANUAL_USDT_TRC20_ENABLED", False)
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
+    labels = [button.text for row in bot.manual_payment_menu_keyboard(123).inline_keyboard for button in row]
+    assert "🏦 Ngân hàng ACB/VietQR" in labels
+    assert "💚 ZaloPay cá nhân" in labels
+    assert "🛍 ZaloPay cửa hàng" in labels
+    assert "🪙 USDT TRC20" not in labels
+
+
+def test_manual_bank_qr_asset_send_and_missing_no_crash(monkeypatch, tmp_path):
+    class FakeBot:
+        def __init__(self):
+            self.photos = []
+
+        async def send_photo(self, **kwargs):
+            self.photos.append(kwargs)
+
+    fake_bot = FakeBot()
+    context = SimpleNamespace(bot=fake_bot)
+    qr_path = tmp_path / "acb.jpg"
+    qr_path.write_bytes(b"test-qr")
+    monkeypatch.setattr(bot, "MANUAL_BANK_QR_PATH", str(qr_path))
+    assert asyncio.run(bot.send_manual_method_qr(context, 1, 1, "bank_acb")) is True
+    assert len(fake_bot.photos) == 1
+
+    alerts = []
+
+    async def fake_alert(_context, service, detail):
+        alerts.append((service, detail))
+
+    monkeypatch.setattr(bot, "alert_admin", fake_alert)
+    monkeypatch.setattr(bot, "MANUAL_BANK_QR_PATH", str(tmp_path / "missing.jpg"))
+    assert asyncio.run(bot.send_manual_method_qr(context, 1, 1, "bank_acb")) is False
+    assert alerts and "missing manual payment QR asset" in alerts[0][1]
+
+
+def _create_manual_deposit_test_db(path):
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """CREATE TABLE pending_deposits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT, username TEXT, file_id TEXT, file_unique_id TEXT,
+            submitted_at TEXT, status TEXT, order_code TEXT, amount INTEGER, xu INTEGER,
+            method TEXT, tx_hash TEXT, admin_note TEXT, approved_by TEXT,
+            approved_at TEXT, updated_at TEXT
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_manual_bill_upload_creates_pending_review_without_credit(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual.db"
+    _create_manual_deposit_test_db(db_path)
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "owner_and_admin_ids", lambda: ["999"])
+    monkeypatch.setattr(bot, "add_credit", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not add credit")))
+
+    class FakeBot:
+        def __init__(self):
+            self.photos = []
+
+        async def send_photo(self, **kwargs):
+            self.photos.append(kwargs)
+
+    replies = []
+
+    async def reply_text(text, **kwargs):
+        replies.append(text)
+
+    photo = SimpleNamespace(file_id="bill-file", file_unique_id="bill-unique")
+    message = SimpleNamespace(photo=[photo], reply_text=reply_text)
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=123, first_name="Customer"),
+        message=message,
+    )
+    context = SimpleNamespace(bot=FakeBot())
+    bot.set_manual_bill_state(123, order_code="MANUAL", method="bank_acb")
+    asyncio.run(bot.handle_photo(update, context))
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT status,method,file_id,file_unique_id FROM pending_deposits").fetchone()
+    finally:
+        conn.close()
+    assert row == ("pending_admin_review", "bank_acb", "bill-file", "bill-unique")
+    assert context.bot.photos and context.bot.photos[0]["chat_id"] == "999"
+    assert replies and "Đã gửi bill" in replies[0]
+
+
+def test_manual_approve_requires_second_confirmation(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-approve.db"
+    _create_manual_deposit_test_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO pending_deposits (user_id,status,xu,method,submitted_at) VALUES (?,?,?,?,?)",
+        ("123", "pending_admin_review", 500, "bank_acb", "2026-06-13 10:00:00"),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: uid == 999)
+    monkeypatch.setattr(bot, "add_credit", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must wait for confirm")))
+    bot.MANUAL_APPROVAL_STATE.clear()
+    replies = []
+
+    async def answer(*args, **kwargs):
+        return None
+
+    async def reply_text(text, **kwargs):
+        replies.append(text)
+
+    query = SimpleNamespace(
+        data="manual|approve|1",
+        from_user=SimpleNamespace(id=999),
+        message=SimpleNamespace(reply_text=reply_text),
+        answer=answer,
+    )
+    asyncio.run(bot.handle_manual_package_choice(SimpleNamespace(callback_query=query), SimpleNamespace(args=[], bot=SimpleNamespace())))
+    state = bot.get_manual_approval_state(999)
+    assert state and state["deposit_id"] == 1 and state["step"] == "await_amount"
+    assert any("chưa cộng Xu" in item for item in replies)
+
+
+def test_payos_failure_alert_cooldown(monkeypatch):
+    class FakeBot:
+        def __init__(self):
+            self.messages = []
+
+        async def send_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+    fake_bot = FakeBot()
+    monkeypatch.setattr(bot, "owner_and_admin_ids", lambda: ["999"])
+    monkeypatch.setattr(bot, "PAYOS_ALERT_COOLDOWN_MINUTES", 60)
+    bot.PAYOS_FAILURE_EVENTS = []
+    bot.PAYOS_LAST_ALERT_AT = 0.0
+    bot.PAYOS_ALERT_MUTED_UNTIL = 0.0
+    context = SimpleNamespace(bot=fake_bot)
+    assert asyncio.run(bot.record_payos_failure_and_maybe_alert(context, "timeout", 123, now_ts=1000)) is False
+    assert asyncio.run(bot.record_payos_failure_and_maybe_alert(context, "timeout", 123, now_ts=1010)) is False
+    assert asyncio.run(bot.record_payos_failure_and_maybe_alert(context, "timeout", 123, now_ts=1020)) is True
+    assert asyncio.run(bot.record_payos_failure_and_maybe_alert(context, "timeout", 123, now_ts=1030)) is False
+    assert len(fake_bot.messages) == 1
+
+
+def test_payos_expiry_reminder_and_fallback_message(monkeypatch):
+    class FakeBot:
+        def __init__(self):
+            self.messages = []
+
+        async def send_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+    stored = {}
+    monkeypatch.setattr(bot, "PAYOS_EXPIRY_ALERT_ENABLED", True)
+    monkeypatch.setattr(bot, "PAYOS_REGISTRATION_EXPIRES_AT", "2026-07-28")
+    monkeypatch.setattr(bot, "PAYOS_EXPIRY_REMINDER_DAYS", (45, 30, 15, 7, 3, 1))
+    monkeypatch.setattr(bot, "owner_and_admin_ids", lambda: ["999"])
+    monkeypatch.setattr(bot, "get_system_setting", lambda key, default="": stored.get(key, default))
+    monkeypatch.setattr(bot, "set_system_setting", lambda key, value, **kwargs: stored.__setitem__(key, value))
+    fake_bot = FakeBot()
+    assert bot.payos_expiry_days_remaining(datetime(2026, 6, 13).date()) == 45
+    assert asyncio.run(bot.maybe_send_payos_expiry_reminder(fake_bot, datetime(2026, 6, 13).date())) is True
+    assert asyncio.run(bot.maybe_send_payos_expiry_reminder(fake_bot, datetime(2026, 6, 13).date())) is False
+    fallback = bot.payos_checkout_unavailable_text("50k", 50000, 123456, "secret technical error")
+    assert "tạm thời không tạo được" in fallback
+    assert "Nạp thủ công" in fallback
+    assert "secret technical error" not in fallback
