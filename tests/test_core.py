@@ -1790,8 +1790,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any(button.callback_data == "create_media|image_tier_standard_warranty" for button in tier_buttons)
     assert any(button.callback_data == "create_media|image_tier_high" for button in tier_buttons)
     assert any(button.callback_data == "create_media|image_tier_high_warranty" for button in tier_buttons)
-    assert any("Ảnh tiết kiệm" in button.text and "321 Xu" in button.text for button in tier_buttons)
-    assert any("Ảnh tiêu chuẩn + bảo hành" in button.text and "799 Xu" in button.text for button in tier_buttons)
+    assert any("Tiết kiệm" in button.text and "321 Xu" in button.text for button in tier_buttons)
+    assert any("Chuẩn + BH" in button.text and "799 Xu" in button.text for button in tier_buttons)
     assert "Gửi mô tả ảnh bạn muốn tạo" in bot.public_image_prompt_request_text("standard")
     assert "777 Xu" in bot.public_image_confirm_text("standard", "ảnh sản phẩm", 1000)
     assert "Gói này không kèm tạo lại miễn phí" in bot.public_image_confirm_text("standard", "ảnh sản phẩm", 1000)
@@ -3025,9 +3025,9 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "3️⃣ Chọn gợi ý 3" in image_choice_buttons
     selected_image_buttons = [button.text for row in bot.cinematic_ad_image_prompt_selected_keyboard(1).inline_keyboard for button in row]
     assert "✅ Lưu prompt ảnh" in selected_image_buttons
-    assert any("Ảnh tiết kiệm" in label for label in selected_image_buttons)
-    assert any("Ảnh tiêu chuẩn + bảo hành" in label and "250 Xu" in label for label in selected_image_buttons)
-    assert any("Ảnh chất lượng cao + bảo hành" in label and "500 Xu" in label for label in selected_image_buttons)
+    assert any("Tiết kiệm" in label for label in selected_image_buttons)
+    assert any("Chuẩn + BH" in label and "250 Xu" in label for label in selected_image_buttons)
+    assert any("Cao + BH" in label and "500 Xu" in label for label in selected_image_buttons)
     video_choice_buttons = [button.text for row in bot.cinematic_ad_video_prompt_choices_keyboard().inline_keyboard for button in row]
     assert "1️⃣ Chọn gợi ý 1" in video_choice_buttons
     assert "2️⃣ Chọn gợi ý 2" in video_choice_buttons
@@ -4955,11 +4955,12 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
 
     first = bot.quick_image_suggestions(0, "vi")
     second = bot.quick_image_suggestions(3, "vi")
-    assert len(bot.quick_image_suggestion_bank("vi")) >= 10
+    assert len(bot.quick_image_suggestion_bank("vi")) >= 20
     assert len(first) == 3
     assert first != second
     suggestions_text = bot.quick_image_suggestions_text({"suggest_offset": 0}, "vi")
-    assert "3 gợi ý tạo ảnh cho bạn" in suggestions_text
+    assert "3 chủ đề gợi ý tạo ảnh" in suggestions_text
+    assert "soạn prompt hoàn chỉnh" in suggestions_text
     assert first[0] in suggestions_text
     suggestion_callbacks = [
         button.callback_data
@@ -4968,24 +4969,50 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     ]
     assert {"create_media|qi_pick_1", "create_media|qi_pick_2", "create_media|qi_pick_3", "create_media|qi_refresh", "create_media|qi_custom"}.issubset(set(suggestion_callbacks))
 
+    prepared_prompt, negative_prompt = bot.quick_image_prompt_from_topic(first[0], "vi")
+    rewritten_prompt, rewritten_negative = bot.quick_image_prompt_from_topic(first[0], "vi", 1)
+    assert first[0] in prepared_prompt
+    assert negative_prompt
+    assert rewritten_prompt != prepared_prompt
+    assert rewritten_negative == negative_prompt
+
     bot.clear_quick_image_flow("quick-image-test")
     state = bot.set_quick_image_flow(
         "quick-image-test",
-        "ratio",
-        prompt="logo TOAN AAS màu xanh ngọc",
-        prompt_source="custom",
+        "prepared_prompt",
+        selected_topic=first[0],
+        prompt=prepared_prompt,
+        negative_prompt=negative_prompt,
+        prompt_source="suggestion",
         suggest_offset=3,
     )
-    assert state["step"] == "ratio"
-    assert state["prompt_source"] == "custom"
-    assert bot.get_quick_image_flow("quick-image-test")["prompt"] == "logo TOAN AAS màu xanh ngọc"
+    assert state["step"] == "prepared_prompt"
+    assert state["prompt_source"] == "suggestion"
+    assert bot.get_quick_image_flow("quick-image-test")["selected_topic"] == first[0]
+    prepared_text = bot.quick_image_prepared_prompt_text(state, "vi")
+    assert "Prompt ảnh đã được soạn" in prepared_text
+    assert first[0] in prepared_text
+    prepared_callbacks = [
+        button.callback_data
+        for row in bot.quick_image_prepared_prompt_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert {
+        "create_media|qi_choose_ratio",
+        "create_media|qi_rewrite",
+        "create_media|qi_topics",
+        "create_media|qi_custom",
+        "create_media|qi_back_suggestions",
+    }.issubset(set(prepared_callbacks))
+
+    state = bot.set_quick_image_flow("quick-image-test", "ratio")
     state = bot.set_quick_image_flow("quick-image-test", "tier", aspect_ratio="16:9")
-    assert state["prompt"] == "logo TOAN AAS màu xanh ngọc"
+    assert state["prompt"] == prepared_prompt
     assert state["aspect_ratio"] == "16:9"
 
     ratio_text = bot.quick_image_ratio_text(state, "vi")
     assert "Chọn tỉ lệ khung hình" in ratio_text
-    assert "logo TOAN AAS" in ratio_text
+    assert first[0] in ratio_text
     ratio_rows = bot.quick_image_ratio_keyboard("vi").inline_keyboard
     ratio_callbacks = [button.callback_data for row in ratio_rows for button in row]
     assert "create_media|qi_ratio_16x9" in ratio_callbacks
@@ -5012,6 +5039,7 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     planning_keyboards = [
         bot.quick_image_entry_keyboard("vi"),
         bot.quick_image_suggestions_keyboard("vi"),
+        bot.quick_image_prepared_prompt_keyboard("vi"),
         bot.quick_image_custom_prompt_keyboard("vi"),
         bot.quick_image_ratio_keyboard("vi"),
         bot.quick_image_tier_keyboard("vi"),
@@ -5022,9 +5050,67 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
         assert all("Hủy" not in button.text for row in keyboard.inline_keyboard for button in row)
 
     assert '"source": "quick_image_v6"' in callback_source
+    assert 'set_quick_image_flow(\n            uid,\n            "prepared_prompt"' in callback_source
+    assert 'if action == "qi_choose_ratio":' in callback_source
+    assert 'if action == "qi_rewrite":' in callback_source
     assert "shopaikey_image_generate" not in callback_source
     assert "spend_fixed_credit_info" not in callback_source
     assert bot.clear_quick_image_flow("quick-image-test") is True
+
+
+def test_image_ux_v8_manual_and_ai_edit_confirmation_guards():
+    source = bot_source_text()
+    callback_source = source_between(source, "async def handle_image_tools_callback", "async def handle_image_menu_pending_text")
+    pending_source = source_between(source, "async def handle_image_menu_pending_text", "async def handle_image_menu_pending_photo")
+
+    manual_request = bot.image_manual_edit_request_text("text", "vi")
+    assert "Mô tả yêu cầu chỉnh sửa" in manual_request
+    assert "chưa xử lý ảnh" in manual_request
+    manual_request_callbacks = [
+        button.callback_data
+        for row in bot.image_manual_edit_request_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert manual_request_callbacks == ["imgtool|edit_manual", "menu|main"]
+
+    manual_state = {
+        "file_id": "image-file",
+        "manual_action": "blur",
+        "edit_request": "Che mờ biển số ở góc phải",
+    }
+    manual_confirm = bot.image_manual_edit_confirm_text(manual_state, "vi")
+    assert "Xác nhận yêu cầu chỉnh sửa thủ công" in manual_confirm
+    assert "Che mờ biển số" in manual_confirm
+    manual_confirm_callbacks = [
+        button.callback_data
+        for row in bot.image_manual_edit_confirm_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert {"imgtool|edit_manual_confirm", "imgtool|edit_manual_change", "imgtool|edit_manual", "menu|main"}.issubset(set(manual_confirm_callbacks))
+    assert "image_edit_manual_request" in bot.IMAGE_MENU_PENDING_ACTIONS
+    assert "image_edit_manual_confirm" in bot.IMAGE_MENU_PENDING_ACTIONS
+    assert 'if action == "image_edit_manual_request":' in pending_source
+    assert 'if action == "edit_manual_confirm":' in callback_source
+    assert "shopaikey_image_generate(" not in callback_source
+
+    ai_callbacks = [
+        button.callback_data
+        for row in bot.image_edit_result_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert "imgtool|edit_ai" in ai_callbacks
+    assert "imgtool|edit_request_custom" in ai_callbacks
+    assert "imgtool|edit_back_suggestions" in ai_callbacks
+    assert all("cancel" not in callback.lower() for callback in ai_callbacks)
+    ai_guard_callbacks = [
+        button.callback_data
+        for row in bot.image_edit_ai_guard_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert {"imgtool|edit_back_result", "imgtool|edit_ai_menu", "menu|main"}.issubset(set(ai_guard_callbacks))
+    assert 'if action == "edit_back_suggestions":' in callback_source
+    assert "image_edit_ai_guard_keyboard(lang)" in callback_source
+    assert "chưa gọi API và chưa trừ Xu" in bot.image_edit_ai_guard_text("vi")
 
 
 def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
@@ -5096,7 +5182,9 @@ def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
         for row in keyboard.inline_keyboard
         for button in row
     )
-    assert "❌ Hủy" in [button.text for row in bot.image_edit_result_keyboard("vi").inline_keyboard for button in row]
+    image_edit_result_labels = [button.text for row in bot.image_edit_result_keyboard("vi").inline_keyboard for button in row]
+    assert "❌ Hủy" not in image_edit_result_labels
+    assert "🔙 Quay lại" in image_edit_result_labels
 
     memory_rows = rows(bot.main_memory_keyboard("vi"))
     assert memory_rows[:3] == [

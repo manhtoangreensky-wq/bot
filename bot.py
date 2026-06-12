@@ -29386,7 +29386,24 @@ def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool
     tier_norm = normalize_image_tier(tier)
     payload = image_tier_payload(tier_norm)
     state = ui_text(lang, "image.tier_disabled") if include_state and not payload.get("enabled") else ""
-    return f"{IMAGE_TIER_ICONS.get(tier_norm, '🖼')} {localized_image_tier_label(tier_norm, lang)} — {int(payload.get('cost') or 0)} Xu{state}"
+    if normalize_user_language(lang) == "vi":
+        short_labels = {
+            "low": "Tiết kiệm",
+            "standard": "Chuẩn",
+            "standard_warranty": "Chuẩn + BH",
+            "high": "Cao",
+            "high_warranty": "Cao + BH",
+        }
+    else:
+        short_labels = {
+            "low": "Economy",
+            "standard": "Standard",
+            "standard_warranty": "Standard + warranty",
+            "high": "High",
+            "high_warranty": "High + warranty",
+        }
+    label = short_labels.get(tier_norm) or localized_image_tier_label(tier_norm, lang)
+    return f"{IMAGE_TIER_ICONS.get(tier_norm, '🖼')} {label} — {int(payload.get('cost') or 0)} Xu{state}"
 
 def image_tier_choice_rows(callback_builder, lang: str = "vi") -> list[list[InlineKeyboardButton]]:
     return [
@@ -30422,6 +30439,8 @@ IMAGE_MENU_PENDING_ACTIONS = {
     "image_edit_choice",
     "image_edit_prompt_only",
     "image_edit_instruction",
+    "image_edit_manual_request",
+    "image_edit_manual_confirm",
     "image_edit_request_custom",
     "image_edit_prompt_ready",
     "image_edit_waiting_action",
@@ -30450,6 +30469,7 @@ def set_image_menu_pending(user_id, action: str, **fields) -> None:
             elif key in {
                 "note", "goal", "goal_code", "subject", "style", "style_code", "ratio",
                 "edit_type", "edit_request", "resize_task", "resize_ratio", "resize_method",
+                "manual_action",
                 "pixel_size", "source_name", "prompt", "current_prompt", "short_prompt",
                 "detail_prompt", "negative_prompt", "selected_variant", "ratio_change",
                 "prompt_source", "back_to", "last_step",
@@ -31129,8 +31149,93 @@ def image_manual_edit_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def image_manual_edit_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return "This manual edit tool is still being completed. TOAN AAS did not process the image and did not charge Xu."
-    return "Tính năng này đang được hoàn thiện. TOAN AAS chưa xử lý ảnh và chưa trừ Xu."
+        return (
+            "🧩 This manual edit tool is still being completed.\n\n"
+            "TOAN AAS saved your request for this step, but did not process the image, call a provider, or charge Xu."
+        )
+    return (
+        "🧩 Công cụ chỉnh sửa thủ công này đang được hoàn thiện.\n\n"
+        "TOAN AAS đã ghi nhận yêu cầu cho bước này nhưng chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu."
+    )
+
+def image_manual_edit_action_label(action: str = "", lang: str = "vi") -> str:
+    labels_vi = {
+        "text": "Thêm chữ / ghi chú",
+        "crop": "Cắt / căn chỉnh",
+        "blur": "Che / làm mờ vùng",
+        "custom": "Yêu cầu chỉnh sửa riêng",
+    }
+    labels_en = {
+        "text": "Add text / annotation",
+        "crop": "Crop / align",
+        "blur": "Blur / cover an area",
+        "custom": "Custom manual edit",
+    }
+    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(
+        str(action or "").strip().lower(),
+        labels_vi["custom"] if normalize_user_language(lang) == "vi" else labels_en["custom"],
+    )
+
+def image_manual_edit_request_text(action: str = "", lang: str = "vi") -> str:
+    label = image_manual_edit_action_label(action, lang)
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✍️ <b>Describe the manual edit</b>\n\n"
+            f"Selected action: <b>{html.escape(label)}</b>\n\n"
+            "Describe the exact text, crop, position, or area you want changed. "
+            "TOAN AAS will show a confirmation before doing anything.\n\n"
+            "No image processing, provider call, or Xu charge yet."
+        )
+    return (
+        "✍️ <b>Mô tả yêu cầu chỉnh sửa</b>\n\n"
+        f"Thao tác đã chọn: <b>{html.escape(label)}</b>\n\n"
+        "Bạn hãy ghi rõ nội dung chữ, vùng cắt, vị trí hoặc khu vực cần che/làm mờ. "
+        "TOAN AAS sẽ hiển thị bước xác nhận trước khi xử lý.\n\n"
+        "Bot chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu."
+    )
+
+def image_manual_edit_request_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_manual"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+def image_manual_edit_confirm_text(state: dict, lang: str = "vi") -> str:
+    action = image_manual_edit_action_label(state.get("manual_action"), lang)
+    request = _short_pending_text(state.get("edit_request"), 500)
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✅ <b>Confirm manual edit request</b>\n\n"
+            f"Action: <b>{html.escape(action)}</b>\n"
+            f"Request: <code>{html.escape(request)}</code>\n\n"
+            "The tool will report clearly if this operation is not available. "
+            "No Xu will be charged for an unavailable operation."
+        )
+    return (
+        "✅ <b>Xác nhận yêu cầu chỉnh sửa thủ công</b>\n\n"
+        f"Thao tác: <b>{html.escape(action)}</b>\n"
+        f"Yêu cầu: <code>{html.escape(request)}</code>\n\n"
+        "Nếu thao tác chưa được hỗ trợ, TOAN AAS sẽ báo rõ và không trừ Xu."
+    )
+
+def image_manual_edit_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Xác nhận" if vi else "✅ Confirm", callback_data="imgtool|edit_manual_confirm"),
+            InlineKeyboardButton("✍️ Sửa yêu cầu" if vi else "✍️ Edit request", callback_data="imgtool|edit_manual_change"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_manual"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def image_manual_edit_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_manual"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
 
 def image_edit_ai_choice_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -31258,9 +31363,25 @@ def image_edit_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("✍️ Sửa yêu cầu" if vi else "✍️ Edit request", callback_data="imgtool|edit_request_custom"),
         ],
         [
-            InlineKeyboardButton("❌ Hủy" if vi else "❌ Cancel", callback_data="menu|main_image"),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_back_suggestions"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
+    ])
+
+def image_edit_request_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_back_suggestions"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+def image_edit_ai_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⬅️ Về xác nhận" if vi else "⬅️ Back to confirmation", callback_data="imgtool|edit_back_result"),
+            InlineKeyboardButton("🧩 Chọn cách sửa khác" if vi else "🧩 Choose another edit", callback_data="imgtool|edit_ai_menu"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def image_edit_ai_guard_text(lang: str = "vi") -> str:
@@ -44557,7 +44678,34 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
         set_image_menu_pending(uid, "image_resize_choice", **pending)
         return await safe_edit_query_message(query, image_manual_edit_text(lang), reply_markup=image_manual_edit_keyboard(lang))
     if action == "edit_manual_guard":
-        return await safe_edit_query_message(query, image_manual_edit_guard_text(lang), parse_mode=None, reply_markup=image_manual_edit_keyboard(lang))
+        if not pending or not pending.get("file_id"):
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
+        manual_action = parts[2] if len(parts) > 2 else "custom"
+        set_image_menu_pending(uid, "image_edit_manual_request", **{**pending, "manual_action": manual_action, "edit_request": ""})
+        return await safe_edit_query_message(
+            query,
+            image_manual_edit_request_text(manual_action, lang),
+            reply_markup=image_manual_edit_request_keyboard(lang),
+        )
+    if action == "edit_manual_change":
+        state = dict(pending or {})
+        set_image_menu_pending(uid, "image_edit_manual_request", **state)
+        return await safe_edit_query_message(
+            query,
+            image_manual_edit_request_text(state.get("manual_action"), lang),
+            reply_markup=image_manual_edit_request_keyboard(lang),
+        )
+    if action == "edit_manual_confirm":
+        state = dict(pending or {})
+        if not state.get("file_id") or not state.get("edit_request"):
+            return await safe_edit_query_message(query, image_manual_edit_text(lang), reply_markup=image_manual_edit_keyboard(lang))
+        set_image_menu_pending(uid, "image_edit_manual_confirm", **state)
+        return await safe_edit_query_message(
+            query,
+            image_manual_edit_guard_text(lang),
+            reply_markup=image_manual_edit_guard_keyboard(lang),
+        )
     if action == "edit_ai_menu":
         if not pending or not pending.get("file_id"):
             set_image_menu_pending(uid, "image_edit_wait_image")
@@ -44577,7 +44725,12 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
     if action == "edit_type_custom" or action == "edit_request_custom":
         edit_state = dict(pending or get_image_tool_result(uid, "edit") or {})
         set_image_menu_pending(uid, "image_edit_request_custom", **edit_state)
-        return await safe_edit_query_message(query, "✍️ Bạn hãy nhập yêu cầu sửa ảnh. Ví dụ: đổi nền sang luxury showroom, giữ sản phẩm/logo. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_menu_child_keyboard(lang))
+        return await safe_edit_query_message(
+            query,
+            "✍️ Bạn hãy nhập yêu cầu sửa ảnh. Ví dụ: đổi nền sang luxury showroom, giữ sản phẩm/logo. Bot chưa trừ Xu.",
+            parse_mode=None,
+            reply_markup=image_edit_request_input_keyboard(lang),
+        )
     if action == "edit_request":
         state = dict(pending or {})
         edit_type = str(state.get("edit_type") or "background")
@@ -44589,17 +44742,33 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
         save_image_tool_result(uid, "edit", state)
         set_image_menu_pending(uid, "image_edit_waiting_action", **state)
         return await safe_edit_query_message(query, image_edit_ready_text(state, lang), reply_markup=image_edit_result_keyboard(lang))
+    if action == "edit_back_suggestions":
+        state = dict(pending or get_image_tool_result(uid, "edit") or {})
+        edit_type = str(state.get("edit_type") or "").strip()
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_edit_wait_image")
+            return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
+        if edit_type in {"background", "cleanup", "style"}:
+            set_image_menu_pending(uid, "image_edit_request_custom", **state)
+            return await safe_edit_query_message(
+                query,
+                image_edit_suggestion_text(edit_type, lang),
+                reply_markup=image_edit_suggestion_keyboard(lang),
+            )
+        set_image_menu_pending(uid, "image_edit_choice", **state)
+        return await safe_edit_query_message(query, image_edit_ai_choice_text(lang), reply_markup=image_edit_ai_choice_keyboard(lang))
     if action in {"edit_prompt_output", "edit_back_result"}:
         state = dict(pending or get_image_tool_result(uid, "edit") or {})
         if not state:
             return await safe_edit_query_message(query, image_edit_menu_start_text(lang), reply_markup=image_edit_start_keyboard(lang))
         set_image_menu_pending(uid, "image_edit_prompt_ready", **state)
-        return await safe_edit_query_message(query, image_edit_prompt_text(state, lang), reply_markup=image_edit_result_keyboard(lang))
+        text = image_edit_ready_text(state, lang) if action == "edit_back_result" else image_edit_prompt_text(state, lang)
+        return await safe_edit_query_message(query, text, reply_markup=image_edit_result_keyboard(lang))
     if action == "edit_ai":
         state = dict(pending or get_image_tool_result(uid, "edit") or {})
         if state:
             set_image_menu_pending(uid, "image_edit_waiting_action", **state)
-        return await safe_edit_query_message(query, image_edit_ai_guard_text(lang), reply_markup=image_resize_choice_keyboard(lang))
+        return await safe_edit_query_message(query, image_edit_ai_guard_text(lang), reply_markup=image_edit_ai_guard_keyboard(lang))
     if action == "edit_create_new":
         state = dict(pending or get_image_tool_result(uid, "edit") or {})
         if not state:
@@ -44784,6 +44953,15 @@ async def handle_image_menu_pending_text(update: Update, context: ContextTypes.D
         save_image_tool_result(uid, "edit", state)
         set_image_menu_pending(uid, "image_edit_prompt_ready", **state)
         await update.message.reply_text(image_edit_prompt_text(state, lang), parse_mode="HTML", reply_markup=image_edit_result_keyboard(lang))
+        return True
+    if action == "image_edit_manual_request":
+        state = {**pending, "edit_request": text}
+        set_image_menu_pending(uid, "image_edit_manual_confirm", **state)
+        await update.message.reply_text(
+            image_manual_edit_confirm_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=image_manual_edit_confirm_keyboard(lang),
+        )
         return True
     if action in {"image_edit_request_custom", "image_edit_prompt_ready", "image_edit_waiting_action"}:
         state = dict(pending)
@@ -59275,6 +59453,7 @@ QUICK_IMAGE_FLOW_TTL_SECONDS = 10 * 60
 QUICK_IMAGE_FLOW_STEPS = {
     "entry",
     "suggestions",
+    "prepared_prompt",
     "custom_prompt",
     "ratio",
     "tier",
@@ -59300,11 +59479,11 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
         payload["step"] = normalized_step
         payload["created_at_ts"] = time.time()
     for key, value in fields.items():
-        if key in {"prompt", "prompt_source"}:
+        if key in {"prompt", "prompt_source", "selected_topic", "negative_prompt"}:
             payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:1400]
         elif key in {"aspect_ratio", "tier", "confirm_token"}:
             payload[key] = str(value or "").strip()[:120]
-        elif key == "suggest_offset":
+        elif key in {"suggest_offset", "prompt_variant"}:
             payload[key] = max(0, _safe_int(value, 0))
     USER_PENDING[quick_image_flow_pending_key(user_id)] = payload
     return payload
@@ -59329,41 +59508,77 @@ def clear_quick_image_flow(user_id) -> bool:
 def quick_image_suggestion_bank(lang: str = "vi") -> list[str]:
     if normalize_user_language(lang) != "vi":
         return [
-            "Turquoise TOAN AAS technology logo on a clean white background, minimal professional brand style",
-            "Modern TOAN AAS social banner with AI and automation icons, clean turquoise accents",
-            "Studio product advertising image with a clear hero subject, polished commercial lighting",
-            "Cinematic night product reveal with premium rim light and deep contrast",
-            "Future AI workspace with turquoise holographic automation panels and clean composition",
-            "Warm lifestyle scene showing a busy creator using an AI assistant naturally",
-            "Premium male perfume hero image, black-and-white luxury mood, accurate bottle geometry",
-            "Skincare flat lay with soft daylight, clean textures and social-ad composition",
-            "Minimal smart desk setup for a creator, realistic materials and modern lighting",
-            "Before-and-after advertising frame with matching composition and visible improvement",
-            "Friendly Vietnamese entrepreneur portrait in a bright modern workspace",
-            "Vertical TikTok product poster with strong subject focus and safe text space",
-            "Modern coffee shop launch visual with lifestyle customers and warm morning light",
-            "Waterproof travel backpack in a rainy city scene, dynamic but realistic",
-            "Healthy meal-prep product photo with fresh ingredients and clean packaging",
-            "Futuristic technology campaign key visual, white background, turquoise energy details",
+            "Technology logo / minimal branding",
+            "Social banner / campaign key visual",
+            "Studio product advertising",
+            "Cinematic product reveal",
+            "AI / automation workspace",
+            "Creator lifestyle scene",
+            "Luxury perfume advertising",
+            "Skincare / beauty flat lay",
+            "Modern desk setup",
+            "Before / after visual",
+            "Professional entrepreneur portrait",
+            "Vertical TikTok product poster",
+            "Coffee shop launch visual",
+            "Travel product in an outdoor scene",
+            "Healthy food / meal-prep advertising",
+            "Future technology campaign",
+            "Fashion lookbook portrait",
+            "Real-estate interior hero image",
+            "Mobile app feature visual",
+            "Online course cover",
+            "Affiliate product comparison",
+            "Event / webinar poster",
+            "Cute 3D mascot",
+            "Cinematic landscape / destination",
         ]
     return [
-        "Logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản và chuyên nghiệp",
-        "Banner TOAN AAS hiện đại, có biểu tượng AI và automation, điểm nhấn xanh ngọc, bố cục social rõ ràng",
-        "Ảnh sản phẩm quảng cáo studio, chủ thể nổi bật, ánh sáng thương mại đẹp, bố cục sạch",
-        "Product reveal cinematic ban đêm, ánh sáng viền cao cấp, tương phản sâu, không chữ thừa",
-        "Không gian làm việc AI tương lai với bảng automation hologram xanh ngọc, bố cục gọn",
-        "Cảnh lifestyle ấm áp, creator bận rộn dùng trợ lý AI tự nhiên trong công việc",
-        "Nước hoa nam cao cấp, phong cách luxury đen trắng, giữ đúng hình dáng chai",
-        "Bộ skincare flat lay dưới ánh sáng ban ngày mềm, texture sạch, hợp ảnh quảng cáo",
-        "Góc bàn thông minh tối giản cho creator, vật liệu chân thực, ánh sáng hiện đại",
-        "Khung hình before/after đồng bố cục, thể hiện kết quả thay đổi rõ ràng",
-        "Chân dung doanh nhân Việt Nam thân thiện trong văn phòng hiện đại sáng sạch",
-        "Poster sản phẩm dọc cho TikTok, chủ thể rõ, chừa vùng an toàn để đặt caption",
-        "Hình ảnh khai trương quán cà phê hiện đại, khách lifestyle, ánh sáng buổi sáng ấm",
-        "Balo du lịch chống nước trong phố mưa, chuyển động năng động nhưng chân thực",
-        "Ảnh meal-prep healthy với nguyên liệu tươi, bao bì sạch và màu sắc tự nhiên",
-        "Key visual chiến dịch công nghệ tương lai, nền trắng, năng lượng xanh ngọc tinh tế",
+        "Logo công nghệ / nhận diện tối giản",
+        "Banner social / key visual chiến dịch",
+        "Ảnh sản phẩm quảng cáo studio",
+        "Product reveal cinematic",
+        "Không gian AI / automation",
+        "Lifestyle creator làm việc",
+        "Quảng cáo nước hoa luxury",
+        "Skincare / mỹ phẩm flat lay",
+        "Góc bàn làm việc hiện đại",
+        "Ảnh before / after",
+        "Chân dung doanh nhân chuyên nghiệp",
+        "Poster sản phẩm dọc TikTok",
+        "Hình ảnh khai trương quán cà phê",
+        "Sản phẩm du lịch ngoài trời",
+        "Quảng cáo đồ ăn healthy",
+        "Chiến dịch công nghệ tương lai",
+        "Chân dung fashion lookbook",
+        "Ảnh hero nội thất / bất động sản",
+        "Key visual tính năng ứng dụng",
+        "Ảnh bìa khóa học online",
+        "So sánh sản phẩm affiliate",
+        "Poster sự kiện / webinar",
+        "Linh vật 3D dễ thương",
+        "Phong cảnh / điểm đến cinematic",
     ]
+
+def quick_image_prompt_from_topic(topic: str = "", lang: str = "vi", variant: int = 0) -> tuple[str, str]:
+    clean_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:300]
+    variant_index = max(0, _safe_int(variant, 0)) % 3
+    if normalize_user_language(lang) != "vi":
+        endings = [
+            "clear hero subject, clean composition, professional lighting, balanced colors, high quality, no extra text",
+            "strong visual hierarchy, polished commercial lighting, realistic materials, brand-safe composition, high quality",
+            "modern editorial framing, refined details, natural depth, social-ready composition, no watermark",
+        ]
+        prompt = f"{clean_topic}, {endings[variant_index]}"
+    else:
+        endings = [
+            "chủ thể nổi bật, bố cục sạch, ánh sáng chuyên nghiệp, màu sắc hài hòa, chất lượng cao, không thêm chữ thừa",
+            "phân cấp thị giác rõ, ánh sáng quảng cáo chỉn chu, vật liệu chân thực, bố cục an toàn cho thương hiệu",
+            "khung hình hiện đại, chi tiết tinh tế, chiều sâu tự nhiên, phù hợp social và quảng cáo, không watermark",
+        ]
+        prompt = f"{clean_topic}, {endings[variant_index]}"
+    negative = "low quality, blurry, distorted face, distorted hands, broken logo, wrong text, watermark, extra text, messy background"
+    return prompt, negative
 
 def quick_image_suggestions(offset: int = 0, lang: str = "vi") -> list[str]:
     return video_v6_rotating_items(quick_image_suggestion_bank(lang), offset, 3)
@@ -59401,9 +59616,9 @@ def quick_image_suggestions_text(state: dict | None = None, lang: str = "vi") ->
     state = state or {}
     suggestions = quick_image_suggestions(_safe_int(state.get("suggest_offset"), 0), lang)
     if normalize_user_language(lang) != "vi":
-        lines = ["✨ <b>Three image prompt suggestions</b>", "", "Choose one, refresh the set, or enter your own prompt.", ""]
+        lines = ["✨ <b>Three image topic suggestions</b>", "", "Choose a topic. TOAN AAS will prepare the full prompt before ratio and pricing.", ""]
     else:
-        lines = ["✨ <b>3 gợi ý tạo ảnh cho bạn</b>", "", "Chọn một gợi ý bên dưới, đổi bộ gợi ý khác hoặc tự nhập prompt.", ""]
+        lines = ["✨ <b>3 chủ đề gợi ý tạo ảnh</b>", "", "Chọn một chủ đề. TOAN AAS sẽ soạn prompt hoàn chỉnh trước khi chọn tỉ lệ và giá.", ""]
     lines.extend(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions, 1))
     lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
     return "\n".join(lines)
@@ -59412,11 +59627,11 @@ def quick_image_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("1️⃣ Dùng gợi ý 1" if vi else "1️⃣ Use idea 1", callback_data="create_media|qi_pick_1"),
-            InlineKeyboardButton("2️⃣ Dùng gợi ý 2" if vi else "2️⃣ Use idea 2", callback_data="create_media|qi_pick_2"),
+            InlineKeyboardButton("1️⃣ Chọn chủ đề 1" if vi else "1️⃣ Choose topic 1", callback_data="create_media|qi_pick_1"),
+            InlineKeyboardButton("2️⃣ Chọn chủ đề 2" if vi else "2️⃣ Choose topic 2", callback_data="create_media|qi_pick_2"),
         ],
         [
-            InlineKeyboardButton("3️⃣ Dùng gợi ý 3" if vi else "3️⃣ Use idea 3", callback_data="create_media|qi_pick_3"),
+            InlineKeyboardButton("3️⃣ Chọn chủ đề 3" if vi else "3️⃣ Choose topic 3", callback_data="create_media|qi_pick_3"),
             InlineKeyboardButton("🔄 Gợi ý khác" if vi else "🔄 More ideas", callback_data="create_media|qi_refresh"),
         ],
         [
@@ -59424,6 +59639,45 @@ def quick_image_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="create_media|qi_entry"),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    topic = _short_pending_text(state.get("selected_topic"), 300)
+    prompt = shopaikey_safe_prompt_preview(state.get("prompt") or "")
+    negative = shopaikey_safe_prompt_preview(state.get("negative_prompt") or "")
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✨ <b>Prepared image prompt</b>\n\n"
+            f"Topic: <b>{html.escape(topic)}</b>\n\n"
+            f"Prompt:\n<code>{html.escape(prompt)}</code>\n\n"
+            f"Avoid:\n<code>{html.escape(negative)}</code>\n\n"
+            "Choose the aspect ratio when this prompt is ready, or rewrite it first. No API call and no Xu charged."
+        )
+    return (
+        "✨ <b>Prompt ảnh đã được soạn</b>\n\n"
+        f"Chủ đề: <b>{html.escape(topic)}</b>\n\n"
+        f"Prompt:\n<code>{html.escape(prompt)}</code>\n\n"
+        f"Negative prompt:\n<code>{html.escape(negative)}</code>\n\n"
+        "Nếu prompt đã phù hợp, hãy chọn tỉ lệ. Bạn cũng có thể viết lại hoặc chọn chủ đề khác.\n"
+        "Bot chưa gọi API và chưa trừ Xu."
+    )
+
+def quick_image_prepared_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📐 Chọn tỉ lệ" if vi else "📐 Choose ratio", callback_data="create_media|qi_choose_ratio"),
+            InlineKeyboardButton("🔄 Viết lại prompt" if vi else "🔄 Rewrite prompt", callback_data="create_media|qi_rewrite"),
+        ],
+        [
+            InlineKeyboardButton("✨ Chọn chủ đề khác" if vi else "✨ Another topic", callback_data="create_media|qi_topics"),
+            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_suggestions"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
     ])
 
 def quick_image_custom_prompt_text(lang: str = "vi", prompt: str = "") -> str:
@@ -59485,13 +59739,15 @@ def quick_image_tier_text(state: dict | None = None, lang: str = "vi") -> str:
             "🖼 <b>Choose image quality</b>\n\n"
             f"Prompt: <code>{html.escape(prompt)}</code>\n"
             f"Aspect ratio: <b>{html.escape(media_aspect_ratio_label(aspect, 'image', lang))}</b>\n\n"
-            "Choose a tier below. Prices use the centralized image pricing table."
+            "Choose a tier below. Warranty tiers include one retry for the same request; other tiers do not include a free retry. "
+            "Xu is charged only after final confirmation."
         )
     return (
         "🖼 <b>Bạn muốn tạo ảnh chất lượng nào?</b>\n\n"
         f"Prompt: <code>{html.escape(prompt)}</code>\n"
         f"Tỉ lệ: <b>{html.escape(media_aspect_ratio_label(aspect, 'image', lang))}</b>\n\n"
-        "Chọn tier ảnh bên dưới. Giá lấy từ bảng giá hiện tại."
+        "Chọn tier ảnh bên dưới. Gói có BH kèm 1 lần tạo lại trong cùng yêu cầu; gói thường không kèm tạo lại miễn phí.\n"
+        "Xu chỉ được trừ sau bước xác nhận cuối."
     )
 
 def quick_image_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -64235,8 +64491,52 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         except Exception:
             index = 1
         suggestions = quick_image_suggestions(_safe_int(state.get("suggest_offset"), 0), lang)
-        prompt = suggestions[index - 1] if index <= len(suggestions) else (suggestions[0] if suggestions else "")
-        state = set_quick_image_flow(uid, "ratio", prompt=prompt, prompt_source="suggestion")
+        topic = suggestions[index - 1] if index <= len(suggestions) else (suggestions[0] if suggestions else "")
+        prompt, negative_prompt = quick_image_prompt_from_topic(topic, lang, 0)
+        state = set_quick_image_flow(
+            uid,
+            "prepared_prompt",
+            selected_topic=topic,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            prompt_source="suggestion",
+            prompt_variant=0,
+        )
+        return await safe_edit_or_send(
+            query,
+            quick_image_prepared_prompt_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_prepared_prompt_keyboard(lang),
+        )
+    if action == "qi_rewrite":
+        state = get_quick_image_flow(uid) or {}
+        topic = str(state.get("selected_topic") or "").strip()
+        if not topic:
+            state = set_quick_image_flow(uid, "suggestions")
+            return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang))
+        variant = _safe_int(state.get("prompt_variant"), 0) + 1
+        prompt, negative_prompt = quick_image_prompt_from_topic(topic, lang, variant)
+        state = set_quick_image_flow(uid, "prepared_prompt", prompt=prompt, negative_prompt=negative_prompt, prompt_variant=variant)
+        return await safe_edit_or_send(
+            query,
+            quick_image_prepared_prompt_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_prepared_prompt_keyboard(lang),
+        )
+    if action in {"qi_topics", "qi_back_suggestions"}:
+        state = set_quick_image_flow(uid, "suggestions")
+        return await safe_edit_or_send(
+            query,
+            quick_image_suggestions_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_suggestions_keyboard(lang),
+        )
+    if action == "qi_choose_ratio":
+        state = get_quick_image_flow(uid) or {}
+        if not state.get("prompt"):
+            state = set_quick_image_flow(uid, "suggestions")
+            return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang))
+        state = set_quick_image_flow(uid, "ratio")
         return await safe_edit_or_send(
             query,
             quick_image_ratio_text(state, lang),
@@ -64246,12 +64546,12 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
     if action == "qi_back_prompt":
         state = get_quick_image_flow(uid) or {}
         if state.get("prompt_source") == "suggestion":
-            state = set_quick_image_flow(uid, "suggestions")
+            state = set_quick_image_flow(uid, "prepared_prompt")
             return await safe_edit_or_send(
                 query,
-                quick_image_suggestions_text(state, lang),
+                quick_image_prepared_prompt_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=quick_image_suggestions_keyboard(lang),
+                reply_markup=quick_image_prepared_prompt_keyboard(lang),
             )
         state = set_quick_image_flow(uid, "custom_prompt", prompt_source="custom")
         return await safe_edit_or_send(
