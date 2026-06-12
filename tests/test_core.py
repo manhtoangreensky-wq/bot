@@ -275,7 +275,7 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "🤖 Provider" in admin_nav_labels
     admin_nav_rows = [[button.text for button in row] for row in bot.menu_nav_keyboard("admin", True).inline_keyboard]
     assert ["💰 Tài chính", "🧊 Freeze / Queue"] in admin_nav_rows
-    assert ["🤖 Provider"] in admin_nav_rows
+    assert ["🤖 Provider", "📣 Marketing tự động"] in admin_nav_rows
     assert ["⬅️ Quay lại", "🏠 Menu chính"] in admin_nav_rows
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
     for label in ["📊 Tổng quan", "💵 Doanh thu", "📅 Doanh thu tháng", "📉 Chi phí tháng", "📈 Lãi / Lỗ", "📤 Xuất báo cáo", "➕ Thêm chi phí", "📚 Hướng dẫn lệnh"]:
@@ -2197,6 +2197,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "📺 Kịch bản video dài",
         "🧠 Ý tưởng video",
         "🎥 Prompt / Chuyển động",
+        "🌐 Dịch/Lồng tiếng video",
         "🔙 Quay lại",
         "🏠 Menu chính",
     ]
@@ -2207,10 +2208,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "💰 Xem giá" not in video_labels
     assert "📞 Liên hệ admin" not in video_labels
     video_ai_labels = [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
-    assert video_ai_labels == ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "📊 Trạng thái video", "🔙 Quay lại Video", "🏠 Menu chính"]
+    assert video_ai_labels == ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Trạng thái video", "🔙 Quay lại Video", "🏠 Menu chính"]
     video_ai_callbacks = [button.callback_data for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
     assert "promptvideo|start" in video_ai_callbacks
     assert "imagevideo|start" in video_ai_callbacks
+    assert "videoref|start" in video_ai_callbacks
     assert "create_media|quick_video" not in video_ai_callbacks
     assert "menu|hint_image_to_video_pack" not in video_ai_callbacks
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
@@ -4578,6 +4580,7 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
     assert "TOAN AAS đã nhận video của bạn" in upload_text
     assert "/add_music" not in upload_text
     assert "/video_enhance" not in upload_text
+    assert "🎞 Video mẫu → Video AI" in public_upload_buttons
     assert "🎥 Tự quay & đổi cảnh AI" in public_upload_buttons
     assert "🎵 Thêm nhạc / voice" in public_upload_buttons
     assert "🧠 Tạo ý tưởng video" in public_upload_buttons
@@ -4587,6 +4590,8 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
     assert "🔐 Công cụ admin" not in public_upload_buttons
     assert "🔐 Công cụ admin" in admin_upload_buttons
     assert 'CallbackQueryHandler(handle_video_upload_callback, pattern=r"^video_upload\\|")' in source
+    assert 'CallbackQueryHandler(handle_video_reference_callback, pattern=r"^videoref\\|")' in source
+    assert 'CallbackQueryHandler(handle_video_dubbing_callback, pattern=r"^videodub\\|")' in source
 
     selfscene_start = bot.self_scene_start_text("vi")
     selfscene_direction_callbacks = [
@@ -4796,12 +4801,27 @@ def test_video_ux_v6_shared_suggestions_and_navigation():
     for key in bank_keys:
         assert len(bot.video_v6_suggestion_bank(key, "vi")) >= 10
 
+    shared_keys = [
+        "video_topic_suggestions",
+        "video_motion_suggestions",
+        "video_transition_suggestions",
+        "video_music_voice_suggestions",
+        "video_reference_analysis_templates",
+        "marketing_campaign_suggestions",
+        "image_topic_suggestions",
+    ]
+    for key in shared_keys:
+        assert len(bot.creative_suggestion_bank(key, "vi")) >= 9
+    assert bot.rotating_suggestions(["a", "b", "c", "d"], 2, 3) == ["c", "d", "a"]
+
     main_rows = bot.main_video_keyboard("vi").inline_keyboard
     assert [button.callback_data for button in main_rows[-1]] == ["menu|main", "menu|main"]
     assert len(main_rows[-1]) == 2
 
     ai_rows = bot.video_ai_true_keyboard("vi").inline_keyboard
     assert [button.callback_data for button in ai_rows[-1]] == ["menu|main_video", "menu|main"]
+    ai_callbacks = [button.callback_data for row in ai_rows for button in row]
+    assert "videoref|start" in ai_callbacks
 
     self_scene_rows = bot.video_self_scene_ai_keyboard("vi").inline_keyboard
     assert all(len(row) <= 2 for row in self_scene_rows)
@@ -4840,6 +4860,16 @@ def test_video_ux_v6_shared_suggestions_and_navigation():
     assert [button.callback_data for button in result_rows[-1]] == ["promptvideo|back_music", "menu|main"]
     idea_result_rows = bot.video_idea_result_keyboard("vi").inline_keyboard
     assert [button.callback_data for button in idea_result_rows[-1]] == ["videoidea|back_choices", "menu|main"]
+
+    frame_state = {"photos": [{"file_id": "a"}, {"file_id": "b"}], "planning_offset": 0}
+    frame_next = {"photos": [{"file_id": "a"}, {"file_id": "b"}], "planning_offset": 3}
+    frame_plan_text = bot.frame_video_planning_text(frame_state, "vi")
+    assert "Kế hoạch ghép ảnh thành video" in frame_plan_text
+    assert "Gợi ý phong cách" in frame_plan_text
+    assert "Gợi ý transition" in frame_plan_text
+    assert bot.frame_video_planning_suggestions(frame_state, "vi") != bot.frame_video_planning_suggestions(frame_next, "vi")
+    frame_plan_callbacks = [button.callback_data for row in bot.frame_video_planning_keyboard("vi").inline_keyboard for button in row]
+    assert {"framevideo|planning_continue", "framevideo|planning_refresh", "framevideo|back|collect"}.issubset(set(frame_plan_callbacks))
 
 
 def test_video_ux_v7_trend_back_and_suggestion_flow():
@@ -4932,6 +4962,60 @@ def test_video_ux_v7_trend_back_and_suggestion_flow():
     assert "selfscene|back_music" in self_scene_handler
     long_result_callbacks = [button.callback_data for row in bot.long_video_result_keyboard("vi").inline_keyboard for button in row]
     assert "longvideo|back_structure" in long_result_callbacks
+
+
+def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monkeypatch):
+    source = bot_source_text()
+    monkeypatch.setattr(bot, "is_admin_user", lambda user_id: str(user_id) == "1")
+
+    main_labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
+    assert "🌐 Dịch/Lồng tiếng video" in main_labels
+    assert "🎞 Video mẫu → Video AI" in [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
+    assert "🎞 Video mẫu → Video AI" not in main_labels
+
+    ref_start = bot.video_reference_start_text("vi")
+    assert "Video mẫu → Video AI" in ref_start
+    assert "chưa trừ Xu" in ref_start
+    ref_callbacks = [button.callback_data for row in bot.video_reference_start_keyboard("vi").inline_keyboard for button in row]
+    assert "videoref|await_video" in ref_callbacks
+    ref_state = {"analysis_kind": "ad", "suggest_offset": 0, "selected_topic": "App AI automation cho chủ shop nhỏ"}
+    assert len(bot.video_reference_topic_suggestions(ref_state, "vi")) == 3
+    assert bot.video_reference_topic_suggestions(ref_state, "vi") != bot.video_reference_topic_suggestions({**ref_state, "suggest_offset": 3}, "vi")
+    ref_plan = bot.video_reference_plan_text(ref_state, "vi")
+    for expected in ["Tóm tắt video mẫu", "Phong cách video mẫu", "Prompt ảnh", "Prompt video", "không sao chép"]:
+        assert expected in ref_plan
+    ref_result_callbacks = [button.callback_data for row in bot.video_reference_result_keyboard("vi").inline_keyboard for button in row]
+    assert {"videoref|image_prompts", "videoref|frame_plan", "videoref|generate", "videoref|save"}.issubset(set(ref_result_callbacks))
+
+    dub_labels = [button.text for row in bot.video_dubbing_menu_keyboard("vi").inline_keyboard for button in row]
+    assert "📝 Chỉ tạo phụ đề" in dub_labels
+    assert "🎬 Dịch + lồng tiếng + video" in dub_labels
+    dub_confirm = bot.video_dubbing_confirm_text({"process_type": "translate_voice", "target_language": "Tiếng Anh", "voice_style": "Nữ tự nhiên"}, "vi")
+    assert "chưa mở" in dub_confirm
+    assert "trừ Xu" in dub_confirm
+
+    admin_labels = [button.text for row in bot.menu_nav_keyboard("admin", True).inline_keyboard for button in row]
+    assert "📣 Marketing tự động" in admin_labels
+    public_admin_labels = [button.text for row in bot.menu_nav_keyboard("admin", False).inline_keyboard for button in row]
+    assert "📣 Marketing tự động" not in public_admin_labels
+    marketing_callbacks = [button.callback_data for row in bot.marketing_menu_keyboard().inline_keyboard for button in row]
+    assert {"marketing|kind|physical", "marketing|kind|affiliate", "marketing|kind_custom"}.issubset(set(marketing_callbacks))
+    market_state = {"kind": "service", "suggest_offset": 0}
+    assert len(bot.marketing_suggestions(market_state)) == 3
+    assert bot.marketing_suggestions(market_state) != bot.marketing_suggestions({"kind": "service", "suggest_offset": 3})
+    market_plan = bot.marketing_plan_text({"kind": "service", "selected_brief": "ra mắt app AI"})
+    assert "Admin V1" in market_plan
+    for expected in ["Sản phẩm/dịch vụ", "Khách hàng mục tiêu", "Kênh đề xuất", "Lịch đăng 7 ngày", "Bước tiếp theo"]:
+        assert expected in market_plan
+    assert "Chưa tự đăng bài" in market_plan
+    assert "chưa trừ Xu" in market_plan
+
+    assert 'CallbackQueryHandler(handle_video_reference_callback, pattern=r"^videoref\\|")' in source
+    assert 'CallbackQueryHandler(handle_video_dubbing_callback, pattern=r"^videodub\\|")' in source
+    assert 'CallbackQueryHandler(handle_marketing_callback, pattern=r"^marketing\\|")' in source
+    assert "handle_marketing_pending_text(update, context)" in source
+    assert "handle_video_reference_pending_upload(update, context)" in source
+    assert "handle_video_dubbing_pending_upload(update, context)" in source
 
 
 def test_quick_image_flow_prompt_before_ratio_and_pricing():
@@ -5138,6 +5222,14 @@ def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
         bot.image_resize_pixels_keyboard("vi"),
         bot.main_video_keyboard("vi"),
         bot.video_ai_true_keyboard("vi"),
+        bot.frame_video_collect_keyboard(),
+        bot.frame_video_planning_keyboard("vi"),
+        bot.frame_video_ratio_keyboard(),
+        bot.frame_video_duration_keyboard(),
+        bot.frame_video_effect_keyboard(),
+        bot.frame_video_music_keyboard(),
+        bot.frame_video_confirm_keyboard(),
+        bot.frame_video_success_keyboard(),
         bot.main_memory_keyboard("vi"),
         bot.main_docs_keyboard("vi"),
         bot.create_media_menu_keyboard("vi"),
