@@ -56,6 +56,14 @@ from image_prompt_quality import (
     build_image_prompt,
     enhance_image_prompt_for_generation,
 )
+from video_prompt_quality import (
+    build_video_prompt,
+    enhance_video_prompt_for_generation,
+    normalize_video_motion,
+    parse_video_user_intent,
+    validate_video_prompt_against_user_request,
+    video_request_is_vague,
+)
 try:
     import edge_tts
     EDGE_TTS_IMPORT_ERROR = ""
@@ -29551,22 +29559,24 @@ def video_tier_public_status_text() -> str:
     enabled_map = video_tier_enabled_map()
     return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in VIDEO_TIER_ORDER)
 
-def video_tier_prompt_for_generation(prompt: str, tier: str = "", aspect_ratio: str = "") -> str:
-    prompt = re.sub(r"\s+", " ", str(prompt or "").strip())[:1200]
-    tier_norm = normalize_video_tier(tier)
-    aspect = normalize_media_aspect_ratio(aspect_ratio, "16:9")
-    safety = (
-        "Use realistic motion, stable subject, physically correct perspective, no morphing, "
-        "no distorted hands or faces, no fake UI. Negative prompt: no text, no caption, no watermark, "
-        "no fake logo, no readable subtitles, no broken letters. Do not render readable text, captions, subtitles, "
-        "watermarks, fake logos or broken letters. If a phone/laptop/screen appears, keep the screen "
-        "clean or slightly blurred with no readable UI text."
+def video_tier_prompt_for_generation(prompt: str, tier: str = "", aspect_ratio: str = "", current_flow: str = "") -> str:
+    clean_prompt = re.sub(r"\s+", " ", str(prompt or "").strip())[:1800]
+    lowered = clean_prompt.lower()
+    flow = str(current_flow or "").strip().lower() or "promptvideo"
+    if not current_flow and ("uploaded image" in lowered or "source image" in lowered):
+        flow = "imagevideo"
+    elif not current_flow and ("reference video" in lowered or "video mẫu" in lowered):
+        flow = "videoref"
+    elif not current_flow and ("trend-style" in lowered or "theo trend" in lowered or "hướng video:" in lowered):
+        flow = "trend"
+    elif not current_flow and ("keep the original person" in lowered or "đổi cảnh" in lowered or "giữ ổn định mặt" in lowered):
+        flow = "selfscene"
+    return enhance_video_prompt_for_generation(
+        clean_prompt,
+        normalize_video_tier(tier),
+        normalize_media_aspect_ratio(aspect_ratio, "16:9", "video"),
+        flow,
     )
-    if tier_norm == "standard":
-        return f"{prompt}. Short clean video, stable motion, professional lighting, aspect ratio {aspect}. {safety}"
-    if tier_norm == "high":
-        return f"{prompt}. High-quality short commercial video, polished camera movement, stable subject, professional lighting, aspect ratio {aspect}. {safety}"
-    return f"{prompt}. Short simple video, clean motion, clear subject, aspect ratio {aspect}. {safety}"
 
 def image_base_cost_xu() -> int:
     return int(image_tier_pricing_payload()["low"]["cost"])
@@ -37527,28 +37537,77 @@ def guided_video_music_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboard
         back=("🔙 Quay lại" if is_vi else "🔙 Back", f"{prefix}|back_motion"),
     )
 
-def guided_video_plan_text(state: dict | None = None, lang: str = "vi", from_image: bool = False) -> str:
-    state = state or {}
-    prompt = _short_pending_text(state.get("selected_prompt"), 900)
-    motion = self_scene_style_label(state.get("selected_motion"), lang)
-    music = self_scene_music_label(state.get("selected_music"), lang)
-    if normalize_user_language(lang) != "vi":
-        source = "Image received: <b>yes</b>\n" if from_image else ""
-        return (
-            f"🎬 <b>{'Image-to-video' if from_image else 'Prompt-to-video'} plan ready</b>\n\n"
-            f"{source}Style: <b>{html.escape(prompt_video_kind_label(state.get('prompt_kind'), lang))}</b>\n"
-            f"Motion: <b>{html.escape(motion)}</b>\nMusic/voice: <b>{html.escape(music)}</b>\n\n"
-            f"<b>Video prompt</b>\n<code>{html.escape(prompt)}</code>\n\n"
-            "No video provider was called and no Xu was charged."
-        )
-    source = "Ảnh: <b>đã nhận</b>\n" if from_image else ""
-    return (
-        f"🎬 <b>Prompt video {'từ ảnh ' if from_image else ''}đã sẵn sàng</b>\n\n"
-        f"{source}Kiểu video: <b>{html.escape(prompt_video_kind_label(state.get('prompt_kind'), lang))}</b>\n"
-        f"Chuyển động: <b>{html.escape(motion)}</b>\nNhạc/voice: <b>{html.escape(music)}</b>\n\n"
-        f"<b>Prompt video</b>\n<code>{html.escape(prompt)}</code>\n\n"
-        "TOAN AAS chưa gọi API video và chưa trừ Xu."
+def structured_video_plan(state: dict | None = None, flow: str = "promptvideo") -> dict:
+    state = dict(state or {})
+    user_request = _short_pending_text(
+        state.get("selected_prompt") or state.get("selected_topic") or state.get("product") or state.get("selected_context"),
+        1800,
     )
+    previous = {
+        **state,
+        "camera_motion": state.get("selected_motion") or state.get("camera_motion") or "",
+        "music_voice": state.get("selected_music") or state.get("music_voice") or "",
+        "ratio": state.get("aspect_ratio") or state.get("ratio") or "",
+        "quality_tier": state.get("video_tier") or state.get("quality_tier") or "basic",
+    }
+    intent = parse_video_user_intent(user_request, flow, previous)
+    result = build_video_prompt(intent)
+    result["validation"] = validate_video_prompt_against_user_request(user_request, result.get("prompt") or "", intent)
+    return result
+
+def structured_video_preview_text(state: dict | None = None, lang: str = "vi", flow: str = "promptvideo") -> str:
+    package = structured_video_plan(state, flow)
+    intent = package.get("intent") or {}
+    keep = "; ".join(intent.get("must_keep") or []) or ("requested subject and identity" if normalize_user_language(lang) != "vi" else "chủ thể và nhận diện đã yêu cầu")
+    avoid = package.get("negative_prompt") or "distortion, random text, watermark"
+    caution = str(package.get("caution") or "").strip()
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎬 <b>Optimized video plan</b>\n\n"
+            f"Goal: <b>{html.escape(str(intent.get('user_goal') or 'short-form video'))}</b>\n"
+            f"Task: <b>{html.escape(str(intent.get('task_type') or flow))}</b>\n"
+            f"Camera motion: <b>{html.escape(str(intent.get('camera_motion') or 'stable camera'))}</b>\n"
+            f"Subject motion: <b>{html.escape(str(intent.get('subject_motion') or 'natural motion'))}</b>\n"
+            f"Ratio/platform: <b>{html.escape(str(intent.get('ratio') or '9:16'))} / {html.escape(str(intent.get('platform') or 'custom'))}</b>\n"
+            f"Music/voice: <b>{html.escape(str(intent.get('music_voice') or 'not selected'))}</b>\n"
+            f"Must keep: <code>{html.escape(keep)}</code>\n"
+            f"Must avoid: <code>{html.escape(avoid)}</code>\n\n"
+            f"<b>Video prompt</b>\n<code>{html.escape(str(package.get('prompt') or ''))}</code>\n\n"
+            + (f"Note: {html.escape(caution)}\n\n" if caution else "")
+        + "This step only creates a plan/prompt. TOAN AAS has not called a video provider, rendered video or charged Xu."
+        )
+    caution_vi = ""
+    if caution:
+        caution_vi = (
+            "\n\n<b>Lưu ý:</b> Video AI có thể làm thay đổi nhẹ mặt, chữ/logo, bao bì hoặc chi tiết sản phẩm. "
+            "TOAN AAS đã thêm ràng buộc giữ chủ thể, nhưng bạn vẫn nên kiểm tra kết quả sau khi tạo."
+        )
+    vague_vi = ""
+    if intent.get("needs_clarification"):
+        vague_vi = "\nYêu cầu còn ngắn; hãy dùng nút Sửa prompt nếu cần nêu rõ mục tiêu, nền tảng, chủ thể hoặc chuyển động."
+    return (
+        "🎬 <b>Kế hoạch video đã tối ưu</b>\n\n"
+        f"Mục tiêu: <b>{html.escape(str(intent.get('user_goal') or 'video ngắn'))}</b>\n"
+        f"Tác vụ: <b>{html.escape(str(intent.get('task_type') or flow))}</b>\n"
+        f"Chuyển động camera: <b>{html.escape(str(intent.get('camera_motion') or 'camera ổn định'))}</b>\n"
+        f"Chuyển động chủ thể: <b>{html.escape(str(intent.get('subject_motion') or 'chuyển động tự nhiên'))}</b>\n"
+        f"Tỉ lệ / nền tảng: <b>{html.escape(str(intent.get('ratio') or '9:16'))} / {html.escape(str(intent.get('platform') or 'custom'))}</b>\n"
+        f"Nhạc/voice: <b>{html.escape(str(intent.get('music_voice') or 'chưa chọn'))}</b>\n"
+        f"Điều cần giữ: <code>{html.escape(keep)}</code>\n"
+        f"Điều cần tránh: <code>{html.escape(avoid)}</code>\n\n"
+        f"<b>Prompt video</b>\n<code>{html.escape(str(package.get('prompt') or ''))}</code>"
+        f"{caution_vi}{vague_vi}\n\n"
+        "Bước này chỉ tạo kế hoạch/prompt. TOAN AAS chưa gọi API video, chưa render video và chưa trừ Xu."
+    )
+
+def guided_video_plan_text(state: dict | None = None, lang: str = "vi", from_image: bool = False) -> str:
+    flow = "imagevideo" if from_image else "promptvideo"
+    heading = (
+        "🎬 <b>Prompt video từ ảnh đã sẵn sàng</b>\n\n"
+        if from_image and normalize_user_language(lang) == "vi"
+        else ("🎬 <b>Prompt video đã sẵn sàng</b>\n\n" if normalize_user_language(lang) == "vi" else "")
+    )
+    return heading + structured_video_preview_text(state, lang, flow)
 
 def guided_video_result_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -37800,6 +37859,8 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
         ("3–8s", "Bối cảnh, demo hoặc bằng chứng" if normalize_user_language(lang) == "vi" else "Context, demo or proof"),
         ("8–15s", "Kết quả, hero reveal và CTA" if normalize_user_language(lang) == "vi" else "Result, hero reveal and CTA"),
     ]
+    render_plan = structured_video_plan({**state, "selected_prompt": topic}, "videoref")
+    render_prompt = str(render_plan.get("prompt") or "")
     if normalize_user_language(lang) != "vi":
         lines = [
             "🎞 <b>New video plan from a reference video</b>",
@@ -37831,6 +37892,9 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
             "",
             "<b>5. Caption/CTA</b>",
             html.escape(cta[0] if cta else "Save this plan for your next video."),
+            "",
+            "<b>6. Original render prompt</b>",
+            f"<code>{html.escape(render_prompt)}</code>",
             "",
             "This step only creates suggestions/plans. No render, no video provider call and no Xu charge.",
         ])
@@ -37871,6 +37935,9 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
         "",
         "<b>6. Caption/CTA</b>",
         html.escape(cta[0] if cta else "Lưu kế hoạch để làm video tiếp theo."),
+        "",
+        "<b>7. Prompt render mới, không sao chép</b>",
+        f"<code>{html.escape(render_prompt)}</code>",
         "",
         "Bước này chỉ tạo gợi ý/kế hoạch. TOAN AAS chưa render video, chưa gọi provider video và chưa trừ Xu.",
     ])
@@ -38397,14 +38464,18 @@ def self_scene_plan_text(state: dict, lang: str = "vi") -> str:
     motion = state.get("selected_motion") or state.get("selected_style") or "pushin"
     motion_label = self_scene_style_label(motion, lang)
     music_label = self_scene_music_label(state.get("selected_music") or "cinematic", lang)
+    render_state = {
+        **(state or {}),
+        "selected_prompt": f"{topic}. Change scene to {context_text}. Direction: {direction_label}. Motion: {motion_label}.",
+        "selected_motion": f"{motion} {motion_label}",
+        "selected_music": music_label,
+        "selected_context": context_text,
+    }
+    video_prompt = str(structured_video_plan(render_state, "selfscene").get("prompt") or "")
     if normalize_user_language(lang) != "vi":
         image_prompt = (
             f"Create a high-quality keyframe of {topic} in {context_text}, {direction_label}, "
             "preserve identity/product details, clean lighting, realistic composition, no distorted face/logo."
-        )
-        video_prompt = (
-            f"Animate {topic} inside {context_text}; subtle camera push-in, natural lighting shift, "
-            f"stable identity/product geometry, {motion_label}, no extra text."
         )
         return (
             "🎥 <b>Self-shot scene AI plan</b>\n\n"
@@ -38429,10 +38500,6 @@ def self_scene_plan_text(state: dict, lang: str = "vi") -> str:
     image_prompt = (
         f"Tạo ảnh khung chính chất lượng cao cho {topic} trong {context_text}, hướng {direction_label}, "
         "giữ đúng nhận diện/sản phẩm, ánh sáng sạch, bố cục quảng cáo, không méo mặt/logo."
-    )
-    video_prompt = (
-        f"Biến {topic} trong {context_text} thành video ngắn; camera push-in nhẹ, ánh sáng chuyển tự nhiên, "
-        f"giữ ổn định mặt/sản phẩm/logo, chuyển động {motion_label}, không thêm chữ thừa."
     )
     return (
         "🎥 <b>Kế hoạch đổi cảnh video</b>\n\n"
@@ -39811,10 +39878,11 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(shopaikey_active_job_for_user(uid, "video"), lang))
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
             return await safe_edit_or_send(query, guided_video_public_guard_text(lang), reply_markup=guided_video_result_keyboard("promptvideo", lang))
+        render_plan = structured_video_plan(state, "promptvideo")
         package = {
             "source": "prompt_to_video",
             "concept_text": state.get("selected_topic") or "",
-            "video_prompt": state.get("selected_prompt") or "",
+            "video_prompt": render_plan.get("prompt") or state.get("selected_prompt") or "",
             "music_choice": {"label": self_scene_music_label(state.get("selected_music"), lang)},
         }
         set_public_video_package_context(uid, package)
@@ -40103,10 +40171,11 @@ async def handle_video_reference_callback(update: Update, context: ContextTypes.
             return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(active, lang))
         if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
             return await safe_edit_or_send(query, guided_video_public_guard_text(lang), reply_markup=video_reference_result_keyboard(lang))
+        render_plan = structured_video_plan(plan, "videoref")
         package = {
             "source": "reference_video_plan",
             "concept_text": plan.get("selected_topic") or "",
-            "video_prompt": re.sub(r"<[^>]+>", "", video_reference_plan_text(plan, lang))[:1800],
+            "video_prompt": render_plan.get("prompt") or "",
             "music_choice": {"label": "reference-plan music/voice"},
         }
         set_public_video_package_context(uid, package)
@@ -45667,8 +45736,25 @@ async def handle_public_video_prompt_pending_text(update: Update, context: Conte
     prompt = re.sub(r"\s+", " ", update.message.text.strip())
     if not prompt:
         return False
-    clear_public_video_prompt_pending(uid)
     lang = get_user_language(uid) or "vi"
+    if video_request_is_vague(prompt):
+        clear_public_video_prompt_pending(uid)
+        if normalize_user_language(lang) == "vi":
+            message = (
+                "🎬 <b>Yêu cầu video còn quá chung chung</b>\n\n"
+                "Hãy nêu rõ chủ thể/sản phẩm, mục tiêu, nền tảng và chuyển động mong muốn trước khi render.\n"
+                "Ví dụ: video quảng cáo chai nước hoa nam cho TikTok 9:16, camera zoom nhẹ vào chai, ánh sáng luxury, không thêm chữ.\n\n"
+                "TOAN AAS chưa gọi API video và chưa trừ Xu."
+            )
+        else:
+            message = (
+                "🎬 <b>The video request is too general</b>\n\n"
+                "Please specify the subject/product, goal, platform and desired motion before rendering.\n\n"
+                "TOAN AAS has not called a video provider or charged Xu."
+            )
+        await update.message.reply_text(message, parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
+        return True
+    clear_public_video_prompt_pending(uid)
     tier = normalize_video_tier(pending.get("tier") or SHOPAIKEY_VIDEO_DEFAULT_TIER)
     payload = video_tier_payload(tier)
     if tier == "premium" or payload.get("admin_only"):
@@ -60899,9 +60985,19 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
     generation_prompt = raw_prompt
     if music_label and music_label not in {"không", "no", "无"}:
         generation_prompt = f"{raw_prompt}. Visual pacing should fit this music/mood: {music_label}. Do not generate audio; soundtrack/captions are handled separately."
+    source = str((package or {}).get("source") or (package or {}).get("source_flow") or "").strip().lower()
+    flow = "promptvideo"
+    if "image_to_video" in source:
+        flow = "imagevideo"
+    elif "reference" in source:
+        flow = "videoref"
+    elif "trend" in source:
+        flow = "trend"
+    elif "self" in source or "change_scene" in source:
+        flow = "selfscene"
     return {
         "job_type": "video",
-        "prompt": video_tier_prompt_for_generation(generation_prompt, tier_norm, aspect),
+        "prompt": video_tier_prompt_for_generation(generation_prompt, tier_norm, aspect, flow),
         "original_prompt": raw_prompt,
         "base_cost": int(payload.get("cost") or 0),
         "from_image": str((package or {}).get("source") or "") == "image_to_video",
@@ -62112,23 +62208,25 @@ def trend_guided_video_prompt_for_index(state: dict, index: int = 1, lang: str =
         durations = {1: "5 seconds", 2: "10 seconds", 3: "15 seconds"}
         opening = {1: "a short close-up product hook", 2: "the customer problem", 3: "a before/after story"}[idx]
         ending = {1: "a clean final frame with space for CTA overlay", 2: "a clear result and empty space for action text overlay", 3: "hero shot plus clean space for a gentle CTA overlay"}[idx]
-        return (
+        raw_prompt = (
             f"Video prompt {durations[idx]} for {topic}. Video direction: {trend}. "
             f"Motion direction: {motion}. Keyframe image: {image_prompt[:260]}. "
             f"Opening scene: {opening}. Action: reveal the product/service, show the main benefit, then transition to the result. "
             f"Camera motion: smooth push-in, clean transitions, keep the subject clear. Final scene: {ending}. "
             f"Negative prompt: blur, distorted product, extra text, watermark, overly shaky transitions, exaggerated claims. {guard}"
         )
+        return enhance_video_prompt_for_generation(raw_prompt, "standard", "9:16", "trend", state)
     durations = {1: "5 giây", 2: "10 giây", 3: "15 giây"}
     opening = {1: "hook ngắn bằng cận cảnh sản phẩm", 2: "mở bằng vấn đề khách gặp", 3: "mở bằng câu chuyện trước/sau"}[idx]
     ending = {1: "khung cuối sạch có khoảng trống để thêm CTA sau", 2: "kết quả rõ và khoảng trống để chèn lời mời hành động", 3: "hero shot + khoảng trống sạch cho CTA mềm"}[idx]
-    return (
+    raw_prompt = (
         f"Gợi ý video {durations[idx]} cho {topic}. Hướng video: {trend}. "
         f"Hướng chuyển động: {motion}. Ảnh khung chính: {image_prompt[:260]}. "
         f"Cảnh mở đầu: {opening}. Hành động: reveal sản phẩm/dịch vụ, nêu lợi ích chính, chuyển sang kết quả. "
         f"Chuyển động camera: push-in mượt, chuyển cảnh sạch, giữ chủ thể rõ. Cảnh cuối: {ending}. "
         f"Điều cần tránh: mờ nhòe, méo sản phẩm, chữ thừa, watermark, chuyển cảnh quá giật, cam kết quá mức. {guard}"
     )
+    return enhance_video_prompt_for_generation(raw_prompt, "standard", "9:16", "trend", state)
 
 def trend_guided_video_prompts_text(state: dict, lang: str = "vi") -> str:
     topic = trend_guided_topic(state)
@@ -65476,7 +65574,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         token = set_shopaikey_pending_confirmation(uid, pending_payload)
         record_shopaikey_billing_event(uid, 0, "video_prompt_received", 0, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
         record_shopaikey_billing_event(uid, 0, "video_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
-        confirm_text = public_video_confirm_text(tier, raw_prompt, int(credits or 0), lang, pending_payload.get("music_label") or "", aspect)
+        confirm_text = public_video_confirm_text(tier, pending_payload.get("prompt") or raw_prompt, int(credits or 0), lang, pending_payload.get("music_label") or "", aspect)
         confirm_markup = shopaikey_confirm_keyboard("video", token, tier, lang)
         if package_item:
             confirm_text = package_offer_text(package_item, confirm_text, lang)

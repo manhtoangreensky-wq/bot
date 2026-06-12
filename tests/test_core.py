@@ -5685,3 +5685,162 @@ def test_video_order_api_returns_machine_readable_handoff(monkeypatch):
     assert order["run_card"]["state"] == "VIDEO_ORDER_CREATED"
     assert order["run_card"]["sequence"][1]["action"] == "submit_real_video_or_scene_output"
     assert order["run_card"]["sequence"][3]["telegram"] == "/approve_publish job=101 queue=1 mode=manual"
+
+
+def test_video_system_v9_intent_parser_and_flow_specific_builders():
+    request = (
+        "tạo video sản phẩm nước hoa cho TikTok, camera zoom nhẹ vào chai, "
+        "sản phẩm xoay 360, ánh sáng luxury, giữ logo, không thêm chữ"
+    )
+    intent = bot.parse_video_user_intent(request, "promptvideo", {})
+    assert intent["task_type"] == "prompt_to_video"
+    assert intent["target_subject"] == "physical product"
+    assert intent["platform"] == "tiktok"
+    assert intent["ratio"] == "9:16"
+    assert "slow push-in" in intent["camera_motion"]
+    assert "product rotates slowly" in intent["subject_motion"]
+    assert "logo" in " ".join(intent["must_keep"]).lower()
+    assert "random or readable generated text" in intent["must_avoid"]
+
+    prompt_package = bot.build_video_prompt(intent)
+    prompt = prompt_package["prompt"]
+    assert "nước hoa" in prompt
+    assert "slow push-in" in prompt
+    assert "product rotates slowly" in prompt
+    assert "luxury controlled lighting" in prompt
+    assert "aspect ratio 9:16" in prompt
+    assert "no readable UI text" in prompt
+    assert bot.validate_video_prompt_against_user_request(request, prompt, intent)["ok"] is True
+    assert "Video AI may slightly distort" in prompt_package["caution"]
+
+    image_intent = bot.parse_video_user_intent(
+        "làm mượt hơn, chuyển động nhẹ, giữ sản phẩm và không méo logo",
+        "imagevideo",
+        {"ratio": "9:16"},
+    )
+    image_package = bot.build_video_prompt(image_intent)
+    assert "Use the uploaded image as the visual reference" in image_package["prompt"]
+    assert "Preserve the main subject" in image_package["prompt"]
+    assert "warped source image" in image_package["negative_prompt"]
+    image_pending = bot.public_video_pending_payload_from_package(
+        "low",
+        {"source": "image_to_video", "video_prompt": "animate this perfume product with subtle motion"},
+        "9:16",
+    )
+    assert "Use the uploaded image as the visual reference" in image_pending["prompt"]
+
+    reference_package = bot.build_video_prompt(
+        bot.parse_video_user_intent("quảng cáo app AI cho chủ shop", "videoref", {"ratio": "16:9"})
+    )
+    assert "reference video structure" in reference_package["prompt"]
+    assert "Do not copy the original video exactly" in reference_package["prompt"]
+
+    trend_package = bot.build_video_prompt(
+        bot.parse_video_user_intent("video trend nước hoa nam cho Reels", "trend", {})
+    )
+    assert "opening 1-3 seconds" in trend_package["prompt"]
+    assert "soft CTA" in trend_package["prompt"]
+
+    change_scene_package = bot.build_video_prompt(
+        bot.parse_video_user_intent(
+            "giữ người trong video, đổi nền thành thành phố tương lai, camera orbit nhẹ, không méo mặt",
+            "selfscene",
+            {},
+        )
+    )
+    assert "Keep the original person or product identity stable" in change_scene_package["prompt"]
+    assert "thành phố tương lai" in change_scene_package["prompt"]
+    assert "orbit shot" in change_scene_package["prompt"]
+    assert "distorted face" in change_scene_package["negative_prompt"]
+
+    frame_package = bot.build_video_prompt(
+        bot.parse_video_user_intent("ghép 5 ảnh, zoom nhẹ và fade", "framevideo", {"ratio": "9:16"})
+    )
+    assert frame_package["provider_video_allowed"] is False
+    assert "Do not call a generative video provider" in frame_package["prompt"]
+
+    high_prompt = bot.video_tier_prompt_for_generation(request, "high", "9:16")
+    for phrase in ("premium cinematic quality", "realistic motion", "polished commercial look", "stable identity"):
+        assert phrase in high_prompt
+    assert bot.video_request_is_vague("làm video bán hàng") is True
+    assert bot.video_request_is_vague(request) is False
+
+
+def test_video_system_v9_preview_and_stable_flow_linkage():
+    preview = bot.guided_video_plan_text(
+        {
+            "prompt_kind": "ad",
+            "selected_prompt": "video nước hoa luxury cho TikTok, camera zoom nhẹ, không thêm chữ",
+            "selected_motion": "camera zoom nhẹ",
+            "selected_music": "ambient luxury",
+            "aspect_ratio": "9:16",
+        },
+        "vi",
+    )
+    for expected in (
+        "Prompt video đã sẵn sàng",
+        "Kế hoạch video đã tối ưu",
+        "Chuyển động camera",
+        "Chuyển động chủ thể",
+        "Điều cần giữ",
+        "Điều cần tránh",
+        "chưa gọi API video",
+        "chưa trừ Xu",
+    ):
+        assert expected in preview
+
+    image_preview = bot.guided_video_plan_text(
+        {"selected_prompt": "làm ảnh sản phẩm chuyển động nhẹ", "selected_motion": "orbit"},
+        "vi",
+        from_image=True,
+    )
+    assert "Prompt video từ ảnh đã sẵn sàng" in image_preview
+    assert "Use the uploaded image as the visual reference" in image_preview
+
+    reference_plan = bot.video_reference_plan_text(
+        {"analysis_kind": "ad", "selected_topic": "máy pha cà phê mini"},
+        "vi",
+    )
+    assert "Prompt render mới, không sao chép" in reference_plan
+    assert "Do not copy the original video exactly" in reference_plan
+
+    self_scene = bot.self_scene_plan_text(
+        {
+            "selected_topic": "người mẫu nam",
+            "selected_context": "thành phố tương lai",
+            "direction": "cinema",
+            "selected_motion": "orbit",
+            "selected_music": "cinematic",
+        },
+        "vi",
+    )
+    assert "Keep the original person or product identity stable" in self_scene
+    assert "thành phố tương lai" in self_scene
+    assert "orbit shot" in self_scene
+
+    trend_prompt = bot.trend_guided_video_prompt_for_index(
+        {
+            "topic": "máy xay sinh tố mini",
+            "selected_trend_title": "Trend before/after",
+            "selected_motion_title": "zoom nhẹ vào sản phẩm",
+        },
+        1,
+        "vi",
+    )
+    assert "opening 1-3 seconds" in trend_prompt
+    assert "aspect ratio 9:16" in trend_prompt
+
+    long_plan = bot.long_video_plan_text(
+        {"selected_topic": "khóa học affiliate", "duration": "10 phút", "selected_style": "giáo dục"},
+        "vi",
+    )
+    assert "Prompt video từng cảnh" in long_plan
+
+    source = bot_source_text()
+    prompt_handler = source_between(source, "async def handle_prompt_video_callback", "async def handle_image_video_callback")
+    reference_handler = source_between(source, "async def handle_video_reference_callback", "async def handle_video_dubbing_callback")
+    vague_handler = source_between(source, "async def handle_public_video_prompt_pending_text", "async def cmd_shopaikey_video_public")
+    assert 'structured_video_plan(state, "promptvideo")' in prompt_handler
+    assert 'structured_video_plan(plan, "videoref")' in reference_handler
+    assert "video_request_is_vague(prompt)" in vague_handler
+    assert "TOAN AAS chưa gọi API video và chưa trừ Xu" in vague_handler
