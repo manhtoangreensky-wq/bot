@@ -8,7 +8,13 @@ The support flow does not automatically refund Xu, modify payments, call provide
 
 ## Public Flow
 
-Users enter from `Support`, `Feedback / Bug`, `/support`, `/tickets` or `/ticket_status`.
+Public UX is intentionally split:
+
+- `Feedback / Bug report` is the structured ticket path for payment, image,
+  video, document, package, refund and product feedback issues.
+- `Support` and `/support` open human contact, Premium registration, custom bot
+  consulting and service-package advice. The `@toanaas` button is only a link;
+  the bot never sends from a personal Telegram account.
 
 1. Select a support category.
 2. Send a description.
@@ -17,6 +23,29 @@ Users enter from `Support`, `Feedback / Bug`, `/support`, `/tickets` or `/ticket
 5. View only tickets owned by the same Telegram user ID.
 
 Public ticket detail never exposes `admin_note` or assignment metadata.
+Repeated messages from the same user and category within 30 minutes are
+appended to the existing open ticket instead of creating ticket spam.
+
+Premium and custom-bot requests use `premium_lead` and `custom_bot_lead`,
+receive high priority, and alert admins. General human-support tickets use
+`general_support`; sensitive payment/refund/error wording is reclassified to
+the appropriate operational category.
+
+## CSKH Persona
+
+The deterministic persona layer provides short, warm replies without promising
+refunds or delivery times. Rule-based classification runs first. An optional AI
+classifier can be enabled for unmatched messages, but rule fallback remains the
+source of truth if the provider fails.
+
+Admin can preview classification and wording with:
+
+```text
+/support_persona_test <customer message>
+```
+
+This command does not create a ticket, send an alert, call refund logic, or
+change Xu.
 
 ## Admin Flow
 

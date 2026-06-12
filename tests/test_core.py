@@ -2740,29 +2740,31 @@ def test_customer_feedback_loop_state_and_storage(monkeypatch):
         assert {"category", "context", "status", "reviewed_at", "resolved_at"}.issubset(columns)
         assert "Góp ý / Báo lỗi" in bot.feedback_start_text("vi")
         feedback_buttons = [button.callback_data for row in bot.feedback_category_keyboard("vi").inline_keyboard for button in row if button.callback_data]
-        assert "feedback|cat|image_not_right" in feedback_buttons
-        assert "feedback|cat|video_slow" in feedback_buttons
-        assert "feedback|cancel" in feedback_buttons
+        assert "feedback|cat|payment_topup" in feedback_buttons
+        assert "feedback|cat|image_error" in feedback_buttons
+        assert "feedback|cat|video_error" in feedback_buttons
+        assert "feedback|cat|refund" in feedback_buttons
+        assert "feedback|cancel" not in feedback_buttons
 
         bot.USER_PENDING.pop(bot.feedback_pending_key("u_feedback"), None)
-        bot.set_feedback_pending("u_feedback", "video_slow")
+        bot.set_feedback_pending("u_feedback", "video_error")
         pending = bot.get_feedback_pending("u_feedback")
         assert pending and pending["pending_action"] == "feedback"
-        assert pending["category"] == "video_slow"
+        assert pending["category"] == "video_error"
 
         class FakeUser:
             id = "u_feedback"
             username = "tester"
             first_name = "Tester"
 
-        feedback_id = bot.store_customer_feedback(FakeUser(), "video_slow", "Video tạo hơi lâu", "trend_video_flow")
+        feedback_id = bot.store_customer_feedback(FakeUser(), "video_error", "Video tạo hơi lâu", "trend_video_flow")
         assert feedback_id > 0
         conn = bot.db_connect()
         try:
             row = conn.execute("SELECT category, content, context, status FROM feedback WHERE id=?", (feedback_id,)).fetchone()
         finally:
             conn.close()
-        assert row == ("video_slow", "Video tạo hơi lâu", "trend_video_flow", "new")
+        assert row == ("video_error", "Video tạo hơi lâu", "trend_video_flow", "new")
         assert bot.clear_feedback_pending("u_feedback") is True
     finally:
         if os.path.exists(db_path):
@@ -2843,17 +2845,70 @@ def test_support_ticket_public_isolation_reply_and_refund_marker(monkeypatch, tm
 
 
 def test_support_ticket_priority_overdue_and_templates():
-    from support_v1b import overdue_reason, suggested_reply, ticket_priority
+    from support_v1b import (
+        AAS_SUPPORT_SYSTEM_PERSONA,
+        SUPPORT_REPLY_TEMPLATES,
+        classify_support_escalation,
+        format_support_reply,
+        overdue_reason,
+        suggested_reply,
+        support_reply_for_classification,
+        ticket_priority,
+    )
 
     assert ticket_priority("payment_topup", "missing") == "high"
     assert ticket_priority("refund", "please check") == "high"
     assert ticket_priority("video_error", "Video lỗi và bị trừ Xu") == "high"
+    assert ticket_priority("other", "Bot làm ăn kiểu gì, trừ Xu mà không ra video") == "urgent"
     assert ticket_priority("feature_request", "new idea") == "low"
     assert ticket_priority("image_error", "wrong image") == "normal"
     assert overdue_reason("new", "2026-06-01 00:00:00", datetime(2026, 6, 2, 1, 0, 0))
     assert overdue_reason("waiting_provider", "2026-06-01 00:00:00", datetime(2026, 6, 3, 23, 0, 0)) == ""
     assert overdue_reason("waiting_provider", "2026-06-01 00:00:00", datetime(2026, 6, 4, 1, 0, 0))
     assert "chưa tự động" in suggested_reply("refund", 0).lower()
+    assert "không khẳng định đã hoàn xu" in AAS_SUPPORT_SYSTEM_PERSONA.lower()
+    assert {
+        "onboarding", "pricing", "payment", "technical_error", "refund_complaint",
+        "feature_question", "admin_escalation", "out_of_scope", "closing",
+    }.issubset(SUPPORT_REPLY_TEMPLATES)
+
+    onboarding = classify_support_escalation("Bot này làm được gì?")
+    assert onboarding["category"] == "onboarding"
+    assert onboarding["needs_admin"] is False
+    assert "tạo ảnh AI" in support_reply_for_classification(onboarding)
+
+    payment = classify_support_escalation("Tôi nạp tiền rồi chưa thấy Xu")
+    assert payment["ticket_category"] == "payment_topup"
+    assert payment["needs_admin"] is True
+    assert payment["priority"] == "high"
+    assert payment["should_alert_admin"] is True
+
+    angry = classify_support_escalation("Bot làm ăn kiểu gì, trừ Xu mà không ra video")
+    assert angry["suggested_reply_id"] == "angry_customer"
+    assert angry["priority"] == "urgent"
+    assert "đã hoàn Xu" not in support_reply_for_classification(angry)
+
+    pricing = classify_support_escalation("Gói AI này đắt quá")
+    assert pricing["suggested_reply_id"] == "pricing_objection"
+    assert pricing["needs_admin"] is False
+
+    b2b = classify_support_escalation("Anh muốn làm hợp đồng doanh nghiệp")
+    assert b2b["category"] == "admin_escalation"
+    assert b2b["priority"] == "high"
+    assert b2b["should_create_ticket"] is True
+
+    unsafe = classify_support_escalation("Bên em hack nick Facebook được không?")
+    assert unsafe["category"] == "out_of_scope"
+    assert unsafe["needs_admin"] is False
+
+    technical = classify_support_escalation("Deepgram có nhận diện từ lóng không?")
+    assert technical["category"] == "technical_error"
+    assert technical["needs_admin"] is True
+
+    formatted = format_support_reply("Kính gửi quý khách. Đã hoàn Xu. Chắc chắn 100%.")
+    assert "Kính gửi quý khách" not in formatted
+    assert "Đã hoàn Xu" not in formatted
+    assert "Chắc chắn 100%" not in formatted
 
 
 def test_support_ticket_menu_admin_registry_and_no_auto_refund():
@@ -2877,12 +2932,184 @@ def test_support_ticket_menu_admin_registry_and_no_auto_refund():
     assert 'CommandHandler("tickets",     cmd_tickets)' in source
     assert 'CommandHandler("ticket_admin", cmd_ticket_admin)' in source
     assert 'CommandHandler("ticket_overdue", cmd_ticket_overdue)' in source
+    assert 'CommandHandler("support_persona_test", cmd_support_persona_test)' in source
     assert 'CallbackQueryHandler(handle_ticket_callback, pattern=r"^ticket\\|")' in source
     ticket_callback_source = source_between(source, "async def handle_ticket_callback", "async def handle_menu_callback")
     assert 'status="refund_pending"' not in ticket_callback_source
     assert "update_support_ticket(ticket_id, status=new_status)" in ticket_callback_source
     assert "add_credits(" not in ticket_callback_source
     assert "refund_shopaikey_job(" not in ticket_callback_source
+
+
+def test_support_persona_ticket_dedupes_same_user_category(monkeypatch, tmp_path):
+    db_path = tmp_path / "support_persona.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+
+    customer = SimpleNamespace(id="persona-customer", username="persona", first_name="Persona")
+    classification = bot.classify_support_escalation("Tôi nạp tiền rồi chưa thấy Xu")
+    first, first_is_new = bot.create_or_append_support_ticket(
+        customer, "payment_topup", "Tôi nạp tiền rồi chưa thấy Xu", classification
+    )
+    second, second_is_new = bot.create_or_append_support_ticket(
+        customer, "payment_topup", "Số tiền là 100k, chuyển lúc 10 giờ", classification
+    )
+
+    assert first_is_new is True
+    assert second_is_new is False
+    assert second["id"] == first["id"]
+    conn = sqlite3.connect(db_path)
+    try:
+        messages = conn.execute(
+            "SELECT message FROM support_ticket_messages WHERE ticket_id=? ORDER BY id",
+            (first["id"],),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert [row[0] for row in messages] == [
+        "Tôi nạp tiền rồi chưa thấy Xu",
+        "Số tiền là 100k, chuyển lúc 10 giờ",
+    ]
+
+
+def test_support_persona_admin_test_is_preview_only(monkeypatch):
+    class FakeMessage:
+        def __init__(self):
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((text, kwargs))
+
+    message = FakeMessage()
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=str(bot.ADMIN_ID)),
+        message=message,
+    )
+    context = SimpleNamespace(args=["Bot", "làm", "ăn", "kiểu", "gì,", "trừ", "Xu", "mà", "không", "ra", "video"])
+
+    monkeypatch.setattr(bot, "create_or_append_support_ticket", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not create ticket")))
+    asyncio.run(bot.cmd_support_persona_test(update, context))
+
+    payload = message.sent[0][0]
+    assert "CSKH Persona Test" in payload
+    assert "Priority: <code>urgent</code>" in payload
+    assert "Would create ticket: <b>yes</b>" in payload
+    assert "Không tạo ticket" in payload
+
+
+def test_support_feedback_split_and_lead_menus():
+    support_labels = [
+        button.text
+        for row in bot.human_support_keyboard().inline_keyboard
+        for button in row
+    ]
+    feedback_callbacks = [
+        button.callback_data
+        for row in bot.feedback_category_keyboard("vi").inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    premium_callbacks = [
+        button.callback_data
+        for row in bot.support_premium_keyboard().inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    bot_callbacks = [
+        button.callback_data
+        for row in bot.support_custom_bot_keyboard().inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    source = bot_source_text()
+
+    assert "👨‍💼 Nhắn admin @toanaas" in support_labels
+    assert "🎫 Tạo ticket hỗ trợ" in support_labels
+    assert "⭐ Đăng ký Premium" in support_labels
+    assert "🤖 Kết nối bot riêng" in support_labels
+    assert "📦 Tư vấn gói dịch vụ" in support_labels
+    assert "Góp ý / Báo lỗi" in bot.human_support_text()
+    assert "Premium" not in bot.feedback_start_text("vi")
+    assert "feedback|cat|payment_topup" in feedback_callbacks
+    assert "feedback|cat|refund" in feedback_callbacks
+    assert "support|premium_type|business" in premium_callbacks
+    assert "support|bot_type|support" in bot_callbacks
+    assert 'CallbackQueryHandler(handle_human_support_callback, pattern=r"^support\\|")' in source
+
+
+def test_feedback_public_flow_creates_ticket_not_auto_refund(monkeypatch, tmp_path):
+    db_path = tmp_path / "feedback_ticket.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+
+    class FakeMessage:
+        text = "Video bị lỗi và đã trừ Xu nhưng không có kết quả"
+
+        def __init__(self):
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((text, kwargs))
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, **kwargs):
+            self.sent.append(kwargs)
+
+    user = SimpleNamespace(id="feedback-ticket-user", username="feedback_user", first_name="Feedback")
+    message = FakeMessage()
+    update = SimpleNamespace(effective_user=user, message=message)
+    context = SimpleNamespace(bot=FakeBot())
+    bot.set_feedback_pending(user.id, "video_error")
+
+    assert asyncio.run(bot.handle_feedback_pending_text(update, context)) is True
+    tickets = bot.list_support_tickets(user_id=user.id)
+    assert len(tickets) == 1
+    assert tickets[0]["category"] == "video_error"
+    assert tickets[0]["priority"] in {"high", "urgent"}
+    assert "Mã ticket" in message.sent[0][0]
+    assert "chưa tự hoàn Xu" in message.sent[0][0]
+
+
+def test_premium_lead_pending_creates_high_priority_ticket(monkeypatch, tmp_path):
+    db_path = tmp_path / "premium_lead.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+
+    class FakeMessage:
+        text = "Tôi cần ảnh và video hằng ngày cho shop. Liên hệ qua email test@example.com"
+
+        def __init__(self):
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((text, kwargs))
+
+    class FakeBot:
+        async def send_message(self, **kwargs):
+            return None
+
+    user = SimpleNamespace(id="premium-lead-user", username="premium", first_name="Premium")
+    message = FakeMessage()
+    update = SimpleNamespace(effective_user=user, message=message)
+    context = SimpleNamespace(bot=FakeBot())
+    bot.set_support_ticket_pending(
+        user.id,
+        "lead_input",
+        category="premium_lead",
+        selected_option="Shop/Affiliate",
+    )
+
+    assert asyncio.run(bot.handle_support_ticket_pending_text(update, context)) is True
+    ticket = bot.list_support_tickets(user_id=user.id)[0]
+    assert ticket["category"] == "premium_lead"
+    assert ticket["priority"] == "high"
+    assert "Mã yêu cầu" in message.sent[0][0]
 
 
 def test_support_ticket_admin_reply_requires_preview_and_targets_ticket_owner(monkeypatch, tmp_path):

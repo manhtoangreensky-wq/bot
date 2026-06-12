@@ -81,13 +81,17 @@ from operations_v1a import (
     revenue_category_for_source,
 )
 from support_v1b import (
+    AAS_SUPPORT_SYSTEM_PERSONA,
     REPLY_TEMPLATES as SUPPORT_REPLY_TEMPLATES,
     SUPPORT_CATEGORIES,
     SUPPORT_PRIORITIES,
     SUPPORT_STATUSES,
     category_label as support_category_label,
+    classify_support_escalation,
+    format_support_reply,
     overdue_reason as support_overdue_reason,
     priority_label as support_priority_label,
+    support_reply_for_classification,
     status_label as support_status_label,
     suggested_reply as support_suggested_reply,
     ticket_priority as support_ticket_priority,
@@ -537,6 +541,9 @@ PORT                = int(_env("PORT", "8000"))
 BOT_USERNAME        = _env("BOT_USERNAME", "toanaasbot")
 OFFICIAL_TELEGRAM_URL = _env("OFFICIAL_TELEGRAM_URL", "https://t.me/toanaasbot")
 SUPPORT_TELEGRAM_URL  = _env("SUPPORT_TELEGRAM_URL", "https://t.me/toanaas")
+SUPPORT_PERSONA_AUTO_REPLY_ENABLED = env_flag("SUPPORT_PERSONA_AUTO_REPLY_ENABLED", "true")
+SUPPORT_PERSONA_TICKET_DEDUPE_MINUTES = max(1, env_int("SUPPORT_PERSONA_TICKET_DEDUPE_MINUTES", 30))
+SUPPORT_AI_CLASSIFIER_ENABLED = env_flag("SUPPORT_AI_CLASSIFIER_ENABLED", "false")
 TOAN_AAS_COMMUNITY_URL = _env("TOAN_AAS_COMMUNITY_URL", "https://t.me/+RLAA18Uqtv05NWQ1")
 if SUPPORT_TELEGRAM_URL.rstrip("/").lower() in {
     "https://t.me/toanaasbot",
@@ -30600,7 +30607,7 @@ def support_contact_text() -> str:
     lines.extend([
         "• Hoặc gửi tin nhắn tại đây, TOAN AAS sẽ hỗ trợ sớm nhất.",
         "",
-        "Tính năng AI CSKH tự động sẽ được phát triển sau.",
+        "Các vấn đề thanh toán, hoàn Xu, lỗi kỹ thuật hoặc hợp đồng sẽ được tạo ticket để admin kiểm tra.",
     ])
     return "\n".join(lines)
 
@@ -30610,6 +30617,113 @@ def support_contact_keyboard(back_to_media: bool = False, lang: str = "vi") -> I
         rows.append([InlineKeyboardButton("🎨 Media Creator", callback_data="menu|create_media")])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+def human_support_text() -> str:
+    return (
+        "👨‍💼 <b>Hỗ trợ TOAN AAS</b>\n\n"
+        "Bạn cần gặp admin, tư vấn gói dịch vụ hay đăng ký Premium/kết nối bot riêng?\n\n"
+        "Nếu cần báo lỗi kỹ thuật, thanh toán hoặc hoàn Xu, hãy dùng mục "
+        "<b>Góp ý / Báo lỗi</b> để TOAN AAS tạo ticket đối soát rõ hơn."
+    )
+
+def human_support_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👨‍💼 Nhắn admin @toanaas", url=SUPPORT_TELEGRAM_URL),
+            InlineKeyboardButton("🎫 Tạo ticket hỗ trợ", callback_data="support|ticket"),
+        ],
+        [
+            InlineKeyboardButton("⭐ Đăng ký Premium", callback_data="support|premium"),
+            InlineKeyboardButton("🤖 Kết nối bot riêng", callback_data="support|bot"),
+        ],
+        [
+            InlineKeyboardButton("📦 Tư vấn gói dịch vụ", callback_data="support|consult"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
+    ])
+
+def support_general_ticket_prompt() -> str:
+    return (
+        "🎫 <b>Tạo ticket hỗ trợ</b>\n\n"
+        "Bạn mô tả ngắn vấn đề cần hỗ trợ nhé.\n\n"
+        "Ví dụ:\n"
+        "• Tôi cần tư vấn gói video\n"
+        "• Tôi muốn làm bot riêng\n"
+        "• Tôi cần hỗ trợ dùng công cụ\n"
+        "• Tôi muốn gặp admin\n\n"
+        "Nếu nội dung liên quan thanh toán/refund/lỗi kỹ thuật, bot sẽ tự phân loại đúng nhóm."
+    )
+
+def support_premium_text() -> str:
+    return (
+        "⭐ <b>Đăng ký Premium TOAN AAS</b>\n\n"
+        "Premium phù hợp nếu bạn dùng TOAN AAS thường xuyên, cần ưu tiên hỗ trợ, "
+        "nhiều ảnh/video/content hơn hoặc workflow riêng cho shop, affiliate và doanh nghiệp.\n\n"
+        "Bạn muốn đăng ký theo hướng nào?"
+    )
+
+def support_premium_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 Gói cá nhân", callback_data="support|premium_type|personal"), InlineKeyboardButton("🛒 Shop/Affiliate", callback_data="support|premium_type|shop")],
+        [InlineKeyboardButton("🏢 Doanh nghiệp", callback_data="support|premium_type|business"), InlineKeyboardButton("🤝 Tư vấn riêng", callback_data="support|premium_type|private")],
+        [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def support_custom_bot_text() -> str:
+    return (
+        "🤖 <b>Kết nối bot riêng</b>\n\n"
+        "TOAN AAS có thể tư vấn workflow bot riêng cho shop, affiliate, đội content hoặc doanh nghiệp.\n\n"
+        "Ví dụ: bot CSKH, bot tạo ảnh/video, bot quản lý nội dung hoặc bot nội bộ kết nối quy trình riêng.\n\n"
+        "Bạn muốn làm loại bot nào?"
+    )
+
+def support_custom_bot_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛒 Bot cho shop", callback_data="support|bot_type|shop"), InlineKeyboardButton("📣 Bot content/marketing", callback_data="support|bot_type|content")],
+        [InlineKeyboardButton("🎧 Bot CSKH", callback_data="support|bot_type|support"), InlineKeyboardButton("🏢 Bot nội bộ doanh nghiệp", callback_data="support|bot_type|internal")],
+        [InlineKeyboardButton("✍️ Nhập nhu cầu riêng", callback_data="support|bot_type|custom"), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+SUPPORT_CONSULT_OPTIONS = {
+    "image": "🖼 Tạo ảnh",
+    "video": "🎬 Tạo video",
+    "frame_video": "🎞 Ghép ảnh thành video",
+    "document": "📄 Tài liệu/PDF",
+    "voice": "🎙 Voice/TTS",
+    "package": "🎁 Gói/Combo",
+}
+
+def support_consult_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["image"], callback_data="support|consult_type|image"), InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["video"], callback_data="support|consult_type|video")],
+        [InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["frame_video"], callback_data="support|consult_type|frame_video"), InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["document"], callback_data="support|consult_type|document")],
+        [InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["voice"], callback_data="support|consult_type|voice"), InlineKeyboardButton(SUPPORT_CONSULT_OPTIONS["package"], callback_data="support|consult_type|package")],
+        [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def support_lead_input_text(category: str, selected_option: str) -> str:
+    if category == "premium_lead":
+        return (
+            f"⭐ <b>Đăng ký Premium - {html.escape(selected_option)}</b>\n\n"
+            "Bạn gửi giúp mình:\n"
+            "1. Mục đích sử dụng TOAN AAS\n"
+            "2. Nhu cầu chính: ảnh, video, content, tài liệu hay bot riêng\n"
+            "3. Tần suất dùng dự kiến\n"
+            "4. Số điện thoại/Zalo/email nếu muốn admin liên hệ\n\n"
+            "TOAN AAS sẽ tạo lead ưu tiên cao để admin tư vấn."
+        )
+    return (
+        f"🤖 <b>Kết nối bot riêng - {html.escape(selected_option)}</b>\n\n"
+        "Bạn mô tả nhu cầu chính, quy mô sử dụng, quy trình muốn tự động hóa và "
+        "cách liên hệ thuận tiện. TOAN AAS sẽ tạo lead ưu tiên cao cho admin."
+    )
+
+def support_flow_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ]])
 
 SUPPORT_TICKET_TTL_SECONDS = 15 * 60
 
@@ -30623,7 +30737,7 @@ def set_support_ticket_pending(user_id, step: str, **fields) -> dict:
         "created_at_ts": time.time(),
     }
     for key, value in fields.items():
-        if key in {"category", "ticket_id", "source", "reply_text", "variant"}:
+        if key in {"category", "ticket_id", "source", "reply_text", "variant", "lead_type", "selected_option"}:
             state[key] = str(value or "")[:4000]
     USER_PENDING[support_ticket_pending_key(user_id)] = state
     return state
@@ -30784,6 +30898,43 @@ def list_support_tickets(*, user_id=None, status=None, high_priority=False, sear
     finally:
         conn.close()
 
+def find_recent_open_support_ticket(user_id, category: str, minutes: int | None = None) -> dict | None:
+    cutoff = (
+        datetime.now() - timedelta(minutes=max(1, int(minutes or SUPPORT_PERSONA_TICKET_DEDUPE_MINUTES)))
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT id,ticket_code,user_id,username,category,priority,status,message,
+               related_job_id,related_payment_id,related_tool,attachment_file_id,attachment_type,
+               attachment_name,admin_note,suggested_reply,assigned_admin_id,created_at,updated_at,closed_at
+               FROM support_tickets
+               WHERE user_id=? AND category=? AND status NOT IN ('resolved','closed')
+                 AND created_at>=?
+               ORDER BY id DESC LIMIT 1""",
+            (str(user_id or ""), str(category or "other"), cutoff),
+        ).fetchone()
+        return _support_ticket_row(row)
+    finally:
+        conn.close()
+
+def create_or_append_support_ticket(user, category: str, message: str, classification: dict | None = None) -> tuple[dict, bool]:
+    uid = str(getattr(user, "id", "") or "")
+    normalized_category = category if category in SUPPORT_CATEGORIES else "other"
+    existing = find_recent_open_support_ticket(uid, normalized_category)
+    if existing:
+        add_support_ticket_message(existing["id"], "user", uid, str(message or "").strip()[:4000], "recorded")
+        desired_priority = str((classification or {}).get("priority") or existing.get("priority") or "normal")
+        priority_rank = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
+        if priority_rank.get(desired_priority, 1) > priority_rank.get(str(existing.get("priority")), 1):
+            existing = update_support_ticket(existing["id"], priority=desired_priority) or existing
+        return existing, False
+    ticket = create_support_ticket(user, normalized_category, message)
+    desired_priority = str((classification or {}).get("priority") or ticket.get("priority") or "normal")
+    if desired_priority in SUPPORT_PRIORITIES and desired_priority != ticket.get("priority"):
+        ticket = update_support_ticket(ticket["id"], priority=desired_priority) or ticket
+    return ticket, True
+
 def update_support_ticket(ticket_id, **fields) -> dict | None:
     allowed = {"status", "priority", "attachment_file_id", "attachment_type", "attachment_name", "admin_note", "suggested_reply", "assigned_admin_id"}
     updates = []
@@ -30887,7 +31038,8 @@ def support_admin_menu_text() -> str:
     return (
         "🎧 <b>CSKH / Ticket TOAN AAS</b>\n\n"
         "Xem yêu cầu hỗ trợ, báo lỗi, refund và lead khách hàng. "
-        "Admin phải kiểm tra ticket trước khi phản hồi hoặc đánh dấu hoàn tất."
+        "Admin phải kiểm tra ticket trước khi phản hồi hoặc đánh dấu hoàn tất.\n\n"
+        "Kiểm tra persona: <code>/support_persona_test &lt;tin nhắn khách&gt;</code>"
     )
 
 def support_admin_menu_keyboard() -> InlineKeyboardMarkup:
@@ -30997,13 +31149,14 @@ def support_ticket_overdue_rows() -> list[tuple[dict, str]]:
     return result
 
 FEEDBACK_CATEGORY_LABELS = {
-    "hard_to_use": "Bot khó hiểu",
-    "image_not_right": "Ảnh chưa đúng ý",
-    "video_not_right": "Video chưa đúng ý",
-    "video_slow": "Tạo video lâu",
-    "topup_error": "Lỗi nạp Xu",
-    "other_error": "Lỗi khác",
-    "feature_request": "Tôi muốn đề xuất tính năng mới",
+    "payment_topup": "💳 Nạp Xu/Thanh toán",
+    "image_error": "🖼 Lỗi ảnh",
+    "video_error": "🎬 Lỗi video",
+    "document_pdf": "📄 Tài liệu/PDF",
+    "package_combo": "🎁 Gói/Combo",
+    "refund": "💰 Hoàn Xu/Refund",
+    "feature_request": "💡 Góp ý tính năng",
+    "other": "✍️ Nhập nội dung khác",
 }
 
 def feedback_pending_key(user_id) -> str:
@@ -31011,39 +31164,46 @@ def feedback_pending_key(user_id) -> str:
 
 def feedback_start_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "zh":
-        return "💬 <b>反馈 / 报错</b>\n\n请选择你想反馈的问题类型。Bot 未调用 AI/API，也未扣除 Xu。"
+        return "💬 <b>反馈 / 报错</b>\n\n请选择问题类型。TOAN AAS 会创建工单供管理员核查。"
     if normalize_user_language(lang) != "vi":
-        return "💬 <b>Feedback / Bug report</b>\n\nChoose what you want to report. The bot has not called any AI/API and has not charged Xu."
-    return "💬 <b>Góp ý / Báo lỗi</b>\n\nBạn muốn góp ý điều gì cho TOAN AAS?\n\nChọn nhanh một nhóm bên dưới. Bot chưa gọi AI/API và chưa trừ Xu."
+        return (
+            "💬 <b>Feedback / Bug report TOAN AAS</b>\n\n"
+            "Choose the issue you want to report. Payment, media, document and "
+            "refund issues create a ticket for admin review."
+        )
+    return (
+        "💬 <b>Góp ý / Báo lỗi TOAN AAS</b>\n\n"
+        "Bạn muốn báo vấn đề nào?\n\n"
+        "Nếu liên quan đến nạp Xu, tạo ảnh/video, tài liệu hoặc hoàn Xu, "
+        "TOAN AAS sẽ tạo ticket để admin kiểm tra."
+    )
 
 def feedback_category_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     labels = FEEDBACK_CATEGORY_LABELS
     if normalize_user_language(lang) != "vi":
         labels = {
-            "hard_to_use": "Bot is confusing",
-            "image_not_right": "Image result is not right",
-            "video_not_right": "Video result is not right",
-            "video_slow": "Video generation is slow",
-            "topup_error": "Top-up issue",
-            "other_error": "Other issue",
-            "feature_request": "Feature request",
+            "payment_topup": "💳 Top-up/Payment",
+            "image_error": "🖼 Image issue",
+            "video_error": "🎬 Video issue",
+            "document_pdf": "📄 Document/PDF",
+            "package_combo": "🎁 Package/Combo",
+            "refund": "💰 Xu/Refund",
+            "feature_request": "💡 Feature feedback",
+            "other": "✍️ Other issue",
         }
     rows = [
-        [InlineKeyboardButton(f"1️⃣ {labels['hard_to_use']}", callback_data="feedback|cat|hard_to_use")],
-        [InlineKeyboardButton(f"2️⃣ {labels['image_not_right']}", callback_data="feedback|cat|image_not_right")],
-        [InlineKeyboardButton(f"3️⃣ {labels['video_not_right']}", callback_data="feedback|cat|video_not_right")],
-        [InlineKeyboardButton(f"4️⃣ {labels['video_slow']}", callback_data="feedback|cat|video_slow")],
-        [InlineKeyboardButton(f"5️⃣ {labels['topup_error']}", callback_data="feedback|cat|topup_error")],
-        [InlineKeyboardButton(f"6️⃣ {labels['other_error']}", callback_data="feedback|cat|other_error")],
-        [InlineKeyboardButton(f"7️⃣ {labels['feature_request']}", callback_data="feedback|cat|feature_request")],
-        [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="feedback|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(labels["payment_topup"], callback_data="feedback|cat|payment_topup"), InlineKeyboardButton(labels["image_error"], callback_data="feedback|cat|image_error")],
+        [InlineKeyboardButton(labels["video_error"], callback_data="feedback|cat|video_error"), InlineKeyboardButton(labels["document_pdf"], callback_data="feedback|cat|document_pdf")],
+        [InlineKeyboardButton(labels["package_combo"], callback_data="feedback|cat|package_combo"), InlineKeyboardButton(labels["refund"], callback_data="feedback|cat|refund")],
+        [InlineKeyboardButton(labels["feature_request"], callback_data="feedback|cat|feature_request"), InlineKeyboardButton(labels["other"], callback_data="feedback|cat|other")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ]
     return InlineKeyboardMarkup(rows)
 
 def set_feedback_pending(user_id, category: str) -> None:
     slug = str(category or "").strip()
     if slug not in FEEDBACK_CATEGORY_LABELS:
-        slug = "other_error"
+        slug = "other"
     USER_PENDING[feedback_pending_key(user_id)] = {
         "pending_action": "feedback",
         "category": slug,
@@ -32426,19 +32586,19 @@ def image_aspect_ai_guard_text(lang: str = "vi") -> str:
     )
 
 def feedback_message_prompt(category: str, lang: str = "vi") -> str:
-    label = FEEDBACK_CATEGORY_LABELS.get(str(category or ""), FEEDBACK_CATEGORY_LABELS["other_error"])
+    label = FEEDBACK_CATEGORY_LABELS.get(str(category or ""), FEEDBACK_CATEGORY_LABELS["other"])
     if normalize_user_language(lang) != "vi":
         return (
             f"💬 <b>Feedback category:</b> {html.escape(label)}\n\n"
             "Please send one message describing the issue or suggestion.\n"
             "If relevant, include the job ID, button name, or screen where it happened.\n\n"
-            "The bot has not called AI/API and has not charged Xu."
+            "TOAN AAS will create a ticket. The bot has not called AI/API and has not charged Xu."
         )
     return (
         f"💬 <b>Nhóm góp ý:</b> {html.escape(label)}\n\n"
         "Bạn hãy gửi một tin nhắn mô tả lỗi/góp ý.\n"
         "Nếu có, hãy kèm job ID, nút đã bấm hoặc màn hình đang dùng.\n\n"
-        "Bot chưa gọi AI/API và chưa trừ Xu."
+        "TOAN AAS sẽ tạo ticket để admin kiểm tra. Bot chưa gọi AI/API và chưa trừ Xu."
     )
 
 def feedback_context_for_user(user_id) -> str:
@@ -43084,24 +43244,135 @@ async def safe_edit_or_send(query, text: str, reply_markup=None, parse_mode: str
             logger.warning("safe_edit_or_send bot fallback failed | %s", sanitize_log_text(str(send_error))[:240])
         return None
 
-async def notify_admin_new_support_ticket(context: ContextTypes.DEFAULT_TYPE, ticket: dict) -> None:
+def _parse_support_ai_classification(raw_text: str) -> dict:
+    value = str(raw_text or "").strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json)?\s*|\s*```$", "", value, flags=re.IGNORECASE | re.DOTALL).strip()
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    allowed_categories = {
+        "onboarding", "pricing", "payment", "technical_error", "refund_complaint",
+        "feature_question", "admin_escalation", "out_of_scope", "closing",
+    }
+    category = str(parsed.get("category") or "")
+    priority = str(parsed.get("priority") or "normal")
+    if category not in allowed_categories or priority not in {"low", "normal", "high", "urgent"}:
+        return {}
+    return {
+        "matched": bool(parsed.get("matched")),
+        "category": category,
+        "needs_admin": bool(parsed.get("needs_admin")),
+        "priority": priority,
+        "reason": sanitize_log_text(str(parsed.get("reason") or "optional_ai_classifier"))[:160],
+    }
+
+async def classify_support_message(user_message: str, user_id=None) -> dict:
+    rule_result = classify_support_escalation(user_message)
+    if rule_result.get("matched") or not SUPPORT_AI_CLASSIFIER_ENABLED:
+        return rule_result
+    if not (gemini_client or openai_client or shopaikey_public_chat_fallback_enabled()):
+        return rule_result
+    instruction = (
+        f"{AAS_SUPPORT_SYSTEM_PERSONA}\n\n"
+        "Chỉ phân loại ý định CSKH. Trả JSON với các khóa: matched, category, "
+        "needs_admin, priority, reason. category chỉ thuộc onboarding, pricing, "
+        "payment, technical_error, refund_complaint, feature_question, "
+        "admin_escalation, out_of_scope, closing. Không trả lời nội dung khách."
+    )
+    try:
+        result = await call_ai_chat_with_fallback(instruction, str(user_message or "")[:1200], user_id, max_tokens=180)
+        if not result.get("ok"):
+            return rule_result
+        parsed = _parse_support_ai_classification(result.get("text") or "")
+        return classify_support_escalation(user_message, ai_classification=parsed)
+    except Exception:
+        return rule_result
+
+async def notify_admin_new_support_ticket(
+    context: ContextTypes.DEFAULT_TYPE,
+    ticket: dict,
+    classification: dict | None = None,
+    suggested_reply: str = "",
+    *,
+    is_new: bool = True,
+    customer_message: str = "",
+) -> None:
+    classification = classification or classify_support_escalation(ticket.get("message") or "")
+    reason = str(classification.get("reason") or "ticket_created")
+    priority = str(classification.get("priority") or ticket.get("priority") or "normal")
+    category = str(classification.get("category") or ticket.get("category") or "other")
+    reply_preview = format_support_reply(
+        suggested_reply or support_reply_for_classification(classification),
+        classification,
+    )
     text = (
-        "🆕 <b>Ticket mới TOAN AAS</b>\n\n"
+        f"{'🆕' if is_new else '🔔'} <b>{'Ticket mới' if is_new else 'Ticket có cập nhật'} TOAN AAS</b>\n\n"
         f"Mã: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
         f"User: <code>{html.escape(ticket.get('user_id') or '')}</code>\n"
-        f"Nhóm: {html.escape(support_category_label(ticket.get('category')))}\n"
-        f"Ưu tiên: <b>{html.escape(support_priority_label(ticket.get('priority')))}</b>\n\n"
-        f"Nội dung: {html.escape((ticket.get('message') or '')[:900])}"
+        f"Username: {html.escape(ticket.get('username') or '-')}\n"
+        f"Nhóm: {html.escape(category)} / {html.escape(support_category_label(ticket.get('category')))}\n"
+        f"Ưu tiên: <b>{html.escape(support_priority_label(priority))}</b>\n"
+        f"Lý do: {html.escape(reason)}\n\n"
+        f"Tin nhắn: {html.escape((customer_message or ticket.get('message') or '')[:900])}\n\n"
+        f"Gợi ý phản hồi:\n{html.escape(reply_preview[:900])}"
     )
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🎫 Xem ticket", callback_data=f"ticket|av|{ticket['id']}|new"),
-        InlineKeyboardButton("✅ Nhận xử lý", callback_data=f"ticket|assign|{ticket['id']}"),
-    ]])
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎫 Xem ticket", callback_data=f"ticket|av|{ticket['id']}|new"),
+            InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket['id']}"),
+        ],
+        [InlineKeyboardButton("✅ Đã nhận xử lý", callback_data=f"ticket|assign|{ticket['id']}")],
+    ])
     for admin_id in owner_and_admin_ids():
         try:
             await context.bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML", reply_markup=keyboard)
         except Exception as exc:
             logger.warning("support ticket admin notify failed | ticket_id=%s error=%s", ticket.get("id"), type(exc).__name__)
+
+async def handle_support_persona_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not SUPPORT_PERSONA_AUTO_REPLY_ENABLED or not update.effective_user or not update.message or not update.message.text:
+        return False
+    text = update.message.text.strip()
+    classification = await classify_support_message(text, update.effective_user.id)
+    if not classification.get("matched"):
+        return False
+    safe_reply = support_reply_for_classification(classification)
+    ticket = None
+    is_new = False
+    if classification.get("should_create_ticket"):
+        ticket, is_new = create_or_append_support_ticket(
+            update.effective_user,
+            classification.get("ticket_category") or "other",
+            text,
+            classification,
+        )
+        safe_reply += (
+            f"\n\n🎫 Mã ticket: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
+            "Admin sẽ kiểm tra trực tiếp; bot chưa tự động cộng, trừ hoặc hoàn Xu."
+        )
+    if classification.get("allowed_auto_send"):
+        await update.message.reply_text(
+            safe_reply,
+            parse_mode="HTML",
+            reply_markup=(
+                support_ticket_created_keyboard(ticket["id"])
+                if ticket else InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]])
+            ),
+        )
+    if ticket and classification.get("should_alert_admin"):
+        await notify_admin_new_support_ticket(
+            context,
+            ticket,
+            classification,
+            support_reply_for_classification(classification),
+            is_new=is_new,
+            customer_message=text,
+        )
+    return True
 
 async def handle_support_ticket_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not update.message:
@@ -43167,18 +43438,88 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
         return False
     step = state.get("step")
     text = update.message.text.strip()
+    if step == "lead_input":
+        category = state.get("category") if state.get("category") in {"premium_lead", "custom_bot_lead"} else "premium_lead"
+        selected_option = str(state.get("selected_option") or "").strip()
+        full_message = f"{selected_option}\n{text}".strip()
+        classification = {
+            "matched": True,
+            "needs_admin": True,
+            "priority": "high",
+            "reason": "premium_lead" if category == "premium_lead" else "custom_bot_lead",
+            "category": "admin_escalation",
+            "ticket_category": category,
+            "suggested_reply_id": "b2b_contract",
+            "should_create_ticket": True,
+            "should_alert_admin": True,
+            "allowed_auto_send": True,
+            "classifier_source": "support_lead_flow",
+        }
+        ticket, is_new = create_or_append_support_ticket(
+            update.effective_user,
+            category,
+            full_message,
+            classification,
+        )
+        clear_support_ticket_pending(uid)
+        lead_name = "Premium" if category == "premium_lead" else "kết nối bot riêng"
+        await update.message.reply_text(
+            f"✅ <b>TOAN AAS đã nhận yêu cầu {lead_name} của bạn.</b>\n\n"
+            "Admin sẽ xem nhu cầu và tư vấn phương án phù hợp nhất nhé.\n\n"
+            f"Mã yêu cầu: <code>{html.escape(ticket.get('ticket_code') or '')}</code>",
+            parse_mode="HTML",
+            reply_markup=support_ticket_created_keyboard(ticket["id"]),
+        )
+        await notify_admin_new_support_ticket(
+            context,
+            ticket,
+            classification,
+            support_reply_for_classification(classification),
+            is_new=is_new,
+            customer_message=full_message,
+        )
+        return True
     if step == "awaiting_message":
         if len(text) < 5:
             await update.message.reply_text("Vui lòng mô tả rõ hơn để admin có đủ thông tin kiểm tra.", reply_markup=support_ticket_input_keyboard())
             return True
-        ticket = create_support_ticket(update.effective_user, state.get("category") or "other", text)
+        classification = await classify_support_message(text, uid)
+        selected_category = state.get("category") or "other"
+        if selected_category == "general_support" and classification.get("needs_admin"):
+            selected_category = classification.get("ticket_category") or "general_support"
+        ticket, is_new = create_or_append_support_ticket(
+            update.effective_user,
+            selected_category,
+            text,
+            classification,
+        )
         clear_support_ticket_pending(uid)
+        intro = (
+            support_reply_for_classification(classification)
+            if classification.get("matched")
+            else "Dạ mình nhận được rồi nhé. TOAN AAS sẽ chuyển admin kiểm tra trực tiếp để chắc hơn."
+        )
+        ticket_text = (
+            support_ticket_created_text(ticket)
+            if is_new
+            else (
+                f"✅ <b>Đã bổ sung thông tin vào ticket {html.escape(ticket.get('ticket_code') or '')}.</b>\n\n"
+                "TOAN AAS giữ cùng ticket để admin theo dõi liền mạch."
+            )
+        )
         await update.message.reply_text(
-            support_ticket_created_text(ticket),
+            f"{html.escape(intro)}\n\n{ticket_text}",
             parse_mode="HTML",
             reply_markup=support_ticket_created_keyboard(ticket["id"]),
         )
-        await notify_admin_new_support_ticket(context, ticket)
+        await notify_admin_new_support_ticket(
+            context,
+            ticket,
+            classification,
+            intro,
+            is_new=is_new,
+            customer_message=text,
+        )
         return True
     if step == "awaiting_attachment":
         await update.message.reply_text("📎 Vui lòng gửi một ảnh hoặc file tài liệu. Nếu không cần đính kèm, bạn có thể mở ticket khác hoặc về Menu chính.")
@@ -43221,6 +43562,67 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
         await update.message.reply_text(payload, parse_mode="HTML", reply_markup=keyboard)
         return True
     return False
+
+async def handle_human_support_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "start"
+    uid = query.from_user.id
+    if action == "start":
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(query, human_support_text(), reply_markup=human_support_keyboard())
+    if action == "ticket":
+        set_support_ticket_pending(uid, "awaiting_message", category="general_support", source="human_support")
+        return await safe_edit_or_send(query, support_general_ticket_prompt(), reply_markup=support_flow_back_keyboard())
+    if action == "premium":
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(query, support_premium_text(), reply_markup=support_premium_keyboard())
+    if action == "premium_type" and len(parts) >= 3:
+        options = {
+            "personal": "Gói cá nhân",
+            "shop": "Shop/Affiliate",
+            "business": "Doanh nghiệp",
+            "private": "Tư vấn riêng",
+        }
+        selected = options.get(parts[2], "Tư vấn Premium")
+        set_support_ticket_pending(uid, "lead_input", category="premium_lead", selected_option=selected)
+        return await safe_edit_or_send(query, support_lead_input_text("premium_lead", selected), reply_markup=support_flow_back_keyboard())
+    if action == "bot":
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(query, support_custom_bot_text(), reply_markup=support_custom_bot_keyboard())
+    if action == "bot_type" and len(parts) >= 3:
+        options = {
+            "shop": "Bot cho shop",
+            "content": "Bot content/marketing",
+            "support": "Bot CSKH",
+            "internal": "Bot nội bộ doanh nghiệp",
+            "custom": "Nhu cầu bot riêng",
+        }
+        selected = options.get(parts[2], "Nhu cầu bot riêng")
+        set_support_ticket_pending(uid, "lead_input", category="custom_bot_lead", selected_option=selected)
+        return await safe_edit_or_send(query, support_lead_input_text("custom_bot_lead", selected), reply_markup=support_flow_back_keyboard())
+    if action == "consult":
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(
+            query,
+            "📦 <b>Tư vấn gói dịch vụ</b>\n\nBạn muốn tư vấn nhóm nào?",
+            reply_markup=support_consult_keyboard(),
+        )
+    if action == "consult_type" and len(parts) >= 3:
+        selected = SUPPORT_CONSULT_OPTIONS.get(parts[2], "Dịch vụ TOAN AAS")
+        return await safe_edit_or_send(
+            query,
+            f"📦 <b>{html.escape(selected)}</b>\n\n"
+            "Bạn có thể xem giá chính thức trong Bảng giá. Nếu nhu cầu dùng thường xuyên "
+            "hoặc cần workflow riêng, hãy đăng ký Premium để admin tư vấn.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Xem bảng giá", callback_data="pricing|main"), InlineKeyboardButton("⭐ Đăng ký Premium", callback_data="support|premium")],
+                [InlineKeyboardButton("👨‍💼 Gặp admin", url=SUPPORT_TELEGRAM_URL), InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    return await query.answer("Thao tác hỗ trợ chưa được hỗ trợ.", show_alert=True)
 
 async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -43314,7 +43716,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         ticket = get_support_ticket(ticket_id)
         if not ticket:
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
-        reply_text = support_suggested_reply(ticket.get("category"), variant)
+        reply_text = support_suggested_reply(ticket.get("category"), variant, ticket.get("message") or "")
         update_support_ticket(ticket_id, suggested_reply=reply_text)
         set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source="new")
         return await safe_edit_or_send(
@@ -43439,8 +43841,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "support":
         return await safe_edit_query_message(
             query,
-            support_ticket_menu_text(),
-            reply_markup=support_ticket_menu_keyboard(),
+            human_support_text(),
+            reply_markup=human_support_keyboard(),
         )
     if action == "internal_archive":
         return await safe_edit_query_message(
@@ -43608,14 +44010,23 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
     lang = user_ui_lang(uid)
     if data == "feedback|start":
         clear_feedback_pending(uid)
-        return await safe_edit_or_send(query, support_ticket_menu_text(), parse_mode="HTML", reply_markup=support_ticket_menu_keyboard())
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(query, feedback_start_text(lang), parse_mode="HTML", reply_markup=feedback_category_keyboard(lang))
     if data == "feedback|cancel":
         clear_feedback_pending(uid)
         return await safe_edit_or_send(query, ui_text(lang, "common.cancelled_not_charged"), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
     if data.startswith("feedback|cat|"):
         category = data.split("|", 2)[2]
         set_feedback_pending(uid, category)
-        return await safe_edit_or_send(query, feedback_message_prompt(category, lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="feedback|cancel"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
+        return await safe_edit_or_send(
+            query,
+            feedback_message_prompt(category, lang),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Góp ý / Báo lỗi", callback_data="feedback|start"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ]]),
+        )
     return await query.answer("Feedback action not supported.", show_alert=True)
 
 async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54550,9 +54961,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        support_ticket_menu_text(),
+        human_support_text(),
         parse_mode="HTML",
-        reply_markup=support_ticket_menu_keyboard(),
+        reply_markup=human_support_keyboard(),
     )
 
 async def cmd_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54575,6 +54986,37 @@ async def cmd_ticket_overdue(update: Update, context: ContextTypes.DEFAULT_TYPE)
         for ticket, reason in rows:
             lines.append(f"• <code>{ticket['ticket_code']}</code> — {html.escape(reason)} — {html.escape(support_status_label(ticket['status']))}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=support_admin_menu_keyboard())
+
+async def cmd_support_persona_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    message = " ".join(context.args or []).strip()
+    if not message:
+        return await update.message.reply_text(
+            "Cú pháp: <code>/support_persona_test &lt;tin nhắn khách&gt;</code>\n\n"
+            "Lệnh chỉ phân loại và xem trước phản hồi; không tạo ticket, không gửi alert và không đổi Xu.",
+            parse_mode="HTML",
+        )
+    classification = await classify_support_message(message, update.effective_user.id)
+    reply = support_reply_for_classification(classification)
+    lines = [
+        "🧪 <b>CSKH Persona Test</b>",
+        "",
+        f"Category: <code>{html.escape(str(classification.get('category') or 'feature_question'))}</code>",
+        f"Needs admin: <b>{'yes' if classification.get('needs_admin') else 'no'}</b>",
+        f"Priority: <code>{html.escape(str(classification.get('priority') or 'normal'))}</code>",
+        f"Reason: <code>{html.escape(str(classification.get('reason') or 'general_support'))}</code>",
+        f"Reply ID: <code>{html.escape(str(classification.get('suggested_reply_id') or '-'))}</code>",
+        f"Would create ticket: <b>{'yes' if classification.get('should_create_ticket') else 'no'}</b>",
+        f"Would alert admin: <b>{'yes' if classification.get('should_alert_admin') else 'no'}</b>",
+        f"Classifier: <code>{html.escape(str(classification.get('classifier_source') or 'rule_fallback'))}</code>",
+        "",
+        "<b>Suggested reply:</b>",
+        html.escape(reply),
+        "",
+        "Không tạo ticket, không gọi refund và không cộng/trừ Xu.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
@@ -87614,27 +88056,60 @@ async def handle_feedback_pending_text(update: Update, context: ContextTypes.DEF
     text = update.message.text.strip()
     if not text:
         return True
-    category = str(pending.get("category") or "other_error")
-    context_text = feedback_context_for_user(uid)
-    feedback_id = store_customer_feedback(update.effective_user, category, text, context_text)
+    category = str(pending.get("category") or "other")
+    if category not in SUPPORT_CATEGORIES:
+        category = "other"
+    classification = await classify_support_message(text, uid)
+    priority = support_ticket_priority(category, text)
+    reply_ids = {
+        "payment_topup": "payment_missing_xu",
+        "refund": "refund_review",
+        "image_error": "technical_image_error",
+        "video_error": "technical_video_error",
+        "document_pdf": "technical_deep_question",
+        "package_combo": "feature_video_affiliate",
+        "feature_request": "feature_video_affiliate",
+        "other": classification.get("suggested_reply_id") or "feature_video_affiliate",
+    }
+    classification.update({
+        "matched": True,
+        "needs_admin": True,
+        "priority": priority,
+        "reason": classification.get("reason") or f"structured_feedback_{category}",
+        "ticket_category": category,
+        "suggested_reply_id": reply_ids.get(category, "feature_video_affiliate"),
+        "should_create_ticket": True,
+        "should_alert_admin": True,
+        "allowed_auto_send": True,
+        "classifier_source": "structured_feedback",
+    })
+    ticket, is_new = create_or_append_support_ticket(update.effective_user, category, text, classification)
     clear_feedback_pending(uid)
     lang = user_ui_lang(uid)
     if normalize_user_language(lang) != "vi":
         message = (
-            "✅ <b>Thank you.</b> TOAN AAS has recorded your feedback.\n\n"
-            f"Feedback ID: <code>{feedback_id}</code>\n"
+            "✅ <b>Thank you.</b> TOAN AAS has created a support ticket.\n\n"
+            f"Ticket: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
             "The bot has not called AI/API and has not charged Xu."
         )
     else:
         message = (
-            "✅ <b>Cảm ơn bạn.</b> TOAN AAS đã ghi nhận góp ý/báo lỗi.\n\n"
-            f"Mã góp ý: <code>{feedback_id}</code>\n"
-            "Bot chưa gọi AI/API và chưa trừ Xu."
+            "✅ <b>Cảm ơn bạn.</b> TOAN AAS đã tạo ticket góp ý/báo lỗi.\n\n"
+            f"Mã ticket: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
+            "Admin sẽ kiểm tra nội dung. Bot chưa gọi AI/API, chưa trừ và chưa tự hoàn Xu."
         )
     await update.message.reply_text(
         message,
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        reply_markup=support_ticket_created_keyboard(ticket["id"]),
+    )
+    await notify_admin_new_support_ticket(
+        context,
+        ticket,
+        classification,
+        support_reply_for_classification(classification),
+        is_new=is_new,
+        customer_message=text,
     )
     return True
 
@@ -87696,6 +88171,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_quick_media_pending_text(update, context):
+        return
+
+    if await handle_support_persona_message(update, context):
         return
 
     normalized_music_command = normalize_music_inline_command_text(text)
@@ -88528,6 +89006,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("feedback",    cmd_admin_gopy))
     tg_app.add_handler(CommandHandler("ticket_admin", cmd_ticket_admin))
     tg_app.add_handler(CommandHandler("ticket_overdue", cmd_ticket_overdue))
+    tg_app.add_handler(CommandHandler("support_persona_test", cmd_support_persona_test))
     tg_app.add_handler(CommandHandler("duyet",       cmd_duyet))
     tg_app.add_handler(CommandHandler("checkpayos",  cmd_checkpayos))
     tg_app.add_handler(CommandHandler("payos_status", cmd_checkpayos))
@@ -88593,6 +89072,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_video_job_callback, pattern=r"^shopai_video_job\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_human_support_callback, pattern=r"^support\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_ticket_callback, pattern=r"^ticket\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_tools_callback, pattern=r"^imgtool\|"))
